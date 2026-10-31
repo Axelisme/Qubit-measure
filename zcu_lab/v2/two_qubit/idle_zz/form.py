@@ -1,5 +1,7 @@
 """Fixed capture FTF conditional Ramsey form, with editable calibrated pulses."""
 
+from typing import TypeVar
+
 from zcu_tools.cfg_model import Range, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -11,8 +13,10 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import IdleZZCfg
 
+T_Cfg = TypeVar("T_Cfg", bound=IdleZZCfg)
 
-def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
+
+def idle_zz_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     """Lock captured role/tone mapping, seed pulses/readout without model truth.
 
     Require the same complete FTF roles/group as joint readout, delegating mux
@@ -25,9 +29,10 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
     roles = captured_roles(ctx)
     readout = mux_readout_initial(ctx)
     return Form(
-        IdleZZCfg,
+        cfg_type,
         field_order=(
             "roles",
+            "reset",
             "x180_f1",
             "x180_f2",
             "x90_f1",
@@ -48,6 +53,7 @@ def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
+            "reset": None,
             "x180_f1": Slot("$f1.module.x180", copy=True),
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "x90_f1": Slot("$f1.module.x90", copy=True),

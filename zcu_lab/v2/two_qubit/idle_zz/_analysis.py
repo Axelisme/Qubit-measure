@@ -1,24 +1,34 @@
-"""Single-fringe fitting policy and plots for idle conditional Ramsey."""
+"""Count-weighted single and shared fringe fits for idle conditional Ramsey."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay_fringe
-from zcu_tools.plotting.plots import Plots
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    decay_time_bounds,
+    decaycos,
+    fit_decay_fringe,
+)
+from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
+
+from .._sums import sigma
 
 
 @dataclass(frozen=True)
 class IdleBranchFit:
-    """One nominal spectator branch at one DC coordinate.
+    """One spectator state at one DC coordinate.
 
-    dc_index/branch select the original axes (branch 0=I, 1=Xπ). acquired_shots
-    counts completed delay/round shots; complete requires all expected samples.
-    trace is the T-point mean target IQ rotated to its principal real axis,
-    retaining NaN where no round exists. fit_curve is the existing decay-cosine
+    dc_index/branch select DC and state 0/1. Ordinary state means nominal I/Xπ;
+    joint fits use actual spectator g/e. acquired_shots
+    counts accepted shots over all delays; complete requires all expected rounds
+    before herald selection. trace is the T-point target (N_e-N_g)/N_total,
+    retaining NaN at unmeasured or zero-acceptance points. fit_curve is the decay-cosine
     model or None when unavailable. magnitude_mhz is nonnegative; signed_mhz
     assumes both branches stay on the side selected by the operator's detune.
     error_mhz is the fitted frequency's covariance 1σ error. resolution_mhz is
@@ -46,9 +56,10 @@ class IdleBranchFit:
 
 @dataclass(frozen=True)
 class IdleZZAnalysis:
-    """Ordered (DC-major, I then Xπ) fits and one conditional difference per DC.
+    """DC-major state-0/state-1 fits and one conditional difference per DC.
 
-    zeta_mhz is f_Xπ−f_I using detune-signed fringe frequencies, never a bare
+    Ordinary states mean I/Xπ; heralded joint fits use actual spectator g/e.
+    zeta_mhz is f_Xπ−f_I, or actual f_e−f_g, using signed frequencies, never a bare
     magnitude difference. zeta_error_mhz propagates independent branch covariance
     errors in quadrature. Missing/unidentifiable branches leave both None and a
     zeta_reasons explanation. This is a nominal-branch single-model estimate,
@@ -61,178 +72,254 @@ class IdleZZAnalysis:
     zeta_reasons: tuple[str | None, ...]
 
 
-def fit_branch(
-    *,
-    dc_index: int,
-    branch: int,
-    delays: NDArray[np.float64],
-    shots: NDArray[np.complex128],
-    acquired: NDArray[np.bool_],
-    detune: float,
-) -> IdleBranchFit:
-    """Fit complete (T,rounds,reps) target IQ, preserving incomplete trace points.
+def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool_]:
+    """Validate class counts and return full-round points before herald selection.
 
-    acquired is (T,rounds), established by the core's all-tone finite-round
-    validation. Only complete branches enter the existing decay cosine fitter,
-    with free phase. At least six distinct, regularly spaced delays are needed
-    for five fitted parameters plus residual degrees of freedom. No radius cut,
-    heralding, population correction or simulator input is used.
-    Sign is detune's sign. In magnitude coordinates the ambiguous boundaries
-    are 0 and 2*abs(detune), including for negative detune. A distance no larger
-    than max(1/actual sampled delay span, covariance frequency 1σ) is unresolved.
-    Nonfinite covariance is not zero error. Numeric fit failures retain a reason
-    and trace; malformed source/raw is rejected by the caller before this seam.
+    sums has DC, spectator, delay then two or four 3-class axes. All-NaN points
+    are unmeasured. Finite nonnegative counts may be partial, but cannot exceed
+    expected shots. Return the DC × spectator × delay completeness mask.
     """
-    masked = np.where(acquired[..., None], shots, complex(np.nan, np.nan))
-    counts = acquired.sum(axis=1) * shots.shape[-1]
-    mean = np.full(len(delays), complex(np.nan, np.nan))
-    for i in np.flatnonzero(counts):
-        mean[i] = np.mean(masked[i][np.isfinite(masked[i])])
-    trace = rotate2real(mean).real
-    fit = IdleBranchFit(
-        dc_index, branch, int(counts.sum()), bool(np.all(acquired)), trace
-    )
-    if not np.all(acquired):
-        return replace(
-            fit,
-            reason="Required branch is incomplete; all delays and rounds are needed",
+    nclass = sums.ndim - 3
+    if nclass not in (2, 4) or sums.shape[3:] != (3,) * nclass:
+        raise ValueError("Idle ZZ requires DC × spectator × delay × 9/81 classes")
+    axes = tuple(range(3, sums.ndim))
+    finite = np.all(np.isfinite(sums) & (sums >= 0), axis=axes)
+    missing = np.all(np.isnan(sums), axis=axes)
+    total = sums.sum(axis=axes)
+    if not np.all(finite | missing) or np.any(total > expected):
+        raise ValueError(
+            "Idle ZZ counts must be nonnegative, within requested shots, or all NaN"
         )
+    return finite & (total == expected)
+
+
+def sigma_errors(
+    counts: NDArray[np.float64], target: Literal["f1", "f2"]
+) -> NDArray[np.float64]:
+    """Return shot-noise errors for (Ne-Ng)/N, including other in N.
+
+    counts is delay × terminal F1 × terminal F2. The multinomial variance of
+    the {-1,+1,0} observation is (Pg+Pe-sigma²)/N. A one-shot error floor
+    1/N keeps saturated finite-count bins from receiving infinite weight.
+    Zero counts give NaN, not an invented observation.
+    """
+    marginal = counts.sum(axis=-1 if target == "f1" else -2)
+    total = marginal.sum(axis=-1)
+    value = np.full(total.shape, np.nan)
+    second = np.full(total.shape, np.nan)
+    np.divide(marginal[:, 1] - marginal[:, 0], total, out=value, where=total > 0)
+    np.divide(marginal[:, 1] + marginal[:, 0], total, out=second, where=total > 0)
+    variance = np.full(total.shape, np.nan)
+    np.divide(np.maximum(second - value**2, 0), total, out=variance, where=total > 0)
+    floor = np.full(total.shape, np.nan)
+    np.divide(1.0, total, out=floor, where=total > 0)
+    return np.maximum(np.sqrt(variance), floor)
+
+
+def fit_traces(
+    fits: tuple[IdleBranchFit, ...],
+    errors: tuple[NDArray[np.float64], ...],
+    *,
+    delays: NDArray[np.float64],
+    detune: float,
+) -> tuple[IdleBranchFit, ...]:
+    """Fit traces of one actual spectator state with shared frequency/decay.
+
+    Each trace keeps its own offset, signed amplitude and phase, so an ee
+    fringe can be inverted without changing its physical frequency. fits and
+    errors have matching order and contain only one actual spectator state.
+    Require complete full delay axes and nonzero accepted counts in each trace.
+    Failed or sign-ambiguous fits retain traces and an unavailable reason.
+    """
     span = float(np.ptp(delays))
-    if (
+    reason = None
+    if not all(f.complete for f in fits):
+        reason = "Required branch is incomplete; all delays and rounds are needed"
+    elif not all(np.all(np.isfinite(f.trace)) for f in fits):
+        reason = "No accepted shots at one or more required delays"
+    elif (
         len(delays) < 6
         or span <= 0
         or not np.allclose(np.diff(delays), np.diff(delays)[0])
     ):
-        return replace(
-            fit,
-            reason="At least six distinct regularly spaced delays with positive span are needed",
-        )
-    if np.ptp(trace) <= np.finfo(float).eps * max(1.0, float(np.max(np.abs(trace)))):
-        return replace(fit, reason="No identifiable Ramsey contrast")
-    return _fit_complete_branch(fit, delays, detune)
-
-
-def _fit_complete_branch(
-    fit: IdleBranchFit, delays: NDArray[np.float64], detune: float
-) -> IdleBranchFit:
-    trace = fit.trace
-    span = float(np.ptp(delays))
+        reason = "At least six distinct regularly spaced delays with positive span are needed"
+    elif any(np.ptp(f.trace) <= np.finfo(float).eps for f in fits):
+        reason = "No identifiable Ramsey contrast"
+    if reason:
+        return tuple(replace(f, reason=reason) for f in fits)
     try:
-        _, _, freq, error, curve, (params, covariance) = fit_decay_fringe(delays, trace)
-    except (ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
-        return replace(fit, reason=f"Single-fringe fit failed: {exc}")
-    quality = compute_fit_quality(
-        trace,
-        curve,
-        dict(
-            zip(
-                ("offset", "amplitude", "frequency", "phase", "decay_time"),
-                map(float, params),
-                strict=True,
-            )
-        ),
-        covariance,
-    )
-    if not np.isfinite(freq) or not np.all(np.isfinite(curve)):
-        return replace(
-            fit, reason="Single-fringe fit is nonfinite", fit_quality=quality
-        )
-    fit = replace(
-        fit, fit_curve=curve, magnitude_mhz=abs(float(freq)), fit_quality=quality
-    )
-    if not np.isfinite(error) or error < 0:
-        return replace(
-            fit, reason="Frequency uncertainty is not finite; sign is unidentifiable"
-        )
-    resolution = max(1 / span, float(error))
-    magnitude = abs(float(freq))
-    reason = None
-    if detune == 0 or min(magnitude, abs(magnitude - 2 * abs(detune))) <= resolution:
-        reason = "Sign unidentifiable near 0 or 2*abs(detune); possible zero-frequency folding"
-    return replace(
-        fit,
-        error_mhz=float(error),
-        resolution_mhz=resolution,
-        signed_mhz=None if reason else float(np.sign(detune) * magnitude),
-        reason=reason,
-    )
+        return _fit_complete_traces(fits, errors, delays, detune)
+    except (
+        AnalysisFailed,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        np.linalg.LinAlgError,
+    ) as exc:
+        return tuple(replace(f, reason=f"Fringe fit failed: {exc}") for f in fits)
 
 
-def plot_analysis(
-    answer: IdleZZAnalysis,
+def _fit_complete_traces(
+    fits: tuple[IdleBranchFit, ...],
+    errors: tuple[NDArray[np.float64], ...],
     delays: NDArray[np.float64],
-    dc_values: NDArray[np.float64],
-    *,
-    title: str,
-    dc_label: str,
-    plots: Plots,
-) -> None:
-    """Draw available branch traces/fits and ζ without replacing unavailable values.
-
-    delays is the T-point µs axis; dc_values contains the D native coordinates
-    or the documented inactive sentinel. answer holds two branches per DC.
-    title describes the source target/detune, and dc_label names the saved
-    device/unit or inactive axis. plots owns this operation's figures. Register
-    ramsey_0..ramsey_{D-1} and zeta, leaving source arrays unchanged. No I/O or
-    calibration effects occur; plotting errors propagate to the operation owner.
-    """
-    for dc_index, dc_value in enumerate(dc_values):
-        fig, ax = plots.subplots(f"ramsey_{dc_index}", figsize=(9, 6))
-        reasons = []
-        for fit in answer.branches[2 * dc_index : 2 * dc_index + 2]:
-            label = "I" if fit.branch == 0 else "Xπ"
-            ax.plot(
+    detune: float,
+) -> tuple[IdleBranchFit, ...]:
+    seeds = [fit_decay_fringe(delays, f.trace) for f in fits]
+    decay_bounds = decay_time_bounds(delays)
+    frequencies = np.fft.fftfreq(len(delays), d=abs(delays[1] - delays[0]))
+    frequencies = frequencies[frequencies >= 0.125 / float(np.ptp(delays))]
+    # Keep the same sampled-frequency and resolvable-decay bounds as the seed fitter.
+    frequency_bounds = (float(frequencies.min()), float(frequencies.max()))
+    parameters = [
+        ParameterSpec("frequency", float(seeds[0].freq), limits=frequency_bounds),
+        ParameterSpec("decay_time", float(seeds[0].decay_time), limits=decay_bounds),
+    ]
+    traces = []
+    for index, (fit, count_error, seed) in enumerate(
+        zip(fits, errors, seeds, strict=True)
+    ):
+        offset, amplitude, _, phase, _ = seed.params
+        names = tuple(f"{name}_{index}" for name in ("offset", "amplitude", "phase"))
+        parameters.extend(
+            ParameterSpec(name, float(value))
+            for name, value in zip(names, (offset, amplitude, phase), strict=True)
+        )
+        traces.append(
+            FitTrace(
                 delays,
                 fit.trace,
-                ".",
-                label=f"Spectator {label} ({fit.acquired_shots} shots)",
+                decaycos,
+                (names[0], names[1], "frequency", names[2], "decay_time"),
+                count_error,
             )
-            if fit.fit_curve is not None:
-                ax.plot(
-                    delays,
-                    fit.fit_curve,
-                    label=f"{label} fit: |f|={fit.magnitude_mhz:.5g} MHz",
-                )
-            if fit.reason:
-                reasons.append(f"{label}: {fit.reason}")
-            elif fit.signed_mhz is not None:
-                reasons.append(f"{label}: signed f={fit.signed_mhz:.5g} MHz")
-        zeta = answer.zeta_mhz[dc_index]
-        subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
-        ax.set(
-            xlabel="Delay (us)",
-            ylabel="Mean target IQ, principal real axis (a.u.)",
-            title=f"{title}; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nThermal nominal branches; mixture not excluded, no heralding",
         )
-        ax.text(
-            0.01,
-            -0.25,
-            "\n".join(reasons),
-            transform=ax.transAxes,
-            va="top",
-            fontsize=8,
+    shared = fit_shared(traces, parameters)
+    frequency = shared.values["frequency"]
+    variance = shared.variance("frequency")
+    error = float(np.sqrt(variance)) if variance >= 0 else np.nan
+    resolution = max(1 / float(np.ptp(delays)), error)
+    reason = None
+    if not shared.diagnostics.valid:
+        reason = "Shared fringe optimizer did not converge"
+    elif not np.isfinite(error):
+        reason = "Frequency uncertainty is not finite; sign is unidentifiable"
+    elif detune == 0 or min(frequency, abs(frequency - 2 * abs(detune))) <= resolution:
+        reason = "Sign unidentifiable near 0 or 2*abs(detune); possible zero-frequency folding"
+    answers = []
+    for fit, trace in zip(fits, traces, strict=True):
+        values = {name: shared.values[name] for name in trace.parameter_names}
+        curve = decaycos(delays, *values.values())
+        indices = [shared.parameter_names.index(name) for name in trace.parameter_names]
+        quality = compute_fit_quality(
+            fit.trace,
+            curve,
+            values,
+            shared.covariance[np.ix_(indices, indices)],
+            decay_bounds=decay_bounds,
         )
-        ax.legend()
-        ax.grid(True)
-        fig.tight_layout()
-    fig, ax = plots.subplots("zeta", figsize=(8, 5))
-    for index, (value, error) in enumerate(
-        zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)
+        answers.append(
+            replace(
+                fit,
+                fit_curve=curve,
+                magnitude_mhz=frequency,
+                signed_mhz=None if reason else float(np.sign(detune) * frequency),
+                error_mhz=error if np.isfinite(error) else None,
+                resolution_mhz=resolution,
+                reason=reason,
+                fit_quality=quality,
+            )
+        )
+    return tuple(answers)
+
+
+def summarize(fits: tuple[IdleBranchFit, ...]) -> IdleZZAnalysis:
+    """Return signed e-minus-g frequency differences from DC-major g/e pairs.
+
+    Each pair was fitted separately by actual spectator state, so independent
+    frequency variances add. Unavailable frequencies retain their reasons.
+    """
+    zetas: list[float | None] = []
+    errors: list[float | None] = []
+    reasons: list[str | None] = []
+    for a, b in zip(fits[::2], fits[1::2], strict=True):
+        if (
+            a.signed_mhz is None
+            or b.signed_mhz is None
+            or a.error_mhz is None
+            or b.error_mhz is None
+        ):
+            zetas.append(None)
+            errors.append(None)
+            reasons.append("; ".join(f.reason for f in (a, b) if f.reason))
+        else:
+            zetas.append(b.signed_mhz - a.signed_mhz)
+            errors.append(float(np.hypot(a.error_mhz, b.error_mhz)))
+            reasons.append(None)
+    return IdleZZAnalysis(fits, tuple(zetas), tuple(errors), tuple(reasons))
+
+
+def validate_axes(
+    dc_values: NDArray[np.float64],
+    spectator_states: NDArray[np.int64],
+    delays: NDArray[np.float64],
+    sums: NDArray[np.float64],
+    expected_dc: NDArray[np.float64],
+    delay_class_shape: tuple[int, ...],
+) -> None:
+    """Reject mismatched saved coordinates or class-count dimensions.
+
+    Require saved DC coordinates, integer spectator indices [0,1] and finite
+    distinct nonnegative µs delays. delay_class_shape specifies the required
+    delay length followed by terminal or herald/terminal 3-class axes.
+    """
+    if (
+        not np.array_equal(dc_values, expected_dc)
+        or not np.array_equal(spectator_states, np.arange(2))
+        or delays.shape != (delay_class_shape[0],)
+        or not np.all(np.isfinite(delays))
+        or np.any(delays < 0)
+        or len(np.unique(delays)) != delay_class_shape[0]
+        or sums.shape != (len(expected_dc), 2, *delay_class_shape)
     ):
-        if value is not None:
-            ax.errorbar(dc_values[index], value, yerr=error, marker="o", color="C0")
-    if not any(value is not None for value in answer.zeta_mhz):
-        ax.text(
-            0.5,
-            0.5,
-            "ζ unavailable: see branch reasons",
-            transform=ax.transAxes,
-            ha="center",
+        raise ValueError(
+            "Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes"
         )
-    ax.set(
-        xlabel=dc_label,
-        ylabel="ζ = f_Xπ − f_I (MHz)",
-        title="Single-frequency model fit difference\nThermal mixture not excluded; not pure ZZ",
-    )
-    ax.grid(True)
-    fig.tight_layout()
+
+
+def fit_count_traces(
+    delays: NDArray[np.float64],
+    counts: tuple[NDArray[np.float64], ...],
+    complete: tuple[NDArray[np.bool_], ...],
+    target: Literal["f1", "f2"],
+    detune: float,
+) -> tuple[tuple[IdleBranchFit, ...], ...]:
+    """Fit aligned DC × actual-state × delay class-count datasets jointly.
+
+    Caller aligns each dataset and its completeness mask by actual spectator
+    state. Frequency/decay are shared only across datasets at the same DC/state.
+    Return dataset-major tuples of DC-major g/e fits. No plotting or selection.
+    """
+    results: list[list[IdleBranchFit]] = [[] for _ in counts]
+    traces = [sigma(c, target) for c in counts]
+    for dc_index in range(counts[0].shape[0]):
+        for state in range(2):
+            fits = tuple(
+                IdleBranchFit(
+                    dc_index,
+                    state,
+                    int(np.nansum(c[dc_index, state])),
+                    bool(np.all(mask[dc_index, state])),
+                    trace[dc_index, state],
+                )
+                for c, mask, trace in zip(counts, complete, traces, strict=True)
+            )
+            fitted = fit_traces(
+                fits,
+                tuple(sigma_errors(c[dc_index, state], target) for c in counts),
+                delays=delays,
+                detune=detune,
+            )
+            for result, fit in zip(results, fitted, strict=True):
+                result.append(fit)
+    return tuple(tuple(result) for result in results)

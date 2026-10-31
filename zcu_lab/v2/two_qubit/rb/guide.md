@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run paired two-qubit RB and CZ-interleaved RB through the GUI or MCP and interpret their error estimates.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-31
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -29,11 +29,16 @@ logical Z angles in degrees, normally minus the corresponding measured local-Z
 slope. Missing angles remain invalid. Review any operator override against measured
 calibration before Run; model hypotheses only describe assumed behavior.
 
-The saved readout cfg supplies circle g/e centers at `roles.f1_tone` and
-`roles.f2_tone`, not by ADC sorting. Radius is not required and centers have no
-manual override. Missing or linear calibration permits raw acquisition, but FIT
-then reports the missing saved calibration. Historical analysis uses only the
-saved sources.
+The saved readout cfg must supply circle g/e centers and radius at
+`roles.f1_tone` and `roles.f2_tone`, not by ADC sorting. Run rejects missing,
+linear or radius-free classifiers and requests GE Post. After changing readout
+settings, repeat GE and Post before using the classifiers.
+
+Set `reset` to an accepted reset cfg to emit it before every sequence.
+The default `None` emits no reset. The independent
+[`two_qubit/rb_heralded`](guide_heralded.md) experiment adds a herald read
+between optional reset and the sequence. Both versions use the same paired
+sequence construction. The heralded version jointly fits gg and ee return survival.
 
 ## Sequences and cost
 
@@ -59,29 +64,33 @@ Virtual Z updates the logical frame only. Computational-basis readout is
 invariant to terminal Z frames.
 
 Each depth/seed/arm has one compiled program and `rounds` host acquisitions of
-`reps` shots. The nominal B00 start leaves the thermal initial population in
-place. Every shot retains the original thermal ensemble and proceeds directly
-through the sequence to readout. The live plot counts completed shots in each arm.
+`reps` shots. Every host acquisition uses `rounds=1` to preserve its own slot.
+Without reset, the nominal B00 start leaves the thermal initial population in
+place. Terminal F1/F2 classification happens during acquisition. Circle outcomes
+are g, e and other; radius boundaries and equidistant points are other.
+The live plot shows joint00 from counts accumulated over seeds and rounds
+in each arm. This count-weighted view is not the equal-seed decay fit.
 
 ## Save, cancel and analyze
 
-Canonical raw IQ has axes `depth, seed, arm, round, shot, tone`. Arm 0 is
-reference and arm 1 is CZ-interleaved. All original tones stay in their original
-order. Round remains a separate axis. Saved IQ preserves same-shot correlations
-and the readout's acquired ADC normalization.
+Result `sums` is float64 with axes `depth, seed, arm, round, F1 class, F2 class`
+and shape `(Nd, Nseed, 2, Nround, 3, 3)`. Arm 0 is reference and arm 1 is
+CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve joint
+outcomes from the same shot. They are not marginal products or probabilities.
+There are no saved shot or tone axes, and storage does not grow with `reps`.
 
-Stop preserves completed whole rounds in their fixed slots. Unfinished rounds
-stay complex NaN. Each completed acquisition occupies its assigned round slot
-and contributes its shots once. An acquisition failure remains a failure even if
-partial data exists. Save the raw data and cfg before closing the source.
-Native Load restores that source for Analyze and leaves current Form input
-unchanged.
+Cooperative Stop preserves completed whole rounds in fixed slots. Unfinished
+rounds stay NaN. `stop_requested` records a stop request, not data completeness.
+Acquisition exceptions propagate unchanged from Run. A failed Run publishes no
+new record and leaves the previous successful record unchanged, even after Stop.
+Save counts and cfg before closing the source. Native Load restores that
+source for Analyze and leaves the current Form unchanged. Old per-shot IQ
+files are rejected because they lack `sums`; there is no conversion fallback.
 
-Analyze classifies each saved tone against its saved g/e centers. Ties go to G.
-It counts simultaneous G on both role tones in each shot to obtain joint00
-survival directly from the paired role tones. Every thermal shot and its
-original readout effects remain in the result. Missing samples remain missing.
-Malformed or nonfinite acquired rounds cause an error.
+Analyze derives each round's joint00 survival as `N_gg/N_total`.
+Other outcomes stay in the denominator. It does not classify IQ again.
+Zero-total rounds give NaN survival. Malformed or partially populated count
+rounds cause an error.
 
 Only round/seed pairs complete across both arms and every requested depth enter
 the decay analysis. Analyze averages complete rounds within each seed and then
@@ -107,13 +116,13 @@ counts and valid bootstrap fits. The default is 1,000 deterministic resamples wi
 The fit plot shows equal-seed paired means and available fitted decays.
 The summary includes each arm's R² and normalized residual RMS. Parameter
 covariance and marginal parameter errors are unavailable; use the paired-seed interval and residual diagnostics for manual model review.
-Insufficient data, absent centers, flat decay, invalid fits or unstable bootstrap
+Insufficient data, absent saved cfg, flat decay, invalid fits or unstable bootstrap
 stop estimation and retain the failure reason. Preserve that result and review
 the data before deciding to remeasure. Statistical diagnostics and physical
 acceptance remain operator decisions.
 
 Thermal population, preparation and readout errors contribute to this ensemble.
-Nearest-center binary classification leaves leakage unresolved. Finite shots
+Circle other outcomes do not identify a particular leakage state. Finite shots
 and too few shallow depths can leave the decay unidentifiable. A shallow
 curve can also yield finite but biased parameters when amplitude and offset
 are poorly constrained. Even a finite fit needs an identifiability review.
@@ -121,3 +130,21 @@ Gate-dependent noise, coherent errors and nonexponential decay can bias the
 interleaved ratio beyond its statistical interval. Inspect the curves and those limitations before
 interpreting a CZ error. This experiment provides diagnostic estimates only;
 physical calibration acceptance is manual.
+
+## Notebook
+
+Use a validated `RBCfg` as `cfg`. Supply the notebook's existing hardware
+handles, device manager and destination `point_view`.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.rb.core import RBExp, RBOptions
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(RBExp())
+record = exp.run(cfg)
+analysis = exp.analyze(RBOptions())
+saved = exp.save_run(point_view, source=record)
+```
+
+The adapter owns the run record and plots for each operation.

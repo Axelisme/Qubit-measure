@@ -125,6 +125,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._building_body = False
         self._timeline_default: str | None = None
         self._branch_serial = 0
+        self._branch_cases: list[BranchCases] = []
         self._emission_serial = 0
         self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
@@ -488,7 +489,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         events share its current end; actual output ends plus owner post-delay
         determine the ceiled end without moving reference time. Snapshot source
         markers use module.name; nested emissions retain their own labels.
-        Branch/ScanWith retain native path/iteration reference synchronization.
+        Branch joins case ends without moving reference; ScanWith retains
+        iteration reference synchronization.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """
@@ -739,23 +741,52 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(TimelineFork(self._timeline_book, source, targets))
 
     @contextmanager
-    def branch(self, *, by: str) -> Generator[BranchCases]:
-        """Select one case per sweep point without padding paths to equal duration.
+    def branch(self, *, by: str, align_timeline: bool) -> Generator[BranchCases]:
+        """Select indexed sweep cases without advancing the shared reference.
 
-        by is an existing sweep loop name. Provide exactly one case() per point.
-        Each case closes only timelines it uses. Different remaining ends become
-        wait-only; join/fork derive ordinary targets, while sync consumes them.
-        Forked names are case-local, even when every case uses the same spelling.
-        Their ends join the case closing maximum and names expire at its exit.
-        Measurement selectors raise ValueError. Call only while building _body.
+        by names an existing sweep loop. case(index) selects its zero-based point,
+        in any declaration order; omitted points execute no actions. Each case
+        starts with the incoming timeline ends and reference. align_timeline is
+        required: True joins every case end per timeline (static max or exact
+        runtime pointwise max); False retains the executed case end as a runtime
+        value on each used timeline. Unused timelines keep their incoming ends.
+        Both modes allow subsequent placement. Local fork names expire at case
+        exit; unjoined local ends are discarded, not merged into their ancestor.
+        True requires every end to be reconstructible from branch-entry state.
+        Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
+        Repeat in a case raises ValueError; move it outside this branch. Branch
+        inside Repeat is supported. Unconditional actions inside this context
+        raise ValueError; put them before or after the with block.
+        Duplicate, non-integer/out-of-range indices and measurement selectors
+        raise ValueError. Register exhaustion propagates QICK errors unchanged.
+        Call only while building _body.
         """
         if not self._building_body:
             raise ValueError("branch must be called in _body")
         cases = BranchCases(self)
         name = f"_timeline_branch_{self._branch_serial}"
         self._branch_serial += 1
-        yield cases
-        self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name))
+        start = len(self.macro_list)
+        self._branch_cases.append(cases)
+        try:
+            yield cases
+        finally:
+            self._branch_cases.pop()
+        if any(
+            not isinstance(macro, _TimelineScope) for macro in self.macro_list[start:]
+        ):
+            raise ValueError(
+                "move unconditional branch actions before or after the with block"
+            )
+        self.append_macro(
+            TimelineBranch(
+                self._timeline_book,
+                by,
+                cases.cases,
+                name,
+                align_timeline=align_timeline,
+            )
+        )
 
     @contextmanager
     def repeat(
@@ -784,6 +815,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         and differing Branch advances are supported. Native delay_reg_auto inside
         the body raises ValueError; it is not a timeline duration operation.
         """
+        if any(cases.active for cases in self._branch_cases):
+            raise ValueError(
+                "move Repeat outside the branch: its entry and backedge advance reference"
+            )
         selected = timeline if timeline is not None else self._timeline_default
         timeline = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)

@@ -18,7 +18,7 @@ SpectroscopyRun: TypeAlias = RunRecord[SpectroscopyCfg, SpectroscopyResult]
 def _analyze(
     req: AnalyzeRequest[SpectroscopyRun, None], *, plots: Plots
 ) -> SpectroscopyAnalysis:
-    """Use only source cfg/raw; never read current parameters or propose peaks."""
+    """Use saved cfg/counts; never read current parameters or propose peaks."""
     return SpectroscopyExp().analyze(req.run_result, None, plots=plots)
 
 

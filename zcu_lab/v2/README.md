@@ -10,16 +10,31 @@
 ## Reading routes
 
 - [FTF bring-up 與 CZ 校準](two_qubit/guide.md) 說明既有 F1/F2 單 qubit 校準、角色與保存方式。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
-  - 四分支 [conditional spectroscopy](two_qubit/conditional_spectroscopy/guide.md)、[relative-phase × duration constructive phase](two_qubit/constructive_phase/guide.md) 與 [common-frequency × duration Rabi chevron](two_qubit/chevron/guide.md) 提供雙線校準圖與分析。
-  - [CZ common-amplitude](two_qubit/cz_amplitude/guide.md) 保留 same-shot raw，擬合零相位完整回返週期。操作員逐列接受 coupler 的雙 pulse／雙 slot proposals。
-  - [Conditional phase](two_qubit/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
-  - [Local-Z](two_qubit/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
+  - 九個實驗各有非 heralded 與 heralded 入口，均在取數時分類並保存計數，見下方[完整清單](#two-qubit-實驗清單)。
 - [Heralded T1](heralding/t1/guide.md) 說明單 qubit pulse readout 的 ground post-selection、pass fraction 與保存。沒有 active reset 或 joint herald。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
 - [Measure support](support/measure/README.md) 提供共享 domain mechanics。
 - [Framework runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 擁有 Schedule、buffer、acquire 與 stop lifecycle。
+
+## Two-qubit 實驗清單
+
+下表列出 18 個 GUI／MCP registry keys，與 `zcu_lab/definitions.py` 的明列註冊相同。每個連結指向該版 guide。兩版各有 cfg、Result、run 與 analyze，不用 mode 切換。
+
+| 實驗 | 非 heralded key／guide | Heralded key／guide |
+| --- | --- | --- |
+| Joint readout | [`two_qubit/joint_readout`](two_qubit/joint_readout/guide.md) | [`two_qubit/joint_readout_heralded`](two_qubit/joint_readout/guide_heralded.md) |
+| Conditional phase | [`two_qubit/conditional_phase`](two_qubit/conditional_phase/guide.md) | [`two_qubit/conditional_phase_heralded`](two_qubit/conditional_phase/guide_heralded.md) |
+| Chevron | [`two_qubit/chevron`](two_qubit/chevron/guide.md) | [`two_qubit/chevron_heralded`](two_qubit/chevron/guide_heralded.md) |
+| Conditional spectroscopy | [`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/guide.md) | [`two_qubit/conditional_spectroscopy_heralded`](two_qubit/conditional_spectroscopy/guide_heralded.md) |
+| Constructive phase | [`two_qubit/constructive_phase`](two_qubit/constructive_phase/guide.md) | [`two_qubit/constructive_phase_heralded`](two_qubit/constructive_phase/guide_heralded.md) |
+| CZ amplitude | [`two_qubit/cz_amplitude`](two_qubit/cz_amplitude/guide.md) | [`two_qubit/cz_amplitude_heralded`](two_qubit/cz_amplitude/guide_heralded.md) |
+| Idle ZZ | [`two_qubit/idle_zz`](two_qubit/idle_zz/guide.md) | [`two_qubit/idle_zz_heralded`](two_qubit/idle_zz/guide_heralded.md) |
+| Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | [`two_qubit/local_z_heralded`](two_qubit/local_z/guide_heralded.md) |
+| Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
+
+非 heralded 保存 terminal F1/F2 的 9 類計數。Heralded 加一次讀出，保存 herald F1/F2、terminal F1/F2 的 81 類計數，分析 herald g,g 與 e,e 兩組。兩版都可設 `reset`，預設 None。Herald pass fraction 是 g,g 接受率，不是 ground-state purity。採樣與保存量的計算見 [FTF guide](two_qubit/guide.md#採樣數與成本)。
 
 ## 套件邊界
 
@@ -41,8 +56,9 @@ Singleshot GE 的 [analysis.py](singleshot/ge/analysis.py) 擁有混淆矩陣求
 mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
-共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，分類、擬合與繪圖在
-[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。
+共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
+[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩版各自在 `analyze()` 畫自己的圖，
+[\_sums.py](two_qubit/_sums.py) 只負責分類計數的數值換算。
 
 `v2` 延續 program/v2 的版本脈絡，不表示 GUI framework 的第二版。通用 runtime、量化、SNR 與 tracker 工具留在 `zcu_tools.experiment.v2`。Core 不依賴 GUI，import-linter C15 檢查 core 到 GUI framework 的直接與間接依賴。
 

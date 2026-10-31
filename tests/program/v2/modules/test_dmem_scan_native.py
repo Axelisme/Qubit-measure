@@ -139,7 +139,7 @@ class CounterOverwrite(ScalarConsumer):
         elif self.mode == "arithmetic":
             prog.write_reg_op("scan_count", "scan_count", "+", 0)
         elif self.mode == "branch":
-            with prog.branch(by="axis") as branch, branch.case():
+            with prog.branch(by="axis", align_timeline=True) as branch, branch.case(0):
                 prog.write_reg("scan_count", 1)
         else:
             prog.write_reg("scan_count", 1)

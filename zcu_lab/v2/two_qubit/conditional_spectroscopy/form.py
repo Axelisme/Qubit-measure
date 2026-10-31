@@ -1,5 +1,7 @@
 """Fixed-capture thermal spectroscopy Form with explicit two-line probe inputs."""
 
+from typing import TypeVar
+
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -11,8 +13,10 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import SpectroscopyCfg
 
+T_Cfg = TypeVar("T_Cfg", bound=SpectroscopyCfg)
 
-def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
+
+def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     """Capture roles, preparation/readout and available ordinary CZ pulse slots.
 
     Existing coupler CZ slots are editable starting points, not assumed weak
@@ -27,7 +31,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
-            # dual_line_drive replaces both frequencies with the common scan.
+            # The run overrides both pulse frequencies with the common sweep.
             Slot(slot, copy=True, set={"freq": Hidden(0.0)})
             if ctx.has(slot)
             else Template(
@@ -44,9 +48,10 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
         )
     readout = mux_readout_initial(ctx)
     return Form(
-        SpectroscopyCfg,
+        cfg_type,
         field_order=(
             "roles",
+            "reset",
             "x180_f1",
             "x180_f2",
             "readout",
@@ -65,6 +70,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": roles,
+            "reset": None,
             "x180_f1": Slot("$f1.module.x180", copy=True),
             "x180_f2": Slot("$f2.module.x180", copy=True),
             "readout": readout,
@@ -74,3 +80,8 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             "dc_values": Range(0, 0, expts=1),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
+
+
+def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
+    """Capture spectroscopy inputs with optional reset disabled."""
+    return spectroscopy_form(ctx, SpectroscopyCfg)

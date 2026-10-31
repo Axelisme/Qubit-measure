@@ -3,17 +3,15 @@
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
-from zcu_tools.plotting.plots import Plots
 
 from .._rabi_analysis import (
     RabiAnalysis,
     ReturnData,
     fit_duration_rates,
-    plot_duration_rates,
 )
-from .._rabi_scan import RabiScanResult
 
 
 @dataclass(frozen=True)
@@ -21,17 +19,31 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     """Maximum-rate relative phase in degrees or an explicit unresolved reason.
 
     interference_quality describes the ordinary least-squares rate² fit at the
-    valid phase coordinates. relative_phase_deg is atan2(C,B), not an IQ phase
+    valid phase coordinates. interference contains measured phases and rates²,
+    the dense model axis and curve, and its resolved maximum phase.
+    relative_phase_deg is atan2(C,B), not an IQ phase
     quadrature or logical local-Z correction. No module is written by analysis.
     """
 
     relative_phase_deg: float | None
     reason: str | None
     interference_quality: FitQuality | None
+    interference: (
+        tuple[
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            float,
+        ]
+        | None
+    ) = None
 
 
 def analyze_constructive_phase(
-    data: RabiScanResult, returns: ReturnData, *, plots: Plots
+    coordinates: NDArray[np.float64],
+    durations: NDArray[np.float64],
+    returns: ReturnData,
 ) -> ConstructivePhaseAnalysis:
     """Fit complete duration traces, then select the rate² interference maximum.
 
@@ -40,15 +52,12 @@ def analyze_constructive_phase(
     Reject numerical degeneracy/nonfinite uncertainty, not low contrast/sigma or
     residual quality. Nyquist sampling is the operator's responsibility.
     """
-    rates = fit_duration_rates(data, returns)
-    plot_duration_rates(
-        data, rates, coordinate_label="F2 relative to F1 phase (deg)", plots=plots
-    )
+    rates = fit_duration_rates(durations, returns)
     base = RabiAnalysis(returns, rates)
     phases = np.array(
         [
             coordinate
-            for coordinate, rate in zip(data.coordinates, rates, strict=True)
+            for coordinate, rate in zip(coordinates, rates, strict=True)
             if rate.rate is not None
         ]
     )
@@ -118,19 +127,8 @@ def analyze_constructive_phase(
             quality,
         )
     phase = float(np.rad2deg(np.arctan2(c, b)))
-    _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
     dense = np.linspace(-180.0, 180.0, 721)
-    ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
-    ax.plot(
-        dense,
-        a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense)),
-        label="A + B cosφ + C sinφ",
+    curve = a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense))
+    return ConstructivePhaseAnalysis(
+        returns, rates, phase, None, quality, (phases, squared, dense, curve, phase)
     )
-    ax.axvline(phase, ls="--", label=f"Maximum rate at {phase:.4g}°")
-    ax.set(
-        xlabel="F2 relative to F1 phase (deg)",
-        ylabel="Rabi rate² (MHz²)",
-        title="Constructive phase · fixed signed gain ratio · model-dependent",
-    )
-    ax.legend()
-    return ConstructivePhaseAnalysis(returns, rates, phase, None, quality)

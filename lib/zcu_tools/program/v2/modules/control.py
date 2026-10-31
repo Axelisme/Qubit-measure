@@ -152,8 +152,11 @@ class Branch(Module):
 
     On TimelineProgramV2, declare registers the children and lower uses native
     branch/case control with compare_reg as the sweep selector. Children execute
-    in order on the selected timeline, and each case closes its actual end
-    without padding to other cases. Measurement feedback is not supported.
+    in order on the selected timeline. align_timeline=True joins case ends per
+    timeline, using static max or exact runtime pointwise max. Reference does
+    not advance and no wait is inserted. Later emissions resume at the joined
+    end. Reference-moving children and case-local Repeat fail at build.
+    Measurement feedback is not supported.
 
     Legacy init/run selection uses a dispatch-table island:
 
@@ -195,14 +198,15 @@ class Branch(Module):
     ) -> None:
         """Emit the sweep-selected case on timeline (default when None).
 
-        Preserve empty cases and child order. Native case closing advances
-        reference to the selected path's end, without cross-case padding.
+        Preserve empty cases and child order. Use align_timeline=True to join
+        all case ends per timeline, without advancing reference. Native
+        reference-moving children and case-local Repeat raise ValueError.
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """
-        with prog.branch(by=self.compare_reg) as cases:
-            for branch in self.branches:
-                with cases.case():
+        with prog.branch(by=self.compare_reg, align_timeline=True) as cases:
+            for index, branch in enumerate(self.branches):
+                with cases.case(index):
                     for mod in branch:
                         prog.emit(mod, timeline=timeline)
 
