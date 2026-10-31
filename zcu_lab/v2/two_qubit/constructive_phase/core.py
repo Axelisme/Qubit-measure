@@ -219,6 +219,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
         """
+        del options
         if source.cfg is None:
             raise ValueError(
                 "Rabi analysis requires saved cfg; current Form/library is not a substitute"
