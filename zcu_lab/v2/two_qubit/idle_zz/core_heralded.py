@@ -250,7 +250,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             result.delays,
             result.sums,
             dc_values,
-            cfg.delay.expts,
+            (cfg.delay.expts, 3, 3, 3, 3),
         )
         complete = complete_points(result.sums, cfg.reps * cfg.rounds)
         gg = terminal_counts(result.sums, ("g", "g"))

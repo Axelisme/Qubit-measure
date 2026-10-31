@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay_fringe
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import (
+    FitQuality, compute_fit_quality, decay_time_bounds, decaycos, fit_decay_fringe,
+)
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
 from .._sums import sigma
@@ -48,9 +52,10 @@ class IdleBranchFit:
 
 @dataclass(frozen=True)
 class IdleZZAnalysis:
-    """Ordered (DC-major, I then Xπ) fits and one conditional difference per DC.
+    """DC-major state-0/state-1 fits and one conditional difference per DC.
 
-    zeta_mhz is f_Xπ−f_I using detune-signed fringe frequencies, never a bare
+    Ordinary states mean I/Xπ; heralded joint fits use actual spectator g/e.
+    zeta_mhz is f_Xπ−f_I, or actual f_e−f_g, using signed frequencies, never a bare
     magnitude difference. zeta_error_mhz propagates independent branch covariance
     errors in quadrature. Missing/unidentifiable branches leave both None and a
     zeta_reasons explanation. This is a nominal-branch single-model estimate,
@@ -84,21 +89,7 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
     return finite & (total == expected)
 
 
-def fringe(
-    x: NDArray[np.float64],
-    frequency: float,
-    decay: float,
-    offset: float,
-    amplitude: float,
-    phase: float,
-) -> NDArray[np.float64]:
-    """Return a decay cosine, with µs, MHz and phase in degrees."""
-    return offset + amplitude * np.exp(-x / decay) * np.cos(
-        2 * np.pi * frequency * x + np.deg2rad(phase)
-    )
-
-
-def sigma_errors(counts: NDArray[np.float64], target: str) -> NDArray[np.float64]:
+def sigma_errors(counts: NDArray[np.float64], target: Literal["f1", "f2"]) -> NDArray[np.float64]:
     """Return shot-noise errors for (Ne-Ng)/N, including other in N.
 
     counts is delay × terminal F1 × terminal F2. The multinomial variance of
@@ -152,7 +143,7 @@ def fit_traces(
         return tuple(replace(f, reason=reason) for f in fits)
     try:
         return _fit_complete_traces(fits, errors, delays, detune)
-    except (ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+    except (AnalysisFailed, ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
         return tuple(replace(f, reason=f"Fringe fit failed: {exc}") for f in fits)
 
 
@@ -163,12 +154,17 @@ def _fit_complete_traces(
     detune: float,
 ) -> tuple[IdleBranchFit, ...]:
     seeds = [fit_decay_fringe(delays, f.trace) for f in fits]
+    decay_bounds = decay_time_bounds(delays)
+    frequencies = np.fft.fftfreq(len(delays), d=abs(delays[1] - delays[0]))
+    frequencies = frequencies[frequencies >= 0.125 / float(np.ptp(delays))]
+    # Keep the same sampled-frequency and resolvable-decay bounds as the seed fitter.
+    frequency_bounds = (float(frequencies.min()), float(frequencies.max()))
     parameters = [
-        ParameterSpec("frequency", abs(float(seeds[0].freq)), limits=(0, None)),
-        ParameterSpec("decay", float(seeds[0].decay_time), limits=(1e-9, None)),
+        ParameterSpec("frequency", float(seeds[0].freq), limits=frequency_bounds),
+        ParameterSpec("decay_time", float(seeds[0].decay_time), limits=decay_bounds),
     ]
     traces = []
-    for index, (fit, error, seed) in enumerate(zip(fits, errors, seeds, strict=True)):
+    for index, (fit, count_error, seed) in enumerate(zip(fits, errors, seeds, strict=True)):
         offset, amplitude, _, phase, _ = seed.params
         names = tuple(f"{name}_{index}" for name in ("offset", "amplitude", "phase"))
         parameters.extend(
@@ -176,7 +172,7 @@ def _fit_complete_traces(
             for name, value in zip(names, (offset, amplitude, phase), strict=True)
         )
         traces.append(
-            FitTrace(delays, fit.trace, fringe, ("frequency", "decay", *names), error)
+            FitTrace(delays, fit.trace, decaycos, (names[0], names[1], "frequency", names[2], "decay_time"), count_error)
         )
     shared = fit_shared(traces, parameters)
     frequency = shared.values["frequency"]
@@ -193,10 +189,11 @@ def _fit_complete_traces(
     answers = []
     for fit, trace in zip(fits, traces, strict=True):
         values = {name: shared.values[name] for name in trace.parameter_names}
-        curve = fringe(delays, *values.values())
+        curve = decaycos(delays, *values.values())
         indices = [shared.parameter_names.index(name) for name in trace.parameter_names]
         quality = compute_fit_quality(
-            fit.trace, curve, values, shared.covariance[np.ix_(indices, indices)]
+            fit.trace, curve, values, shared.covariance[np.ix_(indices, indices)],
+            decay_bounds=decay_bounds,
         )
         answers.append(
             replace(
@@ -245,21 +242,22 @@ def validate_axes(
     delays: NDArray[np.float64],
     sums: NDArray[np.float64],
     expected_dc: NDArray[np.float64],
-    ndelay: int,
+    delay_class_shape: tuple[int, ...],
 ) -> None:
     """Reject mismatched saved coordinates or class-count dimensions.
 
-    Require saved DC coordinates, integer spectator indices [0,1] and ndelay
-    finite distinct nonnegative µs coordinates. Class axes are all length 3.
+    Require saved DC coordinates, integer spectator indices [0,1] and finite
+    distinct nonnegative µs delays. delay_class_shape specifies the required
+    delay length followed by terminal or herald/terminal 3-class axes.
     """
     if (
         not np.array_equal(dc_values, expected_dc)
         or not np.array_equal(spectator_states, np.arange(2))
-        or delays.shape != (ndelay,)
+        or delays.shape != (delay_class_shape[0],)
         or not np.all(np.isfinite(delays))
         or np.any(delays < 0)
-        or len(np.unique(delays)) != ndelay
-        or sums.shape[:3] != (len(expected_dc), 2, ndelay)
+        or len(np.unique(delays)) != delay_class_shape[0]
+        or sums.shape != (len(expected_dc), 2, *delay_class_shape)
     ):
         raise ValueError(
             "Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes"
@@ -270,7 +268,7 @@ def fit_count_traces(
     delays: NDArray[np.float64],
     counts: tuple[NDArray[np.float64], ...],
     complete: tuple[NDArray[np.bool_], ...],
-    target: str,
+    target: Literal["f1", "f2"],
     detune: float,
 ) -> tuple[tuple[IdleBranchFit, ...], ...]:
     """Fit aligned DC × actual-state × delay class-count datasets jointly.
