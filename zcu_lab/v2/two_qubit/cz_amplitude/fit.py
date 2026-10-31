@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fitcos
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
@@ -105,7 +106,13 @@ def _fit_complete_prefix(
             raise ValueError("Weighted zero-phase return fit failed")
         parameters = np.array([weighted.values[name] for name in names])
         covariance = weighted.covariance
-    except (ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+    except (
+        AnalysisFailed,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        np.linalg.LinAlgError,
+    ) as exc:
         return replace(answer, reason=f"Zero-phase return fit failed: {exc}")
     offset, amplitude, frequency, phase = map(float, parameters)
     if not np.all(np.isfinite(parameters)) or frequency <= 0:

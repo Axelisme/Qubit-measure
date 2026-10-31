@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
 from zcu_tools.analysis.fitting.rabi import fit_rabi
@@ -119,6 +120,7 @@ def _fit_duration_rate(
         error = float(np.sqrt(covariance[2, 2]))
         fitted = cosine(durations, *parameters)
     except (
+        AnalysisFailed,
         ValueError,
         RuntimeError,
         ZeroDivisionError,
