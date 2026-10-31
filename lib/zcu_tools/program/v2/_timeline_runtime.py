@@ -1,7 +1,8 @@
 """Runtime cycle emission plans with correlated compile-time time expressions."""
 
 import math
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 
 import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
@@ -10,6 +11,7 @@ from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
     CycleVariable,
     LinearTime,
+    TimeChoice,
     TimeExpression,
     add_time,
     choose_time,
@@ -111,9 +113,13 @@ class RuntimeEnd:
     deferred records physical boundaries covered only after an additional proven
     nonnegative cycle advance; negative operations and reference debits drop it.
     expression carries correlated integer-cycle algebra for native timestamp
-    projection only. None creates a fresh bounded value (or an exact constant);
-    copying a value must preserve its expression, not its recycled register name.
-    The original intervals still control register arithmetic and overflow checks.
+    projection and maximum proofs over the complete legal producer-axis domain.
+    Unknown values cannot supply point samples. None creates a fresh bounded
+    value (or an exact constant); copying preserves this immutable value identity,
+    never reconstructing it from a recycled register name. Maximum proofs retain
+    both operands' coverage and deferred boundaries. Producer registration and
+    whole-stream write audits remain required. The original intervals still
+    control emitted register arithmetic and overflow checks.
     """
 
     register: str
@@ -329,7 +335,14 @@ def time_bounds(prog, value: Time) -> tuple[float, float]:
     return bounds(value)
 
 
-def _known_maximum(a: Time, b: Time) -> Time | None:
+def known_maximum(a: Time, b: Time) -> Time | None:
+    """Return a proven dominant operand, or None when a runtime max is needed.
+
+    a and b are reference-relative ends in us, or bounded cycle registers.
+    Equal ends and compile-time dominant scalar/affine ends return an input
+    unchanged. This never emits instructions or approximates crossing ends.
+    Invalid static bounds propagate their existing errors.
+    """
     if a is b or (isinstance(a, RuntimeEnd) and any(item is b for item in a.covers)):
         return a
     if isinstance(b, RuntimeEnd) and any(item is a for item in b.covers):
@@ -356,6 +369,126 @@ class RuntimeMath(TimedMacro):
         if previous is not None:
             self.claimed.update(previous.claimed)
 
+    def reconstruct(
+        self,
+        expression: TimeExpression,
+        inputs: dict[CycleVariable, RuntimeEnd],
+        captured_ends: Sequence[RuntimeEnd] = (),
+    ) -> RuntimeEnd:
+        """Materialize exact cycle algebra using captured branch-entry inputs.
+
+        Known point grids use the existing timing-table owner. Unknown terms
+        read their immutable entry snapshots, never path-local scratch storage.
+        captured_ends are immutable incoming timeline values. Reuse their cycle
+        algebra before reading source variables, which may have been overwritten
+        since those ends were computed. Other variables must be known on the
+        point grid or supplied in inputs.
+        """
+        for captured in captured_ends:
+            delta = self._captured_delta(expression, runtime_expression(captured))
+            if delta is not None:
+                axes = expression_axes(delta)
+                points = evaluate_time(delta, axes)
+                if points is not None and int(points.min()) >= 0:
+                    if not np.any(points):
+                        return captured
+                    return self.add(
+                        captured, self.lookup([int(v) for v in points.flat], axes)
+                    )
+        axes = expression_axes(expression)
+        points = evaluate_time(expression, axes)
+        if points is not None:
+            return self.lookup([int(value) for value in points.flat], axes)
+        if isinstance(expression, TimeChoice):
+            values = [
+                self.reconstruct(item, inputs, captured_ends)
+                for item in expression.alternatives
+            ]
+            result = values[0]
+            for value in values[1:]:
+                if expression.maximum:
+                    result = self.cycles(self.maximum(result, value))
+                else:
+                    # min(a,b) = a - max(0,a-b), with the same flag-free math.
+                    delta = self.subtract(result, value)
+                    result = self.subtract(result, self.maximum(0.0, delta))
+            return result
+        return self._reconstruct_linear(expression, inputs)
+
+    def _reconstruct_linear(
+        self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
+    ) -> RuntimeEnd:
+        result = self.cycles(expression.constant / get_fclk(self.prog))
+        for variable, coefficient in expression.terms:
+            term = inputs[variable]
+            magnitude = abs(coefficient)
+            scaled = self.cycles(0.0)
+            while magnitude:
+                if magnitude & 1:
+                    scaled = self.add(scaled, term)
+                magnitude >>= 1
+                if magnitude:
+                    term = self.add(term, term)
+            result = (
+                self.add(result, scaled)
+                if coefficient > 0
+                else self.subtract(result, scaled)
+            )
+        return result
+
+    def reconstruct_maximum(
+        self,
+        values: Sequence[Time],
+        inputs: dict[CycleVariable, RuntimeEnd],
+        captured_ends: Sequence[RuntimeEnd],
+    ) -> RuntimeEnd:
+        """Join case ends using immutable entry values and exact known increments.
+
+        values are reference-relative case ends. Preserve a common incoming
+        floor/max while joining its known increments, so no historical source
+        register is reread. Other ends use reconstruct's cycle-algebra contract.
+        """
+        expressions = [time_expression(self.prog, value) for value in values]
+        for captured in captured_ends:
+            shifts = [
+                self._captured_delta(value, runtime_expression(captured))
+                for value in expressions
+            ]
+            if any(shift is None for shift in shifts):
+                continue
+            delta = choose_time(*(shift for shift in shifts if shift is not None))
+            axes = expression_axes(delta)
+            points = evaluate_time(delta, axes)
+            if points is not None and int(points.min()) >= 0:
+                return self.add(
+                    captured, self.lookup([int(v) for v in points.flat], axes)
+                )
+        return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
+
+    def _captured_delta(
+        self, expression: TimeExpression, captured: TimeExpression
+    ) -> TimeExpression | None:
+        # Addition distributes over max/min. Match the same shift on every
+        # alternative before flattening case maxima loses the incoming floor.
+        if isinstance(expression, TimeChoice) and isinstance(captured, TimeChoice):
+            if expression.maximum != captured.maximum or len(
+                expression.alternatives
+            ) != len(captured.alternatives):
+                return None
+            shifts = [
+                self._captured_delta(value, origin)
+                for value, origin in zip(
+                    expression.alternatives, captured.alternatives, strict=True
+                )
+            ]
+            first = shifts[0]
+            return (
+                first
+                if first is not None and all(shift == first for shift in shifts)
+                else None
+            )
+        return add_time(expression, scale_time(captured, -1))
+
     def source(self, name: str) -> RuntimeEnd:
         """Describe a certified register at this consumer, retaining known points."""
         limits = self.prog._time_bounds.source(self.prog, name)
@@ -381,7 +514,10 @@ class RuntimeMath(TimedMacro):
         offset = self.prog.add_timing_dmem(values, owner=owner)
         register = self.allocate()
         index = sweep_table_index(
-            self.prog, axes, name=f"_timeline_index_{len(self.prog.reg_dict)}"
+            self.prog,
+            axes,
+            name=f"_timeline_index_{len(self.prog.reg_dict)}",
+            shared_indices=self.prog._timeline_book.sweep_indices,
         )
         operation = DmemLookup(
             dst=register, index=index, offset=offset, address=self.scratch(3)
@@ -613,7 +749,7 @@ class RuntimeMath(TimedMacro):
     @staticmethod
     def covers(end: Time, previous: Time) -> bool:
         """Return whether an existing exact identity/coverage proves end >= previous."""
-        return _known_maximum(end, previous) is end
+        return known_maximum(end, previous) is end
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()
@@ -673,14 +809,52 @@ class RuntimeMath(TimedMacro):
         )
 
     def maximum(self, a: Time, b: Time, *, target: str | None = None) -> Time:
-        known = _known_maximum(a, b)
+        known = known_maximum(a, b)
         if known is not None:
             return known
-        left, right = self.cycles(a), self.cycles(b)
-        if left.minimum >= right.maximum:
+        # Prove dominance before allocating static operands. Use the same native
+        # cycle quantization as materialization, and still validate both ranges.
+        limits: list[tuple[int, int]] = []
+        expressions: list[TimeExpression] = []
+        for value in (a, b):
+            rounded = (
+                value if isinstance(value, RuntimeEnd) else step_time(self.prog, value)
+            )
+            lo, hi = time_bounds(self.prog, rounded)
+            lower = round(lo * get_fclk(self.prog))
+            upper = round(hi * get_fclk(self.prog))
+            self.check(lower, upper)
+            limits.append((lower, upper))
+            expressions.append(time_expression(self.prog, rounded))
+        if limits[0][0] >= limits[1][1]:
             return a
-        if right.minimum >= left.maximum:
+        if limits[1][0] >= limits[0][1]:
             return b
+        # Evaluate the complete Cartesian union, broadcasting shared axes rather
+        # than zipping independent producers. Unknown sources retain runtime max.
+        delta = add_time(expressions[0], scale_time(expressions[1], -1))
+        points = evaluate_time(delta, expression_axes(delta))
+        dominant = None
+        if points is not None:
+            if np.all(points >= 0):
+                dominant = a
+            elif np.all(points <= 0):
+                dominant = b
+        if dominant is not None:
+            return replace(
+                self.cycles(dominant),
+                covers=(
+                    a,
+                    b,
+                    *(a.covers if isinstance(a, RuntimeEnd) else ()),
+                    *(b.covers if isinstance(b, RuntimeEnd) else ()),
+                ),
+                deferred=(
+                    *(a.deferred if isinstance(a, RuntimeEnd) else ()),
+                    *(b.deferred if isinstance(b, RuntimeEnd) else ()),
+                ),
+            )
+        left, right = self.cycles(a), self.cycles(b)
         destination = self.allocate() if target is None else target
         # A fresh result can hold intermediates. An explicitly aliased target
         # must preserve both input operands until the final addition.

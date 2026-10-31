@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
@@ -11,7 +12,43 @@ from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register
 from zcu_tools.program.v2.modules import LoadValue
 
 from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
+
+
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_public_acquire_skips_undeclared_branch_points_without_padding(align_timeline):
+    def initialize(p):
+        p.add_loop("scan", 3)
+        p.declare_gen(1, nqz=1)
+        p.add_pulse(1, "drive", style="const", freq=80, phase=0, gain=0.2, length=0.1)
+
+    def body(p):
+        with (
+            p.branch(by="scan", align_timeline=align_timeline) as branch,
+            branch.case(1),
+        ):
+            p.pulse(1, "drive", timeline="default", tag="selected-drive")
+        # The routed ADC always needs a carrier, including undeclared points.
+        p.pulse(0, "p", t=0, tag="terminal")
+        p.trigger([0], t=0)
+
+    prog, env = program(
+        body, initialize, trigger_time=None, n_readouts=2, routes=((0, 0), (1, 1))
+    )
+    try:
+        result = prog.acquire(env.soc, progress=False)
+        np.testing.assert_array_equal(result[0], np.zeros((1, 3, 2)))
+        observed = request_of(env)
+        points = [observed.materialize_point(index) for index in range(3)]
+        assert [[event.source for event in point.events] for point in points] == [
+            ["terminal"],
+            ["selected-drive", "terminal"],
+            ["terminal"],
+        ]
+        assert points[1].events[0].gain == pytest.approx(0.2, abs=1e-4)
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
@@ -76,9 +113,9 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
         p.trigger([0], t=0)
         p.fork("default", into="external")
         p.delay_timeline(100 / 430.08, timeline="external")
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
-                with branch.case():
+                with branch.case(index):
                     p.pulse(0, "p", timeline="default", tag=f"case-{index}")
                     p.delay_timeline((10 + index * 10) / 430.08)
         p.join("external", into="default")
@@ -224,13 +261,11 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
 def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
     def body(p):
-        with p.branch(by="scan") as branch:
-            with branch.case(), p.repeat("twice", 2):
-                p.trigger([0], t=0)
-                p.pulse(0, "p", timeline="default")
-            with branch.case():
-                p.trigger([0], t=0)
-                p.pulse(0, "p", timeline="default")
+        p.trigger([0], t=0)
+        p.pulse(0, "p", timeline="default")
+        with p.branch(by="scan", align_timeline=True) as branch, branch.case(0):
+            p.trigger([0], t=43 / 430.08)
+            p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
     # Lane zero has two reads, matching the two statically emitted triggers.
@@ -249,9 +284,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.branch(by="scan") as branch:
+        with p.repeat("reads", 3), p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
-                with branch.case(), p.repeat(f"case_repeat_{index}", 3):
+                with branch.case(index):
                     p.trigger([0, 1], t=0)
                     p.pulse(0, "p", timeline="default", tag=f"case-{index}")
 
@@ -298,9 +333,9 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
         return CompiledStream(tuple(records))
 
     def body(p):
-        with p.branch(by="scan") as branch:
-            for _ in range(2):
-                with branch.case():
+        with p.branch(by="scan", align_timeline=True) as branch:
+            for index in range(2):
+                with branch.case(index):
                     p.pulse(0, "p", timeline="default")
 
     prog, env = program(
@@ -352,9 +387,9 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         return CompiledStream(tuple(records))
 
     def body(p):
-        with p.branch(by="scan") as branch:
-            for _ in range(2):
-                with branch.case():
+        with p.branch(by="scan", align_timeline=True) as branch:
+            for index in range(2):
+                with branch.case(index):
                     p.pulse(0, "p", timeline="default")
 
     def triggered_body(p):
@@ -388,9 +423,9 @@ def test_structured_branch_memory_live_in_is_rejected(reps):
         p.add_reg("carry", init=QickRawParam("carry", 0, {}))
 
     def body(p):
-        with p.branch(by="scan") as branch:
-            for amount in [1, 2]:
-                with branch.case():
+        with p.branch(by="scan", align_timeline=True) as branch:
+            for index, amount in enumerate([1, 2]):
+                with branch.case(index):
                     p.inc_reg("carry", amount)
         wave = p.pulses["p"].get_wavenames()[0]
         p.read_wmem(wave)
@@ -417,8 +452,8 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
     effect, instruction
 ):
     def body(p):
-        with p.branch(by="scan") as branch:
-            with branch.case():
+        with p.branch(by="scan", align_timeline=True) as branch:
+            with branch.case(0):
                 p.pulse(0, "p", timeline="default", tag="drive")
                 if effect == "measurement":
                     p.read_and_jump(0, "I", 0, ">=", "done")
@@ -429,7 +464,7 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
                     p.write_reg("s1", "s11")
                 else:
                     p.jump("HERE")
-            with branch.case():
+            with branch.case(1):
                 p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2))

@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，compiled simulation、TimelineBuilder 與 shell WAIT 契約
+**Last updated:** 2026-10-31，branch 索引、align_timeline 與 reference 邊界
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -136,9 +136,10 @@ Legacy `ModularProgramV2` 仍將宣告狀態保存在 module 上，不適用跨 
 Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
 Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
 Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記帳方法。
-`with builder.repeat(...)` 與 `with builder.branch(by=...)` 錄製巢狀動作。
-Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case():` 錄製每個 sweep 點的動作。
-在 case 內仍呼叫原 builder 的 emit、delay 或其他 body 方法。
+`with builder.repeat(...)` 與 `with builder.branch(by=..., align_timeline=...)` 錄製巢狀動作。
+Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case(index):` 錄製指定 sweep 點的動作。
+Index 是 zero-based，可不按順序宣告。未宣告的點不發射動作，重複或超界 index 報錯。
+在 case 內仍呼叫原 builder 的 emit、delay_timeline 或其他不推進 reference 的 body 方法。
 關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
 Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
 `SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
@@ -163,8 +164,8 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
 名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
 範圍不 fork、不 join，也不移動 reference。
-`branch` 仍只有 `by` 參數，case 內的發射沿用當下範圍。
-範圍不改變 case used/local 同步與不等長規則。
+`branch` 必填 keyword-only `by` 與 `align_timeline`，case 內的發射沿用當下範圍。
+範圍不改變 branch 的結尾合併與局部名字生命週期。
 原生 `delay` 與 `delay_auto` 仍只推進 reference，不受範圍影響。
 
 ```python
@@ -236,10 +237,23 @@ Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較�
 它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
 交叉或 runtime source 以逐點 maximum 合併，不把所有掃描點補成同一個長度。
 
-`with self.branch(by="scan") as branch:` 依 sweep selector 選 case，每個點必須有一個 `with branch.case():`。
-每個 case 只同步自身使用的 timeline 與局部 fork，不補齊其他 case 的長度。未使用的外部 long pulse 可以橫跨 Branch。
-Case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。跨 Branch 的 timeline 須在入口前宣告。
-入口前既有 timeline 的 path ends 不同時，保留實際選中 end 並標為 wait-only。
+`with self.branch(by="scan", align_timeline=True) as branch:` 依 sweep selector 選 `with branch.case(index):`。
+Index 是 `scan` 的 zero-based 點索引，可只宣告部分點，也可完全不宣告。
+未宣告的點執行空 case，不要求作者填入空動作。重複、非整數或超界 index 報 ValueError。
+
+`align_timeline` 是必填 keyword-only bool。每個 case 從 branch 入口的 timeline 結尾與 reference 開始。
+True 對每條 timeline 的各 case 結尾做 join。全靜態時取靜態 max，有 runtime 值時取精確逐點 max。
+True 需要每個 case 的結尾都能從 branch 入口狀態算出，不執行未選 case 的動作。
+False 將使用過的 timeline 結尾保留為實際執行 case 的 runtime 結尾，未使用的 timeline 不變。
+兩種都不推進 reference、不自動 sync，後續都可在各 timeline 結尾繼續發射。
+未使用的外部 long pulse 可以橫跨 Branch。
+Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
+Case 內 Repeat 的入口與回邊會隱含推進 reference，因此 build 時報錯，須移到 branch 外。
+Repeat 內放 branch 仍合法，兩種 align_timeline 都使用上述規則。
+Branch 區塊內、case 外的 emit、fork、join、delay_timeline 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
+Case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
+沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
+跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
 
 `with self.repeat(name, n, timeline="default", range_hint=None)` 先同步母 timeline，
 每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline

@@ -101,8 +101,8 @@ Builder 產生的 program 與手寫 program 使用相同入口；program 自身�
 它涵蓋 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與 `repeat` 的母 timeline。
 顯式名字優先，包含 `"default"`；巢狀範圍覆蓋外層，離開時還原。
 名字須是 default 或已 fork 的 timeline，未知名字報錯；範圍本身不 fork、不 join，也不推進 reference。
-`branch` 仍只有 `by`，沒有母 timeline 參數；case 內的發射沿用當下範圍預設。
-範圍不增加 branch 的同步或 join，case used/local 與不等長規則維持不變。
+`branch` 接受 `by` 與必填 `align_timeline`，沒有母 timeline 參數；case 內的發射沿用當下範圍預設。
+範圍不推進 reference；branch 的結尾依下述 `align_timeline` 規則合併。
 原生 `delay`／`delay_auto` 只推進 reference，不受此預設影響。
 使用者於 2026-10-30 對只切換既有名字的預設、顯式值優先、巢狀還原與 program 同名入口，回答：「1a 採用建議」。
 
@@ -213,10 +213,24 @@ Into 接受一個新名字或名字 list；重名與未宣告使用報錯。
 並要求：「那會需要一個宣告新timeline的機制，從當前指定timeline尾端分岔」。
 因此採記帳式 fork／join，不提供 `with join`／`j.branch`。
 
-`with self.branch(by=...)` 依 sweep selector 選 case，不支援量測結果分支。
-每個 case 只同步自己使用的 timeline 與局部 fork，可不等長，不補到共同最長 reference。
-Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeline 必須在入口前宣告。
-入口前既有 timeline 的 path ends 不同時，保留實際選中 end 並標為只能等待。
+`with self.branch(by=..., align_timeline=...) as cases` 依 sweep selector 選 `cases.case(index)`，不支援量測結果分支。
+Index 是 by 迴圈的 zero-based 整數點索引。未宣告的 index 是空 case；重複、非整數或超界 index 報錯。
+`align_timeline` 是必填 keyword-only bool。每個 case 從入口的 timeline 結尾與 reference 開始。
+True 對每條 timeline 的各 case 結尾取 join，全靜態取靜態 max，否則取精確逐點 max。
+True 要求各 case 結尾能從入口狀態重建，無法重建時 build 報錯，不執行未選 case 的動作。
+False 保留被 case 使用的 timeline 在 runtime 實際走到的結尾，未使用的 timeline 不變。
+兩種模式都不推進 reference、不自動 sync，後續可在各 timeline 結尾繼續發射。
+未使用的外部 long pulse 可以橫跨 Branch，不因不同 case 的結尾而變成只能等待。
+Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，延遲改用 delay_timeline。
+Branch 區塊內、case 外的 timeline 操作在 build 時報錯，無條件動作寫在區塊前或後。
+Case 內 fork 的名字在 case 結束後失效。未 join 的局部結尾直接丟棄，不合回祖先，也不報錯。
+跨 Branch 要使用的 timeline 必須在入口前宣告。Register 超限保留 QICK 原錯誤，由作者負責。
+
+使用者於 2026-10-31 要求：「case()輸入應該要有對應的值，值沒有宣告對應case應該視為空branch」。
+對結尾選擇裁定：「我會預期branch實際長度可以選擇所以case的最大值，或是runtime時走的那個branch」；「我不想自動推進ref time」。
+對局部 fork 說明：「局部fork自動並回是超出預期的行為」。
+並選定參數名稱：「那感覺叫align_timeline:bool 比較好，我記得兩種需求都有吧？很多要不要打pi pulse的branch就是select?」。
+對 case 外操作報錯的提案回答：「好」。
 
 `with self.repeat(name, n, timeline=P, range_hint=...)` 的母 timeline P 預設為 default。
 入口先 `sync(timeline=P)`，避免第一圈與迴圈前 P 的內容重疊。固定 n=0 仍同步入口，但不執行 body。
@@ -224,6 +238,8 @@ Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeli
 其他外部 timeline 可以橫跨迴圈，但不能在內部使用，連作為 fork source 也不行。
 每圈同步 P 與局部結尾。離開後 P 為 0，局部名字失效，可在外部重新 fork。
 巢狀 Repeat 遞迴套用此規則。
+Case 內不能放 Repeat，因為其入口與回邊隱含推進 reference，build 時報錯，須移到 branch 外。
+Repeat 內放 Branch 仍合法，兩種 align_timeline 都遵守上述 branch 結尾契約。
 
 使用者於 2026-10-29 要求考慮「一開始一個超長flux pulse在獨立timeline，中間有branch或repeat的情況」，並對允許外部 timeline 橫跨結構的修正規則回答：「我同意」。
 這取代進入 Repeat 時拒絕尚未結束的外部 timeline 的做法。
@@ -233,7 +249,7 @@ Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeli
 Register n 是既有 register 名字，不得與 name 命名的 counter 同名。
 它一律要求作者保證的非負整數閉區間 `range_hint=(minimum, maximum)`，minimum 不得大於 maximum。
 編譯器不從 register 初值推定 range，也不新增硬體檢查。
-Register 次數或不同 case 的推進需要 runtime storage 時，外部結尾按實際路徑扣除，不採 minimum count 的等待上界。
+Repeat 的 register 次數或其 body 路徑推進需要 runtime storage 時，外部結尾按實際路徑扣除，不採 minimum count 的等待上界。
 路徑不同或 register 次數後尚未消耗的原 timeline 保持只能等待。
 
 只能等待的來源可供 join／fork、sync 或 body 對齊使用。
@@ -241,9 +257,9 @@ Register 次數或不同 case 的推進需要 runtime storage 時，外部結尾
 Join 目標與 fork 新 timeline 是普通狀態，從實際 remaining end 建立可繼續發射的排程點，來源本身仍只能等待。
 Sync 或原生 reference 推進完整消耗該 end 後，來源恢復普通狀態；部分消耗仍只能等待。
 
-Repeat body 支援具名 timeline 的 register 時間與各 case 不同的 Branch advance。
+Repeat body 支援具名 timeline 的 register 時間與不同 case 的 Branch 結尾，Branch 本身不推進 reference。
 各 case 分別累積 pulse guard，回邊使用全路徑保守 envelope 證明不重疊。
-Envelope 只作重疊與範圍證明，不改各 case 的 reference advance、實際 end、body_end 或 shot_end。
+Envelope 只作重疊與範圍證明，不改 Repeat 的 reference advance、Branch 實際 end、body_end 或 shot_end。
 Repeat body 內的 DelayAuto(register) 與原生 delay_reg_auto 仍拒絕；它們是未知的 native reference advance，不是具名 timeline duration。
 迴圈外 consumer 不受這項 Repeat 限制。
 

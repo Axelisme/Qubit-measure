@@ -1,53 +1,61 @@
 # Conditional phase
 
-**Readers:** operator, agent. Measure conditional ensemble phase through the GUI or MCP and review a common CZ frequency proposal.
-
-**Last updated:** 2026-10-21
-
-Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
-
-`two_qubit/conditional_phase` acquires the target's ensemble phase for two nominal spectator branches. Choose F1 or F2 as target. Each shot applies spectator I or Xπ, target X90, n repeated simultaneous CZ pulse pairs, one projection pulse, then the complete mux readout. X and Y projections are independent acquisitions. Spectator Xπ flips a thermal ensemble, with thermal admixture still present.
-
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+**Readers:** operator, agent. Measure classified conditional phase and review a common CZ frequency proposal.
 
 ## Prepare the inputs
 
-Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate both Xπ and X90 pulses and the complete mux readout first. Open or Reset captures these identities, module inputs and the original tone positions. Run uses these fixed sources throughout acquisition. Reset after changing sources, then check every input.
+Bind `f1` and `f2` to distinct fluxoniums, `coupler` to their transmon, and `mux` to a MuxGroup containing both qubits. Calibrate Xπ, X90 and the complete mux readout first. Each role tone needs a circle classifier with radius from mux singleshot GE Post. Missing calibration, linear classification or missing radius stops Run with a GE Post prompt. Other mux tones need no classifier.
 
-The Form copies `$coupler.module.cz_f1` and `cz_f2` into two ordinary editable pulses. Missing CZ slots remain required inputs. Use the same role generator for CZ, Xπ and X90. Both CZ lines must have the same finite frequency, envelope duration and pre-delay, on different generators. Gains, relative phase, waveforms and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. Only the two charge lines are driven; the coupler stays DC-biased.
+Readout references `$mux.module.readout` when present. Without a slot, fill all required fields in the blank mux template. Open or Reset captures identities, calibrated pulses and original tone positions. Refresh preserves authored inputs. After changing sources, use Reset and check the inputs again.
 
-Enter an increasing Common CZ frequency range in MHz. Set the positive integer `gate_counts`; the starting list is `[1, 3, 5]`. Every frequency point replaces only the two CZ frequencies in the acquisition pulses. Repetition preserves both source gains, relative phase and waveforms. Set reps, host rounds and waits for the authorized acquisition budget.
+The Form copies `$coupler.module.cz_f1` and `cz_f2` into editable pulses. Missing CZ slots remain required. CZ, Xπ and X90 must use their captured role generator. The two CZ lines require different generators, equal finite frequency, equal envelope duration and equal pre-delay. Signed gains, relative phase, waveform and individual post-delays remain explicit. Playback starts both lines together and waits for both to finish. The coupler stays DC-biased.
 
-GE centers come only from each role's original tone in the saved readout cfg. Circle classifiers supply centers without requiring radius; no manual override or point calibration is read. Missing or linear classifiers allow raw acquisition, but phase analysis retains an ADC-named calibration reason instead of phase for that target. Run mux singleshot GE under matching readout conditions.
+Choose lowercase `target=f1` or `f2`. Enter a strictly increasing common CZ frequency range in MHz and unique positive integer `gate_counts`, initially `[1,2,3]`. Each point replaces both CZ frequencies and preserves gains, phase and waveform. Set reps, rounds and delays for the authorized budget. Rounds accumulate counts at acquisition, without a host round scan.
 
-## Read the phase plots
+## Sequence and counts
 
-The target preparation pulse has phase φ. The X projection is another X90 at φ; the Y projection is X90 at φ + 90°. These names identify the axes of pulses in separate acquisitions.
+`two_qubit/conditional_phase` emits optional reset, spectator I or Xπ, target X90, n simultaneous CZ pulse pairs, X90 or Y90 projection, then terminal mux readout. `reset=None` emits no reset. The spectator branches describe nominal preparations on the initial ensemble.
 
-For each independent projection, analysis linearly projects mean IQ along the saved GE center difference to obtain P1. The projection preserves the resulting population values and original readout effects. The quadratures are `qX = 2 P1X − 1 = 1 − 2 P0X` and `qY = 2 P1Y − 1 = 1 − 2 P0Y`. Contrast is the length of this vector. Logical Bloch Z phase is `atan2(qY, qX)` in degrees, relative to the preparation frame.
+Spectator I/Xπ, quadrature and frequency are hardware loops. Only gate count stays on the host because it changes the sequence length. X and Y projections use independent shots. Preparation has phase φ. X projection uses φ; Y projection uses φ+90°. Terminal F1/F2 are classified during acquisition into g/e/other.
 
-The phase figure shows contrast, logical phase for each spectator branch and n, and conditional phase `phase(Xπ) − phase(I)`. All angles wrap to `[-180°, 180°)`, so π appears at −180°. Each train's phase is its total accrued phase. Per-gate slopes require a separate unwrapped analysis across n. The per-tone figures retain mean I/Q for every spectator, projection and gate count, including tones other than the target.
+Saved `sums` has shape `(2,2,Nn,Nf,3,3)`, ordered spectator_states, projection, gate count, frequency, terminal F1, terminal F2. Class order is g/e/other. These float64 values are unnormalized totals, not probabilities or per-shot IQ. Unmeasured points remain NaN. Cancellation preserves completed rounds. Each X/Y projection must total reps × rounds from the saved cfg before it can supply phase or fit data. A finite partial-round total is not complete. Per-frequency fits remain available on the complete frequency prefix, but an incomplete frequency axis prevents crossing selection and writeback. StopSignal carries only a stop request and reason. Acquisition failures propagate from Run as exceptions. A normal return after a stop request may contain partial counts.
 
-A phase point requires both projections and all requested rounds at that frequency and n. Missing X or Y gives a reason rather than a phase estimate. A missing spectator branch also prevents conditional phase at that point. Exactly zero contrast gives an undefined-phase reason. Weak nonzero contrast remains available for manual inspection of quadrature curves before interpreting an angle. Every shot and its original readout effects remain in the thermal ensemble. Interpret the phase as an ensemble measurement with pulse and readout errors; pure-state phase and physical fidelity need separate evidence.
+## Read phase and quadratures
 
-## Select a frequency and review proposals
+For each target projection, `sigma=(N_e-N_g)/N_total`. Other remains in the denominator. Contrast is `hypot(sigma_X,sigma_Y)`; phase is `atan2(sigma_Y,sigma_X)` in degrees, wrapped to `[-180,180)`. Analysis does not project mean IQ or reclassify shots.
 
-Only n=1 selects frequency. Analysis unwraps adjacent frequency points, then uses piecewise-linear interpolation to find π modulo 2π within the scanned interval. This assumes the phase change between adjacent samples is smaller than 180° and that the local curve is adequately sampled for linear interpolation. Choose a fine enough grid by inspecting the quadratures and phase. Unobserved turns between samples remain ambiguous.
+The phase plot shows contrast and logical phase for each spectator state and gate count. The quadratures plot shows classified X/Y sigma. The slopes plot shows the fitted phase per gate for actual spectator g and e.
 
-A unique crossing gives a frequency proposal. A sampled endpoint crossing counts once even when two segments share it. Missing n=1, an incomplete n=1 branch or projection, no crossing, multiple crossings, a flat π segment or an ambiguous half-turn step stops proposal generation and reports the reason. Missing frequency points split the interpolation intervals; multiple roots remain ambiguous regardless of their distance from the source frequency.
+The fit uses X=A cos(n·slope+φ) and Y=A sin(n·slope+φ), with one amplitude A and phase offset φ per spectator and frequency. There is no quadrature DC offset. Count-derived sigma variances weight the fit. Other counts remain in the denominator. Zero contrast has no diagnostic phase, and unmeasured points block the corresponding slope fit.
 
-The figure also marks each n's own π crossings. The n=3/5 curves and their intersections are diagnostics for manual confirmation; n=1 remains the sole selection source. This is piecewise-linear interpolation with sampling assumptions, rather than a parametric fit with fitted uncertainty. Review consistency, statistical ratios and fidelity manually.
+Use at least two distinct gate counts whose differences have gcd=1. The default is [1,2,3]. Odd-only counts such as [1,3,5] have a π slope alias and are rejected before Run. After zero acceptance or unavailable positive variances remove points, each effective fit group must still satisfy this rule. An aliased group retains its diagnostic plots and reason, but no fit or writeback. Slopes use a representative of their unavoidable 2π period.
 
-FIT proposes two pulses at `$coupler.pulses.cz_f1` and `cz_f2`. Both copy the saved source cfg and replace only their common frequency. Signed gains, relative phase, waveforms, generator identities and timing stay unchanged. Separate `$coupler.module.cz_f1` and `cz_f2` slot rows point to these concrete keys resolved in the same capture.
+## Select a frequency and apply
 
-Inspect the plot and each preview row before Apply Selected. Pulse and slot rows apply independently, including partial selection of one line. Check the resulting complete cfg before the next run. Amplitude and local-Z calibration are separate manual steps. Manually alternate amplitude and frequency calibration, with three rounds as a starting workflow, then measure local Z after choosing both. Reset the next Form to capture accepted pulses.
+Conditional phase is the fitted per-gate slope_e−slope_g, not the total phase of a selected train. Analysis unwraps adjacent frequency points and interpolates its π modulo 2π crossings inside the scan. This assumes sufficiently fine frequency sampling. A missing slope, no crossing, multiple crossings, a flat π segment or an ambiguous adjacent half-turn prevents a proposal. An endpoint crossing counts once. The interpolation does not assign a frequency uncertainty.
 
-## Save, cancel and reload
+FIT proposes source pulses at `$coupler.pulses.cz_f1` and `cz_f2`, replacing only their common frequency. Gains, phases, waveforms and timing stay unchanged. Separate `$coupler.module.cz_f1` and `cz_f2` slot rows point to these keys in the fixed capture. Preview each row before Apply Selected. Rows apply independently, so partial selection can update one line only. Reset the next Form to capture accepted pulses.
 
-Raw complex IQ has shape `2 spectator branches × 2 projections × gate count × frequency × (rounds*reps) × full tones`. Branch indices 0 and 1 mean nominal I and Xπ. Projection indices 0 and 1 mean X90 and Y90. Shot indices are round-major. Raw keeps each shot's full ordered tones in the readout's ADC units/sample, preserving the acquired normalization.
+Amplitude and local-Z calibration remain separate steps. Recalibrate after changing shape or operating point.
 
-Cancel preserves completed whole rounds. Unacquired round slots stay complex NaN. Partial rounds or nonfinite acquired IQ are errors. Analysis retains completed projection means; phase requires both projections.
+## Save and load
 
-Native Save retains the raw axes and source cfg, including roles, target, GE centers and both full CZ pulses. Load leaves the current Form unchanged. Analysis uses the loaded cfg only; missing historical cfg stops phase analysis with a source error.
+Native Save retains sums, scan coordinates and source cfg. Load leaves the current Form unchanged. Analyze uses only saved cfg and counts. Missing historical cfg stops phase analysis. Old per-shot IQ files without sums are rejected; no compatibility conversion is provided.
 
-Validate the actual FTF control chain and gate performance with experimental data. Record bias values externally and recalibrate after changing pulse shape or operating point.
+For herald conditioning, choose the separate `two_qubit/conditional_phase_heralded` entry and read its guide.
+
+
+## Notebook
+
+Use the validated ConditionalPhaseCfg as `cfg`. Supply the notebook's existing handles and device manager. `point_view` selects the save destination.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.conditional_phase.core import ConditionalPhaseExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(ConditionalPhaseExp())
+record = exp.run(cfg)
+analysis = exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```

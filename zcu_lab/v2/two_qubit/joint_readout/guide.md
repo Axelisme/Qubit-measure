@@ -1,41 +1,63 @@
-# Four-state joint readout
+# Four-branch joint readout
 
-**Readers:** operator, agent. Acquire four nominal thermal branches through the GUI or MCP and interpret their same-shot joint readout matrix.
-
-**Last updated:** 2026-10-21
-
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
+**Readers:** operator, agent. Run `two_qubit/joint_readout` and interpret its nine-class joint distribution.
 
 ## Before run
 
-Bind `f1` and `f2` to two different fluxonium components. Bind `coupler` to their transmon and `mux` to the MuxGroup. Open and Reset capture these scalar aliases, the point parameters and the module library. An open form keeps its original bindings. Reset to capture changed aliases.
+Bind `f1` and `f2` to different fluxonium components, `coupler` to their transmon, and `mux` to the MuxGroup. Open and Reset capture aliases, role names and original full-group tone positions. Refresh preserves authored inputs. Use Reset after changing sources or aliases.
 
-The MuxGroup needs ordered `qubits` and `resonators` for every tone. Each qubit must point to its matching resonator. F1 and F2 must be distinct members. Their tone positions come from `qubits`. The form shows the fixed roles and positions for review; use this mapping to identify the qubits. The complete readout stays in its original tone order, including tones outside F1/F2.
+The MuxGroup must contain ordered qubits and matching resonators for every tone. Keep the complete readout in that order, including tones outside F1/F2. The form shows the captured mapping as readonly fields.
 
-Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different charge generators. Readout references `$mux.module.readout`, preserving the library's complete tones and scalar settings. If that slot is absent, fill the blank mux readout, including every bound tone. Confirm generator, mixer, ADC channels, integration window and trigger timing before running. Review these editable values against the authorized hardware limits.
+Provide calibrated `$f1.module.x180` and `$f2.module.x180` pulses on different charge generators. Readout starts from `$mux.module.readout` or a blank mux input when the slot is absent. Confirm generator, mixer, ADC channels, integration window, trigger timing and headroom before Run.
 
-The two GE center pairs come only from the saved mux readout tone classifiers at `roles.f1_tone` and `roles.f2_tone`. Each role requires a circle classifier; missing or linear calibration makes the cfg invalid. Radius is not required. The Form offers no center override. Run mux singleshot GE under the actual readout conditions; nonfinite or coincident centers are invalid.
+F1 and F2 each require a circle classifier **with radius** in their readout tone. Run mux singleshot GE and apply GE Post under the actual readout conditions. Missing calibration, linear or centroid3 mode, and missing radius make the cfg invalid with a GE Post prompt. Other tones need no classifier for this experiment. Changing readout settings does not invalidate old calibration automatically. Recalibrate after changing them.
 
-`reps` is the shots per round for each branch. `rounds` is the number of software rounds per branch. Initial and relaxation delays use µs. Set DC devices externally before Run. Each branch starts from the thermal ensemble.
+`reset` starts as None. Leave it None to omit reset, or supply a calibrated reset configuration to emit it at the start of every shot. Reset is separate from heralding. This version has no herald read. Set DC devices externally before Run.
 
-## Acquisition and saved data
+## Sequence and acquisition
 
-B00, B01, B10 and B11 apply I or calibrated Xπ to the thermal initial state, then acquire one mux read. F1 is the first bit. Every thermal shot is retained, including the thermal admixture in nominal B11.
+Each shot starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. One program sweeps two hardware axes, `prepared_f1` outside `prepared_f2`. Each axis uses 0 for g (I) and 1 for e (Xπ), giving row order gg, ge, eg, ee.
 
-Each completed round contributes its own raw complex IQ. IQ retains the readout's ADC units/sample and acquired normalization. Each entry is an acquired shot. The saved array has shape `4 × (rounds*reps) × full tones`. Shot order is round-major, then the program's original reps order. Every tone column at one shot index belongs to the same acquisition event. The native file also saves the complete cfg, role names, tone positions, GE centers and branch/tone/shot axes.
+The program forks directly into F1 and F2 timelines after optional reset, without an extra sync. The forked timelines inherit the reset end. Each timeline has an aligned branch that emits its Xπ only for case 1; case 0 is empty. Both Xπ pulses start together for ee. The timelines join before terminal readout, so all preparations have the same readout start time. Without reset, preparations act on the thermal ensemble.
 
-Cancel preserves completed round slots. Unacquired slots remain NaN. An acquire error reports a failed operation. The measurement plot reports acquired shots per branch.
+`reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
 
-## Load and analysis
+The processor classifies F1/F2 on each shot and sums the nine joint classes. Each role has g, e and other. Circle boundaries and equidistant points count as other. The experiment does not save per-shot IQ and does not multiply separate qubit probabilities.
 
-Load uses the saved cfg and raw data. Only that saved source supplies historical settings. A file with unavailable cfg can retain raw data; joint analysis then reports the missing source, since tone mapping and GE centers are required.
+The live plot shows terminal P(g,g) from accumulated counts for each nominal branch. Cancel preserves completed rounds. Unmeasured branches stay NaN. A failed acquisition remains an operation failure even when partial counts survive.
 
-FIT performs nearest-center G/E classification separately on F1 and F2. Equidistant shots go to G. It forms each joint outcome from the same shot, then counts 00, 01, 10 and 11. The joint counts use the paired tones directly. Every shot in a complete branch enters exactly one cell. This binary partition retains the thermal ensemble and original readout effects; leakage remains unresolved.
+## Saved data and analysis
 
-A branch needs all expected rounds before analysis uses it. Completed branches can be analysed even if later branches were cancelled. Partial raw remains saved and the corresponding matrix and counts row is marked missing. The summary separates acquired shots from analysed shots and distinguishes incomplete from unstarted branches.
+Result stores integer axes `prepared_f1=[0,1]` and `prepared_f2=[0,1]` (0=g, 1=e), and float64 `sums` with shape `(2,2,3,3)`. F1 is the outer preparation axis. The last axes are terminal F1 and F2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
 
-Rows are nominal B00/B01/B10/B11 preparations. Columns are observed joint outcomes. Each complete row sums to one. The figure explicitly states that it includes thermal population, preparation and readout effects. Interpret it as a thermal-ensemble diagnostic. Keep later populations in their original readout coordinates; matrix inversion, gate fidelity inference and leakage estimates require different calibration evidence. Low diagonal values remain valid diagnostic results. FIT provides figures and counts only.
+FIT shows a 4×9 count and row-normalized probability matrix. Columns are F1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds. Each row label shows its acquired shot count.
 
-## Continue calibration
+The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
 
-Validate actual FTF mux acquisition, charge-line configuration and same-shot tone mapping on the control chain in use. Offline synthetic data checks the acquisition and analysis flow only. Continue with the separate CZ calibrations in the [FTF bring-up guide](../guide.md).
+Old raw-IQ files lack `sums` and fail Load explicitly. Files with the old single preparation axis also fail Load. There is no conversion from saved IQ or old probabilities. Analyze uses only saved counts and needs no current library or cfg lookup.
+
+## Heralded alternative
+
+Open `two_qubit/joint_readout_heralded` for a separate experiment with its own cfg and saved Result. It adds a full mux herald read before preparation, saves all 81 herald/terminal class combinations, and aligns terminal distributions from herald g,g and e,e by actual preparation. It also adds their counts before normalizing a combined matrix. See the [heralded guide](guide_heralded.md).
+
+Herald pass fraction measures classified acceptance, not ground-state purity. Neither version claims hardware calibration from offline checks. Continue physical calibration with the [FTF bring-up guide](../guide.md).
+
+## Notebook
+
+Use a validated `JointReadoutCfg` as `cfg`. Supply the notebook's existing
+hardware handles and device manager. `point_view` is the bound PointView for the
+save destination. Run requires that environment; analyze uses the saved counts.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.joint_readout.core import JointReadoutExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(JointReadoutExp())
+record = exp.run(cfg)
+analysis = exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```
+
+Do not call core acquisition directly from the notebook. NotebookAdapter owns
+the run record and the plots for each operation.

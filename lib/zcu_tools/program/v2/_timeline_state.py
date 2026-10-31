@@ -344,6 +344,8 @@ class TimelineBook:
         self.ends: dict[str, Time] = {"default": 0.0}
         self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleVariable] = {}
+        # Ordered native axes/counts identify one index for this compile only.
+        self.sweep_indices: dict[tuple[tuple[str, int], ...], str] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath

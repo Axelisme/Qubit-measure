@@ -1,4 +1,4 @@
-"""Measure attachment for thermal four-state joint readout."""
+"""Measure attachment for nine-class, four-branch joint readout."""
 
 from collections.abc import Sequence
 from pathlib import Path
@@ -29,7 +29,7 @@ JointReadoutRun: TypeAlias = RunRecord[JointReadoutCfg, JointReadoutResult]
 def _analyze(
     req: AnalyzeRequest[JointReadoutRun, None], *, plots: Plots
 ) -> JointReadoutAnalysis:
-    """Classify complete branches using saved cfg; never current parameters."""
+    """Normalize saved joint class counts; never reclassify IQ."""
     return JointReadoutExp().analyze(req.run_result, None, plots=plots)
 
 

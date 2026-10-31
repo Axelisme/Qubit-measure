@@ -13,21 +13,20 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.plotting.plots import Plots
 
 from .._rabi_analysis import RabiAnalysis
-from .._rabi_scan import RabiScanResult
-from .core import ChevronCfg, ChevronExp
+from .core import ChevronCfg, ChevronExp, ChevronResult
 from .form import make_form
 
-ChevronRun: TypeAlias = RunRecord[ChevronCfg, RabiScanResult]
+ChevronRun: TypeAlias = RunRecord[ChevronCfg, ChevronResult]
 
 
 def _analyze(req: AnalyzeRequest[ChevronRun, None], *, plots: Plots) -> RabiAnalysis:
-    """Analyze only saved source cfg/raw, never the current Form or library."""
+    """Analyze saved source cfg/counts, never the current Form or library."""
     return ChevronExp().analyze(req.run_result, None, plots=plots)
 
 
 def run(
     cfg: ChevronCfg, *, context: RunContext
-) -> RunRecord[ChevronCfg, RabiScanResult]:
+) -> RunRecord[ChevronCfg, ChevronResult]:
     """Run the experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=ChevronExp().run(cfg, context=context))
 

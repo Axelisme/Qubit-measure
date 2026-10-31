@@ -99,14 +99,15 @@ def test_module_branch_selects_ordered_cases_without_padding_and_reuses_declarat
     prog = _program([branch, short, tail], body)
     result = shots(prog)
     # 25/50 generator clocks are exactly 28/56 tProc cycles. Each selected
-    # case closes at 84/0/28; two emissions advance by 168/0/56, with no padding.
+    # case ends at 84/0/28. Each emission accounts the maximum 84 without
+    # moving reference; the second starts at 84 and the tail at 168 on all points.
     assert [waves(s) for s in result] == [
         [0, 28, 84, 112, 168],
-        [0],
-        [0, 28, 56],
+        [168],
+        [0, 84, 168],
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [196, 28, 84] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [196, 28, 84] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [196] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [196] * 6
     prog.compile()
     assert shots(prog) == result
 
@@ -412,11 +413,10 @@ def test_module_join_preserves_annotated_native_pulse_effects(exchange):
     choice = Branch("scan", _pulse("a", 0), None, None)
     joined = Join(choice, native) if exchange else Join(native, choice)
     prog = _program([template, joined], lambda prog: prog.emit(joined))
-    # Native output remains at the parallel origin, even when the advancing
-    # case sequence must move after it. Like Pulse, the raw native operation
-    # does not advance a Module timeline; only the selected case closes it.
+    # Native output stays at the parallel origin. It does not advance a Module
+    # timeline; the branch accounts max(28, 0, 0)=28 on every selector point.
     assert [waves(s) for s in shots(prog)] == [[0, 0], [0], [0]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [28, 0, 0] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [28] * 6
 
 
 @pytest.mark.parametrize("annotation", ["LOOP_START", "BRANCH_START", "CUSTOM"])
@@ -462,9 +462,10 @@ def test_module_join_counts_whole_advancing_sequences_without_splitting_them(nes
     advancing = Join(choice) if nested else choice
     joined = Join([advancing, choice], _pulse("b", 1))
     result = shots(_program([joined], lambda prog: prog.emit(joined)))
-    assert [waves(s) for s in result] == [[0, 0, 28], [0], [0, 0, 56]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [56, 28, 112] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [56, 28, 112] * 2
+    # Each branch emission accounts 56; two sequential emissions end at 112.
+    assert [waves(s) for s in result] == [[0, 0, 56], [0], [0, 0, 56]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [112] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [112] * 6
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -523,7 +524,7 @@ def test_module_join_exchange_checks_physical_register_dependencies(access, alia
     if access == "RR":
         result = shots(_program([joined], body, initialize=initialize))
         assert [waves(s) for s in result] == [[0, 0], [0], [0, 0]] * 2
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [28, 28, 56] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [56] * 6
     else:
         with pytest.raises(
             ValueError, match="parallel exchange.*register/word conflict.*r0"
@@ -583,11 +584,14 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
     def body(prog):
         prog.fork("default", into="waiting")
         prog.delay_timeline(100 / 430.08, timeline="waiting")
-        prog.emit(choice)
+        # A register Repeat leaves its unconsumed external end wait-only.
+        prog.write_reg("duration", 1)
+        with prog.repeat("runtime", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
         prog.emit(joined, timeline="waiting")
 
     with pytest.raises(ValueError, match="timeline can only wait"):
-        _program([choice, joined], body)
+        _program([choice, joined], body, initialize=_declare_registers("duration"))
 
 
 @pytest.mark.parametrize("bad_case", [0, 1, 2])
@@ -745,8 +749,8 @@ def test_module_join_reference_advancing_child_preserves_parallel_origin():
     other = _pulse("b", 1)
     joined = Join(choice, other)
     result = shots(_program([joined], lambda prog: prog.emit(joined)))
-    # A closes its selected case at28/0/56. B belongs to another parallel
-    # branch and must still start at0; the Join ends at28/28/56, not56/28/84.
+    # A accounts max(28,0,56)=56 without moving reference. B belongs to another
+    # parallel branch and still starts at 0. The Join ends at max(56,28)=56.
     assert [waves(s) for s in result] == [[0, 0], [0], [0, 0]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [28, 28, 56] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [28, 28, 56] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [56] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [56] * 6

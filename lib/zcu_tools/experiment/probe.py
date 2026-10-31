@@ -259,7 +259,8 @@ def _export(plots: Plots, stage: str, report: ProbeReport, directory: Path) -> N
     plots.finish()
     for name in plots:
         path = directory / f"{stage}-{quote(name, safe='')}.png"
-        plots.save(name, path)
+        width, height = plots[name].get_size_inches()
+        plots.save(name, path, figsize=(float(width), float(height)))
         report.png_paths.append(path)
 
 
@@ -280,7 +281,8 @@ def probe(
     Create output_dir and overwrite data.h5 and same-named PNGs on rerun. Figures
     use Agg canvases and no QApplication. Apply the shared Matplotlib style to
     process-wide rcParams before creating Plots; native arguments and style
-    contexts inside the experiment can override it. PNG names contain live/analysis
+    contexts inside the experiment can override it. Export each figure at its
+    current size in inches at 100 dpi. PNG names contain live/analysis
     and URL-escaped figure names. Return shapes, compare_roundtrip's Result comparison,
     analysis repr and timings. Stage failures are logged with traceback and
     returned as failed_stage/exception without replacing the original exception.

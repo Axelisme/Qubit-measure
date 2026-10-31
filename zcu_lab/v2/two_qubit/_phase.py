@@ -1,11 +1,12 @@
 """Logical phase from independently acquired X90/Y90 projection shots."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .joint_readout.core import GECenters
+from ._sums import marginal_probabilities
 
 
 @dataclass(frozen=True)
@@ -28,37 +29,59 @@ def wrap_phase(degrees: float) -> float:
     return float((degrees + 180) % 360 - 180)
 
 
-def quadrature_phase(
-    x_iq: NDArray[np.complex128],
-    y_iq: NDArray[np.complex128],
-    centers: GECenters,
-) -> QuadraturePhase:
-    """Return ensemble phase accrued after a calibrated target X90 preparation.
+def count_phase(x: float, y: float) -> QuadraturePhase:
+    """Return phase atan2(y,x) in degrees from classified sigma quadratures.
 
-    x_iq/y_iq are nonempty one-dimensional independent projection shot arrays,
-    not same-shot X/Y observations. Both use the saved source's GE centers and
-    the same target tone. X projection is another X90 at preparation phase;
-    Y projection is X90 with +90 degree pulse phase. For R_axis(+pi/2),
-    q_X=1-2*P0_X=2*P1_X-1=contrast*cos(theta), and
-    q_Y=1-2*P0_Y=2*P1_Y-1=contrast*sin(theta), where theta is
-    logical Bloch Z accrual relative to the preparation frame. GE projection is
-    linear along e-g, not nearest-center classification, clipping or inversion.
-    Arrays may have different shot counts. Invalid shape/nonfinite IQ raises
-    ValueError; GECenters owns finite/distinct center validation. Exactly zero
-    contrast returns phase=None with a reason. No scientific contrast gate or
-    thermal-state purification is applied; operators must inspect weak contrast.
+    x/y are (N_e-N_g)/N_total from independent target projections, including
+    other in each denominator. Empty or unmeasured projections have NaN sigma
+    and yield a reason. Zero contrast is undefined; weak contrast is not gated.
     """
-    values: list[float] = []
-    delta = centers.e - centers.g
-    for iq in (x_iq, y_iq):
-        if iq.ndim != 1 or not iq.size or not np.all(np.isfinite(iq)):
-            raise ValueError("Projection IQ must be a nonempty finite shot vector")
-        population = ((iq.mean() - centers.g) / delta).real
-        values.append(float(2 * population - 1))
-    x, y = values
+    if not np.all(np.isfinite([x, y])):
+        return QuadraturePhase(np.nan, None, "Missing or empty X/Y projection counts")
     contrast = float(np.hypot(x, y))
-    if not np.isfinite(contrast):
-        raise ValueError("GE-normalized quadratures must be finite")
     if contrast == 0:
         return QuadraturePhase(contrast, None, "Zero quadrature contrast")
     return QuadraturePhase(contrast, wrap_phase(float(np.degrees(np.arctan2(y, x)))))
+
+
+def sigma_variance(
+    counts: NDArray[np.float64], target: Literal["f1", "f2"]
+) -> NDArray[np.float64]:
+    """Return count-derived variance of sigma for terminal (...,3,3) counts.
+
+    g/e/other form one multinomial: Var(sigma)=(P_e+P_g-sigma²)/N.
+    This includes the negative covariance of the two binomial marginals.
+    Zero totals and unmeasured counts yield NaN without divide warnings.
+    """
+    marginal = marginal_probabilities(counts, target)
+    total = counts.sum(axis=(-2, -1))
+    value = marginal[..., 1] - marginal[..., 0]
+    return np.divide(
+        np.maximum(0, marginal[..., 0] + marginal[..., 1] - value**2),
+        total,
+        out=np.full_like(total, np.nan),
+        where=total > 0,
+    )
+
+
+def phase_variance(
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
+    var_x: NDArray[np.float64],
+    var_y: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Propagate independent X/Y sigma variances through atan2, in degree².
+
+    Arrays have matching point axes; zero contrast yields NaN. Other remains
+    in each sigma denominator. No variance floor or purity correction is applied.
+    """
+    radius_squared = x**2 + y**2
+    return (
+        np.divide(
+            y**2 * var_x + x**2 * var_y,
+            radius_squared**2,
+            out=np.full_like(radius_squared, np.nan),
+            where=radius_squared > 0,
+        )
+        * (180 / np.pi) ** 2
+    )

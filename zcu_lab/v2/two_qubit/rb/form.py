@@ -1,5 +1,7 @@
 """Fixed-capture inputs for paired two-qubit RB."""
 
+from typing import TypeVar
+
 from zcu_tools.cfg_model import Expr, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -8,12 +10,14 @@ from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 from .._measure import captured_roles
 from .core import RBCfg
 
+T_Cfg = TypeVar("T_Cfg", bound=RBCfg)
 
-def make_form(ctx: FormContext) -> Form[RBCfg]:
+
+def rb_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     """Capture role identities, X90/CZ/readout slots and required named phase pair.
 
     Missing pulse/readout slots or correction fields stay Invalid, never zero
-    or simulator defaults. Circle centers come only from the saved role-tone readout classifiers.
+    or simulator defaults. Circle centers and radii come from the saved role-tone readout classifiers.
     All pulse and correction initial values remain operator-overridable; Run
     uses the accepted fixed capture, not current aliases or library.
     """
@@ -28,9 +32,10 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
                 names[role] = captured.value
     readout = Slot("$mux.module.readout")
     return Form(
-        RBCfg,
+        cfg_type,
         field_order=(
             "roles",
+            "reset",
             "x90_f1",
             "x90_f2",
             "readout",
@@ -47,6 +52,7 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             "reps": 1000,
             "rounds": 10,
             "roles": captured_roles(ctx),
+            "reset": None,
             "x90_f1": Slot("$f1.module.x90", copy=True),
             "x90_f2": Slot("$f2.module.x90", copy=True),
             "readout": readout,
@@ -61,3 +67,8 @@ def make_form(ctx: FormContext) -> Form[RBCfg]:
             },
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
+
+
+def make_form(ctx: FormContext) -> Form[RBCfg]:
+    """Capture paired RB inputs with optional reset initially disabled."""
+    return rb_form(ctx, RBCfg)
