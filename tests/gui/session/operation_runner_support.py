@@ -6,11 +6,10 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.event_bus import BaseEventBus, OriginKind
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import OperationConflictError
+from zcu_tools.gui.session.ports import BackgroundError, OperationConflictError
 
 
 class FakeGate:

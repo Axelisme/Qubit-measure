@@ -7,7 +7,6 @@ from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
 from qick import QickConfig
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -27,6 +26,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, FormWritePath
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import NonPresentingHost, PlotHost

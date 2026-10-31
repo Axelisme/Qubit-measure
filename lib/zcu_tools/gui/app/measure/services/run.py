@@ -33,7 +33,6 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
     ExclusionRequest,
@@ -42,6 +41,7 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.parameter_capture import capture_parameters
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, StorageBinding
 

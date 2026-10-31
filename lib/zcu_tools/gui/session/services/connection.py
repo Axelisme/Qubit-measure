@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import dataclasses
 import logging
 import time
@@ -16,7 +14,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
-from zcu_tools.gui.session.ports import OperationKind
+from zcu_tools.gui.session.ports import BackgroundError, OperationKind
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 if TYPE_CHECKING:

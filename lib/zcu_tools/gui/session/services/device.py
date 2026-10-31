@@ -6,8 +6,6 @@
 # callbacks scatters that transition; short helpers/projections add no new owner.
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import logging
 import threading
 from collections.abc import Generator
@@ -50,6 +48,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
+    BackgroundError,
     DeviceMemoryInfo,
     DeviceRegistryPort,
     DriverFactoryPort,

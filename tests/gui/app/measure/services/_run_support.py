@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
 from zcu_tools.experiment.records import RunRecord
@@ -32,6 +31,7 @@ from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import (
     OperationRunner,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg

@@ -6,10 +6,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Generic, TypeVar
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import ParamSpec
-from zcu_tools.gui.session.ports import OwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundError, OwnerScheduler
 
 from .session import Session
 

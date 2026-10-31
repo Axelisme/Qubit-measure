@@ -11,7 +11,6 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from qtpy import QtCore, QtWidgets
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.analysis.fluxdep.cross_selection import (
     CrossSelectionResult,
     CrossSelectionState,
@@ -28,6 +27,7 @@ from zcu_tools.analysis.fluxdep.stroke import (
 from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.cross_selection import CrossSelectionPlot
 

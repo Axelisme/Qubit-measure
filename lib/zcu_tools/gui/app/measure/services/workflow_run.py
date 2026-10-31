@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -39,6 +37,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
 
 from .workflow_tunables import TunablesHost

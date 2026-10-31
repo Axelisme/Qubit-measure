@@ -11,7 +11,6 @@ from matplotlib.backend_bases import MouseButton, MouseEvent
 from numpy.typing import NDArray
 from qtpy import QtCore, QtWidgets
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.analysis.fluxdep.stroke import (
     BrushMode,
     BrushPoint,
@@ -29,6 +28,7 @@ from zcu_tools.analysis.fluxdep.twotone import (
 from zcu_tools.gui.app.fluxdep.interactive import TwoTonePickContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.twotone import TwoTonePickPlot
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -23,6 +21,7 @@ from zcu_tools.gui.interactive.plugin import Action, Command, PluginDefinition
 from zcu_tools.gui.interactive.session import Session
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, validate_params
+from zcu_tools.gui.session.ports import BackgroundError
 
 R = TypeVar("R")
 logger = logging.getLogger(__name__)

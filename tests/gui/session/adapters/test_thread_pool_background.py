@@ -5,11 +5,11 @@ import weakref
 from collections.abc import Callable
 
 import pytest
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 from tests.gui._lifecycle_waits import manual_until as _pump_until
 from tests.gui._lifecycle_waits import waiting_call

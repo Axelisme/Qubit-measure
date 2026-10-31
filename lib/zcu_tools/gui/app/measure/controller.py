@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -49,6 +47,7 @@ from zcu_tools.gui.session.library_entry import (
     new_library_entry,
     open_library_entry,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,

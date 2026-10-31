@@ -20,8 +20,6 @@ distinct gates (run_result vs analyze_result) live in the subclasses, not here.
 
 from __future__ import annotations
 
-from zcu_tools.gui.session.ports import BackgroundError
-
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -44,6 +42,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 logger = logging.getLogger(__name__)
 

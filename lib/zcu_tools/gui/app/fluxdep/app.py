@@ -12,7 +12,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.lab import FluxDepGuiLab
@@ -21,6 +20,7 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.resources.entry.registry import component_registry
 
 if TYPE_CHECKING:

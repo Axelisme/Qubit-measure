@@ -10,7 +10,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError, OwnerScheduler
+from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
+    BackgroundError,
+    OwnerScheduler,
+)
 
 logger = logging.getLogger(__name__)
 

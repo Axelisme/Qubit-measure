@@ -35,7 +35,12 @@ from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
-from zcu_tools.gui.session.ports import BackgroundError, BackgroundExecutor, ExclusionGate, ProgressHub
+from zcu_tools.gui.session.ports import (
+    BackgroundError,
+    BackgroundExecutor,
+    ExclusionGate,
+    ProgressHub,
+)
 
 logger = logging.getLogger(__name__)
 

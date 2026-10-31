@@ -15,10 +15,9 @@ import sys
 import threading
 
 import pytest
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError
 from zcu_tools.gui.session.scopes import progress_ambient
 
 from tests.gui._qt_waits import qt_until

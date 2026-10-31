@@ -3,11 +3,11 @@
 from collections.abc import Callable
 from typing import Protocol
 
-from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.plotting.plots import Plots
 
 from .types import AnalyzeRequest, PostAnalyzeRequest
