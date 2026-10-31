@@ -219,14 +219,15 @@ def test_cancelled_run_without_data_keeps_no_previous_source(
     state.set_context(replace(state.session_env, parameters=q2))
     inputs = make_inputs(state, tab_id, adapter)
     service, _gate, background, _handles = make_run_service(state)
-    service.start_run(inputs, plots=make_plots())
+    token = service.start_run(inputs, plots=make_plots())
     service.cancel_run()
     assert background.last_on_error is not None
     background.last_on_error(RuntimeError("interrupted"))
 
     assert tab.run.result is None
     assert tab.run.parameters is None
-    assert tab.run.source_operation_id is None
+    assert tab.run.source_operation_id == token
+    assert tab.run.stop_requested
     assert not state.is_tab_running(tab_id)
 
 
