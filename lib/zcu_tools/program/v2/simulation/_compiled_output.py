@@ -60,6 +60,9 @@ class Outputs:
         self.reads: dict[int, list[NDArray[np.float64]]] = {
             ch: [] for ch in prog.ro_chs
         }
+        # Retain absolute trigger ticks so config admission uses the same
+        # ticks-to-us conversion as WPORT, without subtracting/readding origin.
+        self.trigger_ticks: dict[int, list[IntArray]] = {ch: [] for ch in prog.ro_chs}
         self.duration = np.zeros(size, dtype=np.float64)
         self.visited = np.zeros(size, dtype=np.bool_)
         self.points = np.arange(size, dtype=np.int64)
@@ -341,11 +344,10 @@ class Outputs:
         port, data = machine.value(inst.dst), machine.value(inst.data)
         if np.any(port != port[0]):
             raise ValueError("lane-dependent trigger port")
-        start = (
-            machine.ref
-            - self.origin
-            + machine.value(inst.time if inst.time is not None else Register("s14"))
-        ) / float(self.prog.tproccfg["f_time"])
+        timestamp = machine.ref + machine.value(
+            inst.time if inst.time is not None else Register("s14")
+        )
+        start = (timestamp - self.origin) / float(self.prog.tproccfg["f_time"])
         for ch in self.prog.ro_chs:
             cfg = self.prog.soccfg["readouts"][ch]
             active = (data & (1 << int(cfg["trigger_bit"]))) != 0
@@ -360,6 +362,8 @@ class Outputs:
                 raise ValueError("lane-dependent trigger layout")
             while len(self.reads[ch]) <= index:
                 self.reads[ch].append(np.zeros((self.size, 3), dtype=np.float64))
+                self.trigger_ticks[ch].append(np.zeros(self.size, dtype=np.int64))
+            self.trigger_ticks[ch][index][self.points[active]] = timestamp[active]
             read = self.reads[ch][index]
             self._put(read[:, 0], start, machine)
             if cfg.get("tproc_ctrl") is None:
@@ -404,7 +408,7 @@ class Outputs:
                 self.prog.soccfg["readouts"][ch]["f_output"]
             )
             for index, read in enumerate(reads):
-                start = read[self.points, 0] + self.origin / float(
+                start = self.trigger_ticks[ch][index][self.points] / float(
                     self.prog.tproccfg["f_time"]
                 )
                 frequency = np.full(machine.size, np.nan)

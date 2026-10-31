@@ -103,6 +103,33 @@ def test_config_at_window_boundary_uses_closed_start_and_open_end(
     assert read.phase_deg == ((90,) if update_time == 0 else (0,))
 
 
+@pytest.mark.parametrize("config_lag_ticks", [0, 1])
+def test_runtime_config_start_uses_absolute_ticks_after_nonzero_origin(
+    config_lag_ticks,
+):
+    def body(p):
+        clock = p.tproccfg["f_time"]
+        p.delay(332 / clock)
+        p.send_readoutconfig(0, "ro", t=config_lag_ticks / clock)
+        p.pulse(0, "p", t=0)
+        p.trigger([0], t=0)
+
+    prog, env = program(
+        body, reps=1, initial_delay=1.0, config_time=None, trigger_time=None
+    )
+    try:
+        if config_lag_ticks:
+            with pytest.raises(ValueError, match=r"ADC 0.*no.*config.*start"):
+                request(prog, env)
+            assert not env.soc.binding.rounds
+        else:
+            read = request(prog, env).materialize_point(0).readouts[0]
+            assert read.trigger_us == pytest.approx((332 / 430.08,))
+            assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
+    finally:
+        env.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("config_time", [None, 1.0])
 def test_runtime_read_without_effective_config_at_start_is_rejected(config_time):
     prog, env = program(lambda p: p.pulse(0, "p", t=0), reps=1, config_time=config_time)
