@@ -264,7 +264,7 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
             hostname="historical-host",
         ),
     )
-    historical = replace(result, metadata=metadata)
+    historical = replace(result, metadata=metadata.model_dump(mode="json"))
     commit_run(
         state, "t1", RunPaneState(result=historical, source_path="/tmp/loaded.hdf5")
     )

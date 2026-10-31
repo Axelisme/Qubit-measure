@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
 from zcu_tools.experiment.native_persistence import metadata_content_from_container
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
@@ -103,9 +104,9 @@ class LoadService:
                 )
             restored = tab.adapter.restore(stored)
             metadata = restored.record.metadata
-            if metadata is None:
+            if not metadata:
                 raise ValueError("restored record has no metadata")
-            snapshot = metadata.parameter_snapshot
+            snapshot = RunMetadataContent(metadata).parameter_snapshot
             parameters = (
                 ParameterContext.empty()
                 if snapshot is None

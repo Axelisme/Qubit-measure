@@ -283,7 +283,7 @@ def host(tmp_path: Path, qapp, request) -> Iterator[Host]:
         tab,
         RunPaneState(
             result=RunRecord(
-                cfg, SavingCore().run(cfg, context=None), metadata=metadata
+                cfg, SavingCore().run(cfg, context=None), metadata=metadata.model_dump(mode="json")
             ),
             storage=captured.storage,
             parameters=captured,

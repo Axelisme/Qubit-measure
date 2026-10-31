@@ -110,10 +110,7 @@ def save_artifacts(
     Return every output attempt, even when some fail. Ledger append errors
     propagate after the writes, without deleting files or returning a receipt.
     """
-    metadata = record.metadata
-    if metadata is None:
-        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
-    metadata = metadata.project()
+    metadata = RunMetadata.model_validate(record.metadata)
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()
@@ -122,7 +119,7 @@ def save_artifacts(
         for member in artifact.members:
             outputs = layout.outputs(member.key)
             if isinstance(member, DataItem):
-                attempts = _save_data(member, outputs, metadata)
+                attempts = _save_data(member, outputs, metadata, record.metadata)
             else:
                 attempts = _save_file(member, outputs, figure_encoder)
             results.extend(attempts)
@@ -184,7 +181,10 @@ def _failed(key: ArtifactKey, output: Output, error: Exception) -> OutputResult:
 
 
 def _save_data(
-    member: DataItem, outputs: tuple[Output, ...], metadata: RunMetadata
+    member: DataItem,
+    outputs: tuple[Output, ...],
+    metadata: RunMetadata,
+    document: JsonObject,
 ) -> tuple[OutputResult, ...]:
     if isinstance(member.data, DataPreparationFailure):
         return tuple(
@@ -210,7 +210,7 @@ def _save_data(
                     grouped_layout=member.data.labber_layout,
                 )
             else:
-                save(output.path, member.data.to_container(metadata), replace=True)
+                save(output.path, member.data.to_container(document), replace=True)
         except Exception as error:
             # Isolate this destination; other formats still receive prepared data.
             logging.exception("Failed saving %s", output.path)

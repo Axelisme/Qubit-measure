@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import Container, load
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
@@ -81,7 +82,7 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(source, metadata=session.metadata),
+            result=replace(source, metadata=session.metadata.model_dump(mode="json")),
             storage=session.state.get_tab("tab").run.storage,
             parameters=session.state.get_tab("tab").run.parameters,
         ),
@@ -159,7 +160,7 @@ def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
             session.state,
             "tab",
             RunPaneState(
-                result=replace(source, metadata=metadata),
+                result=replace(source, metadata=metadata.model_dump(mode="json")),
                 storage=None
                 if tab.run.parameters is None
                 else tab.run.parameters.storage,
@@ -587,7 +588,7 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
         "tab",
         RunPaneState(
             result=replace(
-                require_record(session.state.get_tab("tab").run), metadata=None
+                require_record(session.state.get_tab("tab").run), metadata={}
             )
         ),
         plan_layout=session.save_service.plan_layout,
@@ -614,7 +615,7 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
         session.state,
         "tab",
         RunPaneState(
-            result=RunRecord(cfg=None, result=object(), metadata=session.metadata),
+            result=RunRecord(cfg=None, result=object(), metadata=session.metadata.model_dump(mode="json")),
             storage=session.state.get_tab("tab").run.storage,
             parameters=session.state.get_tab("tab").run.parameters,
         ),
@@ -668,7 +669,7 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == first.outputs[0].output.path
     assert second.outputs[1].output.path != first.outputs[1].output.path
-    metadata = require_record(session.state.get_tab("tab").run).metadata
+    metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
     assert metadata is not None
     assert len(session.entry.ledger.events()) == 2
 
@@ -804,7 +805,7 @@ def test_missing_evidence_rejects_comment_before_operation(
         "tab",
         RunPaneState(
             result=replace(
-                require_record(session.state.get_tab("tab").run), metadata=None
+                require_record(session.state.get_tab("tab").run), metadata={}
             )
         ),
     )
@@ -873,7 +874,7 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert [output.status for output in data.members[0].outputs] == ["failed", "failed"]
     assert data.members[0].outputs[1].path == second.outputs[1].output.path
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
-    metadata = require_record(session.state.get_tab("tab").run).metadata
+    metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
     assert metadata is not None
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     commit_run(session.state, "tab", RunPaneState())

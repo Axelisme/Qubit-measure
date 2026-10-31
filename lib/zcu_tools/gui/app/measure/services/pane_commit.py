@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.experiment.metadata import has_native_metadata
 from zcu_tools.experiment.artifacts import ArtifactRef
 from zcu_tools.experiment.metadata import MetadataFieldError
 from zcu_tools.resources.entry import ArtifactKey, SaveLayout
@@ -174,7 +175,7 @@ def _save_layout(
 ) -> SaveLayout | None:
     """Use Save's planner when both metadata and a planner are available."""
     record = run.result
-    if record is None or record.metadata is None or plan_layout is None:
+    if record is None or not has_native_metadata(record.metadata) or plan_layout is None:
         return None
     try:
         return plan_layout(tab, record, datetime.now().astimezone()).layout

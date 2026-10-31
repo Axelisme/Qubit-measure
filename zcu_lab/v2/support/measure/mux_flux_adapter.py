@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from pydantic import BaseModel
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fluxdep.line_state import FluxPickInputs, FluxPickState
 from zcu_tools.cfg_model import validate_device_name
 from zcu_tools.core.element import ElementIdentity
@@ -180,8 +181,8 @@ def _initial_lines[C: MuxFluxCfg](
     validate_device_name(device)
     if component.flux.offset is None or device not in component.flux.period:
         return None, None
-    metadata = req.run_result.metadata
-    snapshot = None if metadata is None else metadata.device_snapshot
+    metadata = RunMetadataContent(req.run_result.metadata)
+    snapshot = metadata.device_snapshot
     values = snapshot_numeric_values(snapshot, component.flux.period)
     points = device_flux_points(component.flux, device, values)
     return points.half, points.integer

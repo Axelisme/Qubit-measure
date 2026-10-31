@@ -434,7 +434,7 @@ def test_accepted_retains_run_identity_with_or_without_save(
         )
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "later-run"}),
+            metadata=native.metadata.model_copy(update={"run_id": "later-run"}).model_dump(mode="json"),
         )
         draft.apply()
         event = native.entry.ledger.events()[-1]
@@ -463,14 +463,14 @@ def test_analysis_draft_uses_start_run_identity(
                 native.state,
                 "tab",
                 RunPaneState(
-                    result=replace(require_record(tab.run), metadata=native.metadata),
+                    result=replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json")),
                     source_path="historical.h5",
                     parameters=tab.run.parameters,
                     storage=tab.run.storage,
                 ),
             )
         elif source in ("without_metadata", "context_free"):
-            tab.run.result = replace(require_record(tab.run), metadata=None)
+            tab.run.result = replace(require_record(tab.run), metadata={})
             if source == "context_free":
                 tab.run.parameters = None
         captured = tab.run.parameters
@@ -535,7 +535,7 @@ def test_analysis_draft_uses_start_run_identity(
             service.start_analyze("tab", object(), plots=plots)
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "later-run"}),
+            metadata=native.metadata.model_copy(update={"run_id": "later-run"}).model_dump(mode="json"),
         )
         if interactive:
             assert service.finish_plugin("tab")
@@ -575,14 +575,14 @@ def test_post_analysis_draft_retains_primary_identity(
                 native.state,
                 "tab",
                 RunPaneState(
-                    result=replace(require_record(tab.run), metadata=native.metadata),
+                    result=replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json")),
                     source_path="historical.h5",
                     parameters=original_capture,
                     storage=tab.run.storage,
                 ),
             )
         elif source in ("without_metadata", "context_free"):
-            tab.run.result = replace(require_record(tab.run), metadata=None)
+            tab.run.result = replace(require_record(tab.run), metadata={})
             if source == "context_free":
                 tab.run.parameters = None
         captured = tab.run.parameters
@@ -612,7 +612,7 @@ def test_post_analysis_draft_retains_primary_identity(
         )
         if save_before_accept:
             # Save is independent of whether Primary has a native identity.
-            tab.run.result = replace(require_record(tab.run), metadata=native.metadata)
+            tab.run.result = replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json"))
             native.save()
         seen_requests: list[
             PostAnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneSummary, object]
@@ -669,7 +669,7 @@ def test_post_analysis_draft_retains_primary_identity(
             require_record(tab.run),
             metadata=native.metadata.model_copy(
                 update={"run_id": "not-primary-source"}
-            ),
+            ).model_dump(mode="json"),
         )
         native.entry.new_point("later-point")
         control.use_point(PointUseRequest("later-point"))
@@ -680,7 +680,7 @@ def test_post_analysis_draft_retains_primary_identity(
         tab.analysis.writeback_draft = None
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "terminal-live-run"}),
+            metadata=native.metadata.model_copy(update={"run_id": "terminal-live-run"}).model_dump(mode="json"),
         )
         tab.run.parameters = current
         assert native.background.quiesce()

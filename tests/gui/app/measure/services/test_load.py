@@ -96,7 +96,7 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     )
     state.set_context(replace(state.session_env, parameters=captured))
     loaded: RunRecord[ConfigBase, object] = RunRecord(
-        cfg=None, result=object(), metadata=historical_metadata()
+        cfg=None, result=object(), metadata=historical_metadata().model_dump(mode="json")
     )
     metadata = historical_metadata()
 
@@ -137,7 +137,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     loaded = RunRecord(
         cfg=None if missing_cfg else ConfigBase(),
         result=object(),
-        metadata=historical_metadata(),
+        metadata=historical_metadata().model_dump(mode="json"),
     )
     metadata = historical_metadata()
     issue = "cfg unavailable" if missing_cfg else None

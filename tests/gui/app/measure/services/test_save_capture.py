@@ -213,7 +213,7 @@ def test_tab_without_context_saves_recorded_names_not_later_selection(
             RunPaneState(
                 result=replace(
                     require_record(native.state.get_tab("tab").run),
-                    metadata=native.metadata,
+                    metadata=native.metadata.model_dump(mode="json"),
                 )
             ),
         )

@@ -110,7 +110,7 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     report = save_artifacts(
         artifacts(),
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin=origin,
     )
@@ -187,7 +187,7 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="notebook",
         )
@@ -246,7 +246,7 @@ def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> 
     report = save_artifacts(
         selected,
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin="notebook",
     )
@@ -284,7 +284,7 @@ def test_nonfinite_analysis_isolates_the_member_and_records_other_outputs(
     report = save_artifacts(
         selected,
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin="notebook",
     )
@@ -325,7 +325,7 @@ def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) 
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,
@@ -360,7 +360,7 @@ def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> 
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.state import RunPaneState
@@ -25,4 +26,4 @@ def require_target(parameters: ParameterContext) -> ContextTarget:
 def require_metadata(pane: RunPaneState) -> RunMetadata:
     metadata = require_record(pane).metadata
     assert metadata is not None, "Run has no metadata"
-    return metadata.project()
+    return RunMetadata.model_validate(metadata)

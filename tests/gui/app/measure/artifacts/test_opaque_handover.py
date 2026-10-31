@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
 from zcu_tools.experiment import AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.context import RunContext
@@ -129,7 +130,7 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
         "The record envelope must preserve the adapter's opaque Result"
     )
     handle = tab.run.result
-    metadata = require_record(tab.run).metadata
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     storage = tab.run.storage
     assert metadata is not None and storage is not None
     acquired = storage.ledger.events()

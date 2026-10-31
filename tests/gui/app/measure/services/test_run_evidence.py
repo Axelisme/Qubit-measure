@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
@@ -123,7 +124,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     pane = state.get_tab(tab_id).run
     assert require_record(pane).result is record.result
     assert pane.source_operation_id == token
-    metadata = require_record(pane).metadata
+    metadata = RunMetadataContent(require_record(pane).metadata)
     assert metadata is not None
     assert metadata.snapshot == snapshot
     assert metadata.experiment == "test/native"
@@ -237,7 +238,7 @@ def test_stop_request_without_native_metadata_resets_before_next_run(
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     pane = state.get_tab(tab_id).run
-    assert require_record(pane).metadata is None
+    assert require_record(pane).metadata == {}
     assert pane.stop_requested is frontend_request
     assert (outcome := handles.poll(token)) is not None and outcome.status == "finished"
     adapter.run.side_effect = None
@@ -299,7 +300,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     service, _gate, background, _handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
     background.run_work()
-    assert require_record(state.get_tab(tab_id).run).metadata is None
+    assert require_record(state.get_tab(tab_id).run).metadata == {}
     capture.assert_not_called()
 
 
@@ -345,7 +346,7 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     record = require_record(state.get_tab(tab_id).run)
-    metadata = require_record(state.get_tab(tab_id).run).metadata
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert isinstance(record, RunRecord)
     assert isinstance(record.cfg, SavingCfg)
     assert record.cfg == cfg
@@ -380,7 +381,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     assert service.cancel_run()
     assert background.last_on_done is not None
     background.last_on_done(acquired)
-    metadata = require_record(state.get_tab(tab_id).run).metadata
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert metadata is not None and metadata.completion == "complete"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "cancelled"
@@ -416,7 +417,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     background.run_work()
     assert flux.events == ["read", "write"]
     assert unused.events == ["read"]
-    metadata = require_record(state.get_tab(tab_id).run).metadata
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert metadata is not None
     assert metadata.device_snapshot is not None
     assert metadata.device_snapshot["flux"]["value"] == 0.25
@@ -486,7 +487,7 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         assert isinstance(result, RunRecord)
         assert result.cfg is not None
         assert result.cfg.dev == {"flux_dev": "yoko1"}
-        metadata = require_record(state.get_tab("tab").run).metadata
+        metadata = RunMetadataContent(require_record(state.get_tab("tab").run).metadata)
         assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
         report = session.save()
         path = next(

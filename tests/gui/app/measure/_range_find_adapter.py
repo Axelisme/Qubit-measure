@@ -145,7 +145,7 @@ def _spectrum_record(
         ),
     )
     return RunRecord(
-        SpectrumCfg(), spectrum() if data is None else data, metadata=metadata
+        SpectrumCfg(), spectrum() if data is None else data, metadata=metadata.model_dump(mode="json")
     )
 
 

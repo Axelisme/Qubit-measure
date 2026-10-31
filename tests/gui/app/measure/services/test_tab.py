@@ -397,7 +397,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             source_path="existing.hdf5",
             parameters=run.parameters,
             storage=run.storage,
@@ -460,7 +460,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             storage=None if run.parameters is None else run.parameters.storage,
             parameters=run.parameters,
         ),
@@ -474,7 +474,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             source_path="imported.hdf5",
             parameters=run.parameters,
             storage=run.storage,

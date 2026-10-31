@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.registry import Registry
@@ -47,7 +48,7 @@ def test_load_value_accepts_native_data_and_keeps_it_when_next_file_is_unsupport
     retained = require_record(state.get_tab("tab").run)
     assert outcome.cfg_issue is None
     assert retained.metadata is not None
-    assert retained.metadata.project() == metadata
+    assert RunMetadataContent(retained.metadata).project() == metadata
     assert retained.cfg == SavingCfg()
     np.testing.assert_array_equal(retained.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
 

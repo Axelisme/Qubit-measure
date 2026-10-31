@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.remote.handlers.run_save import h_tab_load_data
@@ -65,7 +66,7 @@ def test_registered_adapter_loads_native_record_and_cfg_diagnostic(stored_app) -
     np.testing.assert_array_equal(record.result.frequency, [1000.0, 1001.0, 1002.0])
     np.testing.assert_array_equal(record.result.signal, [1 + 2j, 3 - 4j, 5 + 6j])
     assert record.metadata is not None
-    assert record.metadata.project() == metadata
+    assert RunMetadataContent(record.metadata).project() == metadata
     assert tab.run.source_path == str(path)
     assert tab.cfg.input.data == before
     assert tab.cfg.env is env

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import save
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
@@ -472,7 +473,7 @@ def test_result_commit_survives_analysis_preparation_failure(
         assert snapshot.run.result is not None
         assert snapshot.run.result.result == loaded.result
         assert snapshot.run.result.metadata is not None
-        assert snapshot.run.result.metadata.project() == metadata
+        assert RunMetadataContent(snapshot.run.result.metadata).project() == metadata
     assert snapshot.analysis.params is None
     assert snapshot.analysis.result is None
     assert snapshot.post_analysis.result is None

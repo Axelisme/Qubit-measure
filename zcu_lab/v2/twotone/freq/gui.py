@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -78,10 +79,10 @@ def _Freq_get_writeback_items(
     devices into its record. Missing metadata or snapshot logs "no device snapshot" and omits only the record.
     No write or device access occurs here; this Run leaves devices fixed.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:

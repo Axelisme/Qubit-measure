@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -120,10 +121,10 @@ def _T2Echo_get_writeback_items(
     Run leaves devices fixed; no live lookup, device access, frequency/module
     update or write occurs here.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:

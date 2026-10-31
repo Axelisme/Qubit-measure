@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
@@ -139,7 +140,7 @@ def test_run_without_cfg_records_acquired_evidence(
     assert outcome is not None and outcome.status == "finished"
     record = require_record(session.state.get_tab("tab").run)
     assert record.cfg is None
-    metadata = record.metadata
+    metadata = RunMetadataContent(record.metadata)
     assert metadata is not None
     (event,) = session.entry.ledger.events()
     assert event.kind == "acquired" and event.origin == "gui"
@@ -172,7 +173,7 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     tab = session.state.get_tab("tab")
-    metadata = require_record(tab.run).metadata
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     record = require_record(tab.run)
     assert metadata is not None and record is not None and record.cfg is not None
     events = other.ledger.events()
@@ -363,7 +364,7 @@ def test_native_run_core_stop_returns_record_but_exception_does_not(
         assert session.state.get_tab("tab").run.result is None
     else:
         assert terminal.outcome == outcome.status == "finished"
-        metadata = require_record(session.state.get_tab("tab").run).metadata
+        metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
         assert metadata is not None and metadata.completion == "complete"
         assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
         assert events[0].payload.run_id == metadata.run_id
@@ -386,7 +387,7 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert outcome.error == terminal.error_message
     tab = session.state.get_tab("tab")
     assert require_record(tab.run) is not None
-    metadata = require_record(tab.run).metadata
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     assert metadata is not None
     assert tab.run.source_operation_id == token
     assert tab.run.confirmed_run_id is None
@@ -430,7 +431,7 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     assert session.state.get_tab("tab").run.result is not None
-    assert require_record(session.state.get_tab("tab").run).metadata is None
+    assert require_record(session.state.get_tab("tab").run).metadata == {}
     assert session.entry.ledger.events() == ()
     assert any(
         record.name == "zcu_tools.gui.app.measure.services.run"

@@ -11,6 +11,7 @@ from typing import TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, Field
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
@@ -120,10 +121,10 @@ def _get_writeback_items(
     produce no calibration items. Pulse proposals copy source cfg only, never
     current library values. This method neither writes nor applies proposals.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:

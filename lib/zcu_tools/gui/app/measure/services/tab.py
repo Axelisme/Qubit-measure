@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.gui.app.measure.adapter.analyze_params import describe_analyze_params
 from zcu_tools.gui.app.measure.state import Session, TabInteractionState
@@ -120,7 +121,7 @@ class TabService:
 
         analysis_items = _items_for_pane(tab.analysis)
         post_items = _items_for_pane(tab.post_analysis)
-        metadata = None if tab.run.result is None else tab.run.result.metadata
+        metadata = {} if tab.run.result is None else tab.run.result.metadata
         return TabSnapshot(
             adapter_name=tab.adapter_name,
             cfg_input={}
@@ -136,7 +137,7 @@ class TabService:
                 analysis_source_issue=tab.run.analysis_source_issue,
                 source_operation_id=tab.run.source_operation_id,
                 run_id=tab.run.confirmed_run_id,
-                acquisition_run_id=(metadata.run_id if metadata is not None else None),
+                acquisition_run_id=(RunMetadataContent(metadata).run_id if "run_id" in metadata else None),
             ),
             analysis=AnalysisPaneSnapshot(
                 params=tab.analysis.params,

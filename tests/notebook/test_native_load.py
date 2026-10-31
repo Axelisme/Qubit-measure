@@ -128,7 +128,7 @@ def test_native_load_publishes_shared_restore_and_retains_previous_on_failure(
     evidence = adapter.acquisition_for(previous)
     path = tmp_path / "data.h5"
     save_run(
-        replace(previous, metadata=native_metadata(core.AXES_SPEC.tag)),
+        replace(previous, metadata=native_metadata(core.AXES_SPEC.tag).model_dump(mode="json")),
         path,
         spec=core.AXES_SPEC,
     )
@@ -199,7 +199,7 @@ def test_unknown_historical_evidence_loads_without_inventing_acquisition(
         update={"started_at": None, "completion": "unknown"}
     )
     try:
-        save_run(replace(source, metadata=metadata), path, spec=core.AXES_SPEC)
+        save_run(replace(source, metadata=metadata.model_dump(mode="json")), path, spec=core.AXES_SPEC)
         adapter = NotebookAdapter(host=NonPresentingHost())(core)
         loaded = adapter.load(path)
     except ValueError as error:
@@ -264,7 +264,7 @@ def test_offline_load_analyze_save_do_not_query_devices(tmp_path: Path) -> None:
     )
     path = tmp_path / "data.h5"
     save_run(
-        replace(source, metadata=native_metadata(NativeCore.AXES_SPEC.tag)),
+        replace(source, metadata=native_metadata(NativeCore.AXES_SPEC.tag).model_dump(mode="json")),
         path,
         spec=NativeCore.AXES_SPEC,
     )

@@ -54,7 +54,7 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     }
     record = replace(
         tab.run.result,
-        metadata=session.metadata.model_copy(update={"run_id": "replacement"}),
+        metadata=session.metadata.model_copy(update={"run_id": "replacement"}).model_dump(mode="json"),
     )
     pane = RunPaneState(
         result=record, parameters=tab.run.parameters, storage=tab.run.storage

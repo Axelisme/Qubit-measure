@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
@@ -57,14 +58,15 @@ def _FluxDep_make_interactive_plugin(
     """
     result = req.run_result.result
     inputs = FluxPickInputs(result.signals, result.values, result.freqs * 1e-3)
-    cfg, metadata = req.run_result.cfg, req.run_result.metadata
+    cfg = req.run_result.cfg
+    metadata = RunMetadataContent(req.run_result.metadata)
     points = (
         None
         if cfg is None
         else flux_pick_initial_points(
             req.parameters,
             cfg.flux_dev,
-            None if metadata is None else metadata.device_snapshot,
+            metadata.device_snapshot,
         )
     )
     return make_flux_pick_plugin(

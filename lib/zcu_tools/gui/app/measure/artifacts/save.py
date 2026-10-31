@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from zcu_tools.experiment.metadata import has_native_metadata, RunMetadataContent
 from zcu_tools.experiment.artifacts import (
     AnalysisItem,
     ArtifactRef,
@@ -117,9 +118,9 @@ class SaveService:
         fields raise MetadataFieldError. Read only metadata fields
         needed for naming; full Save validation remains in the Save command.
         """
-        metadata = record.metadata
-        if metadata is None:
+        if not has_native_metadata(record.metadata):
             raise ValueError("Run has no historical native metadata")
+        metadata = RunMetadataContent(record.metadata)
         history = metadata.snapshot
         stem = tab.adapter.save_stem(
             SaveContext(
@@ -258,19 +259,18 @@ class SaveService:
             )
         tab = self._state.get_tab(tab_id)
         record = tab.run.result
-        metadata = None if record is None else record.metadata
         if record is None:
             raise FailedPreconditionError(
                 "No run result available to save.", reason_code="no_run_result"
             )
         self._access.require_available()
         self._require_tab_idle(tab_id)
-        if metadata is None:
+        if not has_native_metadata(record.metadata):
             raise FailedPreconditionError(
                 "Run has no historical native metadata",
                 reason_code="storage_unavailable",
             )
-        return replace(record, metadata=metadata.project())
+        return record
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:
         tab = self._state.get_tab(tab_id)

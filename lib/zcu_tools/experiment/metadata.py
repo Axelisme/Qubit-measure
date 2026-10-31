@@ -182,6 +182,20 @@ class RunMetadata(BaseModel):
         return value
 
 
+def has_native_metadata(document: Mapping[str, object]) -> bool:
+    """Return whether all native schema required keys are present, without validation.
+
+    Empty or partial author documents are not native evidence. Values remain
+    deferred: each reader validates only the fields it uses, and Save validates
+    the whole schema before I/O.
+    """
+    return all(
+        name in document
+        for name, field in RunMetadata.model_fields.items()
+        if field.is_required()
+    )
+
+
 class MetadataFieldError(ValueError):
     """A requested historical metadata field could not be decoded or validated.
 
