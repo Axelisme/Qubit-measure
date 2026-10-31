@@ -27,6 +27,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_labber
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.notebook._interrupt import _RunInterrupts
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -173,17 +174,15 @@ class NotebookExperiment(Generic[CoreT]):
             )
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
-            result = self._core.run(working_cfg, context=context)
-            error = context.scope.stop.error
-            if error is not None and error.status != "interrupted":
-                context.scope.stop.raise_if_error()
+            with _RunInterrupts(context.scope.stop) as interrupts:
+                result = self._core.run(working_cfg, context=context)
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
                 run_id=run_id,
                 started_at=started_at,
                 finished_at=finished_at,
                 completion=(
-                    "stopped" if context.scope.stop.partial_result else "complete"
+                    "stopped" if interrupts.stop_requested else "complete"
                 ),
                 provenance=provenance,
                 device_snapshot=device_snapshot,
