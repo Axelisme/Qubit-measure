@@ -109,10 +109,13 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
     observations = actual[1].reshape(-1, 2)
     count = 4 if mode == "integrated" else 1
     np.testing.assert_allclose(observations.mean(axis=0), count * receiver.offset, atol=0.08)
-    # Integrated integer rounding adds at most its 1/12 variance term.
-    np.testing.assert_allclose(
-        np.cov(observations.T), count * receiver.noise_covariance, atol=0.25
-    )
+    # Integer rounding contributes 1/12 on each integrated quadrature.
+    covariance = count * receiver.noise_covariance
+    if mode == "integrated":
+        covariance = covariance + np.eye(2) / 12
+    # Six standard errors of the largest sample variance bound sampling scatter.
+    tolerance = 6 * covariance.max() * np.sqrt(2 / (len(observations) - 1))
+    np.testing.assert_allclose(np.cov(observations.T), covariance, atol=tolerance)
 
 
 def test_decimated_shots_share_states_paths_and_keep_content_and_sample_order():
