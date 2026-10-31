@@ -302,9 +302,18 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 tone = cfg.tones[index]
                 gain = sweep2param(
                     "point",
-                    make_sweep(tone.require_gain().start, tone.require_gain().stop, cfg.expts),
+                    make_sweep(
+                        tone.require_gain().start, tone.require_gain().stop, cfg.expts
+                    ),
                 )
-                drives.append(Pulse(f"drive_{index}", tone.require_drive(), gain=gain, pulse_id=f"drive_{index}"))
+                drives.append(
+                    Pulse(
+                        f"drive_{index}",
+                        tone.require_drive(),
+                        gain=gain,
+                        pulse_id=f"drive_{index}",
+                    )
+                )
 
             # Reset -> simultaneous drives -> fixed readout after the longest drive.
             builder = TimelineBuilder(

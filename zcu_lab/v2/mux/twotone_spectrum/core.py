@@ -287,7 +287,9 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                 tone = cfg.tones[index]
                 freq = sweep2param(
                     "point",
-                    make_sweep(tone.require_freq().start, tone.require_freq().stop, cfg.expts),
+                    make_sweep(
+                        tone.require_freq().start, tone.require_freq().stop, cfg.expts
+                    ),
                 )
                 drives.append(Pulse(f"drive_{index}", tone.require_drive(), freq=freq))
 
