@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
@@ -87,7 +88,7 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            result = completed(await iteration.run(acquire, original))
+            result = completed(await run_core(iteration, acquire, original))
             saved.append(result.value)
             assert result.value.cfg == Cfg(value=30, nested=[2, 3])
             path = iteration.dir / "measurement.txt"
@@ -143,7 +144,6 @@ def test_call_delivers_the_original_experiment_exception_to_the_author(
     assert (facts[0].iteration, facts[0].attempt) == (0, 1)
     assert facts[0].stopped is False
     assert facts[0].reason == "OSError: acquire disconnected"
-    assert facts[0].device_snapshot is None
 
 
 @pytest.mark.parametrize(
@@ -202,11 +202,11 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         assert attempts == [1, 1]
     else:
         first = completed(observed[0])
-        assert (first.value, first.stop_requested) == (99, False)
+        assert (first.value, first.facts.stopped) == (99, False)
         assert first.facts.stopped is False
         assert first.facts.outcome == "completed"
     second = completed(observed[-1])
-    assert (second.value, second.stop_requested) == (7, False)
+    assert (second.value, second.facts.stopped) == (7, False)
     assert second.facts.stopped is False
     assert second.facts.outcome == "completed"
     facts = [
@@ -245,7 +245,6 @@ def test_unhandled_exception_fails_run(rig: Rig) -> None:
     assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "raised")
     assert facts[0].stopped is False
     assert reason in str(facts[0].reason)
-    assert facts[0].device_snapshot is None
 
 
 def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
@@ -268,7 +267,7 @@ def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
     assert len(caught) == 1
 
 
-def test_stop_keeps_stop_requested_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
+def test_stop_preserves_completion_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
     entered = Event()
     outcomes: list[Completed[int]] = []
     stops: list[bool] = []
@@ -299,7 +298,7 @@ def test_stop_keeps_stop_requested_and_later_calls_see_stopped_tokens(rig: Rig) 
         rig.engine.cancel("run", scope="iteration")
         final = future.result(timeout=10)
     assert final.lifecycle == "done"
-    assert [(outcome.value, outcome.stop_requested) for outcome in outcomes] == [
+    assert [(outcome.value, outcome.facts.stopped) for outcome in outcomes] == [
         (7, True),
         (0, True),
     ]
@@ -310,7 +309,7 @@ def test_stop_keeps_stop_requested_and_later_calls_see_stopped_tokens(rig: Rig) 
         (1, 1),
         (1, 2),
     ]
-    assert all(outcome.facts.stopped is outcome.stop_requested for outcome in outcomes)
+
     assert all(outcome.facts.outcome == "completed" for outcome in outcomes)
     journal_facts = [
         TypeAdapter(OperationFacts).validate_python(event["operation"])
@@ -366,7 +365,7 @@ def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> Non
     assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     outcome = completed(observed[0])
-    assert (outcome.value, outcome.stop_requested) == (7, False)
+    assert (outcome.value, outcome.facts.stopped) == (7, False)
 
 
 @pytest.mark.parametrize("source", ["build", "acquire", "conversion"])
@@ -457,7 +456,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     outcome = completed(observed[0])
-    assert (outcome.value, outcome.stop_requested) == (99, True)
+    assert (outcome.value, outcome.facts.stopped) == (99, True)
 
 
 def test_active_tunables_journal_failure_stops_operation_and_retains_original_cause(

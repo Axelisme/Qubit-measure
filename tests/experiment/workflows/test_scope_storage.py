@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, saved_run
 
@@ -120,7 +121,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         )
         with env.scope("calibration") as scope:
             cfg = Cfg(value=7)
-            record = completed(await scope.run(acquire, cfg, name="T1"))
+            record = completed(await run_core(scope, acquire, cfg, name="T1"))
             assert record.value.result == 8
             assert cfg.value == 7
             await scope.setup_device(
@@ -138,7 +139,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         assert rig.clock.targets == [rig.clock.value]
         assert [
             operation.kind for operation in rig.engine.records("run")[0].operations
-        ] == ["run", "setup_device", "wait_until"]
+        ] == ["call", "setup_device", "wait_until"]
     finally:
         rig.close()
 

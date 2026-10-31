@@ -11,11 +11,9 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from pydantic import BaseModel
 
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDeviceInfo
 
-from .operations import Completed, MissingCapability, RunFunction, RunIdentity
-from .records import RunRecord
+from .operations import Completed, MissingCapability, RunIdentity
 
 if TYPE_CHECKING:
     from .script_host import CallContext
@@ -108,17 +106,6 @@ class ScopeRuntime(Protocol):
         self, scope: Scope, fn: Callable[[CallContext], T], *, name: str | None = None
     ) -> Completed[T]:
         """Execute blocking work under scope and return attempt facts."""
-        ...
-
-    async def execute_run[Cfg: ConfigBase, Result](
-        self,
-        scope: Scope,
-        experiment: RunFunction[Cfg, Result],
-        cfg: Cfg,
-        *,
-        name: str | None = None,
-    ) -> Completed[RunRecord[Cfg, Result]]:
-        """Execute a core callable with an owned cfg and borrowed RunContext."""
         ...
 
     async def execute_setup(
@@ -301,19 +288,6 @@ class Scope:
         """
         return await self._capabilities().execute_call(self, fn, name=name)
 
-    async def run[Cfg: ConfigBase, Result](
-        self, experiment: RunFunction[Cfg, Result], cfg: Cfg, *, name: str | None = None
-    ) -> Completed[RunRecord[Cfg, Result]]:
-        """Run a core (cfg, *, context) callable with a copied cfg, without saving.
-
-        The host captures device settings and supplies borrowed hardware and
-        operation plots. The callable runs once, without automatic retries.
-        Child cancellation delivers partial values; root cancellation raises
-        ScriptCancelled after work drains and completion facts are recorded.
-        Completion carries RunRecord and immutable attempt facts; exceptions propagate.
-        """
-        return await self._capabilities().execute_run(self, experiment, cfg, name=name)
-
     async def setup_device(self, name: str, cfg: BaseDeviceInfo) -> Completed[None]:
         """Apply complete copied settings through the device owner; preserve its errors."""
         return await self._capabilities().execute_setup(self, name, cfg)
@@ -361,7 +335,6 @@ class Scope:
         *,
         expected: int | None = None,
         reason: str | None = None,
-        on_cancel: Callable[[Scope], None] | None = None,
     ) -> CancelResult:
         """Atomically select and stop a live subtree, never its parent.
 
@@ -372,10 +345,6 @@ class Scope:
         refuse without stopping anything. Invalid syntax raises ValueError.
         reason is optional opaque text forwarded to the selected stop subtree;
         it does not change the acknowledgement's reason or selector matching.
-        on_cancel, when supplied, synchronously receives the unique selected
-        Scope before its stop bit is set, under the scope lock. Refused selectors
-        do not invoke it. If it raises, the original exception propagates without
-        setting stop. The callback must not block or change scope topology.
         """
         label, sequence = parse_cancel_scope(scope, expected)
         if label == "run" and self.kind != "run":
@@ -406,8 +375,6 @@ class Scope:
                 return CancelResult(
                     False, "ambiguous", path, [node.path for node in matches]
                 )
-            if on_cancel is not None:
-                on_cancel(matches[0])
             matches[0].stop.set(reason=reason)
             return CancelResult(True, "scope cancellation requested", path)
 

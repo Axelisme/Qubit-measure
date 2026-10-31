@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.datafile import JsonObject
 from zcu_tools.experiment.metadata import SoftwareProvenance
 
 if TYPE_CHECKING:
@@ -54,21 +52,15 @@ class RunFunction[Cfg: ConfigBase, Result](Protocol):
 
 @dataclass(frozen=True)
 class Completed[T]:
-    """A returned value, stop-request flag and facts for one attempt.
+    """One delivered payload and its immutable operation completion facts.
 
-    value is fn's payload; env.run uses the existing RunRecord with cfg/data.
-    stop_requested is true if the operation token was stopped at completion or
-    the host cancelled this operation, an ancestor or a descendant during this
-    attempt. Cancelling an unrelated sibling does not mark this flag.
-    It is not a scientific completeness check or a persistence guarantee. facts is the
-    required OperationFacts for this delivered attempt, also written to journal
-    and the enclosing commit. facts.stopped records the operation token's own
-    control intent at completion, not descendant cancellation. These flags
-    describe different facts and must not be merged.
+    value is the callback payload; run_core supplies a RunRecord with cfg/result
+    and acquisition metadata. facts is also written to journal and enclosing
+    commits. facts.stopped is the operation token's own completion-time control
+    bit, not a claim about scientific completeness or descendant cancellation.
     """
 
     value: T
-    stop_requested: bool
     facts: OperationFacts
 
 
@@ -95,8 +87,7 @@ class OperationFacts:
     iteration scope's birth number, or zero outside iterations. attempt counts
     from one within that iteration or the root, once per operation. Historical
     records also counted retries from the removed Pause/Resume behavior.
-    started_at/finished_at are UTC worker boundaries. device_snapshot is detached
-    pre-call driver JSON for run, otherwise None. Current outcome values are
+    started_at/finished_at are UTC worker boundaries. Current outcome values are
     completed or raised. discarded is retained for historical Pause records only.
     reason is a diagnostic or None on completion.
     stopped is the operation token's completion-time stop bit, including raised
@@ -110,7 +101,6 @@ class OperationFacts:
     attempt: int
     started_at: datetime
     finished_at: datetime
-    device_snapshot: Mapping[str, JsonObject] | None
     outcome: OperationOutcome
     reason: str | None
     stopped: bool

@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -70,12 +70,14 @@ Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid mo
 直接轉送 operation 的薄 helper 可以接同一個 Scope 與 typed cfg。量測＋分析的 stage 接 pulses、settings 與 guess，不收完整 experiment cfg：
 
 ```python
+from zcu_tools.experiment.run_core import run_core
+
 async def run_t1(scope: Scope, cfg: T1Cfg):
-    return await scope.run(T1Exp().run, cfg, name="T1")
+    return await run_core(scope, T1Exp().run, cfg, name="T1")
 ```
 
 需要不同序列時，寫同步 `def acquire(cfg, *, context: RunContext) -> Result`，
-再用 `await iteration.run(acquire, cfg, name="frequency")` 呼叫。
+再用 `await run_core(iteration, acquire, cfg, name="frequency")` 呼叫。
 Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序列。
 需要 workflow 圖的 helper 明收 `plots: Plots`。Identity 與 live device cfg 從 scope 取得。
 
@@ -166,9 +168,9 @@ MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
 每個 operation 只呼叫一次。框架不丟棄合作停止的回傳值，也不自動重跑。
-子層取消後，core 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.stop_requested。
-stop_requested 表示本次 operation 收到停止請求，不表示框架判定資料不完整。
-這些 workflow 由作者把 stop_requested 的回傳資料分類為 partial，不進擬合或接受，保留拒絕原因，也不更新 accepted history。
+子層取消後，core 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.facts.stopped。
+facts.stopped 只表示 operation 自己的 stop bit，不表示框架判定資料不完整。只取消子孫時仍為 false。
+這些 workflow 由作者把 facts.stopped 為 true 的回傳資料分類為 partial，存檔明填 completion=stopped，不進擬合或接受，保留拒絕原因，也不更新 accepted history。
 根 Stop 則在下一個 async operation 或 Ask raise ScriptCancelled。進行中工作先 drain 並留 facts。
 作者 finally 同步提交已有成果，不吞掉例外，也不在 finally 改寫 status。
 Acquisition 例外原樣傳給作者，不轉 Failed。分析 helper 的 Failed 由 caller 記 failed 與 reason。
@@ -199,9 +201,9 @@ Data root 的 point `record.json` 與 metadata root 的 run 摘要是不同檔�
 
 ## Async await guardrail
 
-作者可寫 `await iteration.run(...)` 或 `await helper(scope, cfg)`。
-Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def，不能只靠函式名稱像 helper 就放行。
-所有 lab async def 統一只 await env／scope／iteration／tab／session 的呼叫或 lab 內定義的 helper，helper 可再呼叫 helper。
+作者可寫 `await iteration.call(...)`、`await run_core(iteration, core.run, cfg)` 或 `await helper(scope, cfg)`。
+Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def。Lib 唯一例外是 `zcu_tools.experiment.run_core.run_core`，直接 import alias 也以完整路徑核對。
+所有 lab async def 統一只 await env／scope／iteration／tab／session 的呼叫、lib run_core 或 lab 內定義的 helper，helper 可再呼叫 helper。
 Quality gate 全掃 async def 本文，不依 decorator 或可達性選集。
 在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 即使不 await 也拒絕，包含 async with TaskGroup()。
 其他 async with／async for 不另禁。

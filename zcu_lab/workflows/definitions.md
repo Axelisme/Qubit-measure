@@ -136,7 +136,7 @@ Coherence 與 MIST 共用的 calibrate_point（`common/point_calibration.py`）�
 校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
 每個 operation 只呼叫一次，停止後不自動重試。
-子層取消後 core 回傳就交付 Completed。作者先保存 raw，再檢查 stop_requested，保留原有拒絕原因，不進擬合或接受。
+子層取消後 core 回傳就交付 Completed。作者先保存 raw，再檢查 facts.stopped，保留原有拒絕原因，不進擬合或接受。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
 分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
@@ -220,11 +220,11 @@ ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不�
 
 作者用 zip(plan.fluxes, env.iterations()) 取得每點的 Scope，第一次用 iteration.dir 才建 absolute 保存目錄。
 目錄是 data root 下的 iteration-000001，nested child 再按 label 與 sequence 鏡射。Commit 序號另按提交順序增加。
-Workflow 在 iteration.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
+Workflow 在 run_core(iteration, core.run, cfg) 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Stop 可能留下未提交檔案。
-Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
-Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，再將 JSON dump 放入 record.metadata，不捕捉新事實。
-H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.stop_requested 決定 complete 或 stopped，experiment 取 persistence spec.tag。
+Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間，從 record.metadata 保留 device snapshot。
+Caller 顯式傳入 completion、`env.identity` 與歷史 `RunSnapshot`。Saver 合併既有 `RunMetadata` 到 record.metadata，保留裝置快照與作者欄位，不捕捉新事實。
+H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Lab 以 Completed.facts.stopped 選 stopped 或 complete 並明傳 completion，experiment 取 persistence spec.tag。
 Provenance 取 workflow identity，不逐 operation 捕捉。Lab 不建立 AcquisitionEvidence。
 Framework 只保存 manifest、journal 與 best-effort record.json。
 Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 reader 或通用 dispatcher。
@@ -272,10 +272,10 @@ Latest-wins 由 record table owner 決定，重匯出更新整列，僅 append �
 
 `common.devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，await 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
-每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 alias 修改或 Save 刷新 snapshot。
+每次 run_core 在 core callback 前 capture connected drivers，寫入 RunRecord.metadata["device_snapshot"]。Native saver 保留該快照，不因 alias 修改或 Save 刷新 snapshot。
 
 核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
-每次 env.run attempt 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。
+每次 Scope.call 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。
 Coherence 與 MIST 的 workflow 校準圖為 `calibration/qubit_freq`、`calibration/len_rabi`、`calibration/readout`。
 Frequency 圖上方畫 accepted f01 對 flux，下方畫 flux × detune heatmap 與目前 trace/fit。Detune 相對各點掃描中心。
 Rabi 圖畫 flux × pulse-length heatmap，紅線連各 flux 點的 accepted pi duration，側欄畫目前 trace/fit。

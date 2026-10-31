@@ -43,7 +43,7 @@ def test_root_cancel_records_completion_before_raising_and_does_not_set_host_err
 
     def record(result: CallResult[int]) -> None:
         assert result.result == 7
-        assert result.stopped and result.stop_requested
+        assert result.stopped
         seen.append("recorded")
 
     async def script() -> None:

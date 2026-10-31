@@ -7,6 +7,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.operations import RunFunction
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import Plots
 
@@ -34,8 +35,8 @@ class SavedAcquisition[Result]:
     """Acquisition outcome after saving every Completed, including partials.
 
     status is completed or partial, the author's stopped-data classification.
-    result is available only when no stop was requested, so stopped data never
-    enters a fit. file is the relative native filename after saving. reason is
+    result is available only when the operation's own stop bit is false.
+    Stopped data never enters a fit. file is the relative native filename after saving. reason is
     stopped for partial and None for completed. Acquisition exceptions propagate.
     """
 
@@ -66,12 +67,13 @@ async def acquire_saved[Cfg: ConfigBase, Result](
 
     cfg is the detached native configuration; name labels the operation.
     output pairs a filename relative to scope.dir with its native axes mapping.
-    Exceptions propagate without creating a file. Stop-requested completions
-    save raw then return status=partial without fit data. Other results are
-    returned unchanged.
+    Acquisition exceptions propagate without creating a file. Completions with
+    facts.stopped save raw with completion=stopped, then return status=partial
+    without fit data. Descendant-only stops leave facts.stopped false and save
+    completion=complete. Other results are returned unchanged.
     Acquisition, writer and unexpected framework exceptions propagate.
     """
-    outcome = await scope.run(experiment, cfg, name=name)
+    outcome = await run_core(scope, experiment, cfg, name=name)
     observe_operation(env.summary, outcome)
     save_native(
         outcome,
@@ -79,8 +81,9 @@ async def acquire_saved[Cfg: ConfigBase, Result](
         spec=output.spec,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.stop_requested:
+    if outcome.facts.stopped:
         return SavedAcquisition(
             status="partial", file=output.filename, reason="stopped"
         )
