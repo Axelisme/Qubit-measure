@@ -194,7 +194,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def _add_asm(self, inst, addr_inc=1):
         instruction = BaseInst.from_dict(inst)
-        if (
+        if inst["CMD"] in ("JUMP", "CALL", "RET") or (
             "s14" in instruction.reg_write
             and not (
                 isinstance(instruction, RegWriteInst)
