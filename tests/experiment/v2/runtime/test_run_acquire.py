@@ -33,13 +33,17 @@ class RawProgram:
         self.raw = raw
 
     def acquire(
-        self, soc: object, **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]]
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
     ) -> list[NDArray[np.float64]]:
         kwargs["round_hook"](1, self.raw, kwargs["cancel_flag"])
         return self.raw
 
     def acquire_decimated(
-        self, soc: object, **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]]
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
     ) -> list[NDArray[np.float64]]:
         return self.acquire(soc, **kwargs)
 
@@ -62,14 +66,24 @@ def test_ambiguous_raw_requires_explicit_converter(
 
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if entry == "schedule":
-            run = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+            run = (
+                schedule.run_acquire
+                if mode == "integrated"
+                else schedule.run_acquire_decimated
+            )
             acquire = partial(
-                run, program, "soc",
+                run,
+                program,
+                "soc",
                 options=RunOptions(converter=convert if explicit_converter else None),
             )
         else:
             builder = schedule.prog_builder("soc", "soccfg")
-            run = builder.run_program if mode == "integrated" else builder.run_program_decimated
+            run = (
+                builder.run_program
+                if mode == "integrated"
+                else builder.run_program_decimated
+            )
             acquire = partial(
                 run, program, raw2signal_fn=convert if explicit_converter else None
             )
@@ -95,7 +109,11 @@ def test_single_adc_default_converter_preserves_all_signal_axes(
     raw = np.arange(np.prod(raw_shape), dtype=np.float64).reshape(raw_shape)
     buffer = SignalBuffer(signal_shape)
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
-        run = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+        run = (
+            schedule.run_acquire
+            if mode == "integrated"
+            else schedule.run_acquire_decimated
+        )
         result = run(RawProgram([raw]), "soc")
     expected_iq = raw[0] if mode == "integrated" else raw
     np.testing.assert_array_equal(result.real, expected_iq[..., 0])

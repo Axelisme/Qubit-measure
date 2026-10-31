@@ -83,7 +83,9 @@ def test_shot_overrun_obeys_explicit_retry_budget(
                 program, rounds=2, options=AcquireOptions(retry=retry)
             )
         elif mode == "integrated":
-            result = sched.run_acquire(program, soc, rounds=2, options=RunOptions(retry=retry))
+            result = sched.run_acquire(
+                program, soc, rounds=2, options=RunOptions(retry=retry)
+            )
         else:
             result = sched.run_acquire_summed(
                 program,
