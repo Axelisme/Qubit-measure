@@ -10,7 +10,9 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 
 def averaged_mux_signal(
-    prog: TimelineProgramV2, readout: MuxReadout, acquired: Sequence[NDArray[np.float64]]
+    prog: TimelineProgramV2,
+    readout: MuxReadout,
+    acquired: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
     """Collect this program's averaged IQ in the explicit readout's tone order.
 

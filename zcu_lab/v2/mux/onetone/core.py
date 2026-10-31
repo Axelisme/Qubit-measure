@@ -386,7 +386,11 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         viewers = []
         for index in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(xlabel="Nominal frequency offset (MHz)", ylabel="Magnitude (a.u.)", title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}")
+            ax.set(
+                xlabel="Nominal frequency offset (MHz)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -421,8 +425,12 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 prog = builder.build()
                 # Collect all selected ADCs and average reps/rounds into this scan row.
                 _ = step.run_acquire(
-                    prog, context.soc, rounds=cfg.rounds,
-                    options=RunOptions(converter=partial(averaged_mux_signal, prog, readout_module)),
+                    prog,
+                    context.soc,
+                    rounds=cfg.rounds,
+                    options=RunOptions(
+                        converter=partial(averaged_mux_signal, prog, readout_module)
+                    ),
                 )
 
         # 4. Keep acquired rows and the original tone mapping, including partial scans.

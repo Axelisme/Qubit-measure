@@ -33,11 +33,11 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
-    Reset,
     Pulse,
+    Reset,
     ResetCfg,
     SweepCfg,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
@@ -212,7 +212,11 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         viewers = []
         for index in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(xlabel="Requested delay (us)", ylabel="Magnitude (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+            ax.set(
+                xlabel="Requested delay (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -279,10 +283,13 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             # 4. Average completed rounds into tone-major IQ, preserving NaN gaps.
             prog = builder.build()
             _ = sched.run_acquire(
-                prog, context.soc,
+                prog,
+                context.soc,
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    converter=lambda raw: averaged_mux_signal(prog, readout_module, raw).T,
+                    converter=lambda raw: (
+                        averaged_mux_signal(prog, readout_module, raw).T
+                    ),
                     retry=cfg.acquire_retry,
                     stop_condition=mux_snr_checker(
                         signals, cfg.earlystop_snr, tone_axis=0

@@ -967,22 +967,32 @@ class MuxReadout(AbsReadout):
 
         if not isinstance(prog, TimelineProgramV2):
             if self._program is not prog:
-                raise ValueError(f"{self.name}: use the program that initialized this module")
+                raise ValueError(
+                    f"{self.name}: use the program that initialized this module"
+                )
             return
 
         def emitted(macros: Sequence[Macro]) -> bool:
             for macro in macros:
-                source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+                source = (
+                    macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+                )
                 if isinstance(source, ReadoutEmission) and source.owner is self:
                     return True
-                if isinstance(source, (ModuleEmission, TimeProducer)) and emitted(source.macros):
+                if isinstance(source, (ModuleEmission, TimeProducer)) and emitted(
+                    source.macros
+                ):
                     return True
-                if isinstance(source, TimelineBranch) and any(emitted(case) for case in source.cases):
+                if isinstance(source, TimelineBranch) and any(
+                    emitted(case) for case in source.cases
+                ):
                     return True
             return False
 
         if not emitted(prog.macro_list):
-            raise ValueError(f"{self.name}: module has no compiled readout emission on this program")
+            raise ValueError(
+                f"{self.name}: module has no compiled readout emission on this program"
+            )
 
     def collect_iq(
         self,

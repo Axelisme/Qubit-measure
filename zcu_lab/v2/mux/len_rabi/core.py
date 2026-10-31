@@ -124,7 +124,12 @@ from zcu_tools.program.v2.modules import (
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, ToneRangeCfg, require_tone_value, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 from .analysis import MuxLenRabiFit, analyze_length
@@ -300,7 +305,11 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(xlabel="Pulse length (us)", ylabel="Magnitude (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+            ax.set(
+                xlabel="Pulse length (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -344,8 +353,11 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
             # 3. Publish the full point/tone matrix after each completed round.
             _ = sched.run_acquire(
-                prog, context.soc,
-                options=RunOptions(converter=partial(averaged_mux_signal, prog, readout_module)),
+                prog,
+                context.soc,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module)
+                ),
                 rounds=cfg.rounds,
             )
         signals.trigger_update(flush=True)

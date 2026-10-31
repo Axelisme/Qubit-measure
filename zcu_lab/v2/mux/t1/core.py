@@ -148,12 +148,12 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
-    Reset,
     DelayAuto,
     LoadValue,
+    Reset,
     ResetCfg,
     SweepCfg,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
@@ -315,11 +315,17 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     def _run_linear(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         times = sweep2array(cfg.delay, "none")
         indices = list(cfg.participants)
-        readout = cfg.readout.with_updates(tones=[cfg.readout.tones[i] for i in indices])
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
         viewers = []
         for i in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{i}")
-            ax.set(xlabel="Delay (us)", ylabel="Magnitude (a.u.)", title=f"{i}: {cfg.tones[i].name}")
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{i}: {cfg.tones[i].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -334,15 +340,20 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(None, signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps,
-                initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
             builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, timeline in zip(indices, timelines, strict=True):
-                builder.emit(Pulse(f"drive_{index}", cfg.tones[index].require_drive()), timeline=timeline)
+                builder.emit(
+                    Pulse(f"drive_{index}", cfg.tones[index].require_drive()),
+                    timeline=timeline,
+                )
             builder.join(*timelines, into="default")
             builder.delay_timeline(delay)
             builder.sync()
@@ -350,25 +361,37 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             builder.emit(readout_module)
             prog = builder.build()
             sched.run_acquire(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 options=RunOptions(
                     converter=partial(averaged_mux_signal, prog, readout_module),
                     retry=cfg.acquire_retry,
-                    stop_condition=mux_snr_checker(signals, cfg.earlystop_snr, tone_axis=1),
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=1
+                    ),
                 ),
             )
         signals.trigger_update(flush=True)
-        return MuxT1Result(times, np.asarray(indices, dtype=np.int64), signals.array.T.copy())
+        return MuxT1Result(
+            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
+        )
 
     def _run_decay(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         times = table.times_us
         indices = list(cfg.participants)
-        readout = cfg.readout.with_updates(tones=[cfg.readout.tones[i] for i in indices])
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
         viewers = []
         for i in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{i}")
-            ax.set(xlabel="Delay (us)", ylabel="Magnitude (a.u.)", title=f"{i}: {cfg.tones[i].name}")
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{i}: {cfg.tones[i].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -383,34 +406,50 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
         with Schedule(None, signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps,
-                initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
             builder.add_loop("delay_idx", len(table.cycles))
-            builder.emit(LoadValue(
-                "load_t1_delay", values=list(table.cycles),
-                idx_reg="delay_idx", val_reg="t1_delay_cycle", auto_compress=False,
-            ))
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(table.cycles),
+                    idx_reg="delay_idx",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            )
             builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, timeline in zip(indices, timelines, strict=True):
-                builder.emit(Pulse(f"drive_{index}", cfg.tones[index].require_drive()), timeline=timeline)
+                builder.emit(
+                    Pulse(f"drive_{index}", cfg.tones[index].require_drive()),
+                    timeline=timeline,
+                )
             builder.join(*timelines, into="default")
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
             prog = builder.build()
             sched.run_acquire(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 options=RunOptions(
                     converter=partial(averaged_mux_signal, prog, readout_module),
                     retry=cfg.acquire_retry,
-                    stop_condition=mux_snr_checker(signals, cfg.earlystop_snr, tone_axis=1),
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=1
+                    ),
                 ),
             )
         signals.trigger_update(flush=True)
-        return MuxT1Result(times, np.asarray(indices, dtype=np.int64), signals.array.T.copy())
+        return MuxT1Result(
+            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
+        )
 
     def analyze(
         self,

@@ -130,11 +130,11 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
-    Reset,
     Pulse,
+    Reset,
     ResetCfg,
     SweepCfg,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
     MuxReadout,
@@ -262,7 +262,11 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         viewers = []
         for index in indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(xlabel="Requested delay (us)", ylabel="Magnitude (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+            ax.set(
+                xlabel="Requested delay (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -287,7 +291,9 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             builder.emit(Reset("reset", cfg.reset))
             timelines = [f"pi2_first_{index}" for index in indices]
             builder.fork("default", into=timelines)
-            for index, tone, drive, timeline in zip(indices, tones, drives, timelines, strict=True):
+            for index, tone, drive, timeline in zip(
+                indices, tones, drives, timelines, strict=True
+            ):
                 builder.emit(
                     Pulse(
                         f"pi2_first_{index}",
@@ -300,7 +306,9 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             builder.sync()
             timelines = [f"pi2_final_{index}" for index in indices]
             builder.fork("default", into=timelines)
-            for index, tone, drive, timeline in zip(indices, tones, drives, timelines, strict=True):
+            for index, tone, drive, timeline in zip(
+                indices, tones, drives, timelines, strict=True
+            ):
                 builder.emit(
                     Pulse(
                         f"pi2_final_{index}",
@@ -316,9 +324,14 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             # 4. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
             _ = sched.run_acquire(
-                prog, context.soc,
+                prog,
+                context.soc,
                 rounds=cfg.rounds,
-                options=RunOptions(converter=lambda raw: averaged_mux_signal(prog, readout_module, raw).T),
+                options=RunOptions(
+                    converter=lambda raw: (
+                        averaged_mux_signal(prog, readout_module, raw).T
+                    )
+                ),
             )
         signals.trigger_update(flush=True)
         return MuxCoherenceResult(

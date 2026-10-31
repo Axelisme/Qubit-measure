@@ -47,6 +47,8 @@ def test_raw_collection_keeps_shots_reads_tones_and_offsets(monkeypatch):
     assert iq.shape == (3, 2, 2, 2, 2)
     np.testing.assert_array_equal(iq[..., 0, :], sentinels)
     np.testing.assert_array_equal(iq[..., 1, :], sentinels + 1000)
-    np.testing.assert_array_equal(module.collect_raw_iq(prog, read_index=1), iq[..., 1, :, :])
+    np.testing.assert_array_equal(
+        module.collect_raw_iq(prog, read_index=1), iq[..., 1, :, :]
+    )
     with pytest.raises(ValueError, match="mux"):
         native_mux().build("mux").collect_raw_iq(prog)

@@ -98,7 +98,12 @@ from zcu_tools.program.v2.modules import (
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveToneCfg, ToneRangeCfg, require_tone_value, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
 from .analysis import MuxFreqFit, analyze_frequency
@@ -205,9 +210,7 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqSca
         tone = cfg.tones[index]
         drive = tone.require_drive()
         actual = sweep2array(
-            make_sweep(
-                tone.require_freq().start, tone.require_freq().stop, cfg.expts
-            ),
+            make_sweep(tone.require_freq().start, tone.require_freq().stop, cfg.expts),
             "freq",
             {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
         )
@@ -260,7 +263,11 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         viewers = []
         for index in scan.indices:
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
-            ax.set(xlabel="Drive frequency (MHz)", ylabel="Magnitude (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+            ax.set(
+                xlabel="Drive frequency (MHz)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
+            )
             viewers.append(live_line(ax))
             fig.show()
 
@@ -312,8 +319,11 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
             # 4. Each completed round supplies the full point/tone IQ matrix.
             prog = builder.build()
             _ = sched.run_acquire(
-                prog, context.soc,
-                options=RunOptions(converter=partial(averaged_mux_signal, prog, readout_module)),
+                prog,
+                context.soc,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module)
+                ),
                 rounds=cfg.rounds,
             )
 

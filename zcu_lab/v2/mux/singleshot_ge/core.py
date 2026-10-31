@@ -338,10 +338,17 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 for cloud, label, color in zip(
                     data[:, :, row],
                     ("g preparation (probe off)", "e preparation (probe on)"),
-                    ("tab:blue", "tab:red"), strict=True,
+                    ("tab:blue", "tab:red"),
+                    strict=True,
                 ):
-                    axes.scatter(cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label)
-                axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+                    axes.scatter(
+                        cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
+                    )
+                axes.set(
+                    xlabel="I (a.u.)",
+                    ylabel="Q (a.u.)",
+                    title=f"{index}: {cfg.tones[index].name}",
+                )
                 axes.set_aspect("equal", adjustable="datalim")
                 axes.grid()
                 axes.legend()
@@ -362,16 +369,28 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                 timelines = [f"tone_{i}" for i in indices]
                 builder.fork("default", into=timelines)
                 for i, timeline in zip(indices, timelines, strict=True):
-                    builder.emit(Pulse(f"init_{i}", cfg.tones[i].init_pulse), timeline=timeline)
-                    builder.emit(Pulse(f"probe_{i}", cfg.tones[i].require_drive() if with_probe else None), timeline=timeline)
+                    builder.emit(
+                        Pulse(f"init_{i}", cfg.tones[i].init_pulse), timeline=timeline
+                    )
+                    builder.emit(
+                        Pulse(
+                            f"probe_{i}",
+                            cfg.tones[i].require_drive() if with_probe else None,
+                        ),
+                        timeline=timeline,
+                    )
                 builder.join(*timelines, into="default")
                 readout_module = MuxReadout("readout", readout)
                 builder.emit(readout_module)
                 prog = builder.build()
                 # Read normalized shots from this program's initialized readout.
                 _ = step.run_acquire(
-                    prog, context.soc, rounds=1,
-                    options=RunOptions(converter=partial(_raw_signal, prog, readout_module)),
+                    prog,
+                    context.soc,
+                    rounds=1,
+                    options=RunOptions(
+                        converter=partial(_raw_signal, prog, readout_module)
+                    ),
                 )
 
         # 4. Keep completed preparations in participant/preparation/shot order.
