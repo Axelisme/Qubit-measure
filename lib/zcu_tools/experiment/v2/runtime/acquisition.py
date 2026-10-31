@@ -144,6 +144,12 @@ class AcquireOptions:
     logged if finite and acquisition actually ends early. Each retry logs its
     reason and next attempt number at warning level; early stops log the stop
     value and completed rounds at info level.
+    on_stop optionally observes external cancellation once per successful
+    cooperative return, including cancellation before any round. It runs
+    synchronously after acquire scope release and progress cleanup, before the
+    signal view is returned. Data-driven stop alone does not call it. Producer,
+    converter, update and KeyboardInterrupt failures do not call it. Observer
+    exceptions propagate unchanged without retry or changing Schedule outcome.
     """
 
     retry: int = 0
@@ -151,6 +157,7 @@ class AcquireOptions:
     progress_label: str = "rounds"
     progress_leave: bool | None = None
     stop_condition: StopCondition | None = None
+    on_stop: Callable[[], None] | None = None
 
 
 @dataclass
@@ -248,9 +255,11 @@ class AcquisitionRunner:
             disable=rounds == 1,
         )
         observation = _AcquireProgress(pbar)
+        external_stop = False
         try:
             for _ in range(retry + 1):
                 if self._schedule.check_stop_requested():
+                    external_stop = True
                     break
                 pbar.reset()
                 observation.attempts += 1
@@ -266,6 +275,7 @@ class AcquisitionRunner:
                         observation=observation,
                     )
                 except _AcquireStopped:
+                    external_stop = True
                     self._schedule.check_stop_requested()
                     break
                 except _CallbackError as exc:
@@ -280,6 +290,7 @@ class AcquisitionRunner:
                     continue
 
                 if self._schedule.check_stop_requested():
+                    external_stop = True
                     break
 
                 pbar.set_progress(rounds)
@@ -289,6 +300,8 @@ class AcquisitionRunner:
         finally:
             pbar.close()
 
+        if external_stop and options.on_stop is not None:
+            options.on_stop()
         return slot.view
 
     def _acquire_once(

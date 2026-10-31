@@ -48,12 +48,18 @@ class RunOptions(Generic[T_Raw]):
     sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
     requesting an explicit converter. Converter and live update exceptions
     propagate without retry or a failed acquisition outcome.
+    on_stop optionally observes external cancellation once per cooperative return,
+    after acquire scope release and progress cleanup, before returning the signal
+    view. It also runs when already stopped before acquisition. Pure data stop,
+    producer/converter/update failures and KeyboardInterrupt do not call it.
+    Observer exceptions propagate unchanged without retry or outcome changes.
     """
 
     retry: int = 0
     progress: bool = False
     stop_condition: StopCondition | None = None
     converter: Callable[[T_Raw], SignalArray] | None = None
+    on_stop: Callable[[], None] | None = None
 
 
 def _adapt_run_options(
@@ -69,6 +75,7 @@ def _adapt_run_options(
             retry=selected.retry,
             progress=selected.progress,
             stop_condition=selected.stop_condition,
+            on_stop=selected.on_stop,
         ),
     )
 

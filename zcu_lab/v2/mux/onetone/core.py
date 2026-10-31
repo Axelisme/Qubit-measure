@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
@@ -16,6 +16,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -372,7 +373,12 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         )
         return MuxOnetoneAnalysis(outcomes)
 
-    def run(self, config: MuxOnetoneCfg, *, context: RunContext) -> MuxOnetoneResult:
+    def run(self,
+        config: MuxOnetoneCfg,
+        *,
+        context: RunContext,
+        on_acquire_stop: Callable[[], None] | None = None,
+    ) -> MuxOnetoneResult:
         """Reset, read all selected tones together, and repeat at each offset.
 
         config supplies the base readout and common MHz offsets; it is unchanged.
@@ -433,7 +439,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 prog = builder.build()
                 # Collect all selected ADCs and average reps/rounds into this scan row.
                 _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_mux_signal, prog), rounds=cfg.rounds
+                    prog, raw2signal_fn=partial(_mux_signal, prog), rounds=cfg.rounds,
+                    options=AcquireOptions(on_stop=on_acquire_stop),
                 )
 
         # 4. Keep acquired rows and the original tone mapping, including partial scans.
