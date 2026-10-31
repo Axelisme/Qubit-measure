@@ -359,7 +359,8 @@ def _mux_channel_contents(
                 pulse
                 for pulse in event.pulses
                 if not addressed
-                or pfb_channel(profile, channel, pulse.frequency_ghz * 1000) in addressed
+                or pfb_channel(profile, channel, pulse.frequency_ghz * 1000)
+                in addressed
             )
             if addressed and not pulses:
                 frequencies = ", ".join(
