@@ -56,6 +56,16 @@ def _program(
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
 
 
+def test_shared_pulse_definitions_deduplicate_in_each_program():
+    shared = [_pulse("first"), _pulse("second")]
+    first = _program(shared)
+    second = _program(shared)
+    fresh = _program([_pulse("first"), _pulse("second")])
+    assert second.prog_list == fresh.prog_list == first.prog_list
+    first.compile()
+    assert first.prog_list == fresh.prog_list
+
+
 @pytest.mark.parametrize("timeline", [None, "drive"])
 @pytest.mark.parametrize(
     "delays, events, duration",
