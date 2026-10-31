@@ -35,7 +35,6 @@ class CycleProducer:
 
     axes/points retain exact integer values in row-major loop order for Repeat
     reduction and exact-value getters. One axis without points is its loop index.
-    interval_points retains unknown-input envelopes for Repeat accumulation.
     reconstruction is integer algebra for an affine lookup; selection is the
     captured selector and declared words. fixed_point holds numerator and shift.
     rounding_remainder marks a cross-loop shift's integer remainder, whose
@@ -46,7 +45,6 @@ class CycleProducer:
 
     axes: tuple[tuple[str, int], ...] = ()
     points: tuple[int, ...] | None = None
-    interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
     reconstruction: "TimeExpression | None" = None
     selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
     fixed_point: "tuple[TimeExpression, int] | None" = None
@@ -85,6 +83,7 @@ def cycle_variable(
     minimum: int | None,
     maximum: int | None,
     producer: CycleProducer | None = None,
+    *, interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None,
 ) -> CycleVariable:
     """Capture a producer's range once, without evaluating expression grids.
 
@@ -94,11 +93,7 @@ def cycle_variable(
     Recipe metadata survives independently for runtime reconstruction.
     """
     producer = CycleProducer() if producer is None else producer
-    axes, points, interval_points = (
-        producer.axes,
-        producer.points,
-        producer.interval_points,
-    )
+    axes, points = producer.axes, producer.points
     source: str | object = object()
     start, end = minimum, maximum
     low = high = (Fraction(0),)
@@ -285,7 +280,7 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
                 result, np.asarray(coefficient * variable.minimum, dtype=object)
             )
             continue
-        if not variable.producer.axes or variable.producer.interval_points is not None:
+        if not variable.producer.axes or variable.bounds.deviation_minimum != variable.bounds.deviation_maximum:
             return None
         local = dict(variable.producer.axes)
         if variable.producer.rounding_remainder:
@@ -388,7 +383,7 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
         return limits
     for variable in variables:
         recipe = variable.producer
-        if recipe.interval_points is not None or not recipe.axes:
+        if variable.bounds.deviation_minimum != variable.bounds.deviation_maximum or not recipe.axes:
             return None
         if not isinstance(variable.bounds.source, str):
             axes = dict(recipe.axes).keys()
@@ -410,9 +405,16 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
     constant = value.constant
     terms = []
     for variable, coefficient in value.terms:
-        if variable.producer.interval_points is not None:
-            index = int(upper == (coefficient > 0))
-            points = variable.producer.interval_points[index]
+        r = variable.bounds
+        if isinstance(r.source, str) and r.deviation_minimum != r.deviation_maximum:
+            deviations = r.deviation_maximum if upper == (coefficient > 0) else r.deviation_minimum
+            if r.start is None or r.end is None:
+                raise ValueError("runtime-only time has no compile-time bounds")
+            count = len(deviations)
+            points = tuple(
+                int(Fraction(r.start) + Fraction((r.end - r.start) * i, max(1, count - 1)) + deviation)
+                for i, deviation in enumerate(deviations)
+            )
             endpoint = cycle_variable(
                 variable.name,
                 min(points),
@@ -515,12 +517,10 @@ def interval_time(
         name,
         int(lower.min()),
         int(upper.max()),
-        CycleProducer(
-            tuple(axes.items()),
-            interval_points=(
-                tuple(int(v) for v in lower.flat),
-                tuple(int(v) for v in upper.flat),
-            ),
+        CycleProducer(tuple(axes.items())),
+        interval_points=(
+            tuple(int(v) for v in lower.flat),
+            tuple(int(v) for v in upper.flat),
         ),
     )
     return LinearTime(terms=((variable, 1),))
