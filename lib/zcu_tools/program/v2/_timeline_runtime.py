@@ -1079,8 +1079,6 @@ class RuntimeMath(TimedMacro):
         limits: tuple[int | None, int | None],
         target: str | None = None,
     ) -> RuntimeEnd:
-        if limits[0] is not None and limits[1] is not None:
-            self.check(limits[0], limits[1])
         register = self.allocate() if target is None else target
         self.operations.append(
             WriteRegOp(
@@ -1115,7 +1113,10 @@ class RuntimeMath(TimedMacro):
                         deferred.append(DeferredCoverage(proof.boundary, remaining))
                     else:
                         covers += (proof.boundary,)
-        return RuntimeEnd(register, *limits, covers, tuple(deferred), expression)
+        result = RuntimeEnd(register, *limits, covers, tuple(deferred), expression)
+        if result.minimum is not None and result.maximum is not None:
+            self.check(result.minimum, result.maximum)
+        return result
 
     @staticmethod
     def covers(end: Time, previous: Time) -> bool:

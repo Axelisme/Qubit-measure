@@ -38,8 +38,8 @@ class VariableRange:
     source: str | object
     start: int | None
     end: int | None
-    deviation_minimum: Fraction = Fraction(0)
-    deviation_maximum: Fraction = Fraction(0)
+    deviation_minimum: tuple[Fraction, ...] = (Fraction(0),)
+    deviation_maximum: tuple[Fraction, ...] = (Fraction(0),)
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ class CycleVariable:
         r = self.bounds
         if r.start is None or r.end is None:
             return None
-        return math.ceil(min(r.start, r.end) + r.deviation_minimum)
+        return expression_bounds(LinearTime(terms=((self, 1),))).minimum
 
     @property
     def maximum(self) -> int | None:
@@ -89,7 +89,7 @@ class CycleVariable:
         r = self.bounds
         if r.start is None or r.end is None:
             return None
-        return math.floor(max(r.start, r.end) + r.deviation_maximum)
+        return expression_bounds(LinearTime(terms=((self, 1),))).maximum
 
 
 def cycle_variable(
@@ -113,17 +113,21 @@ def cycle_variable(
     """
     source: str | object = object()
     start, end = minimum, maximum
-    low = high = Fraction(0)
-    if len(axes) == 1 and interval_points is None:
-        source = axes[0][0]
-        if points is not None:
-            start, end = points[0], points[-1]
-            if len(points) > 1:
-                deviations = [
-                    Fraction(value - start) - Fraction((end - start) * i, len(points) - 1)
-                    for i, value in enumerate(points)
-                ]
-                low, high = min(deviations), max(deviations)
+    low = high = (Fraction(0),)
+    if len(axes) == 1:
+        source, count = axes[0]
+        low = high = (Fraction(0),) * count
+        if interval_points is not None or points is not None:
+            lower, upper = interval_points if interval_points is not None else (points, points)
+            if lower is None or upper is None:
+                raise RuntimeError("point producer has no values")
+            start, end = lower[0], lower[-1]
+            line = tuple(
+                Fraction(start) + Fraction((end - start) * i, max(1, count - 1))
+                for i in range(count)
+            )
+            low = tuple(Fraction(value) - origin for value, origin in zip(lower, line, strict=True))
+            high = tuple(Fraction(value) - origin for value, origin in zip(upper, line, strict=True))
     return CycleVariable(
         name,
         VariableRange(source, start, end, low, high),
@@ -174,21 +178,38 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
             select(limit.minimum for limit in limits),
             select(limit.maximum for limit in limits),
         )
-    groups: dict[str | object, tuple[int, int]] = {}
-    lower = upper = Fraction(value.constant)
+    groups: dict[str | object, list[tuple[VariableRange, int]]] = {}
+    lower = upper = value.constant
     for variable, coefficient in value.terms:
         r = variable.bounds
         if r.start is None or r.end is None:
             raise ValueError("runtime-only time has no compile-time bounds")
-        start, end = groups.get(r.source, (0, 0))
-        groups[r.source] = start + coefficient * r.start, end + coefficient * r.end
-        deviations = coefficient * r.deviation_minimum, coefficient * r.deviation_maximum
-        lower += min(deviations)
-        upper += max(deviations)
-    for start, end in groups.values():
-        lower += min(start, end)
-        upper += max(start, end)
-    return CycleBounds(math.ceil(lower), math.floor(upper))
+        groups.setdefault(r.source, []).append((r, coefficient))
+    for source, terms in groups.items():
+        if isinstance(source, str):
+            count = len(terms[0][0].deviation_minimum)
+            lows = [Fraction(0)] * count
+            highs = [Fraction(0)] * count
+            for r, coefficient in terms:
+                if r.start is None or r.end is None:
+                    raise RuntimeError("bounded source lost its endpoints")
+                for i in range(count):
+                    line = Fraction(r.start) + Fraction((r.end - r.start) * i, max(1, count - 1))
+                    a = coefficient * (line + r.deviation_minimum[i])
+                    b = coefficient * (line + r.deviation_maximum[i])
+                    lows[i] += min(a, b)
+                    highs[i] += max(a, b)
+            lower += math.ceil(min(lows))
+            upper += math.floor(max(highs))
+        else:
+            for r, coefficient in terms:
+                if r.start is None or r.end is None:
+                    raise RuntimeError("bounded source lost its endpoints")
+                endpoints = coefficient * r.start, coefficient * r.end
+                lower += min(endpoints)
+                upper += max(endpoints)
+    return CycleBounds(lower, upper)
+
 
 def unbounded_time(value: TimeExpression) -> bool:
     """Return whether surviving identities lack author or producer bounds."""
@@ -329,14 +350,16 @@ def slack_variables(value: TimeExpression) -> list[str]:
 
 
 def point_time(
-    name: str, axes: dict[str, int], points: NDArray[np.int64]
+    name: str, axes: dict[str, int], points: NDArray[np.int64],
+    *, reconstruction: TimeExpression | None = None,
 ) -> TimeExpression:
     """Retain a known nonlinear grid as a bounded variable, or a scalar constant."""
     lower, upper = int(points.min()), int(points.max())
     if lower == upper:
         return LinearTime(lower)
     variable = cycle_variable(
-        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in points.flat)
+        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in points.flat),
+        reconstruction=reconstruction,
     )
     return LinearTime(terms=((variable, 1),))
 
@@ -527,7 +550,21 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
             for other, alternative in enumerate(limits)
         ):
             return unique[index]
-    return TimeChoice(unique, maximum)
+    choice = TimeChoice(unique, maximum)
+    axes = expression_axes(choice)
+    if len(axes) == 1 and all(
+        variable.bounds.source in axes for variable in time_variables(choice)
+    ):
+        points = evaluate_time(choice, axes)
+        if points is not None:
+            return point_time("loop extremum", axes, points, reconstruction=choice)
+        grids = [interval_arrays(value, axes) for value in unique]
+        select = np.maximum if maximum else np.minimum
+        lower, upper = grids[0].minimum, grids[0].maximum
+        for grid in grids[1:]:
+            lower, upper = select(lower, grid.minimum), select(upper, grid.maximum)
+        return interval_time("loop extremum", axes, lower, upper)
+    return choice
 
 
 def substitute_time(

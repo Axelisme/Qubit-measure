@@ -536,10 +536,16 @@ class TimelineBook:
                     terms=((cycle_variable(macro.dst, None, None), 1),)
                 )
             return
-        self.source_expressions[macro.dst] = add_time(
+        expression = add_time(
             source_expression(prog, macro.lhs),
             rhs if macro.op == "+" else scale_time(rhs, -1),
         )
+        if macro.dst not in prog._time_bounds.allowed.get(id(macro), ()):
+            # Author arithmetic is a runtime recipe, not a certified loop range.
+            expression = LinearTime(
+                terms=((cycle_variable(macro.dst, None, None, reconstruction=expression), 1),)
+            )
+        self.source_expressions[macro.dst] = expression
 
     def set_end(self, name: str, end: Time) -> None:
         self.math.check_end(end)
