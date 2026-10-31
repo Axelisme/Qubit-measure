@@ -846,7 +846,8 @@ class TimelineBranch(Macro):
         self.book = book
         self.by = by
         self.indexed_cases = cases
-        self.cases: list[list[Macro]] = []
+        # Producer and parallel-effect audits visit declared bodies before prepare.
+        self.cases: list[list[Macro]] = list(cases.values())
         self.name = name
         self.prepared: list[list[PreparedTimelineMacro]] = []
 
