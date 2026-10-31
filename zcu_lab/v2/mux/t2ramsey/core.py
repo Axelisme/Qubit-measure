@@ -292,9 +292,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 builder.emit(Reset("reset", cfg.reset))
             timelines = [f"pi2_first_{index}" for index in indices]
             builder.fork("default", into=timelines)
-            for index, drive, timeline in zip(
-                indices, drives, timelines, strict=True
-            ):
+            for index, drive, timeline in zip(indices, drives, timelines, strict=True):
                 builder.emit(
                     Pulse(
                         f"pi2_first_{index}",
