@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import AsmInst, Macro, QickSweep1D, WriteReg
+from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -557,17 +558,26 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
-def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(kind):
+@pytest.mark.parametrize("runtime_selector", [False, True])
+def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
+    kind, runtime_selector
+):
     pulse = _negative_selected(kind)
     following = Pulse(
         "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
-        prog.add_loop("index", 2)
+        prog.add_loop("scan" if runtime_selector else "index", 2)
+        if runtime_selector:
+            prog.add_reg("index")
         prog.add_reg("origin")
 
     def body(prog):
+        if runtime_selector:
+            # Bitwise author arithmetic has a certified range, not known points.
+            with prog.time_producer("index", CycleBounds(0, 1)):
+                prog.write_reg_op("index", "scan", "AND", 1)
         prog.write_reg("origin", 100)
         prog.delay_timeline("origin", timeline="default")
         prog.fork("default", into="other")
