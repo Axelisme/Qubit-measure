@@ -73,7 +73,8 @@ class PreparedRunData:
     values and declaration identity. labber_metadata carries raw comment and tags,
     not a cfg envelope. labber_layout is common or independent, from the spec.
     experiment_tag is the persistence declaration identity, independent of
-    mutable Labber export tags. Construction copies mappings and cfg/metadata but shares large arrays.
+    mutable Labber export tags. Construction copies mappings and cfg/metadata
+    but shares large arrays.
     Callers must not mutate arrays during saving. Preparation performs no I/O.
     """
 
@@ -115,7 +116,8 @@ class PreparedRunData:
         """Return the prepared arrays with validated docs/cfg and docs/metadata.
 
         metadata is the saving record's JSON document. Validate the native schema
-        and declaration tag while retaining every key. Invalid cfg or metadata raises ValueError;
+        and declaration tag while retaining every key. Invalid cfg or metadata
+        raises ValueError;
         no live state is captured, paths chosen or files written. Unknown prepared
         docs/groups and container attributes remain intact.
         """
@@ -350,7 +352,8 @@ def restore_run(
     Validate the experiment tag, required variables, units/axes/dtypes/shapes and
     cfg envelope. Keep the original metadata JSON detached from the container;
     readers validate requested fields through RunMetadataContent or the complete
-    document through RunMetadata.model_validate. Reconstruct and validate Result before concrete cfg validation;
+    document through RunMetadata.model_validate. Reconstruct and validate Result
+    before concrete cfg validation;
     grouped builders receive only loaded arrays. Extra variables/unknown cfg keys
     remain in the Container, not the typed record. Malformed docs or data raise
     ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
