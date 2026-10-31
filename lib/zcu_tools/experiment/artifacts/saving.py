@@ -28,7 +28,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.ledger_models import validate_origin
 from zcu_tools.utils import atomic_replace
 
-from ..metadata import RunMetadata
+from ..metadata import RunMetadata, validate_run_metadata
 from ..records import RunRecord
 from .analysis_document import encode_analysis_document
 from .items import (
@@ -93,7 +93,9 @@ def save_artifacts(
     """Rewrite every selected output, isolate failures, then append one saved event.
 
     record.metadata supplies fixed run/context/acquisition evidence; missing
-    or invalid metadata raises ValueError before writes. layout supplies
+    or invalid schema/nonfinite JSON raises ValueError before writes. Successful
+    DataItems also require their declaration tag to match; analysis-only selections
+    validate schema/JSON without comparing a tag. layout supplies
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
@@ -110,7 +112,7 @@ def save_artifacts(
     Return every output attempt, even when some fail. Ledger append errors
     propagate after the writes, without deleting files or returning a receipt.
     """
-    metadata = RunMetadata.model_validate(record.metadata)
+    metadata = validate_run_metadata(record.metadata)
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()

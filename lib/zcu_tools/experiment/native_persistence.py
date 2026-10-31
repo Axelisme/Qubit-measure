@@ -37,6 +37,7 @@ from .metadata import (
     RunMetadataContent,
     RunSnapshot,
     validate_cfg_snapshot,
+    validate_run_metadata,
 )
 from .records import RunRecord
 
@@ -105,7 +106,7 @@ class PreparedRunData:
         raise ValueError naming /docs/metadata. Extra keys remain in the caller's
         document for writing, not in this typed projection.
         """
-        projected = _validate_metadata_doc(metadata)
+        projected = validate_run_metadata(metadata)
         if projected.experiment != self.experiment_tag:
             raise ValueError(
                 f"/docs/metadata: experiment {projected.experiment!r} does not match {self.experiment_tag!r}"
@@ -221,7 +222,7 @@ def save_run(
     raise FileExistsError unless replace=True. Atomic single-file publication
     and I/O errors belong to datafile. No live state or legacy format is guessed.
     """
-    metadata = _validate_metadata_doc(source.metadata)
+    metadata = validate_run_metadata(source.metadata)
     if metadata.experiment != spec.tag:
         raise ValueError(
             f"{destination}: experiment {metadata.experiment!r} does not match {spec.tag!r}"

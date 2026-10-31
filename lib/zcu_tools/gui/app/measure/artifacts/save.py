@@ -18,7 +18,11 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.metadata import RunMetadataContent, has_native_metadata
+from zcu_tools.experiment.metadata import (
+    RunMetadataContent,
+    has_native_metadata,
+    validate_run_metadata,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (
@@ -157,7 +161,9 @@ class SaveService:
         tab_id identifies an existing idle tab with native metadata.
         comment=None retains its annotation; origin attributes this command.
         Missing evidence or busy raises FailedPreconditionError before mapping
-        or I/O. Recorded names select outputs under the injected current roots.
+        or I/O. Invalid metadata schema or nonfinite JSON raises ValueError before
+        annotation mutation or ledger preparation. Recorded names select outputs
+        under the injected current roots.
         Retain the historical run_id and point for all
         output paths and the saved event, regardless of later global selections.
         Output failures appear in the complete report; ledger errors
@@ -184,7 +190,9 @@ class SaveService:
         mapping, I/O or annotation mutation. No live entry, point or storage
         capability is required. All selected outputs and the saved event use the
         historical run_id and point, not the current global point.
-        Invalid pane content raises TypeError/ValueError.
+        Invalid metadata schema or nonfinite JSON raises ValueError before
+        annotation mutation or ledger preparation. Invalid pane content raises
+        TypeError/ValueError.
         comment=None retains the annotation. origin attributes this command.
         All mapping, PNG encoding, writes and ledger append finish before return.
         Output failures retain diagnostics and do not stop independent outputs;
@@ -270,6 +278,7 @@ class SaveService:
                 "Run has no historical native metadata",
                 reason_code="storage_unavailable",
             )
+        validate_run_metadata(record.metadata)
         return record
 
     def _capture_data(self, tab_id: str, key: ArtifactKey, comment: str) -> DataItem:

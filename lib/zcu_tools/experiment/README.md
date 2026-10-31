@@ -167,6 +167,11 @@ NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保
 
   `AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
 
+`metadata.validate_run_metadata(document)` 在實際 Save 前驗證完整 schema 與原文件的有限 JSON，不修改作者 key。
+GUI 在修改 comment 或準備 ledger 前呼叫它，native 與 artifact saver 也使用同一入口。
+Native 資料保存另比對 declaration tag；analysis-only Save 不比對 tag。
+Eligibility 與 Load 仍使用 key presence 或逐欄讀取，不提前驗證未使用內容。
+
 `RunMetadata` 與 workflow operation 只記各自邊界的事實，不要求作者使用特定 acquisition 寫法。
 Native schema 不解讀舊文件的 `acquisitions` key。Load 不改原檔，record 保留該 key，重存時也保留。
 ProgramBuilder 的 retry 與 data-driven early stop 改由日誌提供診斷。

@@ -21,7 +21,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticUndefined, SchemaValidator
 
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import JsonObject, json_text
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.context.library import LibraryContent
 from zcu_tools.resources.entry import ParameterContent
@@ -180,6 +180,20 @@ class RunMetadata(BaseModel):
             if parsed.utcoffset() != timedelta(0):
                 raise ValueError("timestamp must be UTC ISO")
         return value
+
+
+def validate_run_metadata(document: JsonObject) -> RunMetadata:
+    """Validate finite JSON and the complete native schema before Save, without I/O.
+
+    Return a typed projection without mutating the document; persist the original,
+    including unknown author keys. Invalid JSON or fields raise ValueError naming
+    /docs/metadata. This does not compare the experiment declaration tag.
+    """
+    try:
+        json_text(document)
+        return RunMetadata.model_validate(document)
+    except (ValueError, TypeError) as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
 
 
 def has_native_metadata(document: Mapping[str, object]) -> bool:

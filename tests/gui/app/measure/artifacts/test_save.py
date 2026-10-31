@@ -208,6 +208,45 @@ def test_data_save_rejects_wrong_experiment_before_files_or_ledger(
     assert not session.entry.database_path.exists()
 
 
+@pytest.mark.parametrize("command", ["save_data", "save_artifacts"])
+@pytest.mark.parametrize("invalid_field", ["completion", "author_notes"])
+def test_save_rejects_invalid_schema_before_comment_or_historical_entry_creation(
+    native_session: NativeSaveSession, tmp_path: Path, command: str, invalid_field: str
+) -> None:
+    session = native_session
+    record = require_record(session.state.get_tab("tab").run)
+    if invalid_field == "completion":
+        record.metadata["completion"] = "invalid"
+    else:
+        record.metadata["author_notes"] = {"nested": [float("inf")]}
+    record.metadata["snapshot"] = {
+        "entry_name": "historical",
+        "point": None,
+        "roles": {},
+    }
+    original_metadata = json.dumps(record.metadata)
+    comment = session.state.get_tab("tab").save.comment
+    snapshots = session.state.get_artifact_snapshots("tab")
+
+    save = (
+        session.control.save_data
+        if command == "save_data"
+        else session.control.save_artifacts
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        save("tab", comment="rejected", origin=GUI_ORIGIN)
+
+    assert (
+        session.state.get_tab("tab").save.comment,
+        (tmp_path / "result/historical").exists(),
+        (tmp_path / "Database/historical").exists(),
+    ) == (comment, False, False)
+    assert session.state.get_artifact_snapshots("tab") == snapshots
+    assert session.entry.ledger.events() == ()
+    assert session.completions == session.artifact_completions == []
+    assert json.dumps(record.metadata) == original_metadata
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
