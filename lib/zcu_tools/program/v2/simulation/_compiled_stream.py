@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import NoReturn
 
 from ..base import MyProgramV2
 from ..ir.instruction_fields import CondCode
@@ -12,7 +13,6 @@ from ..ir.instructions import (
     JumpInst,
     LabelInst,
     MetaInst,
-    NopInst,
     RegWriteInst,
     TestInst,
 )
@@ -340,22 +340,18 @@ def _validate_branch(
             r
             for r in records[first:last]
             if isinstance(r.instruction, BaseInst)
-            and not isinstance(r.instruction, NopInst)
         ]
 
-    def fail(record: DecodedInstruction) -> None:
+    def fail(record: DecodedInstruction) -> NoReturn:
         raise ValueError(
             f"{type(record.instruction).__name__} at preopt {record.position}, loops={record.loops}, cases={record.cases}, source={record.source!r}: branch dispatch disagrees with markers"
         )
 
     def entry(index: int) -> LabelRef:
-        if index >= len(records) or not isinstance(
-            records[index].instruction, LabelInst
-        ):
-            fail(records[min(index, len(records) - 1)])
-        inst = records[index].instruction
+        record = records[min(index, len(records) - 1)]
+        inst = record.instruction
         if not isinstance(inst, LabelInst):
-            raise ValueError("missing branch entry label")
+            fail(record)
         return LabelRef(inst.name)
 
     targets = [entry(a + 1) for a, _ in branch.cases]

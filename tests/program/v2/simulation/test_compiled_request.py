@@ -500,6 +500,26 @@ def test_runtime_adc_word_requires_one_common_window_frequency_image(
         ].frequency_mhz == pytest.approx((100,), abs=1e-5)
 
 
+@pytest.mark.parametrize("boundary_tick", [7, 28])
+@pytest.mark.parametrize("multiple_routes", [False, True])
+def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
+    boundary_tick, multiple_routes
+):
+    def initialize(p):
+        p.declare_gen(1, nqz=1)
+        p.add_pulse(0, "boundary", style="const", freq=3000, phase=0, gain=0.1, length=7 / 430.08)
+        p.add_pulse(1 if multiple_routes else 0, "inside", style="const", freq=100, phase=0, gain=0.1, length=14 / 430.08)
+
+    def body(p):
+        for tick, channel, name in sorted([(boundary_tick, 0, "boundary"), (14, 1 if multiple_routes else 0, "inside")]):
+            p.pulse(channel, name, t=tick / 430.08)
+
+    prog, env = program(body, initialize, reps=1, readout_length=10 / 307.2, trigger_time=14 / 430.08, routes=((0, 0), (1, 0)) if multiple_routes else ((0, 0),))
+    read = request(prog, env).materialize_point(0).readouts[0]
+    assert read.generator_channels == ((1,) if multiple_routes else (0,))
+    assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
+
+
 def test_raw_trigger_count_mismatch_fails_with_static_and_actual_per_shot():
     def body(p):
         p.pulse(0, "p")
