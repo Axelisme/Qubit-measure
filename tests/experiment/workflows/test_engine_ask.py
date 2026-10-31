@@ -110,6 +110,8 @@ def test_answer_continues_same_author_with_live_tunables(rig: Rig) -> None:
     rig.start(script)
     with running(rig) as future:
         request_id = pending(rig)
+        status = rig.engine.status()
+        assert status is not None and status.lifecycle == "waiting"
         rig.engine.update_tunables(
             "run", Tunables(value=8), expected_revision=0, actor=Actor("agent", "test")
         )
