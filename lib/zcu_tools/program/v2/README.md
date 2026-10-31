@@ -232,6 +232,10 @@ builder.emit(drive)  # Uses default again.
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
 可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
 Runtime 合流用 TEST 與條件 register 寫回，算術使用移位與加減。
+Runtime 事件直接寫 s14，沿 QICK preprocess 接縫把 `t_regs['t']` 設為 `s_out_time`。
+Pulse、ConfigReadout、Trigger 的 expand 仍由 QICK 負責，不另配事件時間 data register。
+同基準的後續事件使用 s14 差值增量。Native／raw 寫 s14 與 branch 合流會使記錄失效，下一個事件重新載入基準。
+原生 sweep 時間仍使用 QICK sweep register。IR 會刪除無條件、無 UF 且無其他效果的純 register 自我複製。
 End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
 每個 sweep／shot 重新建立所需狀態。`timeline_inc("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
 作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
@@ -356,10 +360,12 @@ Branch case 內仍禁止任何經 owner 推進 reference 的操作，包括 Repe
 編譯器只按已錄製的 body 結構選 lowering，不分析定點，也不重播 preprocess。
 當 body 頂層最後一個操作是對循環 timeline 的 `delay_by_timeline()`，且入口結尾為常數 0，
 不攜帶循環尾端 register。固定圈長直接編成每圈的常數 `TIME inc_ref`。
-其他情況使用 shot-local register 累加器，入口以母 timeline 結尾初始化，每圈存回相對 reference 的最晚結尾。
-中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步其他 timeline 或沒有 delay_by_timeline 都走累加器。
+其他情況使用 s14 作循環時間指針，入口載入母 timeline 結尾，每圈推進到新的最晚結尾，離開時才捕獲尾端。
+簡單固定圈長 body 只留下事件與 s14 字面增量，不每圈搬運尾端 register。
+Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，保留 shot-local 原點 snapshot 供恢復。
+中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步其他 timeline 或沒有 delay_by_timeline 都走指針路徑。
 若 body 以循環 timeline 的 delay_by_timeline 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 delay_by_timeline。
-編譯器不自行插入它。非定點的 register lowering 保留既有 IR 展開與 branch-address DMEM 成本，尚未改成 s14 指針。
+編譯器不自行插入它。IR 依實際時間窗口決定展開份數，branch-address DMEM 成本維持原契約。
 
 `n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
 Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。

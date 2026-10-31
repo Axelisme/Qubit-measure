@@ -63,6 +63,10 @@ def _trigger_static_cycles(
 class TimelineObservedPulse(Pulse):
     """Delegate native pulse behavior, observing only its public timing inputs."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: Pulse):
         # Directly constructed QICK Pulse macros may omit the optional tag.
         super().__init__(
@@ -141,10 +145,11 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            start = (
-                end
+            start = self.book.math.event_time(
+                end,
+                0.0
                 if self.relative_t == "auto"
-                else self.book.math.add(end, placement_time(prog, self.relative_t))
+                else placement_time(prog, self.relative_t),
             )
             end_limits = optional_time_bounds(prog, start)
             previous_limits = optional_time_bounds(prog, previous)
@@ -161,7 +166,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
-            self.source.t_regs["t"] = self.book.math.cycles(start).register
+            self.source.t_regs["t"] = "s_out_time"
             finish = self.book.math.add(
                 start,
                 align_end(
@@ -223,6 +228,10 @@ class TimelinePlacedPulse(TimelineObservedPulse):
 
 
 class TimelinePlacedConfig(ConfigReadout):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, timeline: str, source: ConfigReadout):
         super().__init__(ch=source.ch, name=source.name, tag=source.tag)
         self.book = book
@@ -235,13 +244,16 @@ class TimelinePlacedConfig(ConfigReadout):
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
+            start = self.book.math.event_time(
+                origin, placement_time(prog, self.relative_t)
+            )
             self.event_end = EventEnd(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
-            self.source.t_regs["t"] = start.register
-            self.book.set_end(self.timeline, self.book.math.maximum(0.0, start))
+            self.source.t_regs["t"] = "s_out_time"
+            finish = self.book.math.snapshot(start)
+            self.book.set_end(self.timeline, self.book.math.maximum(0.0, finish))
             return
         self.source.t = origin + placement_time(prog, self.relative_t)
         self.source.preprocess(prog)
@@ -263,6 +275,10 @@ class TimelinePlacedConfig(ConfigReadout):
 
 
 class TimelinePlacedTrigger(Trigger):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def get_time_param(self, name: str) -> QickParam:
         if name == "t" and self.runtime_start is not None:
             return self.book.math.time_parameter(self.runtime_start)
@@ -290,11 +306,13 @@ class TimelinePlacedTrigger(Trigger):
         if self.relative_width is not None:
             self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
+            start = self.book.math.event_time(
+                origin, placement_time(prog, self.relative_t)
+            )
             self.runtime_start = start
             self.t = self.book.math.preprocess_time(start)
             super().preprocess(prog)
-            self.t_regs["t"] = start.register
+            self.t_regs["t"] = "s_out_time"
             duration = self.get_time_param("width")
             end = self.book.math.add(start, duration)
             for ch in self.ros:

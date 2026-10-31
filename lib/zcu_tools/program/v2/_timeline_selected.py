@@ -58,6 +58,10 @@ class TimelineSelectedPulse(TimedMacro):
     Invalid selector/producer provenance or channel overlap fails at compile.
     """
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,

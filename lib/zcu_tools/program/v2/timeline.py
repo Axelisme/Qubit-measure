@@ -24,6 +24,8 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
+    RepeatTimelineBody,
+    RepeatTimelineCapture,
     RepeatTimelineEnter,
     RepeatTimelineExit,
     TimelineAdvance,
@@ -47,6 +49,7 @@ from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
+from .ir.instructions import BaseInst, RegWriteInst
 from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
@@ -138,6 +141,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def _make_asm(self) -> None:
         self._timeline_register_pool = []
+        self._timeline_book.output_time = None
         self._time_bounds = ProducerBounds()
         for macro in self.macro_list:
             self._observe_time_producers(macro)
@@ -190,6 +194,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                     self._observe_time_producers(child)
 
     def _add_asm(self, inst, addr_inc=1):
+        instruction = BaseInst.from_dict(inst)
+        if inst["CMD"] in ("JUMP", "CALL", "RET") or (
+            "s14" in instruction.reg_write
+            and not (
+                isinstance(instruction, RegWriteInst) and instruction.is_pure_self_copy
+            )
+        ):
+            self._timeline_book.output_time = None
         self._time_bounds.emission(
             inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
         )
@@ -811,6 +823,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
             self.append_macro(fixed)
+        self.append_macro(RepeatTimelineBody(entry))
         body_start = len(self.macro_list)
         try:
             yield
@@ -821,6 +834,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 bool(body)
                 and type(body[-1]) is TimelineSync
                 and body[-1].timeline == parent
+            )
+            entry.accumulator.simple = all(
+                isinstance(macro, (TimelinePlacedPulse, TimelineAdvance))
+                and macro.timeline == parent
+                for macro in body
             )
             self.append_macro(
                 RepeatTimelineExit(
@@ -837,6 +855,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 self.close_inner_loop(name, name, n)
             elif fixed is not None:
                 self.append_macro(fixed.closing)
+            self.append_macro(RepeatTimelineCapture(entry))
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).

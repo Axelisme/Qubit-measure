@@ -331,6 +331,12 @@ class LoopTimelineFrame:
     for the backedge proof, in relative integer cycles. advance is cumulative
     reference movement in cycles; debits retain its execution-position plans.
     written_channels distinguishes generated tails from untouched outer tails.
+    body_math starts empty and retains the prepared RuntimeMath plans emitted
+    in this frame's body, in preparation order. Loop exit may rewrite these plans
+    to s14-only pointer updates when their event offsets and duration are proven
+    constant. recording starts False and becomes True at the body boundary,
+    after the iteration-origin capture. Only the active innermost frame records
+    plans; popping the frame at exit ends recording before exit plans prepare.
     """
 
     parent: str
@@ -349,6 +355,8 @@ class LoopTimelineFrame:
     advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
+    body_math: list[RuntimeMath] = field(default_factory=list)
+    recording: bool = False
 
 
 @dataclass(frozen=True)
@@ -393,6 +401,7 @@ class TimelineBook:
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
+        self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}

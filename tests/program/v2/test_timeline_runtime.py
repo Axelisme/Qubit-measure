@@ -208,6 +208,54 @@ class AllocateTime(Macro):
         pass
 
 
+def test_runtime_events_load_s14_then_increment_for_shared_origin():
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.timeline_inc("duration")
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", t=40 / 430.08, timeline="other")
+
+    prog = program(body)
+    assert [waves(s) for s in shots(prog)] == [[100, 140]] * 3
+    writes = [i for i in prog.prog_list if i.get("DST") == "s14"]
+    assert len(writes) == 2
+    assert writes[0]["SRC"] == "op"
+    assert writes[1]["OP"] == "s14 + #40"
+    assert all("TIME" not in i for i in prog.prog_list if i["CMD"] == "WPORT_WR")
+
+
+@pytest.mark.parametrize("clobber", ["native", "raw"])
+def test_runtime_event_restores_output_time_after_clobber(clobber):
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.timeline_inc("duration")
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", timeline="default")
+        if clobber == "native":
+            prog.append_macro(WriteReg(dst="s_out_time", src=7))
+        else:
+            prog.asm_inst({"CMD": "REG_WR", "DST": "s14", "SRC": "imm", "LIT": "#7"})
+        prog.pulse(0, "p0", t=40 / 430.08, timeline="other")
+
+    result = shots(program(body, reps=2))
+    assert [waves(shot) for shot in result] == [[100, 140]] * 6
+
+
+def test_runtime_event_restores_output_time_after_branch_merge():
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.timeline_inc("duration")
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            for index in range(3):
+                with branch.case(index):
+                    prog.pulse(0, "p0", t=index * 40 / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, reps=2))
+    assert [waves(shot) for shot in result] == [[100, 208], [140, 208], [180, 208]] * 2
+
+
 def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
     def body(prog):
         prog.write_reg("duration", 40)
