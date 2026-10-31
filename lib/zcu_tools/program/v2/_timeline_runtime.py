@@ -152,6 +152,14 @@ class DeferredCoverage:
     cycles: int
 
 
+@dataclass(frozen=True)
+class _CycleStorage:
+    """An immutable runtime operand: register name plus literal cycle offset."""
+
+    register: str
+    offset: int = 0
+
+
 @dataclass(frozen=True, init=False)
 class RuntimeEnd:
     """A captured cycle register and its immutable proof expression.
@@ -170,35 +178,43 @@ class RuntimeEnd:
     Final ends must be nonnegative; arithmetic intermediates may be signed32.
     """
 
-    register: str
-    offset: int
+    storage: _CycleStorage
     covers: tuple["Time", ...]
     deferred: tuple[DeferredCoverage, ...]
     expression: TimeExpression
 
     def __init__(
         self,
-        register: str,
+        storage: str | _CycleStorage,
         minimum: int | None = None,
         maximum: int | None = None,
         covers: tuple["Time", ...] = (),
         deferred: tuple[DeferredCoverage, ...] = (),
         expression: TimeExpression | None = None,
-        *,
-        offset: int = 0,
     ) -> None:
         # Endpoints seed a fresh producer only. Existing algebra is authoritative.
+        if isinstance(storage, str):
+            storage = _CycleStorage(storage)
         if expression is None:
             expression = (
                 TimeVariable(minimum)
                 if minimum is not None and minimum == maximum
-                else TimeVariable(terms=((cycle_axis(register, minimum, maximum), 1),))
+                else TimeVariable(terms=((cycle_axis(storage.register, minimum, maximum), 1),))
             )
-        object.__setattr__(self, "register", register)
-        object.__setattr__(self, "offset", offset)
+        object.__setattr__(self, "storage", storage)
         object.__setattr__(self, "covers", covers)
         object.__setattr__(self, "deferred", deferred)
         object.__setattr__(self, "expression", expression)
+
+    @property
+    def register(self) -> str:
+        """Return the name of the underlying runtime register."""
+        return self.storage.register
+
+    @property
+    def offset(self) -> int:
+        """Return the literal cycle displacement from the underlying register."""
+        return self.storage.offset
 
     @property
     def minimum(self) -> int | None:
@@ -612,7 +628,7 @@ class RuntimeMath(TimedMacro):
             )
             base = replace(
                 base,
-                offset=0,
+                storage=_CycleStorage(base.register),
                 expression=add_time(runtime_expression(base), TimeVariable(-base.offset)),
                 covers=(),
                 deferred=(),
@@ -1311,16 +1327,13 @@ class RuntimeMath(TimedMacro):
         target: str | None,
     ) -> tuple[str, int]:
         """Lower operand storage, retaining stable register-plus-literal aliases."""
-        literal = operator in ("+", "-") and isinstance(right, int)
-        if literal and operator == "+" and target is None and left.register != "s_out_time":
-            return left.register, left.offset + right
-        if not literal:
+        if isinstance(right, int) and operator in ("+", "-"):
+            if operator == "+" and target is None and left.register != "s_out_time":
+                return left.register, left.offset + right
+            rhs: int | str = right + left.offset if operator == "+" else right - left.offset
+        else:
             left = self.cycles(left)
-        if isinstance(right, RuntimeEnd):
-            right = self.cycles(right)
-        rhs = right.register if isinstance(right, RuntimeEnd) else right
-        if literal:
-            rhs = right + left.offset if operator == "+" else right - left.offset
+            rhs = self.cycles(right).register if isinstance(right, RuntimeEnd) else right
         register = self.allocate() if target is None else target
         self.operations.append(
             WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
@@ -1367,7 +1380,7 @@ class RuntimeMath(TimedMacro):
                     else:
                         covers += (proof.boundary,)
         result = RuntimeEnd(
-            register, *limits, covers, tuple(deferred), expression, offset=offset
+            _CycleStorage(register, offset), *limits, covers, tuple(deferred), expression
         )
         if result.minimum is not None and result.maximum is not None:
             self.check(result.minimum, result.maximum)

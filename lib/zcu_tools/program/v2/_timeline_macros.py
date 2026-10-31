@@ -485,7 +485,7 @@ class TimelineSync(Delay):
         else:
             super().preprocess(prog)
 
-    def expand(self, prog) -> list[Macro]:
+    def expand(self, prog) -> list[AsmInst]:
         """Advance by the stored base and any nonnegative literal displacement."""
         operations = super().expand(prog)
         if isinstance(self.t, RuntimeEnd) and self.literal_advance:
@@ -604,10 +604,7 @@ class TimelineRepeatExit(Macro):
                 debit = _bounds(frame.advance)[0] * self.count
                 runtime[name] = (
                     RuntimeEnd(
-                        end.register,
-                        0,
-                        max(0, round((upper - debit) * get_fclk(prog))),
-                        offset=end.offset,
+                        end.storage, 0, max(0, round((upper - debit) * get_fclk(prog)))
                     )
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
@@ -668,7 +665,7 @@ class TimelineRepeatExit(Macro):
                             ),
                         )
                     )
-                    current[ch] = RuntimeEnd(end.register, 0, upper, offset=end.offset)
+                    current[ch] = RuntimeEnd(end.storage, 0, upper)
             else:
                 for ch, end in initial.items():
                     if ch not in written:
