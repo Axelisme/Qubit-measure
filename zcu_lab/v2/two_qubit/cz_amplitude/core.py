@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -29,21 +28,20 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg, dual_line_drive
+from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
     terminal_counts,
     validate_classifiers,
 )
-from .analysis import CZAmplitudeAnalysis, analyze_return
+from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
 
 
 class CZAmplitudeCfg(ConfigBase):
@@ -156,86 +154,6 @@ class CZAmplitudeResult:
     sums: NDArray[np.float64]
 
 
-def build_program(
-    cfg: CZAmplitudeCfg, soccfg: QickConfig, scale: float, *, heralded: bool
-) -> TimelineProgramV2:
-    """Compile optional reset → optional herald → B11 → CZ → Xπ⊗Xπ → terminal.
-
-    scale multiplies both signed gains, preserving the remaining pulse fields.
-    Every call creates fresh modules. Herald and terminal reuse one mux object.
-    Circle + radius calibration is required before build. No acquisition occurs.
-    """
-    validate_classifiers(cfg.readout, cfg.roles)
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    builder.emit(Pulse("prepare_f1", cfg.x180_f1))
-    builder.emit(Pulse("prepare_f2", cfg.x180_f2))
-    drive = DualLineCfg(
-        f1=cfg.drive.f1.with_updates(gain=float(cfg.drive.f1.gain) * scale),
-        f2=cfg.drive.f2.with_updates(gain=float(cfg.drive.f2.gain) * scale),
-    )
-    builder.emit(dual_line_drive(drive, frequency=float(drive.f1.freq), name="cz"))
-    builder.emit(Pulse("contrast_f1", cfg.x180_f1))
-    builder.emit(Pulse("contrast_f2", cfg.x180_f2))
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: CZAmplitudeCfg, *, context: RunContext, heralded: bool
-) -> NDArray[np.float64]:
-    """Scan common gain scales and return unchanged acquisition-side count sums.
-
-    Shape is (Ns,3,3), or (Ns,3,3,3,3) with herald. Live P00 uses the accumulated
-    terminal counts, selecting herald (g,g) for the heralded version. Schedule
-    owns a cfg copy and stop handling. Host does not loop rounds.
-    """
-    validate_classifiers(config.readout, config.roles)
-    scales = sweep2array(config.scales)
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "Common gain scale",
-        "P(g,g) | herald (g,g)" if heralded else "P(g,g)",
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
-        viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
-
-    shape = (len(scales),) + ((3, 3, 3, 3) if heralded else (3, 3))
-    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        for scale, step in sched.scan("scale", scales.tolist()):
-            prog = build_program(step.cfg, context.soccfg, scale, heralded=heralded)
-            step.run_acquire_summed(
-                prog,
-                context.soc,
-                processor=shot_sums(
-                    prog,
-                    [
-                        Classify(label, tone)
-                        for label in (
-                            ("herald", "terminal") if heralded else ("terminal",)
-                        )
-                        for tone in (step.cfg.roles.f1_tone, step.cfg.roles.f2_tone)
-                    ],
-                ),
-                rounds=step.cfg.rounds,
-                options=RunOptions(),
-            )
-    return buffer.array
-
-
 def restore_result(data: GroupedLoadData[CZAmplitudeCfg]) -> CZAmplitudeResult:
     """Restore count sums; old per-shot IQ files without sums raise ValueError."""
     sums = data.variable("sums")
@@ -277,10 +195,36 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         The cfg is unchanged. Completed rounds survive cancellation; check the
         RunContext stop signal for acquisition errors before interpreting results.
         """
-        return CZAmplitudeResult(
-            sweep2array(config.scales),
-            acquire_counts(config, context=context, heralded=False),
-        )
+        validate_classifiers(config.readout, config.roles)
+        scales = sweep2array(config.scales)
+        viewer = live_line(context.plots, "measurement", "Common gain scale", "P(g,g)")
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            counts = sums
+            viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
+
+        buffer = SignalBuffer((len(scales), 3, 3), dtype=np.float64, on_update=update_view)
+        builder = TimelineBuilder(context.soccfg, reps=config.reps, initial_delay=config.initial_delay, relax_delay=config.relax_delay)
+        scale = builder.add_sweep("scale", config.scales)
+        drive_f1 = Pulse("cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale)
+        drive_f2 = Pulse("cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale)
+        readout = MuxReadout("readout", config.readout)
+        if config.reset is not None:
+            builder.emit(Reset("reset", config.reset))
+        builder.sync()
+        builder.emit(Join(Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)))
+        builder.emit(Join(drive_f1, drive_f2))
+        builder.emit(Join(Pulse("contrast_f1", config.x180_f1), Pulse("contrast_f2", config.x180_f2)))
+        builder.emit(readout, tag="terminal")
+        prog = builder.build()
+        axes = [
+            Classify("terminal", config.roles.f1_tone),
+            Classify("terminal", config.roles.f2_tone),
+        ]
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            sched.run_acquire_summed(prog, context.soc, processor=shot_sums(prog, axes), rounds=config.rounds, options=RunOptions())
+        buffer.trigger_update(flush=True)
+        return CZAmplitudeResult(scales, buffer.array)
 
     def analyze(
         self,
@@ -300,10 +244,36 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             raise ValueError("CZ return analysis requires saved cfg")
         if not np.array_equal(result.scales, sweep2array(cfg.scales)):
             raise ValueError("CZ return scales must match saved cfg")
-        return analyze_return(
+        terminal = analyze_return(
             result.scales,
             result.sums,
             acquired_shots=result.sums.sum(axis=(-2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
-            plots=plots,
         )
+
+        _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
+        for index, label in enumerate(OUTCOME_LABELS):
+                ax.plot(
+                        result.scales, terminal.data.probabilities.reshape(-1, 9)[:, index], ".-", label=label
+                )
+        ax.set(
+                xlabel="Common gain scale",
+                ylabel="Same-shot joint probability",
+                title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
+        )
+        if np.any(np.isfinite(terminal.fit.curve)):
+                ax.plot(result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit")
+        diagnostic = (
+                terminal.fit.reason or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
+        )
+        ax.text(
+                0.02,
+                0.02,
+                diagnostic,
+                transform=ax.transAxes,
+                fontsize="small",
+                bbox={"facecolor": "white", "alpha": 0.85},
+        )
+        ax.legend()
+
+        return terminal

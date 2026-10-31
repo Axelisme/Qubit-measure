@@ -71,7 +71,7 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with acquired partial rounds contributes its actual available counts.
+Partial rounds remain visible. Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
@@ -81,3 +81,25 @@ Use `two_qubit/chevron_heralded` for the version conditioned on a ground-ground 
 After amplitude/frequency selection, measure conditional phase and local Z.
 Repeat calibration after changing pulse shapes or the pair's working point.
 Validate the actual FTF control chain separately from offline compile checks.
+
+## Notebook
+
+Use the adapter with a complete saved or operator-reviewed cfg.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.chevron.core import ChevronExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(ChevronExp())
+exp.run(cfg)
+exp.analyze(None)
+exp.save_run("data", "classified_chevron")
+```
+
+The coordinate is a hardware sweep. Constant and flat-top pulse durations also
+use a hardware sweep in the same program. Sampled cosine, Gaussian and DRAG
+waveforms reject swept lengths, so only their duration uses a host loop.
+
+Fits use count-weighted binomial errors. Endpoint probabilities use
+Jeffreys-smoothed variance so observations at zero or one retain finite weight.

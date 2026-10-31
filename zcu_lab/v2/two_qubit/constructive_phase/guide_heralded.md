@@ -79,7 +79,7 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with acquired partial rounds contributes its actual available counts.
+Partial rounds remain visible. Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
@@ -101,3 +101,33 @@ Use `two_qubit/constructive_phase` for the ordinary scan without post-selection.
 After amplitude/frequency selection, measure conditional phase and local Z.
 Repeat calibration after changing pulse shapes or the pair's working point.
 Validate the actual FTF control chain separately from offline compile checks.
+
+## Notebook
+
+Use the adapter with a complete saved or operator-reviewed cfg.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.constructive_phase.core_heralded import ConstructivePhaseHeraldedExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(ConstructivePhaseHeraldedExp())
+exp.run(cfg)
+exp.analyze(None)
+exp.save_run("data", "classified_constructive_phase_heralded")
+```
+
+## Excited-excited control
+
+Analysis also selects herald (e,e). Preparation flips this state to |00⟩.
+The final double Xπ should return it to ee. The ee control plot shows one
+minus its terminal ee probability, including other outcomes in the denominator.
+Zero accepted counts give NaN. This control has no fit shared with gg.
+Only the gg slice supplies calibration proposals and writeback.
+
+The coordinate is a hardware sweep. Constant and flat-top pulse durations also
+use a hardware sweep in the same program. Sampled cosine, Gaussian and DRAG
+waveforms reject swept lengths, so only their duration uses a host loop.
+
+Fits use count-weighted binomial errors. Endpoint probabilities use
+Jeffreys-smoothed variance so observations at zero or one retain finite weight.

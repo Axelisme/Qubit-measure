@@ -114,3 +114,23 @@ Old per-shot IQ files without sums are rejected; there is no automatic conversio
 Resolve acquisition errors separately from interpreting a low-contrast scan.
 
 See the [heralded guide](guide_heralded.md) for post-selection and pass fraction.
+
+## Notebook
+
+Use the adapter with a complete saved or operator-reviewed cfg.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.cz_amplitude.core import CZAmplitudeExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(CZAmplitudeExp())
+exp.run(cfg)
+exp.analyze(None)
+exp.save_run("data", "classified_cz_amplitude")
+```
+
+The common gain scale is a hardware sweep in one compiled program.
+
+Fits use count-weighted binomial errors. Endpoint probabilities use
+Jeffreys-smoothed variance so observations at zero or one retain finite weight.
