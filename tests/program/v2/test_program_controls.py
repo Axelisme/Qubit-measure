@@ -7,6 +7,8 @@ from zcu_tools.program.v2 import ModularProgramV2, make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program.v2.simulation.time_observations import time_us
+
 
 def test_constructor_controls_define_repetition_loop_and_delays():
     prog = ModularProgramV2(
@@ -51,8 +53,9 @@ def test_acquire_uses_each_calls_rounds_and_preserves_iq_layout(decimated):
             assert completed == list(range(1, rounds + 1))
             assert result[0].shape == ((3, 16, 2) if decimated else (1, 2))
             np.testing.assert_array_equal(result[0], 0)
-            assert env.soc.binding.last_request is not None
-            assert env.soc.binding.last_request.relax_delay_us == 12.5
+            request = env.soc.binding.last_request
+            assert request is not None
+            assert time_us(request.time_base, request.relax_delay_ticks) == 12.5
     finally:
         env.devices.close_all_devices()
 

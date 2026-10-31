@@ -18,6 +18,8 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager, FakeDevice
 
+from tests.core._simulation import TIME_BASE, tick_tuple, ticks
+
 from ._inputs import settings, template
 
 if TYPE_CHECKING:
@@ -61,16 +63,16 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         )
         assert source.model_facts(first) is facts
         original = template()
-        planned = source.plan_template(first, original)
-        assert source.plan_template(first, original) is planned
+        planned = source.plan_template(first, original, time_base=TIME_BASE)
+        assert source.plan_template(first, original, time_base=TIME_BASE) is planned
         # Same metadata and support, different samples must not reuse the plan.
         changed_event = replace(
-            original.events[1], envelopes=(PulseEnvelope((0, 0.008), (0j, 1j)),)
+            original.events[1], envelopes=(PulseEnvelope(ticks(0.008), (0j, 1j)),)
         )
         changed = replace(
             original, events=(original.events[0], changed_event, original.events[2])
         )
-        new_plan = source.plan_template(first, changed)
+        new_plan = source.plan_template(first, changed, time_base=TIME_BASE)
         assert new_plan is not planned
         assert new_plan.batch.flux_waveform is not None
         np.testing.assert_allclose(new_plan.batch.flux_waveform.flux, 0.5)
@@ -78,7 +80,7 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         assert np.max(planned.batch.flux_waveform.flux) > 0.59
         # Borrowed arrays are reread, not keyed only by template identity.
         original.events[1].gain[:] = 0
-        zero = source.plan_template(first, original)
+        zero = source.plan_template(first, original, time_base=TIME_BASE)
         assert zero.batch.flux_waveform is not None
         np.testing.assert_allclose(zero.batch.flux_waveform.flux, 0.5)
         bias.set_value(0.2)
@@ -88,7 +90,7 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
         assert moved.model.dc_flux == pytest.approx(0.52)
         assert moved is not facts
         assert not np.allclose(moved.model.energies_ghz, facts.model.energies_ghz)
-        shifted = source.plan_template(second, original)
+        shifted = source.plan_template(second, original, time_base=TIME_BASE)
         assert shifted.batch.flux_waveform is not None
         np.testing.assert_allclose(shifted.batch.flux_waveform.flux, 0.52)
         bias.set_value(2)
@@ -109,13 +111,14 @@ def test_builder_binds_control_generators_and_live_dc_with_single_cavity_readout
         "integrated",
         (1, 2),
         0,
-        (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000), tick_tuple((0.018,))),),
         123,
         0,
         f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
         point_dims=(2,),
         point_names=("sweep",),
         templates=(compiled,),
+        time_base=TIME_BASE,
     )
     try:
         device = environment.create_device("FakeDevice", config.dc_bias.source.name)

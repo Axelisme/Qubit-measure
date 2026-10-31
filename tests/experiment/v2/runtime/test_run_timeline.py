@@ -67,7 +67,7 @@ def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
 
     monkeypatch.setattr(soc, "poll_data", poll)
     monkeypatch.setattr(soc, "get_decimated", decimated)
-    shape = (2, samples) if mode == "decimated" else (2,) if mode == "summed" else (1,)
+    shape = (2, samples) if mode == "decimated" else (2,) if mode == "summed" else ()
     dtype = np.float64 if mode == "summed" else np.complex128
     updates = []
     buffer = SignalBuffer(
@@ -80,7 +80,7 @@ def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
     with Schedule({}, buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
             result = schedule.run_acquire(program, soc, rounds=2)
-            expected = np.array([3 + 4j])
+            expected = np.array(3 + 4j)
         elif mode == "summed":
             result = schedule.run_acquire_summed(
                 program, soc, rounds=2, processor=_sum_iq

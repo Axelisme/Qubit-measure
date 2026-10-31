@@ -12,6 +12,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program.v2.simulation.support import raw_of, request_of
+from tests.program.v2.simulation.time_observations import times_us
 
 
 def test_offline_board_declares_mock_identity():
@@ -129,7 +130,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
     assert [
-        t.readouts[0].trigger_us[0]
+        times_us(request.time_base, t.readouts[0].trigger_ticks)[0]
         for t in (
             request.materialize_point(p)
             for p in range(int(np.prod(request.point_dims)))
@@ -178,7 +179,15 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
         "second",
         "third",
     ]
-    assert np.all(np.diff(request.materialize_point(0).readouts[0].trigger_us) > 0)
+    assert np.all(
+        np.diff(
+            times_us(
+                request.time_base,
+                request.materialize_point(0).readouts[0].trigger_ticks,
+            )
+        )
+        > 0
+    )
     assert len(seen) == 2
     assert traces.shape == (2, 3, request.readouts[0].samples, 2)
     np.testing.assert_array_equal(traces[:, :, 0, 0], [[5, 6, 7], [8, 9, 10]])

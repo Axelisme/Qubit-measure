@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
+    TimeBase,
     TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
@@ -19,6 +20,7 @@ from zcu_tools.experiment.readout_plan import (
     map_readout_events,
     readout_contents,
 )
+from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg, pfb_channel
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
@@ -88,8 +90,10 @@ class FTFModelFacts:
 class FTFReadoutPlan:
     """One ADC's detached batch in program declaration order.
 
-    channel is the logical ADC index. batch contains all incident carriers and
-    this receiver's calibrated model, grids and point-to-content mapping.
+    channel is the logical ADC index. batch contains this receiver's calibrated
+    model, grids and point-to-content mapping. Observed mux events retain only
+    incident carriers in the ADC's profile PFB channel; same-channel carriers
+    superpose. Unobserved events keep their pulses and empty grids.
     """
 
     channel: int
@@ -214,9 +218,11 @@ def _timeline_batch(
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
     path: _ReadoutPath,
-    memo: dict[int, EnvelopeSpec],
+    *,
+    time_base: TimeBase,
 ) -> TimelineBatch:
     """Separate microwave and fast-flux slots using the round's DC projection."""
+    memo: dict[int, EnvelopeSpec] = {}
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     lines = _flux_lines(settings)
     drives, flux_tracks = [], []
@@ -224,7 +230,9 @@ def _timeline_batch(
         if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
         if event.gen_ch in lines:
-            track = drive_track(event, lines[event.gen_ch].source, memo)
+            track = drive_track(
+                event, lines[event.gen_ch].source, memo, time_base=time_base
+            )
             flux_tracks.append(
                 FluxTrack(
                     track.port,
@@ -239,7 +247,9 @@ def _timeline_batch(
                 )
             )
         elif event.gen_ch in microwave:
-            drives.append(drive_track(event, microwave[event.gen_ch], memo))
+            drives.append(
+                drive_track(event, microwave[event.gen_ch], memo, time_base=time_base)
+            )
         else:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
     flux = schedule(
@@ -311,10 +321,11 @@ def _projective_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
+    time_base: TimeBase,
 ) -> tuple[tuple[ReadoutMapping, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
-        logical_event_contents(template, drive, window, memo)
+        logical_event_contents(template, drive, window, memo, time_base=time_base)
         for window in template.readouts
     )
     reference = channels[0][-1].pulses[0][0].frequency_ghz
@@ -323,18 +334,61 @@ def _projective_contents(
     ), reference
 
 
+def _mux_channel_contents(
+    content: ReadoutMapping, path: _ReadoutPath, channel: int
+) -> ReadoutMapping:
+    """Select incident carriers using the fixed compile profile's PFB channels."""
+    channels = tuple(receiver.ro_ch for receiver in path.receivers)
+    profile = make_mux_mock_soccfg(
+        path.gen_ch + 1, max(channels) + 1, gen_ch=path.gen_ch, ro_chs=channels
+    )
+    selected = []
+    for events in content.events:
+        row = []
+        for event in events:
+            addressed = {
+                pfb_channel(profile, channel, grid.demodulation_frequency_ghz * 1000)
+                for grid in event.grids
+            }
+            if len(addressed) > 1:
+                raise ValueError(
+                    f"FTF mux ADC {channel} cannot select different PFB channels "
+                    "within one readout event"
+                )
+            pulses = tuple(
+                pulse
+                for pulse in event.pulses
+                if not addressed
+                or pfb_channel(profile, channel, pulse.frequency_ghz * 1000)
+                in addressed
+            )
+            if addressed and not pulses:
+                frequencies = ", ".join(
+                    f"{grid.demodulation_frequency_ghz * 1000:g}"
+                    for grid in event.grids
+                )
+                raise ValueError(
+                    f"FTF mux ADC {channel} demod {frequencies} MHz, "
+                    f"PFB channel {next(iter(addressed))} has no in-channel carrier"
+                )
+            row.append(replace(event, pulses=pulses))
+        selected.append(tuple(row))
+    return replace(content, events=tuple(selected))
+
+
 def plan_template(
     settings: FTFSettings,
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,
     *,
+    time_base: TimeBase,
     readout: FTFReadoutConfig | None = None,
     facts: FTFModelFacts | None = None,
 ) -> FTFTemplatePlan:
     """Convert one C1 template to C3 evolution and C6 readout inputs.
 
     settings is the immutable FTF resource, snapshot supplies live fixed-unit DC
-    values, and template has point arrays in us/MHz/degrees. Support rounds to
+    values, and template has point arrays in ticks/MHz/degrees, interpreted with time_base. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
     latest active readout-generator block per point ends evolution. Earlier
     readout blocks with their own triggers are projective reads; untriggered
@@ -357,8 +411,14 @@ def plan_template(
     Event generators select pulse or mux capabilities. Using both configured
     readout generators in one template raises ValueError naming both channels.
     Readout windows must belong to that path's receivers and generator.
-    Mux permits simultaneous coherent tones with independent ADC grids. Program
-    common-origin carrier phases convert to pulse-local phases in the first
+    Mux retains only carriers in each ADC's fixed-profile PFB channel, including
+    same-channel superposition. Each logical event selects independently. Grids
+    in one event spanning different PFB channels raise ValueError. An addressed
+    single carrier is unchanged; off-channel carriers are excluded even alone.
+    An observed mux event without an in-channel carrier raises ValueError naming
+    the ADC, demodulation frequencies and PFB channel. Unobserved events retain
+    their pulses and empty grids without emitting data.
+    Program common-origin carrier phases convert to pulse-local phases in the first
     terminal carrier's model reference frame; ADC demodulation remains absolute-time.
     All ADCs retain the same ordered event axis, even if none observes terminal.
     Unobserved events have empty grids. Each ADC must have at least one trigger.
@@ -384,7 +444,7 @@ def plan_template(
         path.input_per_gain,
         "mux" if path.multiplexed else "pulse",
     )
-    partition = classify_readout(template, drive, memo)
+    partition = classify_readout(template, drive, memo, time_base=time_base)
     cavity_drives = partition.cavity_drives
     terminal_template = replace(template, events=partition.terminal_slots)
     for window in template.readouts:
@@ -392,18 +452,20 @@ def plan_template(
             raise ValueError(f"unbound FTF receiver {window.channel}")
     end_ns = np.max(
         [
-            np.where(e.active, e.start_us * 1000, -np.inf)
+            np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
             for e in partition.terminal_slots
         ],
         axis=0,
     )
     if any(partition.projective_reads):
         event_contents, reference_frequency_ghz = _projective_contents(
-            template, drive, memo
+            template, drive, memo, time_base
         )
     else:
         contents = tuple(
-            readout_contents(terminal_template, drive, window, memo)
+            readout_contents(
+                terminal_template, drive, window, memo, time_base=time_base
+            )
             for window in template.readouts
         )
         reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
@@ -418,8 +480,10 @@ def plan_template(
     joint, source, physical = facts.joint, facts.source, facts.readout
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
+        if path.multiplexed:
+            content = _mux_channel_contents(content, path, window.channel)
         adc = receivers[window.channel]
-        dt = 1000 / window.sample_rate_mhz
+        dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
             adc.gain,
             float(np.deg2rad(adc.phase_deg)),
@@ -463,7 +527,9 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, path, memo),
+            _timeline_batch(
+                settings, joint, template, end_ns, path, time_base=time_base
+            ),
             cavity_drives,
             partition.projective_reads,
         ),

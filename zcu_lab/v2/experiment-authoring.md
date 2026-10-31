@@ -631,7 +631,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+新寫法以 module constructor keyword 傳入掃描值，不修改 caller cfg。以下 mutation 規則只適用仍使用 `set_param` 的既有程式。這些程式把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）時，一律修改 runner-owned cfg，一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
@@ -991,7 +991,7 @@ distinct depths 時分析明確失敗。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
 5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
-6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
+6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。
 
