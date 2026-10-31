@@ -176,6 +176,10 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 builder.emit(readout, tag="herald")
                 builder.emit(Join(prepare_f1, prepare_f2))
                 builder.emit(Join(drive_f1, drive_f2))
+                # Consume duration-sweep runtime ends at the drive boundary.
+                # Contrast, readout, ADC and shot end then use constant relative
+                # times while their absolute event times remain unchanged.
+                builder.sync()
                 builder.emit(Join(contrast_f1, contrast_f2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
