@@ -52,7 +52,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime sync 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。A、B 與 builder 已交付；C frontend、實驗遷移與 D 舊路徑移除另行交付。
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime sync 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。兩種 program 共用優化前 compiled snapshot 與單一 simulation frontend，採獨立 shot 與 effect-based admission。A、B、builder 與 C 已交付；大量實驗遷移及 D 的 legacy program／init／run 移除仍未交付。
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Pause 中斷及同 request 重試、live tunables、core 同簽名 env.run、operation facts 與作者自存 commit 目錄。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
@@ -75,7 +75,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、Module 控制、FTF 快速分段引擎與重算式單 round 重播。離線 U 表與持久 exact records 已移除。Engine 只保留 routing facts，數值 preparation 限一次 evolve，routing 預算不是 process RAM 上限。可信 startup 腳本組裝並交付資源，GUI 不載入 environment；FTF 從 template 建 entry／point 並用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、共用 compiled frontend、FTF 快速分段引擎與重算式單 round 重播。Program 的 compiler snapshot 與 frontend owner 契約見 [[0083]]，舊 Module-tree simulation frontend 已移除。離線 U 表與持久 exact records 已移除。Engine 只保留 routing facts，數值 preparation 限一次 evolve，routing 預算不是 process RAM 上限。可信 startup 腳本組裝並交付資源，GUI 不載入 environment；FTF 從 template 建 entry／point 並用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
 
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。

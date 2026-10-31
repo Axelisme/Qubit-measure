@@ -14,13 +14,15 @@ Program 作者需要在同一個 body 混用原生 QICK 操作與可重用的 Pu
 ## 決策
 
 B 與 builder 的 owner 細節由 advisor 依使用者 2026-10-30 代理授權裁定。
+Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 C 授權裁定。
 使用者的設計選擇另附日期與逐字原話，與 advisor 的細節裁定分開記錄。
 
 ### Program 基底與 module owner
 
 `TimelineProgramV2` 繼承 repo 的 `MyProgramV2` 加 `ProgramResourcesMixin`，不經 `ModularProgramV2`。
 它承接既有 `SimulationAcquireMixin`、`ImproveAsmV2`、`IRCompileMixin` 與 classify／herald acquire 擴充。
-承接 acquire 介面不代表模擬 frontend 已支援新寫法。
+`TimelineProgramV2` 與 `ModularProgramV2` 共用 compiled simulation frontend。
+支援範圍依指令效果判定，不代表所有 native 操作均可模擬；admission 契約見 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
 原生操作與 module lowering 共用既有 IR 管線及 `TimedMergePass` 的安全條件，不按來源分流或另建 canonicalization。
 共用 `ProgramResourcesMixin` 只集中 dmem 配置與 readout route 保護。
 `TimelineProgramV2` 在 ADC／register 宣告邊界記錄 module resource owner。
@@ -113,6 +115,11 @@ delay_reg_auto 先消耗選定的 native channels，再推進非負 register cyc
 尚未被 native 部分完整消耗的 timeline，依已知 producer bounds 扣除實際推進量。
 若 native 部分已完整消耗全部 timeline，register 部分沿用原生的非負時間契約。
 PulseReadout 的 gain／frequency runtime words 是非時間 consumer，不受這項時間限制排除。
+
+使用者於 2026-10-31 指出：「ModularProgram那個是沒有rintime timeline功能時的無可奈何辦法，新program有就不要模仿了」。
+新 program 的 runtime sync 依逐點實際結尾對齊，不模仿 `ModularProgramV2` 的 DelayAuto symbolic max 權宜行為。
+實驗遷移也不帶入這項舊行為。
+Compiled frontend 模擬 `ModularProgramV2` 時仍執行其編譯指令；這是忠實模擬，不是新 program 的相容性要求。
 
 ### Runtime end 與範圍證明
 
@@ -237,6 +244,42 @@ Program emission owner 依 lowered operations 彙總 reference effects，不從 
 這項 admission 由 advisor 依使用者 2026-10-30 代理授權裁定。
 逐個 child 直接 lower 會讓推進 reference 的 child 改變後續 sibling 起點；上述限制保留可證明安全的共同 origin，而不引入多序列排程器。
 
+### Compiled snapshot 與 simulation 入口
+
+IR compiler 每次成功 compile 後在 program 發布具型別、不可變的 `compiled_stream`。
+它保存優化前的 logical instructions、labels 與結構 metadata，是與 simulation 無關的 compiler artifact。
+`ModularProgramV2` 與 `TimelineProgramV2` 使用相同契約。
+Snapshot 不借用可變的 Module／macro graph，與後續 program 變更隔離；consumer 取得 detached typed instructions。
+Compiler 擁有結構與資料，不依賴 simulation，也不透過 observer callback 管理 consumer。
+Simulation 不接管 compile lifecycle。
+存取、copy、recompile 與位址語意見 [IR README](../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot)。
+
+Producer 以 LOOP／BRANCH／SOURCE 與 body 邊界描述結構、標記作者來源，並提供 resolved sweep 起點、步長與有限 table definitions。
+Simulation frontend 核對 metadata 與實際指令，不從 jump 或仿射 shell 反推結構，也不重新解釋 Module tree。
+不一致在建立 request 前拒絕。
+來源名稱由 producer 擁有，分工見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#design-boundaries)。
+
+Sweep points 是獨立向量 lanes，reps 只保留在 request metadata，不執行。
+Shot 內的非 sweep loops 依標記順序迭代，以 active masks 處理零次、固定與 register 次數，不展開指令流。
+跨 point／rep 的 register、memory、readout config FIFO 與 pending update 延續在建立 request 前拒絕，同值或輸出不變也不豁免。
+Prologue 後不再寫入的常數與 config 可用，沒有 ordered engine 或 fallback。
+支援範圍由 instruction effect 決定，不依 macro 類別或來源白名單；不支援的效果在呼叫 backend 前拒絕。
+Frontend 保留 shot-local 運算、memory 與 FIFO 時序，不執行量測結果 feedback，也不模擬 tProc 執行 latency；它不是通用 tProc emulator。
+
+`SimulationAcquireMixin` 對 `SimulationSoc` 呼叫唯一的 compiled request builder，傳入 SoC routes。
+Builder 讀 snapshot，輸出 detached numeric requests；physical backend 仍由既有 numeric owner 負責。
+其他 SoC 保留 QICK acquisition。
+舊 Module-tree simulation frontend 已移除，不留 selector、legacy oracle 或 fallback。
+呼叫與拒絕契約見 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
+
+2026-10-29，使用者要求：「優化是一定要做的，你可以安排流程」，對 compiled frontend 選擇回答：「A, 不是瓶頸就好」。
+同日，對移除舊 frontend，使用者裁定：「舊前端不留，第二題你決定」。
+對運算支援，使用者回答：「運算的採用建議」，因此採 instruction effects 判定，取代早期 runtime 運算禁令。
+2026-10-30，使用者描述執行模型：「每個內部迴圈都當作獨立點向量化模擬，但內部非sweep迴圈會視為一個shot內部的order，但不會單純的展開」。
+對獨立 shot 與拒絕跨 shot carry 的提案，使用者回答：「採用建議」。
+同日，通用標記暫緩後，使用者回答：「那採用建議做法」。
+現行方案只擴充有限 LOOP metadata，不採 generic payload。
+
 ### IR analysis 與驗收責任
 
 `program/v2/ir` 擁有唯讀時序 analysis，不 import frontend 私有 macro，也不從 module total_length 回推編譯行為。
@@ -277,8 +320,8 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 |---|---|
 | A，已交付底層 | B1、顯式 module／emission、fork／join、Repeat 與 IR 時序 analysis。A 交付時採規則 a，無法靜態證明時拒絕，register Repeat 使用等待上界；這些限制由 B 的現行契約取代。Builder、實驗與模擬 frontend 不切換。 |
 | B，已交付 | 其餘 Module lowering、規則 b、runtime timeline 與 a→b 時序差異報告。新路徑不讀 block_mode，legacy 欄位與 init／run 保留到 D。B 不遷移實驗、不改模擬 frontend，也不刪舊路徑。MuxReadout 只轉換 declaration／playback，collect_raw_iq 仍只接受 legacy program。 |
-| Builder，已交付 | 在 B 的 TimelineProgramV2 上提供序列錄製與 build，Schedule 提供共用 run_acquire*。與舊 builder 並存，不遷移實驗，不等待模擬 frontend 切換。 |
-| C，另行交付 | 模擬 frontend 遷移，現有每種 Module form 與可模擬實驗須維持支援。其編譯結果介面、優化與切換驗收由 C 維護。Builder 已交付不代表 frontend 已切換；大量實驗遷移仍待 C 完成後另行交付。 |
+| Builder，已交付 | 在 B 的 TimelineProgramV2 上提供序列錄製與 build，Schedule 提供共用 run_acquire*。交付時與舊 builder 並存，不遷移實驗，也不等待 C 的 frontend 切換。 |
+| C，已交付 | 兩種 program 共用優化前 compiled snapshot 與唯一 compiled simulation frontend，已完成既定語料的 parity／完整 acquire 效能驗收並移除舊 Module-tree simulation frontend。現行支援與拒絕範圍見上節；大量實驗遷移仍未交付。 |
 | D，另行交付 | 刪除舊 init／run 路徑與退役的 legacy 入口，不再於此切換規則 b。 |
 
 2026-10-29，對規則 b 與差異報告提前到 B、D 只刪舊路徑的安排，使用者回答：「採用建議」。
@@ -287,7 +330,9 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 新路徑不讀 block_mode、legacy 保留到 D 的細節由 advisor 依既有階段裁定具體化，不要求 B 改寫實驗。
 
 2026-10-30，對先交付 builder／Schedule 取數、實驗遷移另開工作且等待模擬 frontend 的安排，使用者回答：「沒問題，採用建議，我思考soc/prog的順序，感覺prog應該要是第一個才對」。
-因此 run 入口以 program 在前、soc 在後；這次交付不代表 lab 實驗已遷移或 emit 寫法已可模擬。
+因此 run 入口以 program 在前、soc 在後；builder 交付當時不含模擬 frontend 切換。
+C 現已支援 compiled emission；大量 lab 實驗遷移仍未交付。
+C 刪除的是舊 simulation frontend，`ModularProgramV2` 與舊 init／run 仍保留到 D。
 
 ## 依賴與後果
 
@@ -295,7 +340,7 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 Experiment 可依賴 program；program 不反向依賴 experiment，此方向由 `.importlinter` C8 檢查。
 沿用 [[0072]] 的分層與 `.importlinter` 的 C8、C9、C12、C19，以及 `program-simulation-entry` contract。
 IR analysis 是編譯結果分析，不是物理模擬 frontend，不產生模擬量測資料。
-模擬遷移的狀態另見 [simulation-environments](draft/simulation-environments.md#module-frontend-與小介面依賴)。
+模擬遷移的狀態另見 [simulation-environments](draft/simulation-environments.md#compiled-frontend-與小介面依賴)。
 
 作者必須明確同步 timeline 與原生 reference，不能以未同步的原生 pulse 代替序列發射。
 Runtime timeline 承接無法靜態精確表示的時間；無法證明 producer bounds、資源交換或不重疊的排程仍在編譯期拒絕。

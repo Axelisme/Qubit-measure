@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-31, compiled frontend and joint-ADC shot sums
+**Last updated:** 2026-10-31, compiled frontend, ADC admission and joint-ADC shot sums
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -86,8 +86,11 @@ The builder also rejects unresolved readout routes. An ADC without a wired
 generator route receives an explicit missing-route diagnostic with read and time.
 Content after the terminal self-jump is rejected, including unreachable NOPs;
 body, cleanup and loop NOPs remain supported.
-Runtime ADC words use overlapping output carriers to resolve their frequency image.
-Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
+For a runtime-controlled ADC, all overlapping carriers on the selected route must
+resolve the ADC word to the same frequency image. No carrier or conflicting images
+raise before a request is returned. Static-config ADCs use the full frequency from
+the shared QICK `calc_ro_freq` adapter and do not require an overlapping carrier
+for this image resolution.
 Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO
 uses the maximum of the command timestamp and its previous effective time, without
 wave duration or pipeline delays. Each read uses the last update effective at its
@@ -113,6 +116,8 @@ marked case. Raw jumps inside case bodies remain unsupported.
 Each ADC must execute its declared static trigger count in every point/shot;
 matching scan totals cannot compensate for a per-shot mismatch. A mismatch raises
 with ADC channel, static count and actual count before returning a request.
+A declared ADC with no trigger is rejected before request construction; the builder
+does not drop the ADC or invent a generator route.
 Table lookups and runtime timeline arithmetic use the same register/memory effects,
 including selected waveform ends, timeline maxima, floors and reference debits.
 ARITH uses signed A/D27, B18 and C32 inputs and rejects pre-adder overflow.
