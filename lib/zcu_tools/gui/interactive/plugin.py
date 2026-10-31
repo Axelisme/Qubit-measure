@@ -133,7 +133,8 @@ class PluginDefinition(Generic[S, R]):
         """Submit compute to the bound runner with owner-loop completion callbacks.
 
         compute returns the value supplied to on_done; on_error receives compute
-        failures. Raise FailedPreconditionError before submission if unbound.
+        Exception or KeyboardInterrupt unchanged on the owner thread.
+        Raise FailedPreconditionError before submission if unbound.
         Execution, cancellation and callback isolation belong to the runner.
         """
         if self._background is None:

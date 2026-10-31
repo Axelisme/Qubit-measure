@@ -58,6 +58,9 @@ class ThreadPoolBackgroundExecutor:
     ) -> None:
         """Schedule work and deliver its outcome through the injected owner.
 
+        Deliver results to on_done and Exception or KeyboardInterrupt unchanged
+        to on_error on the owner thread. SystemExit and GeneratorExit are not delivered.
+
         After terminal quiesce, raise BackgroundAdmissionClosedError before any
         work or callback is scheduled. Non-callable work raises TypeError.
         """

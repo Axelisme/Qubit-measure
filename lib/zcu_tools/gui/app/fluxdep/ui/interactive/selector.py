@@ -358,7 +358,7 @@ class SelectorWidget(InteractiveMplWidget):
                 f"added {len(view.added_points)}, removed {len(view.removed_points)}"
             )
 
-        def error(exc: Exception) -> None:
+        def error(exc: BackgroundError) -> None:
             if not current():
                 return
             self._view = None

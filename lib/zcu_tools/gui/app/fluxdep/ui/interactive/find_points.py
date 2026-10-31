@@ -412,7 +412,7 @@ class FindPointsWidget(InteractiveMplWidget):
                 f"Mask added: {view.mask_added}, removed: {view.mask_removed}"
             )
 
-        def error(exc: Exception) -> None:
+        def error(exc: BackgroundError) -> None:
             if generation != self._generation or not self._input_open():
                 return
             self._view = None

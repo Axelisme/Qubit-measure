@@ -26,16 +26,19 @@ from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
 
 
-@pytest.fixture(params=[False, True], ids=["return", "error"])
+@pytest.fixture(params=["return", "error", "interrupt"])
 def stop_window(
     request: pytest.FixtureRequest, qapp: QApplication, tmp_path: Path
 ) -> Iterator[tuple[MainWindow, bool]]:
-    fails = bool(request.param)
+    ending = str(request.param)
+    fails = ending != "return"
 
     def acquire(
         cfg: SampleCfg, *, context: RunContext
     ) -> RunRecord[SampleCfg, SampleResult]:
         context.scope.stop.event.wait()
+        if ending == "interrupt":
+            raise KeyboardInterrupt("Synthetic core failed after Stop")
         if fails:
             raise RuntimeError("Synthetic core failed after Stop")
         return SampleAdapter.run(cfg, context=context)

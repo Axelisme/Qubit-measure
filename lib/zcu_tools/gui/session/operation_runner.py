@@ -98,7 +98,8 @@ class BgResult:
     """What the background callback delivered.
 
     ``ok=True`` → ``result`` is the worker's return value (``error`` is None).
-    ``ok=False`` → ``error`` is the raised exception (``result`` is ``NO_RESULT``).
+    ``ok=False`` → ``error`` is the original worker Exception or KeyboardInterrupt
+    (``result`` is ``NO_RESULT``), delivered on the owner thread.
     """
 
     ok: bool
