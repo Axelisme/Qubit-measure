@@ -201,7 +201,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 and instruction.is_pure_self_copy
             )
         ):
-            self._timeline_book.output_time = None
+            pass
         self._time_bounds.emission(
             inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
         )
