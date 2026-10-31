@@ -120,9 +120,9 @@ Processor 接收 I/Q 分量，需要複數運算時自行轉換。`acquire_decim
 舊 cfg 沒有 classifier 時，T1 分析略過 confusion 修正，不讀 point 校準。
 GE 以 run 的 readout slot 解析目標，proposal builder 與 materialized 比對契約見 [[0008]]。
 Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的精確 classifier 路徑。
-雙 qubit 的 nearest-GE 分析只從 saved readout cfg 的角色 tone 派生 circle centers，不要求 radius。
-Joint readout、chevron、constructive phase、CZ amplitude 在 cfg 驗證時拒絕 missing／非 circle。
-Conditional phase、local Z、RB 保留 raw acquisition，分析將 missing／非 circle 轉為帶原因的結果，不產生 population 或 fit。
+雙 qubit 的 9 個實驗各有 ordinary 與 heralded 兩版，兩版都在 Run 前要求兩個角色 tone 的 circle 與 GE Post 的 radius，缺少或非 circle 時 cfg 驗證報錯。
+取數端以 shot sums 分類：ordinary 存終端讀出的 9 類計數，heralded 存 herald 加終端的 81 類計數；Result 保存原 float64 總和，不再保存逐 shot IQ，也不在 analyze 分類。
+2026-10-30 使用者裁定：「不要再有逐shot記錄的實驗了，除了singleshot/ge這種本來就是用於生成分類參數的實驗，其他都請在平均時分類」。gg／ee 分析與 writeback 細節由 `zcu_lab/v2/two_qubit/guide.md` 擁有。
 Readout owner 的單 ADC circle lookup 不理解 lab 角色，也不讀 live library。
 其餘 singleshot population consumers 使用 shot-sums 分類取數，confusion correction 只讀 saved cfg。
 Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit，未校準時只略過 live population preview。
