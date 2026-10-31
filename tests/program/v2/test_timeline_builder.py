@@ -1004,7 +1004,10 @@ def test_branch_case_local_forks_and_nested_parent_merge_without_leaking_names(
         program.emit(pulse)
 
     prog = _compile_scoped(
-        mock_soccfg, frontend, body, modules=(pulse,),
+        mock_soccfg,
+        frontend,
+        body,
+        modules=(pulse,),
         loops=(("scan", 2), ("inner", 2)),
     )
     assert [waves(shot) for shot in shots(prog)] == [[30]] * 4
