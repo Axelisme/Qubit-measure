@@ -39,8 +39,15 @@ def test_request_rejects_negative_body_durations_and_empty_templates(durations):
     )
     with pytest.raises(ValueError, match="body duration|template"):
         simulation.AcquireRequest(
-            "decimated", (1,), 0, (), 1, 0, "test",
-            templates=(template,), time_base=simulation.TimeBase(Fraction(1)),
+            "decimated",
+            (1,),
+            0,
+            (),
+            1,
+            0,
+            "test",
+            templates=(template,),
+            time_base=simulation.TimeBase(Fraction(1)),
         )
 
 
