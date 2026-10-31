@@ -203,7 +203,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 )
                 if run_cfg.reset is not None:
                     builder.emit(Reset("reset", run_cfg.reset))
-                builder.sync()
+                builder.delay_by_timeline()
                 with builder.repeat(
                     "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)
                 ):
@@ -220,7 +220,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                             "basic_gate", val_reg="gate_idx", pulses=gate_pulses
                         )
                     )
-                    builder.sync()
+                    builder.delay_by_timeline()
                 # Both recovery slots retain the complete candidate set for fixed timing.
                 builder.emit(
                     ComputedPulse(

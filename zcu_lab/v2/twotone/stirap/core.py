@@ -242,10 +242,10 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                     )
                     builder.fork("default", into=["stokes", "pump"])
                     with builder.timeline("stokes"):
-                        builder.delay_timeline(max(-lead, 0.0))
+                        builder.timeline_inc(max(-lead, 0.0))
                         builder.emit(Pulse("stokes", stokes))
                     with builder.timeline("pump"):
-                        builder.delay_timeline(max(lead, 0.0))
+                        builder.timeline_inc(max(lead, 0.0))
                         builder.emit(Pulse("pump", pump))
                     builder.join("stokes", "pump", into="default")
                     builder.emit(PulseReadout("readout", cfg.readout))

@@ -199,12 +199,12 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
-            builder.sync()
+            builder.delay_by_timeline()
             with builder.repeat(
                 "zigzag_loop", "repeat_count", range_hint=(min(loop_n), max(loop_n))
             ):
                 builder.emit(Pulse(repeat_on, repeated_cfg))
-                builder.sync()
+                builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

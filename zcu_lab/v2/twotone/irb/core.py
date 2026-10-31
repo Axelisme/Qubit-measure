@@ -203,7 +203,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             )
                             if run_cfg.reset is not None:
                                 builder.emit(Reset("reset", run_cfg.reset))
-                            builder.sync()
+                            builder.delay_by_timeline()
                             with builder.repeat(
                                 "rand_gate_idx",
                                 "rand_len",
@@ -224,7 +224,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                         pulses=gate_pulses,
                                     )
                                 )
-                                builder.sync()
+                                builder.delay_by_timeline()
                             # Both recovery slots retain the complete candidate set for fixed timing.
                             builder.emit(
                                 ComputedPulse(

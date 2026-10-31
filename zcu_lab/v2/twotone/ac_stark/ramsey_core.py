@@ -162,10 +162,10 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                     timeline="stark",
                 )
                 with builder.timeline("ramsey"):
-                    builder.delay_timeline(cfg.wait_delay)
+                    builder.timeline_inc(cfg.wait_delay)
                     pi2_pulse = Pulse("pi2_pulse", cfg.pi2_pulse)
                     builder.emit(pi2_pulse)
-                    builder.delay_timeline(length)
+                    builder.timeline_inc(length)
                     builder.emit(
                         Pulse(
                             "pi2_pulse",

@@ -123,12 +123,12 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
             # Legacy repeats flush the reference at entry and after every gate.
-            builder.sync()
+            builder.delay_by_timeline()
             with builder.repeat(
                 "zigzag_loop", "repeat_count", range_hint=(0, max(counts))
             ):
                 builder.emit(Pulse(cfg.repeat_on, repeat_pulse))
-                builder.sync()
+                builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
