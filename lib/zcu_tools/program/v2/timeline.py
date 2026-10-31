@@ -47,6 +47,7 @@ from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .base import MyProgramV2
 from .ir import TimingLayout, TimingLoop
+from .ir.instructions import BaseInst, RegWriteInst
 from .macro.delay import DelayRegAuto
 from .macro.table import TableSelection
 from .modules.base import Module
@@ -137,6 +138,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def _make_asm(self) -> None:
         self._timeline_register_pool = []
+        self._timeline_book.output_time = None
         self._time_bounds = ProducerBounds()
         for macro in self.macro_list:
             self._observe_time_producers(macro)
@@ -189,6 +191,15 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                     self._observe_time_producers(child)
 
     def _add_asm(self, inst, addr_inc=1):
+        instruction = BaseInst.from_dict(inst)
+        if inst["CMD"] in ("JUMP", "CALL", "RET") or (
+            "s14" in instruction.reg_write
+            and not (
+                isinstance(instruction, RegWriteInst)
+                and instruction.is_pure_self_copy
+            )
+        ):
+            self._timeline_book.output_time = None
         self._time_bounds.emission(
             inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
         )

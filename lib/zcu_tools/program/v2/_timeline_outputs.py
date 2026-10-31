@@ -141,10 +141,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            start = (
-                end
-                if self.relative_t == "auto"
-                else self.book.math.add(end, placement_time(prog, self.relative_t))
+            start = self.book.math.event_time(
+                end, 0.0 if self.relative_t == "auto" else placement_time(prog, self.relative_t)
             )
             end_limits = optional_time_bounds(prog, start)
             previous_limits = optional_time_bounds(prog, previous)
@@ -161,7 +159,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
-            self.source.t_regs["t"] = self.book.math.cycles(start).register
+            self.source.t_regs["t"] = "s_out_time"
             finish = self.book.math.add(
                 start,
                 align_end(
@@ -235,13 +233,14 @@ class TimelinePlacedConfig(ConfigReadout):
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
+            start = self.book.math.event_time(origin, placement_time(prog, self.relative_t))
             self.event_end = EventEnd(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
-            self.source.t_regs["t"] = start.register
-            self.book.set_end(self.timeline, self.book.math.maximum(0.0, start))
+            self.source.t_regs["t"] = "s_out_time"
+            finish = self.book.math.snapshot(start)
+            self.book.set_end(self.timeline, self.book.math.maximum(0.0, finish))
             return
         self.source.t = origin + placement_time(prog, self.relative_t)
         self.source.preprocess(prog)
@@ -290,11 +289,11 @@ class TimelinePlacedTrigger(Trigger):
         if self.relative_width is not None:
             self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
+            start = self.book.math.event_time(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.t = self.book.math.preprocess_time(start)
             super().preprocess(prog)
-            self.t_regs["t"] = start.register
+            self.t_regs["t"] = "s_out_time"
             duration = self.get_time_param("width")
             end = self.book.math.add(start, duration)
             for ch in self.ros:

@@ -506,6 +506,30 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
     return min(candidates, key=lambda weight: (len(_csd(weight)), weight))
 
 
+class _EventTime(Macro):
+    """Write an event offset directly, reusing only a proven current s14 value."""
+
+    def __init__(self, base: RuntimeEnd, offset: RuntimeEnd | int, expression: TimeExpression):
+        self.base = base
+        self.offset = offset
+        self.expression = expression
+
+    def translate(self, prog) -> None:
+        book = prog._timeline_book
+        previous = book.output_time
+        delta = None if previous is None else difference_limits(self.expression, previous)
+        if delta is not None and delta[0] == delta[1] and delta[0] is not None:
+            amount = int(delta[0])
+            if amount:
+                WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=amount).translate(prog)
+        else:
+            WriteRegOp(
+                dst="s_out_time", lhs=self.base.register, op="+",
+                rhs=self.offset.register if isinstance(self.offset, RuntimeEnd) else self.offset,
+            ).translate(prog)
+        book.output_time = self.expression
+
+
 class RuntimeMath(TimedMacro):
     """Prepare integer cycle arithmetic and conditional candidate selection."""
 
@@ -518,6 +542,18 @@ class RuntimeMath(TimedMacro):
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
+
+    def event_time(self, base: RuntimeEnd, offset: float | QickParam) -> RuntimeEnd:
+        """Place a runtime event in s14 without allocating event-time storage.
+
+        The returned operand is transient. Capture any persistent timeline end
+        before another event or native macro can overwrite the output register.
+        Native sweep offsets retain their QICK time registers.
+        """
+        operand = self.cycles(offset) if isinstance(offset, QickParam) and offset.is_sweep() else round((offset.start if isinstance(offset, QickParam) else offset) * get_fclk(self.prog))
+        expression = add_time(runtime_expression(base), runtime_expression(operand) if isinstance(operand, RuntimeEnd) else TimeVariable(operand))
+        self.operations.append(_EventTime(base, operand, expression))
+        return RuntimeEnd("s_out_time", expression=expression)
 
     def native_end(
         self, aggregate: float | QickParam, native: NativeLength
