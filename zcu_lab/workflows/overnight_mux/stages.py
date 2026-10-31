@@ -49,7 +49,7 @@ class T1Settings(FitSettings):
 
     reps/rounds are native acquisition averages. acquire_retry counts transient
     retries; earlystop_snr is the active tones' minimum completed-round SNR, or
-    None to disable. sampling=linear selects linear delays, sampling=decay lets the core
+    None to disable. sampling=linear selects linear delays; sampling=decay
     concentrates the same window. sweep_factor times guess_us sets its endpoint.
     Relaxation is max(relax_min_us, relax_factor*guess_us), in us.
     """

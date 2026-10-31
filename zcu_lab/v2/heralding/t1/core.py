@@ -115,7 +115,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         normalization. Live and analyze use the herald-g conditional IQ.
         Zero-count means are NaN; unmeasured sums remain NaN.
         Linear sampling uses SweepCfg. Decay sampling uses the shared T1
-        hardware-grid owner and reject colliding points. cfg is not mutated.
+        hardware-grid owner and rejects colliding points. cfg is not mutated.
         """
         if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
             raise ValueError(
