@@ -338,9 +338,8 @@ def run_flux_scan(
         if context.scope.stop.event.wait(cfg.settle):
             break
         acquired, stopped = _acquire_spectrum(spectrum, context=context)
-        if context.scope.stop.is_set():
-            break
-        if stopped:
+        if stopped or context.scope.stop.is_set():
+            # Skip incomplete IQ; the loop's root-stop check ends the whole scan.
             continue
         _require_finite_spectrum(
             acquired,
