@@ -152,7 +152,19 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
 
 
 @pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
-@pytest.mark.parametrize("ticks, rounded", [(119, 119), (0.2, 1), (1.0000000002, 2)])
+@pytest.mark.parametrize(
+    "ticks, rounded",
+    [
+        (119, 119),
+        (0.2, 1),
+        (1.0000000002, 2),
+        # Integer cycles round-trip through us with >1e-10-cycle float noise.
+        (1000006, 1000006),
+        (1000010, 1000010),
+        # This real fractional tail exceeds the relative tolerance.
+        (1000000.00001, 1000001),
+    ],
+)
 def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
     operation, ticks, rounded
 ):
@@ -172,9 +184,13 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
 
     prog = _program(body)
     start = 2 * rounded if operation == "delay" else rounded
-    assert prog.get_time_param("event", "t") * 430.08 == pytest.approx(start)
+    assert prog.get_time_param("event", "t") * 430.08 == pytest.approx(
+        start, rel=0, abs=1e-8
+    )
     if operation == "trigger":
-        assert prog.get_time_param("event", "width") * 430.08 == pytest.approx(rounded)
+        assert prog.get_time_param("event", "width") * 430.08 == pytest.approx(
+            rounded, rel=0, abs=1e-8
+        )
     # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
     end = start + {"pulse": 43, "config": 0, "trigger": 173, "delay": 0}[operation]
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"][-1] == end
