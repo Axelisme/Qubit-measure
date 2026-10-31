@@ -65,7 +65,6 @@ class ZigZagCfg(ConfigBase):
     ] = 1.0
 
 
-
 class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
     # times is an int counter (a.u.) -> Axis dtype int64, scale IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[ZigZagResult, ZigZagCfg]] = AxesSpec(
@@ -108,16 +107,25 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                 n * (2 if cfg.repeat_on == "X90_pulse" else 1)
                 for n in range(cfg.n_times + 1)
             ]
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("times", len(times))
-            builder.emit(LoadValue(
-                "load_repeat_count", values=counts, idx_reg="times", val_reg="repeat_count",
-            ))
+            builder.emit(
+                LoadValue(
+                    "load_repeat_count",
+                    values=counts,
+                    idx_reg="times",
+                    val_reg="repeat_count",
+                )
+            )
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
             # Legacy repeats flush the reference at entry and after every gate.
             builder.sync()
-            with builder.repeat("zigzag_loop", "repeat_count", range_hint=(0, max(counts))):
+            with builder.repeat(
+                "zigzag_loop", "repeat_count", range_hint=(0, max(counts))
+            ):
                 builder.emit(Pulse(cfg.repeat_on, repeat_pulse))
                 builder.sync()
             builder.emit(Readout("readout", cfg.readout))

@@ -22,11 +22,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -241,7 +241,6 @@ class CKP_Cfg(ConfigBase):
     ] = 1.0
 
 
-
 class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
     AXES_SPEC: ClassVar[AxesSpec[CKP_Result, CKP_Cfg]] = AxesSpec(
         axes=(
@@ -255,7 +254,9 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
                 scale=1e6,
                 dtype=np.float64,
             ),
-            AxesSpec.Axis("initial_states", label="Initial State", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=CKP_Result,
@@ -327,17 +328,25 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
 
         # Acquire both preparations and the full frequency grid in one program.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("ge", 2)
             res_freq = builder.add_sweep("res_freq", cfg.res_freq)
             qub_freq = builder.add_sweep("qub_freq", cfg.qub_freq)
             builder.emit(Reset("reset", cfg.reset))
-            with builder.branch(by="ge", align_timeline=True) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="ge", align_timeline=True) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.fork("default", into=["resonator", "qubit"])
-            builder.emit(Pulse("res_pulse", cfg.res_pulse, freq=res_freq), timeline="resonator")
-            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=qub_freq), timeline="qubit")
+            builder.emit(
+                Pulse("res_pulse", cfg.res_pulse, freq=res_freq), timeline="resonator"
+            )
+            builder.emit(
+                Pulse("qub_pulse", cfg.qub_pulse, freq=qub_freq), timeline="qubit"
+            )
             builder.join("resonator", "qubit", into="default")
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)

@@ -29,10 +29,10 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    TimelineBuilder,
     Pulse,
     PulseReadout,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
@@ -228,7 +228,9 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                         ),
                     )
                     builder = TimelineBuilder(
-                        context.soccfg, reps=cfg.shots, relax_delay=cfg.relax_delay,
+                        context.soccfg,
+                        reps=cfg.shots,
+                        relax_delay=cfg.relax_delay,
                     )
                     builder.fork("default", into=["stokes", "pump"])
                     with builder.timeline("stokes"):
@@ -241,7 +243,8 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                     builder.emit(PulseReadout("readout", cfg.readout))
                     program = builder.build()
                     step.run_acquire_summed(
-                        program, context.soc,
+                        program,
+                        context.soc,
                         processor=shot_sums(program, [Classify("readout")]),
                         options=RunOptions(converter=lambda sums: sums.reshape(3)),
                         charge_requirements=(

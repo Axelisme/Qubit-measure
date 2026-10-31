@@ -19,9 +19,9 @@ from zcu_tools.program.v2 import (
     LoadValue,
     Pulse,
     Readout,
-    TimelineBuilder,
     Reset,
     SweepCfg,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -83,7 +83,6 @@ class ZigZagScanCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-
 
 
 @dataclass(frozen=True)
@@ -178,20 +177,31 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             ),
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("times", len(times))
             x_param = builder.add_sweep(x_key, x_sweep)
             # Preparation keeps its original settings; only the repeat is swept.
             repeated_cfg = deepcopy(repeat_pulse)
             repeated_cfg.set_param(x_key, x_param)
-            loop_n = [int(n) for n in (2 * times if repeat_on == "X90_pulse" else times)]
-            builder.emit(LoadValue(
-                "load_repeat_count", values=loop_n, idx_reg="times", val_reg="repeat_count",
-            ))
+            loop_n = [
+                int(n) for n in (2 * times if repeat_on == "X90_pulse" else times)
+            ]
+            builder.emit(
+                LoadValue(
+                    "load_repeat_count",
+                    values=loop_n,
+                    idx_reg="times",
+                    val_reg="repeat_count",
+                )
+            )
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
             builder.sync()
-            with builder.repeat("zigzag_loop", "repeat_count", range_hint=(min(loop_n), max(loop_n))):
+            with builder.repeat(
+                "zigzag_loop", "repeat_count", range_hint=(min(loop_n), max(loop_n))
+            ):
                 builder.emit(Pulse(repeat_on, repeated_cfg))
                 builder.sync()
             builder.emit(Readout("readout", cfg.readout))

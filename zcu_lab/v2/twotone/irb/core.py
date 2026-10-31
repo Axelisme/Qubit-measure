@@ -17,10 +17,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
-    TimelineProgramV2,
     Readout,
-    TimelineBuilder,
     Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
 )
 
 from zcu_lab.v2.support import live_line
@@ -128,7 +128,9 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             break
                         arm_step = seed_step.child(arm)
                         builder = TimelineBuilder(
-                            context.soccfg, reps=program_cfg.reps, relax_delay=program_cfg.relax_delay,
+                            context.soccfg,
+                            reps=program_cfg.reps,
+                            relax_delay=program_cfg.relax_delay,
                         )
                         key = (seed_index, arm)
                         if key not in cache:
@@ -175,18 +177,68 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
 
                             # 3. Play this arm's prefix and its own full inverse.
                             builder.add_loop("depth", len(prefix_len_by_depth))
-                            builder.emit(LoadValue("load_rand_len", values=prefix_len_by_depth, idx_reg="depth", val_reg="rand_len"))
-                            builder.emit(LoadValue("load_recovery_gate_0", values=recovery_gate0_by_depth, idx_reg="depth", val_reg="recovery_gate_0"))
-                            builder.emit(LoadValue("load_recovery_gate_1", values=recovery_gate1_by_depth, idx_reg="depth", val_reg="recovery_gate_1"))
+                            builder.emit(
+                                LoadValue(
+                                    "load_rand_len",
+                                    values=prefix_len_by_depth,
+                                    idx_reg="depth",
+                                    val_reg="rand_len",
+                                )
+                            )
+                            builder.emit(
+                                LoadValue(
+                                    "load_recovery_gate_0",
+                                    values=recovery_gate0_by_depth,
+                                    idx_reg="depth",
+                                    val_reg="recovery_gate_0",
+                                )
+                            )
+                            builder.emit(
+                                LoadValue(
+                                    "load_recovery_gate_1",
+                                    values=recovery_gate1_by_depth,
+                                    idx_reg="depth",
+                                    val_reg="recovery_gate_1",
+                                )
+                            )
                             builder.emit(Reset("reset", run_cfg.reset))
                             builder.sync()
-                            with builder.repeat("rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)):
-                                builder.emit(LoadValue("load_rand_gate", values=rand_gate_seq, idx_reg="rand_gate_idx", val_reg="gate_idx"))
-                                builder.emit(ComputedPulse("basic_gate", val_reg="gate_idx", pulses=gate_pulses))
+                            with builder.repeat(
+                                "rand_gate_idx",
+                                "rand_len",
+                                range_hint=(0, max_rand_len),
+                            ):
+                                builder.emit(
+                                    LoadValue(
+                                        "load_rand_gate",
+                                        values=rand_gate_seq,
+                                        idx_reg="rand_gate_idx",
+                                        val_reg="gate_idx",
+                                    )
+                                )
+                                builder.emit(
+                                    ComputedPulse(
+                                        "basic_gate",
+                                        val_reg="gate_idx",
+                                        pulses=gate_pulses,
+                                    )
+                                )
                                 builder.sync()
                             # Both recovery slots retain the complete candidate set for fixed timing.
-                            builder.emit(ComputedPulse("recovery_gate_0", val_reg="recovery_gate_0", pulses=gate_pulses))
-                            builder.emit(ComputedPulse("recovery_gate_1", val_reg="recovery_gate_1", pulses=gate_pulses))
+                            builder.emit(
+                                ComputedPulse(
+                                    "recovery_gate_0",
+                                    val_reg="recovery_gate_0",
+                                    pulses=gate_pulses,
+                                )
+                            )
+                            builder.emit(
+                                ComputedPulse(
+                                    "recovery_gate_1",
+                                    val_reg="recovery_gate_1",
+                                    pulses=gate_pulses,
+                                )
+                            )
                             builder.emit(Readout("readout", run_cfg.readout))
                             program = builder.build()
 

@@ -58,7 +58,6 @@ class LengthCfg(ConfigBase):
     ] = 1.0
 
 
-
 @dataclass(frozen=True)
 class LengthAnalyzeOptions:
     t0: float | None = None
@@ -134,20 +133,31 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                 cfg.readout.set_param("length", lengths.max() + 0.11)
                 tracker = MomentTracker()
 
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 builder.add_loop("ge", 2)
                 builder.emit(Reset("reset", cfg.reset))
-                with builder.branch(by="ge", align_timeline=True) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
                 builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
                 step.run_acquire(
-                    program, soc, rounds=cfg.rounds,
-                    options=RunOptions(converter=lambda _raw: snr_as_signal(
-                        [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
-                    )),
-                    trackers=[tracker], **(acquire_kwargs or {}),
+                    program,
+                    soc,
+                    rounds=cfg.rounds,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=cfg.skew_penalty,
+                        )
+                    ),
+                    trackers=[tracker],
+                    **(acquire_kwargs or {}),
                 )
 
         # Return the moment-derived score; raw shots and IQ moments are not retained.

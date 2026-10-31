@@ -215,17 +215,24 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         with Schedule(None, counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 builder = TimelineBuilder(
-                    context.soccfg, reps=cfg.shots,
-                    initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+                    context.soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
                 )
-                builder.emit(Pulse(
-                    "drive", cfg.drive,
-                    freq=float(point_frequencies[point]), gain=float(point_gains[point]),
-                ))
+                builder.emit(
+                    Pulse(
+                        "drive",
+                        cfg.drive,
+                        freq=float(point_frequencies[point]),
+                        gain=float(point_gains[point]),
+                    )
+                )
                 builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
                 step.run_acquire_summed(
-                    program, context.soc,
+                    program,
+                    context.soc,
                     processor=shot_sums(program, [Classify("readout")]),
                     options=RunOptions(converter=lambda sums: sums.reshape(3)),
                 )

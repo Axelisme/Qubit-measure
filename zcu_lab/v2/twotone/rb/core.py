@@ -20,9 +20,9 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    TimelineBuilder,
     Reset,
     ResetCfg,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -141,7 +141,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
-                builder = TimelineBuilder(soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
+                )
 
                 # 2. Map the seed's physical gate IDs to calibrated pulses.
                 (
@@ -175,18 +177,60 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
 
                 # 3. Reset, play the depth prefix, recover the full Clifford, read out.
                 builder.add_loop("depth", len(prefix_len_by_depth))
-                builder.emit(LoadValue("load_rand_len", values=prefix_len_by_depth, idx_reg="depth", val_reg="rand_len"))
-                builder.emit(LoadValue("load_recovery_gate_0", values=recovery_gate0_by_depth, idx_reg="depth", val_reg="recovery_gate_0"))
-                builder.emit(LoadValue("load_recovery_gate_1", values=recovery_gate1_by_depth, idx_reg="depth", val_reg="recovery_gate_1"))
+                builder.emit(
+                    LoadValue(
+                        "load_rand_len",
+                        values=prefix_len_by_depth,
+                        idx_reg="depth",
+                        val_reg="rand_len",
+                    )
+                )
+                builder.emit(
+                    LoadValue(
+                        "load_recovery_gate_0",
+                        values=recovery_gate0_by_depth,
+                        idx_reg="depth",
+                        val_reg="recovery_gate_0",
+                    )
+                )
+                builder.emit(
+                    LoadValue(
+                        "load_recovery_gate_1",
+                        values=recovery_gate1_by_depth,
+                        idx_reg="depth",
+                        val_reg="recovery_gate_1",
+                    )
+                )
                 builder.emit(Reset("reset", run_cfg.reset))
                 builder.sync()
-                with builder.repeat("rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)):
-                    builder.emit(LoadValue("load_rand_gate", values=rand_gate_seq, idx_reg="rand_gate_idx", val_reg="gate_idx"))
-                    builder.emit(ComputedPulse("basic_gate", val_reg="gate_idx", pulses=gate_pulses))
+                with builder.repeat(
+                    "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)
+                ):
+                    builder.emit(
+                        LoadValue(
+                            "load_rand_gate",
+                            values=rand_gate_seq,
+                            idx_reg="rand_gate_idx",
+                            val_reg="gate_idx",
+                        )
+                    )
+                    builder.emit(
+                        ComputedPulse(
+                            "basic_gate", val_reg="gate_idx", pulses=gate_pulses
+                        )
+                    )
                     builder.sync()
                 # Both recovery slots retain the complete candidate set for fixed timing.
-                builder.emit(ComputedPulse("recovery_gate_0", val_reg="recovery_gate_0", pulses=gate_pulses))
-                builder.emit(ComputedPulse("recovery_gate_1", val_reg="recovery_gate_1", pulses=gate_pulses))
+                builder.emit(
+                    ComputedPulse(
+                        "recovery_gate_0", val_reg="recovery_gate_0", pulses=gate_pulses
+                    )
+                )
+                builder.emit(
+                    ComputedPulse(
+                        "recovery_gate_1", val_reg="recovery_gate_1", pulses=gate_pulses
+                    )
+                )
                 builder.emit(Readout("readout", run_cfg.readout))
                 program = builder.build()
 
@@ -216,7 +260,11 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         depths_f = depths.astype(np.float64)
 
         fit = fit_decay(depths_f, real_signals_avg)
-        decay_time, decay_err, fit_signals = fit.decay_time, fit.decay_time_err, fit.curve
+        decay_time, decay_err, fit_signals = (
+            fit.decay_time,
+            fit.decay_time_err,
+            fit.curve,
+        )
 
         p = np.exp(-1.0 / decay_time)
         p_err = p / (decay_time**2) * decay_err

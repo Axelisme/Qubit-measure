@@ -103,7 +103,6 @@ class AcStarkCfg(ConfigBase):
     ] = 1.0
 
 
-
 class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     Options: ClassVar[type[AcStarkAnalyzeOptions]] = AcStarkAnalyzeOptions
 
@@ -180,22 +179,35 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))
                 # The Stark tone does not block the probe or the following readout.
                 builder.fork("default", into=["stark", "probe"])
-                builder.emit(Pulse("stark_pulse1", cfg.stark_pulse1, gain=step.value), timeline="stark")
-                builder.emit(Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq), timeline="probe")
+                builder.emit(
+                    Pulse("stark_pulse1", cfg.stark_pulse1, gain=step.value),
+                    timeline="stark",
+                )
+                builder.emit(
+                    Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq), timeline="probe"
+                )
                 builder.join("probe", into="default")
                 builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()
                 step.run_acquire(
-                    program, soc, rounds=cfg.rounds,
-                    options=RunOptions(stop_condition=snr_checker(
-                        signals_buffer[step], cfg.earlystop_snr,
-                        lambda x: rotate2real(x).real, after_check=update_snr,
-                    )),
+                    program,
+                    soc,
+                    rounds=cfg.rounds,
+                    options=RunOptions(
+                        stop_condition=snr_checker(
+                            signals_buffer[step],
+                            cfg.earlystop_snr,
+                            lambda x: rotate2real(x).real,
+                            after_check=update_snr,
+                        )
+                    ),
                 )
 
         return AcStarkResult(gains, freqs, signals_buffer.array)

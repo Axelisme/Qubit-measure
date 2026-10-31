@@ -81,7 +81,6 @@ class AcStarkRamseyCfg(ConfigBase):
     ] = 1.0
 
 
-
 class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     Options: ClassVar[type[AcStarkRamseyAnalyzeOptions]] = AcStarkRamseyAnalyzeOptions
 
@@ -151,20 +150,28 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         # At each Stark gain, sweep the Ramsey delay and its programmed phase.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 length = builder.add_sweep("length", cfg.length)
                 builder.emit(Reset("reset", cfg.reset))
                 builder.fork("default", into=["stark", "ramsey"])
-                builder.emit(Pulse("stark_pulse", cfg.stark_pulse, gain=step.value), timeline="stark")
+                builder.emit(
+                    Pulse("stark_pulse", cfg.stark_pulse, gain=step.value),
+                    timeline="stark",
+                )
                 with builder.timeline("ramsey"):
                     builder.delay_timeline(cfg.wait_delay)
                     pi2_pulse = Pulse("pi2_pulse", cfg.pi2_pulse)
                     builder.emit(pi2_pulse)
                     builder.delay_timeline(length)
-                    builder.emit(Pulse(
-                        "pi2_pulse", cfg.pi2_pulse,
-                        phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length,
-                    ))
+                    builder.emit(
+                        Pulse(
+                            "pi2_pulse",
+                            cfg.pi2_pulse,
+                            phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length,
+                        )
+                    )
                 builder.join("stark", "ramsey", into="default")
                 builder.emit(Readout("readout", cfg.readout))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)

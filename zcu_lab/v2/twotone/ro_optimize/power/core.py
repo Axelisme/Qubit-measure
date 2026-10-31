@@ -18,12 +18,12 @@ from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
     GainSweep,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
+    TimelineBuilder,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
@@ -64,7 +64,6 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-
 
 
 @dataclass(frozen=True)
@@ -140,21 +139,32 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             cfg.readout.set_param("gain", gain_param)
             tracker = MomentTracker()
 
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("ge", 2)
             builder.add_sweep("gain", gain_sweep)
             builder.emit(Reset("reset", cfg.reset))
-            with builder.branch(by="ge", align_timeline=True) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+            with (
+                builder.branch(by="ge", align_timeline=True) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
             sched.run_acquire(
-                program, soc, rounds=cfg.rounds,
-                options=RunOptions(converter=lambda _raw: snr_as_signal(
-                    [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
-                )),
-                trackers=[tracker], **(acquire_kwargs or {}),
+                program,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    converter=lambda _raw: snr_as_signal(
+                        [tracker],
+                        ge_axis=1,
+                        skew_penalty=cfg.skew_penalty,
+                    )
+                ),
+                trackers=[tracker],
+                **(acquire_kwargs or {}),
             )
 
         # Return the moment-derived score; raw shots and IQ moments are not retained.

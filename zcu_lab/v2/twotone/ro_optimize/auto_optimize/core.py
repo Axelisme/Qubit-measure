@@ -28,13 +28,13 @@ from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    TimelineBuilder,
     GainSweep,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support import live_line
@@ -139,7 +139,6 @@ class AutoOptCfg(ConfigBase):
             ),
         ),
     ] = None
-
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -277,6 +276,7 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     result_validator=_validate_auto_opt_result,
 )
 
+
 class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[AutoOptResult, AutoOptCfg]] = (
         RO_AUTO_GROUPED_AXES_SPEC
@@ -386,20 +386,31 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                 tracker = MomentTracker()
 
                 # Compare pulse-off/on preparations at this candidate's readout settings.
-                builder = TimelineBuilder(soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
+                )
                 builder.add_loop("ge", 2)
                 builder.emit(Reset("reset", run_cfg.reset))
-                with builder.branch(by="ge", align_timeline=True) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("qub_pulse", run_cfg.qub_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("qub_pulse", run_cfg.qub_pulse))
                 builder.emit(Readout("readout", run_cfg.readout))
                 program = builder.build()
                 step.run_acquire(
-                    program, soc, rounds=run_cfg.rounds,
-                    options=RunOptions(converter=lambda _raw: snr_as_signal(
-                        [tracker], ge_axis=1, skew_penalty=run_cfg.skew_penalty,
-                    )),
-                    trackers=[tracker], **(acquire_kwargs or {}),
+                    program,
+                    soc,
+                    rounds=run_cfg.rounds,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=run_cfg.skew_penalty,
+                        )
+                    ),
+                    trackers=[tracker],
+                    **(acquire_kwargs or {}),
                 )
 
         # Keep the sampled path and scores, including unvisited NaN rows.
