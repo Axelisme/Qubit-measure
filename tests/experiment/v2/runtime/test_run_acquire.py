@@ -92,7 +92,9 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
             return np.ones((1,))
 
     program = FailingProgram([np.array([[[3.0, 4.0]]])])
-    with pytest.raises(RuntimeError) as caught, Schedule({}, buffer, scope=root) as sched:
+    sched = Schedule({}, buffer, scope=root)
+
+    def acquire() -> None:
         if entry == "schedule":
             options = RunOptions[list[NDArray[np.float64]]](
                 retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
@@ -126,6 +128,9 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
                     sums2signal_fn=lambda raw: raw,
                     options=acquire_options,
                 )
+
+    with sched, pytest.raises(RuntimeError, match="producer failed") as caught:
+        acquire()
     assert caught.value is cause
     assert len(attempts) == (1 if cancel_on_failure else retry + 1)
     if mode != "summed":

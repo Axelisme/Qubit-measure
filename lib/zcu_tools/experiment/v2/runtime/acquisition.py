@@ -273,8 +273,8 @@ class AcquisitionRunner:
                 except KeyboardInterrupt as exc:
                     self._schedule.mark_interrupted(exc)
                     break
-                # tolerated: Retry producer failures; exhausted errors propagate unchanged.
-                except Exception as exc:  # noqa: BLE001
+                # Retry producer failures; exhausted errors propagate unchanged.
+                except Exception as exc:
                     if self._schedule.check_stop_requested(exception=exc):
                         raise
                     if not observation.retry_after(exc, retry, slot, initial_signal):

@@ -179,7 +179,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         try:
             iteration = next(iterations)
             if failed:
-                with pytest.raises(OSError) as caught:
+                with pytest.raises(OSError, match="readout disconnected") as caught:
                     await iteration.call(operation)
                 assert caught.value is cause
             else:
