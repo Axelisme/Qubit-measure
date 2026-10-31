@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-30，Schedule run acquisition
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -21,7 +21,9 @@ acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
   NaN 初始化底層 ndarray。
 - `buffer[step]` / `buffer.at(...)` 回傳 `SignalSlot`，slot 寫入的是 buffer 的
   writable view。
-- `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
+- `SignalBuffer.set(...)` / `SignalSlot.set(...)` 只接受與目標完全相同的 shape，寫入後自動觸發 `on_update`。
+  Shape 不符會在寫入前拋出 `ValueError`，訊息列出 target 與 value 的 shape，不發布 update。
+  不做 NumPy broadcasting，純量或長度 1 陣列不能填滿多格 slot。純量 slot 的 shape 是 `()`，傳入 `np.array(value)` 即可寫入。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
 - `flush_pending_update()` 立即交付被節流、尚未呈現的更新。若 callback 已經完成，這個方法直接返回。顯式 `trigger_update(flush=True)` 則仍會強制刷新。
 
@@ -104,6 +106,7 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
   `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
   `step.array_data` 做型別邊界。`flush=True` 對 ResultTree 表示立即送出 node event；
   對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
+  `set_data` 與 `ResultNode.set` 寫入 ndarray target 時同樣要求 shape 完全相同。數字只可寫入 shape 為 `()` 的 target；mapping 與 list 的既有更新語意不變。
 - `sched.trigger_update(flush=True)` 是 root-level update，會對 root buffer 傳
   `step=None`；step-level update 才帶 `ScheduleStep`。
 - 正常離開 scope 時（包含 requested stop），`Schedule` 對 root `SignalBuffer` 呼叫 `flush_pending_update()`，交付最後尚未呈現的資料。已顯式 flush 或已經呈現的更新不重複發布。Body 拋出例外或 `KeyboardInterrupt` 時不做自動 flush；正常退出的 callback 錯誤會傳播，但 scope 仍關閉。

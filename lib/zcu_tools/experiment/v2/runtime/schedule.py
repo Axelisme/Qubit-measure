@@ -674,9 +674,11 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     ) -> None:
         """Write value into owner's existing result node, then notify root buffers.
 
-        owner must belong to this active schedule. Container assignment enforces
-        supported value types and array shapes; lookup or write errors propagate
-        before update. flush requests immediate delivery through the root hook.
+        owner must belong to this active schedule. An ndarray target requires
+        an identical value shape; a number is valid only for a scalar target.
+        Shape mismatch raises ValueError with both shapes before writing or
+        notifying. Other lookup or write errors also propagate before update.
+        flush requests immediate delivery through the root hook.
         """
         target = self.get_data_for(owner)
         set_target(target, value)
