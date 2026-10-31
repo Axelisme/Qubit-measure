@@ -42,7 +42,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         """
         _require_positive_integer(reps, "reps")
         self.relax_delay = relax_delay
-        self.pulse_registry = PulseRegistry()
 
         super().__init__(
             soccfg,
@@ -55,6 +54,11 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         )
 
         logger.debug("ASM:\n%s", self.asm())
+
+    def _init_declarations(self) -> None:
+        super()._init_declarations()
+        # QICK rebuilds pulse declarations; deduplication belongs to that build.
+        self.pulse_registry = PulseRegistry()
 
     def _initialize(self, cfg: None) -> None: ...
 
@@ -76,9 +80,6 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         self.binprog["dmem"] = [int(word) for word in words]
 
     def compile(self) -> None:
-        if self.binprog is None:
-            # QICK rebuilds pulse declarations; deduplication belongs to that build.
-            self.pulse_registry = PulseRegistry()
         super().compile()
 
         pmem_len = len(self.binprog["pmem"]) if self.binprog["pmem"] is not None else 0

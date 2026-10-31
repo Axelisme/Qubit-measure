@@ -23,7 +23,7 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-from tests.program.v2.timing_support import shots, waves
+from tests.program.v2.timing_support import recompile, shots, waves
 
 
 def _readout(name="read", *, gain: float | QickParam = 0.5):
@@ -794,8 +794,7 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
             expected_ends * 6
         )
         # Invalidate QICK's binary cache to exercise a fresh compile, not a no-op.
-        prog.binprog = None
-        prog.compile()
+        recompile(prog)
 
 
 def test_native_parallel_body_allocates_its_own_emission_scope(mock_soccfg):
@@ -924,11 +923,9 @@ def test_builder_preserves_borrowed_selector_and_shared_pulse_templates(mock_soc
     assert actual.prog_list == fresh.prog_list
     np.testing.assert_array_equal(actual.compile_datamem(), fresh.compile_datamem())
     padded_timing = shots(actual)
-    first.binprog = None
-    first.compile()
+    recompile(first)
     assert shots(actual) == padded_timing
-    actual.binprog = None
-    actual.compile()
+    recompile(actual)
     assert shots(actual) == padded_timing
     assert first.prog_list == build(modules()).prog_list
 

@@ -26,7 +26,7 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
-from tests.program.v2.timing_support import shots, waves
+from tests.program.v2.timing_support import recompile, shots, waves
 
 
 def _program(
@@ -622,8 +622,7 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
                 [104, 104, 176, 220],
             ] * 2
             assert [s.body_end_cycle - s.start_cycle for s in result] == [236, 264] * 2
-            prog.binprog = None
-            prog.compile()
+            recompile(prog)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])

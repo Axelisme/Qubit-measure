@@ -8,7 +8,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from .timing_support import shots, waves
+from .timing_support import recompile, shots, waves
 
 
 def program(
@@ -112,8 +112,7 @@ def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
         # with the new relative80, not the conservative author count bound.
         assert [waves(s) for s in result] == [[100], [110], [125]] * 2
         assert [s.body_end_cycle - s.start_cycle for s in result] == [128, 138, 153] * 2
-        prog.binprog = None
-        prog.compile()
+        recompile(prog)
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])

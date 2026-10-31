@@ -8,7 +8,7 @@ from zcu_tools.program.v2.macro.dmem import DmemLookup, sweep_table_index
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program.v2.timing_support import shots
+from tests.program.v2.timing_support import recompile, shots
 
 
 class IndexedReads(Macro):
@@ -81,8 +81,7 @@ def test_native_indices_share_capacity_but_preserve_axis_order_and_counts(mixed)
     for prog in [indexed_program(axes), indexed_program(axes)]:
         for _ in range(2):
             assert [[e.value for e in s.events] for s in shots(prog)] == expected * 2
-            prog.binprog = None
-            prog.compile()
+            recompile(prog)
 
 
 class InvalidCachedIndex(Macro):
