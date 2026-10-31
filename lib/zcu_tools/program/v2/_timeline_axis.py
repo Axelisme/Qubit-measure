@@ -4,9 +4,10 @@ This module owns identity alignment and rational scalar/ndarray arithmetic.
 Expression normalization and constrained Abs ranges live in _timeline_expression.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from functools import cached_property
+from itertools import count
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
 CycleValues = NDArray[np.int64] | NDArray[np.object_]
 CycleLimits = tuple[Fraction | None, Fraction | None]
 Scalar = int | Fraction
+_AXIS_ORDER = count()
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,14 @@ class CycleAxis:
     maximum: int | None
     values: CycleValues | None
     producer: CycleProducer
+    order: int = field(default_factory=_AXIS_ORDER.__next__, init=False, repr=False)
+
+    @property
+    def sort_key(self) -> tuple[int, str, int]:
+        """Order named correlated axes by name, independent axes by creation."""
+        if isinstance(self.identity, str):
+            return 0, self.identity, 0
+        return 1, "", self.order
 
     def __post_init__(self) -> None:
         if self.values is not None:
@@ -104,12 +114,14 @@ def nonzero_component(component: Component) -> bool:
     return bool(np.any(np.asarray(component, dtype=object)))
 
 
+def component_values(component: Component) -> tuple[Scalar, ...]:
+    """Return actual component values as immutable Python numeric scalars."""
+    return tuple(component.tolist()) if isinstance(component, np.ndarray) else (component,)
+
+
 def component_key(axis: CycleAxis, component: Component) -> tuple[object, ...]:
     """Return an immutable structural key using axis identity and actual values."""
-    return (
-        axis.identity,
-        *(component.flat if isinstance(component, np.ndarray) else (component,)),
-    )
+    return (axis.identity, *component_values(component))
 
 
 @dataclass(frozen=True, eq=False, init=False)
