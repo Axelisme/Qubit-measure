@@ -239,7 +239,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self._body(None)
         finally:
             self._building_body = False
-        self.append_macro(TimelineSync(self._timeline_book, None))
+        self.append_macro(TimelineSync(self._timeline_book, None, close_adc=True))
         self.append_macro(TimelineBoundary(self._timeline_book, "body_end"))
         self.append_macro(TimelineShellWait(self._timeline_book, self.final_wait))
         if self.final_delay is not None:

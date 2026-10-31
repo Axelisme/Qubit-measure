@@ -395,15 +395,17 @@ class TimelineSync(Delay):
         timeline: str | None,
         *,
         sources: tuple[str, ...] | None = None,
+        close_adc: bool = False,
     ):
         super().__init__(t=0, auto=False)
         self.book = book
         self.timeline = timeline
         self.sources = sources
+        self.close_adc = close_adc
 
     def preprocess(self, prog) -> None:
         self.t = (
-            self.book.maximum()
+            self.book.maximum(close_adc=self.close_adc)
             if self.timeline is None
             else self.book.end(self.timeline)
         )

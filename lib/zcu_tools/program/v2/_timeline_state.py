@@ -764,22 +764,14 @@ class TimelineBook:
 
         Known producers use exact legal-point extrema. A bounds-only unknown
         emits an explicitly conservative warning and never triggers the relax
-        guard. This check emits no runtime instructions.
+        guard. Body closure has already consumed unbounded ADC tails at runtime.
+        This check emits no runtime instructions.
         """
         if not prog.ro_chs:
             return
         expression = choose_time(
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
-        if unbounded_time(expression):
-            unknown = [
-                ch
-                for ch in prog.ro_chs
-                if unbounded_time(self.native_expression(prog, ch, generator=False))
-            ]
-            raise ValueError(
-                f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending"
-            )
         exact = exact_bounds(expression)
         limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its
@@ -798,5 +790,19 @@ class TimelineBook:
                 raise ValueError(f"{message}, relax={relax} cycles")
             warnings.warn(message, UserWarning, stacklevel=2)
 
-    def maximum(self) -> Time:
-        return self.math.join(list(self.ends.values()) or [0.0])
+    def maximum(self, *, close_adc: bool = False) -> Time:
+        """Join timeline ends, consuming unbounded ADC tails at shot closure.
+
+        Finite ADC tails retain the constant shell WAIT and its slack proof.
+        Unknown tails must advance reference by their actual runtime maximum,
+        since no constant WAIT can cover them without inventing an upper bound.
+        """
+        values = list(self.ends.values())
+        if close_adc:
+            prog = self.math.prog
+            values.extend(
+                self.channel_end(prog, ch, generator=False)
+                for ch in prog.ro_chs
+                if unbounded_time(self.native_expression(prog, ch, generator=False))
+            )
+        return self.math.join(values or [0.0])
