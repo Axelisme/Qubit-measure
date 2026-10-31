@@ -130,8 +130,9 @@ class RunAcquisitionMixin(ABC):
     no scope, slot or outcome state. Each run call writes converted data into
     that owner's default slot and triggers live updates, retries producer errors
     and applies acquire-local data stops. It requires an active Schedule and a
-    writable SignalBuffer slot. Cancellation/interruption return partial data
-    with a Schedule outcome. Exhausted producer errors propagate unchanged;
+    writable SignalBuffer slot. Cancellation returns partial data with a
+    Schedule outcome. KeyboardInterrupt propagates unchanged without retry.
+    Exhausted producer errors propagate unchanged;
     conversion/update errors propagate without retry.
     """
 
@@ -163,7 +164,7 @@ class RunAcquisitionMixin(ABC):
         ValueError requesting an explicit converter. Final-axis IQ becomes complex.
         Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
@@ -201,7 +202,7 @@ class RunAcquisitionMixin(ABC):
         repetition, read and sample axes. Native qick_options are forwarded.
         rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
@@ -239,7 +240,7 @@ class RunAcquisitionMixin(ABC):
         cumulative and final sums directly without averaging. Native qick_options
         are forwarded. rounds defaults to one and must be a positive integer
         excluding bool. Return the live slot, retaining completed rounds on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         None producer results, conversion and update failures propagate without retry.
         """
         owner = self._acquisition_owner

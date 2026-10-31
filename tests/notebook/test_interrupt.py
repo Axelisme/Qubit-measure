@@ -158,6 +158,35 @@ def test_timeout_fallback_delivers_keyboard_interrupt(
     assert adapter.last_run is None
 
 
+def test_real_deadline_targets_main_thread_during_blocking_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send = signal.pthread_kill
+    main_thread = threading.get_ident()
+    delivered: list[tuple[int, int, int]] = []
+
+    def deliver(thread_id: int, signum: int) -> None:
+        delivered.append((threading.get_ident(), thread_id, signum))
+        send(thread_id, signum)
+
+    monkeypatch.setattr(signal, "pthread_kill", deliver)
+
+    def author(context: RunContext) -> None:
+        signal.raise_signal(signal.SIGINT)
+        # The armed deadline must interrupt this C wait; 30s only guards a broken timer.
+        threading.Event().wait(30)
+
+    adapter = notebook(InterruptCore(author), interrupt_timeout=0.01)
+    with pytest.raises(KeyboardInterrupt):
+        adapter.run(Cfg())
+    assert adapter.last_run is None
+    assert len(delivered) == 1
+    sender, target, signum = delivered[0]
+    assert sender != main_thread
+    assert target == main_thread
+    assert signum == signal.SIGINT
+
+
 def test_worker_thread_run_keeps_process_sigint_handler() -> None:
     previous = signal.getsignal(signal.SIGINT)
 

@@ -159,12 +159,15 @@ class NotebookExperiment(Generic[CoreT]):
         caller). Propagate any read error before writes/acquisition; no cached
         fallback. Retain that pre-Run snapshot unchanged through sweeps and Save.
         Capture software-only provenance before acquisition; propagate errors.
-        Time core.run and its error check in UTC, excluding plot finalization.
-        Normal stopped or interrupted returns publish stopped evidence and a
-        saveable record. Failed signals and exceptions escaping core.run raise.
-        This includes KeyboardInterrupt before a Schedule scope (device setup)
-        or after it. Any acquisition or presentation failure
-        retains the previous record, analysis and acquisition evidence.
+        Time core.run in UTC, excluding plot finalization. On the main thread,
+        temporarily handle SIGINT during core.run: the first interrupt requests
+        stop with a reason, the second or interrupt_timeout deadline raises
+        KeyboardInterrupt. Cancel the timer before restoring the prior handler.
+        Worker-thread runs leave signal handling unchanged. Publish every normal
+        return; completion is stopped only if this adapter sent a stop request.
+        Propagate all escaping exceptions unchanged, including KeyboardInterrupt.
+        Any acquisition or presentation failure retains the previous record,
+        analysis and acquisition evidence.
         """
         if self._soc is None or self._soccfg is None:
             raise ValueError("Run requires both soc and soccfg handles")
