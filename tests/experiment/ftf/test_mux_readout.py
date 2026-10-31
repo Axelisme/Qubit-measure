@@ -156,16 +156,58 @@ def test_mux_channel_passband_keeps_only_in_channel_carriers(
     assert len(plan.readouts[0].batch.events[0][0].pulses) == retained
 
 
-def test_mux_rejects_an_off_channel_single_carrier_with_adc_frequency_and_channel():
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+@pytest.mark.parametrize("tones", [1, 2])
+def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
     base = mux_template()
-    with pytest.raises(ValueError, match=r"ADC 1.*6080.*PFB channel 62.*no.*carrier"):
-        ftf_module.plan_template(
-            settings(),
-            snapshot(),
-            replace(base, events=base.events[:1]),
-            readout=configuration(),
-            time_base=TIME_BASE,
+    base = replace(base, events=base.events[:tones])
+    empty_window = replace(base.readouts[1], frequency_mhz=np.full((2, 1), 6200.0))
+    empty = replace(base, readouts=(base.readouts[0], empty_window))
+    config = configuration()
+    assert config.mux is not None
+    first, second = config.mux.receivers
+    config = replace(
+        config,
+        mux=replace(config.mux, receivers=(first, replace(
+            second,
+            offset_adc=(11.0, -7.0),
+            noise_psd_adc2_ns=((4.0, 0.5), (0.5, 2.0)),
+        ))),
+    )
+    numeric = settings()
+    plan = ftf_module.plan_template(
+        numeric, snapshot(), empty, readout=config, time_base=TIME_BASE
+    )
+    assert plan.readouts[1].batch.events[0][0].pulses == ()
+    assert len(plan.readouts[1].batch.events[0][0].grids) == 1
+
+    def acquire(content):
+        source = ftf_module.FTFSource(
+            numeric, DeviceManager(), engine=MixedEngine(), readout=config
         )
+        acquire_request = replace(request(mode), reps=6000, templates=(content,))
+        try:
+            result = source.open_acquire(acquire_request).sample_round(snapshot(), 0)
+            if isinstance(result, IntegratedRound):
+                return result.raw.materialize(acquire_request.reps, acquire_request.avg_level)
+            return {channel.channel: channel.iq for channel in result.channels}
+        finally:
+            source.close()
+
+    actual = acquire(empty)
+    # Retuning only the other ADC must not change the observed carrier's bits.
+    reference = replace(base, readouts=(base.readouts[0], replace(
+        base.readouts[1], frequency_mhz=np.full((2, 1), 6000.0)
+    )))
+    np.testing.assert_array_equal(actual[4], acquire(reference)[4])
+    observations = actual[1].reshape(-1, 2)
+    count = 3 if mode == "integrated" else 1
+    np.testing.assert_allclose(observations.mean(axis=0), np.array([11.0, -7.0]) * count, atol=0.1)
+    covariance = count * np.array([[4.0, 0.5], [0.5, 2.0]])
+    if mode == "integrated":
+        covariance += np.eye(2) / 12
+    tolerance = 6 * covariance.max() * np.sqrt(2 / (len(observations) - 1))
+    np.testing.assert_allclose(np.cov(observations.T), covariance, atol=tolerance)
 
 
 def test_mux_retunes_independently_between_logical_events():
