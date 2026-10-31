@@ -10,7 +10,7 @@ from zcu_tools.experiment.records import RunRecord
 from ._run_support import make_inputs, make_plots, make_run_service, make_state
 
 
-@pytest.mark.parametrize("selector", ["run", "acquire"])
+@pytest.mark.parametrize("selector", ["run", "acquire", "stop", "operation"])
 @pytest.mark.parametrize("fails", [False, True])
 def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) -> None:
     state, tab_id, adapter = make_state()
@@ -22,8 +22,14 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
             selected = context.scope
             if selector == "acquire":
                 selected = scopes.enter_context(context.scope.branch("acquire"))
-            accepted = service.cancel_scope(token, scope=selector)
-            assert accepted.cancelled
+            if selector == "stop":
+                assert service.cancel_run()
+            elif selector == "operation":
+                # Unscoped remote/MCP cancellation uses the handle's cancel hook.
+                handles.cancel(token)
+            else:
+                accepted = service.cancel_scope(token, scope=selector)
+                assert accepted.cancelled
             assert selected.stop.reason is not None
             if fails:
                 raise RuntimeError("selector core error")
@@ -34,9 +40,7 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
     background.run_work()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == (
-        "failed" if fails else "cancelled" if selector == "run" else "finished"
-    )
+    assert outcome.status == ("failed" if fails else "finished")
     assert outcome.error == ("selector core error" if fails else None)
     pane = state.get_tab(tab_id).run
     assert pane.result is (None if fails else record)
@@ -86,4 +90,4 @@ def test_gui_run_scope_matches_status_and_operation_stop_intent() -> None:
     assert context.scope.cancelled
     assert context.scope.active_path == "run"
     outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "cancelled"
+    assert outcome is not None and outcome.status == "finished"
