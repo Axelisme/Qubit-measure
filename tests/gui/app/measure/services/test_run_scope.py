@@ -10,9 +10,7 @@ from ._run_support import make_inputs, make_plots, make_run_service, make_state
 
 @pytest.mark.parametrize("selector", ["run", "acquire"])
 @pytest.mark.parametrize("fails", [False, True])
-def test_selector_stop_keeps_core_return_or_failure(
-    selector: str, fails: bool
-) -> None:
+def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
     record = RunRecord[ConfigBase, object](None, object())
