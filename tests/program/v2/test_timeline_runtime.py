@@ -94,6 +94,28 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 6
 
 
+def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 1)
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(15 / 430.08)
+        prog.delay_timeline(80 / 430.08)
+        prog.join("external", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    prog = program(body, reps=2)
+    for _ in range(2):
+        result = shots(prog)
+        # Actual repeats advance 15/30/45; compare the external absolute100
+        # with the new relative80, not the conservative author count bound.
+        assert [waves(s) for s in result] == [[100], [110], [125]] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [128, 138, 153] * 2
+        prog.binprog = None
+        prog.compile()
+
+
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 def test_known_table_time_producer_places_each_selected_value(loader_type):
     loader = loader_type("time", [10, 20, 30], "scan", "loaded")

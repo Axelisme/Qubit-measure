@@ -914,7 +914,13 @@ def test_builder_preserves_borrowed_selector_and_shared_pulse_templates(mock_soc
     fresh = build(modules(), padded=True)
     assert actual.prog_list == fresh.prog_list
     np.testing.assert_array_equal(actual.compile_datamem(), fresh.compile_datamem())
+    padded_timing = shots(actual)
+    first.binprog = None
     first.compile()
+    assert shots(actual) == padded_timing
+    actual.binprog = None
+    actual.compile()
+    assert shots(actual) == padded_timing
     assert first.prog_list == build(modules()).prog_list
 
     class Native(v2.TimelineProgramV2):

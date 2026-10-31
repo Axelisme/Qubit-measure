@@ -563,6 +563,62 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
     assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 220] * 2
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("post, advance", [(0, 0), (-60, 60), (-60, 59)])
+def test_equal_runtime_maximum_preserves_both_physical_boundaries(reverse, post, advance):
+    selected = [
+        TableLengthPulse(
+            f"selected_{ch}",
+            _pulse_cfg(39 / 384).model_copy(
+                update={"ch": ch, "post_delay": post / 430.08}
+            ),
+            lengths=[39 / 384, 64 / 384],
+            idx_reg="index",
+        )
+        for ch in (0, 1)
+    ]
+    following = [
+        Pulse(
+            f"following_{ch}",
+            _pulse_cfg(39 / 384).model_copy(update={"ch": ch, "pre_delay": 0.0}),
+        )
+        for ch in (0, 1)
+    ]
+
+    def initialize(prog):
+        prog.add_loop("index", 2)
+        prog.add_reg("origin")
+
+    def body(prog):
+        prog.write_reg("origin", 100)
+        prog.delay_timeline("origin")
+        prog.fork("default", into="other")
+        prog.emit(selected[0])
+        prog.emit(selected[1], timeline="other")
+        source, target = ("default", "other") if reverse else ("other", "default")
+        prog.join(source, into=target)
+        prog.delay_timeline(advance / 430.08, timeline=target)
+        for pulse in following:
+            prog.emit(pulse, timeline=target)
+
+    def build():
+        return _program(make_mock_soccfg(2, 0), [*selected, *following], body, initialize)
+
+    if post + advance < 0:
+        with pytest.raises(ValueError, match="pulse overlap"):
+            build()
+    else:
+        prog = build()
+        for _ in range(2):
+            result = shots(prog)
+            # Both selected physical ends are 148/176. Equal numeric aggregate
+            # ends must retain both channels' coverage, including the 60-cycle debt.
+            assert [waves(s) for s in result] == [[104, 104, 148, 192], [104, 104, 176, 220]] * 2
+            assert [s.body_end_cycle - s.start_cycle for s in result] == [236, 264] * 2
+            prog.binprog = None
+            prog.compile()
+
+
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
     pulse = _negative_selected(kind)
