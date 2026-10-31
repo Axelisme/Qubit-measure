@@ -87,16 +87,22 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                         VariableAxisSpec.generated_arange("terminal_f1", ""),
                         VariableAxisSpec.generated_arange("herald_f2", ""),
                         VariableAxisSpec.generated_arange("herald_f1", ""),
-                        VariableAxisSpec("Round", "", field_name="rounds", dtype=np.int64),
+                        VariableAxisSpec(
+                            "Round", "", field_name="rounds", dtype=np.int64
+                        ),
                         VariableAxisSpec("Arm", "", field_name="arms", dtype=np.int64),
-                        VariableAxisSpec("Seed", "", field_name="seeds", dtype=np.int64),
+                        VariableAxisSpec(
+                            "Seed", "", field_name="seeds", dtype=np.int64
+                        ),
                         VariableAxisSpec(
                             "Clifford depth", "", field_name="depths", dtype=np.int64
                         ),
                     ),
                     z=VariableZSpec(
-                        field_name="sums", label="Herald and terminal class counts",
-                        unit="", dtype=np.float64,
+                        field_name="sums",
+                        label="Herald and terminal class counts",
+                        unit="",
+                        dtype=np.float64,
                     ),
                 ),
             ),
@@ -107,9 +113,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         )
     )
 
-    def run(
-        self, config: RBHeraldedCfg, *, context: RunContext
-    ) -> RBHeraldedResult:
+    def run(self, config: RBHeraldedCfg, *, context: RunContext) -> RBHeraldedResult:
         """Acquire optional reset → herald → paired sequence → terminal.
 
         Compile once per depth/seed/arm. Each host round acquires reps shots with
@@ -144,12 +148,17 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         acquired = np.isfinite(data.sums).all(axis=(-4, -3, -2, -1))
         missing = np.isnan(data.sums).all(axis=(-4, -3, -2, -1))
         if not np.all(acquired | missing):
-            raise ValueError("Heralded RB sums contains nonfinite counts or a partial round")
+            raise ValueError(
+                "Heralded RB sums contains nonfinite counts or a partial round"
+            )
         terminal = analyze_rb(
             RunRecord[RBCfg, RBResult](
                 cfg=source.cfg,
                 result=RBResult(
-                    data.depths, data.seeds, data.arms, data.rounds,
+                    data.depths,
+                    data.seeds,
+                    data.arms,
+                    data.rounds,
                     terminal_counts(data.sums, heralded=True),
                 ),
             ),
@@ -164,11 +173,14 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 for f2 in range(3):
                     classes = ("g", "e", "other")
                     ax.plot(
-                        data.depths, aggregate[:, arm, f1, f2], "o-",
+                        data.depths,
+                        aggregate[:, arm, f1, f2],
+                        "o-",
                         label=f"{classes[f1]},{classes[f2]}",
                     )
             ax.set(
-                xlabel="Random Clifford depth", ylabel="Herald probability",
+                xlabel="Random Clifford depth",
+                ylabel="Herald probability",
                 title=f"{label}: (g,g) is pass fraction, not purity",
             )
             ax.legend()

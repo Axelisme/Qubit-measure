@@ -23,14 +23,25 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Reset, TimelineBuilder, TimelineProgramV2, shot_sums
+from zcu_tools.program.v2 import (
+    Pulse,
+    Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
 from .._readout import JointRoles
-from .._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from .._sums import (
+    joint_probabilities,
+    readout_axes,
+    terminal_counts,
+    validate_classifiers,
+)
 from .._timeline import emit_readout_prefix
 from .analysis import RBAnalysis, RBOptions, analyze_rb
 from .program import CZPhasePair, sequence_modules
@@ -76,7 +87,9 @@ class RBCfg(ConfigBase):
     ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset at the start of every shot."),
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
     ] = None
     x90_f1: Annotated[
         Pulse.Cfg,
@@ -168,13 +181,18 @@ def build_program(
     """
     validate_classifiers(cfg.readout, cfg.roles)
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps,
-        initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
     for module in sequence_modules(
-        gates, x90_f1=cfg.x90_f1, x90_f2=cfg.x90_f2,
-        drive=cfg.drive, phase_pair=cfg.phase_pair,
+        gates,
+        x90_f1=cfg.x90_f1,
+        x90_f2=cfg.x90_f2,
+        drive=cfg.drive,
+        phase_pair=cfg.phase_pair,
     ):
         builder.emit(module)
     builder.emit(readout, tag="terminal")
@@ -194,7 +212,9 @@ def acquire_counts(
     """
     validate_classifiers(config.readout, config.roles)
     viewer = live_line(
-        context.plots, "measurement", "Random Clifford depth",
+        context.plots,
+        "measurement",
+        "Random Clifford depth",
         "Joint00 survival" if not heralded else "Joint00 survival | herald (g,g)",
         num_lines=2,
     )
@@ -203,14 +223,13 @@ def acquire_counts(
         counts = terminal_counts(sums, heralded=heralded)
         # Unmeasured rounds do not contribute to the cumulative count ratio.
         totals = np.nansum(counts, axis=(1, 3))
-        viewer.update(
-            np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T
-        )
+        viewer.update(np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T)
 
     class_shape = (3, 3, 3, 3) if heralded else (3, 3)
     buffer = SignalBuffer(
         (len(config.depths), len(config.seeds), 2, config.rounds, *class_shape),
-        dtype=np.float64, on_update=update_view,
+        dtype=np.float64,
+        on_update=update_view,
     )
     with Schedule(config, buffer, scope=context.scope) as sched:
         cfg = sched.cfg
@@ -227,8 +246,11 @@ def acquire_counts(
                     )
                     for _, round_step in arm_step.repeat("round", cfg.rounds):
                         round_step.run_acquire_summed(
-                            prog, context.soc, processor=processor,
-                            rounds=1, options=RunOptions(),
+                            prog,
+                            context.soc,
+                            processor=processor,
+                            rounds=1,
+                            options=RunOptions(),
                         )
     buffer.trigger_update(flush=True)
     return buffer.array
@@ -265,7 +287,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     ),
                 ),
                 z=VariableZSpec(
-                    field_name="sums", label="Joint class counts", unit="",
+                    field_name="sums",
+                    label="Joint class counts",
+                    unit="",
                     dtype=np.float64,
                 ),
             ),

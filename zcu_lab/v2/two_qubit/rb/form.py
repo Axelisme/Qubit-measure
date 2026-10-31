@@ -10,7 +10,6 @@ from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 from .._measure import captured_roles
 from .core import RBCfg
 
-
 T_Cfg = TypeVar("T_Cfg", bound=RBCfg)
 
 
