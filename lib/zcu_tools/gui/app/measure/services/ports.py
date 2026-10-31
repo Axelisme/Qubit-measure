@@ -43,8 +43,9 @@ class RunPaneSnapshot:
     it survives failed resaves, but does not survive Run replacement.
     acquisition_run_id is the fixed Run/Load metadata identity before any Save;
     None means no native acquisition metadata, not unsaved data.
-    stop_requested is the completed Run's cancellation fact, independent of
-    metadata and terminal operation classification; replacement resets it.
+    stop_requested is True when the frontend sent an accepted Stop or selector
+    cancel during this Run. It does not describe completeness or success, and
+    does not include core-owned stops. Replacement resets it to False.
     """
 
     result: object | None

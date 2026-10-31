@@ -3,8 +3,8 @@
 Static preconditions (context readiness, committed-cfg validity, soc capability)
 are GuardService's responsibility (see test_guard.py). RunService only handles
 the dynamic boundary: tab-busy, lease acquisition, bg submit, and — since
-ADR-0066 — the cancel *interpretation* of bg's done/failed (it owns the
-stop_event, so it relabels finished vs cancelled here).
+ADR-0066 — frontend Stop request facts and core return/error delivery.
+Errors remain failed even after Stop; returned records remain publishable.
 
 Stage 2c: RunService is now an OperationRunner client. Tests use a shared
 FakeRunner helper that captures the last spec so callbacks can be driven

@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-29, GLOBAL startup restore 與 writeback destination
+**Last updated:** 2026-10-31, frontend stop requests
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -368,7 +368,12 @@ Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Ad
 
 RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成功台更新觀察 cache，失敗台保留既有值。這項讀回不改變 run 終局、settlement、lease 或 run 前固定的 acquisition snapshot。
 
-RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。`partial_result` 固定 worker 完成時的 Run root 完成事實，與 operation 終態及 metadata 是否存在無關。Snapshot 與 wire 的 result_state 交付同一 bool，new Run 或非 acquisition replacement 重設為 False。
+RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+`stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
+Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
+New Run 或非 acquisition replacement 重設為 False。
+Core 回傳就發布 record，core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
+RunMetadata.completion 的 stopped 表示 core 回傳前前端發出過停止請求，不判定資料是否完整。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。
 Load 接受任意位置的檔案，不讀 live point，也不依 entry 身分選來源。

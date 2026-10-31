@@ -80,8 +80,9 @@ class RunPaneState:
     storage fixes the Save capability: Run admission or Load request storage.
     None means no Save destination. Native Load may have a different analysis
     target; Save still checks this capability against file history.
-    stop_requested is the Run owner's completion-time cancellation fact, even
-    without metadata. Non-acquisition replacement and new Run reset it to False.
+    stop_requested is True when the frontend sent an accepted Stop or selector
+    cancel during this Run, even if the core later failed. Core-owned stops do
+    not set it. Non-acquisition replacement and new Run reset it to False.
     """
 
     result: RunRecord[Any, Any] | None = None

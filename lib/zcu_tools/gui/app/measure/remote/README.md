@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-29，global 文件組的 wire 133／GUI 166
+**Last updated:** 2026-10-31，frontend stop requests，wire 134／GUI 167
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -191,11 +191,15 @@ The GUI path starts with run. Recipe projects only its schedule/acquire tail
 onto the local recipe:<name>/operation#N path. Composite live_paths and cancel
 ack candidates omit the GUI run root by the same rule. GUI acceptance and refusal
 reasons remain unchanged. Handle and sequence checks are process-local; the combined path
-is not an atomic cross-process observation. Descendant cancellation marks Run
-metadata stopped through partial_result, without changing run Stop intent.
-`tab.snapshot.result_state.partial_result` carries the fixed completion fact even
-without native metadata. New Run and result replacement clear the old fact.
-Recipe RunResult reads this field, not operation terminal status or cancel ack.
+is not an atomic cross-process observation.
+`tab.snapshot.result_state.stop_requested` is true when the frontend sent Stop
+or an accepted selector cancel during this Run, including descendant cancellation.
+Core-owned stops do not set it. The flag survives core failure and does not
+classify data completeness. New Run and result replacement reset it to false.
+Run metadata uses stopped for requests recorded before core return.
+Recipe RunResult reads stop_requested, not operation terminal status or cancel ack.
+Core return publishes its record; core errors fail the operation and remain visible
+also after Stop. Wire version 134 requires the renamed field.
 
 Analyze work may explicitly raise AnalysisFailed. Only that work failure adds
 failure_kind="analysis" to operation.await; recording/postprocessing errors stay

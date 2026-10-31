@@ -256,7 +256,8 @@ class RunResult:
 
     status is completed or failed. run_id is the owner's acquisition identity,
     or None when none exists; it does not prove persistence. stop_requested
-    marks cooperative interruption and may retain usable data for Save.
+    is True when the GUI frontend sent Stop or an accepted selector cancel
+    during this Run. It does not classify the returned data's completeness.
     """
 
     status: Literal["completed", "failed"]
@@ -412,7 +413,9 @@ class RecipeRun:
 
     tab is its GUI locator; adapter is the registered name. run_id is the
     acquisition identity, or None before a known owner identity. status records
-    completed/failed operation delivery. stop_requested records interruption.
+    completed/failed operation delivery. stop_requested is True when the GUI
+    frontend sent Stop or an accepted selector cancel during this Run; it does
+    not classify the returned data's completeness.
     saves retains every Save report attempt, including confirmed prefixes on
     failure. No identity or completed status implies persistence.
     """

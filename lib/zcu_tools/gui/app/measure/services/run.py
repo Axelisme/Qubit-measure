@@ -75,6 +75,7 @@ class _RunOperation:
     plots: Plots
     cancel_requested: threading.Event
     stop_requested: threading.Event
+    request_lock: threading.Lock
     origin: CommandOrigin
     adapter_name: str
     storage: StorageBinding | None
@@ -125,7 +126,7 @@ class RunService:
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
         self._active_stop: Scope | None = None
-        self._active_stop_requested: threading.Event | None = None
+        self._active_operation: _RunOperation | None = None
         # Run plots are view-only, never part of the canonical pane or Save All.
         self._view_plots: dict[str, Plots] = {}
         self._bus.subscribe(TabClosedPayload, self._on_tab_closed)
@@ -243,7 +244,7 @@ class RunService:
         self._state.set_tab_running(tab_id, running=False)
         self._active_token = None
         self._active_stop = None
-        self._active_stop_requested = None
+        self._active_operation = None
 
     def _run_finished(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
         logger.info(
@@ -358,16 +359,20 @@ class RunService:
             scope=scope,
         )
 
+        request_lock = threading.Lock()
+
         def request_cancel() -> None:
-            cancel_requested.set()
-            stop_requested.set()
-            stop_signal.set(reason="GUI Run Stop requested")
+            with request_lock:
+                cancel_requested.set()
+                stop_requested.set()
+                stop_signal.set(reason="GUI Run Stop requested")
 
         operation = _RunOperation(
             tab_id=tab_id,
             plots=plots,
             cancel_requested=cancel_requested,
             stop_requested=stop_requested,
+            request_lock=request_lock,
             origin=origin,
             adapter_name=inputs.adapter_name,
             storage=inputs.storage,
@@ -409,7 +414,8 @@ class RunService:
             with progress_ambient(factory):
                 result = adapter.run(cfg, context=context)
             # Metadata fixes the requests observed before acquisition returned.
-            completion = "stopped" if stop_requested.is_set() else "complete"
+            with request_lock:
+                completion = "stopped" if stop_requested.is_set() else "complete"
             finished_at = datetime.now(UTC)
             if metadata is not None:
                 metadata = metadata.model_copy(
@@ -453,7 +459,7 @@ class RunService:
         # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
         self._active_stop = scope
-        self._active_stop_requested = stop_requested
+        self._active_operation = operation
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
@@ -497,13 +503,16 @@ class RunService:
         """
         parse_cancel_scope(scope, expected)
         signal = self._active_stop
-        if operation_id != self._active_token or signal is None:
+        operation = self._active_operation
+        if operation_id != self._active_token or signal is None or operation is None:
             return CancelResult(False, "scope not active", "")
-        result = signal.cancel(
-            scope, expected=expected, reason="GUI Run scope cancellation requested"
-        )
-        if result.cancelled and self._active_stop_requested is not None:
-            self._active_stop_requested.set()
+        # The worker cannot snapshot completion between signalling and recording intent.
+        with operation.request_lock:
+            result = signal.cancel(
+                scope, expected=expected, reason="GUI Run scope cancellation requested"
+            )
+            if result.cancelled:
+                operation.stop_requested.set()
         return result
 
     def cancel_run(self) -> bool:

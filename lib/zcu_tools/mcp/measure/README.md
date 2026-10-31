@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-30，MCP 文字分工與 recipe wire schema
+**Last updated:** 2026-10-31，recipe stop_requested
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -391,7 +391,7 @@ Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為
 其他 selector 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
 
 根 recipe／workflow 取消在下一個 await 丟共用 ScriptCancelled，普通 Exception 子類，
-不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／partial／completion facts，再讓 await raise。
+不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／stop_requested，再讓 await raise。
 作者 finally 在同一 worker 照跑，同步 Save 可保留已取得資料；不在 finally 開新的 await。
 Recipe 終態為 `RecipeOutcome(status="cancelled", report=None, runs=[...])`。
 ScriptCancelled 不記入 error，真實 owner、作者或 cleanup 例外仍保留診斷。
@@ -422,8 +422,11 @@ Recipe 的本地樹與 GUI Run 樹分屬兩個 process。Schedule／acquire 經
 Status 每次用 `operation.status_scope` 取得尾段，接在本地 path 後，不重列 GUI run root。
 拒絕回覆的 cancelled/reason 保留 GUI 事實，active_path、live_paths 與候選 candidates 使用相同合成規則。
 這不是跨 process 原子快照，晚到請求靠 handle 與序號拒絕，不取消下一個 Run。
-GUI `result_state.partial_result` 交付 Run 的完成事實，即使沒有 native metadata 也保留。
-Recipe RunResult 讀這一欄，不因 GUI operation 仍為 finished 而遺失內層取消。
+GUI `result_state.stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel。
+只取消 acquire 子層也記 true，core 自己設 stop 不記。這一欄不判定資料是否完整。
+Recipe RunResult 與 RecipeRun 交付同名欄位，即使沒有 native metadata 也保留。
+Core 回傳就發布，Stop 後 core 拋錯也 failed 並保留錯誤。
+Wire version 134 使用 stop_requested，MCP 沿既有握手拒絕舊版本。
 `recipe_runtime.py` 擁有 GUI binding、wire 解碼、合作取消與 operation source；
 `recipe_host.py` 組合 scheduler、runtime 與 author session。
 `recipe_execution.py` 管理注入 declarations、單一 recipe admission 與 execution 查詢。
@@ -460,7 +463,7 @@ Post 的 `result_read` 失敗另附 `recovery`，保留 owner 的唯讀 RPC、�
 Reason 是 `str(exception)`，不附格式化 traceback。作者 catch 後的新錯誤不沿用舊 phase，
 成功的 finally Save 也不覆蓋原失敗的 phase。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
-partial 與 Save 收據，不靠作者補取消報告。
+stop_requested 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
 `status(execution, detail="full")` 保留 detached Run 前 Form 條件、
 各 stage 的 owner-native summary／invalid、最後明確捕捉的 writeback proposal、各次 writeback_receipts 與 error。
