@@ -464,7 +464,11 @@ class RuntimeMath(TimedMacro):
         )
         ratio = Fraction(str(get_fclk(self.prog))) / Fraction(str(clock))
         weight = _conversion_weight(ratio, clock, get_fclk(self.prog))
-        source = self.cycles(counts / get_fclk(self.prog))
+        sources = self.prog._timeline_book.native_length_sources
+        key = (round(counts.start), tuple(sorted((k, round(v)) for k, v in counts.spans.items()))) if isinstance(counts, QickParam) else (counts, ())
+        if key not in sources:
+            sources[key] = self.cycles(counts / get_fclk(self.prog))
+        source = sources[key]
         product = self.multiply(source, weight)
         tail = (aggregate - native.value) * get_fclk(self.prog)
         if isinstance(tail, QickParam):

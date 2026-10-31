@@ -351,6 +351,9 @@ class TimelineBook:
         self.ends: dict[str, Time] = {"default": 0.0}
         self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleVariable] = {}
+        # Native length sweeps are immutable program parameters. Share their
+        # QICK initialization registers across physical-end and post plans.
+        self.native_length_sources: dict[tuple[int, tuple[tuple[str, int], ...]], RuntimeEnd] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
