@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -21,7 +20,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.round_zcu import round_sweep_dict, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
@@ -29,7 +28,6 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
 from zcu_tools.program.v2.modules import MuxReadout
@@ -38,8 +36,16 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
 from .._readout import JointRoles
-from .._sums import sigma, terminal_counts, validate_classifiers
-from ._analysis import IdleBranchFit, IdleZZAnalysis, fit_branch, plot_analysis
+from .._sums import sigma, validate_classifiers
+from ._analysis import (
+    IdleBranchFit,
+    IdleZZAnalysis,
+    complete_points,
+    fit_traces,
+    sigma_errors,
+    summarize,
+    validate_axes,
+)
 
 
 class IdleZZCfg(ConfigBase):
@@ -176,256 +182,15 @@ class IdleZZResult:
     """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
 
     dc_values is the D-point device coordinate, or [0] when DC is disabled.
-    branches is int64 [0,1] for spectator I/Xπ. delays is actual quantized µs.
+    spectator_states is int64 [0,1] for spectator I/Xπ. delays is actual quantized µs.
     Rounds accumulate without averaging. Unmeasured points stay NaN; completed
     rounds survive cancellation. No individual shots or IQ are retained.
     """
 
     dc_values: NDArray[np.float64]
-    branches: NDArray[np.int64]
+    spectator_states: NDArray[np.int64]
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-def build_program(
-    cfg: IdleZZCfg,
-    soccfg: QickConfig,
-    branch: int,
-    delay: float,
-    *,
-    heralded: bool,
-) -> TimelineProgramV2:
-    """Compile spectator I/Xπ (branch 0/1) and target Ramsey at delay in µs.
-
-    Emit optional reset, optional herald, spectator preparation, target π/2,
-    delay, phase-ramped projection and terminal. Fresh modules belong to each
-    build; herald and terminal use the same mux object. No acquisition occurs.
-    """
-    if branch not in (0, 1):
-        raise ValueError("branch must be 0 (I) or 1 (Xπ)")
-    if not np.isfinite(delay) or delay < 0:
-        raise ValueError("Ramsey delay must be finite and nonnegative")
-    validate_classifiers(cfg.readout, cfg.roles)
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    spectator = cfg.x180_f2 if cfg.target == "f1" else cfg.x180_f1
-    pi2 = cfg.x90_f1 if cfg.target == "f1" else cfg.x90_f2
-    if branch:
-        builder.emit(Pulse("spectator_x180", spectator))
-    builder.emit(Pulse("target_pi2", pi2))
-    builder.delay_timeline(delay)
-    builder.emit(
-        Pulse(
-            "projection",
-            pi2.with_updates(phase=pi2.phase + 360 * cfg.detune * delay),
-        )
-    )
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: IdleZZCfg,
-    *,
-    context: RunContext,
-    heralded: bool,
-) -> tuple[
-    NDArray[np.float64], NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
-]:
-    """Return DC, branch, actual delay axes and raw 9/81-class summed counts.
-
-    Host scans DC/branch/delay; acquisition accumulates rounds. Live traces are
-    target sigma per DC/branch, selecting herald (g,g) when requested. Only the
-    named optional DC source is set, without compensation or restoration.
-    Schedule owns the cfg copy and cancellation. The input cfg is unchanged.
-    """
-    validate_classifiers(config.readout, config.roles)
-    delays = sweep2array(config.delay, "time", {"soccfg": context.soccfg})
-    dc_values = (
-        np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
-    )
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "Delay (us)",
-        "Target ⟨σ⟩" if not heralded else "Target ⟨σ⟩ | herald (g,g)",
-        num_lines=len(dc_values) * 2,
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        traces = sigma(
-            (terminal_counts(sums, ("g", "g")) if heralded else sums), config.target
-        )
-        viewer.update(delays, traces.reshape(-1, len(delays)))
-
-    classes = (3, 3, 3, 3) if heralded else (3, 3)
-    buffer = SignalBuffer(
-        (len(dc_values), 2, len(delays), *classes),
-        dtype=np.float64,
-        on_update=update_view,
-    )
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        cfg = sched.cfg
-        for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
-            if cfg.dc_device is not None:
-                set_flux(
-                    context.devices[cfg.dc_device],
-                    dc_value,
-                    unit=cfg.dc_unit,
-                    stop=context.scope.stop,
-                )
-            for branch, branch_step in dc_step.scan("branch", [0, 1]):
-                for delay, step in branch_step.scan("delay", delays.tolist()):
-                    prog = build_program(
-                        step.cfg,
-                        context.soccfg,
-                        branch,
-                        delay,
-                        heralded=heralded,
-                    )
-                    step.run_acquire_summed(
-                        prog,
-                        context.soc,
-                        processor=shot_sums(
-                            prog,
-                            [
-                                Classify(label, tone)
-                                for label in (
-                                    ("herald", "terminal")
-                                    if heralded
-                                    else ("terminal",)
-                                )
-                                for tone in (cfg.roles.f1_tone, cfg.roles.f2_tone)
-                            ],
-                        ),
-                        rounds=cfg.rounds,
-                        options=RunOptions(),
-                    )
-    return dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
-
-
-def analyze_counts(
-    cfg: IdleZZCfg | None,
-    result: IdleZZResult,
-    *,
-    complete: NDArray[np.bool_],
-    plots: Plots,
-) -> IdleZZAnalysis:
-    """Fit saved target sigma for each complete branch; return f_Xπ−f_I in MHz.
-
-    result holds terminal (D,2,T,3,3) counts, already herald-selected if needed.
-    complete is (D,2,T), established from all saved classes before selection.
-    Zero accepted shots cannot fit. Saved cfg is required; no live library is
-    consulted. Free-phase decay cosine, detune-sign ambiguity, covariance errors
-    and the six regular-delay requirement retain their existing definitions.
-    """
-    if cfg is None:
-        raise ValueError(
-            "Idle ZZ analysis requires saved cfg, not current Form/library"
-        )
-    dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
-    ndelay = cfg.delay.expts
-    if (
-        not np.array_equal(result.dc_values, dc_values)
-        or not np.array_equal(result.branches, np.arange(2))
-        or result.delays.shape != (ndelay,)
-        or not np.all(np.isfinite(result.delays))
-        or np.any(result.delays < 0)
-        or len(np.unique(result.delays)) != ndelay
-        or result.sums.shape != (len(dc_values), 2, ndelay, 3, 3)
-    ):
-        raise ValueError("Idle ZZ requires saved (DC,2,delay,3,3) count axes")
-    traces = sigma(result.sums, cfg.target)
-    shots = result.sums.sum(axis=(-2, -1))
-    fits = []
-    zetas: list[float | None] = []
-    errors: list[float | None] = []
-    reasons: list[str | None] = []
-    for dc_index in range(len(dc_values)):
-        pair = [
-            fit_branch(
-                IdleBranchFit(
-                    dc_index,
-                    branch,
-                    int(np.nansum(shots[dc_index, branch])),
-                    bool(np.all(complete[dc_index, branch])),
-                    traces[dc_index, branch],
-                ),
-                delays=result.delays,
-                detune=cfg.detune,
-            )
-            for branch in range(2)
-        ]
-        fits.extend(pair)
-        a, b = pair
-        if (
-            a.signed_mhz is None
-            or b.signed_mhz is None
-            or a.error_mhz is None
-            or b.error_mhz is None
-        ):
-            zetas.append(None)
-            errors.append(None)
-            reasons.append(
-                "; ".join(
-                    f"{label}: {fit.reason}"
-                    for label, fit in zip(("I", "Xπ"), pair, strict=True)
-                    if fit.reason
-                )
-            )
-        else:
-            zetas.append(b.signed_mhz - a.signed_mhz)
-            errors.append(float(np.hypot(a.error_mhz, b.error_mhz)))
-            reasons.append(None)
-    answer = IdleZZAnalysis(tuple(fits), tuple(zetas), tuple(errors), tuple(reasons))
-    dc_label = (
-        "DC not swept (inactive coordinate)"
-        if cfg.dc_device is None
-        else f"{cfg.dc_device} ({cfg.dc_unit})"
-    )
-    plot_analysis(
-        answer,
-        result.delays,
-        result.dc_values,
-        title=f"Target {cfg.target}, detune={cfg.detune:g} MHz",
-        dc_label=dc_label,
-        plots=plots,
-    )
-    return answer
-
-
-def complete_points(
-    cfg: IdleZZCfg | None,
-    sums: NDArray[np.float64],
-    *,
-    heralded: bool,
-) -> NDArray[np.bool_]:
-    """Validate raw counts and return points with all requested rounds acquired.
-
-    All-NaN points are unmeasured. Finite nonnegative points may contain partial
-    round accumulation. Completion uses all 9/81 classes, never herald acceptance.
-    Saved cfg is mandatory; malformed counts raise ValueError.
-    """
-    if cfg is None:
-        raise ValueError("Idle ZZ analysis requires saved cfg")
-    nclass = 4 if heralded else 2
-    if sums.ndim != 3 + nclass or sums.shape[-nclass:] != (3,) * nclass:
-        raise ValueError("Idle ZZ requires DC × branch × delay × 9/81 class counts")
-    axes = tuple(range(-nclass, 0))
-    finite = np.all(np.isfinite(sums) & (sums >= 0), axis=axes)
-    missing = np.all(np.isnan(sums), axis=axes)
-    if not np.all(finite | missing):
-        raise ValueError("Idle ZZ counts must be nonnegative finite or entirely NaN")
-    return finite & (sums.sum(axis=axes) == cfg.reps * cfg.rounds)
 
 
 def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
@@ -451,7 +216,10 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
                     VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
                     VariableAxisSpec(
-                        "Spectator branch", "", field_name="branches", dtype=np.int64
+                        "Spectator state (0=I, 1=Xπ)",
+                        "",
+                        field_name="spectator_states",
+                        dtype=np.int64,
                     ),
                     VariableAxisSpec(
                         "DC source value (inactive if disabled)",
@@ -466,18 +234,97 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         ),
         result_type=IdleZZResult,
         cfg_type=IdleZZCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="two_qubit/idle_zz",
         result_builder=restore_result,
     )
 
     def run(self, config: IdleZZCfg, *, context: RunContext) -> IdleZZResult:
-        """Acquire optional reset → spectator I/Xπ → target Ramsey → terminal.
+        """Acquire reset if set → spectator I/Xπ → target Ramsey → terminal.
 
-        Return raw (DC,2,delay,3,3) counts. Rounds accumulate without averaging;
-        completed counts survive cancellation. No calibration is written.
+        Hardware scans spectator_states and delay; DC alone stays on host
+        because it changes an external instrument. Return unnormalized counts.
         """
-        return IdleZZResult(*acquire_counts(config, context=context, heralded=False))
+        validate_classifiers(config.readout, config.roles)
+        delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
+        delays = sweep2array(delay_sweep)
+        dc_values = (
+            np.array([0.0])
+            if config.dc_device is None
+            else sweep2array(config.dc_values)
+        )
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Delay (us)",
+            "Target ⟨σ⟩",
+            num_lines=len(dc_values) * 2,
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            viewer.update(delays, sigma(sums, config.target).reshape(-1, len(delays)))
+
+        buffer = SignalBuffer(
+            (len(dc_values), 2, len(delays), 3, 3),
+            dtype=np.float64,
+            on_update=update_view,
+        )
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            # DC stays on host because it sets an external instrument.
+            for dc_value, step in sched.scan("dc", dc_values.tolist()):
+                if config.dc_device is not None:
+                    set_flux(
+                        context.devices[config.dc_device],
+                        dc_value,
+                        unit=config.dc_unit,
+                        stop=context.scope.stop,
+                    )
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
+                builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ (outer)
+                delay = builder.add_sweep("delay", delay_sweep)
+                spectator_cfg = (
+                    config.x180_f2 if config.target == "f1" else config.x180_f1
+                )
+                pi2_cfg = config.x90_f1 if config.target == "f1" else config.x90_f2
+                spectator = Pulse("spectator_x180", spectator_cfg)
+                pi2 = Pulse("target_pi2", pi2_cfg)
+                projection = Pulse(
+                    "projection",
+                    pi2_cfg,
+                    phase=pi2_cfg.phase + 360 * config.detune * delay,
+                )
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                with (
+                    builder.branch(by="spectator_states", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(spectator)
+                builder.emit(pi2)
+                builder.delay_timeline(delay)
+                builder.emit(projection)
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                axes = [
+                    Classify("terminal", config.roles.f1_tone),
+                    Classify("terminal", config.roles.f2_tone),
+                ]
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
+        return IdleZZResult(
+            dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
+        )
 
     def analyze(
         self,
@@ -486,16 +333,115 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         *,
         plots: Plots,
     ) -> IdleZZAnalysis:
-        """Fit complete saved sigma traces, preserving unavailable ζ with reasons.
+        """Fit full saved delay axes and plot signed frequency differences.
 
-        Operator must ensure both branch frequencies stay on the detune-selected
-        side. Finite fits do not prove a pure ZZ Hamiltonian or exclude thermal
-        mixtures. No automatic detune/DC adjustment or writeback occurs.
+        Every required delay must contain all requested rounds. Other remains
+        in the sigma denominator. Count errors weight the fringe fit.
+        No calibration or DC writeback occurs.
         """
         del options
-        return analyze_counts(
-            source.cfg,
-            source.result,
-            complete=complete_points(source.cfg, source.result.sums, heralded=False),
-            plots=plots,
+        cfg, result = source.cfg, source.result
+        if cfg is None:
+            raise ValueError("Idle ZZ analysis requires saved cfg")
+        dc_values = (
+            np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
         )
+        validate_axes(
+            result.dc_values,
+            result.spectator_states,
+            result.delays,
+            result.sums,
+            dc_values,
+            (cfg.delay.expts, 3, 3),
+        )
+        complete = complete_points(result.sums, cfg.reps * cfg.rounds)
+        traces = sigma(result.sums, cfg.target)
+        shots = result.sums.sum(axis=(-2, -1))
+        fits = []
+        for dc_index in range(len(dc_values)):
+            for state in result.spectator_states:
+                fit = IdleBranchFit(
+                    dc_index,
+                    int(state),
+                    int(np.nansum(shots[dc_index, state])),
+                    bool(np.all(complete[dc_index, state])),
+                    traces[dc_index, state],
+                )
+                fits.extend(
+                    fit_traces(
+                        (fit,),
+                        (sigma_errors(result.sums[dc_index, state], cfg.target),),
+                        delays=result.delays,
+                        detune=cfg.detune,
+                    )
+                )
+        answer = summarize(tuple(fits))
+        dc_label = (
+            "DC not swept (inactive coordinate)"
+            if cfg.dc_device is None
+            else f"{cfg.dc_device} ({cfg.dc_unit})"
+        )
+        for dc_index, dc_value in enumerate(dc_values):
+            fig, ax = plots.subplots(f"ramsey_{dc_index}", figsize=(9, 6))
+            reasons = []
+            for fit in answer.branches[2 * dc_index : 2 * dc_index + 2]:
+                label = "I" if fit.branch == 0 else "Xπ"
+                ax.plot(
+                    result.delays,
+                    fit.trace,
+                    ".",
+                    label=f"Spectator {label} ({fit.acquired_shots} shots)",
+                )
+                if fit.fit_curve is not None:
+                    ax.plot(
+                        result.delays,
+                        fit.fit_curve,
+                        label=f"{label} fit: |f|={fit.magnitude_mhz:.5g} MHz",
+                    )
+                if fit.reason:
+                    reasons.append(f"{label}: {fit.reason}")
+                elif fit.signed_mhz is not None:
+                    reasons.append(f"{label}: signed f={fit.signed_mhz:.5g} MHz")
+            zeta = answer.zeta_mhz[dc_index]
+            subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Target ⟨σ⟩ = (N_e − N_g) / N_total",
+                title=f"Target {cfg.target}, detune={cfg.detune:g} MHz; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nNominal branches; mixture not excluded",
+            )
+            ax.text(
+                0.01,
+                -0.25,
+                "\n".join(reasons),
+                transform=ax.transAxes,
+                va="top",
+                fontsize=8,
+            )
+            ax.legend()
+            ax.grid(True)
+            fig.tight_layout()
+        fig, ax = plots.subplots("zeta", figsize=(8, 5))
+        for index, (value, error) in enumerate(
+            zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)
+        ):
+            if value is not None:
+                ax.errorbar(
+                    result.dc_values[index], value, yerr=error, marker="o", color="C0"
+                )
+        if not any(value is not None for value in answer.zeta_mhz):
+            ax.text(
+                0.5,
+                0.5,
+                "ζ unavailable: see branch reasons",
+                transform=ax.transAxes,
+                ha="center",
+            )
+        ax.set(
+            xlabel=dc_label,
+            ylabel="ζ = f_Xπ − f_I (MHz)",
+            title="Single-frequency model fit difference\nThermal mixture not excluded; not pure ZZ",
+        )
+        ax.grid(True)
+        fig.tight_layout()
+
+        return answer

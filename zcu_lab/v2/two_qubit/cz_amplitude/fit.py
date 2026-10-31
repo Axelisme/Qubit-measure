@@ -10,7 +10,11 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fitcos
+from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
+
+from .._rabi_analysis import cosine
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,7 @@ def fit_return(
     scales: NDArray[np.float64],
     probabilities: NDArray[np.float64],
     complete: NDArray[np.bool_],
+    shots: NDArray[np.float64],
 ) -> CZReturnFit:
     """Fit complete prefix P00 to offset + contrast*cos(2π*scale/period).
 
@@ -68,16 +73,46 @@ def fit_return(
         )
     if np.ptp(ys) <= np.finfo(float).eps * max(1.0, float(np.max(np.abs(ys)))):
         return replace(answer, reason="Zero return contrast; period is degenerate")
-    return _fit_complete_prefix(xs, ys, answer)
+    return _fit_complete_prefix(xs, ys, shots[:count], answer)
 
 
 def _fit_complete_prefix(
-    xs: NDArray[np.float64], ys: NDArray[np.float64], answer: CZReturnFit
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    shots: NDArray[np.float64],
+    answer: CZReturnFit,
 ) -> CZReturnFit:
     """Fit the contiguous valid observations, transform uncertainty and check coverage."""
     try:
-        parameters, covariance = fitcos(xs, ys, fixedparams=[None, None, None, 0.0])
-    except (ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+        seed, _ = fitcos(xs, ys, fixedparams=[None, None, None, 0.0])
+        # fitcos may canonicalize negative contrast with a 180-degree phase.
+        initial = (
+            float(seed[0]),
+            float(seed[1] * np.cos(np.deg2rad(seed[3]))),
+            float(seed[2]),
+            0.0,
+        )
+        names = ("offset", "contrast", "frequency", "phase_deg")
+        probability = (ys * shots + 0.5) / (shots + 1.0)
+        errors = np.sqrt(probability * (1.0 - probability) / (shots + 1.0))
+        weighted = fit_shared(
+            [FitTrace(xs, ys, cosine, names, errors)],
+            [
+                ParameterSpec(name, value, fixed=name == "phase_deg")
+                for name, value in zip(names, initial, strict=True)
+            ],
+        )
+        if not weighted.diagnostics.valid:
+            raise ValueError("Weighted zero-phase return fit failed")
+        parameters = np.array([weighted.values[name] for name in names])
+        covariance = weighted.covariance
+    except (
+        AnalysisFailed,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        np.linalg.LinAlgError,
+    ) as exc:
         return replace(answer, reason=f"Zero-phase return fit failed: {exc}")
     offset, amplitude, frequency, phase = map(float, parameters)
     if not np.all(np.isfinite(parameters)) or frequency <= 0:
