@@ -558,6 +558,28 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
 
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline):
+    def body(prog):
+        prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
+        prog.fork("external", into="working")
+        with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+            with branch.case(0):
+                prog.delay_timeline(5 / 430.08, timeline="working")
+                prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
+            with branch.case(2):
+                prog.delay_timeline(15 / 430.08, timeline="working")
+        prog.pulse(0, "p0", timeline="working")
+
+    result = shots(program(body))
+    # Repeat advanced 30. Working still ends at absolute 100 at branch entry.
+    assert [waves(s) for s in result] == ([[115]] * 3 if align_timeline else [[105], [100], [115]])
+
+
 class OverwriteTime(Macro):
     def translate(self, prog):
         WriteReg(dst="duration", src=1).translate(prog)
