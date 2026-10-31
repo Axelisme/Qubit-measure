@@ -150,11 +150,12 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
 ) -> None:
     observed: list[Completed[int] | Failed] = []
     attempts: list[int] = []
+    cause = OSError("readout disconnected")
 
     class Program:
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
             attempts.append(1)
-            raise OSError("readout disconnected")
+            raise cause
 
         acquire_decimated = acquire
 
@@ -177,7 +178,12 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            observed.append(await iteration.call(operation))
+            if failed:
+                with pytest.raises(OSError) as caught:
+                    await iteration.call(operation)
+                assert caught.value is cause
+            else:
+                observed.append(await iteration.call(operation))
             observed.append(
                 await iteration.call(
                     lambda ctx: (
@@ -195,15 +201,14 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
     if failed:
-        assert isinstance(observed[0], Failed)
-        assert "readout disconnected" in observed[0].reason
+        assert len(observed) == 1
         assert attempts == [1, 1]
     else:
         first = completed(observed[0])
         assert (first.value, first.partial_result) == (99, True)
         assert first.facts.stopped is False
         assert first.facts.outcome == "partial"
-    second = completed(observed[1])
+    second = completed(observed[-1])
     assert (second.value, second.partial_result) == (7, False)
     assert second.facts.stopped is False
     assert second.facts.outcome == "completed"
@@ -215,7 +220,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     assert [
         (fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts
     ] == [
-        (1, 1, "failed" if failed else "partial", False),
+        (1, 1, "raised" if failed else "partial", False),
         (1, 2, "completed", False),
     ]
     if not failed:
