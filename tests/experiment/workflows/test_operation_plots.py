@@ -1,7 +1,6 @@
 """env.run isolates core plotting lifetimes without clearing workflow trends."""
 
 from pathlib import Path
-from threading import Event
 
 import numpy as np
 import pytest
@@ -21,8 +20,6 @@ from ._engine_fakes import (
     Rig,
     Tunables,
     completed,
-    running,
-    until,
 )
 
 

@@ -1,12 +1,8 @@
 """Headless workflow hosting through synthetic registrations and shared session."""
 
-from threading import Event
-
 import pytest
 from pydantic import BaseModel, ConfigDict
-from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
-    Actor,
     Live,
     RunMismatch,
     WorkflowEnv,

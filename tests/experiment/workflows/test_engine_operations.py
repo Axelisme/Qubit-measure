@@ -14,7 +14,6 @@ from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.plotting.plots import NonPresentingHost
 

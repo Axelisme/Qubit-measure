@@ -197,5 +197,3 @@ def question(rig: Rig) -> PendingQuestion:
     value = rig.engine.pending_question("run")
     assert value is not None
     return value
-
-

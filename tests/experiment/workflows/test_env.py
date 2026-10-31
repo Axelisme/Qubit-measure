@@ -1,30 +1,24 @@
 """Environment capabilities and retained displays through an async author."""
 
-from collections.abc import Callable, Iterator, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator, MutableMapping
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from threading import Event
 
 import numpy as np
 import pytest
 from qick import QickConfig
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.experiment.workflows import (
     Engine,
     EnginePorts,
     Live,
     MissingCapability,
-    OperationFacts,
     RunIdentity,
     WorkflowEnv,
     saved_run,
     workflow,
 )
-from zcu_tools.experiment.workflows.env import EnvHooks
 
 from tests._plotting import create_trace
 

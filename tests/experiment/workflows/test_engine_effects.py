@@ -1,7 +1,6 @@
 """Operation outcomes, cooperative cancellation and author-owned persistence."""
 
 from collections.abc import Callable, Iterator
-from datetime import timedelta
 from pathlib import Path
 from threading import Event
 
@@ -21,14 +20,13 @@ from zcu_tools.experiment.workflows import (
     Live,
     OperationFacts,
     WorkflowEnv,
-    saved_run,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.modules import SoftDelay
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
-from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed, running
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, running
 
 
 @pytest.fixture

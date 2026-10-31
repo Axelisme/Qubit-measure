@@ -15,9 +15,6 @@ from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.stop_signal import StopSignal
 
-if TYPE_CHECKING:
-    from zcu_tools.experiment.script_host import CallResult
-
 
 class Approval(Answer):
     accepted: bool

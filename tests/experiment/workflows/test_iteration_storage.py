@@ -1,14 +1,12 @@
 """Acquisition returns records without implicitly saving author files."""
 
 from pathlib import Path
-from threading import Event
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 
-from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed, running
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed
 
 
 def test_acquisition_without_writer_returns_run_record_without_committing(

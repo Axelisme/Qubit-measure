@@ -4,7 +4,6 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
-from threading import Event
 
 import pytest
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, saved_run
 
-from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, running
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed
 
 
 class Collection(BaseModel):
