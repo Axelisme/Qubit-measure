@@ -667,7 +667,8 @@ def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, frontend):
     if resource == "adc":
-        first, second = _readout("first"), _readout("second")
+        first = _readout("first")
+        second = PulseReadout("second", first.cfg, ro_length=0.3)
     elif resource == "register address":
         first = DeclarationModule("first", lambda p: p.add_reg("a", addr=10))
         second = DeclarationModule("second", lambda p: p.add_reg("b", addr=10))

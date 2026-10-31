@@ -3,6 +3,10 @@
 
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
+from inspect import signature
+
+import numpy as np
 from typing import TypedDict, override
 
 from qick.asm_v2 import (
@@ -13,6 +17,7 @@ from qick.asm_v2 import (
     Pulse,
     QickParam,
     QickRawParam,
+    QickProgramV2,
     Trigger,
 )
 
@@ -121,6 +126,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states: dict[int, tuple[Module, object]] = {}
         self._declaration_module: Module | None = None
         self._resource_owners: dict[tuple[str, str | int], Module] = {}
+        self._resource_declarations: dict[tuple[str, int], dict[str, object]] = {}
         self._declaring = False
         self._building_body = False
         self._timeline_default: str | None = None
@@ -215,6 +221,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states.clear()
         self._declaration_module = None
         self._resource_owners.clear()
+        self._resource_declarations.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
         self._declaring = True
@@ -384,16 +391,50 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if self._declaration_module is not None:
             self._resource_owners.setdefault((kind, key), self._declaration_module)
 
+    def _reuse_declaration(
+        self, kind: str, ch: int, settings: dict[str, object]
+    ) -> bool:
+        previous = self._resource_declarations.get((kind, ch))
+        if previous is None:
+            return False
+        differing = []
+        for field, value in settings.items():
+            old = previous[field]
+            equal = (
+                np.array_equal(old, value)
+                if isinstance(old, np.ndarray) and isinstance(value, np.ndarray)
+                else old == value
+            )
+            if not equal:
+                differing.append("length (ro_length)" if field == "length" else field)
+        if differing:
+            owner = self._resource_owners.get((kind, ch))
+            module = self._declaration_module
+            first = f"{owner.name} ({owner!r})" if owner else "native declaration"
+            second = f"{module.name} ({module!r})" if module else "native declaration"
+            raise ValueError(
+                f"{kind} {ch}: {second} conflicts with {first}; "
+                f"inconsistent fields: {', '.join(differing)}"
+            )
+        return True
+
     @override
     def declare_readout(self, ch: int, *args, **kwargs) -> None:
-        """Declare an ADC, rejecting distinct module owners of the same channel.
+        """Declare or reuse an ADC with identical QICK resource settings.
 
-        Native QICK arguments pass unchanged. During declare(module), ownership
-        follows object identity; conflicts name both modules and their objects.
-        Calls outside module declaration retain native route protection.
+        Arguments follow QICK declare_readout, including length in us. Reuse
+        does not reset trigger accounting. Different settings raise ValueError
+        naming both declaring modules and the inconsistent fields. Runtime
+        freq/phase/outsel/gen matching belongs in separate readout configs.
         """
-        self._check_resource_owner("readout", ch)
+        # Bind at the external adapter so positional/default arguments compare alike.
+        bound = signature(QickProgramV2.declare_readout).bind(self, ch, *args, **kwargs)
+        bound.apply_defaults()
+        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
+        if self._reuse_declaration("readout", ch, settings):
+            return
         super().declare_readout(ch, *args, **kwargs)
+        self._resource_declarations[("readout", ch)] = deepcopy(settings)
         self._remember_resource_owner("readout", ch)
 
     @override
