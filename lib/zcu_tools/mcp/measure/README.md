@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-31，recipe stop_requested
+**Last updated:** 2026-10-31，analyze error propagation
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -399,11 +399,10 @@ Standalone analysis 取消會停止後續接續；未登記的 cancel(op) 仍走
 取消不重寫已發布的終態 execution 結果。
 Completed 不代表所有輸出已保存。
 
-Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
-只有 analyze work 明確丟 AnalysisFailed 才轉成這個值。任意程式錯誤、record 或 writeback 失敗仍 raise。
-作者看 status 後自行保存、跳過、重試或停止，不需要為預期 fit 失敗 raise。
+Analyze 回傳就發布結果。Analyze、record 或 writeback 拋錯時，recipe 向作者 raise，
+保留 operation 的原始錯誤訊息，不辨識例外型別。
+作者可自行接住錯誤，選擇保存、跳過、重試或停止。
 成功 result 按作者提供的 T 驗證，缺欄位與型別不合仍 raise。
-已分類的數值路徑見 [fitting README](../../analysis/fitting/README.md)。
 
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。

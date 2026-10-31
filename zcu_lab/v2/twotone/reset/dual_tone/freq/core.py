@@ -115,7 +115,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         """
         # 1. Prepare hardware-grid axes without changing the caller's cfg.
         cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
+        soccfg = context.soccfg
         reset_cfg = cfg.tested_reset
         freqs1 = sweep2array(
             cfg.freq1,
@@ -130,48 +130,69 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         if cfg.method == "soft":
-            # 2. Scan frequency 2 on the host; keep frequency 1 as the inner loop.
-            soft_viewer = live_heatmap_with_line(
-                context.plots,
-                "measurement",
-                "Frequency1 (MHz)",
-                "Frequency2 (MHz)",
-                line_axis=0,
-            )
-            signals_buffer = SignalBuffer(
-                (len(freqs2), len(freqs1)),
-                on_update=lambda data: soft_viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(data.T)
-                ),
-            )
-            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                    step.cfg.tested_reset.set_param("freq2", freq2)
-                    step.cfg.tested_reset.set_param(
-                        "freq1", sweep2param("freq1", step.cfg.freq1)
+            return self._run_soft(cfg, freqs1, freqs2, context=context)
+        return self._run_hard(cfg, freqs1, freqs2, context=context)
+
+    def _run_soft(
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> FreqResult:
+        soc, soccfg = context.soc, context.soccfg
+        # 2. Scan frequency 2 on the host; keep frequency 1 as the inner loop.
+        soft_viewer = live_heatmap_with_line(
+            context.plots,
+            "measurement",
+            "Frequency1 (MHz)",
+            "Frequency2 (MHz)",
+            line_axis=0,
+        )
+        signals_buffer = SignalBuffer(
+            (len(freqs2), len(freqs1)),
+            on_update=lambda data: soft_viewer.update(
+                freqs1, freqs2, dual_reset_signal2real(data.T)
+            ),
+        )
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+            for freq2, step in sched.scan("freq2", freqs2.tolist()):
+                step.cfg.tested_reset.set_param("freq2", freq2)
+                step.cfg.tested_reset.set_param(
+                    "freq1", sweep2param("freq1", step.cfg.freq1)
+                )
+
+                # 3. Prepare, apply the tested reset, and collect averaged IQ.
+                _ = (
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
                     )
-
-                    # 3. Prepare, apply the tested reset, and collect averaged IQ.
-                    _ = (
-                        step.prog_builder(
-                            soc,
-                            soccfg,
-                            reps=step.cfg.reps,
-                            relax_delay=step.cfg.relax_delay,
-                        )
-                        .add(
-                            Reset("reset", step.cfg.reset),
-                            Pulse("init_pulse", step.cfg.init_pulse),
-                            TwoPulseReset("tested_reset", step.cfg.tested_reset),
-                            Readout("readout", step.cfg.readout),
-                        )
-                        .declare_sweep("freq1", step.cfg.freq1)
-                        .build_and_acquire(rounds=cfg.rounds)
+                    .add(
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
+                        TwoPulseReset("tested_reset", step.cfg.tested_reset),
+                        Readout("readout", step.cfg.readout),
                     )
+                    .declare_sweep("freq1", step.cfg.freq1)
+                    .build_and_acquire(rounds=cfg.rounds)
+                )
 
-            # Host rows are frequency 2; restore the canonical frequency-1 rows.
-            return FreqResult(freqs1, freqs2, signals_buffer.array.T)
+        # Host rows are frequency 2; restore the canonical frequency-1 rows.
+        return FreqResult(freqs1, freqs2, signals_buffer.array.T)
 
+    def _run_hard(
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> FreqResult:
+        soc, soccfg = context.soc, context.soccfg
         # 2. Sweep both frequencies in hardware, frequency 1 outside frequency 2.
         hard_viewer = live_heatmap(
             context.plots, "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)"

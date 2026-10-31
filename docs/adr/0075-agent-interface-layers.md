@@ -116,11 +116,17 @@ Recipe 本地樹在 MCP process，GUI Run 是另一棵樹。Schedule／acquire �
 
 兩邊只在自己的控制序列或樹鎖下核對，不宣稱跨 process 原子。細層 op target 必須仍為目前 tab.run handle，舊 op 回 scope not active，不經歷史歸屬改打新 Run。Execution target 的 expected 只檢查目前 GUI root，下一 Run 可重用序號；跨 Run 精確取消使用觀察到的 op handle。Acknowledgement 只證明已處理控制命令，不證明 operation 或 cleanup 已 drain。
 
-#### 擬合失敗以值交付
+#### Analyze 黑箱與作者的例外處理
 
-AnalysisFailed 定義於 Qt-free 的 analysis 葉模組，experiment 公開同一型別。這個依賴方向遵守 analysis 位於 experiment 下層的 import contract，不讓 fitting 反向 import experiment。
+2026-10-31 使用者裁定：「我可以接受analyze遇到問題就raise，但我不能接受框架識別raise的原因」。
 
-只有 analyze work 的 AnalysisFailed 產生 OperationOutcome.failure_kind="analysis"。Record、writeback、postprocessing 與任意程式錯誤不降級。Operation.await wire 保留分類；recipe 對 analysis 分類回 AnalysisResult(result=None, status="failed", reason=...)。作者決定保存、跳過、重試或停止。成功 summary 仍按作者型別驗證，缺欄位不補值。
+`core.analyze` 比照 Run，以回傳或拋錯決定結果。回傳就發布；拋錯就把 operation 標為 failed，並將原錯誤交回呼叫者。前端只在這個邊界接例外，不依例外型別或原因分類。Operation outcome 與 wire 不帶 `failure_kind`，recipe 不把 fitting 例外轉成 failed 結果值。成功 summary 仍按作者型別驗證，缺欄位不補值。
+
+`AnalysisFailed` 保留為 fitting 的例外型別，定義於 Qt-free 的 `zcu_tools.analysis.failure`，experiment 不再 re-export。需要處理它的作者直接從 owner import，決定是否捕捉，以及保存、跳過、重試或停止；未捕捉就使 recipe failed。Framework 不辨識這個型別。這個依賴方向遵守 analysis 位於 experiment 下層的 import contract，不讓 fitting 反向 import experiment。
+
+子層分析合作取消且沒有結果時仍可回 `AnalysisResult(result=None, status="failed", reason=...)`。這是取消路徑，不是 fitting 例外；根取消仍拋 `ScriptCancelled`。
+
+2026-10-31 advisor 代理裁定：Run／Analyze 共用既有 fallback，空字串或缺少錯誤訊息時顯示通用 operation failed 文字，因為空訊息沒有可交付的資訊，補上顯示文字不需要辨識例外型別或原因。
 
 Fitting owner 的 fit_func 把 optimizer 不收斂與已知自由參數數目下的資料不足轉為 AnalysisFailed，不再回初猜加 warning。Model callback 自己的例外原樣傳播。其餘 backend 的有效性或 fallback 契約不因此全改，已分類路徑見 fitting README。這些 frontend→experiment／analysis 依賴受既有 import contracts 約束。
 

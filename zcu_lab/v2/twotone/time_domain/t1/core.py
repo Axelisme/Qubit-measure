@@ -134,102 +134,110 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         context supplies acquisition and live plots. Return quantized delays
         and mean complex IQ with shape (time,); unmeasured points remain NaN.
         """
-        # 1. Prepare the delay axis without changing the caller's configuration.
+        # Copy the configuration before dispatching to either acquisition path.
         cfg = deepcopy(config)
         if cfg.uniform and not isinstance(cfg.length, SweepCfg):
             raise ValueError("uniform mode requires SweepCfg")
+        if cfg.uniform:
+            return self._run_uniform(cfg, context)
+        return self._run_non_uniform(cfg, context)
+
+    def _run_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
         soc, soccfg, plots = context.soc, context.soccfg, context.plots
 
-        if cfg.uniform:
-            lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
-            viewer = live_line(
-                plots, "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
-            )
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                cfg = sched.cfg
-                length_sweep = cfg.length
-                if not isinstance(length_sweep, SweepCfg):
-                    raise TypeError("uniform mode requires SweepCfg")
-                length_param = sweep2param("length", length_sweep)
+        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
+        viewer = live_line(
+            plots, "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+        )
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+            cfg = sched.cfg
+            length_sweep = cfg.length
+            if not isinstance(length_sweep, SweepCfg):
+                raise TypeError("uniform mode requires SweepCfg")
+            length_param = sweep2param("length", length_sweep)
 
-                # 2a. Excite, wait a linearly swept delay, then acquire readout IQ.
-                _ = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", cfg.reset),
-                        Pulse("pi_pulse", cfg.pi_pulse),
-                        Delay("t1_delay", length_param),
-                        Readout("readout", cfg.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        rounds=cfg.rounds,
-                        options=AcquireOptions(
-                            retry=cfg.acquire_retry,
-                            stop_condition=snr_checker(
-                                signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
-                            ),
-                        ),
-                    )
+            # Excite, wait a linearly swept delay, then acquire readout IQ.
+            _ = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
                 )
-        else:
-            delay_table = materialize_nonuniform_t1_delays(
-                cfg.length,
-                soccfg=soccfg,
-            )
-            length_cycles = delay_table.cycles
-            lengths = delay_table.times_us
-            viewer = live_line(plots, "measurement", "Time (us)", "Amplitude")
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                cfg = sched.cfg
-
-                # 2b. Load each nonuniform delay in cycles before reset and excitation.
-                _ = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add(
-                        LoadValue(
-                            "load_t1_delay",
-                            values=list(length_cycles),
-                            idx_reg="length_idx",
-                            val_reg="t1_delay_cycle",
-                            auto_compress=False,
-                        ),
-                        Reset("reset", cfg.reset),
-                        Pulse("pi_pulse", cfg.pi_pulse),
-                        DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", cfg.readout),
-                    )
-                    .declare_sweep("length_idx", len(length_cycles))
-                    .build_and_acquire(
-                        rounds=cfg.rounds,
-                        options=AcquireOptions(
-                            retry=cfg.acquire_retry,
-                            stop_condition=snr_checker(
-                                signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
-                            ),
-                        ),
-                    )
+                .add(
+                    Reset("reset", cfg.reset),
+                    Pulse("pi_pulse", cfg.pi_pulse),
+                    Delay("t1_delay", length_param),
+                    Readout("readout", cfg.readout),
                 )
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
+                        ),
+                    ),
+                )
+            )
 
-        # 3. Keep acquired averages and any NaN partial-data slots on the same axis.
+        return T1Result(times=lengths, signals=signals_buffer.array)
+
+    def _run_non_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
+        soc, soccfg, plots = context.soc, context.soccfg, context.plots
+
+        delay_table = materialize_nonuniform_t1_delays(
+            cfg.length,
+            soccfg=soccfg,
+        )
+        length_cycles = delay_table.cycles
+        lengths = delay_table.times_us
+        viewer = live_line(plots, "measurement", "Time (us)", "Amplitude")
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+            cfg = sched.cfg
+
+            # Load each nonuniform delay in cycles before reset and excitation.
+            _ = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add(
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(length_cycles),
+                        idx_reg="length_idx",
+                        val_reg="t1_delay_cycle",
+                        auto_compress=False,
+                    ),
+                    Reset("reset", cfg.reset),
+                    Pulse("pi_pulse", cfg.pi_pulse),
+                    DelayAuto("t1_delay", t="t1_delay_cycle"),
+                    Readout("readout", cfg.readout),
+                )
+                .declare_sweep("length_idx", len(length_cycles))
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
+                        ),
+                    ),
+                )
+            )
+
         return T1Result(times=lengths, signals=signals_buffer.array)
 
     def analyze(

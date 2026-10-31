@@ -15,8 +15,10 @@ does not resolve component identities.
 
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
-not a Cartesian product. One program executes a shared hardware point loop with
-optional common reset, Join of table-length drive pulses, then active mux readout.
+not a Cartesian product. All const/flat_top drives use one hardware point loop.
+If any participant uses a sampled waveform, the host scans all participants,
+compiles once per point and reuses each program across rounds. Each program runs
+one round. Both paths apply optional common reset, simultaneous drives and mux readout.
 Branches start together; short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
@@ -28,14 +30,16 @@ MuxSweepResult.tone_indices is int64 (K,) in participant order. Coordinates are
 float64 (K,P) on each drive's own rounded grid. Signals are complex128 (K,P),
 ADC-length-normalized average IQ in a.u. The measurement_i magnitude plots use
 original tone indices and each tone's own coordinates, so duplicate labels retain
-distinct plots. Each completed round updates the full sweep. Cancellation keeps
-completed-round averages across all points, or NaN when no round completed.
+distinct plots. Hardware acquisition updates the full sweep after each round.
+Host acquisition updates each measured point and averages its available rounds.
+Cancellation keeps acquired values and leaves unmeasured points NaN.
 
 Length scan contract
 --------------------
 MuxLenRabiCfg.reset is optional; MuxLenRabiCfg.readout is the full mux readout.
-Sweep bounds are positive requested lengths in us. Every tone must use const
-or flat_top for participants. Const length is the entire pulse.
+Sweep bounds are positive requested lengths in us. Participants support const,
+flat_top and sampled waveforms such as cosine, gauss and DRAG.
+Const length is the entire pulse.
 Flat_top length includes raise_waveform ramps; the waveform implementation
 subtracts ramps to determine the plateau. Gain, frequency, phase and ramp
 settings stay fixed. Arb assets have fixed length and are rejected by cfg and
@@ -43,7 +47,7 @@ run validation rather than stretched or cropped.
 
 prepare_length_scan(cfg, soccfg=...) copies cfg and resolves original indices
 in participant order. sweep2array(..., "time", gen_ch=...) creates each drive's
-rounded requested-length grid for TableLengthPulse. Each grid retains its
+rounded requested-length grid for hardware tables or host points. Each grid retains its
 hardware spacing and full point count, with no sorting or deduplication.
 Nonpositive rounded lengths or overlapping adjacent points raise. Coordinates
 are requested total lengths rather than compiled traces; flat_top ramp handling
@@ -110,16 +114,17 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import estimate_snr
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ResetCfg
+from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
 from zcu_tools.program.v2.modules import (
-    ConstWaveform,
-    FlatTopWaveform,
     Join,
     MuxReadout,
     MuxReadoutCfg,
+    Pulse,
     TableLengthPulse,
 )
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
@@ -139,8 +144,11 @@ class MuxLenRabiCfg(ConfigBase):
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
     generators distinct from readout. Independent positive us length ranges
-    use expts, the positive hardware point count shared by all tones. Every waveform
-    must be const or flat_top; arb duration belongs to its asset, not this sweep.
+    use expts, the positive point count shared by all tones. Const/flat_top use
+    hardware length tables; any sampled waveform selects the host path for all
+    participants. Arb duration belongs to its asset and cannot be swept.
+    earlystop_snr optionally stops the host scan after a full round when every
+    participant reaches the threshold; None disables it. Hardware scans ignore it.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
@@ -152,6 +160,13 @@ class MuxLenRabiCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Host scan stops after a full round when every tone reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -176,7 +191,7 @@ class MuxLenRabiCfg(ConfigBase):
         strict=True,
         gt=0,
         title="Expts",
-        description="Hardware scan point count shared by all tones.",
+        description="Scan point count shared by all tones.",
     )
     participants: list[StrictInt]
 
@@ -187,10 +202,10 @@ class MuxLenRabiCfg(ConfigBase):
         for index in self.participants:
             tone = self.tones[index]
             drive = tone.require_drive()
-            if not isinstance(drive.waveform, (ConstWaveform.Cfg, FlatTopWaveform.Cfg)):
+            if drive.waveform.style == "arb":
                 raise ValueError(
-                    f"tones[{index}].drive.waveform: length sweep requires const or "
-                    "flat_top; arb length is asset-derived with no public length sweep"
+                    f"tones[{index}].drive.waveform: arb length is asset-derived "
+                    "with no public length sweep"
                 )
             if min(tone.require_sweep().start, tone.require_sweep().stop) <= 0:
                 raise ValueError(f"tones[{index}].sweep lengths must be positive us")
@@ -272,14 +287,31 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         requested total lengths (K,P) in us and average complex IQ (K,P) in
         ADC-length-normalized a.u. Flat-top lengths include their ramps.
 
+        All const/flat_top participants use hardware tables. Any sampled drive
+        selects a host scan for all participants, with one compiled program per
+        point reused across rounds. Host programs run rounds=1; the host averages
+        available rounds per point and checks earlystop_snr after each full scan.
+        Native arb assets raise ValueError before coordinates or compilation.
+
         context supplies soc/soccfg, plots and a fresh stop signal. Cancellation
-        retains completed-round averages and leaves unmeasured points NaN.
+        retains acquired values and leaves unmeasured points NaN.
         Acquisition and cfg/build errors propagate. The caller owns plot and
         hardware cleanup and decides whether returned data can be analyzed.
         """
         # 1. Prepare each qubit's length grid and select its original readout tone.
         cfg = MuxLenRabiCfg.model_validate(config.model_dump())
         scan = prepare_length_scan(cfg, soccfg=context.soccfg)
+        if all(
+            cfg.tones[index].require_drive().waveform.style in ("const", "flat_top")
+            for index in scan.indices
+        ):
+            return self._run_for_flat(cfg, scan, context=context)
+        return self._run_for_arb(cfg, scan, context=context)
+
+    def _run_for_flat(
+        self, cfg: MuxLenRabiCfg, scan: MuxLengthScan, *, context: RunContext
+    ) -> MuxSweepResult:
+        """Sweep all const/flat-top length tables in one hardware program."""
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
         )
@@ -336,6 +368,87 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             np.asarray(scan.indices, dtype=np.int64),
             scan.coordinates,
             signals.array.T.copy(),
+        )
+
+    def _run_for_arb(
+        self, cfg: MuxLenRabiCfg, scan: MuxLengthScan, *, context: RunContext
+    ) -> MuxSweepResult:
+        """Scan sampled waveforms on the host; native arb assets stay unsupported."""
+        rounds = cfg.rounds
+        cfg = cfg.model_copy(deep=True)
+        cfg.rounds = 1
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[index] for index in scan.indices]
+        )
+        programs: dict[int, ModularProgramV2] = {}
+        viewers = [
+            live_line(
+                context.plots,
+                f"measurement_{index}",
+                "Pulse length (us)",
+                "Magnitude (a.u.)",
+                title=f"{index}: {cfg.tones[index].name}",
+            )
+            for index in scan.indices
+        ]
+
+        def average_round(data: NDArray[np.complex128]) -> NDArray[np.complex128]:
+            # Average only measured entries; untouched point/tone pairs stay NaN.
+            counts = np.sum(~np.isnan(data), axis=0)
+            mean = np.full(data.shape[1:], np.nan, dtype=np.complex128)
+            np.divide(np.nansum(data, axis=0), counts, out=mean, where=counts > 0)
+            return mean
+
+        def update(data: NDArray[np.complex128]) -> None:
+            mean = average_round(data)
+            for row, viewer in enumerate(viewers):
+                viewer.update(scan.coordinates[row], np.abs(mean[:, row]))
+
+        signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
+        with Schedule(cfg, signals, scope=context.scope) as sched:
+            for _, rep in sched.repeat("round", rounds):
+                for point, step in rep.scan("point", list(range(cfg.expts))):
+                    drives = []
+                    for row, index in enumerate(scan.indices):
+                        drive = step.cfg.tones[index].require_drive()
+                        drive.set_param("length", float(scan.coordinates[row, point]))
+                        drives.append(Pulse(f"drive_{index}", drive))
+                    # Reset -> simultaneous scalar-length drives -> mux readout.
+                    builder = (
+                        step.prog_builder(
+                            context.soc,
+                            context.soccfg,
+                            reps=step.cfg.reps,
+                            initial_delay=step.cfg.initial_delay,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        .add_reset("reset", step.cfg.reset)
+                        .add(Join(*drives), MuxReadout("readout", readout))
+                    )
+                    if point not in programs:
+                        programs[point] = builder.build()
+                    prog = programs[point]
+                    _ = builder.run_program(
+                        prog,
+                        raw2signal_fn=partial(averaged_mux_signal, prog),
+                        rounds=1,
+                    )
+                # Check every tone only after a complete host-side point scan.
+                mean = average_round(signals.array)
+                if (
+                    cfg.earlystop_snr is not None
+                    and np.all(np.isfinite(mean))
+                    and all(
+                        estimate_snr(rotate2real(trace).real) >= cfg.earlystop_snr
+                        for trace in mean.T
+                    )
+                ):
+                    break
+        signals.trigger_update(flush=True)
+        return MuxSweepResult(
+            np.asarray(scan.indices, dtype=np.int64),
+            scan.coordinates,
+            average_round(signals.array).T.copy(),
         )
 
     def analyze(

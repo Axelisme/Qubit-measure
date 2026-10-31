@@ -158,7 +158,6 @@ class _Completion(BaseModel):
     reason: Literal["completed", "timeout"]
     status: Literal["finished", "cancelled", "failed"] | None = None
     error: str | _OperationError | None = None
-    failure_kind: Literal["analysis"] | None = None
 
     @property
     def error_message(self) -> str:
@@ -775,9 +774,7 @@ class RecipeRuntime:
             raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
         return snapshots[0]
 
-    def _await(
-        self, op: int, ctx: CallContext, *, analysis: bool = False
-    ) -> _Completion:
+    def _await(self, op: int, ctx: CallContext) -> _Completion:
         stopped = False
         while True:
             began = time.monotonic()
@@ -792,8 +789,6 @@ class RecipeRuntime:
             completion = _Completion.model_validate(reply)
             if completion.reason == "completed":
                 if completion.status == "failed":
-                    if analysis and completion.failure_kind == "analysis":
-                        return completion
                     raise GuiRpcError(
                         completion.error_message,
                         reason="operation_failed",
@@ -914,11 +909,7 @@ class RecipeRuntime:
                 tab, "primary" if stage == "primary" else "post", started.handle
             )
             self.host.control(lambda: self._publish_analysis(pending))
-        completion = self._await(started.handle, ctx, analysis=True)
-        if completion.status == "failed":
-            return AnalysisResult(
-                None, status="failed", reason=completion.error_message
-            )
+        completion = self._await(started.handle, ctx)
         if completion.status == "cancelled":
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
         recovery: AnalysisRecovery | None = (
