@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
@@ -92,7 +93,7 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
             iteration = next(iterations)
             trend = create_trace(env.plots, "trend", "Iteration", "Value")
             for index in range(2):
-                outcome = completed(await iteration.run(acquire, Cfg(value=7)))
+                outcome = completed(await run_core(iteration, acquire, Cfg(value=7)))
                 delivered.append(outcome.value.result)
                 trend.update((np.array([0.0]), np.array([float(index)])))
                 iteration.commit(Point(value=index))
@@ -140,7 +141,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
         try:
             iteration = next(iterations)
             try:
-                delivered.append(await iteration.run(acquire, Cfg()))
+                delivered.append(await run_core(iteration, acquire, Cfg()))
             except ValueError as error:
                 errors.append(str(error))
             # The old producer is no longer allowed to update even before run ends.
@@ -217,7 +218,7 @@ def test_finish_failure_propagates_without_masking_core_error(
         try:
             iteration = next(iterations)
             try:
-                deliveries.append(await iteration.run(acquire, Cfg()))
+                deliveries.append(await run_core(iteration, acquire, Cfg()))
             except (ValueError, OSError) as error:
                 errors.append(error)
         finally:

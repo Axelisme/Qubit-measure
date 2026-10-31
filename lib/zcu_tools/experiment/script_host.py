@@ -63,16 +63,12 @@ class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
     result is fn's unchanged payload.
-    stop_requested records the operation's stop bit or a host cancellation of
-    this operation, an ancestor or a descendant during this attempt. Unrelated
-    sibling cancellation does not mark it. It does not assess data completeness.
-    stopped snapshots only the operation token's own stop bit. Both facts use
-    one lock ordering with cancellation; later requests cannot mark completion
-    retroactively.
+    stopped snapshots the operation token's own stop bit at completion, not
+    descendant cancellation or scientific completeness. Later stop requests
+    cannot mark a completed callback retroactively.
     """
 
     result: T
-    stop_requested: bool
     stopped: bool
 
 
@@ -108,8 +104,6 @@ class ScriptHost:
     ) -> None:
         self._on_change = on_change
         self._root = scope
-        self._active: Scope | None = None
-        self._active_stop_requested = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._owner: int | None = None
         self._lock = RLock()
@@ -225,20 +219,13 @@ class ScriptHost:
         if ancestor is not self._root:
             raise ValueError("Call scope must belong to this host")
         token = parent.branch("operation", name=name)
-        with self._lock:
-            self._active = token
-            self._active_stop_requested = False
         context = CallContext(token)
 
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
                 stopped = token.cancelled
-                return CallResult(
-                    value,
-                    stopped or self._active_stop_requested,
-                    stopped,
-                )
+                return CallResult(value, stopped)
 
         try:
             result = await loop.run_in_executor(None, invoke)
@@ -248,8 +235,6 @@ class ScriptHost:
                 raise ScriptCancelled()
             return result
         finally:
-            with self._lock:
-                self._active = None
             token.release()
 
     async def ask[A: Answer](self, question: Question[A]) -> A:
@@ -338,22 +323,9 @@ class ScriptHost:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
             with self._lock:
-                return self._root.cancel(
-                    selector, expected=expected, on_cancel=self._record_cancel
-                )
+                return self._root.cancel(selector, expected=expected)
 
         return self._command(stop, allow_idle=True)
-
-    def _record_cancel(self, target: Scope) -> None:
-        if self._active is None:
-            return
-        active_path, target_path = self._active.path, target.path
-        if (
-            active_path == target_path
-            or active_path.startswith(target_path + "/")
-            or target_path.startswith(active_path + "/")
-        ):
-            self._active_stop_requested = True
 
     def _cancel_root(
         self, selector: str | None, *, expected: int | None
@@ -366,13 +338,9 @@ class ScriptHost:
                     return CancelResult(False, "sequence mismatch", self.active_path)
                 self._root.stop.set()
             else:
-                result = self._root.cancel(
-                    selector, expected=expected, on_cancel=self._record_cancel
-                )
+                result = self._root.cancel(selector, expected=expected)
                 if not result.cancelled:
                     return result
-            if self._active is not None:
-                self._active_stop_requested = True
             if self._root_ack is None:
                 self._root_ack = CancelResult(
                     True, "scope cancellation requested", self._root.path

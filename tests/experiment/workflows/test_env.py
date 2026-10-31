@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.workflows import (
     Engine,
     EnginePorts,
@@ -129,7 +130,7 @@ def test_run_accepts_typed_bound_callable_with_config_parameter(rig: Rig) -> Non
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            outcome = completed(await iteration.run(experiment.run, Cfg(value=3)))
+            outcome = completed(await run_core(iteration, experiment.run, Cfg(value=3)))
             assert outcome.value.cfg == Cfg(value=3)
             results.append(outcome.value.result)
         finally:

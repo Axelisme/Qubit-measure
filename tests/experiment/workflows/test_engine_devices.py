@@ -109,7 +109,7 @@ def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            await iteration.run(acquire, Cfg())
+            await run_core(iteration, acquire, Cfg())
         finally:
             iterations.close()
 
@@ -149,7 +149,7 @@ def test_env_run_distinguishes_missing_devices_from_empty_port(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            await iteration.run(acquire, Cfg())
+            await run_core(iteration, acquire, Cfg())
         finally:
             iterations.close()
 
@@ -178,7 +178,7 @@ def test_role_names_are_resolved_only_when_core_callback_uses_device(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            await iteration.run(acquire, Cfg(dev={"flux": "unavailable"}))
+            await run_core(iteration, acquire, Cfg(dev={"flux": "unavailable"}))
         finally:
             iterations.close()
 

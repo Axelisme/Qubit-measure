@@ -12,6 +12,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -207,10 +208,10 @@ def test_caught_run_exception_does_not_poison_the_next_operation(
         try:
             iteration = next(iterations)
             try:
-                await iteration.run(acquire, Cfg())
+                await run_core(iteration, acquire, Cfg())
             except OSError as error:
                 caught.append(error)
-            outcomes.append(await iteration.run(acquire, Cfg()))
+            outcomes.append(await run_core(iteration, acquire, Cfg()))
         finally:
             iterations.close()
 
@@ -244,7 +245,7 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
                 cfg.value = 8
                 return cfg.value + 1
 
-            outcome = await iteration.run(experiment, cfg)
+            outcome = await run_core(iteration, experiment, cfg)
             assert isinstance(outcome, w.Completed)
             assert outcome.value.cfg is not None
             records.append((outcome.value.cfg.value, outcome.value.result))

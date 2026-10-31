@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
@@ -198,7 +199,7 @@ async def calibrate_amp_rabi(
             step=(stop - start) / (tun.rabi_points - 1),
         ),
     )
-    outcome = await scope.run(AmpRabiExp().run, cfg, name="AmpRabi")
+    outcome = await run_core(scope, AmpRabiExp().run, cfg, name="AmpRabi")
     observe_operation(env.summary, outcome)
     amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
     trace = None
@@ -210,9 +211,10 @@ async def calibrate_amp_rabi(
         spec=AmpRabiExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
     amp = replace(amp, file="amp-rabi.h5")
-    if outcome.stop_requested:
+    if outcome.facts.stopped:
         amp = replace(amp, status="rejected", reason="stopped")
     else:
         amp, trace = _analyze_completed(outcome.value.result, amp, settings, guess)

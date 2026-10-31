@@ -34,12 +34,11 @@ def test_explicit_completion_and_core_metadata_survive_native_save(
         attempt=7,
         started_at=datetime(2026, 10, 22, 1, 2, 3, tzinfo=UTC),
         finished_at=datetime(2026, 10, 22, 1, 2, 5, tzinfo=UTC),
-        device_snapshot=None,
         outcome="completed",
         reason=None,
         stopped=False,
     )
-    completed = workflows.Completed(source, False, facts)
+    completed = workflows.Completed(source, facts)
     record = workflows.record_with_metadata(
         completed,
         identity=workflows.RunIdentity(
@@ -77,7 +76,7 @@ def test_record_metadata_requires_explicit_completion() -> None:
         kind="call", iteration=0, attempt=1,
         started_at=datetime(2026, 10, 22, tzinfo=UTC),
         finished_at=datetime(2026, 10, 22, tzinfo=UTC),
-        device_snapshot=None, outcome="completed", reason=None, stopped=False,
+        outcome="completed", reason=None, stopped=False,
     )
     assemble: Callable[..., object] = workflows.record_with_metadata
     with pytest.raises(TypeError, match="completion"):

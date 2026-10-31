@@ -8,8 +8,7 @@ from typing import Literal
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
-from zcu_tools.device import FakeDevice, FakeDeviceInfo
-from zcu_tools.experiment.context import RunContext
+from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
     Completed,
@@ -19,7 +18,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.journal import JournalPayload, OperationFinished
 
-from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables
+from ._engine_fakes import Plan, Point, Rig, Tunables
 from ._engine_ports import START
 
 
@@ -66,24 +65,17 @@ def test_saved_operations_and_journal_ignore_retired_fields(
     assert parsed.operation == original.operations[0]
 
 
-@pytest.mark.parametrize("kind", ["call", "run", "setup_device", "wait_until"])
+@pytest.mark.parametrize("kind", ["call", "setup_device", "wait_until"])
 def test_completed_facts_match_journal_and_commit_scope(
-    rig: Rig, kind: Literal["call", "run", "setup_device", "wait_until"]
+    rig: Rig, kind: Literal["call", "setup_device", "wait_until"]
 ) -> None:
     delivered: list[object] = []
 
-    def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        # The facts must retain the pre-call snapshot, not these later settings.
-        rig.devices.drivers["flux"].setup(
-            FakeDeviceInfo(address="memory", value=7), progress=False
-        )
-        return cfg.value
 
     async def operation(env: Scope) -> None:
         if kind == "call":
             delivered.append(await env.call(lambda ctx: 5))
-        elif kind == "run":
-            delivered.append(await env.run(acquire, Cfg()))
+
         elif kind == "setup_device":
             delivered.append(
                 await env.setup_device("flux", FakeDeviceInfo(address="memory"))
@@ -106,21 +98,13 @@ def test_completed_facts_match_journal_and_commit_scope(
         assert isinstance(outcome, Completed)
         assert hasattr(outcome, "facts"), "Completed must expose its operation facts"
         assert outcome.facts.kind == kind
-        assert outcome.facts.stopped is outcome.stop_requested is False
+        assert outcome.facts.stopped is False
         assert outcome.facts.outcome == "completed"
         assert outcome.facts.reason is None
         assert outcome.facts.started_at == outcome.facts.finished_at == START
         operations.append(outcome.facts)
     assert [(op.iteration, op.attempt) for op in operations] == [(1, 1), (1, 2), (2, 1)]
-    if kind == "run":
-        assert operations[0].device_snapshot == {
-            "flux": FakeDeviceInfo(address="memory").model_dump(mode="json")
-        }
-        assert operations[1].device_snapshot is not None
-        assert operations[1].device_snapshot["flux"]["value"] == 7
-    else:
-        assert all(op.device_snapshot is None for op in operations)
-        assert rig.devices.captures == 0
+
     records = rig.engine.records("run")
     saved = saved_run.read_records(rig.paths.metadata_root, Point)
     assert records[0].operations == saved[0].operations == tuple(operations[:2])

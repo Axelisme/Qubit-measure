@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -13,14 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.script_protocol import Answer, Question
-from zcu_tools.datafile import JsonObject
 from zcu_tools.device import BaseDeviceInfo
-from zcu_tools.experiment.acquisition import capture_device_snapshot
-from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.operations import RunFunction
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.script_host import CallContext, CallResult, ScriptHost
 from zcu_tools.progress_bar import BaseProgressBar
@@ -40,18 +34,12 @@ from .ports import DevicePort, EnginePorts, ProgressFactory
 _logger = logging.getLogger(__name__)
 
 
-def _validate_model(value: object, model: type[BaseModel], label: str) -> None:
-    if not isinstance(value, model):
-        raise TypeError(f"{label} must be a {model.__name__} instance")
-
-
 @dataclass
 class _Attempt:
     iteration: int
     number: int
     started_at: datetime
     finished_at: datetime
-    device_snapshot: Mapping[str, JsonObject] | None = None
     stopped: bool = False
     name: str | None = None
 
@@ -267,7 +255,7 @@ class WorkflowEnv[C](Scope):
         self._hooks.boundary()
         if self.cancelled:
             raise ScriptCancelled()
-        return Completed(result.result, result.stop_requested, facts)
+        return Completed(result.result, facts)
 
     def _invoke[T](
         self,
@@ -323,7 +311,6 @@ class WorkflowEnv[C](Scope):
             attempt=attempt.number,
             started_at=attempt.started_at,
             finished_at=attempt.finished_at,
-            device_snapshot=attempt.device_snapshot,
             outcome=outcome,
             reason=reason,
             stopped=attempt.stopped,
@@ -331,67 +318,6 @@ class WorkflowEnv[C](Scope):
         )
         self._hooks.operation_finished(scope, facts)
         return facts
-
-    async def execute_run[Cfg: ConfigBase, Result](
-        self,
-        scope: Scope,
-        experiment: RunFunction[Cfg, Result],
-        cfg: Cfg,
-        *,
-        name: str | None = None,
-    ) -> Completed[RunRecord[Cfg, Result]]:
-        """Run a core callable with a copied configuration, without saving it.
-
-        experiment accepts (cfg, *, context: RunContext), including a bound
-        T1Exp().run. cfg must be a ConfigBase; other scans use raw env.call.
-        Each attempt builds RunContext with this operation token and borrowed
-        soc/soccfg/devices and fresh operation Plots on the workflow's same
-        presentation host, captures device settings, then invokes the core
-        callable with a fresh deepcopy of cfg. Completed.value is RunRecord with
-        callback-return cfg and result. Completed.facts carries the same
-        OperationFacts as journal/commit, including the pre-call device snapshot,
-        nearest iteration birth number, attempt and stopped bit.
-        Every core exception propagates unchanged into the author.
-        Child cancellation delivers a partial/empty record. Root stop raises
-        ScriptCancelled after completion recording. The callable runs once.
-        Each operation finishes its plots before delivery; the next operation
-        releases the previous presentation. A core
-        exception remains primary if finish also fails (cleanup adds a note).
-        A finish-only failure propagates instead of delivering Completed.
-        Framework journal/commit envelopes retain attempt facts and snapshots;
-        provenance stays in workflow startup metadata, not a per-operation identity.
-        """
-        _validate_model(cfg, ConfigBase, "env.run cfg")
-        captured = deepcopy(cfg)
-
-        def invoke(ctx: CallContext, attempt: _Attempt) -> RunRecord[Cfg, Result]:
-            plots = self.plots.start_operation()
-            try:
-                context = RunContext(
-                    soc=self.soc,
-                    soccfg=self._ports.soccfg,
-                    plots=plots,
-                    devices=self.devices.get_connected_devices(),
-                    scope=ctx.scope,
-                )
-                attempt.device_snapshot = capture_device_snapshot(context.devices)
-                current = deepcopy(captured)
-                result = experiment(current, context=context)
-            except BaseException as error:
-                try:
-                    plots.finish()
-                except Exception as cleanup_error:
-                    _logger.exception(
-                        "Failed to finish operation plots after core failure"
-                    )
-                    error.add_note(
-                        f"Operation plot finish failed: {type(cleanup_error).__name__}: {cleanup_error}"
-                    )
-                raise
-            plots.finish()
-            return RunRecord(current, result)
-
-        return await self._call(scope, "run", invoke, name=name)
 
     def read_device_cfg(self, name: str) -> BaseDeviceInfo:
         """Live-read detached typed settings; name/I/O errors propagate."""
@@ -405,8 +331,7 @@ class WorkflowEnv[C](Scope):
         The device owner revalidates fields and enforces limits. Errors propagate
         unchanged. The device is invoked once. Child cancellation
         still invokes the device with a stopped token; root stop rejects new work.
-        Completed.facts records this setup attempt with device_snapshot=None;
-        no snapshot read is required.
+        Completed.facts records this setup attempt; no driver snapshot is read.
         """
         captured = deepcopy(cfg)
 
@@ -421,7 +346,7 @@ class WorkflowEnv[C](Scope):
 
         A naive deadline raises ValueError. A past target returns immediately.
         The clock is invoked once. Completed.facts records this wait attempt
-        with device_snapshot=None and its stop bit.
+        with its stop bit.
         """
         if target.tzinfo is None or target.utcoffset() is None:
             raise ValueError("Wait target must be timezone-aware")
@@ -451,7 +376,7 @@ class WorkflowEnv[C](Scope):
 
     @property
     def plots(self) -> WorkflowPlots:
-        """Return injected workflow trends, independent of each env.run attempt.
+        """Return injected workflow trends, independent of each operation.
 
         This collection persists across commits. The operation/ name prefix is
         reserved for the pane/MCP projection and raises ValueError at registration.

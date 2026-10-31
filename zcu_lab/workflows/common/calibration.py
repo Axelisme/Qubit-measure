@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import BaseModel
 from qick import QickConfig
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program import shot_time_s
@@ -368,7 +369,7 @@ async def calibrate_len_rabi(
         readout=ro,
         length=_len_rabi_sweep(settings, guess),
     )
-    outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
+    outcome = await run_core(scope, measure_planned_rabi, cfg, name="Rabi")
     observe_operation(env.summary, outcome)
     diagnostics = RabiResult(
         "failed",
@@ -390,8 +391,9 @@ async def calibrate_len_rabi(
         spec=LenRabiExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.stop_requested:
+    if outcome.facts.stopped:
         return RabiStageResult(
             record=replace(
                 diagnostics, status="rejected", reason="stopped", file="rabi.h5"
@@ -629,7 +631,7 @@ async def calibrate_readout(
             step=(gain_stop - gain_start) / (READOUT_GAIN_POINTS - 1),
         ),
     )
-    outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
+    outcome = await run_core(scope, FreqGainExp().run, cfg, name="readout")
     observe_operation(env.summary, outcome)
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
@@ -638,8 +640,9 @@ async def calibrate_readout(
         spec=FreqGainExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.stop_requested:
+    if outcome.facts.stopped:
         return ReadoutResult(
             "rejected", "stopped", None, None, "readout.h5", tuple(gain_clamped)
         )

@@ -41,7 +41,7 @@ def test_workflow_scope_ack_status_and_partial_facts(
     tmp_path: Path, scope: str
 ) -> None:
     rig = Rig(tmp_path)
-    outcomes: list[tuple[bool, bool]] = []
+    outcomes: list[bool] = []
     acquisitions: list[bool] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -70,13 +70,13 @@ def test_workflow_scope_ack_status_and_partial_facts(
         iterations = env.iterations()
         iteration = next(iterations)
         first = completed(await iteration.call(acquire))
-        outcomes.append((first.stop_requested, first.facts.stopped))
+        outcomes.append(first.facts.stopped)
         second = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
-        outcomes.append((second.stop_requested, second.facts.stopped))
+        outcomes.append(second.facts.stopped)
         iteration.commit(Point(value=11))
         iteration = next(iterations)
         third = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
-        outcomes.append((third.stop_requested, third.facts.stopped))
+        outcomes.append(third.facts.stopped)
         iteration.commit(Point(value=12))
         iterations.close()
 
@@ -88,9 +88,9 @@ def test_workflow_scope_ack_status_and_partial_facts(
         )
         assert acquisitions == [True, scope != "acquire"]
         assert outcomes == [
-            (True, scope in {"run", "iteration", "workflow"}),
-            (scope in {"iteration", "workflow"}, scope in {"iteration", "workflow"}),
-            (scope == "workflow", scope == "workflow"),
+            scope in {"run", "iteration"},
+            scope == "iteration",
+            False,
         ]
         records = rig.engine.records("run")
         assert [

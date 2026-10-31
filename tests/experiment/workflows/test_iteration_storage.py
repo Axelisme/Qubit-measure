@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 
@@ -23,7 +24,7 @@ def test_acquisition_without_writer_returns_run_record_without_committing(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            outcomes.append(completed(await iteration.run(acquire, Cfg())))
+            outcomes.append(completed(await run_core(iteration, acquire, Cfg())))
         finally:
             iterations.close()
 
@@ -34,7 +35,7 @@ def test_acquisition_without_writer_returns_run_record_without_committing(
         assert len(outcomes) == 1
         assert outcomes[0].value.cfg == Cfg(value=7)
         assert outcomes[0].value.result == 42
-        assert not outcomes[0].stop_requested
+        assert not outcomes[0].facts.stopped
         assert rig.engine.records("run") == ()
         assert list(rig.paths.data_root.rglob("*.h5")) == []
     finally:

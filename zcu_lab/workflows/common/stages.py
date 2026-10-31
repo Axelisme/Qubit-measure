@@ -5,6 +5,7 @@ from typing import Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.operations import RunFunction
 from zcu_tools.experiment.scope import Scope
@@ -71,7 +72,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
     returned unchanged.
     Acquisition, writer and unexpected framework exceptions propagate.
     """
-    outcome = await scope.run(experiment, cfg, name=name)
+    outcome = await run_core(scope, experiment, cfg, name=name)
     observe_operation(env.summary, outcome)
     save_native(
         outcome,
@@ -79,8 +80,9 @@ async def acquire_saved[Cfg: ConfigBase, Result](
         spec=output.spec,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.stop_requested:
+    if outcome.facts.stopped:
         return SavedAcquisition(
             status="partial", file=output.filename, reason="stopped"
         )
