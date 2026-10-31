@@ -55,7 +55,9 @@ def analyze_return(
     Wrong count/axis shapes raise ValueError. No cfg/library mutation occurs.
     """
     if counts.shape != (len(scales), 3, 3) or acquired_shots.shape != scales.shape:
-        raise ValueError("CZ return requires scales (Ns,), counts (Ns,3,3) and shot totals (Ns,)")
+        raise ValueError(
+            "CZ return requires scales (Ns,), counts (Ns,3,3) and shot totals (Ns,)"
+        )
     accepted = counts.sum(axis=(-2, -1))
     data = CZReturnData(
         counts=counts,
@@ -78,7 +80,9 @@ def _plot_return(
 ) -> None:
     _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
     for index, label in enumerate(OUTCOME_LABELS):
-        ax.plot(scales, answer.probabilities.reshape(-1, 9)[:, index], ".-", label=label)
+        ax.plot(
+            scales, answer.probabilities.reshape(-1, 9)[:, index], ".-", label=label
+        )
     ax.set(
         xlabel="Common gain scale",
         ylabel="Same-shot joint probability",
@@ -90,7 +94,11 @@ def _plot_return(
         fit.reason or f"First positive return scale = {fit.scale:.6g} ± {fit.error:.2g}"
     )
     ax.text(
-        0.02, 0.02, diagnostic, transform=ax.transAxes, fontsize="small",
+        0.02,
+        0.02,
+        diagnostic,
+        transform=ax.transAxes,
+        fontsize="small",
         bbox={"facecolor": "white", "alpha": 0.85},
     )
     ax.legend()

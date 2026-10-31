@@ -14,15 +14,15 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.gui.session.parameters import ParameterContext
+from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
 from .analysis import CZAmplitudeAnalysis
 from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult
-from .form import make_form
 from .fit import CZReturnFit
+from .form import make_form
 
 CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
 

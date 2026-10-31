@@ -6,8 +6,12 @@ from typing import ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
-    Experiment, GroupedAxesSpec, GroupedLoadData,
-    VariableAxisSpec, VariableSpec, VariableZSpec,
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -15,7 +19,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 
 from .._sums import herald_probabilities, terminal_counts
-from .analysis import CZAmplitudeAnalysis, OUTCOME_LABELS, analyze_return
+from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
 from .core import CZAmplitudeCfg, acquire_counts
 
 
@@ -81,13 +85,17 @@ class CZAmplitudeHeraldedExp(
                     VariableAxisSpec("Common gain scale", "", field_name="scales"),
                 ),
                 z=VariableZSpec(
-                    field_name="sums", label="Herald and terminal class counts",
-                    unit="", dtype=np.float64,
+                    field_name="sums",
+                    label="Herald and terminal class counts",
+                    unit="",
+                    dtype=np.float64,
                 ),
             ),
         ),
-        result_type=CZAmplitudeHeraldedResult, cfg_type=CZAmplitudeHeraldedCfg,
-        tag="two_qubit/cz_amplitude_heralded", result_builder=restore_result,
+        result_type=CZAmplitudeHeraldedResult,
+        cfg_type=CZAmplitudeHeraldedCfg,
+        tag="two_qubit/cz_amplitude_heralded",
+        result_builder=restore_result,
     )
 
     def run(
@@ -99,7 +107,8 @@ class CZAmplitudeHeraldedExp(
         signal for acquisition errors before interpreting partial results.
         """
         return CZAmplitudeHeraldedResult(
-            sweep2array(config.scales), acquire_counts(config, context=context, heralded=True),
+            sweep2array(config.scales),
+            acquire_counts(config, context=context, heralded=True),
         )
 
     def analyze(
@@ -124,17 +133,24 @@ class CZAmplitudeHeraldedExp(
         if result.sums.shape != (len(result.scales), 3, 3, 3, 3):
             raise ValueError("Heralded CZ return requires sums (Ns,3,3,3,3)")
         terminal = analyze_return(
-            result.scales, terminal_counts(result.sums, heralded=True),
+            result.scales,
+            terminal_counts(result.sums, heralded=True),
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
-            expected_shots=cfg.reps * cfg.rounds, plots=plots,
+            expected_shots=cfg.reps * cfg.rounds,
+            plots=plots,
         )
         herald_matrix = herald_probabilities(result.sums)
         _, ax = plots.subplots("herald", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
-            ax.plot(result.scales, herald_matrix.reshape(-1, 9)[:, index], ".-", label=label)
+            ax.plot(
+                result.scales, herald_matrix.reshape(-1, 9)[:, index], ".-", label=label
+            )
         ax.set(
-            xlabel="Common gain scale", ylabel="Herald probability",
+            xlabel="Common gain scale",
+            ylabel="Herald probability",
             title="Herald (g,g) is pass fraction, not ground-state purity",
         )
         ax.legend()
-        return CZAmplitudeHeraldedAnalysis(terminal, herald_matrix, herald_matrix[:, 0, 0])
+        return CZAmplitudeHeraldedAnalysis(
+            terminal, herald_matrix, herald_matrix[:, 0, 0]
+        )

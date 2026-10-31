@@ -11,8 +11,12 @@ from pydantic import Field, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
-    Experiment, GroupedAxesSpec, GroupedLoadData,
-    VariableAxisSpec, VariableSpec, VariableZSpec,
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -20,7 +24,12 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Pulse, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2, shot_sums,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
@@ -28,7 +37,12 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles
-from .._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from .._sums import (
+    joint_probabilities,
+    readout_axes,
+    terminal_counts,
+    validate_classifiers,
+)
 from .._timeline import emit_readout_prefix
 from .analysis import CZAmplitudeAnalysis, analyze_return
 
@@ -53,7 +67,9 @@ class CZAmplitudeCfg(ConfigBase):
     ] = Field(default=1, gt=0)
     reset: Annotated[
         Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset at the start of every shot."),
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
     ] = None
     initial_delay: Annotated[
         float,
@@ -152,7 +168,9 @@ def build_program(
     """
     validate_classifiers(cfg.readout, cfg.roles)
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
         relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
@@ -181,7 +199,9 @@ def acquire_counts(
     validate_classifiers(config.readout, config.roles)
     scales = sweep2array(config.scales)
     viewer = live_line(
-        context.plots, "measurement", "Common gain scale",
+        context.plots,
+        "measurement",
+        "Common gain scale",
         "P(g,g) | herald (g,g)" if heralded else "P(g,g)",
     )
 
@@ -195,9 +215,13 @@ def acquire_counts(
         for scale, step in sched.scan("scale", scales.tolist()):
             prog = build_program(step.cfg, context.soccfg, scale, heralded=heralded)
             step.run_acquire_summed(
-                prog, context.soc,
-                processor=shot_sums(prog, readout_axes(step.cfg.roles, heralded=heralded)),
-                rounds=step.cfg.rounds, options=RunOptions(),
+                prog,
+                context.soc,
+                processor=shot_sums(
+                    prog, readout_axes(step.cfg.roles, heralded=heralded)
+                ),
+                rounds=step.cfg.rounds,
+                options=RunOptions(),
             )
     return buffer.array
 
@@ -211,23 +235,30 @@ def restore_result(data: GroupedLoadData[CZAmplitudeCfg]) -> CZAmplitudeResult:
 class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
     """Common amplitude scan with count-sum persistence and first-return fit."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[CZAmplitudeResult, CZAmplitudeCfg]] = GroupedAxesSpec(
-        variables=(
-            VariableSpec(
-                variable="sums",
-                axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Common gain scale", "", field_name="scales"),
-                ),
-                z=VariableZSpec(
-                    field_name="sums", label="Joint class counts", unit="", dtype=np.float64,
+    AXES_SPEC: ClassVar[GroupedAxesSpec[CZAmplitudeResult, CZAmplitudeCfg]] = (
+        GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    variable="sums",
+                    axes=(
+                        VariableAxisSpec.generated_arange("terminal_f2", ""),
+                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec("Common gain scale", "", field_name="scales"),
+                    ),
+                    z=VariableZSpec(
+                        field_name="sums",
+                        label="Joint class counts",
+                        unit="",
+                        dtype=np.float64,
+                    ),
                 ),
             ),
-        ),
-        result_type=CZAmplitudeResult, cfg_type=CZAmplitudeCfg,
-        cfg_schema_version="4.0", tag="two_qubit/cz_amplitude",
-        result_builder=restore_result,
+            result_type=CZAmplitudeResult,
+            cfg_type=CZAmplitudeCfg,
+            cfg_schema_version="4.0",
+            tag="two_qubit/cz_amplitude",
+            result_builder=restore_result,
+        )
     )
 
     def run(self, config: CZAmplitudeCfg, *, context: RunContext) -> CZAmplitudeResult:
@@ -237,7 +268,8 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         RunContext stop signal for acquisition errors before interpreting results.
         """
         return CZAmplitudeResult(
-            sweep2array(config.scales), acquire_counts(config, context=context, heralded=False),
+            sweep2array(config.scales),
+            acquire_counts(config, context=context, heralded=False),
         )
 
     def analyze(
@@ -259,6 +291,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         if not np.array_equal(result.scales, sweep2array(cfg.scales)):
             raise ValueError("CZ return scales must match saved cfg")
         return analyze_return(
-            result.scales, result.sums, acquired_shots=result.sums.sum(axis=(-2, -1)),
-            expected_shots=cfg.reps * cfg.rounds, plots=plots,
+            result.scales,
+            result.sums,
+            acquired_shots=result.sums.sum(axis=(-2, -1)),
+            expected_shots=cfg.reps * cfg.rounds,
+            plots=plots,
         )

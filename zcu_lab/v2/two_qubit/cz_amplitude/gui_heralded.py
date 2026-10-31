@@ -7,14 +7,20 @@ from typing import TypeAlias
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
-    Adapter, Analysis, AnalyzeRequest, WritebackItem, WritebackRequest,
+    Adapter,
+    Analysis,
+    AnalyzeRequest,
+    WritebackItem,
+    WritebackRequest,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .core_heralded import (
-    CZAmplitudeHeraldedAnalysis, CZAmplitudeHeraldedCfg,
-    CZAmplitudeHeraldedExp, CZAmplitudeHeraldedResult,
+    CZAmplitudeHeraldedAnalysis,
+    CZAmplitudeHeraldedCfg,
+    CZAmplitudeHeraldedExp,
+    CZAmplitudeHeraldedResult,
 )
 from .form import amplitude_form
 from .gui import amplitude_writeback
@@ -29,9 +35,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeHeraldedCfg]:
     return amplitude_form(ctx, CZAmplitudeHeraldedCfg)
 
 
-def run(
-    cfg: CZAmplitudeHeraldedCfg, *, context: RunContext
-) -> CZAmplitudeHeraldedRun:
+def run(cfg: CZAmplitudeHeraldedCfg, *, context: RunContext) -> CZAmplitudeHeraldedRun:
     """Run the heralded experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=CZAmplitudeHeraldedExp().run(cfg, context=context))
 
