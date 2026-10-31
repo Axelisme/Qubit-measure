@@ -17,7 +17,7 @@ from .computed_pulse import ComputedPulse
 from .control import Branch, Repeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .dmem import LoadValue, LoadWord, ScanWith
-from .pulse import Pulse, PulseCfg, TableLengthPulse
+from .pulse import Pulse, PulseCfg, PulseOverrides, TableLengthPulse
 from .readout import (
     AbsReadout,
     AbsReadoutCfg,
@@ -25,6 +25,7 @@ from .readout import (
     MuxReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
+    PulseReadoutOverrides,
     Readout,
     ReadoutCfg,
     TablePulseReadout,
@@ -34,12 +35,16 @@ from .reset import (
     AbsResetCfg,
     BathReset,
     BathResetCfg,
+    BathResetOverrides,
     PulseReset,
     PulseResetCfg,
+    PulseResetOverrides,
     Reset,
     ResetCfg,
+    ResetOverrides,
     TwoPulseReset,
     TwoPulseResetCfg,
+    TwoPulseResetOverrides,
 )
 from .util import param2str, round_timestamp
 from .waveform import (

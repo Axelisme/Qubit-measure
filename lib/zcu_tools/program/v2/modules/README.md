@@ -114,8 +114,12 @@ in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
 
 ## Constructor overrides
 
-Constructors copy cfg before applying keyword-only overrides through its existing
-`set_param` routing. Numeric values and QICK sweep parameters use the same units
+Constructors accept `**overrides: Unpack[...]` using the exported `total=False`
+TypedDicts `PulseOverrides`, `PulseReadoutOverrides`, `PulseResetOverrides`,
+`TwoPulseResetOverrides` and `BathResetOverrides`. `ResetOverrides` lists the
+factory's combined keys. Pyright checks keyword names and values. At runtime,
+unknown or wrong-variant keys raise `TypeError`, even when their value is `None`.
+Constructors copy cfg before applying overrides through its existing `set_param` routing. Numeric values and QICK sweep parameters use the same units
 and waveform restrictions as `set_param`. `None` keeps the cfg value, including
 zero-valued settings. The caller's cfg is unchanged. Registry hashing, read-axis
 owners and lowering all use the effective cfg retained by the module.

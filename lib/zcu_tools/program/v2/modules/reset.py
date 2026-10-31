@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 from pydantic import BeforeValidator, Field
 from qick.asm_v2 import QickParam
 
-from .base import AbsModuleCfg, Module, _apply_cfg_overrides, resolve_module_ref
+from .base import AbsModuleCfg, Module, apply_cfg_overrides, resolve_module_ref
 from .pulse import Pulse, PulseCfg, PulseOverrides
 from .util import calc_max_length
 
@@ -195,7 +195,7 @@ class Reset:
         else:
             allowed = {}
         effective = deepcopy(cfg)
-        _apply_cfg_overrides(effective, overrides, allowed)
+        apply_cfg_overrides(effective, overrides, allowed)
         return effective.build(name)
 
 
@@ -218,7 +218,7 @@ class PulseReset(AbsReset):
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        _apply_cfg_overrides(self.cfg, overrides, PulseResetOverrides.__annotations__)
+        apply_cfg_overrides(self.cfg, overrides, PulseResetOverrides.__annotations__)
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
@@ -264,7 +264,7 @@ class TwoPulseReset(AbsReset):
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        _apply_cfg_overrides(self.cfg, overrides, TwoPulseResetOverrides.__annotations__)
+        apply_cfg_overrides(self.cfg, overrides, TwoPulseResetOverrides.__annotations__)
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.cfg.pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.cfg.pulse2_cfg)
 
@@ -323,7 +323,7 @@ class BathReset(AbsReset):
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        _apply_cfg_overrides(self.cfg, overrides, BathResetOverrides.__annotations__)
+        apply_cfg_overrides(self.cfg, overrides, BathResetOverrides.__annotations__)
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=self.cfg.cavity_tone_cfg)
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=self.cfg.qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=self.cfg.pi2_cfg)

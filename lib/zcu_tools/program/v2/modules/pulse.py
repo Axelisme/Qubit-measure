@@ -9,7 +9,7 @@ from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
 
 from .._timeline_selected import PlaybackChoice, SelectedPlayback
-from .base import AbsModuleCfg, Module, _apply_cfg_overrides
+from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .delay import DelayAuto
 from .dmem import LoadValue
 from .util import get_fclk, round_timestamp
@@ -104,7 +104,7 @@ class Pulse(Module):
         """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
-        _apply_cfg_overrides(self.cfg, overrides, PulseOverrides.__annotations__)
+        apply_cfg_overrides(self.cfg, overrides, PulseOverrides.__annotations__)
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id

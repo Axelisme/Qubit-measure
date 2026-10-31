@@ -37,15 +37,19 @@ class AbsModuleCfg(ConfigBase, ABC):
         """Update a sweep-tunable parameter by name."""
 
 
-def _apply_cfg_overrides(
+def apply_cfg_overrides(
     cfg: AbsModuleCfg | None,
     overrides: Mapping[str, object],
     allowed: Collection[str],
 ) -> None:
-    """Validate constructor keyword names and apply non-None numeric/sweep values.
+    """Apply allowed constructor knobs in place to an already detached cfg.
 
-    TypedDict annotations supply allowed names; runtime callers may bypass static
-    checking. Validate keys even for None so misspellings never silently succeed.
+    overrides maps knob names to scalar numbers, QICK sweeps or None, which
+    keeps cfg. allowed lists the selected constructor TypedDict keys. Pulse,
+    readout and reset constructors share this runtime guard because Python
+    callers can bypass their static keyword contract. Unknown keys, including
+    keys with None values, and nonnumeric values raise TypeError. Non-None
+    values with cfg=None raise ValueError. cfg.set_param errors propagate.
     """
     unknown = overrides.keys() - allowed
     if unknown:

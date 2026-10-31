@@ -21,7 +21,7 @@ from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid
 
 from ..macro.readout import ReadoutEmission
 from ..macro.wmem import PatchWmemFromDmem
-from .base import AbsModuleCfg, Module, _apply_cfg_overrides
+from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
@@ -357,7 +357,7 @@ class Readout:
         The caller's cfg is never modified.
         """
         effective = deepcopy(cfg)
-        _apply_cfg_overrides(effective, overrides, PulseReadoutOverrides.__annotations__)
+        apply_cfg_overrides(effective, overrides, PulseReadoutOverrides.__annotations__)
         return effective.build(name)
 
 
@@ -389,7 +389,7 @@ class PulseReadout(AbsReadout):
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        _apply_cfg_overrides(self.cfg, overrides, PulseReadoutOverrides.__annotations__)
+        apply_cfg_overrides(self.cfg, overrides, PulseReadoutOverrides.__annotations__)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
