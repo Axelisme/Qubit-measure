@@ -31,8 +31,11 @@ def notebook(
     core: InterruptCore, *, interrupt_timeout: float = 10.0
 ) -> NotebookExperiment[InterruptCore]:
     return NotebookAdapter(
-        soc=object(), soccfg=object(), device_manager=DeviceManager(),
-        host=NonPresentingHost(), interrupt_timeout=interrupt_timeout,
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+        interrupt_timeout=interrupt_timeout,
     )(core)
 
 
@@ -72,7 +75,9 @@ def timers(monkeypatch: pytest.MonkeyPatch) -> list[ManualTimer]:
     return created
 
 
-def test_timeout_interrupts_core_and_retains_previous_record(timers: list[ManualTimer]) -> None:
+def test_timeout_interrupts_core_and_retains_previous_record(
+    timers: list[ManualTimer],
+) -> None:
     core = InterruptCore(lambda context: None)
     adapter = notebook(core)
     previous = adapter.run(Cfg())
@@ -95,7 +100,9 @@ def test_timeout_interrupts_core_and_retains_previous_record(timers: list[Manual
     assert timers[-1].cancelled
 
 
-def test_return_cancels_deadline_before_restoring_handler(timers: list[ManualTimer]) -> None:
+def test_return_cancels_deadline_before_restoring_handler(
+    timers: list[ManualTimer],
+) -> None:
     received: list[int] = []
 
     def previous(signum: int, frame: FrameType | None) -> None:
@@ -103,7 +110,9 @@ def test_return_cancels_deadline_before_restoring_handler(timers: list[ManualTim
 
     original = signal.signal(signal.SIGINT, previous)
     try:
-        adapter = notebook(InterruptCore(lambda context: signal.raise_signal(signal.SIGINT)))
+        adapter = notebook(
+            InterruptCore(lambda context: signal.raise_signal(signal.SIGINT))
+        )
         adapter.run(Cfg())
         assert timers and timers[-1].cancelled
         assert signal.getsignal(signal.SIGINT) is previous

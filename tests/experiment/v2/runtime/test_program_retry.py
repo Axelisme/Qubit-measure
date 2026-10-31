@@ -353,7 +353,9 @@ def test_run_acquire_propagates_same_interrupt_without_retry(phase: str) -> None
     attempts = 0
 
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             nonlocal attempts
             attempts += 1
             if phase == "producer":
@@ -367,7 +369,9 @@ def test_run_acquire_propagates_same_interrupt_without_retry(phase: str) -> None
         pytest.raises(KeyboardInterrupt) as caught,
         Schedule(_cfg(), SignalBuffer((1,)), scope=Scope("run")) as sched,
     ):
-        sched.run_acquire(Program(), object(), options=RunOptions(retry=3, converter=convert))
+        sched.run_acquire(
+            Program(), object(), options=RunOptions(retry=3, converter=convert)
+        )
     assert caught.value is interrupt
     assert attempts == 1
 

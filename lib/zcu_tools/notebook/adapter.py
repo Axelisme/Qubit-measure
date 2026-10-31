@@ -253,16 +253,16 @@ class NotebookExperiment(Generic[CoreT]):
             )
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
-            with _RunInterrupts(context.scope.stop, self._interrupt_timeout) as interrupts:
+            with _RunInterrupts(
+                context.scope.stop, self._interrupt_timeout
+            ) as interrupts:
                 result = self._core.run(working_cfg, context=context)
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
                 run_id=run_id,
                 started_at=started_at,
                 finished_at=finished_at,
-                completion=(
-                    "stopped" if interrupts.stop_requested else "complete"
-                ),
+                completion=("stopped" if interrupts.stop_requested else "complete"),
                 provenance=provenance,
                 device_snapshot=device_snapshot,
             )

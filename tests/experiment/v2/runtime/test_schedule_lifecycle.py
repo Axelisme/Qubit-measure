@@ -88,6 +88,7 @@ def test_schedule_body_interrupt_propagates_with_buffer_intact(loop: str) -> Non
     buffer = SignalBuffer(3, dtype=np.float64)
     stop = StopSignal()
     interrupt = KeyboardInterrupt("host body stopped")
+
     def run() -> None:
         with Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched:
             steps = (
