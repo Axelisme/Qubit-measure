@@ -24,6 +24,7 @@ from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
 
@@ -69,10 +70,12 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
         assert request.materialize_point(0).events == ()
         events = request.materialize_point(1).events
         assert [event.gain for event in events] == pytest.approx([0.1, 0.2], abs=1e-4)
-        assert [event.start_us for event in events] == pytest.approx([0, 17 / 430.08])
-        assert [event.duration_us for event in events] == pytest.approx(
-            [15 / 384, 31 / 384]
-        )
+        assert [
+            time_us(request.time_base, event.start_ticks) for event in events
+        ] == pytest.approx([0, 17 / 430.08])
+        assert [
+            time_us(request.time_base, event.duration_ticks) for event in events
+        ] == pytest.approx([15 / 384, 31 / 384])
     finally:
         env.devices.close_all_devices()
 
