@@ -245,11 +245,14 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
 
 
 def test_schedule_step_data_operations_require_context() -> None:
+    step = None
     root = [{"signals": np.full((1,), np.nan)}]
 
     with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
         _, step = next(sched.scan("point", [0]))
         assert step.path == (0,)
+
+    assert step is not None
     for operation in (
         lambda: step.data,
         lambda: step.set_data({"signals": np.array([1.0])}),
