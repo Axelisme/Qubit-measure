@@ -1,4 +1,4 @@
-"""Four-branch spectroscopy conditioned on a classified ground-ground herald."""
+"""Two-qubit spectroscopy with gg/ee herald-conditioned excitation spectra."""
 
 from dataclasses import dataclass
 from typing import ClassVar
@@ -47,7 +47,8 @@ class SpectroscopyHeraldedResult:
     """Raw float64 sums (DC,2,2,frequency,3,3,3,3), never proportions.
 
     Class axes are herald F1/F2 then terminal F1/F2, each g/e/other.
-    DC is [0] when inactive; frequency is MHz. Missing points remain NaN.
+    prepared_f1/prepared_f2 are [0,1] (g/e), F1 outer. DC is [0] when inactive;
+    frequency is MHz. Missing points remain NaN.
     """
 
     dc_values: NDArray[np.float64]
@@ -315,27 +316,26 @@ class SpectroscopyHeraldedExp(
                     f"{role} P_e · DC {value:g} {cfg.dc_unit if cfg.dc_device else '(inactive)'}"
                     f" · double Xπ contrast {cfg.contrast}"
                 )
-                for f1 in range(2):
-                    for f2 in range(2):
-                        ax = fig.axes[2 * f1 + f2]
-                        ax.plot(
-                            frequencies,
-                            gg.excitation[d, f1, f2, :, target],
-                            label=f"herald gg, nominal ({f1},{f2})",
-                        )
-                        ax.plot(
-                            frequencies,
-                            ee.excitation[d, 1 - f1, 1 - f2, :, target],
-                            linestyle="--",
-                            label=f"herald ee, nominal ({1 - f1},{1 - f2})",
-                        )
-                        ax.set(
-                            title=f"Actual initial state ({f1},{f2}) before probe",
-                            xlabel="Common probe frequency (MHz)",
-                            ylabel=f"{role} P_e",
-                            ylim=(0, 1),
-                        )
-                        ax.legend(fontsize="small")
+                for f1, f2 in np.ndindex(2, 2):
+                    ax = fig.axes[2 * f1 + f2]
+                    ax.plot(
+                        frequencies,
+                        gg.excitation[d, f1, f2, :, target],
+                        label=f"herald gg, nominal ({f1},{f2})",
+                    )
+                    ax.plot(
+                        frequencies,
+                        ee.excitation[d, 1 - f1, 1 - f2, :, target],
+                        linestyle="--",
+                        label=f"herald ee, nominal ({1 - f1},{1 - f2})",
+                    )
+                    ax.set(
+                        title=f"Actual initial state ({f1},{f2}) before probe",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel=f"{role} P_e",
+                        ylim=(0, 1),
+                    )
+                    ax.legend(fontsize="small")
         fig, _ = plots.subplots(
             "shots",
             nrows=len(dc),
@@ -348,24 +348,23 @@ class SpectroscopyHeraldedExp(
         gg_shots = gg_counts.sum(axis=(-2, -1))
         ee_shots = ee_counts.sum(axis=(-2, -1))
         for d, value in enumerate(dc):
-            for f1 in range(2):
-                for f2 in range(2):
-                    ax = fig.axes[4 * d + 2 * f1 + f2]
-                    ax.plot(frequencies, acquired[d, f1, f2], label="All 81 classes")
-                    ax.plot(frequencies, gg_shots[d, f1, f2], label="Selected gg")
-                    ax.plot(frequencies, ee_shots[d, f1, f2], label="Selected ee")
-                    ax.axhline(
-                        cfg.reps * cfg.rounds,
-                        color="gray",
-                        linestyle="--",
-                        label="Requested",
-                    )
-                    ax.set(
-                        title=f"DC {value:g} · nominal ({f1},{f2}) · complete={gg.complete[d, f1, f2]}",
-                        xlabel="Common probe frequency (MHz)",
-                        ylabel="Shots",
-                    )
-                    ax.legend(fontsize="small")
+            for f1, f2 in np.ndindex(2, 2):
+                ax = fig.axes[4 * d + 2 * f1 + f2]
+                ax.plot(frequencies, acquired[d, f1, f2], label="All 81 classes")
+                ax.plot(frequencies, gg_shots[d, f1, f2], label="Selected gg")
+                ax.plot(frequencies, ee_shots[d, f1, f2], label="Selected ee")
+                ax.axhline(
+                    cfg.reps * cfg.rounds,
+                    color="gray",
+                    linestyle="--",
+                    label="Requested",
+                )
+                ax.set(
+                    title=f"DC {value:g} · nominal ({f1},{f2}) · complete={gg.complete[d, f1, f2]}",
+                    xlabel="Common probe frequency (MHz)",
+                    ylabel="Shots",
+                )
+                ax.legend(fontsize="small")
         herald = herald_probabilities(data.sums)
         fig, _ = plots.subplots(
             "herald",
@@ -382,23 +381,22 @@ class SpectroscopyHeraldedExp(
             "Herald distribution; gg is pass fraction, not ground-state purity"
         )
         for d, value in enumerate(dc):
-            for f1 in range(2):
-                for f2 in range(2):
-                    ax = fig.axes[4 * d + 2 * f1 + f2]
-                    image = ax.pcolormesh(
-                        frequencies,
-                        np.arange(9),
-                        herald[d, f1, f2].reshape(-1, 9).T,
-                        shading="nearest",
-                        vmin=0,
-                        vmax=1,
-                    )
-                    ax.set(
-                        title=f"DC {value:g} · nominal ({f1},{f2})",
-                        xlabel="Common probe frequency (MHz)",
-                        ylabel="Herald class (F1, F2)",
-                        yticks=range(9),
-                        yticklabels=outcomes,
-                    )
-                    fig.colorbar(image, ax=ax, label="Herald probability")
+            for f1, f2 in np.ndindex(2, 2):
+                ax = fig.axes[4 * d + 2 * f1 + f2]
+                image = ax.pcolormesh(
+                    frequencies,
+                    np.arange(9),
+                    herald[d, f1, f2].reshape(-1, 9).T,
+                    shading="nearest",
+                    vmin=0,
+                    vmax=1,
+                )
+                ax.set(
+                    title=f"DC {value:g} · nominal ({f1},{f2})",
+                    xlabel="Common probe frequency (MHz)",
+                    ylabel="Herald class (F1, F2)",
+                    yticks=range(9),
+                    yticklabels=outcomes,
+                )
+                fig.colorbar(image, ax=ax, label="Herald probability")
         return SpectroscopyHeraldedAnalysis(gg, ee, herald, herald[..., 0, 0])

@@ -44,16 +44,15 @@ Result 保存 float64 `sums`，形狀為 `DC × prepared_f1[2] × prepared_f2[2]
 
 ## Notebook
 
-先建立通過驗證的 `SpectroscopyCfg`，環境 handles 由 caller 提供。Notebook 經 adapter 管理 scope、plots 與 RunRecord。
+先建立通過驗證的 `SpectroscopyCfg`，環境 handles 由 caller 提供。`point_view` 是保存目的地的 bound PointView。Notebook 經 adapter 管理 scope、plots 與 RunRecord。
 
 ```python
-from pathlib import Path
 from zcu_tools.notebook import NotebookAdapter
 from zcu_lab.v2.two_qubit.conditional_spectroscopy.core import SpectroscopyExp
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(SpectroscopyExp())
-exp.run(cfg)
+record = exp.run(cfg)
 exp.analyze(None)
-exp.save_run(Path("conditional_spectroscopy"))
+saved = exp.save_run(point_view, source=record)
 ```

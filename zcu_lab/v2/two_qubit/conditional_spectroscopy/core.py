@@ -347,24 +347,23 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 layout="constrained",
             )
             fig.suptitle(f"{role} P_e · double Xπ contrast {cfg.contrast}")
-            for f1 in range(2):
-                for f2 in range(2):
-                    ax = fig.axes[2 * f1 + f2]
-                    for d, value in enumerate(dc):
-                        ax.plot(
-                            frequencies,
-                            answer.excitation[d, f1, f2, :, target],
-                            label=f"DC {value:g} {cfg.dc_unit}"
-                            if cfg.dc_device
-                            else "DC inactive",
-                        )
-                    ax.set(
-                        title=f"Nominal preparation ({f1},{f2})",
-                        xlabel="Common probe frequency (MHz)",
-                        ylabel=f"{role} P_e",
-                        ylim=(0, 1),
+            for f1, f2 in np.ndindex(2, 2):
+                ax = fig.axes[2 * f1 + f2]
+                for d, value in enumerate(dc):
+                    ax.plot(
+                        frequencies,
+                        answer.excitation[d, f1, f2, :, target],
+                        label=f"DC {value:g} {cfg.dc_unit}"
+                        if cfg.dc_device
+                        else "DC inactive",
                     )
-                    ax.legend(fontsize="small")
+                ax.set(
+                    title=f"Nominal preparation ({f1},{f2})",
+                    xlabel="Common probe frequency (MHz)",
+                    ylabel=f"{role} P_e",
+                    ylim=(0, 1),
+                )
+                ax.legend(fontsize="small")
             if cfg.dc_device is not None:
                 fig, _ = plots.subplots(
                     f"map_{role.lower()}",
@@ -374,23 +373,22 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     squeeze=False,
                     layout="constrained",
                 )
-                for f1 in range(2):
-                    for f2 in range(2):
-                        ax = fig.axes[2 * f1 + f2]
-                        image = ax.pcolormesh(
-                            frequencies,
-                            dc,
-                            answer.excitation[:, f1, f2, :, target],
-                            shading="nearest",
-                            vmin=0,
-                            vmax=1,
-                        )
-                        fig.colorbar(image, ax=ax, label=f"{role} P_e")
-                        ax.set(
-                            title=f"Nominal preparation ({f1},{f2})",
-                            xlabel="Common probe frequency (MHz)",
-                            ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
-                        )
+                for f1, f2 in np.ndindex(2, 2):
+                    ax = fig.axes[2 * f1 + f2]
+                    image = ax.pcolormesh(
+                        frequencies,
+                        dc,
+                        answer.excitation[:, f1, f2, :, target],
+                        shading="nearest",
+                        vmin=0,
+                        vmax=1,
+                    )
+                    fig.colorbar(image, ax=ax, label=f"{role} P_e")
+                    ax.set(
+                        title=f"Nominal preparation ({f1},{f2})",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
+                    )
         fig, _ = plots.subplots(
             "shots",
             nrows=2,
@@ -400,25 +398,24 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             layout="constrained",
         )
         fig.suptitle("Acquired shots per point · partial counts included")
-        for f1 in range(2):
-            for f2 in range(2):
-                ax = fig.axes[2 * f1 + f2]
-                for d, value in enumerate(dc):
-                    ax.plot(
-                        frequencies,
-                        answer.acquired_shots[d, f1, f2],
-                        label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}",
-                    )
-                ax.axhline(
-                    cfg.reps * cfg.rounds,
-                    color="gray",
-                    linestyle="--",
-                    label="Requested shots",
+        for f1, f2 in np.ndindex(2, 2):
+            ax = fig.axes[2 * f1 + f2]
+            for d, value in enumerate(dc):
+                ax.plot(
+                    frequencies,
+                    answer.acquired_shots[d, f1, f2],
+                    label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}",
                 )
-                ax.set(
-                    title=f"Nominal preparation ({f1},{f2})",
-                    xlabel="Common probe frequency (MHz)",
-                    ylabel="Shots",
-                )
-                ax.legend(fontsize="small")
+            ax.axhline(
+                cfg.reps * cfg.rounds,
+                color="gray",
+                linestyle="--",
+                label="Requested shots",
+            )
+            ax.set(
+                title=f"Nominal preparation ({f1},{f2})",
+                xlabel="Common probe frequency (MHz)",
+                ylabel="Shots",
+            )
+            ax.legend(fontsize="small")
         return answer
