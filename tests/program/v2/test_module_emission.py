@@ -183,6 +183,41 @@ def test_default_emit_only_moves_end_until_sync(sync):
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [43] * 2
 
 
+def test_shared_runtime_readout_keeps_each_programs_templates():
+    shared = _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
+    others = []
+
+    def build(readout, *, padded=False, interleave=False):
+        def initialize(prog):
+            if padded:
+                prog.add_reg("padding")
+                prog.declare(_pulse("padding", ch=2, length=0.2))
+            for register in ("frequency", "gain", "adc_word"):
+                prog.add_reg(register)
+
+        def body(prog):
+            if interleave:
+                others.append(build(shared, padded=True))
+            prog.write_reg("frequency", 1000)
+            prog.write_reg("gain", 100)
+            prog.write_reg("adc_word", 2000)
+            prog.emit(readout)
+
+        return _program([readout], body, initialize)
+
+    first = build(shared, interleave=True)
+    fresh = build(_readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"))
+    other_fresh = build(
+        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"),
+        padded=True,
+    )
+    assert first.prog_list == fresh.prog_list
+    assert _shots(first) == _shots(fresh)
+    assert others[0].prog_list == other_fresh.prog_list
+    first.compile()
+    assert first.prog_list == fresh.prog_list
+
+
 def _readout(**kwargs):
     return PulseReadout(
         "read",
