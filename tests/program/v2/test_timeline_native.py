@@ -151,6 +151,34 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 175]
 
 
+@pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
+@pytest.mark.parametrize("ticks, rounded", [(5e-11, 1), (1.00000000005, 2), (43, 43)])
+def test_scalar_ceil_preserves_positive_tails_and_exact_grid(operation, ticks, rounded):
+    def body(prog):
+        value = ticks / 430.08
+        if operation == "pulse":
+            prog.pulse(0, "pulse", t=value, timeline="default", tag="event")
+        elif operation == "config":
+            prog.send_readoutconfig(0, "ro", t=value, timeline="default", tag="event")
+        elif operation == "trigger":
+            prog.trigger([0], t=value, width=value, timeline="default", tag="event")
+        else:
+            prog.delay_timeline(value)
+            prog.delay_timeline(value, tag="event")
+        prog.sync()
+        prog.pulse(1, "p1", timeline="default", tag="after")
+
+    prog = _program(body)
+    start = 2 * rounded if operation == "delay" else rounded
+    assert prog.get_time_param("event", "t") * 430.08 == pytest.approx(start)
+    if operation == "trigger":
+        assert prog.get_time_param("event", "width") * 430.08 == pytest.approx(rounded)
+    # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
+    end = start + {"pulse": 43, "config": 0, "trigger": 173, "delay": 0}[operation]
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"][-1] == end
+    assert prog.get_time_param("after", "t") == 0
+
+
 def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     def body(prog):
         value = QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08)
