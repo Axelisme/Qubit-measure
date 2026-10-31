@@ -1,13 +1,10 @@
 # tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from copy import deepcopy
-from inspect import signature
 from typing import TypedDict, override
 
-import numpy as np
 from qick.asm_v2 import (
     AsmV2,
     ConfigReadout,
@@ -15,7 +12,6 @@ from qick.asm_v2 import (
     OpenLoop,
     Pulse,
     QickParam,
-    QickProgramV2,
     QickRawParam,
     Trigger,
 )
@@ -131,7 +127,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states: dict[int, tuple[Module, object]] = {}
         self._declaration_module: Module | None = None
         self._resource_owners: dict[tuple[str, str | int], Module] = {}
-        self._resource_declarations: dict[tuple[str, int], dict[str, object]] = {}
         self._declaring = False
         self._building_body = False
         self._timeline_default: str | None = None
@@ -226,7 +221,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states.clear()
         self._declaration_module = None
         self._resource_owners.clear()
-        self._resource_declarations.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
         self._declaring = True
@@ -367,10 +361,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
         Do not mutate it afterward. Outside _initialize raises ValueError;
-        unsupported module types raise NotImplementedError. Inconsistent ADC or
-        generator settings and register conflicts raise ValueError naming both
-        objects and conflicting fields. Equal channel declarations are shared;
-        explicit register borrowing and Pulse registry sharing are retained.
+        unsupported module types raise NotImplementedError. Generator and ADC
+        declarations follow QICK: later declarations overwrite earlier ones,
+        and authors own their consistency. Read gen_chs/ro_chs for settings.
+        Explicit protect_readout_routes calls prevent later redeclaration.
+        Register conflicts raise ValueError naming both objects; explicit
+        register borrowing and Pulse registry sharing are retained.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
@@ -396,88 +392,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def _remember_resource_owner(self, kind: str, key: str | int) -> None:
         if self._declaration_module is not None:
             self._resource_owners.setdefault((kind, key), self._declaration_module)
-
-    def _reuse_declaration(
-        self, kind: str, ch: int, settings: dict[str, object]
-    ) -> bool:
-        previous = self._resource_declarations.get((kind, ch))
-        if previous is None:
-            return False
-        differing = []
-        for field, value in settings.items():
-            old = previous[field]
-            if isinstance(old, np.ndarray) or isinstance(value, np.ndarray):
-                equal = (
-                    isinstance(old, np.ndarray)
-                    and isinstance(value, np.ndarray)
-                    and np.array_equal(old, value)
-                )
-            else:
-                equal = old == value
-            if not equal:
-                differing.append("length (ro_length)" if field == "length" else field)
-        if differing:
-            owner = self._resource_owners.get((kind, ch))
-            module = self._declaration_module
-            first = f"{owner.name} ({owner!r})" if owner else "native declaration"
-            second = f"{module.name} ({module!r})" if module else "native declaration"
-            raise ValueError(
-                f"{kind} {ch}: {second} conflicts with {first}; "
-                f"inconsistent fields: {', '.join(differing)}"
-            )
-        return True
-
-    @override
-    def declare_readout(self, ch: int, *args, **kwargs) -> None:
-        """Declare or reuse an ADC with identical QICK resource settings.
-
-        Arguments follow QICK declare_readout, including length in us. Reuse
-        does not reset trigger accounting. Different settings raise ValueError
-        naming both declaring modules and the inconsistent fields. Runtime
-        freq/phase/outsel/gen matching belongs in separate readout configs.
-        """
-        # Bind at the external adapter so positional/default arguments compare alike.
-        bound = signature(QickProgramV2.declare_readout).bind(self, ch, *args, **kwargs)
-        bound.apply_defaults()
-        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
-        if self._reuse_declaration("readout", ch, settings):
-            return
-        super().declare_readout(ch, *args, **kwargs)
-        self._resource_declarations[("readout", ch)] = deepcopy(settings)
-        self._remember_resource_owner("readout", ch)
-
-    @override
-    def declare_gen(self, ch: int, *args, **kwargs) -> None:
-        """Declare or reuse a generator with identical QICK resource settings.
-
-        Arguments follow QICK declare_gen (nqz, mixer, mux tones and matching
-        ADC). Different declarations raise ValueError naming both modules and
-        inconsistent fields, rather than overwriting the first declaration.
-        """
-        bound = signature(QickProgramV2.declare_gen).bind(self, ch, *args, **kwargs)
-        bound.apply_defaults()
-        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
-        if self._reuse_declaration("generator", ch, settings):
-            return
-        super().declare_gen(ch, *args, **kwargs)
-        self._resource_declarations[("generator", ch)] = deepcopy(settings)
-        self._remember_resource_owner("generator", ch)
-
-    @override
-    def protect_readout_routes(
-        self, owner: str, gen_ch: int, ro_chs: Sequence[int]
-    ) -> None:
-        """Protect declared generator/ADC routes under their declaring module.
-
-        owner is the diagnostic label; gen_ch and ro_chs are declared logical
-        channels. Native protection errors propagate without changing ownership.
-        During declare(module), future conflicts identify this protector object,
-        not earlier unprotected generator users. Equivalent declarations remain
-        shareable; different-owner explicit protection still raises ValueError.
-        """
-        super().protect_readout_routes(owner, gen_ch, ro_chs)
-        if self._declaration_module is not None:
-            self._resource_owners[("generator", gen_ch)] = self._declaration_module
 
     @override
     def add_reg(

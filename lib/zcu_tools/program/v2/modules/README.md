@@ -219,10 +219,12 @@ accident. Mixer declaration receives the channel only when mixing is configured.
 
 `MuxReadoutCfg` reuses the numeric cfg_model schema. `MuxReadout` declares fixed
 mixmux8 tones and explicit logical outputs on one static PFBv4, then plays one
-all-tone const mask and triggers the outputs together. Timeline programs share
-identical ADC/generator resources and reject differences with both module objects
-and field names. Emission delays and classifier/description metadata do not affect
-resource identity. Static Mux does not switch runtime readout configurations.
+all-tone const mask and triggers the outputs together. Timeline programs use
+QICK's native ADC/generator declarations: later declarations overwrite earlier
+ones, and authors own their consistency. Read gen_chs/ro_chs for declaration
+settings. Timeline modules do not protect routes automatically. Authors may
+explicitly call the inherited protect_readout_routes to prevent redeclaration.
+Static Mux does not switch runtime readout configurations.
 Legacy `ModularProgramV2.protect_readout_routes` protects successful declarations,
 including when nested; its unprotected routes retain QICK overwrite semantics.
 `collect_iq` selects one standard averaged read using that program's actual

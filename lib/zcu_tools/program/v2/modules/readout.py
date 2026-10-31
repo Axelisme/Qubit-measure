@@ -705,8 +705,9 @@ class MuxReadout(AbsReadout):
         """Declare tones/routes without enabling legacy raw-IQ collection.
 
         Incompatible wiring and illegal rounded durations raise ValueError.
-        Identical resources can be shared; inconsistent ADC/generator settings
-        name both modules and their fields. QICK frequency/format errors propagate.
+        ADC/generator declarations follow QICK: later declarations overwrite
+        earlier ones, and authors own their consistency. Read gen_chs/ro_chs
+        for settings. QICK frequency/format errors propagate.
         """
         self._declare_resources(prog)
 
@@ -761,8 +762,8 @@ class MuxReadout(AbsReadout):
             mask=list(range(len(cfg.tones))),
             length=cfg.length,
         )
-        # Timeline declarations are immutable already; legacy programs need
-        # explicit protection to prevent QICK from overwriting these routes.
+        # Timeline authors own declaration consistency; legacy programs protect
+        # these routes explicitly to prevent QICK from overwriting them.
         if not allow_shared:
             prog.protect_readout_routes(
                 self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
