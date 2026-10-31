@@ -357,8 +357,9 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
     for index, (sources, times) in enumerate(
         [
             (["short", "long", "short", "long", "readout"], [0, 28, 84, 112, 168]),
-            (["readout"], [0]),
-            (["short", "short", "readout"], [0, 28, 56]),
+            # Both emissions account max(84,0,28)=84, including nested Branch.
+            (["readout"], [168]),
+            (["short", "short", "readout"], [0, 84, 168]),
         ]
     ):
         point = result.materialize_point(index)

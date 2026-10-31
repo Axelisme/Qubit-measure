@@ -296,8 +296,9 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body))
-    assert [waves(s) for s in result] == [[10], [20], [30]]
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [38, 48, 58]
+    # The local end 20 joins default's case ends 10 and 30: max=30.
+    assert [waves(s) for s in result] == [[30]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
 
 def test_branch_local_names_expire_even_when_every_case_forks_same_name():
@@ -333,7 +334,9 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
                     prog.delay_timeline((5 + 5 * i) / 430.08)
 
     result = shots(program(body, reps=2))
-    expected = [28, 28, 45] if register_count else [28, 28, 30]
+    # Branch duration is max(5,10,15)=15. Fixed count 2 ends at 30;
+    # counts 1/2/3 end at 15/30/45, joined with the external pulse end 28.
+    expected = [28, 30, 45] if register_count else [30, 30, 30]
     assert [waves(s) for s in result] == [[0]] * 6
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected * 2
     assert [s.end_cycle - s.start_cycle for s in result] == expected * 2
@@ -390,9 +393,10 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
             program(body)
     else:
         result = shots(program(body))
-        assert [waves(s) for s in result] == [[0, 28], [0, 28], [0, 35, 63, 98]]
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [56, 56, 126]
-        assert [s.end_cycle - s.start_cycle for s in result] == [56, 56, 126]
+        # Safe case 2 ends at 28+35=63, which is every iteration's duration.
+        assert [waves(s) for s in result] == [[0, 63], [0, 63], [0, 35, 63, 98]]
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [126] * 3
+        assert [s.end_cycle - s.start_cycle for s in result] == [126] * 3
 
 
 def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding():
@@ -588,7 +592,10 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works(contro
             with prog.branch(by="scan") as branch:
                 for i in range(3):
                     with branch.case(i):
-                        prog.delay_timeline((10 + 10 * i) / 430.08)
+                        # Runtime case closure, not static max accounting, is
+                        # what leaves the external source path-selected.
+                        prog.write_reg("duration", 10 + 10 * i)
+                        prog.delay_timeline("duration")
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
         prog.delay_timeline("duration", timeline="external")
