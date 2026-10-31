@@ -151,14 +151,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 reset = Reset("reset", cfg.reset)
                 if reset is not None:
                     builder.emit(reset)
-                builder.sync()
+                builder.delay_by_timeline()
                 # Empty g case has no pi-length padding; preserve each case's readout time.
                 with (
                     builder.branch(by="ge", align_timeline=False) as cases,
                     cases.case(1),
                 ):
                     builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-                builder.sync()
+                builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(
