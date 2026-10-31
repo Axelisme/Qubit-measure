@@ -249,7 +249,9 @@ class RepeatFrame:
                 tails[ch] = (
                     RuntimeEnd(tail.register, None, None)
                     if tail.maximum is None or operand.maximum is None
-                    else RuntimeEnd(tail.register, 0, max(tail.maximum, operand.maximum))
+                    else RuntimeEnd(
+                        tail.register, 0, max(tail.maximum, operand.maximum)
+                    )
                 )
 
     def _store(self, prog, end: Time) -> RuntimeEnd:
@@ -449,8 +451,14 @@ class TimelineBook:
         if type(macro) is WriteRegOp:
             self._observe_alu(prog, macro)
             return
-        if type(macro) is not WriteReg and isinstance(getattr(macro, "dst", None), str) and macro.dst in prog._time_bounds.author_writes:
-            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
+        if (
+            type(macro) is not WriteReg
+            and isinstance(getattr(macro, "dst", None), str)
+            and macro.dst in prog._time_bounds.author_writes
+        ):
+            self.source_expressions[macro.dst] = LinearTime(
+                terms=((CycleVariable(macro.dst, None, None), 1),)
+            )
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
                 self.source_expressions[macro.dst] = LinearTime(macro.src)
@@ -469,7 +477,9 @@ class TimelineBook:
 
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
         if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
-            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
+            self.source_expressions[macro.dst] = LinearTime(
+                terms=((CycleVariable(macro.dst, None, None), 1),)
+            )
             return
         right = macro.rhs
         if isinstance(right, int):
@@ -477,7 +487,9 @@ class TimelineBook:
         elif isinstance(right, str) and self._known_source(prog, right):
             rhs = source_expression(prog, right)
         else:
-            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
+            self.source_expressions[macro.dst] = LinearTime(
+                terms=((CycleVariable(macro.dst, None, None), 1),)
+            )
             return
         self.source_expressions[macro.dst] = add_time(
             source_expression(prog, macro.lhs),
@@ -543,7 +555,9 @@ class TimelineBook:
                     if generator and time_bounds(self.math.prog, remaining)[1] <= 1e-12:
                         consumed.add(ch)
                 if not isinstance(remaining, RuntimeEnd):
-                    self.native_expressions[generator, ch] = native_event_expression(self.math.prog, remaining)
+                    self.native_expressions[generator, ch] = native_event_expression(
+                        self.math.prog, remaining
+                    )
                 self.native_timestamp(
                     self.math.prog,
                     remaining,
@@ -567,7 +581,11 @@ class TimelineBook:
             limits = optional_time_bounds(self.math.prog, t)
             # Sync advances are nonnegative by construction. Zero is only the
             # guaranteed minimum, never the actual runtime reference debit.
-            proof_advance = (0.0 if limits is None else limits[0]) if isinstance(t, RuntimeEnd) else t
+            proof_advance = (
+                (0.0 if limits is None else limits[0])
+                if isinstance(t, RuntimeEnd)
+                else t
+            )
             if limits is None:
                 for guard in frame.pulse_guards.values():
                     guard.unbounded = True
@@ -668,8 +686,14 @@ class TimelineBook:
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
         if unbounded_time(expression):
-            unknown = [ch for ch in prog.ro_chs if unbounded_time(self.native_expression(prog, ch, generator=False))]
-            raise ValueError(f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending")
+            unknown = [
+                ch
+                for ch in prog.ro_chs
+                if unbounded_time(self.native_expression(prog, ch, generator=False))
+            ]
+            raise ValueError(
+                f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending"
+            )
         exact = exact_bounds(expression)
         limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its

@@ -194,7 +194,9 @@ class TimelineShellWait(Wait):
 
 
 class TimelineAdvance(TimedMacro):
-    def __init__(self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None):
+    def __init__(
+        self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None
+    ):
         super().__init__(tag=tag)
         self.book = book
         self.timeline = timeline
@@ -205,7 +207,9 @@ class TimelineAdvance(TimedMacro):
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
-            duration = self.book.math.snapshot(self.book.math.source(self.duration, self.range_hint, author=True))
+            duration = self.book.math.snapshot(
+                self.book.math.source(self.duration, self.range_hint, author=True)
+            )
         else:
             duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
@@ -990,7 +994,9 @@ class TimelineBranch(Macro):
         self.entry_math = RuntimeMath(prog)
         self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
         if self.align_timeline:
-            for register in prog._time_bounds.defined | self.book.source_expressions.keys():
+            for register in (
+                prog._time_bounds.defined | self.book.source_expressions.keys()
+            ):
                 expression = source_expression(prog, register)
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):

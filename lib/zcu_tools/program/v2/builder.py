@@ -368,7 +368,11 @@ class TimelineBuilder:
         overflow are author-owned. Invalid hints and unknown/wait-only timelines
         fail during build, as in TimelineProgramV2.delay_timeline.
         """
-        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag, range_hint=range_hint))
+        self._record(
+            lambda prog: prog.delay_timeline(
+                t, timeline=timeline, tag=tag, range_hint=range_hint
+            )
+        )
 
     def fork(self, source: str, *, into: str | list[str]) -> None:
         """Record new timeline names copying source's current end.

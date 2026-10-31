@@ -165,7 +165,11 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
     """
     if unbounded_time(value):
         points = evaluate_time(value, expression_axes(value))
-        return None if points is None else CycleBounds(int(points.min()), int(points.max()))
+        return (
+            None
+            if points is None
+            else CycleBounds(int(points.min()), int(points.max()))
+        )
     limits = expression_bounds(value)
     if limits.minimum == limits.maximum:
         return limits
@@ -385,11 +389,17 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     unique = tuple(dict.fromkeys(alternatives))
     # Shared unbounded identities cancel in comparisons; only constants remain.
     unique = tuple(
-        value for value in unique
-        if not isinstance(value, LinearTime) or not any(
+        value
+        for value in unique
+        if not isinstance(value, LinearTime)
+        or not any(
             isinstance(other, LinearTime)
             and other.terms == value.terms
-            and (other.constant > value.constant if maximum else other.constant < value.constant)
+            and (
+                other.constant > value.constant
+                if maximum
+                else other.constant < value.constant
+            )
             for other in unique
         )
     )

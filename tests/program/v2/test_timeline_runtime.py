@@ -141,7 +141,9 @@ def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(opera
 
 
 @pytest.mark.parametrize("synchronize", [False, True])
-def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait(synchronize):
+def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait(
+    synchronize,
+):
     def initialize(prog):
         prog.add_dmem([40])
         prog.declare_readout(0, length=4 / 307.2)
@@ -200,7 +202,9 @@ def test_branch_register_time_can_be_captured_from_author_entry_state(align):
         prog.pulse(0, "p0", timeline="default")
 
     expected = [42] * 3 if align else [40, 41, 42]
-    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [[t] for t in expected]
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [
+        [t] for t in expected
+    ]
 
 
 def test_hinted_register_time_name_does_not_conflict_with_repeat_counter_validation():
@@ -211,7 +215,10 @@ def test_hinted_register_time_name_does_not_conflict_with_repeat_counter_validat
         prog.write_reg_op("time", "scan", "+", 10)
         prog.delay_timeline("time", range_hint=(10, 12))
 
-    assert [s.body_end_cycle - s.start_cycle for s in shots(program(body, initialize=initialize))] == [10, 11, 12]
+    assert [
+        s.body_end_cycle - s.start_cycle
+        for s in shots(program(body, initialize=initialize))
+    ] == [10, 11, 12]
 
 
 def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
@@ -227,7 +234,9 @@ def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
         prog.pulse(0, "p0", timeline="fixed")
         prog.pulse(0, "p0", t="auto")
 
-    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [[40, 100, 128]] * 3
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [
+        [40, 100, 128]
+    ] * 3
 
 
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
