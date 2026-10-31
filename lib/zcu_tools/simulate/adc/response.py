@@ -155,7 +155,7 @@ class ConditionalReadout:
             np.maximum(
                 times
                 - batch.model.receiver.time_of_flight_ns
-                - (event.pulses[0].start_ns if event.pulses else 0.0),
+                - event.pulses[0].start_ns,
                 0.0,
             ).tobytes()
             for event, times in zip(events, times_by_content, strict=True)
@@ -222,8 +222,6 @@ class ConditionalReadout:
 
     def _content_fields(self, pulses, times, flat_mux, constant, projected):
         """Choose known affine/common-start superposition or the general field solve."""
-        if not pulses:
-            return np.zeros((len(times), len(self.model.state_labels)), complex)
         sampled = (
             any(isinstance(p.envelope, PiecewiseLinearEnvelope) for p in pulses)
             and all(

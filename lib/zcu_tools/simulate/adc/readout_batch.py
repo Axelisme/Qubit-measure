@@ -54,17 +54,19 @@ def _output_order(
 class ReadoutEvent:
     """One logical read event in physical ns/GHz units.
 
-    pulses: coherent incident pulses sharing one CTMC path. Empty means no
-        physical field: observed grids emit receiver offset and noise only,
-        without CTMC or cavity propagation.
+    pulses: nonempty tuple of coherent incident pulses sharing one CTMC path.
     grids: ADC windows in channel-local trigger order, sharing that path.
         Empty means this ADC does not observe the event and emits no read column.
         Windows may include lookback, gaps and ringdown.
-    Pulse and grid records validate themselves.
+    Empty pulses raise ValueError; physical records validate themselves.
     """
 
     pulses: tuple[ReadoutPulse, ...]
     grids: tuple[SampleGrid, ...]
+
+    def __post_init__(self) -> None:
+        if not self.pulses:
+            raise ValueError("readout event requires nonempty pulses")
 
 
 @dataclass(frozen=True)
