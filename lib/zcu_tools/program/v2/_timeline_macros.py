@@ -43,7 +43,12 @@ from ._timeline_runtime import (
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
-from ._timeline_state import BranchProvenance, RepeatFrame, RepeatFrameSnapshot, TimelineBook
+from ._timeline_state import (
+    BranchProvenance,
+    RepeatFrame,
+    RepeatFrameSnapshot,
+    TimelineBook,
+)
 from .macro.delay import DelayRegAuto
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
@@ -921,7 +926,8 @@ class TimelineBranch(Macro):
             if static_ends is None:
                 used = state.used | (state.ends.keys() - initial.keys())
                 closer = PreparedTimelineMacro(
-                    self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
+                    self.book,
+                    TimelineSync(self.book, None, sources=tuple(sorted(used))),
                 )
                 closer.preprocess(prog)
                 prepared.append(closer)

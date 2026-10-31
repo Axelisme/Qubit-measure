@@ -12,9 +12,13 @@ from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program import v2
-from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
+from zcu_tools.program.v2.modules.readout import (
+    MuxReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
+)
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -69,14 +73,19 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
     assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == [
-        86, 86, 86, 86
+        86,
+        86,
+        86,
+        86,
     ]
     actual.compile()
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])
-@pytest.mark.parametrize(("index", "message"), [(0, "duplicate"), (-1, "index"), (2, "index")])
+@pytest.mark.parametrize(
+    ("index", "message"), [(0, "duplicate"), (-1, "index"), (2, "index")]
+)
 def test_indexed_branch_rejects_duplicate_and_out_of_range_points(
     mock_soccfg, frontend, index, message
 ):
@@ -114,12 +123,24 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
         ],
     ).build("readout")
     if reset:
-        builder.emit(TwoPulseResetCfg(
-            pulse1_cfg=v2.PulseCfg(ch=1, nqz=1, freq=100, gain=0.5,
-                waveform=ConstWaveformCfg(length=0.1)),
-            pulse2_cfg=v2.PulseCfg(ch=2, nqz=1, freq=100, gain=0.5,
-                waveform=ConstWaveformCfg(length=0.1)),
-        ).build("reset"))
+        builder.emit(
+            TwoPulseResetCfg(
+                pulse1_cfg=v2.PulseCfg(
+                    ch=1,
+                    nqz=1,
+                    freq=100,
+                    gain=0.5,
+                    waveform=ConstWaveformCfg(length=0.1),
+                ),
+                pulse2_cfg=v2.PulseCfg(
+                    ch=2,
+                    nqz=1,
+                    freq=100,
+                    gain=0.5,
+                    waveform=ConstWaveformCfg(length=0.1),
+                ),
+            ).build("reset")
+        )
     if heralded:
         builder.emit(readout, tag="herald")
     # wait for herald/reset to finish before the branch-selected preparation
@@ -140,11 +161,18 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     drive_ports = {soccfg["gens"][ch]["tproc_ch"] for ch in (1, 2)}
     scheduled = shots(prog)
     drives = [
-        [event for event in shot.events if event.kind == "wave" and event.port in drive_ports]
+        [
+            event
+            for event in shot.events
+            if event.kind == "wave" and event.port in drive_ports
+        ]
         for shot in scheduled
     ]
     assert [len(events) for events in drives] == [
-        2 * int(reset), 2 * int(reset) + 1, 2 * int(reset) + 1, 2 * int(reset) + 2
+        2 * int(reset),
+        2 * int(reset) + 1,
+        2 * int(reset) + 1,
+        2 * int(reset) + 2,
     ]
     print(f"ee_cycles={[event.cycle for event in drives[-1][-2:]]}")
     # Both selected preparations must start together, after the optional prefix.

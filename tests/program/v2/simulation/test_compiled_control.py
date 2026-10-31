@@ -38,7 +38,9 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding():
         observed = request_of(env)
         points = [observed.materialize_point(index) for index in range(3)]
         assert [[event.source for event in point.events] for point in points] == [
-            ["terminal"], ["selected-drive", "terminal"], ["terminal"]
+            ["terminal"],
+            ["selected-drive", "terminal"],
+            ["terminal"],
         ]
         assert points[1].events[0].gain == pytest.approx(0.2, abs=1e-4)
     finally:
