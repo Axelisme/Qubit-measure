@@ -1,18 +1,14 @@
-"""Expected analysis failures are values; programming errors still end recipes."""
+"""Unhandled analyze errors fail recipes and retain the original message."""
 
 from pathlib import Path
 
-import pytest
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
 from ._support import make_client
 
 
-@pytest.mark.parametrize("classified", [True, False])
-def test_analysis_failure_leaves_the_author_in_control(
-    tmp_path: Path, classified: bool
-) -> None:
+def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path) -> None:
     gui = SyntheticGui()
     observed: list[tuple[str, object, str | None]] = []
 
@@ -22,7 +18,6 @@ def test_analysis_failure_leaves_the_author_in_control(
                 "reason": "completed",
                 "status": "failed",
                 "error": "fit did not converge",
-                "failure_kind": "analysis" if classified else None,
             }
         return gui.respond(method, params)
 
@@ -32,7 +27,6 @@ def test_analysis_failure_leaves_the_author_in_control(
         await tab.run()
         fit = await tab.analyze("primary", result=Fit)
         observed.append((fit.status, fit.result, fit.reason))
-        # A failed fit need not discard the acquisition or fail this recipe.
         tab.save()
         return Report(count=inputs.count)
 
@@ -41,15 +35,9 @@ def test_analysis_failure_leaves_the_author_in_control(
         execution = start(client, "synthetic")
         execution.join()
         snapshot = execution.snapshot()
-        if classified:
-            assert snapshot.status == "completed", snapshot.error
-            assert observed == [("failed", None, "fit did not converge")]
-            assert snapshot.outcome is not None
-            assert len(snapshot.outcome.runs[0].saves) == 1
-        else:
-            assert snapshot.status == "failed"
-            assert observed == []
-            assert snapshot.error is not None
-            assert snapshot.error.message == "fit did not converge"
+        assert snapshot.status == "failed"
+        assert observed == []
+        assert snapshot.error is not None
+        assert snapshot.error.message == "fit did not converge"
     finally:
         client.context.session.close()

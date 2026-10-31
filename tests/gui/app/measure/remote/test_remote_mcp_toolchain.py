@@ -276,7 +276,6 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
                     "reason": "failed",
                     "message": "stopped before any acquisition",
                 },
-                "failure_kind": None,
             }
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
         assert snapshot["result_state"]["available"] is returns_record

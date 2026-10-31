@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-31，frontend stop requests，wire 134／GUI 167
+**Last updated:** 2026-10-31，analyze error propagation，wire 135／GUI 168
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -199,13 +199,12 @@ classify data completeness. New Run and result replacement reset it to false.
 Run metadata uses stopped for requests recorded before core return.
 Recipe RunResult reads stop_requested, not operation terminal status or cancel ack.
 Core return publishes its record; core errors fail the operation and remain visible
-also after Stop. Wire version 134 requires the renamed field.
+also after Stop. Wire version 135 uses this field.
 
-Analyze work may explicitly raise AnalysisFailed. Only that work failure adds
-failure_kind="analysis" to operation.await; recording/postprocessing errors stay
-unclassified. Recipe converts the analysis classification to a failed value,
-while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
-drain and does not overwrite genuine errors.
+Analyze returns publish results. Any analyze exception settles operation.await
+as failed with the original error message, regardless of exception type.
+Recipe raises the operation error to its author, just as it does for Run.
+Root cancellation uses ScriptCancelled after drain and does not overwrite genuine errors.
 
 ## Analysis presentation
 

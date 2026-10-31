@@ -64,15 +64,14 @@ class OperationOutcome:
     Carries only success/failure/cancellation + an error message — never a
     result payload (run results / soc handles are read via their own snapshot /
     query paths, not through the operation handle). ``OperationHandles`` never
-    interprets ``status``; it is carried verbatim to the awaiter. failure_kind
-    is "analysis" only for expected analyze-work failure, otherwise None;
-    recording and programming errors must remain unclassified.
+    interprets ``status``; it is carried verbatim to the awaiter.
+
+    status is pending, finished, failed or cancelled. error is the original
+    failure message for failed operations, otherwise None.
     """
 
     status: OperationStatus
     error: str | None = None
-    # analysis means expected failure of analyze work; None means unclassified.
-    failure_kind: Literal["analysis"] | None = None
 
 
 @dataclass(frozen=True)
