@@ -65,13 +65,14 @@ class ComputedPulse(Module):
         base_idxs = self._declare_candidates(
             prog, declare_pulse=lambda pulse: pulse.declare(prog)
         )
-        self._address_loader = LoadValue(
+        address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
             idx_reg=self.val_reg,
             val_reg=f"{self.name}_wmem_index",
         )
-        self._address_loader.declare(prog)
+        address_loader.declare(prog)
+        prog.set_module_state(self, address_loader)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -82,7 +83,8 @@ class ComputedPulse(Module):
         path. Address/selector writes and same-channel overlap fail at compile.
         """
         del tag  # ModuleEmission owns the occurrence tag.
-        relation = self._address_loader.lower_selected(prog)
+        address_loader = prog.get_module_state(self, LoadValue)
+        relation = address_loader.lower_selected(prog)
         choices = tuple(
             PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules
@@ -90,7 +92,7 @@ class ComputedPulse(Module):
         )
         prog.pulse_by_reg(
             self.ref_cfg.ch,
-            self._address_loader.val_reg,
+            address_loader.val_reg,
             t=self.ref_cfg.pre_delay,
             flat_top_pulse=self._is_flat_top,
             timeline="default" if timeline is None else timeline,

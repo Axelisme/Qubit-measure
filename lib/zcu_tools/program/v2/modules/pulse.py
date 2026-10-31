@@ -404,13 +404,14 @@ class TableLengthPulse(Module):
             raise ValueError(f"{self.name}: missing runtime pulse template")
         template_cfg.set_param("length", self.lengths[0])
         self._template.declare(prog)
-        self._length_loader = LoadValue(
+        length_loader = LoadValue(
             f"{self.name}_load_gen_length",
             wave_cycles,
             idx_reg=self.idx_reg,
             val_reg=self._length_reg,
         )
-        self._length_loader.declare(prog)
+        length_loader.declare(prog)
+        prog.set_module_state(self, length_loader)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -421,7 +422,7 @@ class TableLengthPulse(Module):
         Timeline owner resolves flat-top ramps, exact end rounding and audits.
         """
         del tag  # ModuleEmission owns the occurrence tag.
-        relation = self._length_loader.lower_selected(prog)
+        relation = prog.get_module_state(self, LoadValue).lower_selected(prog)
         name = self._template.pulse_name(prog)
         prog.pulse_from_length_reg(
             self.cfg.ch,
