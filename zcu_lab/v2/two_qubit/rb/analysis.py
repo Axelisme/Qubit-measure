@@ -130,7 +130,7 @@ def count_completion(
     counts: NDArray[np.float64], class_axes: tuple[int, ...]
 ) -> NDArray[np.bool_]:
     """Identify whole finite slots, rejecting partial/nonfinite/negative counts."""
-    acquired = np.isfinite(counts).all(axis=class_axes)
+    acquired = np.asarray(np.isfinite(counts).all(axis=class_axes), dtype=np.bool_)
     missing = np.isnan(counts).all(axis=class_axes)
     if not np.all(acquired | missing) or np.any(counts < 0):
         raise ValueError("RB sums contains invalid counts or a partial round")
@@ -172,7 +172,7 @@ def seed_statistics(
     usable without assigning zero error. Counts affect errors, never seed means.
     Unavailable seeds remain NaN.
     """
-    complete = np.isfinite(survival).all(axis=(0, 2))
+    complete = np.asarray(np.isfinite(survival).all(axis=(0, 2)), dtype=np.bool_)
     nrounds = complete.sum(axis=1)
     valid = complete[None, :, None, :]
     means = np.full(survival.shape[:-1], np.nan)

@@ -170,8 +170,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
 
         def update_view(sums: NDArray[np.float64]) -> None:
             curves = []
-            for state, cell in ((("g", "g"), 0), (("e", "e"), 1)):
-                counts = terminal_counts(sums, state)
+            for cell, counts in enumerate((terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))):
                 totals = np.nansum(counts, axis=(1, 3))
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
             viewer.update(np.array(config.depths), np.array(curves))
@@ -296,8 +295,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 (data.depths, data.seeds, data.arms, data.rounds),
                 (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
             )
-            for herald, state in enumerate((("g", "g"), ("e", "e"))):
-                counts = terminal_counts(data.sums, state)
+            for herald, counts in enumerate((terminal_counts(data.sums, ("g", "g")), terminal_counts(data.sums, ("e", "e")))):
                 total = counts.sum(axis=(-2, -1))
                 returns = joint_probabilities(counts)[..., herald, herald]
                 paired[herald] = (acquired & np.isfinite(returns)).all(axis=(0, 2))
@@ -331,7 +329,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             else:
                 curves = fitted
                 # Union counts describe available paired identities, not an intersection.
-                union = paired.any(axis=0)
+                union = np.asarray(paired.any(axis=0), dtype=np.bool_)
                 estimate = estimate_joint_d4(
                     fit,
                     (low, high, successes),
