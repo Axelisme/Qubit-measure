@@ -99,7 +99,8 @@ def analyze_irb(
     seed over its complete rounds, then weight seeds equally. Bootstrap resamples
     entire paired seed curves, preserving depth and arm correlations. Raises
     ValueError for insufficient data, invalid fits or >10% failed bootstrap fits.
-    Known optimizer failures in the main fit become ValueError with their cause.
+    Known optimizer failures in the main fit become ValueError with their cause;
+    in bootstrap they count as failed draws, without replacement or retry.
     The ratio is the single-qubit estimate in Magesan et al., arXiv:1203.4550;
     its confidence interval does not include gate-dependent noise systematics.
     """
@@ -131,7 +132,7 @@ def analyze_irb(
         sample = seed_means[rng.integers(0, len(seed_means), len(seed_means))]
         try:
             boot_ps, _ = _fit_pair(xs, project_arm_means(sample[None, ...]))
-        except (ValueError, RuntimeError):
+        except (AnalysisFailed, ValueError, RuntimeError):
             # A failed resample is reported in the success count, never replaced.
             continue
         fidelities.append(float((1 + boot_ps[1] / boot_ps[0]) / 2))
