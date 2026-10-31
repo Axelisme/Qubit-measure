@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -58,18 +59,60 @@ def _overrun_acquisition(monkeypatch: pytest.MonkeyPatch, *, recover: bool):
     # Complete one round, then store a partial chunk before the offending one.
     failed = [[chunk(3, 91)], [chunk(1, 99)], [chunk(3, 99)]]
     batches = iter(failed + ([[chunk(3, 4)], [chunk(3, 6)]] if recover else failed))
-    monkeypatch.setattr(soc, "poll_data", lambda: next(batches))
-    return soc, program
+    polls: list[int] = []
+
+    def poll():
+        polls.append(1)
+        return next(batches)
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    return soc, program, polls
 
 
-def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
+@pytest.mark.parametrize("retry", [0, 1])
+@pytest.mark.parametrize("mode", ["builder", "integrated", "summed"])
+def test_shot_overrun_obeys_explicit_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, retry: int, mode: str
+) -> None:
+    soc, program, polls = _overrun_acquisition(monkeypatch, recover=True)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    buffer.set(np.array(7 + 8j))
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        if mode == "builder":
+            result = sched.prog_builder(soc, "unused").run_program(
+                program, rounds=2, options=AcquireOptions(retry=retry)
+            )
+        elif mode == "integrated":
+            result = sched.run_acquire(program, soc, rounds=2, options=RunOptions(retry=retry))
+        else:
+            result = sched.run_acquire_summed(
+                program,
+                soc,
+                rounds=2,
+                processor=lambda iq: iq[0][..., 0, 0].sum(axis=1),
+                options=RunOptions(retry=retry),
+            )
+
+    assert len(polls) == (5 if retry else 3)
+    assert sched.outcome.status == ("completed" if retry else "failed")
+    if retry:
+        np.testing.assert_allclose(result, 30 if mode == "summed" else 5 - 5j)
+    else:
+        assert isinstance(sched.outcome.exception, AcquisitionContractError)
+        np.testing.assert_array_equal(result, 7 + 8j)
+    np.testing.assert_array_equal(buffer.array, result)
+
+
+def test_shot_overrun_restarts_all_rounds_with_one_retry(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     result = None
-    soc, program = _overrun_acquisition(monkeypatch, recover=True)
+    soc, program, _ = _overrun_acquisition(monkeypatch, recover=True)
     buffer = SignalBuffer((), dtype=np.complex128)
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+        result = sched.prog_builder(soc, "unused").run_program(
+            program, rounds=2, options=AcquireOptions(retry=1)
+        )
 
     assert sched.outcome.status == "completed"
     assert result is not None
@@ -87,14 +130,16 @@ def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
     )
 
 
-def test_repeated_shot_overrun_exhausts_default_retry_and_discards_failed_data(
+def test_repeated_shot_overrun_exhausts_explicit_retry_and_discards_failed_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = None
-    soc, program = _overrun_acquisition(monkeypatch, recover=False)
+    soc, program, _ = _overrun_acquisition(monkeypatch, recover=False)
     buffer = SignalBuffer((), dtype=np.complex128)
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+        result = sched.prog_builder(soc, "unused").run_program(
+            program, rounds=2, options=AcquireOptions(retry=1)
+        )
 
     assert sched.outcome.status == "failed"
     assert isinstance(sched.outcome.exception, AcquisitionContractError)
