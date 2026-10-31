@@ -63,7 +63,6 @@ class RepeatFrameSnapshot:
 class RepeatFrame:
     parent: str
     external: dict[str, Time]
-    waiting: set[str]
     native_gens: dict[int, float | QickParam]
     native_ros: dict[int, float | QickParam]
     advance: float | QickParam = 0.0
@@ -323,7 +322,7 @@ class RepeatFrame:
 class LoopTimelineFrame:
     """One Repeat accumulator, isolated namespace and explicit reference debits.
 
-    parent is the visible loop timeline. external/waiting restore outer names.
+    parent is the visible loop timeline. external restores outer names.
     entry is its incoming end; origin adds an opaque iteration-progress identity.
     initial_channels/native retain incoming physical tails and their provenance.
     entry_math initializes shot-local storage before the loop. pinned restores
@@ -341,7 +340,6 @@ class LoopTimelineFrame:
 
     parent: str
     external: dict[str, Time]
-    waiting: set[str]
     entry: Time
     origin: RuntimeEnd
     progress: CycleAxis
@@ -409,7 +407,6 @@ class TimelineBook:
         # their existing scheduling roles; these expressions never emit code.
         # Keys are (is_generator, channel_id).
         self.native_expressions: dict[tuple[bool, int], TimeExpression] = {}
-        self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
         self.loop_timelines: list[LoopTimelineFrame] = []
         self.case_path: list[tuple[str, int]] = []
@@ -579,15 +576,10 @@ class TimelineBook:
         if name not in self.ends:
             raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
 
-    def end(self, name: str, *, placement: bool = False) -> Time:
+    def end(self, name: str) -> Time:
         self.require(name)
         if self.used is not None:
             self.used.add(name)
-        if placement and name in self.waiting:
-            raise ValueError(
-                f"{name}: timeline can only wait after register repeat; "
-                "sync it or use join/fork to establish a conservative scheduling point"
-            )
         return self.ends[name]
 
     def check_loop_pulse(self, prog, channel: int, start: Time) -> None:
@@ -631,11 +623,6 @@ class TimelineBook:
         consumed = self._debit_native(t) if observe_pulses else set()
         self._debit_repeats(t, observe_pulses=observe_pulses, consumed=consumed)
         self.ends = {name: self.math.floor(end, t) for name, end in self.ends.items()}
-        self.waiting = {
-            name
-            for name in self.waiting
-            if time_bounds(self.math.prog, self.ends[name])[1] > 1e-12
-        }
 
     def _debit_native(self, t: Time) -> set[int]:
         consumed: set[int] = set()

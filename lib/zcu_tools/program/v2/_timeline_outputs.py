@@ -140,7 +140,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.event_end = EventEnd(0.0, 0.0)
 
     def preprocess(self, prog) -> None:
-        end = self.book.end(self.timeline, placement=True)
+        end = self.book.end(self.timeline)
         previous = self.book.channel_end(prog, self.ch, generator=True)
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
@@ -242,7 +242,7 @@ class TimelinePlacedConfig(ConfigReadout):
         self.runtime_start: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
-        origin = self.book.end(self.timeline, placement=True)
+        origin = self.book.end(self.timeline)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.event_time(
                 origin, placement_time(prog, self.relative_t)
@@ -302,7 +302,7 @@ class TimelinePlacedTrigger(Trigger):
         self.runtime_start: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
-        origin = self.book.end(self.timeline, placement=True)
+        origin = self.book.end(self.timeline)
         if self.relative_width is not None:
             self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
