@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 
 import numpy as np
@@ -664,6 +664,7 @@ class RuntimeMath(TimedMacro):
                 term = inputs[variable]
             elif variable.reconstruction is not None:
                 term = self.reconstruct(variable.reconstruction, inputs)
+                term = replace(term, minimum=variable.minimum, maximum=variable.maximum, expression=LinearTime(terms=((variable, 1),)))
             elif variable.fixed_point is not None:
                 term = self._reconstruct_fixed_point(variable, inputs)
             elif variable.selection is not None:
@@ -685,7 +686,7 @@ class RuntimeMath(TimedMacro):
                 )
             scaled = self.multiply(term, abs(coefficient))
             result = (
-                self.add(result, scaled)
+                self.add(result, scaled, target=result.register if result.register != "s0" else None)
                 if coefficient > 0
                 else self.subtract(result, scaled)
             )
