@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from pydantic import ValidationInfo
@@ -35,6 +35,29 @@ class AbsModuleCfg(ConfigBase, ABC):
     @abstractmethod
     def set_param(self, name: str, value: float | QickParam) -> None:
         """Update a sweep-tunable parameter by name."""
+
+
+def _apply_cfg_overrides(
+    cfg: AbsModuleCfg | None,
+    overrides: Mapping[str, object],
+    allowed: Collection[str],
+) -> None:
+    """Validate constructor keyword names and apply non-None numeric/sweep values.
+
+    TypedDict annotations supply allowed names; runtime callers may bypass static
+    checking. Validate keys even for None so misspellings never silently succeed.
+    """
+    unknown = overrides.keys() - allowed
+    if unknown:
+        raise TypeError(f"Unknown override keywords: {sorted(unknown)}")
+    for knob, value in overrides.items():
+        if value is None:
+            continue
+        if cfg is None:
+            raise ValueError("overrides require a module cfg")
+        if not isinstance(value, (float, int, QickParam)):
+            raise TypeError(f"{knob}: override must be numeric, a QICK sweep or None")
+        cfg.set_param(knob, value)
 
 
 class Module(ABC):

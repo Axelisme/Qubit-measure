@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
 
 import numpy as np
 from numpy.typing import NDArray
@@ -21,7 +21,7 @@ from zcu_tools.utils.shot_classification import classify_shots, nearest_centroid
 
 from ..macro.readout import ReadoutEmission
 from ..macro.wmem import PatchWmemFromDmem
-from .base import AbsModuleCfg, Module
+from .base import AbsModuleCfg, Module, _apply_cfg_overrides
 from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
@@ -319,6 +319,21 @@ class AbsReadout(Module):
         return True
 
 
+class PulseReadoutOverrides(TypedDict, total=False):
+    """Optional readout knobs, with None retaining each cfg value.
+
+    freq is shared generator/ADC carrier MHz, gain normalized generator
+    amplitude, length waveform duration us and ro_length ADC window us.
+    Each accepts a scalar or QICK sweep. Waveform length restrictions and
+    QICK ADC-window sweep compile limitations remain unchanged.
+    """
+
+    freq: float | QickParam | None
+    gain: float | QickParam | None
+    length: float | QickParam | None
+    ro_length: float | QickParam | None
+
+
 class Readout:
     """Dispatch cfg to its readout module; zcu_lab uses ``Readout.Cfg`` fields.
 
@@ -332,24 +347,17 @@ class Readout:
         cls,
         name: str,
         cfg: AbsReadoutCfg,
-        *,
-        freq: float | QickParam | None = None,
-        gain: float | QickParam | None = None,
-        length: float | QickParam | None = None,
-        ro_length: float | QickParam | None = None,
+        **overrides: Unpack[PulseReadoutOverrides],
     ) -> AbsReadout:
         """Build a detached readout with optional MHz/gain/us overrides.
 
         None keeps cfg. Pulse readout accepts freq, gain, length and ro_length;
         mux rejects non-None overrides with ValueError. Waveform set_param
-        restrictions propagate. The caller's cfg is never modified.
+        restrictions propagate. Unknown keys or nonnumeric values raise TypeError.
+        The caller's cfg is never modified.
         """
         effective = deepcopy(cfg)
-        for knob, value in dict(
-            freq=freq, gain=gain, length=length, ro_length=ro_length
-        ).items():
-            if value is not None:
-                effective.set_param(knob, value)
+        _apply_cfg_overrides(effective, overrides, PulseReadoutOverrides.__annotations__)
         return effective.build(name)
 
 
@@ -366,10 +374,7 @@ class PulseReadout(AbsReadout):
         gain_val: str | None = None,
         freq_val: str | None = None,
         ro_freq_val: str | None = None,
-        freq: float | QickParam | None = None,
-        gain: float | QickParam | None = None,
-        length: float | QickParam | None = None,
-        ro_length: float | QickParam | None = None,
+        **overrides: Unpack[PulseReadoutOverrides],
     ) -> None:
         """Capture a flat readout and optional hardware-word register inputs.
 
@@ -380,15 +385,11 @@ class PulseReadout(AbsReadout):
         freq (MHz), gain (normalized), length and ro_length (us) override the
         copied cfg via set_param. None keeps cfg; unsupported waveform length
         sweeps raise ValueError. init must precede run. Invalid QICK settings
-        fail during initialization.
+        fail during initialization. Unknown keys or nonnumeric overrides raise TypeError.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        for knob, value in dict(
-            freq=freq, gain=gain, length=length, ro_length=ro_length
-        ).items():
-            if value is not None:
-                self.cfg.set_param(knob, value)
+        _apply_cfg_overrides(self.cfg, overrides, PulseReadoutOverrides.__annotations__)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val

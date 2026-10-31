@@ -3,13 +3,13 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
 
 from pydantic import BeforeValidator
 from qick.asm_v2 import QickParam, QickRawParam
 
 from .._timeline_selected import PlaybackChoice, SelectedPlayback
-from .base import AbsModuleCfg, Module
+from .base import AbsModuleCfg, Module, _apply_cfg_overrides
 from .delay import DelayAuto
 from .dmem import LoadValue
 from .util import get_fclk, round_timestamp
@@ -60,6 +60,20 @@ class PulseCfg(AbsModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
+class PulseOverrides(TypedDict, total=False):
+    """Optional generator knobs; every field accepts a scalar, sweep or None.
+
+    freq is the carrier in MHz, gain the normalized amplitude, phase degrees,
+    and length the waveform duration in us. None keeps the cfg value. Length
+    sweeps are accepted only by waveforms that support set_param length sweeps.
+    """
+
+    freq: float | QickParam | None
+    gain: float | QickParam | None
+    phase: float | QickParam | None
+    length: float | QickParam | None
+
+
 class Pulse(Module):
     """Emit a generator pulse; zcu_lab declares its settings as ``Pulse.Cfg``."""
 
@@ -74,10 +88,7 @@ class Pulse(Module):
         *,
         block_mode: bool = True,
         ro_ch: int | None = None,
-        freq: float | QickParam | None = None,
-        gain: float | QickParam | None = None,
-        phase: float | QickParam | None = None,
-        length: float | QickParam | None = None,
+        **overrides: Unpack[PulseOverrides],
     ) -> None:
         """Capture a pulse and optional runtime ADC channel for frequency matching.
 
@@ -89,16 +100,11 @@ class Pulse(Module):
         the copied cfg via set_param; None keeps cfg. Waveform length restrictions
         apply, including ValueError for unsupported sweeps. With cfg=None,
         non-None overrides raise ValueError because there is no pulse to update.
+        Unknown override keys or nonnumeric values raise TypeError.
         """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
-        for knob, value in dict(
-            freq=freq, gain=gain, phase=phase, length=length
-        ).items():
-            if value is not None:
-                if self.cfg is None:
-                    raise ValueError(f"{name}: overrides require a pulse cfg")
-                self.cfg.set_param(knob, value)
+        _apply_cfg_overrides(self.cfg, overrides, PulseOverrides.__annotations__)
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id
