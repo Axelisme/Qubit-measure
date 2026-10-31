@@ -65,12 +65,14 @@ class CycleVariable:
     @property
     def minimum(self) -> int | None:
         """Return the conservative integer lower bound, or None when unbounded."""
-        return expression_limits(LinearTime(terms=((self, 1),)))[0]
+        lower, _ = expression_limits(LinearTime(terms=((self, 1),)))
+        return None if lower is None else math.ceil(lower)
 
     @property
     def maximum(self) -> int | None:
         """Return the conservative integer upper bound, or None when unbounded."""
-        return expression_limits(LinearTime(terms=((self, 1),)))[1]
+        _, upper = expression_limits(LinearTime(terms=((self, 1),)))
+        return None if upper is None else math.floor(upper)
 
 
 def cycle_variable(
@@ -90,7 +92,7 @@ def cycle_variable(
     source: str | object = object()
     start, end = minimum, maximum
     low = high = (Fraction(0),)
-    if len(axes) == 1:
+    if len(axes) == 1 and not producer.rounding_remainder:
         source, count = axes[0]
         low = high = (Fraction(0),) * count
         if interval_points is not None or points is not None:
@@ -141,7 +143,7 @@ class TimeChoice:
 TimeExpression = LinearTime | TimeChoice
 
 
-def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
+def expression_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
     """Bound cycles by grouping source IDs, with None for unavailable endpoints.
 
     Each loop group sums its coefficient-weighted directed line and deviations
@@ -156,7 +158,7 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
             if isinstance(axis, str):
                 count = len(variables[0].bounds.deviation_minimum)
                 grids = interval_arrays(value, {axis: count})
-                return math.ceil(grids.minimum.min()), math.floor(grids.maximum.max())
+                return Fraction(grids.minimum.min()), Fraction(grids.maximum.max())
         # Bound unknown inputs before the nonlinear range capture. This keeps
         # shared loop coordinates when an independent feedback value survives.
         # Each resulting linear path still uses source_limits, never a grid.
@@ -184,7 +186,7 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
         lo, hi = source_limits(terms)
         lower = None if lower is None or lo is None else lower + lo
         upper = None if upper is None or hi is None else upper + hi
-    return None if lower is None else math.ceil(lower), None if upper is None else math.floor(upper)
+    return lower, upper
 
 
 def expression_bounds(value: TimeExpression) -> CycleBounds:
@@ -192,7 +194,7 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
     lower, upper = expression_limits(value)
     if lower is None or upper is None:
         raise ValueError("runtime-only time has no compile-time bounds")
-    return CycleBounds(lower, upper)
+    return CycleBounds(math.ceil(lower), math.floor(upper))
 
 
 def unbounded_time(value: TimeExpression) -> bool:
@@ -566,14 +568,14 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         return LinearTime(terms=((variable, 1),))
     if any(unbounded_time(value) for value in unique):
         return TimeChoice(unique, maximum)
-    limits = [expression_bounds(value) for value in unique]
-    for index, limit in enumerate(limits):
+    limits = [expression_limits(value) for value in unique]
+    for index, (lower, upper) in enumerate(limits):
         if all(
             index == other
             or (
-                limit.minimum >= alternative.maximum
+                lower is not None and alternative[1] is not None and lower >= alternative[1]
                 if maximum
-                else limit.maximum <= alternative.minimum
+                else upper is not None and alternative[0] is not None and upper <= alternative[0]
             )
             for other, alternative in enumerate(limits)
         ):

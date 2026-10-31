@@ -188,12 +188,14 @@ class RuntimeEnd:
     @property
     def minimum(self) -> int | None:
         """Return the expression's lower cycle bound, or None for unknown time."""
-        return expression_limits(self.expression)[0]
+        lower, _ = expression_limits(self.expression)
+        return None if lower is None else math.ceil(lower)
 
     @property
     def maximum(self) -> int | None:
         """Return the expression's upper cycle bound, or None for unknown time."""
-        return expression_limits(self.expression)[1]
+        _, upper = expression_limits(self.expression)
+        return None if upper is None else math.floor(upper)
 
 
 def runtime_expression(value: RuntimeEnd) -> TimeExpression:
