@@ -25,6 +25,7 @@ from ._timeline_expression import (
     projected_expression_bounds,
     scale_time,
     select_time,
+    shifted_time,
     unbounded_time,
 )
 from ._timeline_guard import bounds
@@ -565,26 +566,9 @@ class RuntimeMath(TimedMacro):
             limits=(numerator.minimum // 256, numerator.maximum // 256),
             target=product.register,
         )
-        expression = runtime_expression(numerator)
-        axes = expression_axes(expression)
-        points = evaluate_time(expression, axes)
-        if points is None:
-            raise RuntimeError("native conversion lost its producer points")
-        values = points // 256
-        variable = cycle_variable(
-            "fabric conversion",
-            int(values.min()),
-            int(values.max()),
-            CycleProducer(
-                tuple(axes.items()), tuple(int(v) for v in values.flat),
-                fixed_point=(expression, 8),
-            ),
-        )
         return RuntimeEnd(
             result.register,
-            result.minimum,
-            result.maximum,
-            expression=LinearTime(terms=((variable, 1),)),
+            expression=shifted_time(runtime_expression(numerator), 8),
         )
 
     def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
@@ -684,6 +668,23 @@ class RuntimeMath(TimedMacro):
     def _reconstruct_linear(
         self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
     ) -> RuntimeEnd:
+        for variable, coefficient in expression.terms:
+            recipe = variable.producer
+            if recipe.rounding_remainder and recipe.fixed_point is not None:
+                numerator, shift = recipe.fixed_point
+                divisor = 1 << shift
+                copies = -coefficient * divisor
+                if copies != int(copies):
+                    raise RuntimeError("fractional conversion lost its complete quotient")
+                quotient = add_time(
+                    scale_time(numerator, Fraction(1, divisor)),
+                    LinearTime(terms=((variable, Fraction(-1, divisor)),)),
+                )
+                rest = add_time(expression, scale_time(quotient, -copies))
+                converted = self._reconstruct_fixed_point(variable, inputs)
+                scaled = self.multiply(converted, abs(int(copies)))
+                remainder = self.reconstruct(rest, inputs)
+                return self.add(remainder, scaled) if copies > 0 else self.subtract(remainder, scaled)
         if all(
             variable not in inputs
             and len(variable.producer.axes) == 1
@@ -693,12 +694,18 @@ class RuntimeMath(TimedMacro):
             spans: dict[str, int] = {}
             for variable, coefficient in expression.terms:
                 axis, count = variable.producer.axes[0]
-                spans[axis] = spans.get(axis, 0) + coefficient * (count - 1)
+                amount = coefficient * (count - 1)
+                if amount != int(amount):
+                    raise RuntimeError("fractional cycle span lost its conversion recipe")
+                spans[axis] = spans.get(axis, 0) + int(amount)
             return self.cycles(
-                QickParam(expression.constant, spans) / get_fclk(self.prog)
+                QickParam(float(expression.constant), spans) / get_fclk(self.prog)
             )
-        result = self.cycles(expression.constant / get_fclk(self.prog))
+        result = self.cycles(float(expression.constant) / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
+            if coefficient != int(coefficient):
+                raise RuntimeError("fractional cycle coefficient lost its conversion recipe")
+            coefficient = int(coefficient)
             if variable in inputs:
                 term = inputs[variable]
             elif variable.producer.reconstruction is not None:
@@ -750,12 +757,14 @@ class RuntimeMath(TimedMacro):
         result = self.op(
             raw, "ASR", shift, limits=(raw.minimum >> shift, raw.maximum >> shift)
         )
-        return RuntimeEnd(
-            result.register,
-            result.minimum,
-            result.maximum,
-            expression=LinearTime(terms=((variable, 1),)),
-        )
+        expression = LinearTime(terms=((variable, 1),))
+        if variable.producer.rounding_remainder:
+            divisor = 1 << shift
+            expression = add_time(
+                scale_time(numerator, Fraction(1, divisor)),
+                LinearTime(terms=((variable, Fraction(-1, divisor)),)),
+            )
+        return RuntimeEnd(result.register, expression=expression)
 
     def reconstruct_maximum(
         self,
@@ -1106,18 +1115,8 @@ class RuntimeMath(TimedMacro):
             expression = scale_time(runtime_expression(left), 1 << right)
         if operator == "ASR" and isinstance(right, int):
             numerator = runtime_expression(left)
-            axes = expression_axes(numerator)
-            points = evaluate_time(numerator, axes)
-            if points is not None:
-                values = points >> right
-                variable = cycle_variable(
-                    "shifted cycles", int(values.min()), int(values.max()),
-                    CycleProducer(
-                        tuple(axes.items()), tuple(int(v) for v in values.flat),
-                        fixed_point=(numerator, right),
-                    ),
-                )
-                expression = LinearTime(terms=((variable, 1),))
+            if expression_axes(numerator):
+                expression = shifted_time(numerator, right)
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
             if right_minimum is not None and right_minimum >= 0:

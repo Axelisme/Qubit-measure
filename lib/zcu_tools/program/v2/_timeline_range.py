@@ -1,6 +1,5 @@
 """Directed source ranges and one-axis bounds, independent of runtime recipes."""
 
-import math
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -25,8 +24,8 @@ class VariableRange:
 
 
 def source_limits(
-    terms: list[tuple[VariableRange, int]],
-) -> tuple[int | None, int | None]:
+    terms: list[tuple[VariableRange, int | Fraction]],
+) -> tuple[Fraction | None, Fraction | None]:
     """Sum one ID's coefficient-weighted cycle ranges along its own axis.
 
     Loop terms have matching axis lengths. Independent IDs have ordered
@@ -35,7 +34,8 @@ def source_limits(
     """
     first = terms[0][0]
     if not isinstance(first.source, str):
-        lower = upper = 0
+        lower: Fraction | None = Fraction(0)
+        upper: Fraction | None = Fraction(0)
         for r, coefficient in terms:
             a, b = (r.start, r.end) if coefficient > 0 else (r.end, r.start)
             lower = None if lower is None or a is None else lower + coefficient * a
@@ -53,4 +53,4 @@ def source_limits(
             b = coefficient * (line + r.deviation_maximum[i])
             lows[i] += min(a, b)
             highs[i] += max(a, b)
-    return math.ceil(min(lows)), math.floor(max(highs))
+    return min(lows), max(highs)

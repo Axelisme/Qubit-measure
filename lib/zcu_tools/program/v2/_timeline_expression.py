@@ -1,5 +1,7 @@
 """Compile-time cycle algebra, independent of register allocation and emission."""
 
+import logging
+import math
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -43,6 +45,8 @@ class CycleProducer:
     reconstruction: "TimeExpression | None" = None
     selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
     fixed_point: "tuple[TimeExpression, int] | None" = None
+    rounding_remainder: bool = False
+    fallback_branches: int = 0
 
 
 @dataclass(frozen=True, eq=False)
@@ -116,8 +120,8 @@ class LinearTime:
     bounding, so shared origins cancel even when register storage differs.
     """
 
-    constant: int = 0
-    terms: tuple[tuple[CycleVariable, int], ...] = ()
+    constant: int | Fraction = 0
+    terms: tuple[tuple[CycleVariable, int | Fraction], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -152,7 +156,7 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
             if isinstance(axis, str):
                 count = len(variables[0].bounds.deviation_minimum)
                 grids = interval_arrays(value, {axis: count})
-                return int(grids.minimum.min()), int(grids.maximum.max())
+                return math.ceil(grids.minimum.min()), math.floor(grids.maximum.max())
         # Bound unknown inputs before the nonlinear range capture. This keeps
         # shared loop coordinates when an independent feedback value survives.
         # Each resulting linear path still uses source_limits, never a grid.
@@ -171,15 +175,16 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
             select(lows) if lows and (value.maximum or len(lows) == len(limits)) else None,
             select(highs) if highs and (not value.maximum or len(highs) == len(limits)) else None,
         )
-    groups: dict[str | object, list[tuple[VariableRange, int]]] = {}
+    groups: dict[str | object, list[tuple[VariableRange, int | Fraction]]] = {}
     for variable, coefficient in value.terms:
         groups.setdefault(variable.bounds.source, []).append((variable.bounds, coefficient))
-    lower = upper = value.constant
+    lower: Fraction | None = Fraction(value.constant)
+    upper: Fraction | None = Fraction(value.constant)
     for terms in groups.values():
         lo, hi = source_limits(terms)
         lower = None if lower is None or lo is None else lower + lo
         upper = None if upper is None or hi is None else upper + hi
-    return lower, upper
+    return None if lower is None else math.ceil(lower), None if upper is None else math.floor(upper)
 
 
 def expression_bounds(value: TimeExpression) -> CycleBounds:
@@ -236,19 +241,57 @@ def evaluate_time(
         if not variable.producer.axes or variable.producer.interval_points is not None:
             return None
         local = dict(variable.producer.axes)
-        points = (
-            np.arange(variable.maximum + 1, dtype=np.int64)
-            if variable.producer.points is None
-            else np.asarray(variable.producer.points, dtype=np.int64).reshape(
-                tuple(local.values())
+        if variable.producer.rounding_remainder:
+            if variable.producer.fixed_point is None:
+                raise RuntimeError("rounding remainder lost its numerator")
+            numerator, shift = variable.producer.fixed_point
+            raw = evaluate_time(numerator, local)
+            if raw is None:
+                return None
+            points = raw % (1 << shift)
+        else:
+            points = (
+                np.arange(variable.maximum + 1, dtype=np.int64)
+                if variable.producer.points is None
+                else np.asarray(variable.producer.points, dtype=np.int64).reshape(
+                    tuple(local.values())
+                )
             )
-        )
         # Producer dimensions may appear in a different order from the union.
         order = [name for name in axes if name in local]
         points = points.transpose(tuple(list(local).index(name) for name in order))
         shape = tuple(local.get(name, 1) for name in axes)
         result = result + coefficient * points.reshape(shape)
     return result
+
+
+def shifted_time(value: TimeExpression, shift: int) -> TimeExpression:
+    """Describe arithmetic right shift, keeping cross-loop linear contributions.
+
+    Single-axis results retain exact deviations. Across axes, an independent
+    integer remainder in 0..2**shift-1 accounts for fractional rounding. Its
+    recipe retains the original numerator, without constructing a Cartesian grid.
+    """
+    axes = expression_axes(value)
+    if len(axes) <= 1:
+        points = evaluate_time(value, axes)
+        if points is not None:
+            values = points >> shift
+            variable = cycle_variable(
+                "shifted cycles", int(values.min()), int(values.max()),
+                CycleProducer(tuple(axes.items()), tuple(int(v) for v in values.flat),
+                              fixed_point=(value, shift)),
+            )
+            return LinearTime(terms=((variable, 1),))
+    divisor = 1 << shift
+    remainder = cycle_variable(
+        "rounding remainder", 0, divisor - 1,
+        CycleProducer(tuple(axes.items()), fixed_point=(value, shift), rounding_remainder=True),
+    )
+    return add_time(
+        scale_time(value, Fraction(1, divisor)),
+        LinearTime(terms=((remainder, Fraction(-1, divisor)),)),
+    )
 
 
 def exact_bounds(value: TimeExpression) -> CycleBounds | None:
@@ -509,6 +552,18 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     )
     if len(unique) == 1:
         return unique[0]
+    if len(unique) > 64:
+        choice = TimeChoice(unique, maximum)
+        limits = [expression_limits(value) for value in unique]
+        select = max if maximum else min
+        lower = None if any(lo is None for lo, _ in limits) else select(lo for lo, _ in limits if lo is not None)
+        upper = None if any(hi is None for _, hi in limits) else select(hi for _, hi in limits if hi is not None)
+        logging.getLogger(__name__).warning("Timeline range fallback: %s branches exceed 64", len(unique))
+        variable = cycle_variable(
+            "choice fallback", lower, upper,
+            CycleProducer(reconstruction=choice, fallback_branches=len(unique)),
+        )
+        return LinearTime(terms=((variable, 1),))
     if any(unbounded_time(value) for value in unique):
         return TimeChoice(unique, maximum)
     limits = [expression_bounds(value) for value in unique]
@@ -547,7 +602,7 @@ def substitute_time(
     return result
 
 
-def scale_time(value: TimeExpression, coefficient: int) -> TimeExpression:
+def scale_time(value: TimeExpression, coefficient: int | Fraction) -> TimeExpression:
     """Multiply cycles by an integer without rounding runtime coefficients."""
     if isinstance(value, TimeChoice):
         return choose_time(
