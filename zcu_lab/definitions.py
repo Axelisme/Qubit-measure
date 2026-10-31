@@ -94,6 +94,9 @@ from zcu_lab.v2.two_qubit.chevron.gui import DEFINITION as CHEVRON_DEFINITION
 from zcu_lab.v2.two_qubit.conditional_phase.gui import (
     DEFINITION as CONDITIONAL_PHASE_DEFINITION,
 )
+from zcu_lab.v2.two_qubit.conditional_phase.gui_heralded import (
+    DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_DEFINITION,
 )
@@ -109,8 +112,9 @@ from zcu_lab.v2.two_qubit.joint_readout.gui_heralded import (
     DEFINITION as JOINT_READOUT_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
-from zcu_lab.v2.two_qubit.local_z.gui_heralded import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
-from zcu_lab.v2.two_qubit.conditional_phase.gui_heralded import DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION
+from zcu_lab.v2.two_qubit.local_z.gui_heralded import (
+    DEFINITION as LOCAL_Z_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import (

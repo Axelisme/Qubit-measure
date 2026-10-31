@@ -10,8 +10,8 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.plotting.plots import Plots
 
-from .._sums import herald_probabilities, sigma, terminal_counts
 from .._phase import QuadraturePhase, count_phase
+from .._sums import herald_probabilities, sigma, terminal_counts
 
 if TYPE_CHECKING:
     from .core import LocalZCfg, LocalZResult

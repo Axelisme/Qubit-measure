@@ -14,11 +14,11 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .analysis import LocalZAnalysis
 from .core_heralded import LocalZHeraldedCfg, LocalZHeraldedExp, LocalZHeraldedResult
-from zcu_tools.gui.form_adapter import Form, FormContext
 from .form import phase_form
 
 LocalZHeraldedRun: TypeAlias = RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult]

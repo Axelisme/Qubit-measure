@@ -14,12 +14,16 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from ...support.measure.writeback_helpers import module_writeback
 from .analysis import ConditionalPhaseAnalysis
-from .core_heralded import ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedExp, ConditionalPhaseHeraldedResult
-from zcu_tools.gui.form_adapter import Form, FormContext
+from .core_heralded import (
+    ConditionalPhaseHeraldedCfg,
+    ConditionalPhaseHeraldedExp,
+    ConditionalPhaseHeraldedResult,
+)
 from .form import phase_form
 
 ConditionalPhaseHeraldedRun: TypeAlias = RunRecord[ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult]

@@ -5,8 +5,12 @@ from typing import ClassVar
 
 import numpy as np
 from zcu_tools.experiment import (
-    Experiment, GroupedAxesSpec, GroupedLoadData,
-    VariableAxisSpec, VariableSpec, VariableZSpec,
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord

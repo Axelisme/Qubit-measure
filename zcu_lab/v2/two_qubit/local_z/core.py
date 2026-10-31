@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
@@ -11,15 +12,24 @@ from pydantic import Field, model_validator
 from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
-    Experiment, GroupedAxesSpec, GroupedLoadData,
-    VariableAxisSpec, VariableSpec, VariableZSpec,
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2, shot_sums
+from zcu_tools.program.v2 import (
+    Pulse,
+    Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
@@ -28,7 +38,6 @@ from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles
 from .._sums import readout_axes, sigma, terminal_counts, validate_classifiers
 from .._timeline import emit_readout_prefix
-from itertools import pairwise
 from .analysis import LocalZAnalysis, analyze_local_z
 
 
@@ -196,7 +205,8 @@ def acquire_counts(
     shape = (2, 2, len(config.gate_counts)) + ((3, 3, 3, 3) if heralded else (3, 3))
     buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
     with Schedule(config, buffer, scope=context.scope) as sched:
-        for target, target_step in sched.scan("target", ["f1", "f2"]):
+        targets: list[Literal["f1", "f2"]] = ["f1", "f2"]
+        for target, target_step in sched.scan("target", targets):
             for quadrature, projection_step in target_step.scan("quadrature", [0, 1]):
                 for n, step in projection_step.scan("gate_count", sched.cfg.gate_counts):
                     point = LocalZPoint(target, quadrature, n)
