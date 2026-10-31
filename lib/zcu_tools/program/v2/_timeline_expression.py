@@ -383,6 +383,16 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         else:
             alternatives.append(value)
     unique = tuple(dict.fromkeys(alternatives))
+    # Shared unbounded identities cancel in comparisons; only constants remain.
+    unique = tuple(
+        value for value in unique
+        if not isinstance(value, LinearTime) or not any(
+            isinstance(other, LinearTime)
+            and other.terms == value.terms
+            and (other.constant > value.constant if maximum else other.constant < value.constant)
+            for other in unique
+        )
+    )
     if len(unique) == 1:
         return unique[0]
     if any(unbounded_time(value) for value in unique):
