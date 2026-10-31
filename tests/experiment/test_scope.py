@@ -15,6 +15,29 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.scope import RootKind
 
 
+def test_stop_reason_follows_scope_cancellation_and_late_children() -> None:
+    root = experiment.Scope("run")
+    assert root.stop.reason is None
+    with root.branch("schedule") as schedule:
+        with schedule.branch("acquire") as acquire:
+            receipt = root.cancel("schedule", reason="operator requested stop")
+            assert receipt.cancelled
+            assert schedule.stop.is_set()
+            assert acquire.stop.reason == "operator requested stop"
+        with schedule.branch("acquire") as later:
+            assert later.stop.is_set()
+            assert later.stop.reason == "operator requested stop"
+        assert schedule.stop.reason == "operator requested stop"
+    assert not root.stop.is_set()
+    assert root.stop.reason is None
+
+    root.stop.set(reason="caller shutdown")
+    assert root.stop.reason == "caller shutdown"
+    root.stop.clear_stop()
+    assert not root.stop.is_set()
+    assert root.stop.reason == "caller shutdown"
+
+
 def make_root() -> Scope:
     assert hasattr(experiment, "Scope"), (
         "experiment must expose the explicit Scope contract"
