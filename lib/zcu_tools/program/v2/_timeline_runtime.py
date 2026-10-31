@@ -87,6 +87,9 @@ def placement_time(prog, value: float | QickParam) -> float | QickParam:
 def step_time(prog, value: float | QickParam) -> float | QickParam:
     if not isinstance(value, QickParam):
         return value
+    missing = value.spans.keys() - prog.loop_dict.keys()
+    if missing:
+        raise ValueError(f"{sorted(missing)}: missing native sweep axis")
     # Use QICK public conversion/rounding APIs, never inspect raw sweep internals.
     param = QickParam(value.start, value.spans.copy())
     prog.us2cycles(param)

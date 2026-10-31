@@ -576,6 +576,21 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 6
 
 
+def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
+    def body(prog):
+        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.delay(20 / 430.08)
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            for index in range(3):
+                with branch.case(index):
+                    prog.delay_timeline((5 + 5 * index) / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    prog = program(body)
+    assert [waves(s) for s in shots(prog)] == [[35], [35], [45]]
+    assert prog.compile_datamem() is None
+
+
 def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
     def body(prog):
         with prog.branch(by="scan", align_timeline=True) as branch:

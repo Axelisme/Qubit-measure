@@ -126,7 +126,7 @@ class TimelineSelectedPulse(TimedMacro):
             start = self.book.math.add(origin, offset)
             raw_origin = origin
         else:
-            start = placement_time(prog, origin + self.relative_t)
+            start = origin + offset
             raw_origin = 0.0
             offset = start
         if (

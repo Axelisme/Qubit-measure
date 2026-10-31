@@ -481,13 +481,13 @@ def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
 
 
 def test_sweep_end_requires_a_discovered_native_axis_before_using_its_bounds():
-    with pytest.raises(ValueError, match="missing.*loop"):
+    with pytest.raises(ValueError, match="missing.*native sweep axis"):
         _program(
             [], lambda prog: prog.delay_timeline(QickSweep1D("missing", 0.101, 0.301))
         )
 
 
-def test_exact_sweep_delay_can_fill_the_remaining_dmem_capacity():
+def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
     def initialize(prog):
         prog.add_loop("scan", 3)
         prog.add_dmem([0] * 2045)
@@ -502,13 +502,10 @@ def test_exact_sweep_delay_can_fill_the_remaining_dmem_capacity():
     result = shots(prog)
     memory = prog.compile_datamem()
     assert memory is not None
-    assert len(memory) == 2048
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        44,
-        87,
-        129,
-    ] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [53, 96, 138] * 2
+    assert len(memory) == 2045
+    # Native start rounds43.68 to44; native step truncates42.56 to42.
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [44, 86, 128] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [53, 95, 137] * 2
 
 
 def test_crossing_fractional_generator_and_adc_ends_add_post_before_ceil():
