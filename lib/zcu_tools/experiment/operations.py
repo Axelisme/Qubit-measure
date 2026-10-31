@@ -75,8 +75,8 @@ class Completed[T]:
 class Failed:
     """An author-owned recoverable analysis failure.
 
-    reason describes the cause. Authors decide whether to retry or continue;
-    arbitrary framework/build/conversion exceptions instead propagate.
+    reason describes the analysis failure. Authors decide whether to retry or
+    continue. Operation exceptions propagate rather than becoming this value.
     """
 
     reason: str

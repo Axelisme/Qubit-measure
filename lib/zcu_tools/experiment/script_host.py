@@ -234,11 +234,12 @@ class ScriptHost:
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
+                stopped = token.cancelled
                 return CallResult(
                     value,
                     context.epoch,
-                    token.cancelled or self._active_stop_requested,
-                    token.cancelled,
+                    stopped or self._active_stop_requested,
+                    stopped,
                 )
 
         try:

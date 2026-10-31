@@ -113,7 +113,7 @@ class QubitFitResult:
 
 @dataclass(frozen=True, kw_only=True)
 class MuxT1StageResult:
-    """T1 participant outcomes and saved t1.h5, or no file on acquisition failure.
+    """T1 participant outcomes and saved t1.h5; acquisition exceptions propagate.
 
     qubits retains acquisition order and original tone indices. Partial raw is
     saved with rejected/stopped outcomes, without fitting. Unexpected errors
@@ -126,7 +126,7 @@ class MuxT1StageResult:
 
 @dataclass(frozen=True, kw_only=True)
 class MuxEchoStageResult:
-    """Echo participant outcomes and t2echo.h5, absent on acquisition failure.
+    """Echo participant outcomes and t2echo.h5; acquisition exceptions propagate.
 
     qubits retains acquisition order and original tone indices. Partial raw is
     saved with rejected/stopped outcomes, without fitting. Unexpected errors
@@ -205,7 +205,7 @@ async def measure_mux_t1(
     gates. points is the shared delay count, at least five; guess_us is the
     positive longest-qubit estimate in us. The sweep ends at sweep_factor*guess_us;
     relaxation is max(relax_min_us, relax_factor*guess_us). Inputs remain unchanged.
-    env supplies plots, save identity and summary observation. Failed/partial
+    env supplies plots, save identity and summary observation. Stop-requested
     acquisitions return outcomes for every participant; expected per-tone fit
     failures leave others available. Other errors propagate. No point/history changes.
     """

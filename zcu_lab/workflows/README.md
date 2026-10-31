@@ -168,11 +168,12 @@ MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 
 Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
 Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
 兩種情況都不重跑整個 workflow。
-子層取消讓 operation 回 partial result。作者先保存 Completed raw，再檢查 partial_result。
+子層取消後，core 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.stop_requested。
+stop_requested 表示本次 operation 收到停止請求，不表示框架判定資料不完整。
 Partial 不進擬合或接受，保留原本拒絕原因，不更新 accepted history。
 根 Stop 則在下一個 async operation 或 Ask raise ScriptCancelled。進行中工作先 drain 並留 facts。
 作者 finally 同步提交已有成果，不吞掉例外，也不在 finally 改寫 status。
-Failed 表示 Schedule acquisition 或預期分析失敗。分析 helper 的 Failed 由 caller 記 failed 與 reason。
+Acquisition 例外原樣傳給作者，不轉 Failed。分析 helper 的 Failed 由 caller 記 failed 與 reason。
 NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其他程式例外仍 raise，停止 run。
 
 要回到過去某點，開新 run 並切 plan 範圍。History 初值用 `saved_run.read_records`
@@ -190,7 +191,7 @@ Overnight 與 overnight_mux 另列每個 qubit 的 T1／Echo 接受數、平均�
 
 耗時先加總每點同 stage 的 delivered Completed operations，再算平均與最大。
 MIST both 的兩種 preparation 共用 MIST 耗時；mux 不依 participant 數重複計時。
-Failed 沒有可交付 facts，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時統計。
+拋錯的 operation 沒有可交付 Completed，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時統計。
 沒有可用時間時省略 duration 欄位。完整的 attempt 事實仍保存在 point 信封與 journal。
 
 Stop 或錯誤中止時 workflow 沒有 return，框架不產生摘要，即使 finally 已提交部分 point。
