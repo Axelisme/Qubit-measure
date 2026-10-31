@@ -188,7 +188,7 @@ class TimelineBoundary(Macro):
             self.book.source_expressions.clear()
             self.book.branch_provenance.clear()
             self.book.shell_wait_bound = None
-r()
+            self.book.repeats.clear()
             self.book.loop_timelines.clear()
             self.book.case_path.clear()
             self.book.native_only = False
@@ -494,7 +494,7 @@ class TimelineRepeatEnter(Macro):
             RepeatFrame(
                 parent,
                 external,
-p(gen_ch=ch) for ch in prog.gen_chs},
+                {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
                 {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
                 pulse_guards={ch: _PulseGuard(ch) for ch in prog.gen_chs},
                 defined=prog._time_bounds.defined.copy(),
@@ -585,9 +585,8 @@ class TimelineRepeatExit(Macro):
         self.book.ends = static
         self.book.decrement(frame.advance * self.count, observe_pulses=False)
         self.book.ends.update(runtime)
-        if variable:
-            if self.book.repeats:
-                self.book.repeats[-1].variable = True
+        if variable and self.book.repeats:
+            self.book.repeats[-1].variable = True
         self.book.ends[frame.parent] = 0.0
         self._restore_native(prog, frame, variable=variable)
         frame.restore_expressions(
