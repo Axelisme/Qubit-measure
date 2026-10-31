@@ -149,7 +149,7 @@ def test_readout_overrides_match_set_param_without_mutating_cfg(
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    overrides = dict(freq=None, gain=None, length=None, ro_length=None)
+    overrides: dict[str, float | QickParam | None] = dict(freq=None, gain=None, length=None, ro_length=None)
     overrides[knob] = value
     readout = factory("read", cfg, **overrides)
     if knob == "ro_length" and swept:
@@ -232,7 +232,7 @@ def test_reset_overrides_match_set_param_without_mutating_cfg(
             "pi2_phase",
         ),
     }
-    overrides = dict.fromkeys(names[variant])
+    overrides: dict[str, float | QickParam | None] = dict.fromkeys(names[variant])
     overrides[knob] = value
     actual = _compile(kind, [ctor("reset", cfg, **overrides)], swept)
     expected = _compile(kind, [ctor("reset", equivalent)], swept)
