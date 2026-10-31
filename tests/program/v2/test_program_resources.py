@@ -76,6 +76,22 @@ def test_modular_route_protection_is_atomic_and_unprotected_routes_remain_native
     assert prog.ro_chs[1]["length"] == 123
 
 
+def test_timeline_readout_weights_share_by_value_and_reject_missing_weights():
+    soccfg = make_mock_soccfg(0, 1)
+    soccfg["readouts"][0]["has_weights"] = True
+    weights = np.zeros((61, 2), dtype=np.int16)
+
+    class Native(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare_readout(0, length=0.2, weights=weights)
+            self.declare_readout(0, length=0.2, weights=weights.copy())
+            with pytest.raises(ValueError, match="weights"):
+                self.declare_readout(0, length=0.2)
+
+    prog = Native(soccfg)
+    np.testing.assert_array_equal(prog.ro_chs[0]["weights"], weights)
+
+
 def test_timeline_direct_declarations_share_settings_and_preserve_explicit_protection():
     def initialize(prog: TimelineProgramV2 | ModularProgramV2):
         prog.declare_gen(0, nqz=1)
