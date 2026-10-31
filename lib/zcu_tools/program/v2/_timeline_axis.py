@@ -117,7 +117,8 @@ class TimeVariable:
     """A sum of axis components, with a separate integer reconstruction recipe.
 
     components is the authoritative proof mapping, including the singleton
-    const axis. Known components are one-dimensional arrays. Range components
+    const axis. Pointwise equal known components fold into that axis, and a
+    fully constant result drops its runtime source recipe. Range components
     are coefficients of independent unknowns. terms/constant are runtime recipe
     operands only; proofs never reconstruct information from them after capture.
     """
@@ -142,14 +143,24 @@ class TimeVariable:
                     else scale_component(axis.values, coefficient)
                 )
                 components = merge_components(components, ((axis, component),))
+        folded: Scalar = 0
         frozen = []
         for axis, component in components:
             if isinstance(component, np.ndarray):
+                if np.all(component == component.flat[0]):
+                    folded += component.flat[0]
+                    continue
                 component = component.copy()
                 component.flags.writeable = False
             if nonzero_component(component):
                 frozen.append((axis, component))
+        if folded:
+            component = np.asarray([folded], dtype=object)
+            component.flags.writeable = False
+            frozen.append((CONST_AXIS, component))
         components = tuple(frozen)
+        if all(axis.identity == "const" for axis, _ in components):
+            constant, terms = folded, ()
         object.__setattr__(self, "constant", constant)
         object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "components", components)
