@@ -40,7 +40,7 @@ from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import RBAnalysis, RBOptions, estimate_d4, paired_means, validate_axes
+from .analysis import RBAnalysis, RBOptions, count_completion, estimate_d4, paired_means, validate_axes
 from .program import CZPhasePair
 from .sequence import TwoQubitGate, make_paired_sequences
 
@@ -341,10 +341,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             if data.sums.shape != (*shape, 3, 3):
                 raise ValueError("Expected RB sums shape (depth,seed,arm,round,3,3)")
             counts = data.sums
-            acquired = np.all(np.isfinite(counts), axis=(-2, -1))
-            missing = np.all(np.isnan(counts), axis=(-2, -1))
-            if not np.all(acquired | missing) or np.any(counts < 0):
-                raise ValueError("RB sums contains invalid counts or a partial round")
+            acquired = count_completion(counts, (-2, -1))
             joint00 = joint_probabilities(counts)[..., 0, 0]
             paired = (acquired & np.isfinite(joint00)).all(axis=(0, 2))
             survival = np.where(paired[None, :, None, :], joint00, np.nan)

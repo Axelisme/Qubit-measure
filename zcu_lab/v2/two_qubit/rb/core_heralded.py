@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.analysis.fitting.shared import SharedFitResult
@@ -34,6 +35,8 @@ from .analysis import (
     RBEstimate,
     RBOptions,
     aggregate_seeds,
+    count_completion,
+    estimate_joint_d4,
     bootstrap_joint_error,
     fit_joint_decay,
     paired_means,
@@ -276,12 +279,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
         if data.sums.shape != (*shape, 3, 3, 3, 3):
             raise ValueError("Expected heralded RB sums (depth,seed,2,round,3,3,3,3)")
-        acquired = np.isfinite(data.sums).all(axis=(-4, -3, -2, -1))
-        missing = np.isnan(data.sums).all(axis=(-4, -3, -2, -1))
-        if not np.all(acquired | missing) or np.any(data.sums < 0):
-            raise ValueError(
-                "Heralded RB sums contains invalid counts or a partial round"
-            )
+        acquired = count_completion(data.sums, (-4, -3, -2, -1))
         survival = np.full((2, *shape), np.nan)
         paired = np.zeros((2, len(data.seeds), len(data.rounds)), dtype=np.bool_)
         means = np.full((2, 2, len(data.depths)), np.nan)
@@ -334,25 +332,11 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 reason = str(exc)
             else:
                 curves = fitted
-                pr, pi = fit.values["p_0"], fit.values["p_1"]
-                error = 0.75 * (1 - pi / pr)
-                warning = "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
-                if error < 0:
-                    warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
-                # Estimate counts use the identity/round union. Per-herald counts
-                # remain available from paired_rounds; no intersection is imposed.
+                # Union counts describe available paired identities, not an intersection.
                 union = paired.any(axis=0)
-                estimate = RBEstimate(
-                    pr,
-                    pi,
-                    0.75 * (1 - pr),
-                    error,
-                    low,
-                    high,
-                    int(union.any(axis=1).sum()),
-                    int(union.sum()),
-                    successes,
-                    warning,
+                estimate = estimate_joint_d4(
+                    fit, (low, high, successes),
+                    (int(union.any(axis=1).sum()), int(union.sum())),
                 )
                 quality = tuple(
                     compute_fit_quality(means[h, arm], curves[h, arm], {}, None)
@@ -363,45 +347,19 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
         for herald, label in enumerate(("gg", "ee")):
             fig, ax = plots.subplots(f"fit_{label}", figsize=(9, 6))
-            for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
-                (line,) = ax.plot(data.depths, means[herald, arm], "o", label=arm_label)
-                ax.errorbar(
-                    data.depths,
-                    means[herald, arm],
-                    yerr=errors[herald, arm],
-                    fmt="none",
-                    ecolor=line.get_color(),
-                )
-                if estimate is not None:
-                    ax.plot(data.depths, curves[herald, arm], color=line.get_color())
-            ax.set(
-                xlabel="Random Clifford depth",
-                ylabel=f"Return to {label} | herald {label}",
+            _draw_return_survival(
+                ax, data.depths, means[herald], errors[herald], curves[herald], label,
             )
             ax.set_title(
                 f"No RB estimate: {reason}"
                 if reason
                 else "d=4 joint decay; equal-seed means, statistical seed CI only"
             )
-            ax.legend()
             fig.tight_layout()
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             fig, ax = plots.subplots(f"herald_{arm}", figsize=(10, 6))
-            for f1 in range(3):
-                for f2 in range(3):
-                    classes = ("g", "e", "other")
-                    ax.plot(
-                        data.depths,
-                        aggregate[:, arm, f1, f2],
-                        "o-",
-                        label=f"{classes[f1]},{classes[f2]}",
-                    )
-            ax.set(
-                xlabel="Random Clifford depth",
-                ylabel="Herald probability",
-                title=f"{label}: (g,g) is pass fraction, not purity",
-            )
-            ax.legend()
+            _draw_herald_fractions(ax, data.depths, aggregate[:, arm])
+            ax.set_title(f"{label}: (g,g) is pass fraction, not purity")
             fig.tight_layout()
         return RBHeraldedAnalysis(
             survival,
@@ -416,3 +374,28 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             matrix,
             matrix[..., 0, 0],
         )
+
+
+def _draw_return_survival(
+    ax: Axes, depths: NDArray[np.int64], means: NDArray[np.float64],
+    errors: NDArray[np.float64], curves: NDArray[np.float64], label: str,
+) -> None:
+    """Render already-selected arm means, error bars and curves on this axis."""
+    for arm, arm_label in enumerate(("Reference", "CZ interleaved")):
+        (line,) = ax.plot(depths, means[arm], "o", label=arm_label)
+        ax.errorbar(depths, means[arm], yerr=errors[arm], fmt="none", ecolor=line.get_color())
+        ax.plot(depths, curves[arm], color=line.get_color())
+    ax.set(xlabel="Random Clifford depth", ylabel=f"Return to {label} | herald {label}")
+    ax.legend()
+
+
+def _draw_herald_fractions(
+    ax: Axes, depths: NDArray[np.int64], probabilities: NDArray[np.float64],
+) -> None:
+    """Render the caller's nine aggregated herald fractions, without filtering."""
+    classes = ("g", "e", "other")
+    for f1 in range(3):
+        for f2 in range(3):
+            ax.plot(depths, probabilities[:, f1, f2], "o-", label=f"{classes[f1]},{classes[f2]}")
+    ax.set(xlabel="Random Clifford depth", ylabel="Herald probability")
+    ax.legend()
