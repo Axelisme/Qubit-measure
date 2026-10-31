@@ -704,8 +704,9 @@ class MuxReadout(AbsReadout):
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare tones/routes without enabling legacy raw-IQ collection.
 
-        Incompatible wiring, duplicate routes and illegal rounded durations raise
-        ValueError naming this module. QICK frequency/format errors propagate.
+        Incompatible wiring and illegal rounded durations raise ValueError.
+        Identical resources can be shared; inconsistent ADC/generator settings
+        name both modules and their fields. QICK frequency/format errors propagate.
         """
         self._declare_resources(prog)
 

@@ -362,9 +362,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
         Do not mutate it afterward. Outside _initialize raises ValueError;
-        unsupported module types raise NotImplementedError. ADC/register conflicts
-        between distinct modules raise ValueError naming both objects. Explicit
-        register borrowing and module-family Pulse registry sharing are retained.
+        unsupported module types raise NotImplementedError. Inconsistent ADC or
+        generator settings and register conflicts raise ValueError naming both
+        objects and conflicting fields. Equal channel declarations are shared;
+        explicit register borrowing and Pulse registry sharing are retained.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
@@ -466,8 +467,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         owner is the diagnostic label; gen_ch and ro_chs are declared logical
         channels. Native protection errors propagate without changing ownership.
         During declare(module), future conflicts identify this protector object,
-        not earlier unprotected generator users. Outside module declaration the
-        inherited string-owner protection contract is unchanged.
+        not earlier unprotected generator users. Equivalent declarations remain
+        shareable; different-owner explicit protection still raises ValueError.
         """
         super().protect_readout_routes(owner, gen_ch, ro_chs)
         if self._declaration_module is not None:
