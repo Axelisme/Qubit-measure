@@ -1092,25 +1092,58 @@ class RuntimeMath(TimedMacro):
         """
         expression = runtime_expression(value)
         axes = expression_axes(expression)
-        points = evaluate_time(expression, axes)
-        if points is None:
+        origin = self._known_time_point(expression, {})
+        if origin is None:
             raise RuntimeError(
                 "time is runtime-only; cannot evaluate it at compile time"
             )
-        points = np.broadcast_to(points, tuple(axes.values()))
-        start = int(points.flat[0])
+        start = int(origin)
         spans = {}
-        for dimension, (axis, count) in enumerate(axes.items()):
+        terms: list[tuple[CycleAxis, Fraction]] = []
+        for axis, count in axes.items():
             if count > 1:
-                index = [0] * len(axes)
-                index[dimension] = count - 1
-                spans[axis] = int(points[tuple(index)]) - start
-        parameter = QickParam(start, spans)
-        if not np.array_equal(points, parameter.to_array(axes, all_loops=True)):
+                endpoint = self._known_time_point(expression, {axis: count - 1})
+                if endpoint is None:
+                    raise RuntimeError(
+                        "time is runtime-only; cannot evaluate it at compile time"
+                    )
+                span = int(endpoint) - start
+                spans[axis] = span
+                variable = cycle_axis(
+                    axis, 0, count - 1, CycleProducer(((axis, count),))
+                )
+                terms.append((variable, Fraction(span, count - 1)))
+        candidate = TimeVariable(start, tuple(terms))
+        if difference_limits(expression, candidate) != (0, 0):
             raise RuntimeError(
                 "non-affine runtime time cannot be represented by QickParam"
             )
-        return parameter / get_fclk(self.prog)
+        return QickParam(start, spans) / get_fclk(self.prog)
+
+    @staticmethod
+    def _known_time_point(
+        value: TimeExpression, coordinates: dict[object, int]
+    ) -> Fraction | None:
+        """Read one known point without allocating a cross-axis proof grid."""
+        if isinstance(value, TimeAbs):
+            result = RuntimeMath._known_time_point(value.linear, coordinates)
+            if result is None:
+                return None
+            for argument, coefficient in value.absolute:
+                point = RuntimeMath._known_time_point(argument, coordinates)
+                if point is None:
+                    return None
+                result += coefficient * abs(point)
+            return result
+        result = Fraction(0)
+        for axis, component in value.components:
+            if isinstance(component, np.ndarray):
+                result += Fraction(component[coordinates.get(axis.identity, 0)])
+            elif axis.minimum is not None and axis.minimum == axis.maximum:
+                result += component * axis.minimum
+            else:
+                return None
+        return result
 
     def allocate(self) -> str:
         live = self.prog._timeline_live_registers()
