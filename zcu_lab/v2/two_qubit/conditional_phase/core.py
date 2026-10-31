@@ -1,47 +1,59 @@
-"""Thermal conditional phase acquisition with independent X/Y projections."""
+"""Conditional ensemble phase from classified X/Y projections."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, SweepCfg
+from zcu_tools.program.v2 import (
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg, dual_line_drive
-from .._readout import JointRoles, collect_joint_shots
-from ..joint_readout.core import GECenters, tone_centers
+from .._readout import JointRoles
+from .._sums import readout_axes, sigma, terminal_counts, validate_classifiers
+from .._timeline import emit_readout_prefix
 from .analysis import ConditionalPhaseAnalysis, analyze_phase
 
 
 class ConditionalPhaseCfg(ConfigBase):
-    """Spectator I/Xπ → target X90 → n parallel CZ pairs → X90/Y90 → mux.
+    """Independent X/Y projections with acquisition-side F1/F2 classification.
 
-    Target selects F1/F2, never tone order. Projection Y changes target X90
-    phase by +90 degrees relative to preparation. Each projection is an independent
-    acquisition. Frequency is a common MHz host scan, gate_counts are positive
-    integer pulse-train lengths. Full tones and round-major shots are retained.
-    GE centers derive from saved role-tone circle classifiers, not simulator
-    truth. Missing/linear calibration permits raw acquisition; analysis reports
-    the calibration reason instead of a phase. Radius is not required.
+    Frequencies are MHz, phases degrees and delays us. reps is shots per round;
+    rounds accumulate counts at acquisition. F1/F2 require circle classifiers
+    with GE Post radii. reset=None skips reset; otherwise reset starts each shot.
+    target is lowercase f1/f2; gate_counts are unique positive train lengths.
     """
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
@@ -77,6 +89,10 @@ class ConditionalPhaseCfg(ConfigBase):
             description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
         ),
     ]
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot."),
+    ] = None
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -119,26 +135,10 @@ class ConditionalPhaseCfg(ConfigBase):
         default_factory=lambda: [1, 3, 5], min_length=1
     )
 
-    @property
-    def f1_centers(self) -> GECenters:
-        """Derive F1's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f1_tone)
-
-    @property
-    def f2_centers(self) -> GECenters:
-        """Derive F2's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f2_tone)
-
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject mismatched role generators, nonfinite frequencies and repeated n."""
-        self.roles.validate_readout(self.readout)
+        validate_classifiers(self.readout, self.roles)
         for drive, x180, x90 in (
             (self.drive.f1, self.x180_f1, self.x90_f1),
             (self.drive.f2, self.x180_f2, self.x90_f2),
@@ -161,149 +161,206 @@ class ConditionalPhaseCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class ConditionalPhaseResult:
-    """Raw IQ (2 spectator branches,2 quadratures,Nn,Nf,rounds*reps,Ntones).
+    """Summed counts with branch × quadrature × n × frequency leading axes.
 
-    branches=[0,1] mean nominal spectator I/Xπ on a thermal ensemble;
-    quadratures=[0,1] mean X90/Y90 projection pulse axes. No heralding,
-    postselection or averaging precedes persistence. Unacquired whole round
-    slots remain complex NaN; acquired IQ must be finite ADC units/sample.
+    branches=[0,1] denote spectator I/Xπ; quadratures=[0,1] denote X/Y.
+    sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
+    Rounds add without averaging. Unmeasured points remain NaN.
     """
 
     branches: NDArray[np.int64]
     quadratures: NDArray[np.int64]
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class ConditionalPhasePoint:
+    """One host-scan coordinate; quadrature 0/1 is X/Y, gate_count is train length.
+
+    branch 0/1 is spectator I/Xπ; frequency is the common CZ frequency in MHz.
+    """
+
+    branch: int
+    quadrature: int
+    gate_count: int
+    frequency: float
+
+
+def build_program(
+    cfg: ConditionalPhaseCfg,
+    soccfg: QickConfig,
+    point: ConditionalPhasePoint,
+    *,
+    heralded: bool,
+) -> TimelineProgramV2:
+    """Compile optional reset → optional herald → preparation → CZ train → projection → terminal.
+
+    Each call creates fresh modules. Herald and terminal emit one mux object.
+    Input cfg is unchanged; invalid scan coordinates or classifiers raise ValueError.
+    No acquisition occurs.
+    """
+    validate_classifiers(cfg.readout, cfg.roles)
+    if point.branch not in (0, 1) or point.quadrature not in (0, 1):
+        raise ValueError("branch and quadrature must be 0 or 1")
+    if point.gate_count not in cfg.gate_counts:
+        raise ValueError("gate_count must be in the configured scan")
+    target = cfg.x90_f1 if cfg.target == "f1" else cfg.x90_f2
+    spectator = cfg.x180_f2 if cfg.target == "f1" else cfg.x180_f1
+    builder = TimelineBuilder(
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
+    )
+    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    if point.branch:
+        builder.emit(Pulse("spectator", spectator))
+    builder.emit(Pulse("prepare_target", target))
+    for gate in range(point.gate_count):
+        builder.emit(
+            dual_line_drive(
+                cfg.drive,
+                frequency=point.frequency,
+                name=f"cz_{gate}",
+            )
+        )
+    builder.emit(
+        Pulse(
+            "projection",
+            target.with_updates(phase=target.phase + 90 * point.quadrature),
+        )
+    )
+    builder.emit(readout, tag="terminal")
+    return builder.build()
+
+
+def acquire_counts(
+    config: ConditionalPhaseCfg, *, context: RunContext, heralded: bool
+) -> NDArray[np.float64]:
+    """Acquire the host scan; return unnormalized 9/81-class float64 sums.
+
+    Completed rounds accumulate at acquisition and survive cancellation. Live
+    quadratures use terminal counts, conditioned on herald (g,g) when requested.
+    Schedule owns the cfg copy; no host round axis or per-shot storage remains.
+    """
+    validate_classifiers(config.readout, config.roles)
+    frequencies = sweep2array(config.frequency)
+    viewer = live_line(
+        context.plots,
+        "measurement",
+        "Common CZ frequency (MHz)",
+        "Target sigma" + (" | herald (g,g)" if heralded else ""),
+        num_lines=4 * len(config.gate_counts),
+    )
+
+    def update_view(sums: NDArray[np.float64]) -> None:
+        counts = terminal_counts(sums, heralded=heralded)
+        values = sigma(counts, config.target).reshape(-1, len(frequencies))
+        viewer.update(frequencies, values)
+
+    shape = (2, 2, len(config.gate_counts), len(frequencies)) + (
+        (3, 3, 3, 3) if heralded else (3, 3)
+    )
+    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
+    with Schedule(config, buffer, scope=context.scope) as sched:
+        for branch, branch_step in sched.scan("branch", [0, 1]):
+            for quadrature, projection_step in branch_step.scan("quadrature", [0, 1]):
+                for n, count_step in projection_step.scan(
+                    "gate_count", sched.cfg.gate_counts
+                ):
+                    for frequency, step in count_step.scan(
+                        "frequency", frequencies.tolist()
+                    ):
+                        point = ConditionalPhasePoint(branch, quadrature, n, frequency)
+                        prog = build_program(
+                            step.cfg, context.soccfg, point, heralded=heralded
+                        )
+                        step.run_acquire_summed(
+                            prog,
+                            context.soc,
+                            processor=shot_sums(
+                                prog, readout_axes(step.cfg.roles, heralded=heralded)
+                            ),
+                            rounds=step.cfg.rounds,
+                            options=RunOptions(),
+                        )
+    buffer.trigger_update(flush=True)
+    return buffer.array
+
+
+def restore_result(
+    data: GroupedLoadData[ConditionalPhaseCfg],
+) -> ConditionalPhaseResult:
+    """Restore classified sums; old per-shot IQ files without sums are rejected."""
+    sums = data.variable("sums")
+    return ConditionalPhaseResult(
+        branches=sums.axes[5].astype(np.int64),
+        quadratures=sums.axes[4].astype(np.int64),
+        gate_counts=sums.axes[3].astype(np.int64),
+        frequencies=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg]):
-    """Stateless conditional phase acquisition, saved-source analysis and native IO."""
+    """Independent classified conditional phase experiment."""
 
-    AXES_SPEC: ClassVar[AxesSpec[ConditionalPhaseResult, ConditionalPhaseCfg]] = (
-        AxesSpec(
-            axes=(
-                AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-                AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-                AxesSpec.Axis("frequencies", "Common CZ frequency", "Hz", 1e6),
-                AxesSpec.Axis("gate_counts", "CZ gate count", "", dtype=np.int64),
-                AxesSpec.Axis("quadratures", "Projection X or Y", "", dtype=np.int64),
-                AxesSpec.Axis("branches", "Spectator I or Xπ", "", dtype=np.int64),
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConditionalPhaseResult, ConditionalPhaseCfg]
+    ] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("terminal_f2", ""),
+                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec(
+                        "Common CZ frequency",
+                        "Hz",
+                        field_name="frequencies",
+                        dtype=np.float64,
+                        scale=1e6,
+                    ),
+                    VariableAxisSpec(
+                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        "Projection X or Y",
+                        "",
+                        field_name="quadratures",
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        "Spectator I or Xπ", "", field_name="branches", dtype=np.int64
+                    ),
+                ),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Joint class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
-            z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
-            result_type=ConditionalPhaseResult,
-            cfg_type=ConditionalPhaseCfg,
-            cfg_schema_version="3.0",
-            tag="two_qubit/conditional_phase",
-        )
+        ),
+        result_type=ConditionalPhaseResult,
+        cfg_type=ConditionalPhaseCfg,
+        cfg_schema_version="4.0",
+        tag="two_qubit/conditional_phase",
+        result_builder=restore_result,
     )
 
     def run(
         self, config: ConditionalPhaseCfg, *, context: RunContext
     ) -> ConditionalPhaseResult:
-        """Acquire fixed branch/projection/n/frequency/round slots without cfg mutation.
-
-        Caller owns transport/plots and checks cancel_signal.raise_if_error() to
-        distinguish transport/nonfinite acquired IQ errors from normal cancellation.
-        Final raw conversion overwrites its round slot; it never duplicates shots.
-        """
-        cfg = config.model_copy(deep=True, update={"rounds": 1})
-        frequencies = sweep2array(cfg.frequency)
-        ntones = len(cfg.readout.tones)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Common CZ frequency (MHz)",
-            "Completed shots (all branches/projections/n)",
-            num_lines=1,
-        )
-
-        def update_view(raw: NDArray[np.complex128]) -> None:
-            viewer.update(
-                frequencies, np.all(np.isfinite(raw), axis=-1).sum(axis=(0, 1, 2, 4, 5))
-            )
-
-        buffer = SignalBuffer(
-            (
-                2,
-                2,
-                len(cfg.gate_counts),
-                len(frequencies),
-                config.rounds,
-                cfg.reps,
-                ntones,
-            ),
-            on_update=update_view,
-        )
-        m = cfg
-        target = m.x90_f1 if cfg.target == "f1" else m.x90_f2
-        spectator = m.x180_f2 if cfg.target == "f1" else m.x180_f1
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            for branch, branch_step in sched.scan("branch", [0, 1]):
-                for quadrature, projection_step in branch_step.scan(
-                    "quadrature", [0, 1]
-                ):
-                    for n, count_step in projection_step.scan(
-                        "gate_count", cfg.gate_counts
-                    ):
-                        for frequency, step in count_step.scan(
-                            "frequency", frequencies.tolist()
-                        ):
-                            builder = step.prog_builder(
-                                context.soc,
-                                context.soccfg,
-                                reps=step.cfg.reps,
-                                initial_delay=step.cfg.initial_delay,
-                                relax_delay=step.cfg.relax_delay,
-                            )
-                            if branch:
-                                builder.add_pulse("spectator", spectator)
-                            builder.add_pulse("prepare_target", target)
-                            for gate in range(n):
-                                builder.add(
-                                    dual_line_drive(
-                                        cfg.drive,
-                                        frequency=frequency,
-                                        name=f"cz_{gate}",
-                                    )
-                                )
-                            builder.add_pulse(
-                                "projection",
-                                target.with_updates(
-                                    phase=target.phase + 90 * quadrature
-                                ),
-                            )
-                            builder.add(MuxReadout("readout", m.readout))
-                            prog = builder.build()
-                            for _, round_step in step.repeat("round", config.rounds):
-                                _ = round_step.prog_builder(
-                                    context.soc,
-                                    context.soccfg,
-                                    reps=round_step.cfg.reps,
-                                    initial_delay=round_step.cfg.initial_delay,
-                                    relax_delay=round_step.cfg.relax_delay,
-                                ).run_program(
-                                    prog,
-                                    raw2signal_fn=partial(collect_joint_shots, prog),
-                                    rounds=round_step.cfg.rounds,
-                                )
-        buffer.trigger_update(flush=True)
+        """Acquire optional reset and the original sequence; save summed counts."""
         return ConditionalPhaseResult(
             np.arange(2, dtype=np.int64),
             np.arange(2, dtype=np.int64),
-            np.array(cfg.gate_counts, dtype=np.int64),
-            frequencies,
-            np.arange(config.rounds * cfg.reps, dtype=np.int64),
-            np.arange(ntones, dtype=np.int64),
-            buffer.array.reshape(
-                2,
-                2,
-                len(cfg.gate_counts),
-                len(frequencies),
-                config.rounds * cfg.reps,
-                ntones,
-            ),
+            np.array(config.gate_counts, dtype=np.int64),
+            sweep2array(config.frequency),
+            acquire_counts(config, context=context, heralded=False),
         )
 
     def analyze(
@@ -313,6 +370,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         *,
         plots: Plots,
     ) -> ConditionalPhaseAnalysis:
-        """Analyze complete saved-source projection pairs; never consult current Form."""
+        """Analyze saved cfg and classified quadratures; never read current Form."""
         del options
-        return analyze_phase(source, plots=plots)
+        if source.cfg is None:
+            raise ValueError("Phase analysis requires saved source cfg")
+        return analyze_phase(source.cfg, source.result, plots=plots)
