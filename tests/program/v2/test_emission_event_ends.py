@@ -362,9 +362,10 @@ def test_nonaffine_post_and_repeated_emissions_keep_exact_same_channel_spacing(
         prog.emit(pulse)
 
     prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
-    # Ends43.68,86.24,128.8 plus scalar.086016 or swept.086016/.136016/.186016.
-    # Descending playback reverses these ends, not the increasing post.
-    ends = [129, 87, 44] if descending else [44, 87, 129]
+    # W=287 gives tails43.72265625/86.32421875/128.92578125.
+    # Scalar post .086016 crosses 129; native swept post truncates to zero.
+    last = 129 if swept_post else 130
+    ends = [last, 87, 44] if descending else [44, 87, last]
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[0, end] for end in ends] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
@@ -397,7 +398,7 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
     # Generator grids39/40/41,77/78/79,115/116/117 at ratio28/25.
     # Each native sweep point executes four k=8 local bodies, not four
     # advances of a shared sequential dmem cursor.
-    ends = [44, 45, 46, 87, 88, 89, 129, 130, 132]
+    ends = [44, 45, 46, 87, 88, 89, 129, 131, 132]
     result = shots(prog)
     assert [waves(shot) for shot in result] == [
         [0, end, 2 * end, 3 * end] for end in ends
@@ -599,11 +600,10 @@ def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
         [reset], lambda prog: prog.emit(reset), lambda prog: prog.add_loop("scan", 3)
     )
     result = shots(prog)
-    # Cavity ends43.68/86.24/128.8 plus.086016 =>44/87/129.
-    # Qubit ends86.24+.086016 =>87. Pi2 placement is the ceiled
-    # cavity boundary; length22.4+.086016 adds23, once per placement.
-    cycles = [[0, 0]] * 3 if kind == "two" else [[0, 0, end] for end in [44, 87, 129]]
-    ends = [87, 87, 129] if kind == "two" else [87, 110, 152]
+    # Cavity k=8 tails plus .086016 =>44/87/130. Static qubit stays87.
+    # Pi2 starts at the cavity boundary and adds ceil(22.4+.086016)=23.
+    cycles = [[0, 0]] * 3 if kind == "two" else [[0, 0, end] for end in [44, 87, 130]]
+    ends = [87, 87, 130] if kind == "two" else [87, 110, 153]
     assert [waves(shot) for shot in result] == cycles * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [

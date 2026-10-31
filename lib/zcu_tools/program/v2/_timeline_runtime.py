@@ -476,11 +476,18 @@ class RuntimeMath(TimedMacro):
         # public 1e-10-cycle tolerance at the complete aggregate boundary.
         nearest = round(constant * 256)
         bias = nearest if abs(constant - nearest / 256) <= 1e-10 else math.ceil(constant * 256)
-        numerator = self.add(product, QickParam(bias + 255, spans) / get_fclk(self.prog))
+        if spans:
+            tail_value = self.cycles(QickParam(bias + 255, spans) / get_fclk(self.prog))
+            numerator = self.op(product, "+", tail_value,
+                                limits=self._sum_limits(product, tail_value), target=product.register)
+        else:
+            numerator = self.op(product, "+", bias + 255,
+                                limits=self._sum_limits(product, bias + 255), target=product.register)
         if numerator.minimum is None or numerator.maximum is None:
             raise RuntimeError("native conversion lost its known bounds")
         result = self.op(numerator, "ASR", 8,
-                         limits=(numerator.minimum // 256, numerator.maximum // 256))
+                         limits=(numerator.minimum // 256, numerator.maximum // 256),
+                         target=product.register)
         expression = runtime_expression(numerator)
         axes = expression_axes(expression)
         points = evaluate_time(expression, axes)
