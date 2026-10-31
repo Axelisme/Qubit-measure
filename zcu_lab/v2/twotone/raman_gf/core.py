@@ -72,6 +72,15 @@ class RamanGFCfg(ConfigBase):
     phase and delays remain operator inputs. Calibration belongs to saved readout.
     """
 
+    drive: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Raman drive",
+            description="Select a sampled sqrt(cos) arbitrary waveform. Frequency and gain come from the scan.",
+        ),
+    ]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+
     carrier_mhz: Annotated[
         float,
         FieldMeta(
@@ -89,14 +98,6 @@ class RamanGFCfg(ConfigBase):
     ] = "frequency_area"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
     gain: Annotated[GainSweep, FieldMeta(label="Area via drive gain", unit="a.u.")]
-    drive: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Raman drive",
-            description="Select a sampled sqrt(cos) arbitrary waveform. Frequency and gain come from the scan.",
-        ),
-    ]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=1024, ge=6
     )

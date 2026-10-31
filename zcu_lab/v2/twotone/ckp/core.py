@@ -245,12 +245,12 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
     AXES_SPEC: ClassVar[AxesSpec[CKP_Result, CKP_Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "qub_freqs", "Qubit Frequency", "Hz", scale=1e6, dtype=np.float64
+                "qub_freqs", label="Qubit Frequency", unit="Hz", scale=1e6, dtype=np.float64
             ),
             AxesSpec.Axis(
                 "res_freqs",
-                "Resonator Frequency",
-                "Hz",
+                label="Resonator Frequency",
+                unit="Hz",
                 scale=1e6,
                 dtype=np.float64,
             ),

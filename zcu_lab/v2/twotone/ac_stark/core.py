@@ -78,8 +78,8 @@ def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class AcStarkCfg(ConfigBase):
     reset: Reset.Cfg | None = None
-    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
+    stark_tone: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    probe: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
     readout: Readout.Cfg
     gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
@@ -115,7 +115,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/ac_stark",
     )
 
@@ -127,8 +127,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     ) -> AcStarkResult:
         """Measure the qubit's AC Stark shift versus resonator drive gain.
 
-        Reset, launch stark_pulse1 without blocking, then play the
-        frequency-swept qubit probe stark_pulse2 and read out. Configure the
+        Reset, launch stark_tone without blocking, then play the
+        frequency-swept qubit probe probe and read out. Configure the
         pulse timing for the intended overlap. Host gain points are uniform
         in gain squared before hardware rounding; the FPGA sweeps probe
         frequency. Return mean complex IQ shaped (Ngain, Nfreq), with
@@ -144,12 +144,12 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": cfg.stark_pulse2.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.probe.ch},
         )
         gains = np.sqrt(
             np.linspace(gain_sweep.start**2, gain_sweep.stop**2, gain_sweep.expts)
         )
-        gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse1.ch)
+        gains = round_zcu_gain(gains, soccfg, cfg.stark_tone.ch)
 
         current_snr = 0.0
 
@@ -188,11 +188,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 # The Stark tone does not block the probe or the following readout.
                 builder.fork("default", into=["stark", "probe"])
                 builder.emit(
-                    Pulse("stark_pulse1", cfg.stark_pulse1, gain=step.value),
+                    Pulse("stark_tone", cfg.stark_tone, gain=step.value),
                     timeline="stark",
                 )
                 builder.emit(
-                    Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq), timeline="probe"
+                    Pulse("probe", cfg.probe, freq=freq), timeline="probe"
                 )
                 builder.join("probe", into="default")
                 builder.emit(Readout("readout", cfg.readout))

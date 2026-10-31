@@ -94,12 +94,12 @@ class StirapCfg(ConfigBase):
     stokes_lead: Annotated[float, FieldMeta(label="Fixed Stokes lead", unit="us")] = (
         0.05
     )
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     scan: Annotated[
         DelayScan | AmplitudeScan | DetuningScan,
         Field(discriminator="kind"),
         FieldMeta(label="Scan mode"),
     ]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )

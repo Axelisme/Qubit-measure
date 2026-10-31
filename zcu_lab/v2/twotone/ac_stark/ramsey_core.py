@@ -55,12 +55,12 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 class AcStarkRamseyCfg(ConfigBase):
     reset: Reset.Cfg | None = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
     stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
     readout: Readout.Cfg
     wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
     gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
-    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
     detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
     reps: Annotated[
@@ -93,7 +93,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AcStarkRamseyResult,
         cfg_type=AcStarkRamseyCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/ac_stark_ramsey",
     )
 
@@ -120,7 +120,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         gain_sweep = cfg.gain
 
         lengths = sweep2array(
-            cfg.length,
+            cfg.delay,
             "time",
             {"soccfg": soccfg, "gen_ch": cfg.stark_pulse.ch},
         )
@@ -153,7 +153,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
-                length = builder.add_sweep("length", cfg.length)
+                length = builder.add_sweep("delay", cfg.delay)
                 if cfg.reset is not None:
                     builder.emit(Reset("reset", cfg.reset))
                 builder.fork("default", into=["stark", "ramsey"])

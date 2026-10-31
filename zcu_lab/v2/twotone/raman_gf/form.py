@@ -30,15 +30,9 @@ def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
                     "waveform.style": "arb",
                 },
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "shots": 1024,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),
         },
-    ).with_seed_metadata(
-        {}
-        if ctx.has("$resonator.module.readout")
-        else pulse_readout_seed_metadata(gain=0.1)
     )
