@@ -430,10 +430,10 @@ def reduce_loop_time(
 
 def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
     """Scale constants; same-axis multiplication stays known, otherwise bound."""
-    if isinstance(right, TimeVariable) and not right.terms:
-        return scale_time(left, right.constant)
-    if isinstance(left, TimeVariable) and not left.terms:
-        return scale_time(right, left.constant)
+    if isinstance(right, TimeVariable) and not _proof_axes(right):
+        return scale_time(left, expression_limits(right)[0] or 0)
+    if isinstance(left, TimeVariable) and not _proof_axes(left):
+        return scale_time(right, expression_limits(left)[0] or 0)
     axes = expression_axes(left) | expression_axes(right)
     if len(axes) <= 1:
         a, b = evaluate_time(left, axes), evaluate_time(right, axes)
@@ -487,7 +487,8 @@ def select_time(
             for case, point in enumerate(points):
                 if point is not None:
                     result = np.where(index == case, point, result)
-            return point_time("selected cycles", axes, result)
+            names = ", ".join(sorted({axis.name for axis in time_variables(selector)}))
+            return point_time(names or "selected cycles", axes, result)
     if any(unbounded_time(v) for v in values):
         return TimeVariable(terms=((cycle_axis("selected cycles", None, None), 1),))
     limits = [expression_bounds(v) for v in values]
@@ -648,6 +649,26 @@ def _linear_extreme(value: TimeVariable, constraints: tuple[TimeVariable, ...], 
     return best
 
 
+def _constrained_limits(value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: dict[object, CycleValues]) -> tuple[Fraction | None, Fraction | None]:
+    lower, upper = _domain_limits(value, domains)
+    components = {axis.identity: c for axis, c in value.components}
+    for constraint in constraints:
+        for axis, component in constraint.components:
+            if axis.identity == "const" or isinstance(component, np.ndarray) or not component:
+                continue
+            amount = components.get(axis.identity, 0)
+            if isinstance(amount, np.ndarray):
+                continue
+            ratio = Fraction(amount) / component
+            rest = _linear_add(value, _linear_scale(constraint, -ratio))
+            lo, hi = _domain_limits(rest, domains)
+            if ratio > 0 and lo is not None:
+                lower = lo if lower is None else max(lower, lo)
+            if ratio < 0 and hi is not None:
+                upper = hi if upper is None else min(upper, hi)
+    return lower, upper
+
+
 def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
     arguments = _abs_arguments(value)
     if len(arguments) > MAX_ABS_TERMS:
@@ -677,7 +698,7 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
             if bounds == (None, None):
                 continue
         else:
-            bounds = _domain_limits(linear, current)
+            bounds = _constrained_limits(linear, constraints, current)
         leaves.append(bounds)
     if not leaves:
         return _interval_limits(value)
@@ -845,7 +866,15 @@ def substitute_time(value: TimeExpression, replacements: dict[CycleAxis, TimeExp
             absolute = choose_time(substituted, scale_time(substituted, -1))
             result = add_time(result, scale_time(absolute, coefficient))
         return result
-    result: TimeExpression = TimeVariable(value.constant)
-    for variable, coefficient in value.terms:
-        result = add_time(result, scale_time(replacements.get(variable, TimeVariable(terms=((variable, 1),))), coefficient))
+    unchanged = tuple((axis, component) for axis, component in value.components if axis not in replacements)
+    result: TimeExpression = TimeVariable(
+        value.constant,
+        tuple((axis, coefficient) for axis, coefficient in value.terms if axis not in replacements),
+        components=unchanged,
+    )
+    for axis, component in value.components:
+        if axis in replacements:
+            if isinstance(component, np.ndarray):
+                raise ValueError("cannot substitute an arbitrary known-axis component")
+            result = add_time(result, scale_time(replacements[axis], component))
     return result

@@ -600,6 +600,8 @@ class RuntimeMath(TimedMacro):
         """Multiply by a nonnegative integer with checked CSD shifts/adds."""
         if factor < 0:
             raise ValueError("constant multiplication requires a nonnegative factor")
+        if factor == 1:
+            return value
         digits = _csd(factor)
         if not digits:
             return self.cycles(0.0)
