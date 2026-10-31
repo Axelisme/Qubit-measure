@@ -1,13 +1,15 @@
 """Immutable numeric acquisition boundary shared by frontend and environments.
 
-Times are us, frequencies MHz, phases degrees, gain normalized DAC amplitude.
+Times are integer ticks in the request's TimeBase; frequencies are MHz,
+phases degrees, and gain normalized DAC amplitude.
 Execution is C-order over loop_dims (including reps); read order is trigger order.
 Arrays in RoundSignals are float64 ADC sample units, last axis [I, Q]. Backend
 sums are not normalized or rounded. No driver, Module or callback crosses here.
 The optional round cancel query is read-only control, not a callback.
 Frozen records do not freeze borrowed arrays. SamplingIdentity validates entropy;
-AcquireRequest validates template coordinate names. Frontend and adapter checks
-validate the remaining field ranges, layouts and contents against the request.
+AcquireRequest validates template coordinate names and integer time ranges,
+shapes, sample periods and body durations. Frontend and adapter checks validate
+remaining field layouts and contents against the request.
 """
 
 from collections.abc import Iterable
@@ -452,6 +454,8 @@ def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None
     base.validate_ticks(template.duration_ticks)
     if template.duration_ticks.shape != (size,):
         raise ValueError("template duration shape must be (points,)")
+    if size == 0 or np.any(template.duration_ticks < 0):
+        raise ValueError("template must have nonempty nonnegative body durations")
     for event in template.events:
         for times in (event.start_ticks, event.duration_ticks):
             base.validate_ticks(times)
@@ -536,7 +540,8 @@ class AcquireRequest:
     GUI/MCP metadata. Replay also requires the round snapshot and backend version;
     equal seeds alone do not promise bit-exact results across library versions.
     Construction rejects noninteger scalar/array times with TypeError, time
-    array shape mismatches or nonpositive sample periods with ValueError, and
+    array shape mismatches, empty templates, negative body durations or
+    nonpositive sample periods with ValueError, and
     times or derived event/ADC/envelope ends outside TimeBase bounds with
     OverflowError. Arrays are borrowed and must not be mutated during use.
     """

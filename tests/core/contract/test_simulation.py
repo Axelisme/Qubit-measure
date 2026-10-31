@@ -173,6 +173,21 @@ def test_materialize_point_rejects_out_of_range(point: int):
         template_request().materialize_point(point)
 
 
+def test_negative_event_coordinates_and_absent_templates_remain_valid():
+    request = template_request()
+    template = request.templates[0]
+    event = replace(
+        template.events[0],
+        start_ticks=np.array([-8, -4], dtype=np.int64),
+        phase_reference_ticks=-1,
+    )
+    changed = replace(request, templates=(replace(template, events=(event,)),))
+    observed = changed.materialize_point(0).events[0]
+    assert observed.start_ticks == -8
+    assert observed.phase_reference_ticks == -1
+    assert replace(request, templates=()).templates == ()
+
+
 def test_templates_require_names_for_each_point_axis():
     request = template_request()
     with pytest.raises(ValueError, match="point_names"):
