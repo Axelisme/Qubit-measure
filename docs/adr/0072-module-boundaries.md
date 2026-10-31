@@ -54,6 +54,14 @@ Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明�
 
 跨 package 資料沿既有 program／experiment／resources → core 方向傳遞，由 C8、C9、C12、C19 維持分層與 core 的無狀態邊界。既有 `.importlinter` 的 `program-simulation-entry` contract 限制 program classes 直接依賴 simulation frontend、timeline 與 adapter internals，只能經模擬入口使用。這是依賴檢查，不是 runtime 隔離的完整保證；真實 acquire 不執行模擬模組仍須在審閱執行路徑時確認。不新增 contract。
 
+### Mux PFB channel 查詢與 carrier selection 的 owner
+
+`program` 的 mock-profile owner 提供具名 PFB channel 查詢 `pfb_channel`，包裝 QICK 公開的 `calc_ro_freq` 並取其 `pfb_ch`。FTF 只做 event／carrier selection，不組 QICK register 結構，也不複製 channel folding 算式。這讓 QICK 的 channel assignment 留在 program owner，而非由 experiment 重做。
+
+依賴方向沿用 C8、C9 的 `experiment` → `program`，不新增或放寬 import contract。
+
+2026-10-31，使用者核准 mux 濾波：「Mux的可以」。上述 owner 邊界的細節由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的代理授權裁定，不是使用者逐字指定的技術方案。
+
 ### Manifold 衰減模與分析診斷的 owner
 
 `simulate.fluxonium.coherence` 負責組合 directional rate matrix 並計算衰減模。
