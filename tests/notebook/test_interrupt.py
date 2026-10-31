@@ -1,5 +1,6 @@
 """Notebook SIGINT requests cooperate with a synchronous experiment core."""
 
+import logging
 import signal
 import threading
 from collections.abc import Callable, Iterator
@@ -199,6 +200,7 @@ def blocking_deadline(
                 entered_wait.append(True)
                 timers[-1].expire()
         except Exception as error:
+            logging.exception("Controlled deadline sender failed")
             errors.append(error)
             with condition:
                 condition.notify_all()
