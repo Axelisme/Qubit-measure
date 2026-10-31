@@ -753,7 +753,8 @@ class TimelineBook:
             warnings.warn(message, UserWarning, stacklevel=2)
 
     def maximum(self) -> Time:
-        end: Time = 0.0
-        for candidate in self.ends.values():
+        values = iter(self.ends.values())
+        end = next(values, 0.0)
+        for candidate in values:
             end = self.math.maximum(end, candidate)
         return end
