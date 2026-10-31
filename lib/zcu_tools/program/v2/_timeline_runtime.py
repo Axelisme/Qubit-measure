@@ -1050,34 +1050,6 @@ class RuntimeMath(TimedMacro):
         )
         return RuntimeEnd(name, limits.minimum, limits.maximum, expression=expression)
 
-    def _selected_axes(self, values: tuple[float | QickParam, ...]) -> dict[str, int]:
-        spans = set().union(
-            *(v.spans.keys() for v in values if isinstance(v, QickParam))
-        )
-        missing = spans - self.prog.loop_dict.keys()
-        if missing:
-            raise ValueError(
-                f"{sorted(missing)}: missing native sweep axis for selected end"
-            )
-        return {
-            name: count for name, count in self.prog.loop_dict.items() if name in spans
-        }
-
-    def _selected_points(
-        self, values: tuple[float | QickParam, ...], axes: dict[str, int]
-    ) -> list[int]:
-        points: list[int] = []
-        for value in values:
-            param = value if isinstance(value, QickParam) else QickParam(value)
-            points.extend(
-                ceil_tick(float(p) * get_fclk(self.prog))
-                for p in np.broadcast_to(
-                    np.asarray(param.to_array(axes, all_loops=True)),
-                    tuple(axes.values()),
-                ).flat
-            )
-        return points
-
     def coverage_debt(
         self,
         raw: tuple[float | QickParam, ...],
@@ -1085,14 +1057,19 @@ class RuntimeMath(TimedMacro):
     ) -> int:
         """Prove a conservative tick debt from paired raw and aggregate ends.
 
-        Both tuples use the same captured selection and origin. Evaluate the
-        shared exact-ceil rule on their common native grid, without emitting
-        instructions or using rounded physical metadata as a timing source.
+        Both tuples use the same captured selection and origin. Subtract before
+        taking bounds so shared sweep components cancel. The inequality
+        ceil(a) - ceil(b) <= ceil(a - b) bounds the debt without a product grid
+        or instructions. Native fractional metadata remains the timing source.
         """
-        axes = self._selected_axes(raw + completed)
-        physical = self._selected_points(raw, axes)
-        aggregate = self._selected_points(completed, axes)
-        return max(0, *(a - b for a, b in zip(physical, aggregate, strict=True)))
+        debt = 0
+        for physical, aggregate in zip(raw, completed, strict=True):
+            difference = native_event_expression(self.prog, physical - aggregate)
+            upper = expression_limits(difference)[1]
+            if upper is None:
+                raise RuntimeError("selected coverage debt lost its finite range")
+            debt = max(debt, math.ceil(upper))
+        return debt
 
     def _selection_operand(self, value: Time) -> int | str:
         """Resolve a ceiled candidate to literal cycles or its live register."""
