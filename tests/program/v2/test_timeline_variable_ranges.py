@@ -47,6 +47,35 @@ def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
     assert not any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
 
 
+def test_three_way_join_prunes_partial_dominance_and_reconstructs_shared_length_once():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("i", 50)
+            self.add_loop("j", 3)
+            self.add_loop("case", 3)
+
+        def _body(self, cfg):
+            length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
+            other = QickSweep1D("j", 0, 80 / 430.08)
+            self.delay_timeline(7 / 430.08)
+            with self.branch(by="case", align_timeline=True) as branch:
+                with branch.case(0):
+                    self.delay_timeline(length + 40 / 430.08)
+                with branch.case(1):
+                    self.delay_timeline(length + other)
+                with branch.case(2):
+                    self.delay_timeline(2 * length)
+
+    prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        7 + max(2 * length, length + other)
+        for length in range(60, 257, 4)
+        for other in (0, 40, 80)
+        for _ in range(3)
+    ]
+    assert sum(inst.get("IF") == "S" for inst in prog.prog_list) == 1
+
+
 class AllocateDuration(Macro):
     def preprocess(self, prog):
         prog.add_reg("duration")
