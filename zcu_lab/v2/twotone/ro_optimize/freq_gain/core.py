@@ -185,7 +185,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                         [tracker],
                         ge_axis=1,
                         skew_penalty=cfg.skew_penalty,
-                    )
+                    ),
                 ),
                 trackers=[tracker],
                 **(acquire_kwargs or {}),
