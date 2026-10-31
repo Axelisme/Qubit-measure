@@ -68,7 +68,8 @@ def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing)
 
     prog = _program(mux_soccfg(), [readout], body)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
