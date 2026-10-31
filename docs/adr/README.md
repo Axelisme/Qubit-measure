@@ -38,7 +38,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host、await guardrail、顯式 Scope、活子層下的 root kind selector 與歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、單次 stop_requested 與 sibling 隔離、GUI／recipe 同 Run facts、根 ScriptCancelled、Analyze 黑箱與作者例外處理。Workflow 的 operation 原語與 live tunables 生效點見 0062。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host 的 CallResult 與可缺省資源、Scope.call 與 lib run_core 的 await 邊界、顯式 Scope、活子層下的 root kind selector 與歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、operation 自己的 stopped 位元、GUI／recipe 前端 stop_requested 與同 Run facts、根 ScriptCancelled、Analyze 黑箱與作者例外處理。Workflow 的三層分工與 live tunables 生效點見 0062。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
 - [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation、Ask waiting 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
@@ -53,7 +53,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 ## Experiment runtime／Workflows
 
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、program-owned declarations 與跨原生 program 重用、constructor keyword 的有效 cfg、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime sync 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch case 索引與必填 align_timeline 的靜態／逐點 max 或 runtime 結尾、兩模式不推進 reference、case 外操作與局部 fork 邊界、Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。兩種 program 共用優化前 compiled snapshot 與單一 simulation frontend，採獨立 shot 與 effect-based admission。A、B、builder 與 C 已交付；大量實驗遷移及 D 的 legacy program／init／run 移除仍未交付。
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、每個 operation 單次呼叫、Ask waiting、live tunables、core 同簽名 env.run、root 緊急停止、例外直接傳出、stop_requested 與 completed／raised facts、歷史 discarded 讀取、作者自存 commit 目錄。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Scope.call 能力／lib run_core 轉接／workflow 組合的三層分工、每個 operation 單次呼叫、Ask waiting、live tunables、呼叫前 device snapshot 存入 RunRecord.metadata、作者明選 completion、root 緊急停止、例外直接傳出、operation 自己的 stopped 位元與 completed／raised facts、歷史 discarded 讀取、作者自存 commit 目錄。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、core 黑箱與作者 partial 語意、停止請求與 Notebook 首次 SIGINT／10秒期限、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
 
