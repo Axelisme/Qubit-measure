@@ -91,7 +91,9 @@ def fit_target(
         or not np.all(np.isfinite(covariance))
         or not np.all(np.isfinite(curve))
     ):
-        return LocalZTargetFit(reason="Nonfinite weighted fit or covariance uncertainty")
+        return LocalZTargetFit(
+            reason="Nonfinite weighted fit or covariance uncertainty"
+        )
     quality = compute_fit_quality(
         y,
         curve,

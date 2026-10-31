@@ -366,7 +366,11 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
             )
         statistics = count_quadratures(data.sums, cfg.target)
-        quadratures, acquired, variances = statistics.values, statistics.acquired, statistics.variances
+        quadratures, acquired, variances = (
+            statistics.values,
+            statistics.acquired,
+            statistics.variances,
+        )
         phases = phase_points(quadratures)
         fitted = fit_phase_slopes(
             data.gate_counts, quadratures[None], variances[None], acquired[None]
