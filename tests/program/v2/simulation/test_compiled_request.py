@@ -507,14 +507,42 @@ def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
 ):
     def initialize(p):
         p.declare_gen(1, nqz=1)
-        p.add_pulse(0, "boundary", style="const", freq=3000, phase=0, gain=0.1, length=7 / 430.08)
-        p.add_pulse(1 if multiple_routes else 0, "inside", style="const", freq=100, phase=0, gain=0.1, length=14 / 430.08)
+        p.add_pulse(
+            0,
+            "boundary",
+            style="const",
+            freq=3000,
+            phase=0,
+            gain=0.1,
+            length=7 / 430.08,
+        )
+        p.add_pulse(
+            1 if multiple_routes else 0,
+            "inside",
+            style="const",
+            freq=100,
+            phase=0,
+            gain=0.1,
+            length=14 / 430.08,
+        )
 
     def body(p):
-        for tick, channel, name in sorted([(boundary_tick, 0, "boundary"), (14, 1 if multiple_routes else 0, "inside")]):
+        for tick, channel, name in sorted(
+            [
+                (boundary_tick, 0, "boundary"),
+                (14, 1 if multiple_routes else 0, "inside"),
+            ]
+        ):
             p.pulse(channel, name, t=tick / 430.08)
 
-    prog, env = program(body, initialize, reps=1, readout_length=10 / 307.2, trigger_time=14 / 430.08, routes=((0, 0), (1, 0)) if multiple_routes else ((0, 0),))
+    prog, env = program(
+        body,
+        initialize,
+        reps=1,
+        readout_length=10 / 307.2,
+        trigger_time=14 / 430.08,
+        routes=((0, 0), (1, 0)) if multiple_routes else ((0, 0),),
+    )
     read = request(prog, env).materialize_point(0).readouts[0]
     assert read.generator_channels == ((1,) if multiple_routes else (0,))
     assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)

@@ -336,11 +336,7 @@ def _validate_branch(
     """
 
     def effects(first: int, last: int) -> list[DecodedInstruction]:
-        return [
-            r
-            for r in records[first:last]
-            if isinstance(r.instruction, BaseInst)
-        ]
+        return [r for r in records[first:last] if isinstance(r.instruction, BaseInst)]
 
     def fail(record: DecodedInstruction) -> NoReturn:
         raise ValueError(
