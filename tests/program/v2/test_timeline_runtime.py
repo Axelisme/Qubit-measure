@@ -166,6 +166,32 @@ def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait
         assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0]
 
 
+def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 1)
+            self.add_reg("duration")
+            self.add_dmem([40])
+            self.declare_readout(0, length=4 / 307.2)
+
+        def _body(self, cfg):
+            self.read_dmem("duration", 0)
+            with self.branch(by="scan", align_timeline=False) as branch, branch.case(0):
+                self.fork("default", into="local")
+                self.delay_timeline("duration", timeline="local", range_hint=(30, 50))
+                self.trigger([0], width=1 / 430.08, timeline="local")
+
+    with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
+        prog = Program(
+            make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08
+        )
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
+    assert wait["TIME"] == "@56"
+    (shot,) = shots(prog)
+    assert shot.body_end_cycle - shot.start_cycle == 0
+
+
 @pytest.mark.parametrize("count", [2, "duration"])
 def test_author_register_duration_in_repeat_debits_actual_iteration_advances(count):
     def initialize(prog):
