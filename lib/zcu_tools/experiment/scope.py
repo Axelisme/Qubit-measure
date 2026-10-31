@@ -357,13 +357,17 @@ class Scope:
             nodes.extend(child._walk())
         return nodes
 
-    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
+    def cancel(
+        self, scope: str, *, expected: int | None = None, reason: str | None = None
+    ) -> CancelResult:
         """Atomically select and stop a live subtree, never its parent.
 
         Select by kind, kind#N, operation:name, or exact full leaf path.
         run aliases operation outside a run root. Multiple matches refuse with
         reason ambiguous and candidate full paths. Missing/stale selectors
         refuse without stopping anything. Invalid syntax raises ValueError.
+        reason is optional opaque text forwarded to the selected stop subtree;
+        it does not change the acknowledgement's reason or selector matching.
         """
         label, sequence = parse_cancel_scope(scope, expected)
         if label == "run" and self.kind != "run":
@@ -394,7 +398,7 @@ class Scope:
                 return CancelResult(
                     False, "ambiguous", path, [node.path for node in matches]
                 )
-            matches[0].stop.set()
+            matches[0].stop.set(reason=reason)
             return CancelResult(True, "scope cancellation requested", path)
 
     def release(self) -> None:

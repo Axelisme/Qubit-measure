@@ -60,6 +60,7 @@ class StopSignal:
         self._completed_partial = False
         self._event = event if event is not None else threading.Event()
         self._error: ScheduleOutcomeError | None = None
+        self._reason: str | None = None
         self._lock = threading.RLock()
         self._parent: StopSignal | None = None
         self._children: dict[StopSignal, None] = {}
@@ -77,12 +78,27 @@ class StopSignal:
     def is_set(self) -> bool:
         return self._event.is_set()
 
-    def set(self) -> None:
-        """Set this scope and all attached descendants, never its parent."""
+    @property
+    def reason(self) -> str | None:
+        """Return the last requested stop's opaque text, or None if unspecified.
+
+        Clearing the stop bit or releasing this token does not clear the reason.
+        The framework stores and forwards this text without interpreting it.
+        """
         with self._lock:
+            return self._reason
+
+    def set(self, reason: str | None = None) -> None:
+        """Stop this subtree, storing reason verbatim; never stop its parent.
+
+        reason is optional free text. Each request replaces the stored reason
+        on this token and attached descendants, including when already stopped.
+        """
+        with self._lock:
+            self._reason = reason
             self._event.set()
             for child in self._children:
-                child.set()
+                child.set(reason=reason)
 
     def child(self, *, boundary: bool = True) -> StopSignal:
         """Attach a scope inheriting this scope's stop/error, including at birth.
@@ -98,7 +114,7 @@ class StopSignal:
             child._parent = self
             child._error = self._error
             if self.is_set():
-                child.set()
+                child.set(reason=self._reason)
             self._children[child] = None
             return child
 
