@@ -179,7 +179,7 @@ Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop �
 Echo 的共用 relax 取同一輪 participants 已接受 T1 的最大值乘 `relax_factor`，沒有接受值時用 `t1_guess_us`。兩個 member 套用相同的 `relax_min_us` 下限，來源與實際等待時間保存在 point 的同名欄位。
 Plan 保存完整 mux readout 順序、participants 原始索引、每個 tone 的已校準 x180 與獨立 x90、可省略的共用 reset，以及歷史 snapshot。
 Mux tunables 與 overnight 的欄位及意義相同。`sampling` 預設 linear，只控制 T1 的取樣分布，所有 participants 共用同一條 delay grid。
-設 false 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
+設 `sampling=decay` 時使用 native mux T1 的非均勻 cycle table，Echo 仍為線性。兩個 guess 請分別填最長的 T1 與 Echo。
 Native mux 分析逐 tone 擬合，再各自套 overnight 的 relative-error 與 normalized-residual 門檻。
 Overnight 與 mux 沿用 Coherence 的雙模型診斷，分別保存在 point 與每個 qubit 的 `t1_models/t2_models`。
 T1 的副模型為雙指數，零 detune Echo 的副模型為零中心高斯；圖上兩條曲線都標示。`max_model_window_factor` 只控制診斷 discarded，不改接受值、Echo relax 或趨勢圖。
