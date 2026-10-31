@@ -301,8 +301,8 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
-            builder.delay_timeline(delay)
-            builder.sync()
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
             timelines = [f"pi2_final_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, tone, drive, timeline in zip(

@@ -251,8 +251,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
-            builder.delay_timeline(0.5 * delay)
-            builder.sync()
+            builder.timeline_inc(0.5 * delay)
+            builder.delay_by_timeline()
             timelines = [f"pi_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, tone, timeline in zip(indices, tones, timelines, strict=True):
@@ -264,8 +264,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
-            builder.delay_timeline(0.5 * delay)
-            builder.sync()
+            builder.timeline_inc(0.5 * delay)
+            builder.delay_by_timeline()
             timelines = [f"pi2_final_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, tone, timeline in zip(indices, tones, timelines, strict=True):

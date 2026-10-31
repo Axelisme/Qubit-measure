@@ -356,8 +356,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
-            builder.delay_timeline(delay)
-            builder.sync()
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
             prog = builder.build()
