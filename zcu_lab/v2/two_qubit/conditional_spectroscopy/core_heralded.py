@@ -15,16 +15,21 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.plotting.plots import Plots
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._sums import herald_probabilities, marginal_probabilities, terminal_counts, validate_classifiers
+from .._sums import (
+    herald_probabilities,
+    marginal_probabilities,
+    terminal_counts,
+    validate_classifiers,
+)
 from .analysis import SpectroscopyAnalysis, summarize_spectra
 from .core import SpectroscopyCfg
 
