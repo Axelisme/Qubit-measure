@@ -26,17 +26,30 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert result.loop_dims == (2,)
     assert result.point_dims == ()
     assert result.sequence == 7
+    assert result.time_base.ticks_per_us == 43008
+    assert result.relax_delay_ticks == 4300
+    template = result.templates[0]
+    assert template.events[0].start_ticks.dtype == np.int64
+    assert template.events[0].start_ticks.shape == (1,)
+    assert template.events[0].duration_ticks.tolist() == [4256]
+    assert template.duration_ticks.dtype == np.int64
+    assert template.readouts[0].trigger_ticks.dtype == np.int64
+    assert template.readouts[0].trigger_ticks.shape == (1, 1)
+    assert template.readouts[0].sample_period_ticks == 140
+    assert point.time_base == result.time_base
     (event,) = point.events
     assert event.source == "drive"
-    assert event.start_us == 0
-    assert event.duration_us == pytest.approx(38 / 384)
+    assert event.start_ticks == 0
+    assert event.duration_ticks == 4256
+    assert event.phase_reference_ticks == 0
     assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
     assert event.phase_deg == pytest.approx(30, abs=1e-5)
     assert event.gain == pytest.approx(-0.25, abs=1 / 32766)
     (read,) = point.readouts
     assert read.gen_ch == 0
     assert read.samples == 61
-    assert read.trigger_us == (0,)
+    assert read.trigger_ticks == (0,)
+    assert read.sample_period_ticks == 140
     assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
     assert env.soc.binding.last_request is None
 
