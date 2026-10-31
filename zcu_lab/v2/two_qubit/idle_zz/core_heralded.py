@@ -162,8 +162,8 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
         ]
         for dc_index, dc_value in enumerate(data.dc_values):
-            fig, axes = plots.subplots(f"herald_{dc_index}", ncols=2, figsize=(12, 5))
-            for branch, ax in enumerate(axes):
+            for branch in range(2):
+                fig, ax = plots.subplots(f"herald_{dc_index}_{branch}", figsize=(9, 5))
                 for outcome, label in enumerate(labels):
                     ax.plot(
                         data.delays,
@@ -177,6 +177,6 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     ylim=(0, 1),
                 )
                 ax.legend()
-            fig.suptitle("(g,g) is pass fraction, not ground-state purity")
-            fig.tight_layout()
+                fig.suptitle("(g,g) is pass fraction, not ground-state purity")
+                fig.tight_layout()
         return IdleZZHeraldedAnalysis(terminal, matrix, matrix[..., 0, 0])

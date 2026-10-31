@@ -24,4 +24,3 @@ Sums 是 float64 `DC × 2 branches × delay × 3 × 3 × 3 × 3` 原始計數。
 
 Terminal 分析回傳與普通版相同的 magnitude、signed frequency、covariance error、fit_quality、ζ 與原因。外層分析另有 herald_matrix 與 pass_fraction。ζ 仍是 `f_Xπ − f_I`，不宣稱純 ZZ，也不寫回 calibration。Analyze 只讀保存的 cfg，不查目前 Form 或 library。
 
-完整 run/save/restore/analyze、roundtrip 與看圖留給後續整合驗收。

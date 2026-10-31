@@ -46,4 +46,4 @@ Result 的 sums 是 float64 `DC × 2 branches × delay × 3 × 3` 原始計數�
 
 Save 保存 sums、全部座標與本次 cfg。Native Load 不改目前表單。Analyze 只用所載 cfg，不用目前 library；缺 cfg 時拒絕分析。普通版 cfg schema 為 4.0，target 的舊大寫值不作相容轉換。舊 raw-IQ 檔缺少 sums 時明確報錯。
 
-本實驗不寫回 calibration，也不自動調整 detune 或 DC。Run/save/restore/analyze 與圖形驗收由後續整合驗收執行。
+本實驗不寫回 calibration，也不自動調整 detune 或 DC。
