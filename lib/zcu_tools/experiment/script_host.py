@@ -20,10 +20,9 @@ from uuid import uuid4
 from pydantic import BaseModel
 from qick import QickConfig
 
+from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.device import DeviceMapping
 from zcu_tools.plotting.plots import Plots
-
-from zcu_tools.core.script_protocol import Answer, Question
 
 from .scope import Scope, ScriptCancelled, parse_cancel_scope
 from .stop_signal import CancelResult

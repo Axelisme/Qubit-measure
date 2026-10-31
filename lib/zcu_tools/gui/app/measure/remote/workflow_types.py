@@ -4,7 +4,6 @@ from typing import Literal, TypedDict
 
 from pydantic import JsonValue
 
-
 from zcu_tools.experiment.workflows import CommittedRecord, OperationFacts, RunStatus
 from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
@@ -121,7 +120,6 @@ def project_operation(operation: OperationFacts) -> OperationReply:
         "attempt": operation.attempt,
         "started_at": operation.started_at.isoformat(),
         "finished_at": operation.finished_at.isoformat(),
-
         "outcome": operation.outcome,
         "reason": operation.reason,
         "stopped": operation.stopped,

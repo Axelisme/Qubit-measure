@@ -13,7 +13,11 @@ import pytest
     ("statement", "target", "allowed"),
     [
         ("from zcu_tools.experiment.run_core import run_core", "run_core", True),
-        ("from zcu_tools.experiment.run_core import run_core as acquire", "acquire", True),
+        (
+            "from zcu_tools.experiment.run_core import run_core as acquire",
+            "acquire",
+            True,
+        ),
         ("import zcu_tools.experiment.run_core as core", "core.run_core", True),
         ("from zcu_tools.experiment.run_core import other", "other", False),
         ("from external import run_core", "run_core", False),
@@ -24,8 +28,12 @@ import pytest
 def test_only_exact_core_adapter_is_an_external_await_boundary(
     statement: str, target: str, allowed: bool
 ) -> None:
-    source = f"{statement}\nasync def step(scope):\n    await {target}(scope, core, cfg)\n"
-    violations = check_script_awaits.check_sources({"zcu_lab/workflows/demo.py": source})
+    source = (
+        f"{statement}\nasync def step(scope):\n    await {target}(scope, core, cfg)\n"
+    )
+    violations = check_script_awaits.check_sources(
+        {"zcu_lab/workflows/demo.py": source}
+    )
     assert (len(violations) == 0) is allowed
 
 

@@ -57,7 +57,8 @@ def test_explicit_completion_and_core_metadata_survive_native_save(
     assert content.finished_at == "2026-10-22T01:02:05+00:00"
     assert content.provenance == history.provenance
     assert source.metadata == {
-        "device_snapshot": {"flux": {"value": 0.125}}, "author": "kept"
+        "device_snapshot": {"flux": {"value": 0.125}},
+        "author": "kept",
     }
     path = tmp_path / "measurement.h5"
     save_run(record, path, spec=core.AXES_SPEC)
@@ -73,15 +74,22 @@ def test_record_metadata_requires_explicit_completion() -> None:
     cfg = SavingCfg()
     source = RunRecord(cfg, SavingCore().run(cfg, context=None))
     facts = workflows.OperationFacts(
-        kind="call", iteration=0, attempt=1,
+        kind="call",
+        iteration=0,
+        attempt=1,
         started_at=datetime(2026, 10, 22, tzinfo=UTC),
         finished_at=datetime(2026, 10, 22, tzinfo=UTC),
-        outcome="completed", reason=None, stopped=False,
+        outcome="completed",
+        reason=None,
+        stopped=False,
     )
-    assemble: Callable[..., object] = workflows.record_with_metadata
-    with pytest.raises(TypeError, match="completion"):
+    def omit_completion(assemble: Callable[..., object]) -> None:
         assemble(
             workflows.Completed(source, facts),
             identity=workflows.RunIdentity("run", history.provenance),
-            experiment_tag="synthetic/trace", snapshot=history.snapshot,
+            experiment_tag="synthetic/trace",
+            snapshot=history.snapshot,
         )
+
+    with pytest.raises(TypeError, match="completion"):
+        omit_completion(workflows.record_with_metadata)

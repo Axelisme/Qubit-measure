@@ -19,7 +19,6 @@ def test_record_reply_preserves_executor_operations_and_names() -> None:
         attempt=1,
         started_at=timestamp,
         finished_at=timestamp,
-
         outcome="completed",
         reason=None,
         stopped=False,
@@ -45,7 +44,6 @@ def test_record_reply_preserves_executor_operations_and_names() -> None:
         "attempt": 1,
         "started_at": "2026-10-25T00:00:00+00:00",
         "finished_at": "2026-10-25T00:00:00+00:00",
-
         "outcome": "completed",
         "reason": None,
         "stopped": False,

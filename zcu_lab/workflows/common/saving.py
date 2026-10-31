@@ -33,7 +33,10 @@ def save_native[Cfg: ConfigBase, Result](
     metadata, collision and I/O errors propagate; no overwrite or retry occurs.
     """
     record = record_with_metadata(
-        source, identity=identity, experiment_tag=spec.tag, snapshot=snapshot,
+        source,
+        identity=identity,
+        experiment_tag=spec.tag,
+        snapshot=snapshot,
         completion=completion,
     )
     save_run(record, destination, spec=spec)

@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.scope import RootKind
 
 
-
 def test_stop_reason_follows_scope_cancellation_and_late_children() -> None:
     root = experiment.Scope("run")
     assert root.stop.reason is None

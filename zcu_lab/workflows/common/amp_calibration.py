@@ -8,8 +8,8 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
-from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.run_core import run_core
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg

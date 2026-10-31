@@ -12,9 +12,9 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.plotting.plots import NonPresentingHost
 

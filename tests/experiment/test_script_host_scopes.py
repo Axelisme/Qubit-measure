@@ -105,7 +105,6 @@ def test_stale_segment_and_expected_refuse_current_acquire_without_stopping_pare
     host.run(script())
 
 
-
 def test_idle_parent_cancel_is_inherited_only_by_its_later_operations() -> None:
     host = ScriptHost(Scope("workflow", name="test"))
     completions: list[CallResult[bool]] = []

@@ -71,7 +71,6 @@ def test_completed_facts_match_journal_and_commit_scope(
 ) -> None:
     delivered: list[object] = []
 
-
     async def operation(env: Scope) -> None:
         if kind == "call":
             delivered.append(await env.call(lambda ctx: 5))

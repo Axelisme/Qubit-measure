@@ -276,7 +276,8 @@ class WorkflowEnv[C](Scope):
                     soc=self._ports.soc,
                     soccfg=self._ports.soccfg,
                     devices=(
-                        None if self._ports.devices is None
+                        None
+                        if self._ports.devices is None
                         else self._ports.devices.get_connected_devices()
                     ),
                     plots=plots,
@@ -286,7 +287,9 @@ class WorkflowEnv[C](Scope):
                 try:
                     plots.finish()
                 except Exception as cleanup_error:
-                    _logger.exception("Failed to finish operation plots after callback failure")
+                    _logger.exception(
+                        "Failed to finish operation plots after callback failure"
+                    )
                     error.add_note(
                         f"Operation plot finish failed: {type(cleanup_error).__name__}: {cleanup_error}"
                     )

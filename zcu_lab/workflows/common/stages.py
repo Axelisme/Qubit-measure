@@ -5,9 +5,9 @@ from typing import Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
-from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.operations import RunFunction
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import Plots
 

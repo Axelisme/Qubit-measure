@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
-from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.run_core import run_core
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg

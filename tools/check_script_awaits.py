@@ -158,10 +158,10 @@ class _AwaitChecker(ast.NodeVisitor):
         resolved = _imported_target(name, self.bindings)
         if _forbidden(resolved):
             return False
-        if resolved == "zcu_tools.experiment.run_core.run_core":
-            return True
         head, separator, _rest = name.partition(".")
-        if separator and head in _RECEIVERS:
+        if resolved == "zcu_tools.experiment.run_core.run_core" or (
+            separator and head in _RECEIVERS
+        ):
             return True
         if head in self.bindings:
             return _is_definition(resolved, self.definitions, self.module_bindings)

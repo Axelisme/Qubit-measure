@@ -41,5 +41,9 @@ def record_with_metadata[Cfg: ConfigBase, Result](
         provenance=identity.provenance,
     )
     document = dict(completed.value.metadata)
-    document.update(metadata.model_dump(mode="json", exclude={"device_snapshot", "parameter_snapshot"}))
+    document.update(
+        metadata.model_dump(
+            mode="json", exclude={"device_snapshot", "parameter_snapshot"}
+        )
+    )
     return replace(completed.value, metadata=document)

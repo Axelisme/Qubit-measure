@@ -13,6 +13,11 @@ from .scope import Scope
 from .script_host import CallContext
 
 
+def _validate_cfg(cfg: object) -> None:
+    if not isinstance(cfg, ConfigBase):
+        raise TypeError("run_core cfg must be a ConfigBase instance")
+
+
 async def run_core[Cfg: ConfigBase, Result](
     scope: Scope,
     experiment: RunFunction[Cfg, Result],
@@ -35,8 +40,7 @@ async def run_core[Cfg: ConfigBase, Result](
     plots cleanup and completion facts. Child stops deliver the core's partial
     value; root stop raises ScriptCancelled after drain and fact recording.
     """
-    if not isinstance(cfg, ConfigBase):
-        raise TypeError("run_core cfg must be a ConfigBase instance")
+    _validate_cfg(cfg)
     captured = deepcopy(cfg)
 
     def invoke(ctx: CallContext) -> RunRecord[Cfg, Result]:
@@ -49,8 +53,11 @@ async def run_core[Cfg: ConfigBase, Result](
         if ctx.plots is None:
             raise MissingCapability("plots")
         context = RunContext(
-            soc=ctx.soc, soccfg=ctx.soccfg, devices=ctx.devices,
-            plots=ctx.plots, scope=ctx.scope,
+            soc=ctx.soc,
+            soccfg=ctx.soccfg,
+            devices=ctx.devices,
+            plots=ctx.plots,
+            scope=ctx.scope,
         )
         snapshot: JsonObject = dict(capture_device_snapshot(context.devices))
         result = experiment(captured, context=context)

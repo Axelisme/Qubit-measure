@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 from zcu_tools.plotting import LiveUpdate
@@ -25,7 +25,9 @@ from ._engine_fakes import (
 )
 
 
-def test_call_injects_resources_and_finishes_its_operation_plots(tmp_path: Path) -> None:
+def test_call_injects_resources_and_finishes_its_operation_plots(
+    tmp_path: Path,
+) -> None:
     host = Presentation()
     rig = Rig(tmp_path, native=True, plot_host=host)
     handles: list[LiveUpdate[TraceData]] = []
