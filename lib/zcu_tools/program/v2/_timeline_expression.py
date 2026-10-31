@@ -38,7 +38,9 @@ class CycleVariable:
     known loop coordinates must survive later arithmetic; these are not actual
     point values and never authorize an exact-slack guard. reconstruction retains
     exact integer producer algebra when a lookup has an affine declared mapping;
-    None means that no such reconstruction has been established.
+    None means that no such reconstruction has been established. selection retains
+    a declared lookup mapping and its immutable index algebra for exact runtime
+    conditional selection without a new data-memory table.
     """
 
     name: str
@@ -48,6 +50,7 @@ class CycleVariable:
     points: tuple[int, ...] | None = None
     interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
     reconstruction: "TimeExpression | None" = None
+    selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
 
 
 @dataclass(frozen=True)

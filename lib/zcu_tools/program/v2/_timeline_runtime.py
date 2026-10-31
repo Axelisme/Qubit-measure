@@ -303,7 +303,7 @@ def lookup_expression(
         upper,
         tuple(axes.items()),
         tuple(int(v) for v in selected.flat),
-        reconstruction=reconstruction,
+        reconstruction=reconstruction, selection=(index, values),
     )
     return LinearTime(terms=((variable, 1),))
 
@@ -461,6 +461,13 @@ class RuntimeMath(TimedMacro):
                 term = inputs[variable]
             elif variable.reconstruction is not None:
                 term = self.reconstruct(variable.reconstruction, inputs)
+            elif variable.selection is not None:
+                index, words = variable.selection
+                selected = self.reconstruct(index, inputs)
+                term = self.selected_end(
+                    selected.register, tuple(word / get_fclk(self.prog) for word in words),
+                    selector_expression=index,
+                )
             elif len(variable.axes) == 1 and variable.points is None:
                 axis, count = variable.axes[0]
                 term = self.cycles(
@@ -628,7 +635,8 @@ class RuntimeMath(TimedMacro):
         return max(0, *(a - b for a, b in zip(physical, aggregate, strict=True)))
 
     def selected_end(
-        self, selector: str, values: tuple[float | QickParam, ...]
+        self, selector: str, values: tuple[float | QickParam, ...], *,
+        selector_expression: TimeExpression | None = None,
     ) -> RuntimeEnd:
         """Select statically ceiled candidate offsets without allocating time data.
 
@@ -682,7 +690,7 @@ class RuntimeMath(TimedMacro):
             lower,
             upper,
             expression=select_time(
-                source_expression(self.prog, selector),
+                source_expression(self.prog, selector) if selector_expression is None else selector_expression,
                 tuple(time_expression(self.prog, value) for value in candidates),
             ),
         )
