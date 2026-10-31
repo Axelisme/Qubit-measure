@@ -315,7 +315,7 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
             inst = replace(records[index].instruction, label=LabelRef("_timeline_branch_0_end"))
         else:
             index = start + 1 if defect == "effect" else end - 1
-            inst = WaitInst.from_dict({"CMD": "WAIT", "TIME": "@0"})
+            inst = WaitInst(c_op="time")
         records[index] = CompiledRecord(inst, records[index].p_addr)
         return CompiledStream(tuple(records))
 
@@ -325,7 +325,11 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
                 with branch.case():
                     p.pulse(0, "p", timeline="default")
 
-    prog, env = program(body, lambda p: p.add_loop("scan", 2), stream_transform=transform)
+    def triggered_body(p):
+        p.trigger([0], t=0)
+        body(p)
+
+    prog, env = program(triggered_body, lambda p: p.add_loop("scan", 2), trigger_time=None, stream_transform=transform)
     instruction = {"selector": "TestInst", "target": "RegWriteInst", "effect": "WaitInst", "tail-effect": "WaitInst"}[defect]
     with pytest.raises(ValueError, match=rf"{instruction}.*preopt.*loops=.*branch dispatch"):
         request(prog, env)
