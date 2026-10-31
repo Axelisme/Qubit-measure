@@ -1155,7 +1155,7 @@ class TimelineBranch(Macro):
         finite = [limit for limit in limits if limit is not None]
         bounded = len(finite) == len(limits)
         merged = RuntimeEnd(
-            prog.add_reg(),
+            self.result_math.allocate(),
             round(min(lo for lo, _ in finite) * get_fclk(prog)) if bounded else None,
             round(max(hi for _, hi in finite) * get_fclk(prog)) if bounded else None,
             expression=self.book.selected_expression(prog, self.by, values),
