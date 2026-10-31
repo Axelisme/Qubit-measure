@@ -17,7 +17,12 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .core_heralded import LocalZHeraldedAnalysis, LocalZHeraldedCfg, LocalZHeraldedExp, LocalZHeraldedResult
+from .core_heralded import (
+    LocalZHeraldedAnalysis,
+    LocalZHeraldedCfg,
+    LocalZHeraldedExp,
+    LocalZHeraldedResult,
+)
 from .form import phase_form
 
 LocalZHeraldedRun: TypeAlias = RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult]

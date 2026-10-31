@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 from ._sums import marginal_probabilities
 
+
 @dataclass(frozen=True)
 class QuadraturePhase:
     """GE-normalized contrast and logical Bloch phase in degrees, wrapped [-180,180).
