@@ -114,7 +114,10 @@ def test_author_register_overwrite_after_constant_accepts_optional_hint(producer
         prog.delay_timeline("duration", range_hint=hint)
         prog.pulse(0, "p0", timeline="default")
 
-    result = shots(program(body, initialize=lambda prog: prog.add_dmem([6])))
+    def initialize(prog):
+        prog.add_dmem([6])
+
+    result = shots(program(body, initialize=initialize))
     assert [waves(s) for s in result] == [[6]] * 3
     assert [s.body_end_cycle - s.start_cycle for s in result] == [34] * 3
 
