@@ -61,6 +61,45 @@ def test_signal_writes_accept_exact_array_and_scalar_shapes() -> None:
     np.testing.assert_array_equal(updates[-1], [[5.0, 6.0], [7.0, 4.0]])
 
 
+@pytest.mark.parametrize("use_step", [False, True], ids=["root", "child"])
+@pytest.mark.parametrize(
+    "value",
+    [7.0, np.array(7.0), np.array([7.0]), np.array([[7.0, 8.0]])],
+    ids=["number", "scalar-array", "length-one", "extra-axis"],
+)
+def test_schedule_array_writes_reject_shape_mismatch_without_update(
+    use_step: bool, value: Any
+) -> None:
+    storage = np.array([1.0, 2.0])
+    buffer = RootUpdateRecordingBuffer({"signals": storage} if use_step else storage)
+
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        target = sched.child("signals") if use_step else sched
+        with pytest.raises(ValueError, match="shape") as error:
+            target.set_data(value, flush=True)
+
+        assert "target shape=(2,)" in str(error.value)
+        assert f"value shape={np.shape(value)}" in str(error.value)
+        np.testing.assert_array_equal(storage, [1.0, 2.0])
+        assert buffer.calls == []
+
+
+@pytest.mark.parametrize("use_step", [False, True], ids=["root", "child"])
+@pytest.mark.parametrize("scalar", [False, True], ids=["array", "scalar"])
+def test_schedule_array_writes_accept_exact_shapes(use_step: bool, scalar: bool) -> None:
+    storage = np.full(() if scalar else (2,), np.nan)
+    buffer = RootUpdateRecordingBuffer({"signals": storage} if use_step else storage)
+    value = 7.0 if scalar else np.array([7.0, 8.0])
+
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        target = sched.child("signals") if use_step else sched
+        target.set_data(value, flush=True)
+
+        np.testing.assert_array_equal(storage, value)
+        assert len(buffer.calls) == 1
+        assert buffer.calls[0][1] is True
+
+
 def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
     root = {"task": {"signals": np.full((1,), np.nan)}}
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
