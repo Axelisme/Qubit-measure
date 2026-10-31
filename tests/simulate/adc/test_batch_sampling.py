@@ -63,7 +63,7 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
     batches = physical_batches(rates=np.array([[0.0, 0.04], [0.02, 0.0]]))
     original = batches[1]
     receiver = adc.Receiver(
-        iq_offset=np.array([11.0, -7.0]),
+        offset=np.array([11.0, -7.0]),
         noise_covariance=np.array([[4.0, 0.5], [0.5, 2.0]]),
     )
     empty = replace(
@@ -108,7 +108,7 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
     np.testing.assert_array_equal(actual[1], expected[1])
     observations = actual[1].reshape(-1, 2)
     count = 4 if mode == "integrated" else 1
-    np.testing.assert_allclose(observations.mean(axis=0), count * receiver.iq_offset, atol=0.08)
+    np.testing.assert_allclose(observations.mean(axis=0), count * receiver.offset, atol=0.08)
     # Integrated integer rounding adds at most its 1/12 variance term.
     np.testing.assert_allclose(
         np.cov(observations.T), count * receiver.noise_covariance, atol=0.25
