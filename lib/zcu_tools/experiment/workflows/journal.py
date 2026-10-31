@@ -111,35 +111,10 @@ class ControlRequest:
 
 
 @dataclass(frozen=True)
-class PauseRequested(ControlRequest):
-    """Pause intent, tagged pause_requested; not proof of operation drain."""
-
-    kind: Literal["pause_requested"] = field(default="pause_requested", init=False)
-
-
-@dataclass(frozen=True)
 class StopRequested(ControlRequest):
     """Explicit Stop intent, tagged stop_requested; author cleanup may still run."""
 
     kind: Literal["stop_requested"] = field(default="stop_requested", init=False)
-
-
-@dataclass(frozen=True)
-class Paused:
-    """Reached suspension boundary: current call_seq and published commit_seq."""
-
-    call_seq: int | None
-    commit_seq: int
-    kind: Literal["paused"] = field(default="paused", init=False)
-
-
-@dataclass(frozen=True)
-class Resumed:
-    """Accepted continuation, retaining commit_seq and latest tunables revision."""
-
-    commit_seq: int
-    revision: int
-    kind: Literal["resumed"] = field(default="resumed", init=False)
 
 
 @dataclass(frozen=True)
@@ -166,9 +141,6 @@ type JournalPayload = (
     | QuestionAnswered
     | DeviceSetup
     | TunablesChanged
-    | PauseRequested
     | StopRequested
-    | Paused
-    | Resumed
     | RunEnded
 )

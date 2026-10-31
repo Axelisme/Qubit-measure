@@ -470,7 +470,7 @@ def test_cancel_run_stops_selected_flux_before_first_write():
     assert dev.get_value() == 0.0
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == "cancelled"
+    assert outcome.status == "finished"
 
 
 def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
@@ -520,7 +520,7 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     assert not gate.has_active(OperationKind.RUN)
 
 
-def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
+def test_stopped_run_with_partial_result_reports_finished_and_keeps_result():
     state, tab_id, adapter = make_state()
     svc, _gate, bg, _ = make_run_service(state)
     svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
@@ -532,7 +532,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     bg.last_on_done(partial)
 
     payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "cancelled"
+    assert payload.outcome == "finished"
     assert state.get_tab(tab_id).run.result is partial
     assert not state.is_tab_running(tab_id)
 
@@ -568,22 +568,7 @@ def test_bg_done_without_cancel_reports_finished():
     assert state.get_tab(tab_id).run.result is result
 
 
-def test_bg_done_after_cancel_reports_cancelled_with_partial():
-    state, tab_id, adapter = make_state()
-    svc, _gate, bg, _ = make_run_service(state)
-    svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
-
-    svc.cancel_run()  # sets the captured stop_event
-    partial = RunRecord(None, object())
-    assert bg.last_on_done is not None
-    bg.last_on_done(partial)
-
-    payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "cancelled"
-    assert state.get_tab(tab_id).run.result is partial
-
-
-def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
+def test_core_stop_reset_preserves_frontend_stop_request():
     state, tab_id, adapter = make_state()
     partial = RunRecord(None, object())
 
@@ -599,11 +584,12 @@ def test_bg_done_after_cancel_and_retry_reset_reports_cancelled():
     bg.run_work()
 
     payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "cancelled"
+    assert payload.outcome == "finished"
     assert state.get_tab(tab_id).run.result is partial
+    assert state.get_tab(tab_id).run.stop_requested
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == "cancelled"
+    assert outcome.status == "finished"
 
 
 def test_bg_error_without_cancel_reports_failed():
@@ -638,9 +624,7 @@ def test_frontend_stop_preserves_core_return_or_failure(requested: bool, fails: 
     background.run_work()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == (
-        "failed" if fails else "cancelled" if requested else "finished"
-    )
+    assert outcome.status == ("failed" if fails else "finished")
     pane = state.get_tab(tab_id).run
     assert pane.result is (None if fails else record)
     assert pane.stop_requested is requested

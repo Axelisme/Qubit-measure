@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-01, neutral run metadata
+**Last updated:** 2026-11-01, neutral run metadata and GUI run stop terminal
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -290,9 +290,9 @@ imports the lab registry.
 
 `Controller.workflow_control()` returns the headless facet. Each `open(name)`
 creates independent plan/tunables drafts, including repeated names. `tab_id`
-addresses a draft owner; `run_id` addresses its native run. Start, Pause, Resume,
-Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
-Pending and paused runs refuse tab close. Closing the last idle workflow tab
+addresses a draft owner; `run_id` addresses its native run. Start, Stop and Apply
+use the same runner, operation and RUN lease as experiment tabs.
+Busy runs, including Ask waits, refuse tab close. Closing the last idle workflow tab
 does not drain services or disconnect hardware.
 
 Qt workflow panes display these owners and forward commands. A busy workflow's
@@ -300,10 +300,9 @@ local Stop remains available under Remote control. It reclaims locked Local befo
 requesting Stop through the same facet; other mutations still require the holder.
 Tunables Discard restores the latest accepted input and clears local invalid text.
 Before Start, it restores the captured form base. It is enabled only for a changed
-draft while editing is allowed. Running, pausing and paused runs allow tunables
-edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
-Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
-Resume or Stop hides the hint. A new Ask still selects its question page.
+draft while editing is allowed. Running and waiting runs allow tunables edits
+and Apply; stopping locks edits, Apply and Discard. A new Ask selects its
+question page. Waiting means an Ask is awaiting its answer.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
@@ -313,12 +312,12 @@ defaults. Tunables Apply with an empty batch submits the current shared draft.
 
 `WorkflowAttachment(script=...)` pairs an async workflow with its native plan,
 live tunables and optional summary types. One Runner worker calls Engine.execute
-through terminal completion. Pause and Ask retain that worker, operation,
-progress and RUN lease. Resume and Answer signal it without another submission.
-Running and paused Apply both publish a complete tunables model and a new revision.
+through terminal completion. Ask retains that worker, operation, progress and
+RUN lease. Answer signals it without another submission.
+Running and waiting Apply both publish a complete tunables model and a new revision.
 The next tun.current read sees it; already captured operation cfg stays unchanged.
-Pause interrupts acquisition and retries only a stale partial after Resume, not
-an entire point. A naturally completed result waits for Resume without retry.
+Each operation calls its callable once. Cooperative child cancellation delivers
+its returned value. Root Stop records completion facts, then raises ScriptCancelled.
 
 `pending_question` returns the detached
 `{request_id, question_type, question, answer_schema}` envelope while that worker
@@ -373,7 +372,9 @@ RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存
 `stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
 Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
 New Run 或非 acquisition replacement 重設為 False。
-Core 回傳就發布 record，core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
+Core 正常回傳就發布 record，GUI 顯示 finished，operation handle 也回 finished。
+Stop、root 與子孫 scope 的取消都不改這個 terminal。
+Core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
 RunMetadata.completion 的 stopped 表示 core 回傳前前端發出過停止請求，不判定資料是否完整。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。

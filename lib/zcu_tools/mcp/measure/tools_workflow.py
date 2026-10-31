@@ -118,20 +118,6 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
             },
             ("tab_id", "run_id"),
         ),
-        "workflow_pause": _tool(
-            ctx,
-            "workflow.pause",
-            "Request cooperative Pause by native run_id, retaining the operation and RUN lease.",
-            {"run_id": _STRING},
-            ("run_id",),
-        ),
-        "workflow_resume": _tool(
-            ctx,
-            "workflow.resume",
-            "Resume the same native run, operation and lease in the worker.",
-            {"run_id": _STRING},
-            ("run_id",),
-        ),
         "workflow_stop": _tool(
             ctx,
             "workflow.stop",
@@ -200,7 +186,7 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
         "workflow_answer": _tool(
             ctx,
             "workflow.answer",
-            "Answer the exact pending_question.request_id from workflow_status using its answer_schema. Returns the original pending handle; execution stays on the same worker operation/RUN lease until terminal delivery. Invalid answers leave the question paused for retry.",
+            "Answer the exact pending_question.request_id from workflow_status using its answer_schema. Returns the original pending handle; execution stays on the same worker operation/RUN lease until terminal delivery. Invalid answers leave the question waiting for retry.",
             {"run_id": _STRING, "request_id": _STRING, "answer": {}},
             ("run_id", "request_id", "answer"),
         ),

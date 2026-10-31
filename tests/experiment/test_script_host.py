@@ -7,16 +7,12 @@ import importlib
 import importlib.util
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
-from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.stop_signal import StopSignal
-
-if TYPE_CHECKING:
-    from zcu_tools.experiment.script_host import CallResult
 
 
 class Approval(Answer):
@@ -190,76 +186,6 @@ def test_close_drains_question_and_preserves_cancelled_cleanup_error() -> None:
     assert cleaned.is_set()
     assert host.status == "cancelled"
     assert str(host.error) == "cleanup failed"
-
-
-def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() -> None:
-    module = host_module()
-    host = module.ScriptHost(Scope("workflow", name="test"))
-    entered = Event()
-    delivered = Event()
-    attempts: list[CallResult[int | bool]] = []
-
-    def blocking(ctx) -> int:
-        entered.set()
-        assert ctx.scope.stop.event.wait(3)
-        return 11
-
-    async def script() -> int:
-        first = await host.call(blocking)
-        attempts.append(first)
-        delivered.set()
-        await host.wait_until_resumed()
-        second = await host.call(lambda ctx: ctx.scope.stop.is_set())
-        attempts.append(second)
-        return second.epoch
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(lambda: host.run(script()))
-        try:
-            assert entered.wait(3)
-            host.pause()
-            assert delivered.wait(3)
-            # A second acknowledged pause orders before the gate can release.
-            host.pause()
-            assert host.epoch == 2
-            host.resume()
-            assert future.result(timeout=3) == 2
-        finally:
-            if not future.done():
-                host.close()
-    assert [(item.result, item.epoch, item.stop_requested) for item in attempts] == [
-        (11, 0, True),
-        (False, 2, False),
-    ]
-
-
-def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> None:
-    module = host_module()
-    changed = Event()
-    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
-    completions: list[CallResult[int]] = []
-
-    async def script() -> None:
-        completions.append(await host.call(lambda ctx: 19))
-        await host.ask(Confirm(evidence="natural completion"))
-        await host.wait_until_resumed()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(lambda: host.run(script()))
-        try:
-            assert changed.wait(3)
-            host.pause()
-            pending = host.pending_question
-            assert pending is not None
-            host.answer(pending.request_id, {"accepted": True})
-            host.resume()
-            future.result(timeout=3)
-        finally:
-            if not future.done():
-                host.close()
-    assert [(item.result, item.epoch, item.stop_requested) for item in completions] == [
-        (19, 0, False)
-    ]
 
 
 def test_public_control_serializes_on_worker_returns_value_and_transports_errors() -> (

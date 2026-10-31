@@ -63,7 +63,8 @@ class Clock(Protocol):
         """Return when the aware target is reached or cancellation is requested.
 
         A past target returns immediately. Do not raise a control exception for
-        cancellation; the engine decides whether to discard the step.
+        cancellation. The host records completion, then raises ScriptCancelled
+        for root cancellation; child cancellation delivers the return value.
         """
         ...
 

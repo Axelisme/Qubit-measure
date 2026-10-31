@@ -247,8 +247,8 @@ async def coherence_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workf
     setpoint. After commit, append a sample to the captured entry's record table
     when result_path is set; append failure propagates without undoing the commit.
     Each accepted lifetime updates only its own delay-grid history.
-    Unexpected adapter/writer/fit/plot errors propagate. Pause resumes the pending
-    operation, not the whole point. Tunables reads use tun.current.
+    Unexpected adapter/writer/fit/plot errors propagate. Each operation runs once.
+    Tunables reads use tun.current.
     Calibration returns its aggregate only on normal completion. An unexpected
     Rabi exception after frequency success leaves frequency's h5 on disk but
     no frequency result in this point record; the exception still fails the run.
