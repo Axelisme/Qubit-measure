@@ -78,11 +78,6 @@ class ProducerBounds:
         ] = {}
         self.selected: dict[str, TableSelection] = {}
         self.signed_sources: set[str] = set()
-        self.author_writes: set[str] = set()
-
-    def author_source(self, name: str) -> bool:
-        """Return whether a register has no certified range or arbitrary writes."""
-        return name in self.author_writes or name not in self.ranges
 
     def register_selection(
         self, register: str, selection: TableSelection, writers: tuple[Macro, ...]
@@ -109,8 +104,6 @@ class ProducerBounds:
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
         # Subclasses can replace translate/expand, so their src is not a proof.
-        if isinstance(getattr(macro, "dst", None), str) and type(macro) is not WriteReg:
-            self.author_writes.add(macro.dst)
         if type(macro) is WriteReg and isinstance(macro.src, Integral):
             value = int(macro.src)
             self.register(macro.dst, CycleBounds(value, value), (macro,), ())

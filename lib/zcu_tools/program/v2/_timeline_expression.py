@@ -28,8 +28,7 @@ class CycleVariable:
     """One integer-cycle runtime value, identified by object identity.
 
     name identifies the producer for diagnostics, not equality. minimum and
-    maximum are inclusive signed-cycle bounds, or both None for an author-owned
-    runtime value with no compile-time bounds. Separate writes to a recycled
+    maximum are inclusive signed-cycle bounds. Separate writes to a recycled
     register must use separate variables. axes lists the legal loop dimensions
     in row-major order. points holds exact values on that grid. With one axis
     and no points, the value is that loop's zero-based index. Empty axes and no
@@ -40,8 +39,8 @@ class CycleVariable:
     """
 
     name: str
-    minimum: int | None
-    maximum: int | None
+    minimum: int
+    maximum: int
     axes: tuple[tuple[str, int], ...] = ()
     points: tuple[int, ...] | None = None
     interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
@@ -88,17 +87,10 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
         )
     lower = upper = value.constant
     for variable, coefficient in value.terms:
-        if variable.minimum is None or variable.maximum is None:
-            raise ValueError("runtime-only time has no compile-time bounds")
         endpoints = coefficient * variable.minimum, coefficient * variable.maximum
         lower += min(endpoints)
         upper += max(endpoints)
     return CycleBounds(lower, upper)
-
-
-def unbounded_time(value: TimeExpression) -> bool:
-    """Return whether surviving identities lack author or producer bounds."""
-    return any(v.minimum is None or v.maximum is None for v in time_variables(value))
 
 
 def time_variables(value: TimeExpression) -> tuple[CycleVariable, ...]:
@@ -134,8 +126,6 @@ def evaluate_time(
         return result
     result = np.asarray(value.constant, dtype=np.int64)
     for variable, coefficient in value.terms:
-        if variable.minimum is None or variable.maximum is None:
-            return None
         if variable.minimum == variable.maximum:
             result = result + coefficient * variable.minimum
             continue
@@ -163,9 +153,6 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
     Algebraic constants use no Cartesian allocation. Other expressions evaluate
     only the appearing loop axes, not all of the program's sweep dimensions.
     """
-    if unbounded_time(value):
-        points = evaluate_time(value, expression_axes(value))
-        return None if points is None else CycleBounds(int(points.min()), int(points.max()))
     limits = expression_bounds(value)
     if limits.minimum == limits.maximum:
         return limits
@@ -196,8 +183,6 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
             endpoint = (
                 variable.maximum if upper == (coefficient > 0) else variable.minimum
             )
-            if endpoint is None:
-                raise ValueError("runtime-only time has no compile-time bounds")
             constant += coefficient * endpoint
     return LinearTime(constant, tuple(terms))
 
@@ -278,8 +263,6 @@ def reduce_loop_time(
     points = evaluate_time(value, axes)
     if points is not None:
         return point_time(name, remaining, reduce(points))
-    if unbounded_time(value):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
     grids = interval_arrays(value, axes)
     return interval_time(name, remaining, reduce(grids.minimum), reduce(grids.maximum))
 
@@ -330,8 +313,6 @@ def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression
     )
     if a is not None and b is not None:
         return point_time(name, axes, a * b)
-    if unbounded_time(left) or unbounded_time(right):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
     left_grids = interval_arrays(left, axes)
     right_grids = interval_arrays(right, axes)
     products = [
@@ -356,8 +337,6 @@ def select_time(
     name = ", ".join(
         sorted({v.name for value in (selector, *values) for v in time_variables(value)})
     )
-    if any(unbounded_time(value) for value in (selector, *values)):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
     grids = [interval_arrays(value, axes) for value in values]
     lower_grids = [grid.minimum for grid in grids]
     upper_grids = [grid.maximum for grid in grids]
@@ -383,10 +362,6 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         else:
             alternatives.append(value)
     unique = tuple(dict.fromkeys(alternatives))
-    if len(unique) == 1:
-        return unique[0]
-    if any(unbounded_time(value) for value in unique):
-        return TimeChoice(unique, maximum)
     limits = [expression_bounds(value) for value in unique]
     for index, limit in enumerate(limits):
         if all(

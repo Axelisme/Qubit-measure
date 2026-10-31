@@ -40,7 +40,6 @@ from ._timeline_runtime import (
     Time,
     align_end,
     known_maximum,
-    optional_time_bounds,
     source_expression,
     step_time,
     time_bounds,
@@ -194,18 +193,17 @@ class TimelineShellWait(Wait):
 
 
 class TimelineAdvance(TimedMacro):
-    def __init__(self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None):
+    def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
         super().__init__(tag=tag)
         self.book = book
         self.timeline = timeline
         self.duration = duration
-        self.range_hint = range_hint
         self.aligned = aligned
         self.event_ends: tuple[EventEnd | SelectedEventEnd, ...] = ()
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
-            duration = self.book.math.snapshot(self.book.math.source(self.duration, self.range_hint, author=True))
+            duration = self.book.math.snapshot(self.book.math.source(self.duration))
         else:
             duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
@@ -304,8 +302,7 @@ class TimelineAdvance(TimedMacro):
         if (
             isinstance(result, RuntimeEnd)
             and event.rounded
-            and (limits := optional_time_bounds(prog, duration)) is not None
-            and limits[0] >= 0
+            and time_bounds(prog, duration)[0] >= 0
         ):
             covers = [*result.covers, *event.rounded]
             for previous in event.rounded:
@@ -359,8 +356,7 @@ class TimelineSync(Delay):
             self.t_regs["t"] = self.t.register
             self.book.native_only = True
             try:
-                if self.t.minimum is not None:
-                    prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
+                prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
             finally:
                 self.book.native_only = False
             self.book.decrement(self.t)

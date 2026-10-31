@@ -19,7 +19,6 @@ from ._timeline_expression import (
     scale_time,
     select_time,
     slack_variables,
-    unbounded_time,
 )
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds
@@ -30,7 +29,6 @@ from ._timeline_runtime import (
     bounded_source_expression,
     lookup_expression,
     native_event_expression,
-    optional_time_bounds,
     projected_bounds,
     source_expression,
     time_bounds,
@@ -534,11 +532,6 @@ class TimelineBook:
                     del channels[ch]
                     if generator and time_bounds(self.math.prog, remaining)[1] <= 1e-12:
                         consumed.add(ch)
-                if not isinstance(remaining, RuntimeEnd):
-                    self.native_expressions[generator, ch] = native_event_expression(self.math.prog, remaining)
-                limits = optional_time_bounds(self.math.prog, remaining)
-                if limits is None:
-                    continue
                 self.native_timestamp(
                     self.math.prog,
                     projected_bounds(self.math.prog, remaining).maximum,
@@ -650,9 +643,6 @@ class TimelineBook:
         expression = choose_time(
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
-        if unbounded_time(expression):
-            unknown = [ch for ch in prog.ro_chs if unbounded_time(self.native_expression(prog, ch, generator=False))]
-            raise ValueError(f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending")
         exact = exact_bounds(expression)
         limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its
