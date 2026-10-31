@@ -260,6 +260,9 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
     assert restored.metadata.project() == metadata
     assert read_run_metadata(path) == metadata
     assert path.read_bytes() == before
+    resaved = tmp_path / "resaved.h5"
+    experiment.save_run(restored, resaved, spec=declaration())
+    assert load(resaved).docs["metadata"]["acquisitions"] == legacy_value
 
 
 def test_native_round_trip_preserves_author_metadata(tmp_path: Path) -> None:
