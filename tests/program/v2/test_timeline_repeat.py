@@ -124,6 +124,42 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
         _program(body)
 
 
+@pytest.mark.parametrize("align", [False, True])
+def test_branch_inside_variable_repeat_retains_iteration_origin(align):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        with prog.repeat("r", 2, advance_ref=False):
+            with prog.branch(by="scan", align_timeline=align) as cases:
+                for index in range(2):
+                    with cases.case(index):
+                        prog.pulse(0, "p0")
+                        prog.delay_timeline((5 + 5 * index) / 430.08)
+        prog.pulse(1, "p1", timeline="default")
+
+    shots = _shots(_program(body, initialize))
+    assert [_waves(s) for s in shots] == ([[0, 38, 76]] * 2 if align else [[0, 33, 66], [0, 38, 76]])
+
+
+@pytest.mark.parametrize("safe", [False, True])
+def test_outer_reference_repeat_protects_inner_variable_repeat_backedge(safe):
+    def body(prog):
+        with prog.repeat("outer", 2, advance_ref=True):
+            with prog.repeat("inner", 2, advance_ref=False):
+                prog.pulse(0, "p0")
+            if not safe:
+                prog.append_macro(Pulse(ch=0, name="p0", t=112 / 430.08))
+
+    if not safe:
+        with pytest.raises(ValueError, match="channel 0.*overlap"):
+            _program(body)
+    else:
+        (shot,) = _shots(_program(body))
+        assert _waves(shot) == [0, 28, 56, 84]
+        assert shot.end_cycle == 112
+
+
 @pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto", "nested-true"])
 def test_variable_repeat_forbids_reference_owner_advances(operation):
     def body(prog):
