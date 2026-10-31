@@ -370,6 +370,22 @@ def lookup_expression(
         if all(value == values[0] + step * i for i, value in enumerate(values)):
             reconstruction = add_time(TimeVariable(values[0]), scale_time(index, step))
     axes = expression_axes(index)
+    if len(axes) > 1:
+        if reconstruction is not None:
+            return reconstruction
+        return TimeVariable(
+            terms=(
+                (
+                    cycle_axis(
+                        name,
+                        min(values),
+                        max(values),
+                        CycleProducer(selection=(index, values)),
+                    ),
+                    1,
+                ),
+            )
+        )
     points = evaluate_time(index, axes)
     if points is None:
         return TimeVariable(terms=((cycle_axis(name, min(values), max(values)), 1),))
@@ -669,10 +685,9 @@ class RuntimeMath(TimedMacro):
         for captured in captured_ends:
             delta = self._captured_delta(expression, runtime_expression(captured))
             if delta is not None:
-                axes = expression_axes(delta)
-                points = evaluate_time(delta, axes)
-                if points is not None and int(points.min()) >= 0:
-                    if not np.any(points):
+                lower, upper = expression_limits(delta)
+                if lower is not None and lower >= 0:
+                    if upper == 0:
                         return captured
                     return self.add(captured, self.reconstruct(delta, inputs))
         if isinstance(expression, TimeAbs):
@@ -840,11 +855,10 @@ class RuntimeMath(TimedMacro):
             if any(shift is None for shift in shifts):
                 continue
             delta = choose_time(*(shift for shift in shifts if shift is not None))
-            axes = expression_axes(delta)
-            points = evaluate_time(delta, axes)
-            if points is not None and int(points.min()) >= 0:
-                if int(points.min()) == int(points.max()):
-                    return self.add(captured, int(points.min()) / get_fclk(self.prog))
+            lower, upper = expression_limits(delta)
+            if lower is not None and lower >= 0:
+                if lower == upper:
+                    return self.add(captured, int(lower) / get_fclk(self.prog))
                 return self.add(captured, self.reconstruct(delta, inputs))
         return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
 
