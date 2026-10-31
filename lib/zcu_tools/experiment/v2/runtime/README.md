@@ -204,7 +204,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
   Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
-  stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
+  合作停止的 `stopped` outcome 不會被 retry，也不會被 retry reset 清掉。`KeyboardInterrupt` 原樣向外傳播，不 retry，也不轉成 outcome。
 
 ---
 
