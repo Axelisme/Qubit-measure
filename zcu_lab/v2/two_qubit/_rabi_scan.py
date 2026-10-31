@@ -14,7 +14,7 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     SweepCfg,
 )
-from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Reset
+from zcu_tools.program.v2.modules import MuxReadoutCfg, Reset
 
 from ._drive import DualLineCfg
 from ._readout import JointRoles
@@ -132,4 +132,3 @@ class RabiScanResult:
     coordinates: NDArray[np.float64]
     durations: NDArray[np.float64]
     sums: NDArray[np.float64]
-

@@ -38,7 +38,6 @@ from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
-    terminal_counts,
     validate_classifiers,
 )
 from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
@@ -203,18 +202,38 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             counts = sums
             viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
 
-        buffer = SignalBuffer((len(scales), 3, 3), dtype=np.float64, on_update=update_view)
-        builder = TimelineBuilder(context.soccfg, reps=config.reps, initial_delay=config.initial_delay, relax_delay=config.relax_delay)
+        buffer = SignalBuffer(
+            (len(scales), 3, 3), dtype=np.float64, on_update=update_view
+        )
+        builder = TimelineBuilder(
+            context.soccfg,
+            reps=config.reps,
+            initial_delay=config.initial_delay,
+            relax_delay=config.relax_delay,
+        )
         scale = builder.add_sweep("scale", config.scales)
-        drive_f1 = Pulse("cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale)
-        drive_f2 = Pulse("cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale)
+        drive_f1 = Pulse(
+            "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
+        )
+        drive_f2 = Pulse(
+            "cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale
+        )
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset))
         builder.sync()
-        builder.emit(Join(Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)))
+        builder.emit(
+            Join(
+                Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)
+            )
+        )
         builder.emit(Join(drive_f1, drive_f2))
-        builder.emit(Join(Pulse("contrast_f1", config.x180_f1), Pulse("contrast_f2", config.x180_f2)))
+        builder.emit(
+            Join(
+                Pulse("contrast_f1", config.x180_f1),
+                Pulse("contrast_f2", config.x180_f2),
+            )
+        )
         builder.emit(readout, tag="terminal")
         prog = builder.build()
         axes = [
@@ -222,7 +241,13 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             Classify("terminal", config.roles.f2_tone),
         ]
         with Schedule(config, buffer, scope=context.scope) as sched:
-            sched.run_acquire_summed(prog, context.soc, processor=shot_sums(prog, axes), rounds=config.rounds, options=RunOptions())
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                processor=shot_sums(prog, axes),
+                rounds=config.rounds,
+                options=RunOptions(),
+            )
         buffer.trigger_update(flush=True)
         return CZAmplitudeResult(scales, buffer.array)
 
@@ -253,26 +278,32 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
 
         _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
-                ax.plot(
-                        result.scales, terminal.data.probabilities.reshape(-1, 9)[:, index], ".-", label=label
-                )
+            ax.plot(
+                result.scales,
+                terminal.data.probabilities.reshape(-1, 9)[:, index],
+                ".-",
+                label=label,
+            )
         ax.set(
-                xlabel="Common gain scale",
-                ylabel="Same-shot joint probability",
-                title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
+            xlabel="Common gain scale",
+            ylabel="Same-shot joint probability",
+            title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
         )
         if np.any(np.isfinite(terminal.fit.curve)):
-                ax.plot(result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit")
+            ax.plot(
+                result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit"
+            )
         diagnostic = (
-                terminal.fit.reason or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
+            terminal.fit.reason
+            or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
         )
         ax.text(
-                0.02,
-                0.02,
-                diagnostic,
-                transform=ax.transAxes,
-                fontsize="small",
-                bbox={"facecolor": "white", "alpha": 0.85},
+            0.02,
+            0.02,
+            diagnostic,
+            transform=ax.transAxes,
+            fontsize="small",
+            bbox={"facecolor": "white", "alpha": 0.85},
         )
         ax.legend()
 

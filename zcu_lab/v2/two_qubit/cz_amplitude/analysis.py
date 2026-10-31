@@ -66,4 +66,3 @@ def analyze_return(
     )
     fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete, accepted)
     return CZAmplitudeAnalysis(data, fit)
-

@@ -12,7 +12,6 @@ from zcu_tools.analysis.fitting.rabi import fit_rabi
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
 
-
 @dataclass(frozen=True)
 class ReturnData:
     """Count-derived terminal probabilities and fit eligibility.
@@ -66,8 +65,12 @@ def fit_duration_rates(
     not a zero rate or optimizer fallback. No incomplete trace is fitted.
     """
     return tuple(
-        _fit_duration_rate(durations, values[:, 0], shots, complete=bool(complete.all()))
-        for values, complete, shots in zip(answer.populations, answer.complete, answer.acquired_shots, strict=True)
+        _fit_duration_rate(
+            durations, values[:, 0], shots, complete=bool(complete.all())
+        )
+        for values, complete, shots in zip(
+            answer.populations, answer.complete, answer.acquired_shots, strict=True
+        )
     )
 
 
@@ -86,7 +89,11 @@ def _duration_fit_reason(
 
 
 def _fit_duration_rate(
-    durations: NDArray[np.float64], values: NDArray[np.float64], shots: NDArray[np.float64], *, complete: bool
+    durations: NDArray[np.float64],
+    values: NDArray[np.float64],
+    shots: NDArray[np.float64],
+    *,
+    complete: bool,
 ) -> RabiRate:
     reason = _duration_fit_reason(durations, values, complete=complete)
     if reason:
@@ -99,7 +106,10 @@ def _fit_duration_rate(
         errors = np.sqrt(probability * (1.0 - probability) / (shots + 1.0))
         weighted = fit_shared(
             [FitTrace(durations, values, cosine, names, errors)],
-            [ParameterSpec(name, float(value)) for name, value in zip(names, seed.params, strict=True)],
+            [
+                ParameterSpec(name, float(value))
+                for name, value in zip(names, seed.params, strict=True)
+            ],
         )
         if not weighted.diagnostics.valid:
             raise ValueError("Weighted cosine fit failed")
@@ -153,7 +163,14 @@ def _fit_duration_rate(
     return RabiRate(abs(frequency), error, None, fitted, quality)
 
 
-
-def cosine(xs: NDArray[np.float64], offset: float, contrast: float, frequency: float, phase_deg: float) -> NDArray[np.float64]:
+def cosine(
+    xs: NDArray[np.float64],
+    offset: float,
+    contrast: float,
+    frequency: float,
+    phase_deg: float,
+) -> NDArray[np.float64]:
     """Undamped cosine in inverse-x frequency and degree phase."""
-    return offset + contrast * np.cos(2 * np.pi * frequency * xs + np.deg2rad(phase_deg))
+    return offset + contrast * np.cos(
+        2 * np.pi * frequency * xs + np.deg2rad(phase_deg)
+    )

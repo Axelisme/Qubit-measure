@@ -5,11 +5,6 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.v2 import Classify, Pulse, SweepCfg, TimelineBuilder, shot_sums
-from zcu_tools.program.v2.modules import ConstWaveformCfg, FlatTopWaveformCfg, Join, MuxReadout, Reset
-from zcu_lab.v2.support import live_line
-from .._sums import herald_probabilities, joint_probabilities, terminal_counts, validate_classifiers
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import (
@@ -22,11 +17,26 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import Classify, Pulse, SweepCfg, TimelineBuilder, shot_sums
+from zcu_tools.program.v2.modules import (
+    ConstWaveformCfg,
+    FlatTopWaveformCfg,
+    Join,
+    MuxReadout,
+    Reset,
+)
+
+from zcu_lab.v2.support import live_line
 
 from .._rabi_analysis import RabiAnalysis, ReturnData, fit_duration_rates
 from .._rabi_scan import DurationScanCfg, RabiScanResult
+from .._sums import (
+    joint_probabilities,
+    validate_classifiers,
+)
 
 
 class ChevronCfg(DurationScanCfg):
@@ -118,7 +128,13 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
             for pulse in (config.drive.f1, config.drive.f2)
         )
-        viewer = live_line(context.plots, "measurement", "Drive duration (us)", "Terminal P00", num_lines=len(coordinates))
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Drive duration (us)",
+            "Terminal P00",
+            num_lines=len(coordinates),
+        )
 
         def update_view(sums: NDArray[np.float64]) -> None:
             ordered = sums[0] if hardware_duration else sums.swapaxes(0, 1)
@@ -126,18 +142,35 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3)
-        shape = (1, len(coordinates), len(durations), *class_shape) if hardware_duration else (len(durations), len(coordinates), *class_shape)
+        shape = (
+            (1, len(coordinates), len(durations), *class_shape)
+            if hardware_duration
+            else (len(durations), len(coordinates), *class_shape)
+        )
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
         batches = [None] if hardware_duration else durations.tolist()
         with Schedule(config, buffer, scope=context.scope) as sched:
             for duration, step in sched.scan("duration_batch", batches):
-                builder = TimelineBuilder(context.soccfg, reps=config.reps, initial_delay=config.initial_delay, relax_delay=config.relax_delay)
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
                 coordinate = builder.add_sweep("frequency", config.frequency)
-                length = builder.add_sweep("duration", config.duration) if hardware_duration else duration
-                drive_f1 = Pulse("drive_f1", config.drive.f1, length=length, freq=coordinate)
-                drive_f2 = Pulse("drive_f2", config.drive.f2, length=length, freq=coordinate)
+                length = (
+                    builder.add_sweep("duration", config.duration)
+                    if hardware_duration
+                    else duration
+                )
+                drive_f1 = Pulse(
+                    "drive_f1", config.drive.f1, length=length, freq=coordinate
+                )
+                drive_f2 = Pulse(
+                    "drive_f2", config.drive.f2, length=length, freq=coordinate
+                )
                 prepare_f1 = Pulse("prepare_f1", config.x180_f1)
                 prepare_f2 = Pulse("prepare_f2", config.x180_f2)
                 contrast_f1 = Pulse("contrast_f1", config.x180_f1)
@@ -155,7 +188,13 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                     Classify("terminal", config.roles.f1_tone),
                     Classify("terminal", config.roles.f2_tone),
                 ]
-                step.run_acquire_summed(prog, context.soc, processor=shot_sums(prog, axes), rounds=config.rounds, options=RunOptions())
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
         buffer.trigger_update(flush=True)
         sums = buffer.array[0] if hardware_duration else buffer.array.swapaxes(0, 1)
         return ChevronResult(coordinates, durations, sums)
@@ -180,12 +219,23 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         cfg, result = source.cfg, source.result
         coordinates = sweep2array(cfg.frequency)
         durations = sweep2array(cfg.duration)
-        if not np.array_equal(result.coordinates, coordinates) or not np.array_equal(result.durations, durations) or result.sums.shape != (len(coordinates), len(durations), 3, 3):
-            raise ValueError("Rabi count axes/shape must match saved cfg and class axes")
+        if (
+            not np.array_equal(result.coordinates, coordinates)
+            or not np.array_equal(result.durations, durations)
+            or result.sums.shape != (len(coordinates), len(durations), 3, 3)
+        ):
+            raise ValueError(
+                "Rabi count axes/shape must match saved cfg and class axes"
+            )
         counts = result.sums
         totals = counts.sum(axis=(-2, -1))
         acquired = result.sums.sum(axis=(-2, -1))
-        answer = ReturnData(joint_probabilities(counts).reshape(len(coordinates), len(durations), 9), (acquired == cfg.reps * cfg.rounds) & (totals > 0), totals, None)
+        answer = ReturnData(
+            joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
+            (acquired == cfg.reps * cfg.rounds) & (totals > 0),
+            totals,
+            None,
+        )
         fig, ax = plots.subplots("chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
@@ -216,7 +266,9 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             for coordinate, values in zip(
                 result.coordinates, answer.populations, strict=True
             ):
-                ax.plot(result.durations, values[:, outcome], ".-", label=f"{coordinate:g}")
+                ax.plot(
+                    result.durations, values[:, outcome], ".-", label=f"{coordinate:g}"
+                )
             ax.set(
                 xlabel="Drive duration (us)",
                 ylabel=f"Observed P{labels[outcome]}",
@@ -225,8 +277,28 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
         rates = fit_duration_rates(durations, answer)
         _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
-        ax.errorbar(coordinates, [rate.rate if rate.rate is not None else np.nan for rate in rates], yerr=[rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates], fmt="o", color="C0")
-        ax.text(0.02, 0.98, "\n".join(f"{coordinate:g}: {rate.reason}" for coordinate, rate in zip(coordinates, rates, strict=True) if rate.reason), va="top", transform=ax.transAxes, fontsize="small")
+        ax.errorbar(
+            coordinates,
+            [rate.rate if rate.rate is not None else np.nan for rate in rates],
+            yerr=[
+                rate.uncertainty if rate.uncertainty is not None else np.nan
+                for rate in rates
+            ],
+            fmt="o",
+            color="C0",
+        )
+        ax.text(
+            0.02,
+            0.98,
+            "\n".join(
+                f"{coordinate:g}: {rate.reason}"
+                for coordinate, rate in zip(coordinates, rates, strict=True)
+                if rate.reason
+            ),
+            va="top",
+            transform=ax.transAxes,
+            fontsize="small",
+        )
         ax.set(
             xlabel="Common drive frequency (MHz)",
             ylabel="Rabi rate (MHz)",

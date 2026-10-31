@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.analysis.fitting.quality import FitQuality
-from numpy.typing import NDArray
 
 from .._rabi_analysis import (
     RabiAnalysis,
@@ -30,7 +30,9 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
 
 
 def analyze_constructive_phase(
-    coordinates: NDArray[np.float64], durations: NDArray[np.float64], returns: ReturnData
+    coordinates: NDArray[np.float64],
+    durations: NDArray[np.float64],
+    returns: ReturnData,
 ) -> ConstructivePhaseAnalysis:
     """Fit complete duration traces, then select the rate² interference maximum.
 
@@ -114,4 +116,6 @@ def analyze_constructive_phase(
             quality,
         )
     phase = float(np.rad2deg(np.arctan2(c, b)))
-    return ConstructivePhaseAnalysis(returns, rates, phase, None, quality, (float(a), float(b), float(c)))
+    return ConstructivePhaseAnalysis(
+        returns, rates, phase, None, quality, (float(a), float(b), float(c))
+    )

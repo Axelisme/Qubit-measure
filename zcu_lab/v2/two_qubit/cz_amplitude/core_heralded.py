@@ -15,14 +15,20 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-
-from .._sums import herald_probabilities, terminal_counts, joint_probabilities, validate_classifiers
-from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import Join, MuxReadout
+
 from zcu_lab.v2.support import live_line
+
+from .._sums import (
+    herald_probabilities,
+    joint_probabilities,
+    terminal_counts,
+    validate_classifiers,
+)
 from .analysis import OUTCOME_LABELS, CZAmplitudeAnalysis, analyze_return
 from .core import CZAmplitudeCfg
 
@@ -112,25 +118,47 @@ class CZAmplitudeHeraldedExp(
         """
         validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scales)
-        viewer = live_line(context.plots, "measurement", "Common gain scale", "P(g,g) | herald (g,g)")
+        viewer = live_line(
+            context.plots, "measurement", "Common gain scale", "P(g,g) | herald (g,g)"
+        )
 
         def update_view(sums: NDArray[np.float64]) -> None:
             counts = terminal_counts(sums, ("g", "g"))
             viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
 
-        buffer = SignalBuffer((len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
-        builder = TimelineBuilder(context.soccfg, reps=config.reps, initial_delay=config.initial_delay, relax_delay=config.relax_delay)
+        buffer = SignalBuffer(
+            (len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view
+        )
+        builder = TimelineBuilder(
+            context.soccfg,
+            reps=config.reps,
+            initial_delay=config.initial_delay,
+            relax_delay=config.relax_delay,
+        )
         scale = builder.add_sweep("scale", config.scales)
-        drive_f1 = Pulse("cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale)
-        drive_f2 = Pulse("cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale)
+        drive_f1 = Pulse(
+            "cz_f1", config.drive.f1, gain=float(config.drive.f1.gain) * scale
+        )
+        drive_f2 = Pulse(
+            "cz_f2", config.drive.f2, gain=float(config.drive.f2.gain) * scale
+        )
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset))
         builder.emit(readout, tag="herald")
         builder.sync()
-        builder.emit(Join(Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)))
+        builder.emit(
+            Join(
+                Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)
+            )
+        )
         builder.emit(Join(drive_f1, drive_f2))
-        builder.emit(Join(Pulse("contrast_f1", config.x180_f1), Pulse("contrast_f2", config.x180_f2)))
+        builder.emit(
+            Join(
+                Pulse("contrast_f1", config.x180_f1),
+                Pulse("contrast_f2", config.x180_f2),
+            )
+        )
         builder.emit(readout, tag="terminal")
         prog = builder.build()
         axes = [
@@ -140,7 +168,13 @@ class CZAmplitudeHeraldedExp(
             Classify("terminal", config.roles.f2_tone),
         ]
         with Schedule(config, buffer, scope=context.scope) as sched:
-            sched.run_acquire_summed(prog, context.soc, processor=shot_sums(prog, axes), rounds=config.rounds, options=RunOptions())
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                processor=shot_sums(prog, axes),
+                rounds=config.rounds,
+                options=RunOptions(),
+            )
         buffer.trigger_update(flush=True)
         return CZAmplitudeHeraldedResult(scales, buffer.array)
 
@@ -174,7 +208,10 @@ class CZAmplitudeHeraldedExp(
         _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
             ax.plot(
-                result.scales, terminal.data.probabilities.reshape(-1, 9)[:, index], ".-", label=label
+                result.scales,
+                terminal.data.probabilities.reshape(-1, 9)[:, index],
+                ".-",
+                label=label,
             )
         ax.set(
             xlabel="Common gain scale",
@@ -182,9 +219,12 @@ class CZAmplitudeHeraldedExp(
             title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
         )
         if np.any(np.isfinite(terminal.fit.curve)):
-            ax.plot(result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit")
+            ax.plot(
+                result.scales, terminal.fit.curve, "k--", label="Zero-phase P00 fit"
+            )
         diagnostic = (
-            terminal.fit.reason or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
+            terminal.fit.reason
+            or f"First positive return scale = {terminal.fit.scale:.6g} ± {terminal.fit.error:.2g}"
         )
         ax.text(
             0.02,
@@ -195,12 +235,16 @@ class CZAmplitudeHeraldedExp(
             bbox={"facecolor": "white", "alpha": 0.85},
         )
         ax.legend()
-    
+
         ee_counts = terminal_counts(result.sums, ("e", "e"))
         ee_not_returned = 1.0 - joint_probabilities(ee_counts)[:, 1, 1]
         _, ax = plots.subplots("ee_control", figsize=(10, 5), layout="constrained")
         ax.plot(result.scales, ee_not_returned, ".-")
-        ax.set(xlabel="Common gain scale", ylabel="Terminal not ee | herald (e,e)", title="Drive disturbance of |00⟩ · ee control, no shared fit")
+        ax.set(
+            xlabel="Common gain scale",
+            ylabel="Terminal not ee | herald (e,e)",
+            title="Drive disturbance of |00⟩ · ee control, no shared fit",
+        )
         herald_matrix = herald_probabilities(result.sums)
         _, ax = plots.subplots("herald", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
