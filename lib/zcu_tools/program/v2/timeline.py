@@ -845,6 +845,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         *,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
+        advance_ref: bool,
     ) -> Generator[None]:
         """Repeat a body n times on parent timeline (times remain in us).
 

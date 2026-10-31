@@ -179,6 +179,7 @@ class TimelineBuilder:
         *,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
+        advance_ref: bool,
     ) -> AbstractContextManager[None]:
         """Record a repeated body; replay program-owned timing rules at build.
 
@@ -193,7 +194,7 @@ class TimelineBuilder:
         ValueError. Close all recording contexts before build.
         """
         self._ensure_recording()
-        return self._repeat(name, n, timeline, range_hint)
+        return self._repeat(name, n, timeline, range_hint, advance_ref)
 
     @contextmanager
     def _repeat(
@@ -202,13 +203,14 @@ class TimelineBuilder:
         n: int | str,
         timeline: str | None,
         range_hint: tuple[int, int] | None,
+        advance_ref: bool,
     ) -> Generator[None]:
         with self._capture() as actions:
             yield
         recorded = tuple(actions)
 
         def replay(prog: TimelineProgramV2) -> None:
-            with prog.repeat(name, n, timeline=timeline, range_hint=range_hint):
+            with prog.repeat(name, n, timeline=timeline, range_hint=range_hint, advance_ref=advance_ref):
                 for action in recorded:
                     action(prog)
 
