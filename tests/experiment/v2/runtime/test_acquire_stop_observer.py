@@ -1,14 +1,14 @@
 """Author acquisition observers report external stops, not data completeness."""
 
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime import AcquireOptions, RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.acquisition import CancelFlagProtocol, StoppedPartialAcquireError
+from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor, StoppedPartialAcquireError
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_fakes import (
@@ -35,20 +35,20 @@ class Producer:
 
     def acquire(
         self,
-        _soc: object,
+        soc: object,
         *,
         rounds: int,
-        round_hook: Callable[[int, NDArray[np.float64], CancelFlagProtocol], object],
+        round_hook: Callable[[int, list[NDArray[np.float64]], CancelFlagProtocol], object],
         cancel_flag: CancelFlagProtocol,
         **_kwargs: object,
-    ) -> NDArray[np.float64]:
+    ) -> list[NDArray[np.float64]]:
         self.calls += 1
         if self.ending == "before_data":
             assert self.root.cancel("acquire").cancelled
             raise StoppedPartialAcquireError("no completed round")
         if self.ending == "interrupt":
             raise KeyboardInterrupt("producer interrupted")
-        raw = np.array([7.0])
+        raw = [np.array([7.0])]
         round_hook(1, raw, cancel_flag)
         if self.ending in {"finite", "failure"}:
             assert self.root.cancel("acquire").cancelled
@@ -60,16 +60,24 @@ class Producer:
         return raw
 
     acquire_decimated = acquire
-    acquire_summed = acquire
+    def acquire_summed(
+        self, soc: object, *, processor: ShotSumProcessor, rounds: int = 1,
+        step_rounds: bool = False, **qick_options: Any,
+    ) -> NDArray[np.float64]:
+        # The native summed boundary accepts dynamically typed QICK keywords.
+        return self.acquire(
+            soc, rounds=rounds, cancel_flag=qick_options["cancel_flag"],
+            round_hook=lambda ir, raw, flag: qick_options["round_hook"](ir, raw[0], flag),
+        )[0]
 
 
 def run_entry(
     entry: Entry,
-    sched: Schedule,
+    sched: Schedule[Any, Any],
     producer: Producer,
     options: AcquireOptions,
     convert: Callable[[NDArray[np.float64]], NDArray[np.float64]] = lambda raw: raw,
-) -> NDArray:
+) -> NDArray[np.float64]:
     """Exercise either public options family through its acquisition entry."""
     if entry.startswith("builder"):
         builder = sched.prog_builder(object(), object())
@@ -79,15 +87,19 @@ def run_entry(
                 rounds=2, options=options,
             )
         method = builder.run_program_decimated if entry == "builder_decimated" else builder.run_program
-        return method(producer, rounds=2, raw2signal_fn=convert, options=options)
-    direct = RunOptions(
-        retry=options.retry, converter=convert, stop_condition=options.stop_condition,
-        on_stop=options.on_stop,
-    )
+        return method(producer, rounds=2, raw2signal_fn=lambda raw: convert(raw[0]), options=options)
     if entry == "direct_summed":
-        return sched.run_acquire_summed(
-            producer, object(), processor=lambda iq: iq[0], rounds=2, options=direct,
+        direct_sums = RunOptions(
+            retry=options.retry, converter=convert, stop_condition=options.stop_condition,
+            on_stop=options.on_stop,
         )
+        return sched.run_acquire_summed(
+            producer, object(), processor=lambda iq: iq[0], rounds=2, options=direct_sums,
+        )
+    direct: RunOptions[list[NDArray[np.float64]]] = RunOptions(
+        retry=options.retry, converter=lambda raw: convert(raw[0]),
+        stop_condition=options.stop_condition, on_stop=options.on_stop,
+    )
     method = sched.run_acquire_decimated if entry == "direct_decimated" else sched.run_acquire
     return method(producer, object(), rounds=2, options=direct)
 
@@ -151,7 +163,7 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
 
     update_failed = False
 
-    def update(_data: NDArray) -> None:
+    def update(_data: NDArray[np.float64]) -> None:
         nonlocal update_failed
         if ending == "update" and not update_failed:
             update_failed = True
@@ -186,7 +198,7 @@ def test_stop_callback_failure_propagates_without_retry_or_outcome_change(entry:
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
-        with pytest.raises(ValueError) as caught:
+        with pytest.raises(ValueError, match="observer failed") as caught:
             run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=on_stop))
         assert caught.value is cause
         assert producer.calls == 1
