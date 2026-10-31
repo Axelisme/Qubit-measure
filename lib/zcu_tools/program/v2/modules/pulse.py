@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 
 from pydantic import BeforeValidator
@@ -60,6 +61,12 @@ class PulseCfg(AbsModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
+@dataclass(frozen=True)
+class _PulseDeclaration:
+    pulse_id: str
+    waveform: AbsWaveform
+
+
 class Pulse(Module):
     """Emit a generator pulse; zcu_lab declares its settings as ``Pulse.Cfg``."""
 
@@ -87,6 +94,7 @@ class Pulse(Module):
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id
+        self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
@@ -109,6 +117,14 @@ class Pulse(Module):
     def init_pulse(
         self, prog: ModularProgramV2 | TimelineProgramV2, pulse_id: str
     ) -> None:
+        self._add_pulse(prog, pulse_id, self.waveform)
+
+    def _add_pulse(
+        self,
+        prog: ModularProgramV2 | TimelineProgramV2,
+        pulse_id: str,
+        waveform: AbsWaveform,
+    ) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -120,7 +136,7 @@ class Pulse(Module):
             ro_ch=ro_ch,
         )
 
-        self.waveform.create(prog, cfg.ch)
+        waveform.create(prog, cfg.ch)
         prog.add_pulse(
             cfg.ch,
             pulse_id,
@@ -128,7 +144,7 @@ class Pulse(Module):
             freq=cfg.freq,
             phase=cfg.phase,
             gain=cfg.gain,
-            **self.waveform.to_wav_kwargs(),
+            **waveform.to_wav_kwargs(),
         )
 
     def total_length(
@@ -193,8 +209,33 @@ class Pulse(Module):
         return t
 
     def declare(self, prog: TimelineProgramV2) -> None:
-        """Register the pulse template on prog; QICK declaration errors propagate."""
-        self._declare_resources(prog)
+        """Register this program's pulse template; QICK errors propagate."""
+        if self.cfg is None:
+            return
+        pulse_id = self._requested_pulse_id
+        if pulse_id is None:
+            pulse_id = prog.pulse_registry.calc_name(self.cfg, ro_ch=self.ro_ch)
+            create = prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch)
+        else:
+            create = True
+        waveform = self.cfg.waveform.build(f"{self.name}_waveform")
+        prog.set_module_state(self, _PulseDeclaration(pulse_id, waveform))
+        if create:
+            self._add_pulse(prog, pulse_id, waveform)
+
+    def pulse_name(self, prog: ModularProgramV2 | TimelineProgramV2) -> str:
+        """Return the pulse identifier declared on prog for native QICK calls.
+
+        prog must have declared this nonempty pulse (or initialized it on the
+        legacy path). Missing declaration or empty cfg raises ValueError.
+        """
+        from ..timeline import TimelineProgramV2
+
+        if isinstance(prog, TimelineProgramV2):
+            return prog.get_module_state(self, _PulseDeclaration).pulse_id
+        if self.pulse_id is None:
+            raise ValueError(f"{self.name}: pulse must be initialized before playback")
+        return self.pulse_id
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -226,9 +267,7 @@ class Pulse(Module):
         """
         if self.cfg is None:
             return
-        pulse_id = self.pulse_id
-        if pulse_id is None:
-            raise ValueError(f"{self.name}: pulse must be declared before playback")
+        pulse_id = self.pulse_name(prog)
         prog.pulse(
             self.cfg.ch,
             pulse_id,
