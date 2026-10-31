@@ -27,9 +27,9 @@ from zcu_tools.program.v2 import (
     Classify,
     DelayAuto,
     LoadValue,
-    TimelineBuilder,
     Pulse,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
     split_sums,
 )
@@ -89,7 +89,9 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                     axes=(
                         VariableAxisSpec.generated_arange("components", ""),
                         VariableAxisSpec.generated_arange("herald_states", ""),
-                        VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6),
+                        VariableAxisSpec(
+                            label="Time", unit="s", field_name="times", scale=1e-6
+                        ),
                     ),
                     z=VariableZSpec(
                         field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -139,7 +141,8 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3), dtype=np.float64,
+            (len(lengths), 3, 3),
+            dtype=np.float64,
             on_update=update,
         )
 
@@ -154,7 +157,9 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
                 options=RunOptions(converter=np.copy),
             )
@@ -176,7 +181,8 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3), dtype=np.float64,
+            (len(lengths), 3, 3),
+            dtype=np.float64,
             on_update=update,
         )
 
@@ -185,17 +191,24 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             builder.add_loop("delay_idx", len(delay_table.cycles))
-            builder.emit(LoadValue(
-                "load_t1_delay", values=list(delay_table.cycles),
-                idx_reg="delay_idx", val_reg="t1_delay_cycle", auto_compress=False,
-            ))
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(delay_table.cycles),
+                    idx_reg="delay_idx",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            )
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
                 options=RunOptions(converter=np.copy),
             )

@@ -56,7 +56,9 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
         builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
         builder.emit(Readout("readout", cfg.readout))
         sched.run_acquire(
-            builder.build(), soc, rounds=cfg.rounds,
+            builder.build(),
+            soc,
+            rounds=cfg.rounds,
             options=RunOptions(retry=cfg.acquire_retry),
         )
     return PowerDepResult(gains, buffer.array)

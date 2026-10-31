@@ -26,10 +26,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    TimelineBuilder,
     Pulse,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
     split_sums,
 )
@@ -107,7 +107,9 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                     axes=(
                         VariableAxisSpec.generated_arange("components", ""),
                         VariableAxisSpec.generated_arange("herald_states", ""),
-                        VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6),
+                        VariableAxisSpec(
+                            label="Time", unit="s", field_name="times", scale=1e-6
+                        ),
                     ),
                     z=VariableZSpec(
                         field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -150,7 +152,11 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             time_scaler=0.5,
         )
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Amplitude", title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)")
+        ax.set(
+            xlabel="Time (us)",
+            ylabel="Amplitude",
+            title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)",
+        )
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
@@ -165,7 +171,9 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         )
 
         with Schedule(None, buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             delay = builder.add_sweep("delay", cfg.delay)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))
@@ -174,8 +182,11 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.delay_timeline(0.5 * delay)
             builder.emit(
-                Pulse("pi2_pulse", cfg.pi2_pulse,
-                      phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay)
+                Pulse(
+                    "pi2_pulse",
+                    cfg.pi2_pulse,
+                    phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay,
+                )
             )
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
@@ -188,7 +199,8 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                     converter=np.copy,
                     retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
-                        buffer.at(), cfg.earlystop_snr,
+                        buffer.at(),
+                        cfg.earlystop_snr,
                         lambda data: t2echo_signal2real(split_sums(data)[1][..., 0]),
                     ),
                 ),

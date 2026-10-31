@@ -25,9 +25,9 @@ from zcu_tools.program.v2 import (
     IQ,
     Classify,
     GainSweep,
-    TimelineBuilder,
     Pulse,
     Reset,
+    TimelineBuilder,
     shot_sums,
     split_sums,
 )
@@ -148,7 +148,9 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         )
 
         with Schedule(None, buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain = builder.add_sweep("gain", cfg.gain)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))

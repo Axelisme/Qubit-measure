@@ -90,7 +90,9 @@ class OvernightMuxTunables(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    sampling: Literal["linear", "decay"] = Field(default="linear", description="T1 delay sampling")
+    sampling: Literal["linear", "decay"] = Field(
+        default="linear", description="T1 delay sampling"
+    )
     reps: int = Field(default=1000, ge=1, description="Native averages per acquisition")
     rounds: int = Field(default=10, ge=1, description="Native acquisition rounds")
     t1_guess_us: float = Field(

@@ -26,11 +26,11 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    TimelineBuilder,
-    TimelineProgramV2,
     Pulse,
     Reset,
     SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
     shot_sums,
     split_sums,
 )
@@ -126,7 +126,9 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 axes=(
                     VariableAxisSpec.generated_arange("components", ""),
                     VariableAxisSpec.generated_arange("herald_states", ""),
-                    VariableAxisSpec(label="Length", unit="s", field_name="lengths", scale=1e-6),
+                    VariableAxisSpec(
+                        label="Length", unit="s", field_name="lengths", scale=1e-6
+                    ),
                 ),
                 z=VariableZSpec(
                     field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -172,7 +174,11 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         return self._run_host(cfg, np.unique(lengths), context=context)
 
     def _run_hardware(
-        self, cfg: HeraldingLenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
+        self,
+        cfg: HeraldingLenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> HeraldingLenRabiResult:
         """Sweep editable const/flat-top length on the FPGA, summing rounds."""
         fig, ax = context.plots.subplots(num="measurement")
@@ -185,11 +191,13 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3), dtype=np.float64,
+            (len(lengths), 3, 3),
+            dtype=np.float64,
             on_update=update,
         )
         check_snr = snr_checker(
-            buffer.at(), cfg.earlystop_snr,
+            buffer.at(),
+            cfg.earlystop_snr,
             lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
         )
 
@@ -205,7 +213,9 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy, retry=cfg.acquire_retry, stop_condition=check_snr
@@ -214,7 +224,11 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         return HeraldingLenRabiResult(lengths, buffer.array)
 
     def _run_host(
-        self, cfg: HeraldingLenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
+        self,
+        cfg: HeraldingLenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> HeraldingLenRabiResult:
         """Scan editable waveforms round-major, caching each length's program."""
         fig, ax = context.plots.subplots(num="measurement")
@@ -227,11 +241,13 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3), dtype=np.float64,
+            (len(lengths), 3, 3),
+            dtype=np.float64,
             on_update=update,
         )
         check_snr = snr_checker(
-            buffer.at(), cfg.earlystop_snr,
+            buffer.at(),
+            cfg.earlystop_snr,
             lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
         )
 
@@ -256,9 +272,15 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                     prog = programs[length]
                     try:
                         step.run_acquire_summed(
-                            prog, context.soc, rounds=1,
-                            processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                            options=RunOptions(converter=np.copy, retry=cfg.acquire_retry),
+                            prog,
+                            context.soc,
+                            rounds=1,
+                            processor=shot_sums(
+                                prog, [Classify("herald"), IQ("signal")]
+                            ),
+                            options=RunOptions(
+                                converter=np.copy, retry=cfg.acquire_retry
+                            ),
                         )
                     finally:
                         segments = acquisition_buffer.array

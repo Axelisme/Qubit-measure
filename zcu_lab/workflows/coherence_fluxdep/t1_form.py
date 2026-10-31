@@ -69,7 +69,9 @@ class T1TunablesForm(FormModel):
     relax_min_us: Annotated[float, Display(label="Auto relax minimum", unit="µs")] = (
         Field(default=1.0, ge=0)
     )
-    sampling: Annotated[Literal["linear", "decay"], Display(label="Sampling")] = "linear"
+    sampling: Annotated[Literal["linear", "decay"], Display(label="Sampling")] = (
+        "linear"
+    )
     max_model_window_factor: Annotated[float, Display(label="Model window factor")] = (
         Field(
             default=2.0,

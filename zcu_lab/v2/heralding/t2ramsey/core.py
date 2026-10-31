@@ -26,10 +26,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    TimelineBuilder,
     Pulse,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
     split_sums,
 )
@@ -124,7 +124,9 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 axes=(
                     VariableAxisSpec.generated_arange("components", ""),
                     VariableAxisSpec.generated_arange("herald_states", ""),
-                    VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6),
+                    VariableAxisSpec(
+                        label="Time", unit="s", field_name="times", scale=1e-6
+                    ),
                 ),
                 z=VariableZSpec(
                     field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -166,12 +168,18 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             time_scaler=1.0,
         )
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Time (us)", ylabel="Real Signal", title=f"Heralded T2 Ramsey - detune {cfg.detune:.2f} MHz")
+        ax.set(
+            xlabel="Time (us)",
+            ylabel="Real Signal",
+            title=f"Heralded T2 Ramsey - detune {cfg.detune:.2f} MHz",
+        )
         viewer = live_line(ax)
 
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(lengths, t2ramsey_signal2real(split_sums(data)[1][..., 0]))
+            return viewer.set(
+                lengths, t2ramsey_signal2real(split_sums(data)[1][..., 0])
+            )
 
         fig.show()
         buffer = SignalBuffer(
@@ -181,15 +189,20 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         )
 
         with Schedule(None, buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             delay = builder.add_sweep("delay", cfg.delay)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
             builder.delay_timeline(delay)
             builder.emit(
-                Pulse("pi2_pulse", cfg.pi2_pulse,
-                      phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay)
+                Pulse(
+                    "pi2_pulse",
+                    cfg.pi2_pulse,
+                    phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay,
+                )
             )
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
@@ -202,7 +215,8 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                     converter=np.copy,
                     retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
-                        buffer.at(), cfg.earlystop_snr,
+                        buffer.at(),
+                        cfg.earlystop_snr,
                         lambda data: t2ramsey_signal2real(split_sums(data)[1][..., 0]),
                     ),
                 ),

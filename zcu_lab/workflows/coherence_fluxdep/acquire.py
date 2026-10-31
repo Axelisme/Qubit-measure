@@ -46,9 +46,7 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
         return plot.set(times, np.real(samples))
 
     fig.show()
-    buffer = SignalBuffer(
-        (len(times),), on_update=update
-    )
+    buffer = SignalBuffer((len(times),), on_update=update)
     # Execute the pulse sequence using locally constructed modules and sweeps.
     with Schedule(None, buffer, scope=context.scope) as sched:
         builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
@@ -56,16 +54,23 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
         builder.emit(Reset("reset", cfg.reset))
         builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
         builder.delay_timeline(delay)
-        builder.emit(Pulse(
-            "pi2_pulse", cfg.pi2_pulse,
-            phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay,
-        ))
+        builder.emit(
+            Pulse(
+                "pi2_pulse",
+                cfg.pi2_pulse,
+                phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay,
+            )
+        )
         builder.emit(Readout("readout", cfg.readout))
         sched.run_acquire(
-            builder.build(), soc, rounds=cfg.rounds,
+            builder.build(),
+            soc,
+            rounds=cfg.rounds,
             options=RunOptions(
                 retry=cfg.acquire_retry,
-                stop_condition=snr_checker(buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real),
+                stop_condition=snr_checker(
+                    buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real
+                ),
             ),
         )
     return T2RamseyResult(
