@@ -42,7 +42,7 @@ class Delay(Module):
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
         """Ceil the selected end plus delay us; do not move reference."""
-        prog.delay_timeline(
+        prog.timeline_inc(
             self.delay,
             timeline=timeline if timeline is not None else "default",
             tag=tag,
@@ -72,7 +72,7 @@ class SoftDelay(Module):
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
         """Ceil the selected end plus delay us, exactly like Delay in this path."""
-        prog.delay_timeline(
+        prog.timeline_inc(
             self.delay,
             timeline=timeline if timeline is not None else "default",
             tag=tag,
@@ -138,7 +138,7 @@ class DelayAuto(Module):
         """
         if timeline is not None:
             raise ValueError(
-                "DelayAuto cannot select a timeline; use native delay_auto or delay_timeline"
+                "DelayAuto cannot select a timeline; use native delay_auto or timeline_inc"
             )
         if isinstance(self.t, str):
             if tag is not None:
@@ -217,7 +217,7 @@ class Join(Module):
         Children within each branch execute sequentially. Each occurrence owns
         fresh timeline names; selected playback and posts retain their child's
         timing/provenance contract. tag identifies the first child in author
-        order. Children must preserve reference time; native delay, sync and
+        order. Children must preserve reference time; native delay, delay_by_timeline and
         reference-advancing Repeat/ScanWith fail at build, as in branch cases.
         Branch children may merge their timeline ends without moving reference.
         No reordering, padding or legacy block_mode scheduling is added.

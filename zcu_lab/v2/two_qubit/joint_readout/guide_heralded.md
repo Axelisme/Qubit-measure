@@ -12,7 +12,7 @@ This is a separate GUI and registry entry from `two_qubit/joint_readout`. Each h
 
 Each shot emits optional reset, a full mux read tagged `herald`, the nominal I/Xπ preparation, and a full mux read tagged `terminal`. Both reads emit the same mux module with the same gain, integration window and classifiers. Readout post_delay supplies the wait after herald. There is no extra herald-delay field.
 
-One program sweeps `prepared_f1` outside `prepared_f2`, each with 0=g (I) and 1=e (Xπ). The nominal row order is gg, ge, eg, ee. The program forks directly into F1 and F2 timelines after herald, without an extra sync. The forked timelines inherit the herald end, including readout post_delay. Each timeline uses an aligned branch with only case 1 emitting its Xπ; case 0 is empty. Both pulses start together for ee. The timelines join before terminal readout, with the same readout start time for every preparation.
+One program sweeps `prepared_f1` outside `prepared_f2`, each with 0=g (I) and 1=e (Xπ). The nominal row order is gg, ge, eg, ee. The program forks directly into F1 and F2 timelines after herald, without an extra delay_by_timeline. The forked timelines inherit the herald end, including readout post_delay. Each timeline uses an aligned branch with only case 1 emitting its Xπ; case 0 is empty. Both pulses start together for ee. The timelines join before terminal readout, with the same readout start time for every preparation.
 
 `reps` counts shots per round per preparation. `rounds` adds completed rounds during acquisition, without a host round axis.
 

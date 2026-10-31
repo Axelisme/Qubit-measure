@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .hw_semantics import TIMED_BASE_REG
 from .instructions import (
     BaseInst,
     LabelInst,
     MetaInst,
+    RegWriteInst,
     TimeInst,
 )
 from .io_instructions import (
@@ -16,7 +18,7 @@ from .io_instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode
-from .operands import Immediate
+from .operands import AluOp, Immediate, SrcKeyword
 
 if TYPE_CHECKING:
     from .pipeline import ChunkList, PipeLineConfig
@@ -44,7 +46,7 @@ def collect_referenced_labels(chunks: ChunkList) -> set[Label]:
 
 
 def _block_scheduled_ticks(block: BasicBlockNode) -> int:
-    """Count only guaranteed literal TIME inc_ref delays in one physical block."""
+    """Count literal reference advances and output-pointer increments."""
     total = 0
     for inst in block.insts:
         if isinstance(inst, TimeInst) and inst.c_op == "inc_ref":
@@ -52,11 +54,22 @@ def _block_scheduled_ticks(block: BasicBlockNode) -> int:
                 continue
             if isinstance(inst.lit, Immediate):
                 total += inst.lit.value
+        elif (
+            isinstance(inst, RegWriteInst)
+            and inst.dst.name == TIMED_BASE_REG
+            and inst.src == SrcKeyword.OP
+            and inst.if_cond is None
+            and inst.op is not None
+            and inst.op.lhs.name == TIMED_BASE_REG
+            and inst.op.op == AluOp.ADD
+            and isinstance(inst.op.rhs, Immediate)
+        ):
+            total += inst.op.rhs.value
     return total
 
 
 def estimate_body_scheduled_ticks(body: list[IRNode]) -> int:
-    """Lower-bound on inc_ref delay ticks in a body sequence.
+    """Lower-bound on reference/output-pointer advance ticks in a body sequence.
 
     Dynamic (register-driven) `inc_ref` contributes 0 to the total — the
     estimate represents the *guaranteed* scheduled IO window, not the

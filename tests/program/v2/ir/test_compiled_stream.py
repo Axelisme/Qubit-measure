@@ -473,10 +473,10 @@ def test_readout_snapshot_labels_semantic_owner_and_author_children(native, form
 
         def _body(self, cfg):
             if form == "repeat":
-                self.sync()
+                self.delay_by_timeline()
                 with self.repeat("control", 2):
                     self.emit(readout)
-                    self.sync()
+                    self.delay_by_timeline()
             else:
                 for module in modules:
                     self.emit(module)
