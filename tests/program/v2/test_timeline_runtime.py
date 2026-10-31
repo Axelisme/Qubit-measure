@@ -123,6 +123,18 @@ def test_k_way_join_has_one_copy_and_two_instructions_per_comparison(candidate_c
     ]
 
 
+def test_unhinted_author_time_uses_nonnegative_contract_without_runtime_floor():
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "SL", 4)
+        prog.write_reg_op("duration", "duration", "+", 10)
+        prog.delay_timeline("duration")
+
+    prog = program(body)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 26, 42]
+    assert not any("^" in str(inst.get("OP", "")) for inst in prog.prog_list)
+    assert not any(inst.get("CMD") == "REG_WR" and inst.get("IF") == "S" for inst in prog.prog_list)
+
+
 def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficients():
     def body(prog):
         prog.write_reg_op("duration", "scan", "SL", 4)
@@ -141,11 +153,11 @@ def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficien
 
     prog = program(body)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [30, 57, 89]
-    masks = [index for index, inst in enumerate(prog.prog_list) if "^" in inst.get("OP", "")]
+    masks = [index for index, inst in enumerate(prog.prog_list) if "^" in str(inst.get("OP", ""))]
     # Unknown signed differences use a mask. The shared author value is added
     # once after selection, not separately rebuilt into both candidates.
     assert masks
-    assert "+" in prog.prog_list[masks[-1] + 1]["OP"]
+    assert "+" in str(prog.prog_list[masks[-1] + 1]["OP"])
 
 
 def rebased_runtime_end_program():
