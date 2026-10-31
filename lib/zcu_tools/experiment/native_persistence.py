@@ -95,7 +95,7 @@ class PreparedRunData:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
         object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
 
-    def to_container(self, metadata: RunMetadata | RunMetadataContent) -> Container:
+    def to_container(self, metadata: JsonObject) -> Container:
         """Return the prepared arrays with validated docs/cfg and docs/metadata.
 
         metadata is the saving record's historical evidence. Revalidate even
@@ -104,10 +104,10 @@ class PreparedRunData:
         docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
-        metadata = metadata.project()
+        _validate_metadata_doc(metadata)
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
-        docs["metadata"] = _JSON.validate_python(metadata.model_dump(mode="json"))
+        docs["metadata"] = deepcopy(_JSON.validate_python(metadata))
         return replace(self.container, docs=docs)
 
 
@@ -202,11 +202,10 @@ def save_run(
     raise FileExistsError unless replace=True. Atomic single-file publication
     and I/O errors belong to datafile. No live state or legacy format is guessed.
     """
-    if source.metadata is None:
-        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
-    if source.metadata.experiment != spec.tag:
+    metadata = _validate_metadata_doc(source.metadata)
+    if metadata.experiment != spec.tag:
         raise ValueError(
-            f"{destination}: experiment {source.metadata.experiment!r} does not match {spec.tag!r}"
+            f"{destination}: experiment {metadata.experiment!r} does not match {spec.tag!r}"
         )
     prepared = prepare_run_data(source, spec=spec, comment="")
     save(destination, prepared.to_container(source.metadata), replace=replace)
@@ -226,9 +225,7 @@ def load_run(
     CfgUnavailableWarning and leaves valid arrays/metadata available with cfg=None.
     """
     record = load_run_with_metadata(source, spec=spec)
-    if record.metadata is None:
-        raise ValueError(f"{source}: missing metadata")
-    return record, record.metadata.snapshot
+    return record, RunMetadataContent(record.metadata).snapshot
 
 
 def load_run_with_metadata(
@@ -388,7 +385,9 @@ def restore_run(
     cfg, cfg_issue = _restore_cfg(cfg_snapshot, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
-    return RestoredRun(RunRecord(cfg=cfg, result=result, metadata=metadata), cfg_issue)
+    return RestoredRun(
+        RunRecord(cfg=cfg, result=result, metadata=stored.docs["metadata"]), cfg_issue
+    )
 
 
 def _restore_cfg(
