@@ -10,7 +10,8 @@ from zcu_tools.core.simulation import AcquireRequest, TimeBase, TimelineTemplate
 
 
 @pytest.mark.parametrize("reps", [3, 10**12])
-def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int) -> None:
+@pytest.mark.parametrize("relax_delay", [1, np.int64(1)])
+def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int, relax_delay) -> None:
     # Each point is within the ns bound; the whole round may exceed int64.
     request = AcquireRequest(
         "decimated",
@@ -32,7 +33,7 @@ def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int) -> 
                 np.array([1]), (), (), np.array([4_000_000_000_000], dtype=np.int64)
             ),
         ),
-        relax_delay_ticks=1,
+        relax_delay_ticks=relax_delay,
     )
     expected = float(Fraction(reps * 4_000_000_000_010, 1_500_000))
     assert program.request_round_time_s(request).hex() == expected.hex()
