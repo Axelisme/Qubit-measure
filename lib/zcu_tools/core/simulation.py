@@ -80,7 +80,7 @@ class TimeBase:
         _check_fraction_range(period)
         if period.denominator != 1:
             raise ValueError("clock period is not on the time-base grid")
-        self._validate_ticks(period.numerator)
+        self.validate_ticks(period.numerator)
         return period.numerator
 
     def ticks(self, time_us: float | Fraction) -> int:
@@ -97,7 +97,7 @@ class TimeBase:
         _check_fraction_range(ticks)
         if ticks.denominator != 1:
             raise ValueError("time is not on the time-base grid")
-        self._validate_ticks(ticks.numerator)
+        self.validate_ticks(ticks.numerator)
         return ticks.numerator
 
     @overload
@@ -117,7 +117,7 @@ class TimeBase:
         abs(ticks * 1000 * frequency.denominator) <= 2**53. Noninteger scalars
         or arrays with a dtype other than int64 raise TypeError.
         """
-        self._validate_ticks(ticks)
+        self.validate_ticks(ticks)
         scale = 1000 * self.ticks_per_us.denominator
         # Both operands are exactly representable in float64. Only the final
         # IEEE division rounds, including for noninteger rational time bases.
@@ -128,7 +128,13 @@ class TimeBase:
             return result
         return (int(ticks) * scale) / self.ticks_per_us.numerator
 
-    def _validate_ticks(self, ticks: int | np.int64 | NDArray[np.int64]) -> None:
+    def validate_ticks(self, ticks: int | np.int64 | NDArray[np.int64]) -> None:
+        """Validate integer ticks against int64 and exact ns-numerator bounds.
+
+        Accept built-in int, np.int64 or int64 arrays of any shape. Invalid
+        types raise TypeError; values outside the request range raise OverflowError.
+        No conversion or mutation is performed.
+        """
         limit = 2**53 // (1000 * self.ticks_per_us.denominator)
         if isinstance(ticks, np.ndarray):
             if ticks.dtype != np.dtype(np.int64):
@@ -210,15 +216,15 @@ class PulseEnvelope:
     """Owned immutable signed complex envelope, continuously linearly interpolated.
 
     Attributes:
-        sample_us: Strictly increasing local times in us from pulse start. These
+        sample_period_ticks: Strictly increasing local times in us from pulse start. These
             are the actual waveform sample axis, not solver integration steps.
-        values: Dimensionless complex DAC amplitudes at sample_us, preserving
+        values: Dimensionless complex DAC amplitudes at sample_period_ticks, preserving
             original scale and sign. No peak normalization is applied. Interpolate
             real and imaginary parts linearly; hold the final sample through pulse
             end and use zero outside the event. Gain is applied separately.
     """
 
-    sample_us: tuple[float, ...]
+    sample_period_ticks: int
     values: tuple[complex, ...]
 
 
@@ -228,9 +234,9 @@ class PulseEvent:
 
     Attributes:
         gen_ch: Zero-based generator index in the bound board configuration.
-        start_us: Pulse start in us from this execution's common time origin,
-            also used by ReadoutWindow.trigger_us. Not a wall-clock timestamp.
-        duration_us: Pulse duration in us, quantized on the generator clock by
+        start_ticks: Pulse start in us from this execution's common time origin,
+            also used by ReadoutWindow.trigger_ticks. Not a wall-clock timestamp.
+        duration_ticks: Pulse duration in us, quantized on the generator clock by
             the frontend; independent of the ADC duration.
         frequency_mhz: Generator frequency in MHz after QICK DDS quantization,
             matched to the readout channel by the current frontend.
@@ -240,22 +246,22 @@ class PulseEvent:
             relative to the generator's maximum gain word. Nominal full scale
             is -1 to 1; this record does not enforce that range.
         envelope: Owned immutable continuous complex amplitude, or None for
-            unity throughout duration_us. Never includes gain or carrier phase.
-        phase_reference_us: Common carrier phase origin in execution us. Phase at
-            time t is phase_deg + 360 * frequency_mhz * (t-phase_reference_us).
+            unity throughout duration_ticks. Never includes gain or carrier phase.
+        phase_reference_ticks: Common carrier phase origin in execution us. Phase at
+            time t is phase_deg + 360 * frequency_mhz * (t-phase_reference_ticks).
             Pulses do not independently reset their oscillator phase.
         source: Originating Module name for diagnostics, detached from the Module.
         iterations: Enclosing semantic loop (name, zero-based index) coordinates.
     """
 
     gen_ch: int
-    start_us: float
-    duration_us: float
+    start_ticks: int
+    duration_ticks: int
     frequency_mhz: float
     phase_deg: float
     gain: float
     envelope: PulseEnvelope | None = None
-    phase_reference_us: float = 0.0
+    phase_reference_ticks: int = 0
     source: str = ""
     iterations: tuple[tuple[str, int], ...] = ()
 
@@ -270,18 +276,18 @@ class ReadoutWindow:
             frontend uses the last PulseReadout route declared for this ADC.
         samples: Compiled integer sample count per trigger, shared by all reads
             on this ADC. It is a count, not a duration or an integration weight.
-        sample_rate_mhz: ADC output sample rate in MHz, or samples per us.
-            The sample period is 1 / sample_rate_mhz us.
-        trigger_us: Read start times in us from the same per-execution origin
-            as PulseEvent.start_us. Tuple order is trigger emission order,
-            not a separate chronological sort. Read r uses trigger_us[r] and
+        sample_period_ticks: ADC output sample rate in MHz, or samples per us.
+            The sample period is 1 / sample_period_ticks us.
+        trigger_ticks: Read start times in us from the same per-execution origin
+            as PulseEvent.start_ticks. Tuple order is trigger emission order,
+            not a separate chronological sort. Read r uses trigger_ticks[r] and
             samples equally spaced samples on this ADC's grid.
         frequency_mhz: Demodulation frequencies in MHz, one per trigger. Empty
             for legacy shape-only windows; populated in every PointTimeline.
         phase_deg: Demodulation phases in degrees, one per trigger; empty for
             shape-only windows. The common phase origin is execution time zero.
         generator_channels: Generator index per trigger in the same order as
-            trigger_us. Empty in shape-only records, whose gen_ch is the fallback.
+            trigger_ticks. Empty in shape-only records, whose gen_ch is the fallback.
             PointTimeline windows populate this even when all reads use one route.
             gen_ch retains the final route for the fixed ADC shape descriptor.
     """
@@ -289,16 +295,16 @@ class ReadoutWindow:
     channel: int
     gen_ch: int
     samples: int
-    sample_rate_mhz: float
-    trigger_us: tuple[float, ...]
+    sample_period_ticks: int
+    trigger_ticks: tuple[int, ...]
     frequency_mhz: tuple[float, ...] = ()
     phase_deg: tuple[float, ...] = ()
     generator_channels: tuple[int, ...] = ()
 
     @property
     def reads(self) -> int:
-        """Return the number of reads per execution, len(trigger_us)."""
-        return len(self.trigger_us)
+        """Return the number of reads per execution, len(trigger_ticks)."""
+        return len(self.trigger_ticks)
 
 
 @dataclass(frozen=True)
@@ -312,14 +318,15 @@ class PointTimeline:
         events: Generator events in semantic emission order, not time-sorted.
         readouts: ADC declaration order; each window retains trigger emission
             order and this execution's trigger/demod values.
-        duration_us: End of the body in execution us, including blocking waits
+        duration_ticks: End of the body in execution us, including blocking waits
             and pending channel activity but excluding inter-shot relax_delay.
     """
 
     coordinates: tuple[tuple[str, int], ...]
     events: tuple[PulseEvent, ...]
     readouts: tuple[ReadoutWindow, ...]
-    duration_us: float
+    duration_ticks: int
+    time_base: TimeBase
 
 
 @dataclass(frozen=True)
@@ -332,31 +339,31 @@ class EventSlot:
     gen_ch: Fixed zero-based generator index.
     source: Originating Module name, for diagnostics only.
     iterations: Fixed enclosing Repeat (name, zero-based iteration) pairs.
-    start_us: Start relative to the execution origin.
-    duration_us: Generator-clock quantized duration.
+    start_ticks: Start relative to the execution origin.
+    duration_ticks: Generator-clock quantized duration.
     frequency_mhz: DDS-quantized carrier frequency.
     phase_deg: Phase-word phase; carrier phase at time t is phase_deg plus
-        360 * frequency_mhz * (t - phase_reference_us).
+        360 * frequency_mhz * (t - phase_reference_ticks).
     gain: Signed normalized DAC amplitude, nominal full scale [-1, 1].
     envelopes: Candidate envelopes; None means unity. Plain pulses have one
         candidate; computed pulses include every selected candidate.
     envelope_index: int64 candidate index for each point.
     active: bool mask; False omits this event at that point.
-    phase_reference_us: Fixed common oscillator origin; current frontends use 0.
+    phase_reference_ticks: Fixed common oscillator origin; current frontends use 0.
     """
 
     gen_ch: int
     source: str
     iterations: tuple[tuple[str, int], ...]
-    start_us: NDArray[np.float64]
-    duration_us: NDArray[np.float64]
+    start_ticks: NDArray[np.int64]
+    duration_ticks: NDArray[np.int64]
     frequency_mhz: NDArray[np.float64]
     phase_deg: NDArray[np.float64]
     gain: NDArray[np.float64]
     envelopes: tuple[PulseEnvelope | None, ...]
     envelope_index: NDArray[np.int64]
     active: NDArray[np.bool_]
-    phase_reference_us: float = 0.0
+    phase_reference_ticks: int = 0
 
 
 @dataclass(frozen=True)
@@ -368,8 +375,8 @@ class ReadoutSlot:
 
     channel: Fixed zero-based ADC index.
     samples: Fixed compiled samples per trigger.
-    sample_rate_mhz: Fixed ADC output rate, in samples/us.
-    trigger_us: Trigger start relative to execution zero.
+    sample_period_ticks: Fixed ADC output rate, in samples/us.
+    trigger_ticks: Trigger start relative to execution zero.
     frequency_mhz: Demodulation frequency per trigger.
     phase_deg: Demodulation phase per trigger, relative to execution zero.
     generator_channels: int64 generator route per trigger.
@@ -377,8 +384,8 @@ class ReadoutSlot:
 
     channel: int
     samples: int
-    sample_rate_mhz: float
-    trigger_us: NDArray[np.float64]
+    sample_period_ticks: int
+    trigger_ticks: NDArray[np.int64]
     frequency_mhz: NDArray[np.float64]
     phase_deg: NDArray[np.float64]
     generator_channels: NDArray[np.int64]
@@ -392,13 +399,13 @@ class TimelineTemplate:
         range(prod(point_dims)), with point axes flattened in C order.
     events: Generator slots in semantic emission order, not time-sorted.
     readouts: One slot per declared ADC, in declaration order.
-    duration_us: float64 (points,) body end times, excluding relax_delay.
+    duration_ticks: int64 (points,) body end times, excluding relax_delay.
     """
 
     points: NDArray[np.int64]
     events: tuple[EventSlot, ...]
     readouts: tuple[ReadoutSlot, ...]
-    duration_us: NDArray[np.float64]
+    duration_ticks: NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -443,7 +450,7 @@ class AcquireRequest:
             Required when templates are supplied; length mismatch raises ValueError.
         reps: Length of the reps axis; repetitions do not create new points.
         templates: Structural point classes partitioning range(prod(point_dims)).
-        relax_delay_us: Nonnegative inter-shot relaxation in us, added after
+        relax_delay_ticks: Nonnegative inter-shot relaxation in us, added after
             every template point for pacing; not part of template body durations.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
@@ -459,6 +466,7 @@ class AcquireRequest:
     equal seeds alone do not promise bit-exact results across library versions.
     """
 
+    time_base: TimeBase = field(kw_only=True)
     mode: AcquisitionMode
     loop_dims: tuple[int, ...]
     avg_level: int
@@ -470,7 +478,7 @@ class AcquireRequest:
     point_names: tuple[str, ...] = ()
     reps: int = 1
     templates: tuple[TimelineTemplate, ...] = ()
-    relax_delay_us: float = 0.0
+    relax_delay_ticks: int = 0
     charge_requirements: tuple[ChargeDriveRequirement, ...] = ()
     """Explicit named charge bindings; empty preserves ordinary acquisition.
 
@@ -510,13 +518,13 @@ class AcquireRequest:
                         gen_ch=slot.gen_ch,
                         source=slot.source,
                         iterations=slot.iterations,
-                        start_us=float(slot.start_us[local]),
-                        duration_us=float(slot.duration_us[local]),
+                        start_ticks=int(slot.start_ticks[local]),
+                        duration_ticks=int(slot.duration_ticks[local]),
                         frequency_mhz=float(slot.frequency_mhz[local]),
                         phase_deg=float(slot.phase_deg[local]),
                         gain=float(slot.gain[local]),
                         envelope=slot.envelopes[int(slot.envelope_index[local])],
-                        phase_reference_us=slot.phase_reference_us,
+                        phase_reference_ticks=slot.phase_reference_ticks,
                     )
                     for slot in template.events
                     if slot.active[local]
@@ -527,8 +535,8 @@ class AcquireRequest:
                         channel=slot.channel,
                         gen_ch=routes[slot.channel],
                         samples=slot.samples,
-                        sample_rate_mhz=slot.sample_rate_mhz,
-                        trigger_us=tuple(float(x) for x in slot.trigger_us[local]),
+                        sample_period_ticks=slot.sample_period_ticks,
+                        trigger_ticks=tuple(int(x) for x in slot.trigger_ticks[local]),
                         frequency_mhz=tuple(
                             float(x) for x in slot.frequency_mhz[local]
                         ),
@@ -540,7 +548,7 @@ class AcquireRequest:
                     for slot in template.readouts
                 )
                 return PointTimeline(
-                    coordinates, events, readouts, float(template.duration_us[local])
+                    coordinates, events, readouts, int(template.duration_ticks[local]), self.time_base
                 )
         raise ValueError("no template covers point")
 
@@ -606,8 +614,8 @@ class ChannelSignals:
         iq: Finite float64 array with last axis [I, Q]. Decimated mode uses
             (execution, read, sample, 2) and individual ADC
             sample units, with sample length equal to the window's samples.
-            Executions follow loop_dims C order; reads follow trigger_us order;
-            samples follow increasing time at 1 / sample_rate_mhz us intervals.
+            Executions follow loop_dims C order; reads follow trigger_ticks order;
+            samples follow increasing time at 1 / sample_period_ticks us intervals.
             No reps/rounds averaging or integer rounding has been applied.
 
     The backend owns iq and lends it until the adapter finishes copying the round.

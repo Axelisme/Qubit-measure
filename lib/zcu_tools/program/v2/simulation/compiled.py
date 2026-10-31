@@ -14,6 +14,7 @@ from zcu_tools.core.simulation import (
     AcquisitionMode,
     ChargeDriveRequirement,
     ReadoutWindow,
+    TimeBase,
 )
 
 from ..base import MyProgramV2
@@ -578,7 +579,7 @@ def _build_lanes(
     for record in records[:start]:
         _located_execute(record, machine, outputs)
     seed = Machine(prog, 1, labels)
-    seed_outputs = Outputs(prog, 1, outputs.routes, outputs.pool)
+    seed_outputs = Outputs(prog, 1, outputs.routes, outputs.pool, outputs.time_base)
     for record in records[:start]:
         _located_execute(record, seed, seed_outputs)
     live = guard_live_in(
@@ -700,7 +701,13 @@ def build_compiled_request(
             )
     names = _point_names(records, loops)
     dims = tuple(prog.loop_dict[n] for n in names)
-    outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool)
+    clocks = [float(prog.tproccfg["f_time"])]
+    for ch in prog.gen_chs:
+        cfg = prog.soccfg["gens"][ch]
+        clocks.extend((float(cfg["f_fabric"]), float(cfg["f_fabric"]) * int(cfg["samps_per_clk"])))
+    clocks.extend(float(prog.soccfg["readouts"][ch]["f_output"]) for ch in prog.ro_chs)
+    time_base = TimeBase.from_clocks(clocks)
+    outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool, time_base)
     _build_lanes(prog, records, loops, branches, outputs)
     template = outputs.template()
     windows = tuple(
@@ -708,8 +715,8 @@ def build_compiled_request(
             s.channel,
             int(s.generator_channels[0, -1]),
             s.samples,
-            s.sample_rate_mhz,
-            tuple(float(x) for x in s.trigger_us[0]),
+            s.sample_period_ticks,
+            tuple(int(x) for x in s.trigger_ticks[0]),
             tuple(float(x) for x in s.frequency_mhz[0]),
             tuple(float(x) for x in s.phase_deg[0]),
             tuple(int(x) for x in s.generator_channels[0]),
@@ -730,6 +737,7 @@ def build_compiled_request(
         names,
         prog.loop_dict["reps"],
         (template,),
-        prog.relax_delay,
+        int(prog.us2cycles(prog.relax_delay)) * time_base.period_ticks(prog.tproccfg["f_time"]),
+        time_base=time_base,
         charge_requirements=charge_requirements,
     )
