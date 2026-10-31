@@ -346,7 +346,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, timeline in zip(indices, timelines, strict=True):
@@ -421,7 +422,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                     auto_compress=False,
                 )
             )
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, timeline in zip(indices, timelines, strict=True):

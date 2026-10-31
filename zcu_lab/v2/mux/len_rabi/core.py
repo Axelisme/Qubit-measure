@@ -341,7 +341,8 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 relax_delay=cfg.relax_delay,
             )
             builder.add_loop("point", cfg.expts)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             timelines = [f"drive_{index}" for index in scan.indices]
             builder.fork("default", into=timelines)
             for drive, timeline in zip(drives, timelines, strict=True):

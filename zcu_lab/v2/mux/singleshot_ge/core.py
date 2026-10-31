@@ -365,7 +365,8 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
                     initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 timelines = [f"tone_{i}" for i in indices]
                 builder.fork("default", into=timelines)
                 for i, timeline in zip(indices, timelines, strict=True):

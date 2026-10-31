@@ -238,7 +238,8 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 relax_delay=cfg.relax_delay,
             )
             delay = builder.add_sweep("delay", cfg.delay)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             timelines = [f"pi2_first_{index}" for index in indices]
             builder.fork("default", into=timelines)
             for index, tone, timeline in zip(indices, tones, timelines, strict=True):

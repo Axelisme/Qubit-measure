@@ -419,7 +419,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                     initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 readout_module = MuxReadout("readout", readout)
                 builder.emit(readout_module)
                 prog = builder.build()
