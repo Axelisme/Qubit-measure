@@ -290,8 +290,10 @@ class ConditionalPhaseHeraldedExp(
         # ee starts the target in e (both sigma signs reverse); nominal I/Xπ
         # now means actual spectator e/g. Reorder to actual g/e before sharing.
         ee = terminal_counts(data.sums, ("e", "e"))[::-1]
-        gg_stats = count_quadratures(gg, cfg.target)
-        ee_stats = count_quadratures(ee, cfg.target)
+        gg_stats, ee_stats = (
+            count_quadratures(gg, cfg.target),
+            count_quadratures(ee, cfg.target),
+        )
         # Check acquisition before herald selection; low/zero acceptance is not
         # an incomplete round. ee uses the reversed actual-spectator order.
         complete = np.isclose(
@@ -300,10 +302,11 @@ class ConditionalPhaseHeraldedExp(
             rtol=8 * np.finfo(float).eps,
             atol=0,
         )
-        gg_values = np.where(complete, gg_stats.values, np.nan)
-        ee_values = np.where(complete[::-1], -ee_stats.values, np.nan)
-        phases = phase_points(gg_values)
-        ee_phases = phase_points(ee_values)
+        gg_values, ee_values = (
+            np.where(complete, gg_stats.values, np.nan),
+            np.where(complete[::-1], -ee_stats.values, np.nan),
+        )
+        phases, ee_phases = phase_points(gg_values), phase_points(ee_values)
         fitted = fit_phase_slopes(
             data.gate_counts,
             np.stack((gg_values, ee_values)),
