@@ -519,7 +519,8 @@ class RuntimeMath(TimedMacro):
             else:
                 limits = self.prog._time_bounds.source(self.prog, name)
         if limits is None:
-            return RuntimeEnd(name, None, None)
+            expression = self.prog._timeline_book.source_expressions.get(name)
+            return RuntimeEnd(name, None, None, expression=expression)
         expression = (
             bounded_source_expression(self.prog, name, limits.minimum, limits.maximum)
             if range_hint is not None
@@ -724,11 +725,29 @@ class RuntimeMath(TimedMacro):
         limits = optional_time_bounds(self.prog, value)
         return 0.0 if limits is None else limits[1]
 
-    def require_affine_time(self, value: RuntimeEnd) -> None:
-        """Reject runtime-only lookup rather than expose allocation metadata."""
+    def time_parameter(self, value: RuntimeEnd) -> QickParam:
+        """Return an exactly known affine time, never runtime allocation metadata.
+
+        A runtime-only or non-affine value cannot be returned as QickParam and
+        raises RuntimeError. This read does not alter the scheduled end.
+        """
         expression = runtime_expression(value)
-        if evaluate_time(expression, expression_axes(expression)) is None:
+        axes = expression_axes(expression)
+        points = evaluate_time(expression, axes)
+        if points is None:
             raise RuntimeError("time is runtime-only; cannot evaluate it at compile time")
+        points = np.broadcast_to(points, tuple(axes.values()))
+        start = int(points.flat[0])
+        spans = {}
+        for dimension, (axis, count) in enumerate(axes.items()):
+            if count > 1:
+                index = [0] * len(axes)
+                index[dimension] = count - 1
+                spans[axis] = int(points[tuple(index)]) - start
+        parameter = QickParam(start, spans)
+        if not np.array_equal(points, parameter.to_array(axes, all_loops=True)):
+            raise RuntimeError("non-affine runtime time cannot be represented by QickParam")
+        return parameter / get_fclk(self.prog)
 
     def allocate(self) -> str:
         live = self.prog._timeline_live_registers()

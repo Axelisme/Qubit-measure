@@ -64,7 +64,7 @@ class TimelineObservedPulse(Pulse):
 
     def get_time_param(self, name: str) -> QickParam:
         if name == "t" and self.runtime_start is not None:
-            self.book.math.require_affine_time(self.runtime_start)
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
@@ -178,7 +178,7 @@ class TimelinePlacedConfig(ConfigReadout):
 
     def get_time_param(self, name: str) -> QickParam:
         if name == "t" and self.runtime_start is not None:
-            self.book.math.require_affine_time(self.runtime_start)
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
@@ -188,7 +188,7 @@ class TimelinePlacedConfig(ConfigReadout):
 class TimelinePlacedTrigger(Trigger):
     def get_time_param(self, name: str) -> QickParam:
         if name == "t" and self.runtime_start is not None:
-            self.book.math.require_affine_time(self.runtime_start)
+            return self.book.math.time_parameter(self.runtime_start)
         return super().get_time_param(name)
 
     def __init__(self, book: TimelineBook, timeline: str, source: Trigger):

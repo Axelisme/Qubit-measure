@@ -445,7 +445,9 @@ class TimelineBook:
         }
 
     def observe_write(self, prog, macro) -> None:
-        """Keep current native constant/copy/add/subtract point metadata in sync."""
+        """Keep current producer identities and known arithmetic points in sync."""
+        if isinstance(getattr(macro, "dst", None), str) and macro.dst in prog._time_bounds.author_writes:
+            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
                 self.source_expressions[macro.dst] = LinearTime(macro.src)
@@ -466,7 +468,6 @@ class TimelineBook:
 
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
         if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
-            self.source_expressions.pop(macro.dst, None)
             return
         right = macro.rhs
         if isinstance(right, int):
@@ -474,7 +475,6 @@ class TimelineBook:
         elif isinstance(right, str) and self._known_source(prog, right):
             rhs = source_expression(prog, right)
         else:
-            self.source_expressions.pop(macro.dst, None)
             return
         self.source_expressions[macro.dst] = add_time(
             source_expression(prog, macro.lhs),

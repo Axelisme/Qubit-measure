@@ -990,7 +990,7 @@ class TimelineBranch(Macro):
         self.entry_math = RuntimeMath(prog)
         self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
         if self.align_timeline:
-            for register in prog._time_bounds.defined:
+            for register in prog._time_bounds.defined | self.book.source_expressions.keys():
                 expression = source_expression(prog, register)
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
