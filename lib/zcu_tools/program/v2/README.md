@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，Repeat 累加 timeline 與明示 reference 模式
+**Last updated:** 2026-10-31，timeline 來源範圍與 runtime recipe 分離
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -233,6 +233,18 @@ Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，
 沒有可用 bounds 時，編譯器在 runtime 計算 max，不證明該段同 channel 不重疊，溢位也由作者負責。
 原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
 未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
+
+編譯器以來源 ID、有方向的起點→終點與沿該 loop 軸的逐點偏差描述時間範圍。
+同 loop 的 sweep、選表與定點換算共用 loop 名稱作 ID。仿射來源的偏差為零。
+作者 register 與量測結果選表各自獨立，提供 range_hint 也不會讓它繼承 loop 相關性。
+線性式先按 ID 合併，再沿各自的一維軸取界，最後加總不同 ID 的界。
+Max/min 保留符號式。同單一軸的 choice 整體沿該軸投影，跨軸的 choice 依分配代數與分支界投影。
+真正跨 loop 的非線性結果使用新 ID。跨 loop 的 ceil 與定點換算保留線性部分，另加有界取整誤差。
+超過 64 個展平分支時，編譯器改用獨立保守範圍，並記錄分支數與 warning。
+Runtime 結尾、支配與重疊證明、overflow 檢查都從這些式子取界，不另存一套結尾 min/max。
+Runtime recipe 另存 loop、sweep、選表、定點與捕獲結尾的產生方式，執行仍讀已捕獲的 register。
+偏差與誤差只供編譯期證明，不配置時間 DMEM。
+
 Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
 Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。
 只有時間 consumer 啟用這些前置條件。證明涵蓋全部已登記 writes，不能用 lookup 後的合法 index 覆蓋先前非法讀取。

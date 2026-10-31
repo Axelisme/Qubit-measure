@@ -141,28 +141,21 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            end_limits = optional_time_bounds(prog, end)
+            start = (
+                end if self.relative_t == "auto"
+                else self.book.math.add(end, placement_time(prog, self.relative_t))
+            )
+            end_limits = optional_time_bounds(prog, start)
             previous_limits = optional_time_bounds(prog, previous)
             if (
                 end_limits is not None
                 and previous_limits is not None
                 and self.relative_t != "auto"
-                and not (
-                    (
-                        _bounds(self.relative_t)[0] >= -1e-12
-                        and self.book.math.covers(end, previous)
-                    )
-                    or end_limits[0] + _bounds(self.relative_t)[0]
-                    >= previous_limits[1] - 1e-12
-                )
+                and not self.book.math.covers(start, previous)
             ):
                 raise ValueError(
                     f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove runtime start >= previous end"
                 )
-            if self.relative_t == "auto":
-                start = end
-            else:
-                start = self.book.math.add(end, placement_time(prog, self.relative_t))
             self.book.check_loop_pulse(prog, self.ch, start)
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)

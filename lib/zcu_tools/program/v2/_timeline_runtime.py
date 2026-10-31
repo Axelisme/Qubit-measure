@@ -144,20 +144,19 @@ class DeferredCoverage:
 
 @dataclass(frozen=True, init=False)
 class RuntimeEnd:
-    """Relative cycle end stored in register, with inclusive minimum/maximum.
+    """A captured cycle register and its immutable proof expression.
 
-    register is a compiler-owned data-register name. minimum/maximum bound the
-    value on every executable path. None marks an endpoint not established at
-    compile time; operations propagate unavailable bounds rather than guessing
-    a finite limit. Arithmetic intermediates may be signed32;
-    final timeline ends must be nonnegative. covers lists ends proven no later than this
-    value, allowing a following sync to consume them without new arithmetic.
-    deferred records physical boundaries covered only after an additional proven
-    nonnegative cycle advance; negative operations and reference debits drop it.
-    expression carries correlated integer-cycle algebra for native timestamp
-    projection only. None creates a fresh bounded value (or an exact constant);
-    copying a value must preserve its expression, not its recycled register name.
-    The original intervals still control register arithmetic and overflow checks.
+    register names runtime storage; expression describes the integer value
+    independently of later writes. minimum/maximum always derive from expression
+    using the common source-range rule, including overflow and max decisions.
+    None marks an unavailable endpoint. covers lists ends proven no later than
+    this value. deferred records physical boundaries covered after an additional
+    nonnegative advance; negative operations and reference debits drop it.
+
+    Constructor endpoints only seed a fresh independent source when expression
+    is omitted. Equal endpoints seed a constant. An explicit expression is
+    authoritative; copying a value must retain it rather than a register name.
+    Final ends must be nonnegative; arithmetic intermediates may be signed32.
     """
 
     register: str
@@ -1343,17 +1342,12 @@ class RuntimeMath(TimedMacro):
     def _sum_limits(
         left: RuntimeEnd, right: RuntimeEnd | int, *, subtract: bool = False
     ) -> tuple[int | None, int | None]:
-        lo = right.minimum if isinstance(right, RuntimeEnd) else right
-        hi = right.maximum if isinstance(right, RuntimeEnd) else right
-        lower_operand, upper_operand = (hi, lo) if subtract else (lo, hi)
-        return (
-            None
-            if left.minimum is None or lower_operand is None
-            else left.minimum + (-lower_operand if subtract else lower_operand),
-            None
-            if left.maximum is None or upper_operand is None
-            else left.maximum + (-upper_operand if subtract else upper_operand),
+        rhs = runtime_expression(right) if isinstance(right, RuntimeEnd) else LinearTime(right)
+        expression = add_time(
+            runtime_expression(left), scale_time(rhs, -1) if subtract else rhs
         )
+        lower, upper = expression_limits(expression)
+        return None if lower is None else math.ceil(lower), None if upper is None else math.floor(upper)
 
     def _unbounded_maximum(
         self, left: RuntimeEnd, right: RuntimeEnd, *, target: str | None

@@ -38,6 +38,9 @@ class CycleProducer:
     interval_points retains unknown-input envelopes for Repeat accumulation.
     reconstruction is integer algebra for an affine lookup; selection is the
     captured selector and declared words. fixed_point holds numerator and shift.
+    rounding_remainder marks a cross-loop shift's integer remainder, whose
+    fixed_point recipe reconstructs the whole quotient before rational algebra.
+    fallback_branches records a >64-branch proof fallback, otherwise zero.
     None means that recipe is unavailable, never that a range is unbounded.
     """
 
@@ -121,8 +124,10 @@ class LinearTime:
     """Integer cycles as constant + sum(coefficient * variable).
 
     constant is a signed cycle offset. terms contains distinct runtime values
-    and nonzero integer coefficients. Algebra merges coefficients before
-    bounding, so shared origins cancel even when register storage differs.
+    and nonzero coefficients. Rational coefficients occur only in cross-loop
+    ceil/shift proofs; complete scheduling values remain integer cycles.
+    Algebra merges coefficients before bounding, so shared origins cancel even
+    when register storage differs.
     """
 
     constant: int | Fraction = 0
