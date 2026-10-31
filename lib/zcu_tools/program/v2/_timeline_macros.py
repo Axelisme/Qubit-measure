@@ -695,7 +695,8 @@ class RepeatTimelineBody(Macro):
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
-    def preprocess(self, _prog) -> None:
+    def preprocess(self, prog) -> None:
+        del prog  # QICK's override keeps the public keyword parameter name.
         if not self.entry.constant:
             frame = self.entry.accumulator.frame
             self.entry.book.math.operations.append(
@@ -717,7 +718,8 @@ class RepeatTimelineCapture(Macro):
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
-    def preprocess(self, _prog) -> None:
+    def preprocess(self, prog) -> None:
+        del prog  # QICK's override keeps the public keyword parameter name.
         if not self.entry.constant:
             accumulator = self.entry.accumulator
             self.entry.book.math.operations.append(
