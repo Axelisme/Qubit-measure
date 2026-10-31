@@ -80,6 +80,24 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
     return CycleBounds(math.ceil(lower), math.floor(upper))
 
 
+@lru_cache(maxsize=4096)
+def author_time_source(value: TimeExpression) -> TimeExpression:
+    """Apply the author's nonnegative cycle contract only at a time entrance.
+
+    An unbounded signed source keeps its original immutable identity and recipe.
+    The cached time-domain view has lower bound zero and no finite upper bound;
+    its producer reads the captured original, without changing signed data uses.
+    Known bounds remain authoritative. No runtime range check is emitted.
+    """
+    lo, hi = expression_limits(value)
+    if lo is not None or hi is not None:
+        return value
+    axis = cycle_axis(
+        "author time", 0, None, CycleProducer(reconstruction=value)
+    )
+    return TimeVariable(terms=((axis, 1),))
+
+
 def unbounded_time(value: TimeExpression) -> bool:
     """Return whether the proof lacks either endpoint."""
     return any(endpoint is None for endpoint in expression_limits(value))
@@ -959,7 +977,7 @@ class _ChoiceRecipes:
                 self.atom(source)
                 if source in self.captured
                 else self.linear(recipe)
-                if recipe is not None and _integer_recipe(recipe)
+                if axis.values is not None and recipe is not None and _integer_recipe(recipe)
                 else source
             )
             result = _linear_add(result, _linear_scale(term, coefficient))

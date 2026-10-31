@@ -14,6 +14,7 @@ from ._timeline_expression import (
     TimeAbs,
     TimeExpression,
     add_time,
+    author_time_source,
     ceiled_time,
     choose_time,
     cycle_axis,
@@ -911,7 +912,9 @@ class RuntimeMath(TimedMacro):
                 limits = self.prog._time_bounds.source(self.prog, name)
         if limits is None:
             expression = self.prog._timeline_book.source_expressions.get(name)
-            return RuntimeEnd(name, None, None, expression=expression)
+            if expression is None:
+                expression = RuntimeEnd(name).expression
+            return RuntimeEnd(name, expression=author_time_source(expression))
         expression = (
             bounded_source_expression(self.prog, name, limits.minimum, limits.maximum)
             if range_hint is not None
