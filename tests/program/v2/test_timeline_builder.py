@@ -386,7 +386,7 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
         mock_soccfg, reps=2, initial_delay=0, relax_delay=0
     )
     length = builder.add_sweep(
-        "length", v2.SweepCfg(start=0.1, stop=0.3, expts=3)
+        "length", v2.SweepCfg(start=0.1, stop=0.3, step=0.1, expts=3)
     )
     builder.emit(
         v2.Pulse(
