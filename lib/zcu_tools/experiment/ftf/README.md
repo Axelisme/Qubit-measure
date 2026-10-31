@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-31, mux PFB channel selection
+**Last updated:** 2026-10-31, empty mux channel receiver noise
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -310,8 +310,9 @@ shift. Mux ADCs select incident carriers by the fixed profile's PFB channel
 before demodulation. The profile determines Nyquist folding, channel spacing and
 offset; its PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz passband.
 Different-channel carriers are excluded, including when only one carrier is
-incident. If an observed event has no in-channel carrier, planning raises
-`ValueError` naming the ADC, demodulation frequencies and PFB channel.
+incident. If an observed event has no in-channel carrier, planning retains its
+grids with empty pulses. Acquisition emits receiver background offset and noise
+without a cavity response.
 An addressed single carrier retains its previous output bits. Carriers
 in the same channel still superpose, so their finite-window leakage can depend
 on readout start. This ideal selection does not model FIR response, filter
@@ -511,6 +512,9 @@ control portions, including controls after a herald, still evolve normally. Puls
 point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
 a common pulse start. Each mux ADC observes only the shared-line carriers in its
 PFB channel through its own demodulation, calibration, delay and sample grid.
+An observed channel with no in-channel carrier still emits its read columns.
+Its empty pulse event produces the existing receiver background offset and noise,
+without CTMC or cavity propagation. No new noise parameters are introduced.
 The rotating reference is chosen from the first terminal carrier before selection
 and stays common to every ADC. Logical events select independently when an ADC
 retunes between reads. Multiple grids within one event must address the same PFB
