@@ -13,7 +13,6 @@ from ._timeline_runtime import (
     optional_time_bounds,
     placement_time,
     step_time,
-    time_bounds,
 )
 from ._timeline_state import TimelineBook
 from .macro.pluse_reg import PulseByReg
@@ -160,7 +159,7 @@ class TimelineSelectedPulse(TimedMacro):
         self.source.preprocess(prog)
         if isinstance(start, RuntimeEnd):
             self.runtime_start = start
-            self.source.t_regs["t"] = start.register
+            self.source.t_regs["t"] = "s_out_time"
         else:
             self.source.t = start
             self.source.preprocess(prog)
@@ -187,11 +186,18 @@ class TimelineSelectedPulse(TimedMacro):
         self.book.record_native(prog, self.source.ch, finish, generator=True)
         self.book.native_timestamp(prog, finish, gen_ch=self.source.ch)
         if self.book.repeats and not self.book.loop_timelines:
-            lo = time_bounds(prog, start)[0]
-            hi = time_bounds(prog, finish)[1]
-            self.book.repeats[-1].pulse_guards[self.source.ch].then(
-                PulseGuard(self.source.ch, shifts=(), floors=(hi,), limits=(lo,))
+            finish_limits = optional_time_bounds(prog, finish)
+            guard = (
+                PulseGuard(self.source.ch, unbounded=True)
+                if start_limits is None or finish_limits is None
+                else PulseGuard(
+                    self.source.ch,
+                    shifts=(),
+                    floors=(finish_limits[1],),
+                    limits=(start_limits[0],),
+                )
             )
+            self.book.repeats[-1].pulse_guards[self.source.ch].then(guard)
 
         if isinstance(self.source, PulseByReg):
             # Address preparation is the final part of this pulse's arithmetic
