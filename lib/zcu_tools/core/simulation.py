@@ -131,7 +131,7 @@ class TimeBase:
                 # Object integers avoid overflowing when the quantum multiplies
                 # a large frequency numerator.
                 numerator = ticks.astype(object) * scale
-                quotient, remainder = np.divmod(numerator, divisor)
+                quotient, remainder = numerator // divisor, numerator % divisor
                 rounded = quotient + ((2 * remainder > divisor) | ((2 * remainder == divisor) & (quotient % 2 != 0)))
                 return np.asarray(rounded * quantum_ns, dtype=np.float64)
             quotient, remainder = divmod(int(ticks) * scale, divisor)
