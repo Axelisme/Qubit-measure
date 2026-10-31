@@ -274,7 +274,11 @@ def _branch_jump(
     result: list[BaseInst] = []
     if big:
         result.append(RegWriteInst(dst=address, src=SrcKeyword.LABEL, label=target))
-    result.append(JumpInst(addr=address, if_cond=condition) if big else JumpInst(label=target, if_cond=condition))
+    result.append(
+        JumpInst(addr=address, if_cond=condition)
+        if big
+        else JumpInst(label=target, if_cond=condition)
+    )
     return result
 
 
@@ -289,7 +293,9 @@ def _branch_dispatch_choices(
     for big in (False, True):
         chain: list[BaseInst] = []
         for index, target in enumerate(targets):
-            transfer = _branch_jump(target, big=big, condition= "Z" if index < len(targets) - 1 else None)
+            transfer = _branch_jump(
+                target, big=big, condition="Z" if index < len(targets) - 1 else None
+            )
             if index < len(targets) - 1:
                 test = TestInst(
                     AluExpr(Register(compare), AluOp.SUB, Immediate(index)),
@@ -354,6 +360,7 @@ def _validate_branch(
 
     targets = [entry(a + 1) for a, _ in branch.cases]
     end = entry(branch.end + 1)
+
     def matches(
         actual: list[DecodedInstruction], choices: list[list[BaseInst]]
     ) -> None:
@@ -369,7 +376,9 @@ def _validate_branch(
             prefix = max(prefix, count)
         fail(actual[min(prefix, len(actual) - 1)] if actual else records[branch.start])
 
-    choices = _branch_dispatch_choices(branch.compare, targets, records[branch.start + 1 : branch.cases[0][0]])
+    choices = _branch_dispatch_choices(
+        branch.compare, targets, records[branch.start + 1 : branch.cases[0][0]]
+    )
     matches(effects(branch.start + 1, branch.cases[0][0]), choices)
     for index, (_, last) in enumerate(branch.cases):
         stop = (

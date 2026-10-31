@@ -327,7 +327,8 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         elif defect == "target":
             index = start + 1
             inst = replace(
-                records[index].instruction, label=LabelRef(Label("_timeline_branch_0_end"))
+                records[index].instruction,
+                label=LabelRef(Label("_timeline_branch_0_end")),
             )
         else:
             index = start + 1 if defect == "effect" else end - 1
