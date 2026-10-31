@@ -218,7 +218,7 @@ class Pulse(Module):
             create = prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch)
         else:
             create = True
-        waveform = self.cfg.waveform.build(f"{self.name}_waveform")
+        waveform = self.cfg.waveform.build(f"{pulse_id}_waveform")
         prog.set_module_state(self, _PulseDeclaration(pulse_id, waveform))
         if create:
             self._add_pulse(prog, pulse_id, waveform)
