@@ -32,11 +32,11 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "length": _length_sweep(ctx),
+            "delay": _length_sweep(ctx),
             "gain": Range(0.0, 1.0, expts=21),
             "freq": Hidden(),
             "relax_delay": relax_delay,
-            "uniform": True,
+            "sampling": "linear",
             "reps": 1000,
             "rounds": 10,
         },
@@ -62,11 +62,11 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "length": _length_sweep(ctx),
+            "delay": _length_sweep(ctx),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=21),
             "gain": Hidden(),
             "relax_delay": relax_delay,
-            "uniform": True,
+            "sampling": "linear",
             "reps": 1000,
             "rounds": 10,
         },

@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
@@ -39,6 +39,11 @@ class LenRabiResult:
 
 
 class LenRabiCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+    shots: Annotated[int, FieldMeta(label="Shots")]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -54,11 +59,6 @@ class LenRabiCfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qub Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
-    shots: Annotated[int, FieldMeta(label="Shots")]
 
 
 @dataclass(frozen=True)
@@ -74,10 +74,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[LenRabiResult, LenRabiCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
-            AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis(
+                "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64
+            ),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
         cfg_schema_version="3.0",
@@ -128,53 +132,45 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = (
-            None
-            if classifier is None
-            else live_line(
-                context.plots,
-                "measurement",
-                "Length (us)",
-                "Signal",
-                num_lines=3,
-                configure_axes=configure_axes,
-            )
-        )
+        viewer = None
+        if classifier is not None:
+            figure, ax = context.plots.subplots(num="measurement")
+            ax.set(xlabel="Length (us)", ylabel="Signal")
+            viewer = live_line(ax, num_lines=3)
+            configure_axes(ax)
+            figure.show()
 
-        def update_view(raw_iq: NDArray[np.complex128]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(raw_iq: NDArray[np.complex128]):
             if viewer is None or classifier is None or classifier.radius is None:
-                return
+                return ()
             acquired_rows = np.all(np.isfinite(raw_iq), axis=1)
             populations = classify_rabi_iq(
                 raw_iq, classifier.g_center, classifier.e_center, classifier.radius
             )
             populations[~acquired_rows] = np.nan
             other = 1.0 - populations.sum(axis=1)
-            viewer.update(lengths, np.column_stack((populations, other)).T)
+            return viewer.set(lengths, np.column_stack((populations, other)).T)
 
         buffer = SignalBuffer(
             expected_shape,
             dtype=np.complex128,
             on_update=update_view,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
-                step.cfg.qub_pulse.set_param("length", length)
-
                 # Acquire one length at a time to bound the board raw-buffer size.
-                program = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=cfg.shots,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    .add_reset("reset", step.cfg.reset)
-                    .add_pulse("qubit_pulse", step.cfg.qub_pulse)
-                    .add_readout("readout", step.cfg.readout)
-                    .build()
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
                 )
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
+                builder.emit(Readout("readout", cfg.readout))
+                program = builder.build()
                 try:
                     program.acquire(soc, progress=True, cancel_flag=step.stop)
                 except StoppedPartialAcquireError:
