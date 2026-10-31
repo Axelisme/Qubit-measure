@@ -466,7 +466,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Applies to emit, pulse, trigger, send_readoutconfig,
         send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
         pulse_from_length_reg, delay_timeline, sync and the repeat parent.
-        Branch case emissions use the same default. Nested
+        The branch parent uses this default; cases shadow it. Nested
         scopes override it and restore it on exit, including exceptions.
         Explicit names win, including default. This neither forks
         nor joins and does not affect native delay/delay_auto. Call in _body;
@@ -721,15 +721,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(TimelineFork(self._timeline_book, source, targets))
 
     @contextmanager
-    def branch(self, *, by: str, align_timeline: bool) -> Generator[BranchCases]:
+    def branch(
+        self, *, by: str, align_timeline: bool, timeline: str | None = None
+    ) -> Generator[BranchCases]:
         """Select indexed sweep cases without advancing the shared reference.
 
         by names an existing sweep loop. case(index) selects its zero-based point,
         in any declaration order; omitted points execute no actions. Each case
-        starts with the incoming timeline ends and reference. align_timeline is
-        required: True joins every case end per timeline (static max or exact
-        runtime pointwise max); False retains the executed case end as a runtime
-        value on each used timeline. Unused timelines keep their incoming ends.
+        implicitly forks timeline, the parent (None selects the current scope,
+        or default). case(index) yields its name, <by>[<index>], and shadows the
+        default inside the case. Only that name and its local forks are usable;
+        other timelines raise ValueError at compile. align_timeline is required:
+        True joins all case ends into the parent (static or runtime pointwise
+        max); False keeps the executed case end. Other timelines are unchanged.
         Both modes allow subsequent placement. Local fork names expire at case
         exit; unjoined local ends are discarded, not merged into their ancestor.
         True requires every end to be reconstructible from branch-entry state.
@@ -743,7 +747,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         if not self._building_body:
             raise ValueError("branch must be called in _body")
-        cases = BranchCases(self)
+        selected = timeline if timeline is not None else self._timeline_default
+        parent = selected if selected is not None else "default"
+        cases = BranchCases(self, by)
         name = f"_timeline_branch_{self._branch_serial}"
         self._branch_serial += 1
         start = len(self.macro_list)
@@ -765,6 +771,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 cases.cases,
                 name,
                 align_timeline=align_timeline,
+                timeline=parent,
             )
         )
 

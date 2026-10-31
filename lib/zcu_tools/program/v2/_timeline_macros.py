@@ -813,15 +813,18 @@ class TimeProducer(Macro):
 class BranchCases:
     """Collect native macro lists without executing any case at build time."""
 
-    def __init__(self, prog):
+    def __init__(self, prog, by: str):
         self.prog = prog
+        self.by = by
         self.cases: dict[int, list[Macro]] = {}
         self.active = False
 
     @contextmanager
-    def case(self, index: int) -> Generator[None]:
+    def case(self, index: int) -> Generator[str]:
         """Record the zero-based selector point; omitted points do nothing.
 
+        Yield the implicit timeline name <by>[<index>], which shadows the
+        surrounding default. Only it and its local forks are accessible.
         Cases may be declared in any order. Duplicate indices and nested cases
         raise ValueError. Non-integer or out-of-range indices fail at compile.
         """
@@ -831,8 +834,10 @@ class BranchCases:
             raise ValueError(f"duplicate branch case index: {index}")
         self.active = True
         start = len(self.prog.macro_list)
+        name = f"{self.by}[{index}]"
         try:
-            yield
+            with self.prog.timeline(name):
+                yield name
         finally:
             self.cases[index] = self.prog.macro_list[start:]
             del self.prog.macro_list[start:]
@@ -886,9 +891,11 @@ class TimelineBranch(Macro):
         name: str,
         *,
         align_timeline: bool,
+        timeline: str,
     ):
         self.book = book
         self.by = by
+        self.timeline = timeline
         self.align_timeline = align_timeline
         self.indexed_cases = cases
         # Producer audits visit declared bodies before prepare.
@@ -908,6 +915,7 @@ class TimelineBranch(Macro):
                     f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
                 )
         self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
+        parent_end = self.book.end(self.timeline)
         initial = self.book.ends.copy()
         self._capture_entry(prog, initial)
         self.book.begin_branch_sources(prog)
@@ -929,10 +937,11 @@ class TimelineBranch(Macro):
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
-        for case in self.cases:
+        for index, case in enumerate(self.cases):
             self._restore_frames(frames)
             prog._time_bounds.defined = initial_defined.copy()
-            self.book.ends, self.book.waiting = initial.copy(), waiting.copy()
+            case_name = f"{self.by}[{index}]"
+            self.book.ends, self.book.waiting = {case_name: parent_end}, set()
             self.book.runtime_gens, self.book.runtime_ros = (
                 runtime_gens.copy(),
                 runtime_ros.copy(),
@@ -943,6 +952,10 @@ class TimelineBranch(Macro):
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
             self.prepared.append(self._prepare_case(prog, case))
+            case_end = self.book.end(case_name)
+            self.book.ends = {**initial, self.timeline: case_end}
+            self.book.waiting = waiting.copy()
+            self.book.used = {self.timeline}
             states.append(self._capture_case(prog))
             self.book.pinned.update(prog._timeline_live_registers())
         states = self._record_case_sources(prog, states)

@@ -1,7 +1,7 @@
 """Record timeline actions without acquiring data or touching hardware."""
 
 from collections.abc import Callable, Generator, Sequence
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager
 from typing import Literal, TypedDict, Unpack, override
 
 from qick import QickConfig
@@ -65,19 +65,21 @@ class BuilderBranchCases:
     """
 
     def __init__(
-        self, record_case: Callable[[int], AbstractContextManager[None]]
+        self, record_case: Callable[[int], AbstractContextManager[str]]
     ) -> None:
         """Use record_case to open a case; normally yielded by builder.branch().
 
         The callback captures operations on its builder and enforces recording
-        lifetime/overlap constraints. It returns a context yielding None.
+        lifetime/overlap constraints. It yields the implicit case timeline name.
         """
         self._record_case = record_case
 
-    def case(self, index: int) -> AbstractContextManager[None]:
+    def case(self, index: int) -> AbstractContextManager[str]:
         """Record a zero-based sweep point's body; omitted points do nothing.
 
-        Record through the owning builder. Duplicate, non-integer and out-of-range
+        Yield <by>[<index>], the case's default timeline; only it and local
+        forks are accessible inside. Record through the owning builder.
+        Duplicate, non-integer and out-of-range
         indices raise ValueError at build. Calls after branch exit or build,
         and overlapping cases, raise ValueError immediately.
         Nested branches are supported. Repeat in a case fails at build because
@@ -143,7 +145,7 @@ class TimelineBuilder:
         """Record a scoped default for omitted timeline arguments.
 
         Applies to emit, pulse, trigger, delay_timeline, sync and
-        the repeat parent. Branch case emissions use the same default.
+        the repeat and branch parents. Branch cases shadow this default.
         name must exist at replay (default or forked); errors surface at build.
         Explicit names win, nested scopes override and exit restores the prior
         default. No fork/join or native delay/delay_auto change occurs. Close
@@ -213,16 +215,18 @@ class TimelineBuilder:
         self._record(replay)
 
     def branch(
-        self, *, by: str, align_timeline: bool
+        self, *, by: str, align_timeline: bool, timeline: str | None = None
     ) -> AbstractContextManager[BuilderBranchCases]:
         """Record indexed cases without advancing the shared reference.
 
         by names an existing sweep loop. The yielded handle's case(index) records
         a zero-based point, in any order; omitted points execute no actions.
-        Each case starts with the branch-entry ends and reference. Required
-        align_timeline=True joins case ends per timeline, using static max or
-        exact runtime pointwise max. False keeps the executed case end as a
-        runtime value for each used timeline. Unused timelines remain unchanged.
+        timeline selects the parent; None uses the current scope or default.
+        Each case implicitly forks it and yields <by>[<index>], shadowing the
+        default. Only that case timeline and its local forks may be used;
+        other names fail at build. Required align_timeline=True joins case ends
+        into the parent, using static max or exact runtime pointwise max. False
+        keeps the executed case end. Other timelines remain unchanged.
         Local fork names expire and unjoined local ends are discarded. True
         requires all ends to be reconstructible from branch-entry state.
         Case delay/delay_auto/sync fail at build; use delay_timeline. Repeat in
@@ -234,14 +238,14 @@ class TimelineBuilder:
         expires on exit.
         """
         self._ensure_recording()
-        return self._branch(by, align_timeline=align_timeline)
+        return self._branch(by, align_timeline=align_timeline, timeline=timeline)
 
     @contextmanager
     def _branch(
-        self, by: str, *, align_timeline: bool
+        self, by: str, *, align_timeline: bool, timeline: str | None
     ) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
-        cases: list[tuple[int, str | None, tuple[_Action, ...]]] = []
+        cases: list[tuple[int, tuple[_Action, ...]]] = []
         is_open = True
         case_active = False
 
@@ -253,20 +257,22 @@ class TimelineBuilder:
                 raise ValueError("branch.case cannot overlap another case")
 
         @contextmanager
-        def capture_case(index: int) -> Generator[None]:
+        def capture_case(index: int) -> Generator[str]:
             nonlocal case_active
             ensure_case()
             case_active = True
-            timeline = self._timeline_name
+            previous = self._timeline_name
+            self._timeline_name = f"{by}[{index}]"
             try:
                 with self._capture() as case_actions:
-                    yield
+                    yield self._timeline_name
                 # Cases replay separately from the branch's surrounding actions.
-                cases.append((index, timeline, tuple(case_actions)))
+                cases.append((index, tuple(case_actions)))
             finally:
+                self._timeline_name = previous
                 case_active = False
 
-        def record_case(index: int) -> AbstractContextManager[None]:
+        def record_case(index: int) -> AbstractContextManager[str]:
             ensure_case()
             return capture_case(index)
 
@@ -279,14 +285,13 @@ class TimelineBuilder:
         recorded_cases = tuple(cases)
 
         def replay(prog: TimelineProgramV2) -> None:
-            with prog.branch(by=by, align_timeline=align_timeline) as branch:
+            with prog.branch(
+                by=by, align_timeline=align_timeline, timeline=timeline
+            ) as branch:
                 for action in recorded:
                     action(prog)
-                for index, timeline, case in recorded_cases:
-                    with (
-                        branch.case(index),
-                        nullcontext() if timeline is None else prog.timeline(timeline),
-                    ):
+                for index, case in recorded_cases:
+                    with branch.case(index):
                         for action in case:
                             action(prog)
 

@@ -204,11 +204,13 @@ class Branch(Module):
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """
-        with prog.branch(by=self.compare_reg, align_timeline=True) as cases:
+        with prog.branch(
+            by=self.compare_reg, align_timeline=True, timeline=timeline
+        ) as cases:
             for index, branch in enumerate(self.branches):
                 with cases.case(index):
                     for mod in branch:
-                        prog.emit(mod, timeline=timeline)
+                        prog.emit(mod)
 
     def init(self, prog: ModularProgramV2) -> None:
         for branch in self.branches:
