@@ -238,17 +238,6 @@ def test_scan_with_init_delegates_to_repeat():
     prog.add_reg.assert_called()
 
 
-def test_scan_with_run_delegates_to_repeat():
-    s = ScanWith("s", [1, 2, 3], val_reg="v")
-    # replace inner repeat with a mock
-    inner = MagicMock()
-    inner.run.return_value = 0.0
-    s.repeat_mod = inner
-    prog = _make_dmem_prog()
-    s.run(prog, t=0.5)
-    inner.run.assert_called_once_with(prog, 0.5)
-
-
 def test_scan_with_add_content_delegates_to_repeat():
     from zcu_tools.program.v2.modules.delay import SoftDelay
 

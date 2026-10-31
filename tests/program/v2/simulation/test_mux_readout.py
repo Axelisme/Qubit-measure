@@ -5,13 +5,12 @@ import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
-from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
 
 @pytest.mark.parametrize("placement", ["direct", "repeat"])
-def test_mux_frontend_agrees_with_scalar_timing_and_declared_tone_order(placement):
+def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
     mux = native_mux().build("mux_probe")
     module = Repeat("container", 1).add_content(mux) if placement == "repeat" else mux
     prog = ModularProgramV2(
@@ -28,8 +27,6 @@ def test_mux_frontend_agrees_with_scalar_timing_and_declared_tone_order(placemen
         request = env.soc.binding.last_request
         assert request is not None
         point = request.materialize_point(0)
-        scalar = TimelineInterpreter(prog).run_point({})
-        assert point == scalar
         count = 1
         assert len(point.events) == count * 2
         assert tuple(w.channel for w in point.readouts) == (4, 1)

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-30，joint-ADC shot sums and explicit charge requirements
+**Last updated:** 2026-10-31, compiled frontend and joint-ADC shot sums
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -64,6 +64,79 @@ construction. Single-fluxonium uses it to freeze losses once per acquisition.
 Preparation failures propagate and release admission without consuming a sequence.
 Hardware acquisition does not call the binding or this clock.
 
+## Compiled request builder
+
+`simulation.compiled.build_compiled_request(prog, mode, binding, sequence, routes=soc.routes)`
+reads `prog.compiled_stream` and returns detached numeric slots without calling a backend.
+Its optional `charge_requirements` keyword preserves caller requirements in the
+request for environment-owned physical validation, without inferring drive roles.
+It predecodes the snapshot once and evaluates scan points as independent array
+lanes. `LOOP_START` provides resolved register/wave start and step words, plus
+rotated DMEM table hooks. The builder checks these definitions against the
+compiled initial words and loop shells; missing keys or inconsistent metadata
+raise before request construction. Reps remain request metadata and are not
+executed. Marked shot-local loops iterate across lanes with `index < n` masks,
+including zero and register-driven counts, without expanding the instruction stream.
+A static live-in guard rejects registers or memory that a shot reads before
+initialization and also writes across points/reps, even for equal-valued or
+unobserved updates. Reading the outer reps counter in the shot is also an
+unsupported live-in; sweep indices and shot-local counters remain supported.
+Prologue-only constants and shot-local initialization remain supported.
+The builder also rejects unresolved readout routes. An ADC without a wired
+generator route receives an explicit missing-route diagnostic with read and time.
+Content after the terminal self-jump is rejected, including unreachable NOPs;
+body, cleanup and loop NOPs remain supported.
+Runtime ADC words use overlapping output carriers to resolve their frequency image.
+Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
+Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO
+uses the maximum of the command timestamp and its previous effective time, without
+wave duration or pipeline delays. Each read uses the last update effective at its
+window start. A different frequency or phase inside the open window raises before
+request construction; an equal update is accepted. Missing start-time config also
+raises. Shot-local configuration writes must supply every read on that port and
+drain before the next shot. A port configured only in the prologue can remain
+constant. A read cannot use a prologue or previous-shot config once its port is
+mutable in the shot, even when later updates have equal values. Pending FIFO
+updates cannot carry across points/reps.
+This timing rule is a simulation model, not a sample-exact hardware claim.
+
+`SimulationAcquireMixin` calls this builder for both `TimelineProgramV2` and
+`ModularProgramV2`, passing the bound SoC's routes. Other SoC objects keep the
+original QICK acquisition path.
+The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
+native sweep/reps shells, marked inner loops and register-selected branches.
+Body boundaries distinguish acquisition axes from body-local Repeat counters,
+including loops emitted during Module lowering after QICK loop discovery.
+Inner iterations produce separate slots and retain their nested coordinates.
+Branch dispatch follows compiled register/flag effects and only enters its selected
+marked case. Raw jumps inside case bodies remain unsupported.
+Each ADC must execute its declared static trigger count in every point/shot;
+matching scan totals cannot compensate for a per-shot mismatch. A mismatch raises
+with ADC channel, static count and actual count before returning a request.
+Table lookups and runtime timeline arithmetic use the same register/memory effects,
+including selected waveform ends, timeline maxima, floors and reference debits.
+ARITH uses signed A/D27, B18 and C32 inputs and rejects pre-adder overflow.
+Its bounded result fits signed46; s3 exposes low32 and the configured core source
+exposes low/high32. DIV uses unsigned32 quotient/remainder and rejects zero division.
+These are simulation models, not claims about unconfirmed DSP or divider boundaries.
+
+Ordinary axis_signal_gen_v6 commands start at the maximum of their timestamp and
+the previous command's end on the same generator. Same-timestamp flat-top segments
+therefore play consecutively. Generators keep independent schedules. This model
+omits dispatcher/CDC/pipeline delays and does not claim sample-exact DAC edges.
+Mux commands use their own tone/mask contract instead.
+Ordinary zero-output commands emit no event but still occupy their command duration.
+DDS output uses a unity envelope. Input output selection, periodic mode and phase
+reset raise before request construction. Holding the final sample is accepted only
+when that envelope sample is exactly zero. Phase reset would affect later commands,
+which requires DDS phase state outside the current numeric event contract.
+Do not infer support for every control form or registered experiment from this builder.
+
+Simulation acquisition has one frontend. It reads the pre-optimization compiled
+stream through `build_compiled_request` for native and Modular programs.
+There is no runtime frontend selector or fallback. Module lowering remains part
+of program construction; acquisition does not interpret the Module tree.
+
 ## Build and own an environment
 
 An environment file is trusted Python, not a sandbox or a configuration DSL.
@@ -122,8 +195,8 @@ registered with an error; they do not prevent GUI exit or trigger automatic retr
 ## Compact timelines and statistics
 
 Each sweep point has one interpreted timeline per acquire, not one per shot.
-The adapter interprets the Module tree in vector mode and emits templates,
-partitioning the grid only where event structure differs. Reps and rounds repeat
+The adapter interprets the pre-optimization compiled stream over independent
+scan lanes and emits numeric templates. Reps and rounds repeat
 the same controls. A timeline that depends on rep index fails fast with no
 per-shot fallback.
 
@@ -149,28 +222,28 @@ points or reps.
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
 query, not a callback. Time is us, frequency MHz, phase degrees and
-gain normalized DAC amplitude. The frontend interprets exact supported Module
-classes, not arbitrary tProcessor instructions. Unknown subclasses, raw program setup/body/cleanup or make_program overrides, raw loop
-hooks and undefined or
-incorrectly typed registers fail before the backend produces any data. Errors
-identify the concrete Module type/name, loop coordinates and relevant register.
+gain normalized DAC amplitude. The frontend accepts supported instruction effects
+from native operations, Module lowering and raw assembly, including NOP hooks.
+It rejects measurement-dependent jumps, unmarked jumps, body waits/resyncs,
+tProc clock reads and cross-shot state carry before backend execution.
+Errors identify the instruction class, pre-optimization position and available
+loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
-TablePulseReadout, Join and the existing reset wrappers. Join interleaves branches
-in the same static minimum-time order as hardware emission and rejects
-cross-branch register dependencies. Reset wrappers emit actual pulses only;
-they do not reset a quantum state. LoadValue compression does not affect semantic
-values. LoadWord keeps uint32 patterns until a named readout frequency/gain
-consumer decodes them; scalar delay/count consumers cannot reinterpret words.
+TablePulseReadout, Join and the existing reset wrappers. Join preserves compiled
+emission order. Its register effects follow the same shot-local and live-in rules
+as other instructions. Reset wrappers emit actual pulses only; they do not reset
+a quantum state. LoadValue compression does not affect semantic values.
+LoadWord preserves uint32 words; each compiled consumer applies its operand semantics.
 
-The frontend interprets the Module tree once over a NumPy grid of non-reps
-points. `AcquireRequest.templates` partitions that grid into structural classes.
+The frontend predecodes the compiled stream once over a NumPy grid of non-reps
+points. `AcquireRequest.templates` covers that grid with numeric slots.
 Each event slot has point arrays for quantized timing, carrier, phase, signed gain,
-envelope selection and activity. Repeat expands to its fixed count or register
-range bound, with inactive slots beyond each point's count. Branch selections
-partition templates. Generator and per-read ADC routing checks use these templates.
-Any consumed parameter that depends on reps raises before backend execution.
+envelope selection and activity. Marked inner loops execute with active-lane masks
+and retain nested iteration coordinates. Branches select lanes using compiled
+registers and flags. Generator and per-read ADC routing checks use these templates.
+Reps remain request metadata; their shell cannot update other shot state.
 
 `materialize_point(point)` expands one point into a detached `PointTimeline` for
 diagnostics. `PulseEvent` retains signed gain, carrier MHz, phase degrees, source,
@@ -178,10 +251,10 @@ nested iteration coordinates and a common phase origin of zero. A nonconstant
 `PulseEnvelope` owns immutable complex samples on the actual DAC sample clock.
 Consumers interpolate linearly, hold the final sample through pulse end and use
 zero outside the event. No per-pulse peak normalization or solver grid is imposed.
-Const uses a unity envelope (`None`). A flat-top with at least 10 ns of plateau
-becomes adjacent up-ramp, half-gain constant and down-ramp slots. Short flat-tops
-keep whole sampled-envelope candidates. Long plateaus never expand onto a fine
-grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
+Const uses a unity envelope (`None`). Compiled waveform commands determine event
+durations and envelope samples. Flat-top ramp and plateau commands retain their
+compiled playback order. Template grouping is not a public waveform
+decomposition guarantee.
 
 MuxReadout lowers the real compiled mixmux tones into simultaneous EventSlots
 on one generator, with one static PFB ADC slot per declared tone. DDS, gain,
@@ -199,9 +272,9 @@ new consumers use template arrays for point-dependent timing/demodulation.
 Environments, not this frontend, explicitly convert us/MHz into the independent
 numeric APIs' ns/GHz.
 
-ComputedPulse reserves the maximum candidate blocking length. TableLengthPulse
-uses the selected quantized duration and the existing runtime timestamp policy,
-without padding to the longest entry. TablePulseReadout first plays its initial
+ComputedPulse and TableLengthPulse follow the selected compiled waveform and
+timestamp effects. The frontend does not pad a selected event to the longest
+candidate. TablePulseReadout first plays its initial
 compiled template; only its named loop's exec-after hook prepares the next words.
 The last update restores table entry zero for the next outer repetition. Register
 and template state belongs to one frontend preparation, never to another acquire.

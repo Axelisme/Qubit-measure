@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-31
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -280,6 +280,17 @@ register and instruction position. Ordinary scalar and uint32 word consumers
 keep their existing contracts.
 
 ## Design Boundaries
+
+Legacy programs and composite Modules call `Module.emit(prog, t)` after `init`.
+It runs the existing `run` behavior inside `prog.source_scope(module.name)`.
+Each author-provided child emission gets its own nested diagnostic source, even
+when pulse registration shares a waveform or `PulseCfg`. Ending a child restores
+its parent source. Internal helpers run directly under their semantic owner's
+source. `ScanWith` keeps its loop and loader under the scan owner while authored
+children retain their own scopes. Anonymous `Join` scheduling keeps an empty
+source, and its table-pulse children retain their author names without separate
+blocking waits. These annotations add no machine instructions. The snapshot and
+optimizer-input distinction is defined in [IR compile snapshot](../ir/README.md#pre-optimization-compile-snapshot).
 
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken

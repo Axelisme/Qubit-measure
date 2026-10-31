@@ -44,6 +44,16 @@ class PatchWmemFromDmem(Macro):
     val_reg: str
     dmem_offset: int
 
+    def table_definition(self, prog) -> dict[int, dict[int, int]]:
+        """Resolve this deterministic frequency hook without emitting instructions.
+
+        Return {WMEM word address: {frequency field 0: DMEM word offset}}.
+        The DMEM table is rotated: its last word restores the initial WMEM
+        frequency. Unknown or non-single-wave targets raise RuntimeError or
+        NotImplementedError, just as expansion does.
+        """
+        return {_single_wave_addr(prog, self.name): {0: self.dmem_offset}}
+
     # tolerated: QICK Macro.expand is inferred as None, but translate iterates the returned macro list.
     def expand(self, prog) -> list[AsmInst]:  # pyright: ignore[reportIncompatibleMethodOverride]
         idx_reg = prog._get_reg(self.idx_reg)

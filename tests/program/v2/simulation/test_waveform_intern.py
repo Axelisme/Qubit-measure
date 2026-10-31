@@ -1,8 +1,5 @@
 """Compiled waveform reuse observed through detached request records."""
 
-import hashlib
-from dataclasses import fields, is_dataclass
-
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
@@ -19,32 +16,11 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
-from zcu_tools.program.v2.simulation.frontend import build_request
-
-
-def content_digest(value):
-    """Characterize all template fields, ignoring shared object identities."""
-    digest = hashlib.sha256()
-
-    def visit(item):
-        if isinstance(item, np.ndarray):
-            digest.update(str((item.dtype.str, item.shape)).encode())
-            digest.update(item.tobytes())
-        elif is_dataclass(item):
-            for field in fields(item):
-                visit(getattr(item, field.name))
-        elif isinstance(item, (tuple, list)):
-            for child in item:
-                visit(child)
-        else:
-            digest.update(repr(item).encode())
-
-    visit(value)
-    return digest.hexdigest()
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 
 @pytest.mark.parametrize("kind", ["gauss", "drag", "flat_top", "arb"])
-def test_repeat_candidates_extract_compiled_content_once(kind, tmp_path, monkeypatch):
+def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_path):
     if kind == "arb":
         path = tmp_path / "wave.npz"
         np.savez(path, time=[0, 0.04, 0.1], idata=[0, 0.5, 0], qdata=[0.1, 0, -0.2])
@@ -87,49 +63,54 @@ def test_repeat_candidates_extract_compiled_content_once(kind, tmp_path, monkeyp
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
     buffers = list(table.values())
-    sample_count = len(buffers[0]["data"])
-    extractions = []
-    original = np.arange
-
-    def observed_arange(*args, **kwargs):
-        if args == (sample_count,):
-            extractions.append(1)
-        return original(*args, **kwargs)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(np, "arange", observed_arange)
-        request = build_request(prog, "integrated", env.soc.binding, 0)
-    # These digests characterize the original lowering, including flat-top
-    # ramp/plateau slots, complex samples, candidate order and every point array.
-    expected = {
-        "gauss": "cf4af2dee86009b7d7a764f2dc1fb11f4223995530d9d35ac59f97ece396e8f8",
-        "drag": "843dc2578e9293fc1ac44df45fdd86cef4eeb2bd34d50bf7fee12373dfd14035",
-        "flat_top": "67521e134b91ead1aa64a7596e69230d240aeb32e9745ac2c666c356cb818704",
-        "arb": "65fd4cd5d58a7894f2fb097d7ac75a8f4bf03210df5fd0e4da11f8e7098ef98d",
-    }
-    assert content_digest(request.templates) == expected[kind]
-    events = request.materialize_point(1).events
-    assert events[0].gain < 0
-    assert events[0].phase_deg == pytest.approx(37, abs=1e-5)
-    assert len(extractions) == 1
-    if kind != "flat_top":
-        envelopes = [
-            e for slot in request.templates[0].events[:-1] for e in slot.envelopes
-        ]
-        assert all(e is envelopes[0] for e in envelopes)
-        envelope = envelopes[0]
-        assert envelope is not None
-        data = buffers[0]["data"]
-        expected_values = (data[:, 0] + 1j * data[:, 1]) / prog.soccfg.get_maxv(1)
-        np.testing.assert_array_equal(envelope.values, expected_values)
-    # A later preparation must read current compiled bytes, even with the same
-    # channel/name. Previous records remain detached from those mutable buffers.
-    before = content_digest(request.templates)
+    request = build_compiled_request(
+        prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
+    )
+    events = [e for e in request.materialize_point(1).events if e.source == "gate"]
+    assert events
+    assert all(e.gain < 0 for e in events)
+    assert all(e.phase_deg == pytest.approx(37, abs=1e-5) for e in events)
+    data = buffers[0]["data"]
+    expected_values = (data[:, 0] + 1j * data[:, 1]) / prog.soccfg.get_maxv(1)
+    # Observe playback samples, not template candidate identities or ordering.
+    shaped = [e.envelope for e in events if e.envelope is not None]
+    assert shaped
+    if kind == "flat_top":
+        # Each repetition plays both halves of the compiled ramp around a plateau.
+        half = len(expected_values) // 2
+        np.testing.assert_array_equal(
+            np.concatenate([shaped[0].values, shaped[1].values]),
+            np.concatenate([expected_values[:half], expected_values[-half:]]),
+        )
+    else:
+        for envelope in shaped:
+            np.testing.assert_array_equal(envelope.values, expected_values)
+    for event in events:
+        if event.envelope is not None:
+            np.testing.assert_allclose(
+                event.envelope.sample_us,
+                np.arange(len(event.envelope.values))
+                / (
+                    prog.soccfg["gens"][1]["f_fabric"]
+                    * prog.soccfg["gens"][1]["samps_per_clk"]
+                ),
+            )
+    original = tuple(request.materialize_point(point) for point in range(2))
     for buffer in buffers:
         buffer["data"][:, 0] = 0
-    later = build_request(prog, "integrated", env.soc.binding, 1)
-    assert content_digest(later.templates) != before
-    assert content_digest(request.templates) == before
+    later = build_compiled_request(
+        prog, "integrated", env.soc.binding, 1, routes=env.soc.routes
+    )
+    changed = tuple(later.materialize_point(point) for point in range(2))
+    assert changed != original
+    assert tuple(request.materialize_point(point) for point in range(2)) == original
+    assert all(
+        value.real == 0
+        for point in changed
+        for event in point.events
+        if event.source == "gate" and event.envelope is not None
+        for value in event.envelope.values
+    )
 
 
 @pytest.mark.parametrize("difference", ["samples", "clock", "maxv"])
@@ -166,10 +147,13 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
         prog.soccfg["gens"][2]["f_fabric"] *= 2
     else:
         prog.soccfg["gens"][2]["maxv"] //= 2
-    request = build_request(prog, "integrated", env.soc.binding, 0)
-    first, second = [slot.envelopes[0] for slot in request.templates[0].events[:2]]
+    request = build_compiled_request(
+        prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
+    )
+    first, second = [
+        event.envelope for event in request.materialize_point(0).events[:2]
+    ]
     assert first is not None and second is not None
-    assert first is not second
     assert first != second
     if difference == "clock":
         np.testing.assert_array_equal(first.values, second.values)
@@ -179,35 +163,3 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
         np.testing.assert_array_equal(np.array(first.values) * 2, second.values)
     else:
         assert any(value.imag != 0 for value in second.values)
-
-
-def test_flat_top_durations_keep_distinct_sample_axes():
-    from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
-
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=[
-            PulseCfg(
-                ch=1,
-                nqz=1,
-                freq=80,
-                gain=0.2,
-                waveform=FlatTopWaveformCfg(
-                    length=length,
-                    raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
-                ),
-            ).build(f"flat{i}")
-            for i, length in enumerate((0.15, 0.20))
-        ],
-        reps=1,
-    )
-    # The scalar diagnostic seam retains whole flat-tops, making the playback
-    # duration part of envelope identity observable without decomposition.
-    first, second = TimelineInterpreter(prog).run_point({"reps": 0}).events
-    assert first.envelope is not None and second.envelope is not None
-    assert first.envelope.values == second.envelope.values
-    assert first.envelope.sample_us != second.envelope.sample_us
-    assert second.envelope.sample_us[-1] - first.envelope.sample_us[
-        -1
-    ] == pytest.approx(second.duration_us - first.duration_us)

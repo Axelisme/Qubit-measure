@@ -189,6 +189,58 @@ def readout_freq_from_word(
     )
 
 
+def generator_frequencies_from_words(
+    soccfg: QickConfig,
+    words: NDArray[np.int64],
+    *,
+    gen_ch: int,
+    rounded_mixer_mhz: float,
+    absolute_freqs: bool,
+) -> NDArray[np.float64]:
+    """Decode final generator DDS words with already resolved mixer state.
+
+    words contains signed or unsigned 32-bit patterns of arbitrary array shape.
+    gen_ch indexes the resolved board config. rounded_mixer_mhz is the compiled
+    physical mixer frequency, not an author input to be rounded again.
+    absolute_freqs applies QICK's mixer-based absolute-frequency convention.
+    Return same-shaped MHz values without changing words or configuration.
+    """
+    raw = words % _UINT32_MODULUS
+    if absolute_freqs and soccfg["gens"][gen_ch]["has_mixer"]:
+        modulus = 1 << int(soccfg["gens"][gen_ch]["b_dds"])
+        raw = (raw + modulus // 2) % modulus - modulus // 2
+    dds = np.asarray(soccfg.reg2freq(raw, gen_ch=gen_ch), dtype=np.float64)
+    return dds + rounded_mixer_mhz if absolute_freqs else dds
+
+
+def readout_frequencies_from_words(
+    soccfg: QickConfig,
+    words: NDArray[np.int64],
+    *,
+    ro_ch: int,
+    reference_freq_mhz: NDArray[np.float64],
+    flip_downconversion: bool,
+) -> NDArray[np.float64]:
+    """Decode final ADC DDS words at the nearest explicit physical MHz reference.
+
+    words already include QICK mixer correction and downconversion sign. The
+    reference must be finite, same-shaped, and within half an ADC DDS period of
+    the intended carrier. Alias selection belongs to the caller; this function
+    does not discover a pulse or infer a physical route. Invalid shape raises
+    ValueError. Return an owned same-shaped MHz array.
+    """
+    if words.shape != reference_freq_mhz.shape or not np.all(
+        np.isfinite(reference_freq_mhz)
+    ):
+        raise ValueError(
+            "readout frequency words require finite same-shaped reference_freq_mhz"
+        )
+    raw = (-words if flip_downconversion else words) % _UINT32_MODULUS
+    alias = np.asarray(soccfg.reg2freq_adc(raw, ro_ch=ro_ch), dtype=np.float64)
+    period = float(soccfg["readouts"][ro_ch]["f_dds"])
+    return alias + np.rint((reference_freq_mhz - alias) / period) * period
+
+
 def readout_freqs_from_words(
     soccfg: QickConfig,
     words: NDArray[np.int64],
@@ -217,35 +269,29 @@ def readout_freqs_from_words(
         mixer_freq=mixer_freq,
         nqz=nqz,
     )
-    raw = words % _UINT32_MODULUS
     absolute_freqs, flip_downconversion = _program_frequency_conventions()
     if kind == "gen":
-        if absolute_freqs and soccfg["gens"][gen_ch]["has_mixer"]:
-            modulus = 1 << int(soccfg["gens"][gen_ch]["b_dds"])
-            raw = (raw + modulus // 2) % modulus - modulus // 2
-        dds = np.asarray(soccfg.reg2freq(raw, gen_ch=gen_ch), dtype=np.float64)
+        freq = generator_frequencies_from_words(
+            soccfg,
+            words,
+            gen_ch=gen_ch,
+            rounded_mixer_mhz=rounded_mixer,
+            absolute_freqs=absolute_freqs,
+        )
     elif kind == "ro":
-        if flip_downconversion:
-            raw = -raw % _UINT32_MODULUS
-        mixer_word = int(soccfg.freq2reg_adc(rounded_mixer, ro_ch=ro_ch))
-        dds = np.asarray(
-            soccfg.reg2freq_adc(
-                (raw - mixer_word) % _UINT32_MODULUS,
-                ro_ch=ro_ch,
-            ),
-            dtype=np.float64,
+        if reference_freq_mhz is None:
+            raise ValueError(
+                "readout frequency words require same-shaped reference_freq_mhz"
+            )
+        freq = readout_frequencies_from_words(
+            soccfg,
+            words,
+            ro_ch=ro_ch,
+            reference_freq_mhz=reference_freq_mhz,
+            flip_downconversion=flip_downconversion,
         )
     else:
         raise ValueError(f"unsupported frequency word kind: {kind!r}")
-    freq = dds + rounded_mixer if absolute_freqs else dds
-    if kind == "ro":
-        if reference_freq_mhz is None or reference_freq_mhz.shape != words.shape:
-            raise ValueError(
-                "readout frequency words encode only an ADC-DDS alias; "
-                "same-shaped reference_freq_mhz is required"
-            )
-        period = float(soccfg["readouts"][ro_ch]["f_dds"])
-        freq = freq + np.rint((reference_freq_mhz - freq) / period) * period
     if paired_ro_words is not None:
         if kind != "gen" or paired_ro_words.shape != words.shape:
             raise ValueError("paired_ro_words requires same-shaped generator words")

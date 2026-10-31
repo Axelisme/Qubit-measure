@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，shell WAIT 契約與編譯期時間來源
+**Last updated:** 2026-10-31，compiled simulation、TimelineBuilder 與 shell WAIT 契約
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -28,6 +28,9 @@ revision. Generators are `axis_signal_gen_v6`, with 32-bit DDS/phase,
 12288 MHz DDS, 384 MHz fabric, 16 envelope samples/clock, max gain word 32766
 and 65536 envelope samples. ADCs are `axis_readout_v2`, with 32-bit DDS,
 2457.6 MHz DDS, 307.2 MHz output and 8192-sample accumulated/decimated buffers.
+Generator `tproc_ch` and ADC `tproc_ctrl` occupy distinct wave-output ports.
+ADC `tproc_ch` indexes readback inputs, a separate namespace.
+Ordinary ADCs use distinct bits on their shared trigger output port.
 The ordinary profile does not offer mixers, mux channels or weighted readouts.
 `make_mux_mock_soccfg(n_gens, n_readouts, gen_ch=..., ro_chs=...)` separately
 selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
@@ -81,6 +84,12 @@ The scalar, paired and array decoders in `utils` take `cfg=PulseReadoutCfg`.
 They borrow its generator/ADC channels, mixer frequency and Nyquist zone directly;
 they do not change the cfg or use its waveform, gain or readout-window settings.
 Encoding with `readout_freq_words` still takes those four explicit settings.
+`generator_frequencies_from_words` accepts an already-rounded physical mixer
+frequency and generator channel, without constructing a readout cfg.
+`readout_frequencies_from_words` accepts a declared ADC channel and an explicit,
+same-shaped physical reference array. It selects the nearest ADC-DDS image.
+The compiled request builder supplies references from actual output effects.
+The cfg-based APIs delegate to these same word decoders.
 
 ## Architecture
 
@@ -125,7 +134,8 @@ Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case():` �
 在 case 內仍呼叫原 builder 的 emit、delay 或其他 body 方法。
 關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
 Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
-模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
+`SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
+既有 acquire 擴充仍由共同基底提供。
 
 `TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
 不同物件衝突時錯誤列出兩個名稱與物件。

@@ -6,6 +6,8 @@ import pytest
 from qick.asm_v2 import Delay as NativeDelay
 from qick.asm_v2 import Macro, QickParam, QickSweep1D
 from qick.asm_v2 import Pulse as NativePulse
+from zcu_tools.program.v2.macro.meta import MetaMacro
+from zcu_tools.program.v2.macro.structure import MarkedCloseLoop, SourcePulse
 from zcu_tools.program.v2.macro.wmem import PatchWmemFromRegs
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import (
@@ -396,6 +398,62 @@ class _NativeSequence(SoftDelay):
 
     def lower(self, prog, *, timeline, tag):
         self.operations(prog)
+
+
+@pytest.mark.parametrize("exchange", [False, True])
+def test_module_join_preserves_annotated_native_pulse_effects(exchange):
+    template = _pulse("native", 1, 50)
+    native = _NativeSequence(
+        "native_output",
+        lambda prog: prog.append_macro(
+            SourcePulse(ch=1, name=template.pulse_id, t=0, source_name="native")
+        ),
+    )
+    choice = Branch("scan", _pulse("a", 0), None, None)
+    joined = Join(choice, native) if exchange else Join(native, choice)
+    prog = _program([template, joined], lambda prog: prog.emit(joined))
+    # Native output remains at the parallel origin, even when the advancing
+    # case sequence must move after it. Like Pulse, the raw native operation
+    # does not advance a Module timeline; only the selected case closes it.
+    assert [waves(s) for s in shots(prog)] == [[0, 0], [0], [0]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [28, 0, 0] * 2
+
+
+@pytest.mark.parametrize("annotation", ["LOOP_START", "BRANCH_START", "CUSTOM"])
+def test_module_join_rejects_metadata_that_is_not_a_source_annotation(annotation):
+    unknown = _NativeSequence(
+        "unknown",
+        lambda prog: prog.append_macro(
+            MetaMacro(type=annotation, name="unknown", info={"native": True})
+        ),
+    )
+    joined = Join(unknown, _pulse("b", 1))
+    with pytest.raises(ValueError, match="unknown reference effect of MetaMacro"):
+        _program([joined], lambda prog: prog.emit(joined))
+
+
+@pytest.mark.parametrize("wrapper", ["source", "pulse", "closing"])
+def test_module_join_rejects_unknown_subclasses_of_annotation_wrappers(wrapper):
+    class CustomSource(MetaMacro):
+        pass
+
+    class CustomPulse(SourcePulse):
+        pass
+
+    class CustomClosing(MarkedCloseLoop):
+        pass
+
+    macros = {
+        "source": CustomSource(type="SOURCE_START", name="unknown"),
+        "pulse": CustomPulse(ch=0, name="unknown", t=0, source_name="unknown"),
+        "closing": CustomClosing(),
+    }
+    unknown = _NativeSequence(
+        "unknown", lambda prog: prog.append_macro(macros[wrapper])
+    )
+    joined = Join(unknown, _pulse("b", 1))
+    with pytest.raises(ValueError, match="unknown reference effect of Custom"):
+        _program([joined], lambda prog: prog.emit(joined))
 
 
 @pytest.mark.parametrize("nested", [False, True])

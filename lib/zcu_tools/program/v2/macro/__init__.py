@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
-from qick.asm_v2 import AsmV2, ConfigReadout, QickParam, QickProgramV2
+from qick.asm_v2 import AsmV2, ConfigReadout, Pulse, QickParam, QickProgramV2
 
 from .debug import PrintTimeStamp
 from .delay import DelayRegAuto
 from .loop import CloseInnerLoop, OpenInnerLoop
 from .meta import MetaMacro
 from .pluse_reg import PulseByReg
+from .structure import MarkedCloseLoop, MarkedOpenLoop, SourcePulse
 from .wmem import ConfigReadoutFromRegs, PulseFromLengthReg, PulseFromRegs
 from .write_reg import WriteRegOp
 
@@ -18,10 +19,34 @@ from .write_reg import WriteRegOp
 class AdditionalMacroMixin(QickProgramV2):
     def __init__(self, *args, **kwargs):
         self._delay_disabled = False
+        self._source_names: list[str] = []
+        self._native_pulse_ordinal = 0
         self._temp_regs: list[str] = []
         self._reg_num_stack: list[int] = []
 
         super().__init__(*args, **kwargs)
+
+    def _init_declarations(self) -> None:
+        self._source_names = []
+        self._native_pulse_ordinal = 0
+        super()._init_declarations()
+
+    @contextmanager
+    def source_scope(self, name: str) -> Generator[None]:
+        """Associate emitted operations with a diagnostic source until scope exit.
+
+        name is a Module diagnostic label. Nested scopes override the active
+        source and restore it on exit. SOURCE_START/SOURCE_END are zero-word,
+        artifact-only annotations; native pulse fallbacks are suppressed inside
+        a scope and those calls do not consume native pulse ordinals.
+        """
+        self.meta_macro("SOURCE_START", name)
+        self._source_names.append(name)
+        try:
+            yield
+        finally:
+            self._source_names.pop()
+            self.meta_macro("SOURCE_END", name)
 
     def _make_asm(self) -> None:
         # QICK resets its low-level program (registers, prog_list) at the
@@ -55,6 +80,44 @@ class AdditionalMacroMixin(QickProgramV2):
 
     def close_inner_loop(self, name: str, counter_reg: str, n: str | int) -> None:
         self.append_macro(CloseInnerLoop(name=name, counter_reg=counter_reg, n=n))
+
+    def open_loop(self, n: int, name: str | None = None) -> None:
+        """Open a native QICK loop and retain its structure in compiled_stream.
+
+        n is the positive trip count; name is the loop register/label name.
+        QICK allocates an automatic name when None is supplied.
+        """
+        self.append_macro(MarkedOpenLoop(n=n, name=name))
+
+    def pulse(
+        self,
+        ch: int,
+        name: str,
+        t: float | QickParam | Literal["auto"] = 0,
+        tag: str | None = None,
+    ) -> None:
+        """Play a native QICK pulse and annotate its output source.
+
+        ch and name select a declared generator/pulse; t is us or "auto".
+        Outside source_scope, tag is the source when provided; otherwise use
+        native:pulse:<ordinal>. Every unscoped call consumes an ordinal starting
+        at one per compile, including tagged calls. Scoped Module pulses keep
+        the Module source and consume no ordinal. QICK timing errors propagate.
+        """
+        if self._source_names:
+            self.append_macro(Pulse(ch=ch, name=name, t=t, tag=tag))
+        else:
+            self._native_pulse_ordinal += 1
+            source = (
+                tag if tag is not None else f"native:pulse:{self._native_pulse_ordinal}"
+            )
+            self.append_macro(
+                SourcePulse(ch=ch, name=name, t=t, tag=tag, source_name=source)
+            )
+
+    def close_loop(self) -> None:
+        """Close the innermost native QICK loop, including its sweep updates."""
+        self.append_macro(MarkedCloseLoop())
 
     # ---- delay macro ----
 

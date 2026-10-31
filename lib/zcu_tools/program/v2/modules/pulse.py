@@ -182,6 +182,8 @@ class Pulse(Module):
         if cfg is None:
             return t
 
+        if self.pulse_id is None:
+            raise RuntimeError(f"{self.name}: initialize the pulse before emission")
         prog.pulse(cfg.ch, self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
         if self.block_mode:
             return t + self.total_length(prog)

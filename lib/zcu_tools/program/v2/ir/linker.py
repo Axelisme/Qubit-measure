@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,52 +10,102 @@ from .instructions import BaseInst, Instruction, LabelInst, MetaInst
 
 @dataclass(frozen=True)
 class IRCursor:
+    """End of a positioned stream.
+
+    final_p_addr is the zero-based word offset immediately after the stream.
+    final_line counts labels and machine instructions; metadata adds no lines.
+    Both fields are zero for an empty stream.
+    """
+
     final_p_addr: int
     final_line: int
+
+
+@dataclass(frozen=True)
+class PositionedInstruction:
+    """A linker positioning view used by QICK linking and compile snapshots.
+
+    instruction is the original logical instruction, label or metadata object.
+    It retains the input reference, including mutable nested payloads; this view
+    is not a defensive-copy snapshot.
+    p_addr is its zero-based program-memory word offset. Machine instructions
+    advance by addr_inc (normally one word, two for WAIT). Labels and metadata
+    occupy zero words and may share an offset, including the end of the stream.
+    line is the cumulative assembler line count at this record. Labels and
+    machine instructions increment it once, even for a two-word WAIT. Metadata
+    retains the preceding count, or zero before any label/machine instruction.
+
+    This view hides address widths and line-count rules from consumers without
+    requiring QICK dictionary serialization.
+    """
+
+    instruction: Instruction
+    p_addr: int
+    line: int
 
 
 class IRLinker:
     """Assigns physical addresses to a flat instruction list and resolves labels."""
 
-    def link(
-        self, inst_list: list[Instruction]
-    ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, Any]], IRCursor]:
-        """Link a flat instruction list into QICK-compatible dicts."""
-        prog_list: list[dict[str, object]] = []
-        labels: dict[str, str] = {}
-        meta_infos: list[dict[str, Any]] = []
+    def position(
+        self, inst_list: Sequence[Instruction]
+    ) -> tuple[tuple[PositionedInstruction, ...], IRCursor]:
+        """Position flat logical IR without serializing or changing its payloads.
 
+        Accept machine instructions, labels and metadata in source order.
+        Return one positioning view per input item, in that same order, and the
+        end cursor. Addresses start at zero and account for instruction widths.
+        Labels and metadata occupy no words; only metadata adds no line.
+        Raise ValueError for duplicate label names, as link() does.
+        Returned views retain input references; callers needing detached payloads
+        must copy them before changing the input.
+        """
+        positioned: list[PositionedInstruction] = []
+        labels: set[str] = set()
         p_addr = 0
         line = 0
         for inst in inst_list:
-            if isinstance(inst, MetaInst):
-                d = inst.to_dict()
-                d["p_addr"] = p_addr
-                meta_infos.append(d)
-                continue
-            line += 1
+            if not isinstance(inst, MetaInst):
+                line += 1
             if isinstance(inst, LabelInst):
                 name = inst.name.name
                 if name in labels:
                     raise ValueError(f"IRLinker.link: duplicate label {name!r}")
-                labels[name] = f"&{p_addr}"
-                d = inst.to_dict()
-                d["p_addr"] = p_addr
+                labels.add(name)
+            positioned.append(PositionedInstruction(inst, p_addr, line))
+            if isinstance(inst, BaseInst):
+                p_addr += inst.addr_inc
+        return tuple(positioned), IRCursor(final_p_addr=p_addr, final_line=line)
+
+    def link(
+        self, inst_list: list[Instruction]
+    ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, Any]], IRCursor]:
+        """Serialize flat logical IR into positioned QICK-compatible dicts.
+
+        Return machine instruction dicts, label addresses, ordered label/meta
+        dicts and the end cursor. Positioning follows position() and duplicate
+        labels raise ValueError. The input instructions are not changed.
+        """
+        prog_list: list[dict[str, object]] = []
+        labels: dict[str, str] = {}
+        meta_infos: list[dict[str, Any]] = []
+
+        positioned, cursor = self.position(inst_list)
+        for record in positioned:
+            inst = record.instruction
+            d = inst.to_dict()
+            if isinstance(inst, (MetaInst, LabelInst)):
+                d["p_addr"] = record.p_addr
                 meta_infos.append(d)
+                if isinstance(inst, LabelInst):
+                    labels[inst.name.name] = f"&{record.p_addr}"
             else:
                 assert isinstance(inst, BaseInst)
-                d = inst.to_dict()
-                d["P_ADDR"] = p_addr
-                d["LINE"] = line
+                d["P_ADDR"] = record.p_addr
+                d["LINE"] = record.line
                 prog_list.append(d)
-                p_addr += inst.addr_inc
 
-        return (
-            prog_list,
-            labels,
-            meta_infos,
-            IRCursor(final_p_addr=p_addr, final_line=line),
-        )
+        return prog_list, labels, meta_infos, cursor
 
     def unlink(
         self,

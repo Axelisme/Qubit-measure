@@ -169,7 +169,7 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
     )
 
 
-def test_undefined_scalar_and_out_of_bounds_table_fail_before_signals():
+def test_undefined_register_in_unselected_branch_fails_before_signals():
     env = white_noise(std_adc=0)
     uninitialized = ModularProgramV2(
         env.soccfg,
@@ -177,17 +177,24 @@ def test_undefined_scalar_and_out_of_bounds_table_fail_before_signals():
             Branch(
                 "choice",
                 Pulse("none", None),
-                LoadValue("not_taken", [0], "reps", "cycles"),
-                compare_by="reps",
+                LoadValue("not_taken", [0], "axis", "cycles"),
+                compare_by="axis",
             ),
             DelayAuto("undefined", "cycles"),
             readout(),
         ],
+        sweep=[("axis", 1)],
     )
     with pytest.raises(
-        ValueError, match="DelayAuto.*undefined.*reps.*undefined register.*cycles"
+        ValueError,
+        match=r"TimeInst.*preopt.*undefined.*undefined register",
     ):
         uninitialized.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
+def test_short_table_fails_before_signals():
+    env = white_noise(std_adc=0)
     out_of_bounds = ModularProgramV2(
         env.soccfg,
         modules=[
@@ -197,7 +204,8 @@ def test_undefined_scalar_and_out_of_bounds_table_fail_before_signals():
         sweep=[("axis", 2)],
     )
     with pytest.raises(
-        ValueError, match="LoadValue.*short_table.*axis.*out of bounds.*axis"
+        ValueError,
+        match=r"DmemReadInst.*preopt.*axis.*short_table.*uninitialized DMEM\[1\]",
     ):
         out_of_bounds.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds

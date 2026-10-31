@@ -48,6 +48,20 @@ class Module(ABC):
         self, prog: ModularProgramV2, t: float | QickParam = 0.0
     ) -> float | QickParam: ...
 
+    def emit(
+        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+    ) -> float | QickParam:
+        """Run this legacy emission at t us, with this Module as its source.
+
+        Return run's blocking end in us. Control Modules call emit on
+        author-provided children so each child keeps its diagnostic name and
+        restores the parent scope afterward. Internal helpers of one semantic
+        Module call run directly to retain the owner's source. Declaration must
+        already have completed. run errors close the source annotation and propagate.
+        """
+        with prog.source_scope(self.name):
+            return self.run(prog, t)
+
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare resources on prog before emission.
 

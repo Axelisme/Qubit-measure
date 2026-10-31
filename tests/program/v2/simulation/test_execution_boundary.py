@@ -6,8 +6,6 @@ from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Join, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -21,21 +19,8 @@ def test_offline_board_declares_mock_identity():
     assert env.soc.is_mock is True
 
 
-class Feedback(Module):
-    """Synthetic unsupported operation; compilation itself needs no hardware."""
-
-    def __init__(self):
-        self.name = "hidden_feedback"
-
-    def init(self, prog):
-        pass
-
-    def run(self, prog, t=0.0):
-        return t
-
-
 class RawProgram(ModularProgramV2):
-    """A legal hardware program whose raw ISA is outside semantic simulation."""
+    """Emit a supported raw NOP after the Module body."""
 
     def _body(self, cfg):
         super()._body(cfg)
@@ -57,35 +42,50 @@ class RawCleanupProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-@pytest.mark.parametrize("program_type", [RawMakeProgram, RawCleanupProgram])
+@pytest.mark.parametrize("program_type", [RawProgram, RawCleanupProgram])
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
-def test_raw_compile_hooks_rejected_before_simulation_round(program_type, method):
+def test_supported_raw_effects_acquire(program_type, method):
     env = white_noise(std_adc=0)
     prog = program_type(env.soccfg, modules=[readout("readout")])
-    with pytest.raises(ValueError, match=f"{program_type.__name__}.*raw.*unsupported"):
-        getattr(prog, method)(env.soc, progress=False)
-    assert not env.soc.binding.rounds
+    result = getattr(prog, method)(env.soc, progress=False)
+    request = request_of(env)
+    samples = request.readouts[0].samples
+    assert result[0].shape == ((1, 2) if method == "acquire" else (samples, 2))
+    np.testing.assert_array_equal(result[0], 0)
+    np.testing.assert_array_equal(raw_of(prog)[0], 0)
+    assert [event.source for event in request.materialize_point(0).events] == [
+        "readout"
+    ]
+    assert len(env.soc.binding.rounds) == 1
 
 
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
-def test_raw_program_body_rejected_instead_of_silently_ignoring_instructions(method):
+def test_raw_content_after_terminal_jump_rejected_before_backend(method):
     env = white_noise(std_adc=0)
-    prog = RawProgram(env.soccfg, modules=[readout("readout")])
-    with pytest.raises(ValueError, match="RawProgram.*raw.*unsupported"):
+    prog = RawMakeProgram(env.soccfg, modules=[readout("readout")])
+    with pytest.raises(ValueError, match=r"JumpInst.*preopt"):
         getattr(prog, method)(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
-def test_raw_loop_hook_rejected_before_any_backend_round():
+def test_raw_loop_nop_preserves_sweep_readouts():
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(
         env.soccfg, modules=[readout("readout")], sweep=[("axis", 2)]
     )
     prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
     prog.compile()
-    with pytest.raises(ValueError, match="axis.*raw.*unsupported"):
-        prog.acquire(env.soc, progress=False)
-    assert not env.soc.binding.rounds
+    result = prog.acquire(env.soc, progress=False)
+    assert result[0].shape == (1, 2, 2)
+    np.testing.assert_array_equal(result[0], 0)
+    np.testing.assert_array_equal(raw_of(prog)[0], 0)
+    request = request_of(env)
+    assert request.point_dims == (2,)
+    assert [
+        [event.source for event in request.materialize_point(point).events]
+        for point in range(2)
+    ] == [["readout"], ["readout"]]
+    assert len(env.soc.binding.rounds) == 1
 
 
 def test_unwired_generator_pulse_is_not_silently_accepted():
@@ -109,21 +109,6 @@ def readout(name):
         waveform=ConstWaveformCfg(length=0.1),
         ro_length=0.1,
     ).build(name)
-
-
-@pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
-def test_unknown_unexecuted_module_rejected_before_any_signal_generation(method):
-    env = white_noise(std_adc=0)
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=[
-            Repeat("never", 0).add_content(Feedback()),
-            readout("readout"),
-        ],
-    )
-    with pytest.raises(ValueError, match="Feedback.*hidden_feedback.*unsupported"):
-        getattr(prog, method)(env.soc, progress=False)
-    assert not env.soc.binding.rounds
 
 
 def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding():

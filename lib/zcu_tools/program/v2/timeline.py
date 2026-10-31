@@ -453,7 +453,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         None selects the scoped name, or ordinary default outside a scope. Internal
         events share its current end; actual output ends plus owner post-delay
-        determine the ceiled end without moving reference time.
+        determine the ceiled end without moving reference time. Snapshot source
+        markers use module.name; nested emissions retain their own labels.
         Branch/ScanWith retain native path/iteration reference synchronization.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
@@ -467,7 +468,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._emission_scope = (self._emission_serial, 0)
         self._emission_serial += 1
         try:
-            module.lower(self, timeline=timeline, tag=tag)
+            with self.source_scope(module.name):
+                module.lower(self, timeline=timeline, tag=tag)
             macros = self.macro_list[start:]
         finally:
             self._emission_scope = previous_scope
