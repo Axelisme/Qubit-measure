@@ -19,6 +19,48 @@ def v6_profile() -> QickConfig:
     return QickConfig(cfg)
 
 
+def test_complementary_tproc_pulses_leave_a_literal_constant_end():
+    cfg = make_mock_soccfg(1, 1).get_cfg()
+    for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
+        clock.update(
+            fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=430.08
+        )
+    cfg["gens"][0].update(
+        type="axis_sg_int4_v1",
+        has_mixer=True,
+        f_dds=1720.32,
+        fdds_div=4,
+        samps_per_clk=4,
+    )
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("x", 9)
+            self.declare_gen(0, nqz=1, mixer_freq=0)
+            x = QickSweep1D("x", 1, 9)
+            for name, length in (("x", x), ("complement", 10 - x), ("after", 0.1)):
+                self.add_pulse(
+                    0, name, style="const", freq=100, phase=0, gain=0.5, length=length
+                )
+
+        def _body(self, cfg):
+            self.pulse(0, "x", timeline="default")
+            self.pulse(0, "complement", timeline="default")
+            self.pulse(0, "after", timeline="default", tag="after")
+
+    prog = Program(QickConfig(cfg), reps=2, initial_delay=0, relax_delay=0)
+    # Native QICK steps are +/-430 ticks. Rounded starts sum to 4301.
+    assert [waves(s) for s in shots(prog)] == [
+        [0, 430 + 430 * i, 4301] for i in range(9) for _ in range(2)
+    ]
+    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(4301)
+    assert not any(name.startswith("_timeline_end_") for name in prog.reg_dict)
+    assert any(
+        inst.get("CMD") == "WPORT_WR" and inst.get("TIME") == "@4301"
+        for inst in prog.prog_list
+    )
+
+
 def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
