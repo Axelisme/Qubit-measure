@@ -1,7 +1,10 @@
 """Actual waveform/ADC ends govern module emission at the public compiler seam."""
 
 from collections.abc import Callable, Sequence
+from fractions import Fraction
+from functools import lru_cache
 
+import numpy as np
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -41,6 +44,7 @@ def _program(
     modules: Sequence[Module],
     body: Callable[[TimelineProgramV2], None],
     initialize: Callable[[TimelineProgramV2], None] | None = None,
+    *, fabric_clock: float = 384,
 ) -> TimelineProgramV2:
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -52,7 +56,10 @@ def _program(
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0.02)
+    profile = make_mock_soccfg(3, 1)
+    for generator in profile["gens"]:
+        generator["f_fabric"] = fabric_clock
+    return Program(profile, reps=2, initial_delay=0, relax_delay=0.02)
 
 
 @pytest.mark.parametrize("post, spacing", [(0.0005, 49), (0.001, 50)])
@@ -313,6 +320,47 @@ def test_runtime_cross_grid_length_sweep_ceil_without_implicit_time_table():
     assert [waves(shot) for shot in shots(prog)] == [[0, 44], [0, 87], [0, 129]] * 2
     assert prog.compile_datamem() is None
     assert not any(i["CMD"] in {"ARITH", "DIV"} for i in prog.prog_list)
+
+
+@lru_cache(maxsize=None)
+def _signed_power_cost(value: int) -> int:
+    if value <= 1:
+        return value
+    if value % 2 == 0:
+        return _signed_power_cost(value // 2)
+    return 1 + min(_signed_power_cost(value // 2), _signed_power_cost(value // 2 + 1))
+
+
+@pytest.mark.parametrize("clock, weight", [(384, 287), (307.2, 359), (38.4, 2872), (430.08, 256)])
+def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(clock, weight):
+    pulse = Pulse("drive", _pulse_cfg(length=QickSweep1D("scan", 256 / clock, 258 / clock), pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=3 / clock, pre=0, post=0))
+
+    def body(prog):
+        prog.emit(pulse)
+        prog.emit(tail)
+
+    prog = _program([pulse, tail], body, lambda p: p.add_loop("scan", 3), fabric_clock=clock)
+    starts = [waves(shot)[1] for shot in shots(prog)]
+    assert starts == [(n * weight + 255) // 256 for n in (256, 257, 258)] * 2
+    observed = starts[0]  # At n=256 the public end reveals the multiplier exactly.
+    ratio = Fraction("430.08") / Fraction(str(clock))
+    counts = np.arange(int(500 * clock) + 1, dtype=np.int64)
+    physical_numerator = counts * ratio.numerator
+    scheduled = (counts * observed + 255) // 256
+    error_numerator = scheduled * ratio.denominator - physical_numerator
+    assert np.all(error_numerator >= 0)
+    assert np.all(error_numerator <= 430.08 * ratio.denominator)
+    admissible = []
+    for candidate in range(int(np.ceil(256 * ratio)), int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2):
+        error = ((counts * candidate + 255) // 256) * ratio.denominator - physical_numerator
+        if np.all(error >= 0) and np.all(error <= 430.08 * ratio.denominator):
+            admissible.append(candidate)
+    assert observed == min(admissible, key=lambda w: (_signed_power_cost(w), w))
+    shifts = [i.get("OP", "") for i in prog.prog_list if any(op in i.get("OP", "") for op in ("SL", "SR", "ASR"))]
+    assert all(int(op.split("#")[-1]) <= 15 for op in shifts)
+    if clock == 430.08:
+        assert shifts == []
 
 
 def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
