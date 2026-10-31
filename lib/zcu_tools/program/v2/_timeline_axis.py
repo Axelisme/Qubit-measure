@@ -149,7 +149,11 @@ class TimeVariable:
             if isinstance(component, np.ndarray):
                 first = component.flat[0]
                 if np.all(component == first):
-                    folded += int(first) if isinstance(first, np.integer) else first
+                    if isinstance(first, np.integer):
+                        first = int(first)
+                    if not isinstance(first, (int, Fraction)):
+                        raise TypeError("known cycle components must contain rational scalars")
+                    folded += first
                     continue
                 component = component.copy()
                 component.flags.writeable = False
