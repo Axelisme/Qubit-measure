@@ -203,6 +203,33 @@ def test_branch_register_time_can_be_captured_from_author_entry_state(align):
     assert [waves(s) for s in shots(program(body, initialize=initialize))] == [[t] for t in expected]
 
 
+def test_hinted_register_time_name_does_not_conflict_with_repeat_counter_validation():
+    def initialize(prog):
+        prog.add_reg("time")
+
+    def body(prog):
+        prog.write_reg_op("time", "scan", "+", 10)
+        prog.delay_timeline("time", range_hint=(10, 12))
+
+    assert [s.body_end_cycle - s.start_cycle for s in shots(program(body, initialize=initialize))] == [10, 11, 12]
+
+
+def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
+    def initialize(prog):
+        prog.add_dmem([40])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.fork("default", into="fixed")
+        prog.delay_timeline("duration")
+        prog.pulse(0, "p0", timeline="default")
+        prog.delay_timeline(100 / 430.08, timeline="fixed")
+        prog.pulse(0, "p0", timeline="fixed")
+        prog.pulse(0, "p0", t="auto")
+
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [[40, 100, 128]] * 3
+
+
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
