@@ -24,11 +24,12 @@ def program(
     body: Callable[[TimelineProgramV2], None],
     *,
     reps: int = 1,
+    points: int = 3,
     initialize: Callable[[TimelineProgramV2], None] | None = None,
 ):
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
-            self.add_loop("scan", 3)
+            self.add_loop("scan", points)
             for ch in range(2):
                 self.declare_gen(ch, nqz=1)
                 self.add_pulse(
@@ -72,8 +73,8 @@ def test_crossing_join_uses_three_instruction_flag_selection():
         prog.delay_timeline(100 / 430.08, timeline="other")
         prog.join("other", into="default")
 
-    prog = program(body)
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100, 100, 180]
+    prog = program(body, points=41)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] * 21 + list(range(104, 181, 4))
     selections = [
         (index, inst)
         for index, inst in enumerate(prog.prog_list)
@@ -89,7 +90,62 @@ def test_crossing_join_uses_three_instruction_flag_selection():
     inverted = ir.analyze_timing(
         ir.CompiledTimingInput(changed, prog.labels, prog.timing_layout)
     ).shots
-    assert [s.body_end_cycle - s.start_cycle for s in inverted] == [20, 100, 100]
+    assert [s.body_end_cycle - s.start_cycle for s in inverted] == list(range(20, 100, 4)) + [100] * 21
+
+
+@pytest.mark.parametrize("candidate_count", [2, 3, 4])
+def test_k_way_join_has_one_copy_and_two_instructions_per_comparison(candidate_count):
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            for axis in range(candidate_count - 1):
+                self.add_loop(f"i{axis}", 2)
+
+        def _body(self, cfg):
+            names = [f"side{axis}" for axis in range(candidate_count - 1)]
+            self.fork("default", into=names)
+            self.delay_timeline(100 / 430.08)
+            for axis, name in enumerate(names):
+                self.delay_timeline(
+                    QickSweep1D(f"i{axis}", 20 / 430.08, 180 / 430.08),
+                    timeline=name,
+                )
+            self.join(*names, into="default")
+
+    prog = Program(make_mock_soccfg(0, 0), initial_delay=0, relax_delay=0)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] + [180] * (
+        2 ** (candidate_count - 1) - 1
+    )
+    writes = [index for index, inst in enumerate(prog.prog_list) if inst.get("IF") == "S"]
+    assert len(writes) == candidate_count - 1
+    selection = prog.prog_list[writes[0] - 2 : writes[-1] + 1]
+    assert [inst["CMD"] for inst in selection] == ["TEST", "REG_WR", "REG_WR"] + [
+        cmd for _ in range(candidate_count - 2) for cmd in ("TEST", "REG_WR")
+    ]
+
+
+def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficients():
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "SL", 4)
+        prog.write_reg_op("duration", "duration", "+", 10)
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            with branch.case(0):
+                prog.delay_timeline("duration")
+                prog.delay_timeline(10 / 430.08)
+            with branch.case(1):
+                prog.delay_timeline("duration")
+                prog.delay_timeline(20 / 430.08)
+            with branch.case(2):
+                prog.delay_timeline("duration")
+                prog.delay_timeline("duration")
+                prog.delay_timeline(5 / 430.08)
+
+    prog = program(body)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [30, 57, 89]
+    masks = [index for index, inst in enumerate(prog.prog_list) if "^" in inst.get("OP", "")]
+    # Unknown signed differences use a mask. The shared author value is added
+    # once after selection, not separately rebuilt into both candidates.
+    assert masks
+    assert "+" in prog.prog_list[masks[-1] + 1]["OP"]
 
 
 class AllocateTime(Macro):

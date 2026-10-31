@@ -674,6 +674,11 @@ class RuntimeMath(TimedMacro):
                     return self.add(captured, self.reconstruct(delta, inputs))
         if isinstance(expression, TimeAbs):
             operation = expression.runtime
+            if operation.kind in ("max", "min"):
+                return self.cycles(self.join(
+                    operation.operands, inputs, captured_ends,
+                    maximum=operation.kind == "max",
+                ))
             values = [
                 self.reconstruct(item, inputs, captured_ends)
                 for item in operation.operands
@@ -686,9 +691,7 @@ class RuntimeMath(TimedMacro):
                     raise RuntimeError("runtime recipe requires an integer multiplier")
                 scaled = self.multiply(values[0], abs(int(coefficient)))
                 return scaled if coefficient >= 0 else self.subtract(0.0, scaled)
-            return self.cycles(
-                self.join(values, maximum=operation.kind == "max")
-            )
+            raise RuntimeError(f"unknown runtime recipe: {operation.kind}")
         return self._reconstruct_linear(expression, inputs)
 
     def _reconstruct_linear(
@@ -813,7 +816,7 @@ class RuntimeMath(TimedMacro):
 
     def join(
         self,
-        values: Sequence[Time],
+        values: Sequence[Time | TimeExpression],
         inputs: dict[CycleAxis, RuntimeEnd] | None = None,
         captured_ends: Sequence[RuntimeEnd] = (),
         *,
@@ -822,7 +825,8 @@ class RuntimeMath(TimedMacro):
     ) -> Time:
         """Materialize one N-way max/min from original recipes and live bindings.
 
-        values are reference-relative microseconds or captured cycle registers.
+        values are reference-relative microseconds, captured cycle registers,
+        or integer cycle expressions with original producer recipes.
         With inputs supplied, reconstruct branch results from entry registers;
         otherwise RuntimeEnd values are opaque live operands. Captured entry
         max values never expand into historical source-register reads.
@@ -830,7 +834,10 @@ class RuntimeMath(TimedMacro):
         """
         if not values:
             raise ValueError("time choice requires at least one value")
-        expressions = tuple(time_expression(self.prog, value) for value in values)
+        expressions = tuple(
+            value if isinstance(value, (TimeVariable, TimeAbs)) else time_expression(self.prog, value)
+            for value in values
+        )
         captured = (
             tuple(value for value in values if isinstance(value, RuntimeEnd))
             if inputs is None
@@ -843,7 +850,7 @@ class RuntimeMath(TimedMacro):
         if len(residuals) == 1:
             selected = substitute_time(add_time(common, residuals[0]), atoms)
             for value, expression in zip(values, expressions, strict=True):
-                if (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
+                if not isinstance(value, (TimeVariable, TimeAbs)) and (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
                     return value
         sources = {} if inputs is None else inputs.copy()
         for axis, expression in atoms.items():
@@ -862,6 +869,7 @@ class RuntimeMath(TimedMacro):
         covers = tuple(
             item
             for value in values
+            if not isinstance(value, (TimeVariable, TimeAbs))
             for item in (value, *(value.covers if isinstance(value, RuntimeEnd) else ()))
         ) if maximum else ()
         return replace(result, expression=proof, covers=covers)

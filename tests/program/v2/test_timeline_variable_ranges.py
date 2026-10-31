@@ -74,6 +74,39 @@ def test_three_way_join_prunes_partial_dominance_and_reconstructs_shared_length_
         for _ in range(3)
     ]
     assert sum(inst.get("IF") == "S" for inst in prog.prog_list) == 1
+    # Only the shared 4*i is rebuilt as a native sweep register.
+    assert sum(
+        register.init is not None and register.init.spans == {"i": 196}
+        for register in prog.reg_dict.values()
+    ) == 1
+
+
+@pytest.mark.parametrize("extra", [False, True])
+def test_join_eliminates_every_provably_dominated_candidate(extra):
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("i", 50)
+            self.add_loop("case", 3 if extra else 2)
+
+        def _body(self, cfg):
+            length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
+            self.delay_timeline(7 / 430.08)
+            with self.branch(by="case", align_timeline=True) as branch:
+                with branch.case(0):
+                    self.delay_timeline(length + 50 / 430.08)
+                with branch.case(1):
+                    self.delay_timeline(2 * length)
+                if extra:
+                    with branch.case(2):
+                        self.delay_timeline(length + 10 / 430.08)
+
+    prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        7 + 2 * length
+        for length in range(60, 257, 4)
+        for _ in range(3 if extra else 2)
+    ]
+    assert not any(inst.get("IF") in ("S", "NS") for inst in prog.prog_list)
 
 
 class AllocateDuration(Macro):
