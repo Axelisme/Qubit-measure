@@ -54,7 +54,8 @@ class ConditionalPhaseAnalysis:
 
 
 def fitted_crossings(
-    frequencies: NDArray[np.float64], conditional_deg: NDArray[np.float64],
+    frequencies: NDArray[np.float64],
+    conditional_deg: NDArray[np.float64],
     fit: PhaseSlopeFit,
 ) -> PhaseCrossings:
     """Find per-gate π crossings, preserving fit-unavailability reasons.
