@@ -6,7 +6,7 @@
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from qick.asm_v2 import (
     CondJump,
@@ -37,12 +37,13 @@ from ._timeline_runtime import (
     RuntimeMath,
     SelectedEventEnd,
     Time,
+    _known_maximum,
     align_end,
     step_time,
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
-from ._timeline_state import RepeatFrame, RepeatFrameSnapshot, TimelineBook
+from ._timeline_state import BranchProvenance, RepeatFrame, RepeatFrameSnapshot, TimelineBook
 from .macro.delay import DelayRegAuto
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
@@ -68,6 +69,9 @@ class TimelineFork(Macro):
         ):
             raise ValueError("fork requires new, distinct timeline names")
         self.book.ends.update(dict.fromkeys(self.targets, end))
+        if self.book.case_lineage:
+            parents, _ = self.book.case_lineage[-1]
+            parents.update(dict.fromkeys(self.targets, self.source))
 
     def translate(self, prog) -> None:
         pass
@@ -88,6 +92,8 @@ class TimelineJoin(Macro):
             end = self.book.math.maximum(end, self.book.end(source))
         self.book.ends[self.into] = end
         self.book.waiting.discard(self.into)
+        for parents, joined in self.book.case_lineage:
+            joined.update(source for source in self.sources if source in parents)
 
     def translate(self, prog) -> None:
         pass
@@ -816,6 +822,23 @@ def _same_times(values: Sequence[Time]) -> bool:
     )
 
 
+@dataclass
+class BranchCaseState:
+    """Suspend a prepared path until the whole branch's closing mode is known."""
+
+    ends: dict[str, Time]
+    waiting: set[str]
+    used: set[str]
+    runtime_gens: dict[int, RuntimeEnd]
+    runtime_ros: dict[int, RuntimeEnd]
+    gens: dict[int, Time]
+    ros: dict[int, Time]
+    provenance: BranchProvenance
+    frames: list[RepeatFrameSnapshot]
+    defined: set[str]
+    static_ends: dict[str, Time] | None
+
+
 class TimelineBranch(Macro):
     def __init__(
         self, book: TimelineBook, by: str, cases: dict[int, list[Macro]], name: str
@@ -858,6 +881,7 @@ class TimelineBranch(Macro):
         native_gens: list[dict[int, Time]] = []
         native_ros: list[dict[int, Time]] = []
         paths: list[list[RepeatFrameSnapshot]] = []
+        states: list[BranchCaseState] = []
         self.prepared = []
         for case in self.cases:
             self._restore_frames(frames)
@@ -872,7 +896,35 @@ class TimelineBranch(Macro):
                 self.book.native_timestamp(prog, value, gen_ch=ch)
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
-            self.prepared.append(self._prepare_case(prog, case, initial.keys()))
+            self.prepared.append(self._prepare_case(prog, case))
+            parents, joined = self.book.case_lineage.pop()
+            states.append(
+                BranchCaseState(
+                    self.book.ends.copy(),
+                    self.book.waiting.copy(),
+                    (self.book.used or set()).copy(),
+                    self.book.runtime_gens.copy(),
+                    self.book.runtime_ros.copy(),
+                    {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
+                    {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+                    self.book.snapshot_branch_provenance(prog),
+                    self._save_frames(),
+                    prog._time_bounds.defined.copy(),
+                    self._static_case_ends(initial, parents, joined),
+                )
+            )
+            self.book.pinned.update(prog._timeline_live_registers())
+        static_ends = self._static_branch_ends(initial, states)
+        for prepared, state in zip(self.prepared, states, strict=True):
+            self._restore_case(prog, state)
+            if static_ends is None:
+                used = state.used | (state.ends.keys() - initial.keys())
+                closer = PreparedTimelineMacro(
+                    self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
+                )
+                closer.preprocess(prog)
+                prepared.append(closer)
+            self.book.record_branch_sources(prog)
             results.append({name: self.book.ends[name] for name in initial})
             definitions.append(prog._time_bounds.defined.copy())
             native_gens.append(
@@ -899,28 +951,74 @@ class TimelineBranch(Macro):
         self.book.ends = {}
         for name in initial:
             values = [result[name] for result in results]
-            self.book.ends[name] = self._merge_values(prog, values)
-            if not _same_times(values):
+            self.book.ends[name] = (
+                static_ends[name]
+                if static_ends is not None
+                else self._merge_values(prog, values)
+            )
+            if static_ends is None and not _same_times(values):
                 self.book.waiting.add(name)
         self._merge_native(prog, native_gens, results, generator=True)
         self._merge_native(prog, native_ros, results, generator=False)
         self.book.pinned = saved_pins
 
-    def _prepare_case(
-        self, prog, case: list[Macro], incoming
-    ) -> list[PreparedTimelineMacro]:
+    def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
+        self.book.case_lineage.append(({}, set()))
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
             macro.preprocess(prog)
-        local = self.book.ends.keys() - incoming
-        used = (self.book.used or set()) | local
-        closer = PreparedTimelineMacro(
-            self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
-        )
-        closer.preprocess(prog)
-        prepared.append(closer)
-        self.book.record_branch_sources(prog)
         return prepared
+
+    def _static_case_ends(
+        self, initial: dict[str, Time], parents: dict[str, str], joined: set[str]
+    ) -> dict[str, Time] | None:
+        used = (self.book.used or set()) | (self.book.ends.keys() - initial.keys())
+        if any(isinstance(self.book.ends[name], RuntimeEnd) for name in used):
+            return None
+        ends = {name: self.book.ends[name] for name in initial}
+        for local in self.book.ends.keys() - initial.keys():
+            if local in joined:
+                continue
+            ancestor = parents[local]
+            while ancestor not in initial:
+                ancestor = parents[ancestor]
+            merged = _known_maximum(ends[ancestor], self.book.ends[local])
+            if merged is None:
+                return None
+            ends[ancestor] = merged
+        return ends
+
+    def _static_branch_ends(
+        self, initial: dict[str, Time], states: list[BranchCaseState]
+    ) -> dict[str, Time] | None:
+        ends = initial.copy()
+        used = set.union(*(state.used & initial.keys() for state in states))
+        for state in states:
+            if state.static_ends is None:
+                return None
+            for name in used:
+                value = state.static_ends[name]
+                if isinstance(value, RuntimeEnd):
+                    return None
+                merged = _known_maximum(ends[name], value)
+                if merged is None:
+                    return None
+                ends[name] = merged
+        return ends
+
+    def _restore_case(self, prog, state: BranchCaseState) -> None:
+        self._restore_frames(state.frames)
+        self.book.ends, self.book.waiting = state.ends.copy(), state.waiting.copy()
+        self.book.used = state.used.copy()
+        self.book.runtime_gens = state.runtime_gens.copy()
+        self.book.runtime_ros = state.runtime_ros.copy()
+        prog._time_bounds.defined = state.defined.copy()
+        for ch, value in state.gens.items():
+            self.book.native_timestamp(prog, value, gen_ch=ch)
+        for ch, value in state.ros.items():
+            self.book.native_timestamp(prog, value, ro_ch=ch)
+        self.book.source_expressions = state.provenance.sources.copy()
+        self.book.native_expressions = state.provenance.native.copy()
 
     def _merge_values(self, prog, values: list[Time]) -> Time:
         if _same_times(values):

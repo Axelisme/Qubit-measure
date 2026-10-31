@@ -359,6 +359,7 @@ class TimelineBook:
         self.repeats: list[RepeatFrame] = []
         self.native_only = False
         self.used: set[str] | None = None
+        self.case_lineage: list[tuple[dict[str, str], set[str]]] = []
 
     def repeat_count(
         self, prog, iterations: int | str, minimum: int, maximum: int
