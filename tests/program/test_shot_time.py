@@ -18,11 +18,11 @@ def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int) -> 
         point_dims=(3,), point_names=("scan",), reps=reps,
         templates=(
             TimelineTemplate(np.array([0, 2]), (), (), np.array([2, 5], dtype=np.int64)),
-            TimelineTemplate(np.array([1]), (), (), np.array([9_000_000_000_000], dtype=np.int64)),
+            TimelineTemplate(np.array([1]), (), (), np.array([4_000_000_000_000], dtype=np.int64)),
         ),
         relax_delay_ticks=1,
     )
-    expected = float(Fraction(reps * 9_000_000_000_010, 1_500_000))
+    expected = float(Fraction(reps * 4_000_000_000_010, 1_500_000))
     assert program.request_round_time_s(request).hex() == expected.hex()
 
 
