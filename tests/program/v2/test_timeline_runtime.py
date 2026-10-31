@@ -131,6 +131,49 @@ def test_runtime_join_uses_pointwise_maximum_and_preserves_later_target():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [58, 58, 53]
 
 
+def test_runtime_maximum_uses_cartesian_domain_for_independent_table_axes():
+    left = LoadValue("left", [10, 30, 20], "scan", "left_time")
+    right = LoadValue("right", [11, 29], "fine", "right_time")
+
+    def initialize(prog):
+        prog.add_loop("fine", 2)
+        prog.declare(left)
+        prog.declare(right)
+
+    def body(prog):
+        prog.fork("default", into="other")
+        prog.emit(left)
+        prog.emit(right)
+        prog.delay_timeline("left_time")
+        prog.delay_timeline("right_time", timeline="other")
+        prog.join("other", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, initialize=initialize, reps=2))
+    # scan is outer, fine is inner. Zipping the sources loses four legal points.
+    assert [waves(s) for s in result] == [[11], [29], [30], [30], [20], [29]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        39, 57, 58, 58, 48, 57
+    ] * 2
+
+
+def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite():
+    loader = LoadValue("time", [10, 30, 20], "scan", "duration", use_existed=True)
+
+    def body(prog):
+        prog.fork("default", into="other")
+        prog.emit(loader)
+        prog.delay_timeline("duration")
+        prog.write_reg("duration", 25)
+        prog.delay_timeline("duration", timeline="other")
+        prog.join("other", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, initialize=lambda p: p.declare(loader), reps=2))
+    assert [waves(s) for s in result] == [[25], [30], [25]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [53, 58, 53] * 2
+
+
 def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
     def initialize(prog):
         prog.declare_readout(0, length=4 / 307.2)

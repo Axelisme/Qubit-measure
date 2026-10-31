@@ -784,6 +784,8 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         assert [shot.body_end_cycle - shot.start_cycle for shot in scheduled] == (
             expected_ends * 6
         )
+        # Invalidate QICK's binary cache to exercise a fresh compile, not a no-op.
+        prog.binprog = None
         prog.compile()
 
 
