@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
@@ -208,8 +208,9 @@ class WorkflowEnv[C](Scope):
     ) -> Completed[T]:
         """Run fn(ctx) in the executor and deliver its unchanged value.
 
-        ctx is the host CallContext with the explicit operation scope.
-        Use closures for other capabilities. Child-cancelled work starts with its
+        ctx supplies the explicit operation scope, borrowed soc/soccfg and
+        connected drivers (None when unavailable), and fresh operation plots.
+        The framework finishes plots before returning or propagating errors. Child-cancelled work starts with its
         stopped token and cooperatively returns a partial/empty value.
         The callable runs once. Every exception propagates unchanged into the
         author; cooperative child cancellation delivers its returned value.
@@ -279,8 +280,31 @@ class WorkflowEnv[C](Scope):
         iteration, number = self._hooks.next_attempt(scope)
         attempt = _Attempt(iteration, number, started, started, name=ctx.scope.name)
         attempts.append(attempt)
+        plots = self.plots.start_operation()
         try:
-            return fn(ctx, attempt)
+            try:
+                context = replace(
+                    ctx,
+                    soc=self._ports.soc,
+                    soccfg=self._ports.soccfg,
+                    devices=(
+                        None if self._ports.devices is None
+                        else self._ports.devices.get_connected_devices()
+                    ),
+                    plots=plots,
+                )
+                value = fn(context, attempt)
+            except BaseException as error:
+                try:
+                    plots.finish()
+                except Exception as cleanup_error:
+                    _logger.exception("Failed to finish operation plots after callback failure")
+                    error.add_note(
+                        f"Operation plot finish failed: {type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                raise
+            plots.finish()
+            return value
         finally:
             attempt.stopped = ctx.scope.stop.is_set()
             attempt.finished_at = self._ports.clock.now()

@@ -18,6 +18,10 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel
+from qick import QickConfig
+
+from zcu_tools.device import DeviceMapping
+from zcu_tools.plotting import Plots
 
 from zcu_tools.core.script_protocol import Answer, Question
 
@@ -38,10 +42,20 @@ class CallContext:
 
     scope is this operation's explicit child boundary. It may be born stopped; fn
     must still start and return its partial result. Do not clear or release this
-    token; the host owns its lifetime.
+    token; the host owns its lifetime. WorkflowEnv supplies soc (borrowed native
+    handle), soccfg (matching QICK configuration), devices (detached connected
+    driver mapping) and plots (this operation's independent presentation).
+    None means that capability is unavailable; devices={} means available with
+    no connected drivers. Raw ScriptHost supplies only scope and leaves all
+    resources None. Drivers and hardware remain caller-owned. WorkflowEnv
+    finishes plots before delivery; callbacks must not finish or release them.
     """
 
     scope: Scope
+    soc: object | None = None
+    soccfg: QickConfig | None = None
+    devices: DeviceMapping | None = None
+    plots: Plots | None = None
 
 
 @dataclass(frozen=True)
