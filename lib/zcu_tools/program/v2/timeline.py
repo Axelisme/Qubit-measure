@@ -208,8 +208,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def make_program(self) -> None:
         """Build the QICK shell with linked body markers and all-timeline closure.
 
-        Body closure precedes body_end and final_wait/final_delay. Loop hooks,
-        counters, cleanup and subroutines retain AveragerProgramV2's order.
+        Body closure consumes every timeline and any unbounded ADC tail before
+        body_end and the constant final_wait. Finite ADC tails retain their WAIT
+        bound. Loop hooks, counters, cleanup and subroutines retain
+        AveragerProgramV2's order.
         """
         # QICK 0.2.436 provides no public shell boundary hooks.
         self._reset_resources()

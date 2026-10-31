@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil 相對與絕對容差
+**Last updated:** 2026-11-01，未知 ADC tail 的 runtime 收尾
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -411,11 +411,14 @@ Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeli
 它們不是已分析 instruction effects 的安全入口。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
-`sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
+ADC tail 沒有編譯期上界時，收尾同步也納入它的實際 runtime 結尾，取最大值推進 reference。
+無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `sync`，不因未知 ADC tail 而 build 報錯。
+作者負責未知時間的重疊與溢位；編譯器不要求補 hint，也不假造上界。
+`sync` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
+已同步消耗的 ADC tail 剩餘量為 0。
 Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
-未知 ADC tail 經同步可證消耗時，收尾常數 WAIT 使用 0。
-若 ADC tail 仍未知，build 報錯並列出 ADC，提示提供 range_hint 或在結尾前明寫同步。收尾不使用 variable WAIT，也不假造上界。
-這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
+有限 ADC tail 保留既有常數上界與 slack 檢查，不因其他 ADC tail 未知而丟掉已知來源資訊。
+這些式子用於編譯期記帳；實際同步仍沿用 runtime register 計算，不是第二個 scheduler。
 能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
 已知點的 `slack=max-min` 大於 0 時會 warning。
 已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。
