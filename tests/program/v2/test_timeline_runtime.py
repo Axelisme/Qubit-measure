@@ -565,7 +565,7 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.delay_timeline(10 / 430.08)
+            prog.delay_timeline(1 / 430.08)
         prog.fork("external", into="working")
         with prog.branch(by="scan", align_timeline=align_timeline) as branch:
             with branch.case(0):
@@ -576,7 +576,7 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline
         prog.pulse(0, "p0", timeline="working")
 
     result = shots(program(body))
-    # Repeat advanced 30. Working still ends at absolute 100 at branch entry.
+    # Repeat advanced 3. Working still ends at absolute 100 at branch entry.
     assert [waves(s) for s in result] == ([[115]] * 3 if align_timeline else [[105], [100], [115]])
 
 
