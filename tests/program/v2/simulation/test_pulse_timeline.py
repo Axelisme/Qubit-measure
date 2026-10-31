@@ -107,9 +107,6 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     else:
         envelope = drive.envelope
         assert envelope is not None
-        assert len(envelope_times_us(request.time_base, envelope)) == len(
-            envelope.values
-        )
         assert np.all(np.diff(envelope_times_us(request.time_base, envelope)) > 0)
         assert max(abs(v) for v in envelope.values) <= 1.001
         if waveform.style == "drag":

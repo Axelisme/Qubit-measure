@@ -16,7 +16,11 @@ from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
-from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation._compiled_support import (
+    clock_invariance_program,
+    program,
+    request,
+)
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
@@ -60,30 +64,7 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
     env.soccfg["gens"][1]["f_fabric"] = 512.0
 
     def build(extra):
-        class Program(TimelineProgramV2):
-            def _initialize(self, cfg):
-                self.declare_gen(0, nqz=1)
-                if extra:
-                    self.declare_gen(1, nqz=1)
-                self.add_envelope(0, "shape", idata=np.full(48, -8191.0))
-                self.add_pulse(
-                    0,
-                    "p",
-                    style="arb",
-                    envelope="shape",
-                    freq=100,
-                    phase=30,
-                    gain=-0.25,
-                )
-                self.declare_readout(0, length=0.2)
-                self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
-
-            def _body(self, cfg):
-                self.send_readoutconfig(0, "ro", t=0)
-                self.pulse(0, "p", t=0.1)
-                self.trigger([0], t=0.1)
-
-        prog = Program(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+        prog = clock_invariance_program(env.soccfg, extra_generator=extra)
         return request(prog, env)
 
     try:

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-31, integer request timing and aggregate pacing
+**Last updated:** 2026-10-31, integer timing across frontend, physical consumers and replay
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -287,9 +287,11 @@ new consumers use template arrays for point-dependent timing/demodulation.
 `materialize_point` expands one detached point for diagnostics, excluding reps.
 Readout plans and environment templates convert integer tick grids to ns through
 `TimeBase.ns`; frequency conversion to GHz remains with the physical consumers.
-The request schema and frontend migration is complete. Physical consumers and
-replay still use the former schema and need migration before physical acquisitions
-and persisted replay work with these requests.
+The request schema, compiled frontend and physical consumers use integer timing.
+Physical planners receive the request's TimeBase, and plan/preparation cache keys
+include it. Persisted acquire and round replay use format version 2, preserving
+the rational time base and integer ticks. Older replay versions are rejected
+without conversion.
 
 ComputedPulse and TableLengthPulse follow the selected compiled waveform and
 timestamp effects. The frontend does not pad a selected event to the longest
