@@ -346,7 +346,7 @@ def test_nonaffine_author_table_time_getter_rejects_array_and_scalar(as_array):
 
 
 @pytest.mark.parametrize("synchronize", [False, True])
-def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait(
+def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wait(
     synchronize,
 ):
     def initialize(prog):
@@ -365,13 +365,16 @@ def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait
             if synchronize:
                 prog.join("local", into=case_timeline)
 
-    if not synchronize:
-        with pytest.raises(ValueError, match="ADC.*0.*range_hint.*sync"):
-            program(body, initialize=initialize)
-    else:
-        result = shots(program(body, initialize=initialize))
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [46, 0, 0]
-        assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0]
+    prog = program(body, reps=2, initialize=initialize)
+    result = shots(prog)
+    assert [
+        [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
+        for s in result
+    ] == [[40], [], []] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [46, 0, 0] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0] * 2
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    assert wait["TIME"] == "@0"
 
 
 def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
