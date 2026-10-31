@@ -212,7 +212,12 @@ def _wait_tool(
 
 
 def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Wait on a GUI operation, not its downstream analysis completion."""
+    """Wait on a GUI operation, not its downstream analysis completion.
+
+    A Run core returning normally delivers finished even after a stop request;
+    stop_requested in its result snapshot records the accepted request instead.
+    Other operation owners retain their own terminal policies.
+    """
     op = _operation_id(arguments)
     timeout = wait_timeout(arguments)
     ctx = ctx.bound()
@@ -326,7 +331,7 @@ def build_operation_tools(ctx: MeasureToolContext) -> dict[str, dict[str, Any]]:
         },
         "wait": {
             "handler": partial(_wait_tool, ctx),
-            "description": "Wait for a GUI operation or full execution continuation. Timeout stops waiting, not work. Execution replies may attach in-memory images; artifacts retains complete native Save reports.",
+            "description": "Wait for a GUI operation or full execution continuation. Run core return is finished even after Stop. Timeout stops waiting, not work. Execution replies may attach images; artifacts retains native Save reports.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

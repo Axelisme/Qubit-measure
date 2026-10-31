@@ -198,8 +198,10 @@ Core-owned stops do not set it. The flag survives core failure and does not
 classify data completeness. New Run and result replacement reset it to false.
 Run metadata uses stopped for requests recorded before core return.
 Recipe RunResult reads stop_requested, not operation terminal status or cancel ack.
-Core return publishes its record; core errors fail the operation and remain visible
-also after Stop. Wire version 135 uses this field.
+Normal core return publishes its record and operation.await returns status=finished,
+including after Stop, unscoped operation.cancel, or root/descendant cancel_scope.
+Core errors fail the operation and remain visible also after Stop.
+Wire version 135 introduced stop_requested.
 
 Analyze returns publish results. Any analyze exception settles operation.await
 as failed with the original error message, regardless of exception type.
