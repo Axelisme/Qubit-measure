@@ -9,7 +9,13 @@ import numpy as np
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import ComputedPulse, LoadValue, Module, Pulse, PulseCfg
+from zcu_tools.program.v2.modules import (
+    ComputedPulse,
+    LoadValue,
+    Module,
+    Pulse,
+    PulseCfg,
+)
 from zcu_tools.program.v2.modules.delay import Delay, SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.reset import (
