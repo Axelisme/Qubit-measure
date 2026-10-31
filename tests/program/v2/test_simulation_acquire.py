@@ -506,8 +506,12 @@ def test_invalid_std_rejected(std_adc):
 def test_unbound_channel_rejected():
     env = environment(n_gens=2, n_readouts=2, routes=((0, 0),))
     prog = program(env, channels=(1,))
-    with pytest.raises(ValueError, match="bound|route"):
+    with pytest.raises(
+        ValueError,
+        match=r"ADC 1 read 0 point 0: no wired generator route.*candidates=\[\].*wired=\[\].*time=\[",
+    ):
         prog.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
 
 
 def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
@@ -643,7 +647,8 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid):
     assert env.soc.binding.last_request.sequence == failed_sequence + 1
 
 
-def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
+@pytest.mark.parametrize("ro_length", [0.1, 1.5], ids=["no-carrier", "overlap"])
+def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_length):
     env = environment(std_adc=0)
     cfg = PulseReadoutCfg(
         gen_ch=0,
@@ -652,7 +657,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
         freq=100.0,
         gain=0.1,
         waveform=ConstWaveformCfg(length=0.1),
-        ro_length=0.1,
+        ro_length=ro_length,
         pre_delay=1.5,
         trig_offset=0.25,
     )
@@ -661,6 +666,13 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
         modules=[cfg.build("readout")],
         reps=1,
     )
+    if ro_length == 0.1:
+        with pytest.raises(
+            ValueError, match=r"ADC 0 read 0.*no pulse carrier in acquisition window"
+        ):
+            prog.acquire(env.soc, progress=False)
+        assert not env.soc.binding.rounds
+        return
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request
     expected_trigger = prog.cycles2us(prog.us2cycles(0.25))

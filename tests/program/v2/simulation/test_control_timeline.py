@@ -245,7 +245,7 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
     ] == pytest.approx([100, 200], abs=1e-4)
 
 
-def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_shortcuts():
+def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
     env = white_noise(std_adc=0)
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
@@ -254,22 +254,14 @@ def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    request, prog, env = acquire([readout], sweep=[("axis", 2)], reps=1)
-    assert [
-        events[0].frequency_mhz
-        for events in (
-            request.materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([100, 300], abs=1e-4)
-    prog.acquire(env.soc, progress=False)
-    assert [
-        events[0].frequency_mhz
-        for events in (
-            request_of(env).materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([100, 300], abs=1e-4)
+    prog = ModularProgramV2(
+        env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1
+    )
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
+    ):
+        prog.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
 
 
 @pytest.mark.parametrize(

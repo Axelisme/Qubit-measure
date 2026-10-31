@@ -79,8 +79,13 @@ executed. Marked shot-local loops iterate across lanes with `index < n` masks,
 including zero and register-driven counts, without expanding the instruction stream.
 A static live-in guard rejects registers or memory that a shot reads before
 initialization and also writes across points/reps, even for equal-valued or
-unobserved updates. Prologue-only constants and shot-local initialization remain
-supported. The builder also rejects unresolved readout routes.
+unobserved updates. Reading the outer reps counter in the shot is also an
+unsupported live-in; sweep indices and shot-local counters remain supported.
+Prologue-only constants and shot-local initialization remain supported.
+The builder also rejects unresolved readout routes. An ADC without a wired
+generator route receives an explicit missing-route diagnostic with read and time.
+Content after the terminal self-jump is rejected, including unreachable NOPs;
+body, cleanup and loop NOPs remain supported.
 Runtime ADC words use overlapping output carriers to resolve their frequency image.
 Static ADC configuration uses the shared QICK `calc_ro_freq` adapter.
 Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO

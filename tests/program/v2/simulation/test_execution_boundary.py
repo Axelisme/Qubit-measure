@@ -57,7 +57,7 @@ class RawCleanupProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-@pytest.mark.parametrize("program_type", [RawProgram, RawMakeProgram, RawCleanupProgram])
+@pytest.mark.parametrize("program_type", [RawProgram, RawCleanupProgram])
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_supported_raw_effects_acquire(program_type, method):
     env = white_noise(std_adc=0)
@@ -72,6 +72,15 @@ def test_supported_raw_effects_acquire(program_type, method):
         "readout"
     ]
     assert len(env.soc.binding.rounds) == 1
+
+
+@pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
+def test_raw_content_after_terminal_jump_rejected_before_backend(method):
+    env = white_noise(std_adc=0)
+    prog = RawMakeProgram(env.soccfg, modules=[readout("readout")])
+    with pytest.raises(ValueError, match=r"JumpInst.*preopt"):
+        getattr(prog, method)(env.soc, progress=False)
+    assert not env.soc.binding.rounds
 
 
 def test_raw_loop_nop_preserves_sweep_readouts():

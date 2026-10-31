@@ -386,6 +386,10 @@ def _validate_hooks(
         first = axes[index + 1].end + 1 if index + 1 < len(axes) else body_end + 1
         info = _loop_info(records, loop)
         try:
+            if loop.name == "reps" and loop.counter in live:
+                raise ValueError(
+                    f"reps shell counter {loop.counter} is a cross-shot live-in"
+                )
             tables = info["tables"]
             actual = deepcopy(seed)
             actual.writes.clear()

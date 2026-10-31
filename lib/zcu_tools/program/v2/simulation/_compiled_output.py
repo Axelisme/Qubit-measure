@@ -579,8 +579,9 @@ class Outputs:
                     for g, active in zip(wired, candidates[point], strict=True)
                     if active
                 ]
+                reason = "no wired generator route; " if not wired else ""
                 raise ValueError(
-                    f"ADC {ch} read {read} point {point}: generator candidates={selected}, wired={wired}, time=[{times[point, read]}, {times[point, read] + duration})"
+                    f"ADC {ch} read {read} point {point}: {reason}generator candidates={selected}, wired={wired}, time=[{times[point, read]}, {times[point, read] + duration})"
                 )
             result[:, read] = np.asarray(wired)[np.argmax(candidates, axis=1)]
         return result
