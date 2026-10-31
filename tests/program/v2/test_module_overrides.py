@@ -11,6 +11,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg, Readout
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
@@ -54,6 +55,7 @@ def _pulse_cfg(ch: int = 0) -> PulseCfg:
 
 def _assert_same_compile(actual, expected):
     assert actual.prog_list == expected.prog_list
+    assert actual.compiled_stream == expected.compiled_stream
     np.testing.assert_array_equal(actual.binprog["wmem"], expected.binprog["wmem"])
     np.testing.assert_array_equal(actual.compile_datamem(), expected.compile_datamem())
 
@@ -85,3 +87,23 @@ def test_pulse_none_overrides_keep_cfg_and_registry_identity(kind):
     changed.set_param("gain", 0.4)
     expected = _compile(kind, [Pulse("first", cfg), Pulse("second", changed)], False)
     _assert_same_compile(actual, expected)
+
+
+@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize("factory", [PulseReadout, Readout])
+@pytest.mark.parametrize("knob,start,stop", [
+    ("freq", 200, 220), ("gain", 0.3, 0.5),
+    ("length", 0.2, 0.3), ("ro_length", 0.4, 0.5),
+])
+def test_readout_overrides_match_set_param_without_mutating_cfg(kind, swept, factory, knob, start, stop):
+    cfg = PulseReadoutCfg(gen_ch=0, nqz=1, freq=100, gain=0.2,
+        waveform=ConstWaveformCfg(length=0.1), ro_ch=0, ro_length=0.2)
+    original = cfg.model_dump()
+    value = QickSweep1D("point", start, stop) if swept else start
+    equivalent = cfg.model_copy(deep=True)
+    equivalent.set_param(knob, value)
+    actual = _compile(kind, [factory("read", cfg, **{knob: value})], swept)
+    expected = _compile(kind, [factory("read", equivalent)], swept)
+    _assert_same_compile(actual, expected)
+    assert cfg.model_dump() == original
