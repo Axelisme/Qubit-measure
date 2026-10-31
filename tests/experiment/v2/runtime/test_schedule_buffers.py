@@ -71,10 +71,11 @@ def test_schedule_array_writes_reject_shape_mismatch_without_update(
     use_step: bool, value: Any
 ) -> None:
     storage = np.array([1.0, 2.0])
-    buffer = RootUpdateRecordingBuffer({"signals": storage} if use_step else storage)
+    buffer = RootUpdateRecordingBuffer([{"signals": storage}] if use_step else storage)
 
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        target = sched.child("signals") if use_step else sched
+        _, step = next(sched.scan("point", [0]))
+        target = step.child("signals") if use_step else sched
         with pytest.raises(ValueError, match="shape") as error:
             target.set_data(value, flush=True)
 
@@ -88,11 +89,12 @@ def test_schedule_array_writes_reject_shape_mismatch_without_update(
 @pytest.mark.parametrize("scalar", [False, True], ids=["array", "scalar"])
 def test_schedule_array_writes_accept_exact_shapes(use_step: bool, scalar: bool) -> None:
     storage = np.full(() if scalar else (2,), np.nan)
-    buffer = RootUpdateRecordingBuffer({"signals": storage} if use_step else storage)
+    buffer = RootUpdateRecordingBuffer([{"signals": storage}] if use_step else storage)
     value = 7.0 if scalar else np.array([7.0, 8.0])
 
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        target = sched.child("signals") if use_step else sched
+        _, step = next(sched.scan("point", [0]))
+        target = step.child("signals") if use_step else sched
         target.set_data(value, flush=True)
 
         np.testing.assert_array_equal(storage, value)
