@@ -262,6 +262,16 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         ee_variances = np.stack(
             (sigma_variance(ee[0], "f1"), sigma_variance(ee[1], "f2"))
         )
+        # All herald classes establish acquisition completion. The selected
+        # gg/ee totals remain diagnostics, including legitimate zero acceptance.
+        complete = np.isclose(
+            data.sums.sum(axis=(-4, -3, -2, -1)),
+            cfg.reps * cfg.rounds,
+            rtol=8 * np.finfo(float).eps,
+            atol=0,
+        )
+        gg_quadratures = np.where(complete, gg_quadratures, np.nan)
+        ee_quadratures = np.where(complete, ee_quadratures, np.nan)
         gg_phases = tuple(
             tuple(
                 count_phase(

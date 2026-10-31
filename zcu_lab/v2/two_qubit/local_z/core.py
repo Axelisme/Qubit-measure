@@ -307,6 +307,14 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         variances = np.stack(
             (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
         )
+        # Both projections must contain every planned round before phase/fit.
+        complete = np.isclose(
+            counts.sum(axis=(-2, -1)),
+            cfg.reps * cfg.rounds,
+            rtol=8 * np.finfo(float).eps,
+            atol=0,
+        )
+        quadratures = np.where(complete, quadratures, np.nan)
         targets = tuple(
             tuple(
                 count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
