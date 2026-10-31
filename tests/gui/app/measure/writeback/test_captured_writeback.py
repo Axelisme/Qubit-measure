@@ -69,6 +69,7 @@ from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 from tests.experiment._saving_support import SavingCfg, SavingResult
 from tests.gui.app.measure._native_save_support import (
     AnalysisSavingAdapter,
+    NativeSaveSession,
     PaneSummary,
     native_save_session,
 )
@@ -449,6 +450,39 @@ def test_accepted_retains_run_identity_with_or_without_save(
         draft.teardown()
 
 
+def _install_analysis_source(native: NativeSaveSession, source: str) -> None:
+    """Install complete, absent or partial historical documents through State."""
+    tab = native.state.get_tab("tab")
+    if source == "load":
+        commit_run(
+            native.state,
+            "tab",
+            RunPaneState(
+                result=replace(
+                    require_record(tab.run),
+                    metadata=native.metadata.model_dump(mode="json"),
+                ),
+                source_path="historical.h5",
+                parameters=tab.run.parameters,
+                storage=tab.run.storage,
+            ),
+        )
+    elif source in ("without_metadata", "context_free"):
+        tab.run.result = replace(require_record(tab.run), metadata={})
+        if source == "context_free":
+            tab.run.parameters = None
+    elif source in ("identity_only", "experiment_only", "device_only"):
+        partial: dict[str, JsonObject] = {
+            "identity_only": {
+                "run_id": native.metadata.run_id,
+                "completion": "unused-invalid",
+            },
+            "experiment_only": {"experiment": "test/custom", "device_snapshot": {}},
+            "device_only": {"device_snapshot": {"bias": {"value": 0.25}}},
+        }
+        tab.run.result = replace(require_record(tab.run), metadata=partial[source])
+
+
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize(
     "source",
@@ -471,34 +505,7 @@ def test_analysis_draft_uses_start_run_identity(
 ) -> None:
     with native_save_session(tmp_path, qapp) as native:
         tab = native.state.get_tab("tab")
-        if source == "load":
-            commit_run(
-                native.state,
-                "tab",
-                RunPaneState(
-                    result=replace(
-                        require_record(tab.run),
-                        metadata=native.metadata.model_dump(mode="json"),
-                    ),
-                    source_path="historical.h5",
-                    parameters=tab.run.parameters,
-                    storage=tab.run.storage,
-                ),
-            )
-        elif source in ("without_metadata", "context_free"):
-            tab.run.result = replace(require_record(tab.run), metadata={})
-            if source == "context_free":
-                tab.run.parameters = None
-        elif source in ("identity_only", "experiment_only", "device_only"):
-            partial: dict[str, JsonObject] = {
-                "identity_only": {
-                    "run_id": native.metadata.run_id,
-                    "completion": "unused-invalid",
-                },
-                "experiment_only": {"experiment": "test/custom", "device_snapshot": {}},
-                "device_only": {"device_snapshot": {"bias": {"value": 0.25}}},
-            }
-            tab.run.result = replace(require_record(tab.run), metadata=partial[source])
+        _install_analysis_source(native, source)
         captured = tab.run.parameters
         expected = (
             native.metadata.run_id

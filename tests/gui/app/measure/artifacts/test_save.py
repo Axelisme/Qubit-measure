@@ -14,7 +14,6 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import Container, load
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
 from zcu_tools.gui.app.measure.artifacts import (
