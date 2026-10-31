@@ -13,7 +13,11 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import CommandOrigin, EntryRequest, PointCreateRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import make_mock_soccfg
@@ -83,8 +87,12 @@ def test_analyze_shows_errors_and_publishes_returns(
     try:
         ui.screenshot(evidence / "01-ready.png")
         ui.click("Run")
-        qt_until(lambda: ui.observe("Analyze").enabled, label="Run publishes analysis input")
-        ui.screenshot(evidence / "02-run-published.png")
+        ui.screenshot(evidence / "02-run-requested.png")
+        ui.select_tab("Analysis")
+        qt_until(
+            lambda: ui.observe("Analyze").enabled, label="Run publishes analysis input"
+        )
+        ui.screenshot(evidence / "03-run-published.png")
         ui.click("Analyze")
         if error_type is not None:
             qt_until(lambda: bool(ui.dialogs()), label="Analyze error displayed")
@@ -93,13 +101,13 @@ def test_analyze_shows_errors_and_publishes_returns(
                 dialog.title == "Analyze failed" and message in dialog.texts
                 for dialog in dialogs
             ), dialogs
-            ui.screenshot(evidence / "03-error-visible.png")
+            ui.screenshot(evidence / "04-error-visible.png")
         else:
             qt_until(
                 lambda: "Synthetic fit" in ui.legends().texts,
                 label="Analyze return published",
             )
-            ui.screenshot(evidence / "03-analysis-published.png")
+            ui.screenshot(evidence / "04-analysis-published.png")
     finally:
         ctrl.close()
         window.dispose()
