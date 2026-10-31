@@ -24,6 +24,19 @@ def get_path(root: Any, path: tuple[Hashable, ...]) -> Any:
     return target
 
 
+def copy_array_exact(target: NDArray[Any], value: NDArray[Any]) -> None:
+    """Copy value into target without broadcasting, preserving NumPy casting rules.
+
+    Raise ValueError with both shapes before writing when shapes differ.
+    """
+    if np.shape(value) != target.shape:
+        raise ValueError(
+            "Array write requires matching shapes; "
+            f"target shape={target.shape}, value shape={np.shape(value)}"
+        )
+    np.copyto(dst=target, src=value)
+
+
 def set_target(target: Any, value: Any) -> None:
     if isinstance(target, MutableMapping):
         if not isinstance(value, Mapping):

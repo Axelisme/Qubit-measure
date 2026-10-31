@@ -21,7 +21,12 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
+from zcu_tools.experiment.v2.runtime._path import (
+    copy_array_exact,
+    get_path,
+    set_target,
+    writable_view,
+)
 from zcu_tools.experiment.v2.runtime.outcome import (
     RunStatus as RunStatus,
 )
@@ -94,7 +99,8 @@ class SignalBuffer:
         return self.at(index_or_step)
 
     def set(self, value: NDArray[Any]) -> None:
-        np.copyto(dst=self.array, src=value)
+        """Write an identically shaped array and notify; mismatch raises ValueError."""
+        copy_array_exact(self.array, value)
         self.trigger_update()
 
     def trigger_update(
@@ -132,7 +138,8 @@ class SignalSlot:
         return self.view
 
     def set(self, value: NDArray[Any]) -> None:
-        np.copyto(dst=self.view, src=value)
+        """Write an identically shaped array and notify; mismatch raises ValueError."""
+        copy_array_exact(self.view, value)
         self.buffer.trigger_update()
 
 
