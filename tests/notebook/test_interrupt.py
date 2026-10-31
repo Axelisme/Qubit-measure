@@ -47,11 +47,13 @@ class ManualTimer:
         self.function = function
         self.started = False
         self.cancelled = False
+        self.on_cancel: Callable[[], None] = lambda: None
 
     def start(self) -> None:
         self.started = True
 
     def cancel(self) -> None:
+        self.on_cancel()
         self.cancelled = True
 
     def join(self) -> None:
@@ -110,9 +112,14 @@ def test_return_cancels_deadline_before_restoring_handler(
 
     original = signal.signal(signal.SIGINT, previous)
     try:
-        adapter = notebook(
-            InterruptCore(lambda context: signal.raise_signal(signal.SIGINT))
-        )
+        def check_cancel() -> None:
+            assert signal.getsignal(signal.SIGINT) is not previous
+
+        def author(context: RunContext) -> None:
+            signal.raise_signal(signal.SIGINT)
+            timers[-1].on_cancel = check_cancel
+
+        adapter = notebook(InterruptCore(author))
         adapter.run(Cfg())
         assert timers and timers[-1].cancelled
         assert signal.getsignal(signal.SIGINT) is previous
@@ -167,6 +174,7 @@ def test_timeout_fallback_delivers_keyboard_interrupt(
     assert adapter.last_run is None
 
 
+@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX signal contract")
 def test_real_deadline_targets_main_thread_during_blocking_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
