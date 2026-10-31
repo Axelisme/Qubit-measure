@@ -190,9 +190,28 @@ class DelayCfg(ConfigBase):
     acquire_retry: int = 0
 ```
 
-Module 建構時用 keyword 覆寫掃描量的介面**尚未提供，隨 D＋B1 提供**。
-未來例如 `Pulse("probe", cfg.probe, freq=freq)`，不修改 cfg，`None` 表示沿用 cfg。
-目前仍用既有 `set_param` 路徑，不把這個未來片段當成可執行 API。
+Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
+`None` 表示沿用 cfg。以下例子在 builder 上建立頻率 sweep，再交給 Pulse：
+
+```python
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, make_mock_soccfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse
+
+pulse_cfg = Pulse.Cfg(
+    ch=0, nqz=1, freq=100.0, gain=0.2,
+    waveform=ConstWaveformCfg(length=0.1),
+)
+builder = TimelineBuilder(make_mock_soccfg())
+freq = builder.add_sweep("freq", SweepCfg(start=100.0, stop=102.0, step=1.0, expts=3))
+builder.emit(Pulse("probe", pulse_cfg, freq=freq))
+program = builder.build()
+```
+
+Pulse 支援 `freq`、`gain`、`phase`、`length`。PulseReadout 支援 `freq`、`gain`、`length`、`ro_length`。
+Reset 各變體的參數見 [module 建構參數表](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
+不支援 length sweep 的 waveform 仍會報錯，MuxReadout 不接受覆寫。
+接受 `ro_length` sweep 值不代表 QICK 支援 ADC window sweep，編譯會保留既有錯誤。
+既有 `set_param` 仍可用，但它會修改呼叫它的 cfg，應只用在自己持有的 cfg 副本上。
 
 ### 存檔軸用關鍵字，固定座標不塞進 Result
 

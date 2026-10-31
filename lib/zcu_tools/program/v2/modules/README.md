@@ -112,6 +112,31 @@ factory class. `Reset(name, None)` returns `None` (no reset). Module sequences
 in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
 `ScanWith` skip `None` entries without emitting setup or timed operations.
 
+## Constructor overrides
+
+Constructors copy cfg before applying keyword-only overrides through its existing
+`set_param` routing. Numeric values and QICK sweep parameters use the same units
+and waveform restrictions as `set_param`. `None` keeps the cfg value, including
+zero-valued settings. The caller's cfg is unchanged. Registry hashing, read-axis
+owners and lowering all use the effective cfg retained by the module.
+
+| Constructor | Override keywords |
+| --- | --- |
+| `Pulse` / `PulseReset` | `freq`, `gain`, `phase`, `length` |
+| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `length`, `ro_length` |
+| `TwoPulseReset` | `gain1`, `gain2`, `freq1`, `freq2`, `length` (both pulses) |
+| `BathReset` | `qub_gain`, `qub_freq`, `qub_length`, `res_gain`, `res_freq`, `res_length`, `pi2_phase` |
+
+`Reset` forwards the keywords for its selected variant. Frequencies are MHz,
+lengths are us, phases are degrees and gains are normalized. `MuxReadout` does
+not accept override keywords; `Readout` with mux cfg rejects non-None overrides.
+Unsupported waveform length sweeps raise `ValueError` at construction.
+Accepting a `ro_length` sweep value does not mean QICK can compile an ADC-window
+sweep. That existing compile error is unchanged, just as with `set_param`.
+
+`cfg.set_param(name, value)` remains available and mutates that cfg. Use a
+caller-owned copy when deliberately updating cfg before constructing modules.
+
 ## Dmem Tables
 
 - `LoadValue` represents a scalar integer lookup table. It accepts non-negative
