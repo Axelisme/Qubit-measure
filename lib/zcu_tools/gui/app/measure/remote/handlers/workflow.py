@@ -280,29 +280,6 @@ def h_workflow_tunables(
     }
 
 
-def h_workflow_pause(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Request cooperative Pause for params.run_id; project native state, not completion."""
-    run_id = str(params["run_id"])
-    with _workflow_errors():
-        adapter.workflow_control.pause(run_id)
-        return _snapshot(_run(adapter.workflow_control, run_id))
-
-
-def h_workflow_resume(
-    adapter: RemoteControlAdapter, params: Mapping[str, object]
-) -> Mapping[str, object]:
-    """Submit params.run_id continuation in the worker; return its original operation_id."""
-    run_id = str(params["run_id"])
-    with _workflow_errors():
-        operation = adapter.workflow_control.resume(run_id)
-        return {
-            **_snapshot(_run(adapter.workflow_control, run_id)),
-            "operation_id": operation,
-        }
-
-
 def h_workflow_cancel(
     adapter: RemoteControlAdapter, params: Mapping[str, object]
 ) -> Mapping[str, object]:

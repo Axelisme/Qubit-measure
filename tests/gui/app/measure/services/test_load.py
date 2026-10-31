@@ -96,7 +96,9 @@ def test_load_retains_history_without_foreign_analysis_fallback(
     )
     state.set_context(replace(state.session_env, parameters=captured))
     loaded: RunRecord[ConfigBase, object] = RunRecord(
-        cfg=None, result=object(), metadata=historical_metadata()
+        cfg=None,
+        result=object(),
+        metadata=historical_metadata().model_dump(mode="json"),
     )
     metadata = historical_metadata()
 
@@ -137,7 +139,7 @@ def test_load_result_replaces_run_result_and_invalidates_dependents(
     loaded = RunRecord(
         cfg=None if missing_cfg else ConfigBase(),
         result=object(),
-        metadata=historical_metadata(),
+        metadata=historical_metadata().model_dump(mode="json"),
     )
     metadata = historical_metadata()
     issue = "cfg unavailable" if missing_cfg else None
@@ -208,7 +210,9 @@ def test_load_preserves_authored_input_including_invalid_drafts(
     before = tab.cfg.input.data
     env = tab.cfg.env
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
-    loaded = RunRecord(RepeatsCfg(reps=40), object(), historical_metadata())
+    loaded = RunRecord(
+        RepeatsCfg(reps=40), object(), historical_metadata().model_dump(mode="json")
+    )
     metadata = historical_metadata()
     adapter.restore.return_value = RestoredRun(loaded, None)
     service, _emit = _service(state)
@@ -265,11 +269,19 @@ def test_load_result_rejects_busy_tab_without_calling_adapter() -> None:
     assert state.get_tab(tab_id).run.result is None
 
 
-def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
+@pytest.mark.parametrize("failure", ["restore_error", "empty_metadata"])
+def test_load_result_error_leaves_state_unchanged(
+    native_path: str, failure: str
+) -> None:
     state, tab_id, adapter = _make_state()
     old = RunRecord(None, object())
     state.get_tab(tab_id).run.result = old
-    adapter.restore.side_effect = ValueError("bad file")
+    if failure == "restore_error":
+        adapter.restore.side_effect = ValueError("bad file")
+        detail = "bad file"
+    else:
+        adapter.restore.return_value = RestoredRun(RunRecord(None, object()), None)
+        detail = "restored record has no metadata"
     svc, _emit = _service(state)
 
     with pytest.raises(LoadDataError, match="Cannot load this data file") as exc_info:
@@ -277,6 +289,6 @@ def test_load_result_error_leaves_state_unchanged(native_path: str) -> None:
 
     assert exc_info.value.reason_code == "invalid_data_file"
     assert exc_info.value.category is ExpectedErrorCategory.FAILED_PRECONDITION
-    assert "Details: bad file" in str(exc_info.value)
+    assert f"Details: {detail}" in str(exc_info.value)
     assert state.get_tab(tab_id).run.result is old
     assert state.version.get(f"tab:{tab_id}:result") == 0

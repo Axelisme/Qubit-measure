@@ -10,16 +10,16 @@ readout positions. `participants` is a nonempty, unique list of original indices
 Only participants require valid drives. Inactive drives may be None.
 
 `MuxT1Exp` excites active qubits with fixed pi pulses on independent drive generators.
-It uses the existing `Join` to start all pulses together. Each shorter branch waits
-for the longest branch to finish. One common `Delay` follows the Join, then one
+Timeline forks start all pulses together. Each shorter branch waits
+for the longest branch to finish. One common delay follows the join, then one
 active mux readout. Reset, reps, rounds, initial delay and relax delay are shared.
 Pulse pre/post delays remain part of their native branches; no end-alignment
 padding or second compilation is added.
 
-`MuxT1Cfg.delays` defines a finite, nonnegative, strictly increasing start/stop
-window and point count in microseconds. `uniform=True` uses its linear SweepCfg
+`MuxT1Cfg.delay` defines a finite, nonnegative, strictly increasing start/stop
+window and point count in microseconds. `sampling="linear"` uses its linear SweepCfg
 axis in one hardware loop. The result and fit retain requested times; readout
-can differ by native timing ticks. `uniform=False` uses the single-qubit T1
+can differ by native timing ticks. `sampling="decay"` uses the single-qubit T1
 sampling policy to concentrate points in the decay region of the same window.
 LoadValue and DelayAuto execute one shared cycle table for all qubits. Results
 and fits then retain quantized delays; duplicate/reordered quantized points
@@ -36,12 +36,12 @@ T1 with a probe tone or singleshot T1.
 Import the leaf without loading a GUI:
 
 ```python
-from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2.support.mux_sweep_cfg import MuxT1ToneCfg
 from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment import load_run, save_run
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 
@@ -56,7 +56,7 @@ cfg = MuxT1Cfg(
         MuxT1ToneCfg(name="Q3", drive=pi_2),
     ],
     participants=[2, 0],
-    delays=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
+    delay=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
     reps=128,
     rounds=2,
     initial_delay=1.0,
@@ -64,16 +64,15 @@ cfg = MuxT1Cfg(
 )
 core = MuxT1Exp()
 plots = Plots(NonPresentingHost())
-stop = StopSignal()
+scope = Scope("run")
 try:
     result = core.run(
         cfg,
-        context=RunContext(env.soc, env.soccfg, plots, {}, stop),
+        context=RunContext(env.soc, env.soccfg, plots, {}, scope),
     )
-    stop.raise_if_error()
-    source = RunRecord(cfg=cfg, result=result, metadata=metadata)
+    source = RunRecord(cfg=cfg, result=result, metadata=metadata.model_dump(mode="json"))
     fits = core.analyze(source, core.Options(skip=0, dual_exp=False), plots=plots)
-    # Preserve completion separately: stop.is_set() means cancelled, not complete.
+    # scope.stop.is_set() reports a stop request, not data completeness.
     # metadata is caller-captured RunMetadata for this source and its completion.
     save_run(source, destination, spec=MuxT1Exp.AXES_SPEC)
     loaded, snapshot = load_run(destination, spec=MuxT1Exp.AXES_SPEC)
@@ -105,10 +104,9 @@ quantized for nonuniform sampling. `tone_indices` is int64 `(K,)`
 of original active indices. `signals` is complex128 `(K,P)`, ADC-length-normalized
 average I+jQ. The program averages reps and rounds. Cancellation keeps
 completed-round averages across the whole sweep. Before the first completed
-round, signals remain NaN. Acquisition failures retain their cause on `StopSignal`;
-always call `raise_if_error()` before reporting success. A
-partial buffer does not imply success. Admission and construction errors can
-propagate directly.
+round, signals remain NaN. Acquisition, admission and construction errors
+propagate directly. Authors decide whether returned data meets their analysis
+requirements; StopSignal carries only a stop request.
 
 Live plots use `measurement_i` and fit plots use `fit_i`, where `i` is the original
 index, not the label. Analysis reads only the explicit source, permits cfg=None,
@@ -134,7 +132,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Annotated, ClassVar, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -143,21 +141,19 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     DelayAuto,
     LoadValue,
+    Reset,
     ResetCfg,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
@@ -184,14 +180,21 @@ class MuxT1Cfg(ConfigBase):
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
-    generators distinct from readout. delays is one common linear SweepCfg of
-    strictly increasing, finite, nonnegative requested us. uniform defaults True
-    for a linear hardware sweep. False concentrates points within that window
+    generators distinct from readout. delay is one common SweepCfg of
+    strictly increasing, finite, nonnegative requested us. sampling defaults to
+    linear; decay concentrates points within that window
     using a shared cycle table. Fits retain requested times for uniform sampling,
     quantized times otherwise.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
+
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
+    participants: list[StrictInt]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "linear"
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -231,18 +234,12 @@ class MuxT1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxT1ToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delays: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
         """Reject invalid counts, channels and requested delay coordinates."""
         validate_mux_tones(self, self.tones, self.participants)
-        times = sweep2array(self.delays, "none")
+        times = sweep2array(self.delay, "none")
         if (
             times.ndim != 1
             or not times.size
@@ -282,13 +279,13 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
     Options: ClassVar[type[T1AnalyzeOptions]] = T1AnalyzeOptions
     AXES_SPEC: ClassVar[AxesSpec[MuxT1Result, MuxT1Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("times", "Delay", "s", 1e-6),
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("times", label="Delay", unit="s", scale=1e-6),
+            AxesSpec.Axis("tone_indices", label="Tone", unit="", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=MuxT1Result,
         cfg_type=MuxT1Cfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="mux/t1",
     )
 
@@ -297,100 +294,160 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
 
         config supplies the full tone list, ordered participants, pi pulses,
         reset/readout and averaging controls; it is validated without mutation.
-        Join waits for the longest pi branch, including its pulse delays, before
+        The join waits for the longest pi branch, including its pulse delays, before
         the shared wait. Return times (P,), original tone indices (K,) and
-        averaged complex IQ (K,P), with one live figure per tone. uniform=True
-        retains the requested linear times; False returns quantized nonuniform
+        averaged complex IQ (K,P), with one live figure per tone. sampling="linear"
+        retains requested times; "decay" returns quantized nonuniform
         delays in the same window using the single-qubit T1 sampling policy.
         Both paths use one hardware loop. Nonuniform quantization collisions
         raise ValueError before acquisition. Cancellation retains
         completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
-        check context.scope.stop.raise_if_error() before reporting success.
+        acquisition and program errors propagate.
         """
-        # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
+        if cfg.sampling == "linear":
+            return self._run_linear(cfg, context=context)
+        return self._run_decay(cfg, context=context)
+
+    def _run_linear(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        times = sweep2array(cfg.delay, "none")
         indices = list(cfg.participants)
-        delay_table = (
-            None
-            if cfg.uniform
-            else materialize_nonuniform_t1_delays(cfg.delays, soccfg=context.soccfg)
-        )
-        times = (
-            sweep2array(cfg.delays, "none")
-            if delay_table is None
-            else delay_table.times_us
-        )
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
-
-        # 2. Show each decay on the shared requested or quantized delay axis.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{i}",
-                "Delay (us)",
-                "Magnitude (a.u.)",
+        viewers = []
+        for i in indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{i}")
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{i}: {cfg.tones[i].name}",
             )
-            for i in indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(times, np.abs(data[:, row]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(times, np.abs(data[:, row]))
+            )
 
-        # 3. Compile one shared delay loop; pi pulses start together after reset.
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
-            pulses = [
-                Pulse(f"drive_{index}", cfg.tones[index].require_drive())
-                for index in indices
-            ]
-            builder = sched.prog_builder(
-                context.soc,
+        with Schedule(None, signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
                 context.soccfg,
-                reps=sched.cfg.reps,
-                initial_delay=sched.cfg.initial_delay,
-                relax_delay=sched.cfg.relax_delay,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
-            if delay_table is None:
-                delay = Delay("t1_delay", sweep2param("delay", cfg.delays))
-                builder.declare_sweep("delay", cfg.delays)
-            else:
-                # One shared table drives every participant in the same hardware loop.
-                builder.add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(delay_table.cycles),
-                        idx_reg="delay_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    )
+            delay = builder.add_sweep("delay", cfg.delay)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"drive_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, timeline in zip(indices, timelines, strict=True):
+                builder.emit(
+                    Pulse(f"drive_{index}", cfg.tones[index].require_drive()),
+                    timeline=timeline,
                 )
-                delay = DelayAuto("t1_delay", t="t1_delay_cycle")
-                builder.declare_sweep("delay_idx", len(delay_table.cycles))
-            builder.add_reset("reset", cfg.reset).add(
-                Join(*pulses),
-                delay,
-                MuxReadout("readout", readout),
-            )
+            builder.join(*timelines, into="default")
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
             prog = builder.build()
-            # Each completed round supplies the full delay/participant IQ matrix.
-            _ = builder.run_program(
+            sched.run_acquire(
                 prog,
-                raw2signal_fn=partial(averaged_mux_signal, prog),
+                context.soc,
                 rounds=cfg.rounds,
-                options=AcquireOptions(
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module),
                     retry=cfg.acquire_retry,
                     stop_condition=mux_snr_checker(
                         signals, cfg.earlystop_snr, tone_axis=1
                     ),
                 ),
             )
+        signals.trigger_update(flush=True)
+        return MuxT1Result(
+            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
+        )
 
-        # 4. Flush live plots and return one IQ row per original selected tone.
+    def _run_decay(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
+        times = table.times_us
+        indices = list(cfg.participants)
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
+        viewers = []
+        for i in indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{i}")
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Magnitude (a.u.)",
+                title=f"{i}: {cfg.tones[i].name}",
+            )
+            viewers.append(live_line(ax))
+            fig.show()
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(times, np.abs(data[:, row]))
+            )
+
+        signals = SignalBuffer((len(times), len(indices)), on_update=update)
+        with Schedule(None, signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
+            )
+            builder.add_loop("delay_idx", len(table.cycles))
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(table.cycles),
+                    idx_reg="delay_idx",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            )
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"drive_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, timeline in zip(indices, timelines, strict=True):
+                builder.emit(
+                    Pulse(f"drive_{index}", cfg.tones[index].require_drive()),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            # Start the register delay after the full pulse branches, including post.
+            builder.delay_by_timeline()
+            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module),
+                    retry=cfg.acquire_retry,
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=1
+                    ),
+                ),
+            )
         signals.trigger_update(flush=True)
         return MuxT1Result(
             times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()

@@ -41,7 +41,7 @@ def test_workflow_scope_ack_status_and_partial_facts(
     tmp_path: Path, scope: str
 ) -> None:
     rig = Rig(tmp_path)
-    outcomes: list[tuple[bool, bool]] = []
+    outcomes: list[bool] = []
     acquisitions: list[bool] = []
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -70,13 +70,13 @@ def test_workflow_scope_ack_status_and_partial_facts(
         iterations = env.iterations()
         iteration = next(iterations)
         first = completed(await iteration.call(acquire))
-        outcomes.append((first.partial_result, first.facts.stopped))
+        outcomes.append(first.facts.stopped)
         second = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
-        outcomes.append((second.partial_result, second.facts.stopped))
+        outcomes.append(second.facts.stopped)
         iteration.commit(Point(value=11))
         iteration = next(iterations)
         third = completed(await iteration.call(lambda ctx: ctx.scope.stop.is_set()))
-        outcomes.append((third.partial_result, third.facts.stopped))
+        outcomes.append(third.facts.stopped)
         iteration.commit(Point(value=12))
         iterations.close()
 
@@ -88,19 +88,16 @@ def test_workflow_scope_ack_status_and_partial_facts(
         )
         assert acquisitions == [True, scope != "acquire"]
         assert outcomes == [
-            (True, scope in {"run", "iteration", "workflow"}),
-            (scope in {"iteration", "workflow"}, scope in {"iteration", "workflow"}),
-            (scope == "workflow", scope == "workflow"),
+            scope in {"run", "iteration"},
+            scope == "iteration",
+            False,
         ]
         records = rig.engine.records("run")
         assert [
             [operation.outcome for operation in record.operations] for record in records
         ] == [
-            [
-                "partial",
-                "partial" if scope in {"iteration", "workflow"} else "completed",
-            ],
-            ["partial" if scope == "workflow" else "completed"],
+            ["completed", "completed"],
+            ["completed"],
         ]
     finally:
         rig.close()

@@ -13,7 +13,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, PulseReadout, Readout, Reset
+from zcu_tools.program.v2 import Pulse, PulseReadout, Readout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 
@@ -37,12 +37,13 @@ class LookbackAnalysis:
 
 
 class LookbackCfg(ConfigBase):
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay", unit="us", description="Delay before the first shot."
-        ),
-    ] = 1.0
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -52,13 +53,12 @@ class LookbackCfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay", unit="us", description="Delay before the first shot."
+        ),
+    ] = 1.0
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -70,8 +70,8 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
 
     # times stored in seconds on disk -> scale=1e-6 (mem us)
     AXES_SPEC: ClassVar[AxesSpec[LookbackResult, LookbackCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=LookbackResult,
         cfg_type=LookbackCfg,
         cfg_schema_version="3.0",
@@ -89,37 +89,40 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         # Decimated acquisition uses one repetition per round, not an IQ-shot loop.
         run_cfg = deepcopy(config)
 
-        viewer = live_line(context.plots, "measurement", "Time (us)", "Amplitude")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        line = live_line(ax)
+
+        fig.show()
         # Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
-        program_cfg = deepcopy(run_cfg)
-        program = ModularProgramV2(
+        builder = TimelineBuilder(
             context.soccfg,
             reps=1,
             initial_delay=run_cfg.initial_delay,
             relax_delay=run_cfg.relax_delay,
-            modules=[
-                Reset("reset", cfg=program_cfg.reset),
-                Pulse("init_pulse", cfg=program_cfg.init_pulse),
-                Readout("readout", cfg=program_cfg.readout),
-            ],
         )
+        reset = Reset("reset", run_cfg.reset)
+        if reset is not None:
+            builder.emit(reset)
+        builder.emit(Pulse("init_pulse", run_cfg.init_pulse))
+        builder.emit(Readout("readout", run_cfg.readout))
+        program = builder.build()
         times = program.get_time_axis(ro_index=0) + run_cfg.readout.trig_offset
         assert isinstance(times, np.ndarray)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(times, lookback_signal2real(data))
 
         # Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(
             (len(times),),
-            on_update=lambda data: viewer.update(times, lookback_signal2real(data)),
+            on_update=update,
         )
-        with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
-            _ = sched.prog_builder(
-                context.soc,
-                context.soccfg,
-                reps=1,
-                initial_delay=sched.cfg.initial_delay,
-                relax_delay=sched.cfg.relax_delay,
-            ).run_program_decimated(program, rounds=run_cfg.rounds)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            sched.run_acquire_decimated(program, context.soc, rounds=run_cfg.rounds)
+
         return LookbackResult(times=times, signals=signals_buffer.array)
 
     def analyze(
@@ -155,7 +158,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         else:
             offset = float(Ts[np.nonzero(candidate_mask)[0][-1]])
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         # np.real/np.imag are used instead of .real/.imag because numpy 2.4
         # stubs narrow the overloaded descriptor in a way that confuses pyright

@@ -708,8 +708,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare new timeline names in _body, copying source end at this point.
 
         source must already exist; into is one new name or a list of distinct
-        new names. A wait-only source supplies its actual remaining end; new
-        timelines permit placement while that source stays wait-only.
+        new names. Source and targets retain the actual remaining end and
+        permit placement after branch or runtime Repeat.
         Unknown source or duplicate targets raise ValueError during
         compile. Calling outside _body raises ValueError immediately. This emits
         no output and does not advance reference. Each compile resets names.
@@ -800,6 +800,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Unhinted counts skip backedge bounds proofs. Invalid count/hint/name
         raises ValueError; QICK register exhaustion propagates unchanged.
         Runtime-only event getters raise RuntimeError, never return bounds.
+        Table loads written in the body are available to subsequent consumers in
+        that iteration. A hint or certified count bounds the counter's table
+        index; its body-only index proof expires after the closing increment.
+        A possibly empty loop does not initialize destinations on its skipped path.
         """
         selected = timeline if timeline is not None else self._timeline_default
         parent = selected if selected is not None else "default"
@@ -821,6 +825,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         fixed = FixedRepeatLoop(name, n) if isinstance(n, int) else None
         if fixed is None:
             self.open_inner_loop(name, name, n, range_hint=range_hint)
+            entry.iterations = n
+            entry.maximum = range_hint[1] if range_hint is not None else None
+            entry.counter_writers = (self.macro_list[-1],)
         else:
             self.append_macro(fixed)
         self.append_macro(RepeatTimelineBody(entry))
@@ -853,6 +860,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)
+                entry.counter_writers = (*entry.counter_writers, self.macro_list[-1])
             elif fixed is not None:
                 self.append_macro(fixed.closing)
             self.append_macro(RepeatTimelineCapture(entry))
@@ -872,7 +880,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         None selects the scoped name, or default outside a scope.
         Only default exists initially; other names require fork in _body.
-        Fully consumed wait-only bounds become ordinary zero ends again.
+        Runtime ends use their actual remaining value, not a range bound.
         Unknown names or unprovable swept floors raise ValueError during compile.
         """
         selected = timeline if timeline is not None else self._timeline_default

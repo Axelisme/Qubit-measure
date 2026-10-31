@@ -29,8 +29,8 @@ different from the readout generator. Pulse parameters must be fixed and finite.
 The delay bounds must be finite and nonnegative. Numeric cfg validation does not
 resolve component identities; the caller supplies valid tone/qubit bindings.
 
-The sequence is reset, Join of first x90 pulses, common Delay, Join of final x90
-pulses, then active mux readout. Each Join starts its branches at the same stage
+The sequence is reset, parallel first x90 pulses, common delay, parallel final x90
+pulses, then active mux readout. Each fork starts its branches at the same stage
 origin. Native pulse pre/post delays remain unchanged. The Delay starts after the
 longest first stage, not independently after each qubit's own pulse.
 For zero pre/post delays, a shorter pulse waits an extra fixed
@@ -54,7 +54,6 @@ from zcu_lab.v2.mux.t2ramsey import MuxT2RamseyExp
 
 core = MuxT2RamseyExp()
 result = core.run(cfg, context=context)
-context.scope.stop.raise_if_error()
 source = RunRecord(cfg=cfg, result=result)
 outcomes = core.analyze(source, core.Options(fit_phase=True), plots=analysis_plots)
 ```
@@ -73,9 +72,9 @@ nominal rate. Save/load and analysis still accept this source.
 
 The hardware sweeps delay and averages reps/rounds. Cancellation keeps the mean of
 completed rounds across the whole sweep. With no completed round, IQ stays NaN.
-Call `raise_if_error()` before declaring success, then inspect `is_set()` to
-distinguish cancellation. Acquisition errors preserve their cause even with
-partial data. Build, validation and conversion errors propagate directly.
+Acquisition, build, validation and conversion errors propagate directly.
+A stop request does not classify data completeness; authors decide which
+completed-round averages are usable.
 
 Analysis accepts explicit RunRecord, including cfg=None. `fit_fringe=True`
 selects the existing damped-cosine fitter; False selects exponential decay.
@@ -92,7 +91,8 @@ A finite fit is not a calibration-quality guarantee.
 
 ## Native source persistence
 
-`save_run(source, path, metadata=...)` stores full cfg, inactive tones, original
+`save_run(source, path, spec=MuxT2RamseyExp.AXES_SPEC)` validates source.metadata
+against RunMetadata and stores full cfg, inactive tones, original
 indices, shared requested delay, IQ, actual detunes and source frequencies.
 Time and frequency use seconds and Hz on disk, us and MHz in memory.
 `save_run` writes only native data and returns None. `save(source, path)` is
@@ -126,18 +126,17 @@ from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     Pulse,
+    Reset,
     ResetCfg,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
 )
@@ -175,6 +174,12 @@ class MuxT2RamseyCfg(ConfigBase):
     nonnegative us before acquisition and between repetitions respectively.
     """
 
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
+    participants: list[StrictInt]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -199,11 +204,6 @@ class MuxT2RamseyCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxCoherenceToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2RamseyCfg:
@@ -228,8 +228,8 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         the delay begins after the longest first pulse. Return requested times
         (P,), average complex IQ (K,P), original tone indices, actual MHz detunes
         and source frequencies in participant order. context supplies hardware
-        and plots; check its cancel_signal.raise_if_error() before reporting
-        success. Cancellation keeps completed-round means and NaN for no data.
+        and plots. Cancellation keeps completed-round means and NaN for no data.
+        Acquisition, validation, build and conversion errors propagate.
         """
         # 1. Keep participant order while selecting drives and mux readout tones.
         cfg = MuxT2RamseyCfg.model_validate(config.model_dump())
@@ -259,66 +259,78 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         )
 
         # 2. Plot requested delay for each original tone, including partial data.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Requested delay (us)",
-                "Magnitude (a.u.)",
+        viewers = []
+        for index in indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Requested delay (us)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(times, np.abs(data[row]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(times, np.abs(data[row]))
+            )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
-            # 3. Join each x90 stage so the common wait follows its longest pulse.
-            length = sweep2param("length", cfg.delay)
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(
-                    Join(
-                        *[
-                            Pulse(f"pi2_first_{index}", drive)
-                            for index, drive in zip(indices, drives, strict=True)
-                        ]
-                    ),
-                    Delay("delay_first", 1.0 * length),
-                    Join(
-                        *[
-                            Pulse(
-                                f"pi2_final_{index}",
-                                drive.with_updates(
-                                    phase=drive.phase + 360 * tone.detune * length
-                                ),
-                            )
-                            for index, tone, drive in zip(
-                                indices, tones, drives, strict=True
-                            )
-                        ]
-                    ),
-                    MuxReadout("readout", readout),
-                )
-                .declare_sweep("length", cfg.delay)
+        with Schedule(None, signals, scope=context.scope) as sched:
+            # Each stage starts all drives together and waits for its longest pulse.
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
+            delay = builder.add_sweep("delay", cfg.delay)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"pi2_first_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, drive, timeline in zip(indices, drives, timelines, strict=True):
+                builder.emit(
+                    Pulse(
+                        f"pi2_first_{index}",
+                        drive,
+                    ),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
+            timelines = [f"pi2_final_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, tone, drive, timeline in zip(
+                indices, tones, drives, timelines, strict=True
+            ):
+                builder.emit(
+                    Pulse(
+                        f"pi2_final_{index}",
+                        drive,
+                        phase=drive.phase + 360 * tone.detune * delay,
+                    ),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
 
             # 4. Average rounds into tone-major IQ without filling missing points.
             prog = builder.build()
-            _ = builder.run_program(
+            _ = sched.run_acquire(
                 prog,
-                raw2signal_fn=lambda raw: averaged_mux_signal(prog, raw).T,
+                context.soc,
                 rounds=cfg.rounds,
+                options=RunOptions(
+                    converter=lambda raw: (
+                        averaged_mux_signal(prog, readout_module, raw).T
+                    )
+                ),
             )
         signals.trigger_update(flush=True)
         return MuxCoherenceResult(

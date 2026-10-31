@@ -17,18 +17,6 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
     qub_pulse, length_stop = len_rabi_initial_values(ctx.parameters)
     return Form(
         LenRabiCfg,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "qub_pulse",
-            "readout",
-            "length",
-            "reps",
-            "rounds",
-            "acquire_retry",
-            "earlystop_snr",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,

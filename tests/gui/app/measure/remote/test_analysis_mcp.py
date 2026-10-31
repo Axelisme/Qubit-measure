@@ -286,7 +286,7 @@ def test_operation_result_retains_inputs_after_parameter_edits_and_replacement(
 def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
     tab = fx.ctrl.tab_control.new_tab("fake")
     metadata = historical_metadata()
-    source = RunRecord(None, object(), metadata=metadata)
+    source = RunRecord(None, object(), metadata=metadata.model_dump(mode="json"))
     commit_run(fx.state, tab, RunPaneState(result=source))
     summary: dict[str, object] = {
         "tones": [
@@ -321,7 +321,7 @@ def test_analysis_presentation_tracks_run_stage_and_pane_replacement(fx, stage):
                     source,
                     metadata=metadata.model_copy(
                         update={"run_id": "20261008T000000Z-d4e5f6"}
-                    ),
+                    ).model_dump(mode="json"),
                 )
             ),
         )

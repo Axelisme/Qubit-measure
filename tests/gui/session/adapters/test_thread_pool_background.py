@@ -9,6 +9,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 from tests.gui._lifecycle_waits import manual_until as _pump_until
 from tests.gui._lifecycle_waits import waiting_call
@@ -67,7 +68,7 @@ def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) 
     executor = make_executor(scheduler)
     owner_id = threading.get_ident()
     boom = ValueError("boom")
-    delivered: list[tuple[Exception, int]] = []
+    delivered: list[tuple[BackgroundError, int]] = []
 
     def work() -> None:
         raise boom
@@ -82,6 +83,31 @@ def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) 
     _pump_until(scheduler, lambda: bool(delivered))
     assert delivered == [(boom, owner_id)]
     # The observed terminal callback has acked; only worker bookkeeping may remain.
+    assert executor.quiesce(30)
+
+
+@pytest.mark.parametrize("run_in_pool", [True, False])
+def test_keyboard_interrupt_is_delivered_unchanged_and_drained(
+    make_executor, run_in_pool: bool
+) -> None:
+    scheduler = ManualOwnerScheduler()
+    executor = make_executor(scheduler)
+    error = KeyboardInterrupt("core interrupted")
+    delivered: list[tuple[BaseException, int]] = []
+
+    def work() -> None:
+        raise error
+
+    executor.submit(
+        work,
+        run_in_pool=run_in_pool,
+        on_done=lambda value: pytest.fail(f"unexpected result: {value}"),
+        on_error=lambda exc: delivered.append((exc, threading.get_ident())),
+    )
+    _pump_until(scheduler, lambda: bool(delivered))
+    assert len(delivered) == 1
+    assert delivered[0][0] is error
+    assert delivered[0][1] == threading.get_ident()
     assert executor.quiesce(30)
 
 

@@ -22,6 +22,8 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
+from tests.program.v2.simulation.time_observations import time_us, times_us
+
 
 def environment(**kwargs):
     name = "zcu_tools.experiment.simulation"
@@ -88,7 +90,7 @@ def test_builder_program_acquires_and_sums_tagged_readouts():
         assert request.reps == 3
         (window,) = request.materialize_point(0).readouts
         assert window.samples == 16
-        assert len(window.trigger_us) == 2
+        assert len(window.trigger_ticks) == 2
     finally:
         env.devices.close_all_devices()
 
@@ -795,6 +797,11 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request
     expected_trigger = prog.cycles2us(prog.us2cycles(0.25))
-    assert request.readouts[0].trigger_us == (expected_trigger,)
+    assert times_us(request.time_base, request.readouts[0].trigger_ticks) == (
+        expected_trigger,
+    )
     expected_pulse = prog.cycles2us(prog.us2cycles(1.5))
-    assert request.materialize_point(0).events[0].start_us == expected_pulse
+    assert (
+        time_us(request.time_base, request.materialize_point(0).events[0].start_ticks)
+        == expected_pulse
+    )

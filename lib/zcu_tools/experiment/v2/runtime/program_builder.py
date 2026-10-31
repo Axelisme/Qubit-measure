@@ -170,10 +170,14 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
 
     All acquire methods write each converted completed round before checking
     stop_condition, then write the final converted result. Data-driven stop is
-    acquire-local; external stop, interrupt and exhausted failure retain partial
-    data (unwritten slots stay NaN) and record the Schedule outcome. They return
-    the slot's live array rather than raising producer errors. Progress bars close
-    before return, including on interruption or failure.
+    acquire-local. External cancellation returns the slot's partial live array
+    (unwritten slots stay NaN); cancellation of the Schedule itself also records
+    its stopped outcome. KeyboardInterrupt propagates unchanged. on_stop observes
+    external cancellation after scope/progress cleanup as defined by AcquireOptions.
+    Producer
+    failures propagate unchanged after the explicit retry budget is exhausted;
+    concurrent cancellation prevents retry but does not suppress a failure.
+    Progress bars close before return or propagation.
     """
 
     def __init__(
@@ -387,6 +391,8 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         if options.retry < 0:
             raise ValueError("retry must be non-negative")
         if self._schedule.check_stop_requested():
+            if options.on_stop is not None:
+                options.on_stop()
             return self._default_slot().view
         program = self._build_program()
         return runner(

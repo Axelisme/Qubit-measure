@@ -9,11 +9,7 @@ from pydantic_core import PydanticCustomError
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import PulseCfg
-from zcu_tools.program.v2.modules import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    MuxReadoutCfg,
-)
+from zcu_tools.program.v2.modules import MuxReadoutCfg
 
 
 class MuxAcquisition(Protocol):
@@ -82,27 +78,10 @@ class MuxDriveToneCfg(ConfigBase):
                 raise ValueError(f"drive.{name} must be fixed and finite")
         if drive.pre_delay < 0 or drive.post_delay < 0:
             raise ValueError("drive delays must be nonnegative")
-        if isinstance(
-            drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)
-        ) and isinstance(drive.waveform.length, QickParam):
+        if drive.waveform.style != "arb" and isinstance(
+            drive.waveform.length, QickParam
+        ):
             raise ValueError("drive.waveform.length must be fixed")
-
-
-class MuxToneCfg(MuxDriveToneCfg):
-    """One nullable drive and independent pulse-scan range, required when active.
-
-    Inherited name and drive identify the original tone. sweep holds finite
-    start/stop in MHz, gain in a.u. within [-1, 1] or us for twotone, amp or length scans.
-    Coherence uses a shared delay instead and does not use this range schema.
-    """
-
-    sweep: ToneRangeCfg | None = None
-
-    def require_sweep(self) -> ToneRangeCfg:
-        """Return the active tone's bounds, or raise ValueError naming this tone."""
-        if self.sweep is None:
-            raise ValueError(f"{self.name}: active tone requires sweep")
-        return self.sweep
 
 
 def require_tone_value(value: object, path: tuple[str | int, ...]) -> None:
@@ -165,24 +144,19 @@ def validate_mux_tones(
 
 def validate_mux_scan(
     cfg: MuxAcquisition,
-    tones: Sequence[MuxToneCfg],
+    tones: Sequence[MuxDriveToneCfg],
     participants: Sequence[int],
     expts: int,
 ) -> None:
     """Validate fixed drives plus independent pulse ranges and a shared count.
 
-    cfg, modules, tones and participants obey validate_mux_tones. Each tone has
-    finite sweep start/stop in experiment units. expts is a positive integer
-    shared by all tones. Raise ValueError without changing inputs.
+    cfg, tones and participants obey validate_mux_tones. expts is a positive
+    integer shared by all tones. Each leaf declares its physical range field
+    using ToneRangeCfg, which owns finite endpoints. Raise without mutation.
     """
     validate_mux_tones(cfg, tones, participants)
     if type(expts) is not int or expts <= 0:
         raise ValueError("expts must be a positive integer")
-    for i in participants:
-        require_tone_value(tones[i].sweep, ("tones", i, "sweep"))
-        sweep = tones[i].require_sweep()
-        if not all(math.isfinite(v) for v in (sweep.start, sweep.stop)):
-            raise ValueError(f"tones[{i}].sweep start/stop must be finite")
 
 
 def validate_participants(names: Sequence[str], participants: Sequence[int]) -> None:

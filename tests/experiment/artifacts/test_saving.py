@@ -110,7 +110,7 @@ def test_all_outputs_share_content_context_and_one_saved_event(
     report = save_artifacts(
         artifacts(),
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin=origin,
     )
@@ -187,7 +187,7 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="notebook",
         )
@@ -237,6 +237,30 @@ def test_grouped_artifacts_obey_declared_layout_and_preserve_native_ledger_seman
     assert len(ledger.events()) == 2
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("analysis_only", [False, True])
+def test_nonfinite_author_metadata_rejects_before_any_output_or_ledger(
+    tmp_path: Path, value: float, analysis_only: bool
+) -> None:
+    metadata, layout, ledger = storage(tmp_path)
+    document = metadata.model_dump(mode="json")
+    document["author_notes"] = {"nested": [{"value": value}]}
+    selected = artifacts()[1:] if analysis_only else artifacts()
+    before = set(tmp_path.rglob("*"))
+
+    with pytest.raises(ValueError, match="metadata"):
+        save_artifacts(
+            selected,
+            layout=layout,
+            record=RunRecord(None, None, metadata=document),
+            ledger=ledger,
+            origin="gui",
+        )
+
+    assert set(tmp_path.rglob("*")) == before
+    assert ledger.events() == ()
+
+
 def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> None:
     metadata, layout, ledger = storage(tmp_path)
     selected = artifacts()
@@ -246,7 +270,7 @@ def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> 
     report = save_artifacts(
         selected,
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin="notebook",
     )
@@ -284,7 +308,7 @@ def test_nonfinite_analysis_isolates_the_member_and_records_other_outputs(
     report = save_artifacts(
         selected,
         layout=layout,
-        record=RunRecord(None, None, metadata=metadata),
+        record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
         ledger=ledger,
         origin="notebook",
     )
@@ -325,7 +349,7 @@ def test_injected_figure_encoder_runs_once_and_shares_png_bytes(tmp_path: Path) 
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,
@@ -360,7 +384,7 @@ def test_injected_encoder_failure_leaves_data_and_json_saved(tmp_path: Path) -> 
         report = save_artifacts(
             selected,
             layout=layout,
-            record=RunRecord(None, None, metadata=metadata),
+            record=RunRecord(None, None, metadata=metadata.model_dump(mode="json")),
             ledger=ledger,
             origin="gui",
             figure_encoder=encode,

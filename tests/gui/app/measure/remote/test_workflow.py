@@ -517,7 +517,6 @@ def test_workflow_start_observes_draft_or_explicit_fresh_defaults_and_keeps_term
     assert operation["stopped"] is False
     assert operation["outcome"] == "completed"
     assert operation["reason"] is None
-    assert operation["device_snapshot"] is None
     native = controller.workflow_control().records(RUN_ID)[0].operations[0]
     assert operation["started_at"] == native.started_at.isoformat()
     assert operation["finished_at"] == native.finished_at.isoformat()

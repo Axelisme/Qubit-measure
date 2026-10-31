@@ -19,6 +19,7 @@ from zcu_tools.gui.error_messages import (
     friendly_from_rules,
     normalize_raw,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 
 def friendly_io_message(action: str, filepath: str, exc: Exception) -> str:
@@ -69,7 +70,7 @@ _FIT_RULES: list[FriendlyRule] = [
 ]
 
 
-def friendly_fit_message(action: str, exc: Exception | str) -> str:
+def friendly_fit_message(action: str, exc: BackgroundError | str) -> str:
     """Message for a preprocess / auto-fit / export failure.
 
     ``action`` is "Preprocess" / "Auto-fit" / "Export". ``exc`` may be the exception

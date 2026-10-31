@@ -32,26 +32,16 @@ from zcu_lab.v2.mux.onetone.core import (
 from zcu_lab.v2.mux.twotone_spectrum.core import (
     MuxFreqCfg,
     MuxFreqExp,
+    MuxFreqToneCfg,
     prepare_frequency_scan,
 )
 from zcu_lab.v2.support import live_heatmap_with_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
 from zcu_lab.v2.support.mux_sweep_cfg import (
-    MuxToneCfg,
     ToneRangeCfg,
     require_tone_value,
     validate_participants,
 )
-
-
-class FluxFrequencyToneCfg(MuxToneCfg):
-    """One original qubit drive and finite absolute MHz frequency bounds.
-
-    Inherited name fixes identity; drive supplies the fixed pulse. sweep.start
-    and sweep.stop are MHz, with the point count in frequency.expts.
-    """
-
-    sweep: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
 
 
 class FluxFrequencyCfg(ConfigBase):
@@ -62,7 +52,7 @@ class FluxFrequencyCfg(ConfigBase):
     count. Top-level participants selects acquisition order, not this list.
     """
 
-    tones: Annotated[list[FluxFrequencyToneCfg], FieldMeta(element_label="name")]
+    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(strict=True, gt=0)
 
 
@@ -75,18 +65,18 @@ class FluxIdentityCfg(ConfigBase):
 class FluxLineCfg(FluxIdentityCfg):
     """One local DC source and its native-unit start/stop range.
 
-    flux_dev names a connected driver. sweep advances with all other selected
+    flux_dev names a connected driver. flux advances with all other selected
     lines by point index, using the shared flux_expts, not a Cartesian product.
     """
 
     flux_dev: DeviceName = Field(min_length=1)
-    sweep: ToneRangeCfg | None = None
+    flux: ToneRangeCfg | None = None
 
-    def require_sweep(self) -> ToneRangeCfg:
+    def require_flux(self) -> ToneRangeCfg:
         """Return a selected line's DC bounds, or raise ValueError with its name."""
-        if self.sweep is None:
+        if self.flux is None:
             raise ValueError(f"{self.name}: active tone requires DC sweep")
-        return self.sweep
+        return self.flux
 
 
 class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
@@ -156,7 +146,7 @@ class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCf
             for index in self.participants:
                 tone = self.frequency.tones[index]
                 require_tone_value(tone.drive, ("frequency", "tones", index, "drive"))
-                require_tone_value(tone.sweep, ("frequency", "tones", index, "sweep"))
+                require_tone_value(tone.freq, ("frequency", "tones", index, "freq"))
         self.inner_cfg()
         return self
 
@@ -228,9 +218,9 @@ class LocalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
             raise ValueError("local flux lines must use distinct devices")
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.sweep, ("tones", index, "sweep"))
+            require_tone_value(tone.flux, ("tones", index, "flux"))
             make_sweep(
-                tone.require_sweep().start, tone.require_sweep().stop, self.flux_expts
+                tone.require_flux().start, tone.require_flux().stop, self.flux_expts
             )
         return self
 
@@ -264,8 +254,10 @@ def run_flux_scan(
     cfg is not mutated. context supplies connected drivers/board and the one
     Run scope. Validate every selected driver's unit before the first write.
     Global scans write the coil once per point; local scans zip selected lines.
-    Stop during ramp, settle or inner acquisition discards that incomplete flux
-    point and preserves earlier points. Uncancelled nonfinite inner IQ raises
+    Cancelling an inner acquire leaves that whole flux point NaN and continues
+    with the next point. Cancelling the Run scope stops the scan during ramp,
+    settle or acquisition, preserving earlier completed points and leaving the
+    unfinished point and later points NaN. Uncancelled nonfinite inner IQ raises
     ValueError with the zero-based flux point and first invalid tone/cell.
     Driver/acquisition errors propagate. Sources retain their last setting;
     no automatic restoration occurs.
@@ -279,8 +271,8 @@ def run_flux_scan(
         flux_values = np.asarray(
             [
                 np.linspace(
-                    cfg.tones[i].require_sweep().start,
-                    cfg.tones[i].require_sweep().stop,
+                    cfg.tones[i].require_flux().start,
+                    cfg.tones[i].require_flux().stop,
                     cfg.flux_expts,
                 )
                 for i in indices
@@ -335,10 +327,10 @@ def run_flux_scan(
             )
         if context.scope.stop.event.wait(cfg.settle):
             break
-        acquired = _acquire_spectrum(spectrum, context=context)
-        context.scope.stop.raise_if_error()
-        if context.scope.stop.partial_result:
-            break
+        acquired, stopped = _acquire_spectrum(spectrum, context=context)
+        if stopped or context.scope.stop.is_set():
+            # Skip incomplete IQ; the loop's root-stop check ends the whole scan.
+            continue
         _require_finite_spectrum(
             acquired,
             point=point,
@@ -378,15 +370,27 @@ def _require_finite_spectrum(
 
 def _acquire_spectrum(
     spectrum: MuxOnetoneCfg | MuxFreqCfg, *, context: RunContext
-) -> NDArray[np.complex128]:
+) -> tuple[NDArray[np.complex128], bool]:
     # Outer maps own presentation. Retire each inner producer before the next
     # flux point so repeated spectra do not reuse live axes or open extra tabs.
     plots = Plots(NonPresentingHost())
     inner = replace(context, plots=plots)
+    stopped = False
+
+    def on_acquire_stop() -> None:
+        nonlocal stopped
+        stopped = True
+
     try:
         if isinstance(spectrum, MuxOnetoneCfg):
-            return MuxOnetoneExp().run(spectrum, context=inner).signals.T
-        return MuxFreqExp().run(spectrum, context=inner).signals
+            result = MuxOnetoneExp().run(
+                spectrum, context=inner, on_acquire_stop=on_acquire_stop
+            )
+            return result.signals.T, stopped
+        result = MuxFreqExp().run(
+            spectrum, context=inner, on_acquire_stop=on_acquire_stop
+        )
+        return result.signals, stopped
     finally:
         plots.finish(present=False)
         plots.release()
@@ -461,7 +465,7 @@ def mux_flux_spec[C: ConfigBase](
         tag=tag,
         result_builder=build,
         result_validator=validate_flux_result,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         labber_layout="independent",
     )
 

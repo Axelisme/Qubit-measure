@@ -23,18 +23,13 @@ from .encoding import encode_record
 from .env import EnvHooks, WorkflowEnv
 from .journal import (
     DeviceSetup,
-    ExperimentFailed,
     OperationFinished,
-    Paused,
-    PauseRequested,
     QuestionAnswered,
     RecordCommitted,
-    Resumed,
     RunEnded,
     RunMetadata,
     StopRequested,
     TunablesChanged,
-    describe_error,
 )
 from .models import (
     Actor,
@@ -67,7 +62,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
     lock serializes short journal/publication sections, never cross-thread host
     acknowledgements or executor drain. start precedes all other operations;
     reserve_execution precedes the one synchronous execute on a caller worker.
-    Controls keep that same worker alive through Ask and Pause.
+    Controls keep that same worker alive through Ask.
     """
 
     def __init__(
@@ -90,7 +85,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._pending_error: Exception | None = None
         self._call_seq: int | None = None
         self._commit_seq = 0
-        self._run_no = 0
         self._records: list[CommittedRecord] = []
         self._revisions: list[int] = []
         self._accepted_answers: list[tuple[PendingQuestion, Answer]] = []
@@ -131,8 +125,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._artifacts.directory,
                 self._commit,
                 self._boundary,
-                self._stopping,
-                self._experiment_failed,
                 self._question_boundary,
                 self._next_attempt,
                 self._operation_finished,
@@ -165,7 +157,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._executing = True
 
     def execute(self) -> RunStatus:
-        """Drive the single author to terminal, retaining this worker while paused.
+        """Drive the single author to terminal, retaining this worker during Ask.
 
         Exceptions fail the run and retain diagnostics. All authored finally and
         executor drain finish before the reservation is released. No asyncio
@@ -270,10 +262,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         with self._lock:
             if self._pending_error is not None:
                 raise self._pending_error
-            if self._lifecycle == "pausing":
-                self._artifacts.append(Paused(self._call_seq, self._commit_seq))
-                self._artifacts.set_lifecycle("paused")
-                self._lifecycle = "paused"
 
     def _question_boundary(self, phase: Literal["waiting", "answered"]) -> None:
         self._flush_answers()
@@ -282,78 +270,12 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 raise self._pending_error
             if self._lifecycle in ("stopping", "failed"):
                 return
-            if phase == "waiting" and self._lifecycle != "paused":
-                self._artifacts.append(Paused(self._call_seq, self._commit_seq))
-                self._artifacts.set_lifecycle("paused")
-                self._lifecycle = "paused"
-            elif phase == "answered" and self._lifecycle == "paused":
-                self._artifacts.append(
-                    Resumed(self._commit_seq, self._tunables.revision)
-                )
+            if phase == "waiting" and self._lifecycle != "waiting":
+                self._artifacts.set_lifecycle("waiting")
+                self._lifecycle = "waiting"
+            elif phase == "answered" and self._lifecycle == "waiting":
                 self._artifacts.set_lifecycle("running")
                 self._lifecycle = "running"
-
-    def _stopping(self) -> bool:
-        with self._lock:
-            return self._stop_requested
-
-    def _experiment_failed(
-        self, experiment: str, reason: str, cause: BaseException
-    ) -> None:
-        with self._lock:
-            self._run_no += 1
-            self._artifacts.append(
-                ExperimentFailed(
-                    self._call_seq or 0,
-                    self._run_no,
-                    experiment,
-                    reason,
-                    describe_error(cause),
-                )
-            )
-
-    def pause(self) -> RunStatus:
-        """Record Pause intent, then acknowledge host control outside the lock."""
-        try:
-            with self._lock:
-                if self._lifecycle == "pausing":
-                    return self.status()
-                if self._lifecycle != "running":
-                    raise InvalidRunState("pause", self._lifecycle)
-                self._artifacts.append(
-                    PauseRequested(self._ports.clock.now(), self._call_seq)
-                )
-                self._artifacts.set_lifecycle("pausing")
-                self._lifecycle = "pausing"
-        except InvalidRunState:
-            raise
-        except Exception as error:
-            self._control_failure(error)
-            raise
-        self._host.pause()
-        return self.status()
-
-    def resume(self) -> RunStatus:
-        """Open the existing worker's pause gate; an Ask requires an answer instead."""
-        try:
-            with self._lock:
-                if (
-                    self._lifecycle != "paused"
-                    or self._host.pending_question is not None
-                ):
-                    raise InvalidRunState("resume", self._lifecycle)
-                self._artifacts.append(
-                    Resumed(self._commit_seq, self._tunables.revision)
-                )
-                self._artifacts.set_lifecycle("running")
-                self._lifecycle = "running"
-        except InvalidRunState:
-            raise
-        except Exception as error:
-            self._control_failure(error)
-            raise
-        self._host.resume()
-        return self.status()
 
     def _request_stop(self) -> bool:
         """Record and latch Stop under the owner lock; refuse terminal owners.
@@ -475,7 +397,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                         )
                 except Exception as error:
                     # Retain the first cause before the other flush owner can
-                    # observe the broken journal or attempt a Resumed append.
+                    # observe the broken journal or attempt a lifecycle write.
                     if self._pending_error is None:
                         self._pending_error = error
                     raise
@@ -504,7 +426,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         """Replace one whole model after its journal append succeeds."""
         try:
             with self._lock:
-                if self._lifecycle not in ("running", "pausing", "paused"):
+                if self._lifecycle not in ("running", "waiting"):
                     raise InvalidRunState("update_tunables", self._lifecycle)
                 return self._tunables.update(
                     tunables, expected_revision=expected_revision, actor=actor

@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run mux length Rabi from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-10-31
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -30,7 +30,8 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
+Set each tone's `length.start` and `length.stop` bounds. All tones share Expts.
+Open/Reset fills selected tones' drive and per-tone length defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
@@ -62,20 +63,30 @@ linear scaling with reps. Time a short Run at the intended pulse lengths first.
 
 ## Measurement and analysis
 
-Use const or flat_top drives for every selected tone. Inactive drives may be blank.
+Use const, flat_top or sampled drives such as cosine, gauss or DRAG for selected
+tones. Inactive drives may be blank.
 For flat_top, total length includes both ramps and must exceed their duration.
 Switch an arb source to a supported waveform explicitly before Run.
 
 Each tone supplies positive Start and Stop lengths in us. Expts follows Tones
 and sets one shared positive point count for all tones (default 101).
-One program sweeps the selected drives' length tables in a shared hardware loop.
+When all participants use const or flat_top, one program sweeps their length
+tables in a shared hardware loop. If any participant uses a sampled waveform,
+the host scans all participants together. It compiles one program per point and
+reuses those programs across all rounds. Each program runs with rounds=1, while
+the host repeats the full scan and averages each point's available rounds.
 At each point, the selected drives use their corresponding lengths together.
 The sequence is common reset, simultaneous drives, then mux readout after that
 point's longest drive. Short drives wait for that branch; pulse pre/post delays
 stay as configured. Hardware rounding can change total playback by a few ticks.
 Nonpositive or overlapping adjacent rounded lengths block Run.
-Live plots update after each completed round across the full sweep. Stop keeps
-those completed-round averages; if no round completed, signals remain NaN.
+The hardware path updates live plots after each completed round across the full
+sweep. The host path updates after each measured point. Stop keeps acquired data,
+including partial host scans; unmeasured points remain NaN.
+The core cfg field earlystop_snr applies only to host scans. After a full scan,
+the host stops if every participant's projected trace reaches that threshold.
+The default None disables early stopping. Hardware scans retain their requested
+round count.
 
 Each tone uses its own rounded requested-length axis and needs six finite IQ points.
 Decay defaults to a damped cosine and can be disabled.
@@ -86,7 +97,7 @@ Review the curve and fit quality, especially for small-truncation simulations.
 ## Writeback
 
 Each qualifying tone proposes `<qubit>.ext.rabi_freq` in MHz.
-With source configuration, candidates copy the measured const/flat_top pulse and
+With source configuration, candidates copy the measured pulse and
 set fitted pi/pi2 lengths at `<qubit>.pulses.pi_amp` and
 `<qubit>.pulses.pi2_amp`. Separate candidates set `module.x180` and
 `module.x90` to those keys.
@@ -108,7 +119,8 @@ Use Data to save measurement data and analysis artifacts.
 Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
 Cancellation retains acquired data and leaves missing data as NaN.
-Partial data from a failed operation retains its failure status.
+Acquisition errors propagate, and that run publishes no new record.
+A stop request does not determine whether returned data is usable for analysis.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
 Read each Writeback destination, value, quality and uncertainty.

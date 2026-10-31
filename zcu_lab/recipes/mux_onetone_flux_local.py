@@ -90,7 +90,7 @@ async def mux_onetone_flux_local(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"tones.{index}.sweep",
+                f"tones.{index}.flux",
                 None if inputs.flux_sweeps is None else inputs.flux_sweeps[index],
             )
     tab.set("flux_expts", inputs.flux_n)

@@ -29,19 +29,17 @@ from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     Pulse,
+    Reset,
     ResetCfg,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
 )
@@ -97,6 +95,12 @@ class MuxT2EchoCfg(ConfigBase):
     initial_delay/relax_delay are finite nonnegative us shared by all tones.
     """
 
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
+    participants: list[StrictInt]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -135,11 +139,6 @@ class MuxT2EchoCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxEchoToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxT2EchoCfg:
@@ -180,7 +179,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         detune. Return requested total delays (P,), averaged complex IQ (K,P),
         original tone indices, actual detunes and source frequencies (K,).
         context supplies hardware and live plots. Cancellation keeps acquired
-        averages and NaN gaps; call cancel_signal.raise_if_error before success.
+        averages and NaN gaps. Acquisition and program errors propagate.
         """
         # 1. Keep participant order while selecting from the complete tone list.
         cfg = MuxT2EchoCfg.model_validate(config.model_dump())
@@ -210,73 +209,88 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         )
 
         # 2. Show each selected tone on the common requested total-delay axis.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Requested delay (us)",
-                "Magnitude (a.u.)",
+        viewers = []
+        for index in indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Requested delay (us)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(times, np.abs(data[row]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(times, np.abs(data[row]))
+            )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
-            # 3. Join each pulse stage so both shared waits start after all drives.
-            length = sweep2param("length", cfg.delay)
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(
-                    Join(
-                        *[
-                            Pulse(f"pi2_first_{index}", tone.require_drive())
-                            for index, tone in zip(indices, tones, strict=True)
-                        ]
-                    ),
-                    Delay("delay_first", 0.5 * length),
-                    Join(
-                        *[
-                            Pulse(f"pi_{index}", tone.require_pi_pulse())
-                            for index, tone in zip(indices, tones, strict=True)
-                        ]
-                    ),
-                    Delay("delay_second", 0.5 * length),
-                    Join(
-                        *[
-                            Pulse(
-                                f"pi2_final_{index}",
-                                tone.require_drive().with_updates(
-                                    phase=tone.require_drive().phase
-                                    + 360 * tone.detune * length
-                                ),
-                            )
-                            for index, tone in zip(indices, tones, strict=True)
-                        ]
-                    ),
-                    MuxReadout("readout", readout),
-                )
-                .declare_sweep("length", cfg.delay)
+        with Schedule(None, signals, scope=context.scope) as sched:
+            # Each stage starts all drives together and waits for its longest pulse.
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
+            delay = builder.add_sweep("delay", cfg.delay)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"pi2_first_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, tone, timeline in zip(indices, tones, timelines, strict=True):
+                builder.emit(
+                    Pulse(
+                        f"pi2_first_{index}",
+                        tone.require_drive(),
+                    ),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            builder.timeline_inc(0.5 * delay)
+            builder.delay_by_timeline()
+            timelines = [f"pi_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, tone, timeline in zip(indices, tones, timelines, strict=True):
+                builder.emit(
+                    Pulse(
+                        f"pi_{index}",
+                        tone.require_pi_pulse(),
+                    ),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            builder.timeline_inc(0.5 * delay)
+            builder.delay_by_timeline()
+            timelines = [f"pi2_final_{index}" for index in indices]
+            builder.fork("default", into=timelines)
+            for index, tone, timeline in zip(indices, tones, timelines, strict=True):
+                builder.emit(
+                    Pulse(
+                        f"pi2_final_{index}",
+                        tone.require_drive(),
+                        phase=tone.require_drive().phase + 360 * tone.detune * delay,
+                    ),
+                    timeline=timeline,
+                )
+            builder.join(*timelines, into="default")
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
 
             # 4. Average completed rounds into tone-major IQ, preserving NaN gaps.
             prog = builder.build()
-            _ = builder.run_program(
+            _ = sched.run_acquire(
                 prog,
-                raw2signal_fn=lambda raw: averaged_mux_signal(prog, raw).T,
+                context.soc,
                 rounds=cfg.rounds,
-                options=AcquireOptions(
+                options=RunOptions(
+                    converter=lambda raw: (
+                        averaged_mux_signal(prog, readout_module, raw).T
+                    ),
                     retry=cfg.acquire_retry,
                     stop_condition=mux_snr_checker(
                         signals, cfg.earlystop_snr, tone_axis=0

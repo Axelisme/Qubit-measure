@@ -223,7 +223,7 @@ def native_save_session(
         state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=metadata),
+            result=replace(record, metadata=metadata.model_dump(mode="json")),
             storage=captured.storage,
             parameters=captured,
         ),

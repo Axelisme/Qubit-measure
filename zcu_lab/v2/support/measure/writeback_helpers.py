@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.cfg_model import ConfigBase, module_spec_from_raw
 from zcu_tools.core.element import ElementIdentity
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,
@@ -216,8 +217,8 @@ def fluxdep_writeback_items[C: ConfigBase, R, A: FluxPickResult](
     component = parameters.document().components.get(target)
     if not isinstance(component, QubitBaseSchema):
         raise ValueError(f"{target!r}: flux writeback requires a qubit component")
-    metadata = req.run_result.metadata
-    if metadata is None or metadata.device_snapshot is None:
+    metadata = RunMetadataContent(req.run_result.metadata)
+    if metadata.device_snapshot is None:
         raise ValueError(f"{target!r}: flux writeback requires a Run device snapshot")
     devices = deepcopy(dict(metadata.device_snapshot))
     picked = req.analyze_result

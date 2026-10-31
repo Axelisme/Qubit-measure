@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -14,12 +15,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     GainSweep,
     Pulse,
     Readout,
     Reset,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import find_rotate_angle
 
@@ -48,6 +48,12 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class RabiCheckCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -64,20 +70,15 @@ class RabiCheckCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
     AXES_SPEC: ClassVar[AxesSpec[RabiCheckResult, RabiCheckCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("gains", "Amplitude", "a.u.", dtype=np.float64),
-            AxesSpec.Axis("reset_states", "Reset", "None", dtype=np.int64),
+            AxesSpec.Axis("gains", label="Amplitude", unit="a.u.", dtype=np.float64),
+            AxesSpec.Axis("reset_states", label="Reset", unit="None", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=RabiCheckResult,
         cfg_type=RabiCheckCfg,
         cfg_schema_version="3.0",
@@ -104,42 +105,38 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         )
 
         # 2. Project all three mean-IQ curves onto the before-reset IQ axis.
-        viewer = live_line(
-            context.plots, "measurement", "Pulse gain", "Amplitude", num_lines=3
-        )
-        signals_buffer = SignalBuffer(
-            (3, len(gains)),
-            on_update=lambda data: viewer.update(gains, reset_rabi_signal2real(data)),
-        )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            # 3. Both drives use the same gain sweep but distinct module names.
-            sched.cfg.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            builder = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("rabi_pulse", sched.cfg.rabi_pulse),
-                    Branch(
-                        "reset_sel",
-                        [],  # 0: Before the tested reset.
-                        Reset(
-                            "tested_reset_1", sched.cfg.tested_reset
-                        ),  # 1: Reset only.
-                        [  # 2: Reset followed by a second swept Rabi pulse.
-                            Reset("tested_reset_2", sched.cfg.tested_reset),
-                            Pulse("rabi_pulse_after_reset", sched.cfg.rabi_pulse),
-                        ],
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("reset_sel", 3)
-                .declare_sweep("gain", sched.cfg.gain)
-            )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain", ylabel="Amplitude")
+        viewer = live_line(ax, num_lines=3)
 
-            # 4. Acquire all branches and average using the existing reps/rounds.
-            _ = builder.build_and_acquire(rounds=cfg.rounds)
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(gains, reset_rabi_signal2real(data))
+
+        fig.show()
+        signals_buffer = SignalBuffer((3, len(gains)), on_update=update)
+
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("reset_sel", 3)
+            gain = builder.add_sweep("gain", cfg.gain)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain))
+            # Preserve each selected case's duration instead of padding to the maximum.
+            builder.delay_by_timeline()
+            with builder.branch(by="reset_sel", align_timeline=False) as cases:
+                with cases.case(1):
+                    builder.emit(Reset("tested_reset", cfg.tested_reset))
+                with cases.case(2):
+                    builder.emit(Reset("tested_reset", cfg.tested_reset))
+                    builder.emit(Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain))
+            builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return RabiCheckResult(gains, signals_buffer.array)
 

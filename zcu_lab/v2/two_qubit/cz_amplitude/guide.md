@@ -111,7 +111,9 @@ Unmeasured scales are NaN. Cancellation retains completed rounds.
 Native Load restores the saved counts and cfg without changing current Form inputs.
 Analysis never looks up current calibrations. Missing saved cfg prevents the fit.
 Old per-shot IQ files without sums are rejected; there is no automatic conversion.
-Resolve acquisition errors separately from interpreting a low-contrast scan.
+`stop_requested` records a stop request, not data completeness.
+Acquisition exceptions propagate unchanged from Run. A failed Run publishes no
+new record and leaves the previous successful record unchanged, even after Stop.
 
 See the [heralded guide](guide_heralded.md) for post-selection and pass fraction.
 

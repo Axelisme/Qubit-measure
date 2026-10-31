@@ -31,7 +31,6 @@ from ._engine_fakes import (
     Tunables,
     completed,
     identity,
-    paused,
     running,
 )
 
@@ -119,61 +118,9 @@ def test_nested_inputs_and_published_records_are_detached(rig: Rig) -> None:
     assert rig.engine.records("run")[0].encoded_record.value == {"value": 1}
 
 
-def test_resume_keeps_commits_progress_and_author_locals(rig: Rig) -> None:
-    entered = Event()
-    calls: list[int] = []
-
-    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        iterations = env.iterations()
-        try:
-            iteration = next(iterations)
-            bar = env.pbar("points", plan.count)
-            iteration.commit(Point(value=tun.current.value))
-            iteration = next(iterations)
-            bar.set_progress(1)
-
-            def operation(ctx: CallContext) -> int:
-                calls.append(1)
-                if len(calls) == 1:
-                    entered.set()
-                    assert ctx.scope.stop.event.wait(10), (
-                        "Pause reaches active operation"
-                    )
-                return 7
-
-            value = completed(await iteration.call(operation)).value
-            assert env.pbar("points", plan.count) is bar
-            iteration.commit(Point(value=value + tun.current.value))
-            iteration = next(iterations)
-            bar.set_progress(2)
-        finally:
-            iterations.close()
-
-    rig.start(script)
-    with running(rig) as future:
-        assert entered.wait(10), "The worker reaches the operation"
-        rig.engine.pause("run")
-        paused(rig)
-        records = rig.engine.records("run")
-        assert len(records) == 1
-        assert not future.done()
-        assert len(rig.bars) == 1 and not rig.bars[0].closed
-        rig.engine.update_tunables(
-            "run", Tunables(value=3), expected_revision=0, actor=Actor("user", "test")
-        )
-        rig.engine.resume("run")
-        final = future.result(timeout=10)
-    assert final.lifecycle == "done", final.reason
-    assert calls == [1, 1]
-    assert [r.encoded_record.value for r in rig.engine.records("run")] == [
-        {"value": 1},
-        {"value": 10},
-    ]
-    assert final.progress[0].completed == 2
-    assert rig.bars[0].closed
-
-
-def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> None:
+def test_thread_safe_stop_does_not_wait_and_repeated_stop_is_idempotent(
+    rig: Rig,
+) -> None:
     entered, release = Event(), Event()
     stops: list[bool] = []
 
@@ -189,7 +136,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
                 return 4
 
             result = completed(await iteration.call(operation))
-            assert result.partial_result
+            assert result.facts.stopped
         finally:
             iterations.close()
 
@@ -197,17 +144,11 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
     with running(rig) as future:
         try:
             assert entered.wait(10), "Worker enters the injected operation"
-            assert rig.engine.pause("run").lifecycle == "pausing"
-            assert rig.engine.pause("run").lifecycle == "pausing"
             assert not future.done()
             with pytest.raises(InvalidRunState):
                 rig.engine.execute("run")
-            with pytest.raises(InvalidRunState):
-                rig.engine.resume("run")
             assert rig.engine.stop("run").lifecycle == "stopping"
             assert rig.engine.stop("run").lifecycle == "stopping"
-            with pytest.raises(InvalidRunState):
-                rig.engine.pause("run")
             with pytest.raises(InvalidRunState):
                 rig.engine.update_tunables(
                     "run",
@@ -219,7 +160,6 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
             release.set()
         assert future.result(timeout=10).lifecycle == "cancelled"
     assert stops == [True]
-    assert rig.kinds().count("pause_requested") == 1
     assert rig.kinds().count("stop_requested") == 1
 
 
@@ -251,13 +191,9 @@ def test_wrong_run_invalid_lifecycle_and_terminal_replacement(rig: Rig) -> None:
         rig.engine.stop("other")
     with pytest.raises(InvalidRunState):
         rig.start(points)
-    with pytest.raises(InvalidRunState):
-        rig.engine.resume("run")
     old = rig.engine.execute("run")
     with pytest.raises(InvalidRunState):
         rig.engine.execute("run")
-    with pytest.raises(InvalidRunState):
-        rig.engine.pause("run")
     with pytest.raises(ValueError, match="since"):
         rig.engine.records("run", since=-1)
 

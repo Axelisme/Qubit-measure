@@ -10,6 +10,7 @@ from typing import TypeAlias
 from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -120,10 +121,10 @@ def _T2Echo_get_writeback_items(
     Run leaves devices fixed; no live lookup, device access, frequency/module
     update or write occurs here.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:
@@ -141,7 +142,7 @@ def _T2Echo_get_writeback_items(
         ),
     ]
     parameters = req.ctx.parameters
-    if parameters is not None and metadata is not None and devices is not None:
+    if parameters is not None and devices is not None:
         frame = record_flux_frame(captured_qubit_flux(parameters), devices)
         items.append(
             RecordWriteback(
@@ -179,13 +180,13 @@ def _run(
     """
     if inp.detune_ratio == 0.0:
         detune = 0.0
-    elif inp.length.step == 0.0:
+    elif inp.delay.step == 0.0:
         raise ValueError(
             "cannot apply a nonzero detune_ratio on a degenerate "
             "length sweep (expts < 2, step == 0)"
         )
     else:
-        detune = inp.detune_ratio / inp.length.step
+        detune = inp.detune_ratio / inp.delay.step
     cfg = T2EchoCfg(
         reps=inp.reps,
         rounds=inp.rounds,
@@ -196,7 +197,7 @@ def _run(
         pi2_pulse=inp.pi2_pulse,
         pi_pulse=inp.pi_pulse,
         readout=inp.readout,
-        length=inp.length,
+        delay=inp.delay,
         detune=detune,
     )
     result = T2EchoExp().run(cfg, context=context)

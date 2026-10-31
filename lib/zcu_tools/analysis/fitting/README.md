@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-31
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -128,8 +128,7 @@ FitParameters 的正常 optimizer 輸出為 ndarray，還原固定參數後為 l
 這個分類涵蓋共用 fit_func，以及委派它的 exponential、cosine／damped cosine、
 Gaussian、Lorentzian、sinc、multi-decay 與 resonance phase fitting。
 例如 GUI 的 mux T1 analyze 經 fit_decay／fitexp 進這條路徑。
-GUI 只在 analyze work 的 AnalysisFailed 標 failure_kind="analysis"，recipe 才交 failed 值。
-Record 或 writeback 的錯誤仍 raise。Shared／singleshot 的 iminuit diagnostics、
+Shared／singleshot 的 iminuit diagnostics、
 resonance joint-refinement 自己的 fallback 不在這次分類內，不能視為所有 backend 已統一。
 
 Lorentzian family fitting 以 median baseline 判斷初始 peak/dip 方向，避免

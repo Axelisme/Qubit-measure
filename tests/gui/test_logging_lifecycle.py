@@ -22,6 +22,7 @@ from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 from tests.gui._qt_waits import qt_until
 
@@ -95,7 +96,7 @@ def test_caretaker_load_failure_logs_warning(tmp_path: Path, caplog) -> None:
 def test_background_worker_exception_logs_traceback(qapp, caplog) -> None:
     bg = BackgroundRunner()
     _LIVE_BG.append(bg)
-    errors: list[Exception] = []
+    errors: list[BackgroundError] = []
 
     def boom() -> None:
         raise RuntimeError("worker-kaboom")

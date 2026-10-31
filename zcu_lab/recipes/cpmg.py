@@ -1,7 +1,7 @@
 """Measure CPMG decay across positive refocusing-pulse counts.
 
 Recipe points controls the pulse-count grid, not a time-sweep expts field.
-length_points → length_expts: the GUI Time points input is the shared time-window count.
+length_points sets GUI Time points and the shared delay.expts.
 """
 
 from pydantic import Field
@@ -115,7 +115,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     Fit T_CPMG for each count, then save raw IQ and completed artifacts.
     No calibration is written.
 
-    points sets the pulse-count grid; length_points → length_expts sets the shared time count.
+    points sets the pulse-count grid; length_points sets Time points and delay.expts.
     Analysis controls: fit_fringe, t2r, t1. Omission retains each analysis value; null is passed to its owner.
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
@@ -133,21 +133,21 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
         if not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
             raise ValueError("Use max_n/points or times, not both")
         if inputs.times is None:
-            tab.set("times", None)
+            tab.set("count", None)
         else:
             counts = inputs.times
-            tab.set("times", PositiveExplicitIntegerPoints(values=counts))
+            tab.set("count", PositiveExplicitIntegerPoints(values=counts))
     elif not isinstance(inputs.max_n, Keep) or not isinstance(inputs.points, Keep):
         if isinstance(inputs.max_n, Keep) or isinstance(inputs.points, Keep):
             raise ValueError("max_n and points must be supplied together")
         if inputs.max_n is None or inputs.points is None:
-            tab.set("times", None)
+            tab.set("count", None)
         else:
             count_grid = PositiveLogIntegerPoints(
                 max=inputs.max_n, points=inputs.points
             )
             counts = count_grid.values
-            tab.set("times", count_grid)
+            tab.set("count", count_grid)
     tab.set("min_length_us", inputs.min_length_us)
     tab.set("max_length_us", inputs.max_length_us)
     tab.set("length_points", inputs.length_points)

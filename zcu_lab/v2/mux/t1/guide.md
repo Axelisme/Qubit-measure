@@ -71,8 +71,8 @@ Use calibrated fixed pi pulses. All qubits share one delay axis in us,
 executed by one program's hardware loop. Requested window endpoints and the
 linear input axis must be finite, nonnegative and strictly increasing.
 
-**Uniform (linear) sweep** defaults to true. Turn it off to concentrate delay
-samples in the decay region within the same start/stop window, using the same
+`sampling` defaults to `"linear"`. Select `"decay"` to concentrate delay
+samples within the same `delay: SweepCfg` start/stop window, using the same
 sampling policy as single-qubit T1. Every participant uses the same cycle table.
 Nonuniform samples must remain distinct and increasing after hardware
 quantization; otherwise Run reports an error before acquisition.
@@ -113,7 +113,8 @@ The selected source fixes the historical pulse, binding and writeback destinatio
 Live plots update after each completed round across the full delay axis.
 Cancellation retains completed-round averages across that axis.
 Before the first completed round, signals remain NaN.
-Partial data from a failed operation retains its failure status.
+Acquisition errors propagate, and that run publishes no new record.
+A stop request does not determine whether returned data is usable for analysis.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
 Read each Writeback destination, value, quality and uncertainty.
@@ -136,7 +137,7 @@ See the [mux recipe guide](../../../recipes/mux-guide.md#mux_t1) for dotted-path
 parameter origins and explicit writeback decisions.
 
 The MCP recipe is `mux_t1`. Set the generated Form field through an override
-such as `{"path": "uniform", "value": false}`. The recipe applies overrides
+such as `{"path": "sampling", "value": "decay"}`. The recipe applies overrides
 before `check_ready()`; omission keeps the current value.
 
 ## Simulation limits

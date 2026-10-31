@@ -30,7 +30,8 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
+Set each tone's `freq.start` and `freq.stop` bounds. All tones share Expts.
+Open/Reset fills selected tones' drive and per-tone freq defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.
@@ -105,7 +106,8 @@ Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
 Cancellation retains completed-round averages for the full sweep.
 If no round completed, signals remain NaN.
-Partial data from a failed operation retains its failure status.
+Acquisition errors propagate, and that run publishes no new record.
+A stop request does not determine whether returned data is usable for analysis.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
 Read each Writeback destination, value, quality and uncertainty.

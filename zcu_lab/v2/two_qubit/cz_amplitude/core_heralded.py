@@ -113,8 +113,9 @@ class CZAmplitudeHeraldedExp(
     ) -> CZAmplitudeHeraldedResult:
         """Acquire unchanged raw sums for all 81 herald/terminal outcomes.
 
-        No host round loop or per-shot IQ is stored. Check the RunContext stop
-        signal for acquisition errors before interpreting partial results.
+        No host round loop or per-shot IQ is stored. Completed rounds survive
+        cooperative cancellation. Acquisition exceptions propagate unchanged.
+        The stop signal carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scales)

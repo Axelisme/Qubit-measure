@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。Repo 品質檢查的 CLI、輸出與比較機制。
 
@@ -112,6 +112,7 @@ Status 模式也列目前違規數。
 Await 目標必須是 env／scope／iteration／tab／session 呼叫，或解析到 lab 內定義的函式呼叫。
 目標函式可用 def 或 async def 定義，工具不推導回傳型別。
 工具解析直接的絕對／相對 import，不因外部函式名稱像 helper 就放行。
+唯一開放的 lib await helper 是 `zcu_tools.experiment.run_core.run_core`，直接 import alias 也以完整路徑核對。其他 lib helper 仍拒絕。
 Lab 模組只以自己的 import 轉匯出的名稱（例如 `from x import f as f`）會沿 import 追到定義；追到 lab 以外或循環則拒絕。
 Helper 的 async def 本文也受檢查，未被呼叫的 async def 亦在選集，不識別 decorator 或做 reachability。
 在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 不論有無 await 都拒絕，

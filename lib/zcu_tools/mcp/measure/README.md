@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-30，MCP 文字分工與 recipe wire schema
+**Last updated:** 2026-11-01，作者 await 的 run_core 例外
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -385,13 +385,18 @@ Generic cancel(op=17) 維持整個 script Stop 語意。
 
 Ack 保留 execution／workflow snapshot，另帶 cancelled、reason、active_path 與 candidates。
 Cancelled=True 表示 owner 已接受命令，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+GUI 單次 Run 的 core 正常回傳時，`wait(op)` 與 `operation.await` 一律回 finished。
+Stop、未帶 scope 的 `cancel(op)`、root 或子孫 scope 的取消都不改這個 terminal。
+Core 拋錯仍回 failed。`tab.snapshot.result_state.stop_requested` 記錄這次 Run 接受過停止請求，
+存檔 metadata.completion 的 stopped 記錄 core 回傳前接受的請求，不表示資料是否完整。
+Workflow 與 recipe 根停止仍交付 cancelled，不套用 GUI 單次 Run 的 terminal 規則。
 Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
 這個分支的 accepted ack 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token。
 Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
 其他 selector 直接由 host 核對。Terminal workflow 對合法 scope 回 scope not active，錯誤語法仍回 invalid_params。
 
 根 recipe／workflow 取消在下一個 await 丟共用 ScriptCancelled，普通 Exception 子類，
-不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／partial／completion facts，再讓 await raise。
+不是 asyncio.CancelledError。進行中的 Run 先合作 drain、保留 run_id／stop_requested，再讓 await raise。
 作者 finally 在同一 worker 照跑，同步 Save 可保留已取得資料；不在 finally 開新的 await。
 Recipe 終態為 `RecipeOutcome(status="cancelled", report=None, runs=[...])`。
 ScriptCancelled 不記入 error，真實 owner、作者或 cleanup 例外仍保留診斷。
@@ -399,11 +404,10 @@ Standalone analysis 取消會停止後續接續；未登記的 cancel(op) 仍走
 取消不重寫已發布的終態 execution 結果。
 Completed 不代表所有輸出已保存。
 
-Analyze 的預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
-只有 analyze work 明確丟 AnalysisFailed 才轉成這個值。任意程式錯誤、record 或 writeback 失敗仍 raise。
-作者看 status 後自行保存、跳過、重試或停止，不需要為預期 fit 失敗 raise。
+Analyze 回傳就發布結果。Analyze、record 或 writeback 拋錯時，recipe 向作者 raise，
+保留 operation 的原始錯誤訊息，不辨識例外型別。
+作者可自行接住錯誤，選擇保存、跳過、重試或停止。
 成功 result 按作者提供的 T 驗證，缺欄位與型別不合仍 raise。
-已分類的數值路徑見 [fitting README](../../analysis/fitting/README.md)。
 
 Run 前的 `RecipeNeedsParameters` 使 execution 終態為 needs_parameters，
 snapshot 列具名 missing paths、outcome=None，並釋放 admission。
@@ -422,8 +426,11 @@ Recipe 的本地樹與 GUI Run 樹分屬兩個 process。Schedule／acquire 經
 Status 每次用 `operation.status_scope` 取得尾段，接在本地 path 後，不重列 GUI run root。
 拒絕回覆的 cancelled/reason 保留 GUI 事實，active_path、live_paths 與候選 candidates 使用相同合成規則。
 這不是跨 process 原子快照，晚到請求靠 handle 與序號拒絕，不取消下一個 Run。
-GUI `result_state.partial_result` 交付 Run 的完成事實，即使沒有 native metadata 也保留。
-Recipe RunResult 讀這一欄，不因 GUI operation 仍為 finished 而遺失內層取消。
+GUI `result_state.stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel。
+只取消 acquire 子層也記 true，core 自己設 stop 不記。這一欄不判定資料是否完整。
+Recipe RunResult 與 RecipeRun 交付同名欄位，即使沒有 native metadata 也保留。
+Core 回傳就發布，Stop 後 core 拋錯也 failed 並保留錯誤。
+Wire version 134 使用 stop_requested，MCP 沿既有握手拒絕舊版本。
 `recipe_runtime.py` 擁有 GUI binding、wire 解碼、合作取消與 operation source；
 `recipe_host.py` 組合 scheduler、runtime 與 author session。
 `recipe_execution.py` 管理注入 declarations、單一 recipe admission 與 execution 查詢。
@@ -431,7 +438,7 @@ Recipe 不建隱式 iteration，路徑直接由 recipe:<name> 掛 operation#N。
 
 Host loop 只在 execution worker。作者 task 不被 cancel，阻塞操作由 executor 合作 drain。
 每個 operation 都有顯式 Scope child，底層讀 scope.stop。根已停止時不再開始新的 await operation。
-`set_error` 只記本 scope 第一個錯誤並向下停止，不改祖先或後續兄弟。
+Core 的錯誤沿 operation 傳出，不把 stop token 當成錯誤通道。
 跨 thread 的 cancel／answer／control 經同一 loop 控制序列與 acknowledgement。
 Acknowledgement 不是 operation drain 的證明。
 `control(fn)` 的公開 memory-only callback ABI 見
@@ -446,7 +453,8 @@ Stdio server 同步處理請求，不保證首次等待期間同連線的控制�
 answer 符合 pending question 的 Answer schema 與 evidence 規則。
 錯誤、遲到、重複答案回 accepted／reason／pending_request_id，
 不消耗問題、不記 answered。
-問題沒有自動預設回答或 timeout。
+問題沒有自動預設回答或 timeout。等答覆時 status 與 phase 都是 waiting。
+Answer 後同一作者 coroutine 繼續一次，根 Stop 可中斷等待。
 
 Terminal recipe summary 回 execution／status／report／runs。Status 另帶 active_path 與結構化 live_paths。
 Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
@@ -460,7 +468,7 @@ Post 的 `result_read` 失敗另附 `recovery`，保留 owner 的唯讀 RPC、�
 Reason 是 `str(exception)`，不附格式化 traceback。作者 catch 後的新錯誤不沿用舊 phase，
 成功的 finally Save 也不覆蓋原失敗的 phase。
 Report 由作者定義，runs 記每次 Run 的 tab、adapter、run_id、operation status、
-partial 與 Save 收據，不靠作者補取消報告。
+stop_requested 與 Save 收據，不靠作者補取消報告。
 非終態另帶 execution 與明確的 pending question／analysis。
 `status(execution, detail="full")` 保留 detached Run 前 Form 條件、
 各 stage 的 owner-native summary／invalid、最後明確捕捉的 writeback proposal、各次 writeback_receipts 與 error。
@@ -486,6 +494,8 @@ Execution ID 是 session-local，不是持久恢復機制；query 不建立新�
 
 所有 `zcu_lab/` async def 都使用同一規則，包含未被呼叫的 helpers。
 只 await env／tab／session 的方法呼叫，或可靜態解析到 lab async 定義的 helper。
+唯一開放的 lib await helper 是 `zcu_tools.experiment.run_core.run_core`，
+包含可靜態解析到此完整路徑的 import alias。其他 lib helper 仍禁止。
 Workflow 可寫 `await helper(env, cfg)`，helper 可再 await 另一個 lab helper；
 helper 內的 await 同樣受檢查。
 工具拒絕 asyncio.*、create_task、gather、wait_for、TaskGroup，
@@ -506,7 +516,7 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_close` | `tab_id`，回 `tab_id/closed`。Busy 回 false，不替 caller Stop。 |
 | `workflow_status` | 可選 `run_id`。明填回 native status 與 tab 識別，省略/null 回 names 與全部 opened tabs。 |
 | `workflow_start` | `tab_id/run_id`，可選 `plan/tunables` batches。回 pending `handle`，用既有 `wait(op=handle)` 觀察終局。 |
-| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 維持 script scope，等 terminal delivery。 |
+| `workflow_stop` | 明填 native `run_id`。Stop 維持 script scope，等 terminal delivery。 |
 | `cancel` | 明填 `run_id`，可選 scope 與 expected，經 `workflow.cancel` 核對 native active_path，不另建 workflow execution。 |
 | `workflow_form` | `tab_id/form`，form 是 plan 或 tunables。可選 batch 只 preview，回 input/values/errors。 |
 | `workflow_describe_form` | 同上另給 typed `path`，root 是 []。只加同一 candidate 的單層 metadata，不回整棵 schema。 |
@@ -538,19 +548,19 @@ data 帶目前 pending_request_id 或 null，不改 lifecycle、不記 accepted 
 `last_exchange` 保留最近問題、已接受的 answer 或 null，以及
 waiting/submitted/answered/cancelled 狀態。它與 GUI 共用 headless owner。
 Submitted 不表示已接受，錯型答案不記入 answer。整個 coroutine 留在同一 worker，
-Pause、Ask、Resume 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
+Ask 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
 並執行清理，terminal owner delivery 才釋放 RUN。
 
 Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。新 attempt 整組替換 operation 圖，terminal 保留最新一組。Workflow 層登記圖名時拒絕 `operation/` 前綴。
 
 Records 依 commit_seq 查詢，包含配置 directory、committed_at、實際讀過的 revisions、
 record_type 與 operations。配置目錄順序不等於 commit 順序。Operation facts 包含
-kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
+kind、iteration 內 attempt、started_at/finished_at、
 outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
-OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
-Running 或 paused 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
-operation 的 cfg。Pause 打斷的 stale partial 在 Resume 後重試原 request，完整結果
-只等 Resume 交付。Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
+OperationFacts 結構。裝置快照由 run_core 寫入 RunRecord metadata，不在 operation wire facts。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
+Running 或 waiting 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
+operation 的 cfg。每個 operation 只呼叫一次，合作停止的回傳值直接交給作者。
+Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
 
 ## 分析、互動與寫回
 

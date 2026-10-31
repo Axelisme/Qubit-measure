@@ -465,14 +465,14 @@ def test_module_join_preserves_sequential_branch_children(nested):
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
+def test_module_join_uses_actual_external_parent_after_runtime_repeat(empty):
     choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
     joined = Join(None if empty else _pulse("b", 1))
 
     def body(prog):
         prog.fork("default", into="waiting")
         prog.timeline_inc(100 / 430.08, timeline="waiting")
-        # A register Repeat leaves its unconsumed external end wait-only.
+        # The unconsumed external end retains the actual runtime debit.
         prog.write_reg("duration", 1)
         prog.delay_by_timeline()
         with prog.repeat("runtime", "duration", range_hint=(1, 3)):
@@ -480,8 +480,12 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
             prog.delay_by_timeline()
         prog.emit(joined, timeline="waiting")
 
-    with pytest.raises(ValueError, match="timeline can only wait"):
+    result = shots(
         _program([choice, joined], body, initialize=_declare_registers("duration"))
+    )
+    assert [waves(s) for s in result] == ([[]] if empty else [[100]]) * 6
+    expected_end = 100 if empty else 128
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [expected_end] * 6
 
 
 @pytest.mark.parametrize("bad_case", [0, 1, 2])

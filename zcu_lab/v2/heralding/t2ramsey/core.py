@@ -6,7 +6,8 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import FieldMeta
+from pydantic import Field
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -17,7 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
@@ -25,13 +26,12 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    Delay,
-    ModularProgramV2,
     Pulse,
     Reset,
+    SweepCfg,
+    TimelineBuilder,
     shot_sums,
     split_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -40,7 +40,6 @@ from zcu_lab.v2.twotone.time_domain.detune import actual_detune
 from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
     T2RamseyAnalysis,
     T2RamseyAnalyzeOptions,
-    T2RamseyCfg,
     T2RamseyExp,
     T2RamseyResult,
     t2ramsey_signal2real,
@@ -61,10 +60,44 @@ class HeraldingT2RamseyResult:
     true_activate_detune: float | None = None
 
 
-class HeraldingT2RamseyCfg(T2RamseyCfg):
-    """Ordinary Ramsey controls restricted to one pulse readout with classifier."""
+class HeraldingT2RamseyCfg(ConfigBase):
+    """Ramsey pulses and free-evolution delay in us with a pulse readout."""
 
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    detune: float = 0.0
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 def restore_result(
@@ -91,7 +124,9 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 axes=(
                     VariableAxisSpec.generated_arange("components", ""),
                     VariableAxisSpec.generated_arange("herald_states", ""),
-                    VariableAxisSpec("Time", "s", field_name="times", scale=1e-6),
+                    VariableAxisSpec(
+                        label="Time", unit="s", field_name="times", scale=1e-6
+                    ),
                 ),
                 z=VariableZSpec(
                     field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -100,7 +135,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
         ),
         result_type=HeraldingT2RamseyResult,
         cfg_type=HeraldingT2RamseyCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="heralding/t2ramsey",
         result_builder=restore_result,
     )
@@ -124,62 +159,62 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
             )
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
-        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg})
         true_detune = actual_detune(
-            cfg.length,
+            cfg.delay,
             detune=cfg.detune,
             gen_ch=cfg.pi2_pulse.ch,
             soccfg=soccfg,
             time_scaler=1.0,
         )
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Time (us)",
-            "Real Signal",
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(
+            xlabel="Time (us)",
+            ylabel="Real Signal",
             title=f"Heralded T2 Ramsey - detune {cfg.detune:.2f} MHz",
         )
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(
+                lengths, t2ramsey_signal2real(split_sums(data)[1][..., 0])
+            )
+
+        fig.show()
         buffer = SignalBuffer(
             (len(lengths), 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                lengths, t2ramsey_signal2real(split_sums(data)[1][..., 0])
-            ),
+            on_update=update,
         )
 
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            length_param = sweep2param("length", cfg.length)
-            herald_readout = PulseReadout("herald", cfg.readout)
-            signal_readout = PulseReadout("signal", cfg.readout)
-
-            # Unique readout names resolve the herald and signal shot-sum axes.
-            prog = ModularProgramV2(
-                soccfg,
-                modules=[
-                    Reset("reset", cfg.reset),
-                    herald_readout,
-                    Pulse("pi2_pulse1", cfg.pi2_pulse),
-                    Delay("t2_delay", delay=length_param),
-                    Pulse(
-                        "pi2_pulse2",
-                        cfg.pi2_pulse.with_updates(
-                            phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length_param
-                        ),
-                    ),
-                    signal_readout,
-                ],
-                sweep=[("length", cfg.length)],
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
+        with Schedule(None, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_summed(
+            delay = builder.add_sweep("delay", cfg.delay)
+            reset = Reset("reset", cfg.reset)
+            if reset is not None:
+                builder.emit(reset)
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
+            builder.timeline_inc(delay)
+            builder.emit(
+                Pulse(
+                    "pi2_pulse",
+                    cfg.pi2_pulse,
+                    phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay,
+                )
+            )
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
                 prog,
+                context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                sums2signal_fn=np.copy,
-                options=AcquireOptions(
+                options=RunOptions(
+                    converter=np.copy,
                     retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
                         buffer.at(),

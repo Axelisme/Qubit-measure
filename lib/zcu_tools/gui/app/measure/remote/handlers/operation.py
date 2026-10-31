@@ -134,7 +134,6 @@ def h_operation_await(
         return {
             "reason": "completed",
             "status": "failed",
-            "failure_kind": outcome.failure_kind,
             "error": {
                 "reason": "failed",
                 "message": outcome.error or "operation failed",

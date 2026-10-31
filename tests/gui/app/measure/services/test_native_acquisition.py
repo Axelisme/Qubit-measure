@@ -10,7 +10,7 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.metadata import RunMetadataContent, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -139,8 +139,7 @@ def test_run_without_cfg_records_acquired_evidence(
     assert outcome is not None and outcome.status == "finished"
     record = require_record(session.state.get_tab("tab").run)
     assert record.cfg is None
-    metadata = record.metadata
-    assert metadata is not None
+    metadata = RunMetadataContent(record.metadata)
     (event,) = session.entry.ledger.events()
     assert event.kind == "acquired" and event.origin == "gui"
     assert event.at == metadata.finished_at
@@ -172,9 +171,9 @@ def test_native_run_without_save_records_acquired_at_its_historical_entry(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     tab = session.state.get_tab("tab")
-    metadata = require_record(tab.run).metadata
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     record = require_record(tab.run)
-    assert metadata is not None and record is not None and record.cfg is not None
+    assert record is not None and record.cfg is not None
     events = other.ledger.events()
     assert len(events) == 1
     event = events[0]
@@ -289,8 +288,11 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     finally:
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
-    metadata, parameters = require_record(tab.run).metadata, tab.run.parameters
-    assert metadata is not None and parameters is not None
+    metadata, parameters = (
+        RunMetadataContent(require_record(tab.run).metadata),
+        tab.run.parameters,
+    )
+    assert parameters is not None
     storage = parameters.capture_storage()
     assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}
     assert (metadata.snapshot.entry_name, metadata.snapshot.point) == (
@@ -328,7 +330,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_native_run_stop_records_usable_result_but_failure_does_not(
+def test_native_run_core_stop_returns_record_but_exception_does_not(
     native_session: NativeSaveSession,
     monkeypatch: pytest.MonkeyPatch,
     failure: bool,
@@ -362,9 +364,11 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
         assert events == ()
         assert session.state.get_tab("tab").run.result is None
     else:
-        assert terminal.outcome == outcome.status == "cancelled"
-        metadata = require_record(session.state.get_tab("tab").run).metadata
-        assert metadata is not None and metadata.completion == "stopped"
+        assert terminal.outcome == outcome.status == "finished"
+        metadata = RunMetadataContent(
+            require_record(session.state.get_tab("tab").run).metadata
+        )
+        assert metadata.completion == "complete"
         assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
         assert events[0].payload.run_id == metadata.run_id
     assert not (session.entry.database_path / "runs").exists()
@@ -386,8 +390,7 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert outcome.error == terminal.error_message
     tab = session.state.get_tab("tab")
     assert require_record(tab.run) is not None
-    metadata = require_record(tab.run).metadata
-    assert metadata is not None
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     assert tab.run.source_operation_id == token
     assert tab.run.confirmed_run_id is None
     assert any(
@@ -430,7 +433,7 @@ def test_native_run_without_storage_reports_missing_acquired_destination(
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "finished"
     assert session.state.get_tab("tab").run.result is not None
-    assert require_record(session.state.get_tab("tab").run).metadata is None
+    assert require_record(session.state.get_tab("tab").run).metadata == {}
     assert session.entry.ledger.events() == ()
     assert any(
         record.name == "zcu_tools.gui.app.measure.services.run"

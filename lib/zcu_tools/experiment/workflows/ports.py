@@ -27,7 +27,7 @@ class DevicePort(Protocol):
 
         Call on the workflow worker under the RUN lease. Drivers remain borrowed;
         their lifecycle belongs to the session. Do not connect, read hardware or
-        use GUI caches here. env.run owns the pre-call device snapshot.
+        use GUI caches here. run_core owns the pre-call device snapshot.
         """
         ...
 
@@ -63,7 +63,8 @@ class Clock(Protocol):
         """Return when the aware target is reached or cancellation is requested.
 
         A past target returns immediately. Do not raise a control exception for
-        cancellation; the engine decides whether to discard the step.
+        cancellation. The host records completion, then raises ScriptCancelled
+        for root cancellation; child cancellation delivers the return value.
         """
         ...
 
@@ -78,7 +79,7 @@ class EnginePorts[C]:
 
     ``plots`` owns workflow trends and the latest independent operation group.
     Its commands synchronously dispatch artists to the same PlotHost owner.
-    env.run finishes each operation; the host stops execution before finishing
+    WorkflowEnv finishes each operation; the host stops execution before finishing
     workflow plots and releasing both presentations.
     ``progress`` accepts the existing
     make_pbar arguments and returns BaseProgressBar, including runtime bars.

@@ -371,9 +371,17 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             statistics.acquired,
             statistics.variances,
         )
+        # Completion uses all classes, not accepted herald/terminal populations.
+        complete = np.isclose(
+            acquired, cfg.reps * cfg.rounds, rtol=8 * np.finfo(float).eps, atol=0
+        )
+        quadratures = np.where(complete, quadratures, np.nan)
         phases = phase_points(quadratures)
         fitted = fit_phase_slopes(
-            data.gate_counts, quadratures[None], variances[None], acquired[None]
+            data.gate_counts,
+            quadratures[None],
+            variances[None],
+            np.where(complete, acquired, np.nan)[None],
         )
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
         crossings = fitted_crossings(data.frequencies, conditional, fitted)

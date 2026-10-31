@@ -79,8 +79,10 @@ CZ-interleaved. Each class axis is ordered g, e, other. Counts preserve joint
 outcomes from the same shot. They are not marginal products or probabilities.
 There are no saved shot or tone axes, and storage does not grow with `reps`.
 
-Stop preserves completed whole rounds in fixed slots. Unfinished rounds stay
-NaN. An acquisition failure remains a failure even if partial data exists.
+Cooperative Stop preserves completed whole rounds in fixed slots. Unfinished
+rounds stay NaN. `stop_requested` records a stop request, not data completeness.
+Acquisition exceptions propagate unchanged from Run. A failed Run publishes no
+new record and leaves the previous successful record unchanged, even after Stop.
 Save counts and cfg before closing the source. Native Load restores that
 source for Analyze and leaves the current Form unchanged. Old per-shot IQ
 files are rejected because they lack `sums`; there is no conversion fallback.

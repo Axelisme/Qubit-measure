@@ -174,9 +174,9 @@ class OvernightTunablesForm(FormModel):
     Expressions stay in FormInput; native conversion carries ordinary values.
     """
 
-    uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = Field(
-        default=True,
-        description="T1 only; False concentrates delays within the same start/stop window",
+    sampling: Annotated[Literal["linear", "decay"], Display(label="Sampling")] = Field(
+        default="linear",
+        description="T1 only; decay concentrates delays within the same start/stop window",
     )
     reps: Annotated[int, Display(label="Averages")] = Field(
         default=1000, ge=1, description="Native acquisition averages"
@@ -236,7 +236,7 @@ class OvernightTunablesForm(FormModel):
         """Convert validated ordinary knobs; no source, hardware or expression parsing."""
         return OvernightTunables(
             max_model_window_factor=self.max_model_window_factor,
-            uniform=self.uniform,
+            sampling=self.sampling,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,

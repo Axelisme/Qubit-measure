@@ -14,9 +14,10 @@ from zcu_tools.datafile import load, load_labber_data
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import AnalysisDocument
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import CfgSnapshot
 from zcu_tools.experiment.native_persistence import load_run, metadata_from_container
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 from zcu_tools.format_version import YamlMap
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment, PartialSaveError
 from zcu_tools.notebook import saving as saving_module
@@ -42,7 +43,12 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.schema import PARAMETER_VERSION, PointDocument
 
 from tests.device._snapshot_fakes import SnapshotDevice
-from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
+from tests.experiment._saving_support import (
+    SavingCfg,
+    SavingCore,
+    SavingResult,
+    saving_figure,
+)
 from tests.experiment._snapshot_support import SnapshotCore
 from tests.notebook._interrupt_fakes import InterruptedCore
 from tests.resources.entry.fakes import Driver, registry_state, restore_registry
@@ -164,8 +170,48 @@ def analysis_document() -> AnalysisDocument:
     )
 
 
+def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> None:
+    cause = RuntimeError("producer failed")
+
+    class Program:
+        def acquire(self, *_args: object, **_kwargs: object) -> np.ndarray:
+            raise cause
+
+        def acquire_decimated(self, *_args: object, **_kwargs: object) -> np.ndarray:
+            raise NotImplementedError
+
+    class Core(SavingCore):
+        fail = False
+
+        def run(self, config: SavingCfg, *, context: RunContext | None) -> SavingResult:
+            if self.fail:
+                if context is None:
+                    raise ValueError("RunContext required")
+                with Schedule(config, SignalBuffer((3,)), scope=context.scope) as sched:
+                    sched.prog_builder(context.soc, context.soccfg).run_program(
+                        Program()
+                    )
+            return super().run(config, context=context)
+
+    core = Core()
+    exp = NotebookAdapter(
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
+    )(core)
+    previous = exp.run(SavingCfg())
+    evidence = exp.acquisition_for(previous)
+    core.fail = True
+    with pytest.raises(RuntimeError) as caught:
+        exp.run(SavingCfg())
+    assert caught.value is cause
+    assert exp.last_run is previous
+    assert exp.acquisition_for(previous) == evidence
+
+
 @pytest.mark.parametrize("mode", ["software", "program", "program-round"])
-def test_interrupted_acquisition_preserves_saveable_partial(
+def test_sigint_cooperative_acquisition_preserves_saveable_result(
     point: PointView, mode: Literal["software", "program", "program-round"]
 ) -> None:
     core = InterruptedCore(mode)
@@ -179,12 +225,8 @@ def test_interrupted_acquisition_preserves_saveable_partial(
     expected = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
     assert record is exp.last_run
     assert core.context is not None
-    assert not core.context.scope.stop.is_set()
-    assert core.context.scope.stop.partial_result is True
-    assert core.context.scope.stop.error is not None
-    assert core.context.scope.stop.error.status == "interrupted"
-    with pytest.raises(ScheduleOutcomeError):
-        core.context.scope.stop.raise_if_error()
+    assert core.context.scope.stop.is_set()
+    assert core.context.scope.stop.reason
     assert exp.acquisition_for(record).completion == "stopped"
     np.testing.assert_allclose(record.result.signal, expected, equal_nan=True)
     saved = exp.save_run(point, source=record)

@@ -1,4 +1,4 @@
-"""Cooperative async operation, Pause and request-bound Ask contracts."""
+"""Cooperative async operations and request-bound Ask contracts."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.script_host import CallContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.plotting.plots import NonPresentingHost
 
@@ -123,66 +123,6 @@ def until(predicate: Callable[[], bool], label: str) -> None:
         timer.join()
 
 
-def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
-    rig: Rig,
-) -> None:
-    engine, paths, _devices = rig
-    ready, entered = Event(), Event()
-    calls: list[int] = []
-    delivered: list[int] = []
-
-    @w.workflow("pause", "Resume the same suspended request")
-    async def script(
-        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
-    ) -> None:
-        iterations = env.iterations()
-        try:
-            iteration = next(iterations)
-
-            def acquire(ctx: CallContext) -> int:
-                calls.append(ctx.epoch)
-                if len(calls) == 1:
-                    entered.set()
-                    ready.set()
-                    assert ctx.scope.stop.event.wait(30), (
-                        "Pause must reach the active operation"
-                    )
-                    return -1
-                assert not ctx.scope.stop.is_set()
-                return 42
-
-            result = await iteration.call(acquire)
-            assert isinstance(result, w.Completed)
-            delivered.append(result.value)
-            assert not result.partial_result
-        finally:
-            iterations.close()
-
-    start(engine, paths, script)
-    thread, statuses = worker(engine, ready)
-    try:
-        assert ready.wait(30), "The worker must enter its operation or settle"
-        assert entered.is_set(), statuses
-        engine.pause("run")
-        until(
-            lambda: (
-                (status := engine.status()) is not None and status.lifecycle == "paused"
-            ),
-            "paused operation",
-        )
-        assert delivered == []
-        engine.resume("run")
-        thread.join(30)
-    finally:
-        if thread.is_alive():
-            engine.stop("run")
-            thread.join(30)
-    assert not thread.is_alive()
-    assert delivered == [42]
-    assert calls == [0, 1]
-    assert statuses[-1].lifecycle == "done"
-
-
 def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     engine, paths, _devices = rig
     ready = Event()
@@ -245,18 +185,19 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     assert terminal.value.pending_request_id is None
 
 
-def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
+def test_caught_run_exception_does_not_poison_the_next_operation(
     rig: Rig,
 ) -> None:
     engine, paths, _devices = rig
-    outcomes: list[w.Completed[RunRecord[Cfg, int]] | w.Failed] = []
+    outcomes: list[w.Completed[RunRecord[Cfg, int]]] = []
     tokens: list[bool] = []
+    cause = OSError("first acquire failed")
+    caught: list[OSError] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         tokens.append(context.scope.stop.is_set())
         if len(tokens) == 1:
-            cause = OSError("first acquire failed")
-            context.scope.stop.set_error("failed", str(cause), cause)
+            raise cause
         return 42
 
     @w.workflow("recover", "A recoverable acquire failure permits an authored retry")
@@ -266,19 +207,20 @@ def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            outcomes.append(await iteration.run(acquire, Cfg()))
-            outcomes.append(await iteration.run(acquire, Cfg()))
+            try:
+                await run_core(iteration, acquire, Cfg())
+            except OSError as error:
+                caught.append(error)
+            outcomes.append(await run_core(iteration, acquire, Cfg()))
         finally:
             iterations.close()
 
     start(engine, paths, script)
     final = engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    assert isinstance(outcomes[0], w.Failed)
-    assert outcomes[0].reason == "first acquire failed"
-    assert isinstance(outcomes[1], w.Completed), (
-        "A new operation must not inherit handled acquire failure"
-    )
+    assert caught == [cause]
+    assert caught[0] is cause
+    assert outcomes[0].value.result == 42
     assert tokens == [False, False]
 
 
@@ -303,7 +245,7 @@ def test_run_sugar_captures_devices_and_returns_the_modified_cfg_record(
                 cfg.value = 8
                 return cfg.value + 1
 
-            outcome = await iteration.run(experiment, cfg)
+            outcome = await run_core(iteration, experiment, cfg)
             assert isinstance(outcome, w.Completed)
             assert outcome.value.cfg is not None
             records.append((outcome.value.cfg.value, outcome.value.result))

@@ -22,7 +22,7 @@ edits and captures sources again.
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
 - `tones[i].flux_dev` starts from that Q's captured `flux_dev`.
-- Each `tones[i].sweep` has independent native-unit Start and Stop.
+- Each `tones[i].flux` has independent native-unit Start and Stop.
   `flux_expts` is the one point count shared by all local lines, initially 101.
   Lines advance together by point index, not as a Cartesian product.
 - Project integer (flux=0) and half (flux=0.5) from each Q's `{offset, period}`
@@ -102,7 +102,7 @@ uniqueness is checked only for selected tones.
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
 `frequency.df` is a SweepCfg of common nominal MHz offsets.
-`tones[i]` contains its fixed name, `flux_dev`, and `sweep.start/stop` in native DC units. `flux_expts` is their shared positive count.
+`tones[i]` contains its fixed name, `flux_dev`, and `flux.start/stop` in native DC units. `flux_expts` is their shared positive count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
 are finite nonnegative microseconds. `settle` is finite nonnegative seconds.
@@ -125,10 +125,13 @@ the existing mux onetone spectrum. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
-Stop interrupts ramps, settle and acquisition. A flux point is published only
-after the complete inner spectrum returns. Earlier completed points remain;
-the interrupted point and later points stay NaN. Analyze needs at least five
-completed flux points and at least two distinct frequency values.
+A flux point is published only after its complete inner spectrum returns.
+Cancelling an inner acquire leaves the entire current flux point NaN, including
+any data already collected there. The scan continues with the next flux point.
+To stop the whole scan, cancel the Run scope. The GUI Stop button does this;
+it interrupts ramps, settle and acquisition. Earlier completed points remain,
+and the interrupted point and later points stay NaN. Analyze needs at least
+five completed flux points and at least two distinct frequency values.
 Device and acquisition failures are errors, not empty
 successful maps.
 

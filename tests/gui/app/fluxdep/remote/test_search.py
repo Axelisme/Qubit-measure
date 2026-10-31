@@ -30,6 +30,7 @@ from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
 )
 from zcu_tools.gui.session.operation_handles import OperationOutcome
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.progress import ProgressService
 
 from tests.gui.app.fluxdep._search_result import perfect_fit_result
@@ -58,7 +59,7 @@ class SearchCase:
         *,
         run_in_pool: bool,
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Deliver a chosen outcome through the native executor's owner loop."""
         self.submissions += 1

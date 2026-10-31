@@ -1,12 +1,13 @@
 """One mux acquisition and independent participant fits per stage."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
@@ -48,7 +49,7 @@ class T1Settings(FitSettings):
 
     reps/rounds are native acquisition averages. acquire_retry counts transient
     retries; earlystop_snr is the active tones' minimum completed-round SNR, or
-    None to disable. uniform selects linear delays, otherwise the core
+    None to disable. sampling=linear selects linear delays; sampling=decay
     concentrates the same window. sweep_factor times guess_us sets its endpoint.
     Relaxation is max(relax_min_us, relax_factor*guess_us), in us.
     """
@@ -57,7 +58,7 @@ class T1Settings(FitSettings):
     rounds: int
     acquire_retry: int
     earlystop_snr: float | None
-    uniform: bool
+    sampling: Literal["linear", "decay"]
     sweep_factor: float
     relax_factor: float
     relax_min_us: float
@@ -114,7 +115,7 @@ class QubitFitResult:
 
 @dataclass(frozen=True, kw_only=True)
 class MuxT1StageResult:
-    """T1 participant outcomes and saved t1.h5, or no file on acquisition failure.
+    """T1 participant outcomes and saved t1.h5; acquisition exceptions propagate.
 
     qubits retains acquisition order and original tone indices. Partial raw is
     saved with rejected/stopped outcomes, without fitting. Unexpected errors
@@ -127,7 +128,7 @@ class MuxT1StageResult:
 
 @dataclass(frozen=True, kw_only=True)
 class MuxEchoStageResult:
-    """Echo participant outcomes and t2echo.h5, absent on acquisition failure.
+    """Echo participant outcomes and t2echo.h5; acquisition exceptions propagate.
 
     qubits retains acquisition order and original tone indices. Partial raw is
     saved with rejected/stopped outcomes, without fitting. Unexpected errors
@@ -206,13 +207,13 @@ async def measure_mux_t1(
     gates. points is the shared delay count, at least five; guess_us is the
     positive longest-qubit estimate in us. The sweep ends at sweep_factor*guess_us;
     relaxation is max(relax_min_us, relax_factor*guess_us). Inputs remain unchanged.
-    env supplies plots, save identity and summary observation. Failed/partial
+    env supplies plots, save identity and summary observation. Stop-requested
     acquisitions return outcomes for every participant; expected per-tone fit
     failures leave others available. Other errors propagate. No point/history changes.
     """
     stop = settings.sweep_factor * guess_us
     cfg = MuxT1Cfg(
-        uniform=settings.uniform,
+        sampling=settings.sampling,
         reps=settings.reps,
         rounds=settings.rounds,
         acquire_retry=settings.acquire_retry,
@@ -222,25 +223,19 @@ async def measure_mux_t1(
         readout=pulses.readout,
         tones=[MuxT1ToneCfg(name=t.name, drive=t.drive) for t in pulses.tones],
         participants=list(pulses.participants),
-        delays=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+        delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await scope.run(MuxT1Exp().run, cfg, name="Mux T1")
+    record = await run_core(scope, MuxT1Exp().run, cfg, name="Mux T1")
     observe_operation(env.summary, record)
-    if isinstance(record, Failed):
-        return MuxT1StageResult(
-            qubits=tuple(
-                QubitFitResult(index=index, status="failed", reason=record.reason)
-                for index in cfg.participants
-            )
-        )
     save_native(
         record,
         scope.dir / "t1.h5",
         spec=MuxT1Exp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if record.facts.stopped else "complete",
     )
-    if record.partial_result:
+    if record.facts.stopped:
         return MuxT1StageResult(
             file="t1.h5",
             qubits=tuple(
@@ -341,23 +336,17 @@ async def measure_mux_echo(
         participants=list(pulses.participants),
         delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await scope.run(MuxT2EchoExp().run, cfg, name="Mux Echo")
+    record = await run_core(scope, MuxT2EchoExp().run, cfg, name="Mux Echo")
     observe_operation(env.summary, record)
-    if isinstance(record, Failed):
-        return MuxEchoStageResult(
-            qubits=tuple(
-                QubitFitResult(index=index, status="failed", reason=record.reason)
-                for index in cfg.participants
-            )
-        )
     save_native(
         record,
         scope.dir / "t2echo.h5",
         spec=MuxT2EchoExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if record.facts.stopped else "complete",
     )
-    if record.partial_result:
+    if record.facts.stopped:
         return MuxEchoStageResult(
             file="t2echo.h5",
             qubits=tuple(

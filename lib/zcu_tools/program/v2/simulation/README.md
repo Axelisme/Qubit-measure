@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-31, compiled frontend, ADC admission and joint-ADC shot sums
+**Last updated:** 2026-10-31, integer timing across frontend, physical consumers and replay
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -13,8 +13,10 @@ releases admission and propagates; the environment callback owns any optional
 startup-compilation fallback. External timers must wait at the environment's
 ready interface before starting if startup time should be excluded.
 `SimulationBinding(..., timing=SimulationTiming(time_scale=0.0))` optionally paces each round to
-`time_scale × program.shot_time_s(rounds=1, ...)` seconds, passing each
-structural template's point durations and the acquire's reps and relaxation.
+`time_scale × program.request_round_time_s(request)` seconds. That owner sums
+integer template durations and relaxation, multiplies by reps, and delegates the
+single seconds conversion to TimeBase. Aggregate totals may exceed int64 and the
+per-request ns bound without rejecting a long acquisition.
 Timeline durations include readout, pre/post delays and pending ADC activity;
 structural templates cover every scan point once. The binding subtracts snapshot
 and execution wall time, then sleeps only for a positive remainder. Failures do
@@ -226,8 +228,16 @@ points or reps.
 
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
-query, not a callback. Time is us, frequency MHz, phase degrees and
-gain normalized DAC amplitude. The frontend accepts supported instruction effects
+query, not a callback. Every request time is an integer tick in its required
+`TimeBase`. Array times use int64 without changing point/read shapes. Frequency
+is MHz, phase is degrees and gain is normalized DAC amplitude. The builder gathers
+tProc, declared generator fabric/envelope and declared ADC output clocks from
+soccfg. Undeclared channels do not participate. TimeBase belongs to the request;
+adding a declared heterogeneous clock may change tick units, but must preserve
+the original channel's physical time grids and output.
+Start, duration, trigger, phase origin and sample periods remain integers through
+serialization, FIFO admission, window overlap and body-end accounting. Relax delay
+uses QICK's compiled tProc-cycle rounding before mapping to the common clock. The frontend accepts supported instruction effects
 from native operations, Module lowering and raw assembly, including NOP hooks.
 It rejects measurement-dependent jumps, unmarked jumps, body waits/resyncs,
 tProc clock reads and cross-shot state carry before backend execution.
@@ -269,13 +279,19 @@ is opt-in through `make_mux_mock_soccfg`, with 1..8 explicit ADC routes. The
 ordinary `make_mock_soccfg` defaults and clocks do not change. Numeric environments
 must separately bind every requested route and supply any physical mux response.
 
-`ReadoutWindow` keeps ADC samples/rate independent of generator duration. Per-point
+`ReadoutWindow` keeps ADC sample counts and integer sample periods independent
+of generator duration. Per-point
 windows retain trigger emission order, demodulation MHz/degrees and the generator
 association for each read. The acquire-level windows specify fixed ADC shapes;
 new consumers use template arrays for point-dependent timing/demodulation.
 `materialize_point` expands one detached point for diagnostics, excluding reps.
-Environments, not this frontend, explicitly convert us/MHz into the independent
-numeric APIs' ns/GHz.
+Readout plans and environment templates convert integer tick grids to ns through
+`TimeBase.ns`; frequency conversion to GHz remains with the physical consumers.
+The request schema, compiled frontend and physical consumers use integer timing.
+Physical planners receive the request's TimeBase, and plan/preparation cache keys
+include it. Persisted acquire and round replay use format version 2, preserving
+the rational time base and integer ticks. Older replay versions are rejected
+without conversion.
 
 ComputedPulse and TableLengthPulse follow the selected compiled waveform and
 timestamp effects. The frontend does not pad a selected event to the longest

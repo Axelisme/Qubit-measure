@@ -44,7 +44,11 @@ def version_minor(version: str, major: int = 3) -> int:
 
 
 def json_text(value: JsonObject) -> str:
-    """Encode a strict finite JSON object; invalid values raise ValueError."""
+    """Encode a strict finite JSON object without I/O or changing the input.
+
+    Reject invalid JSON types and NaN/Infinity at any depth with ValueError.
+    Callers may use this to preflight documents before creating output paths.
+    """
     _JSON.validate_python(value, strict=True)
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
 

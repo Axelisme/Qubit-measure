@@ -19,7 +19,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support.reset import reset_scan_buffer, reset_signal2real
@@ -34,6 +34,12 @@ class LengthResult:
 
 
 class LengthCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -50,18 +56,13 @@ class LengthCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     # length stores us in-memory, seconds on disk -> scale=1e-6 (1e-6)
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("lengths", "Length", "s", scale=1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="3.0",
@@ -92,23 +93,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         signals_buffer = reset_scan_buffer(context.plots, lengths, xlabel="Length (us)")
 
         # Sweep only the tested reset length after the optional preparation.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "length", sweep2param("length", sched.cfg.length)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    PulseReset("tested_reset", sched.cfg.tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("length", sched.cfg.length)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+            length = builder.add_sweep("length", cfg.length)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(PulseReset("tested_reset", cfg.tested_reset, length=length))
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return LengthResult(lengths, signals_buffer.array)
 

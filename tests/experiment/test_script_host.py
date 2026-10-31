@@ -7,16 +7,12 @@ import importlib
 import importlib.util
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, get_ident
-from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 from zcu_tools.core.script_protocol import Answer, Question
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
-
-if TYPE_CHECKING:
-    from zcu_tools.experiment.script_host import CallResult
+from zcu_tools.experiment.stop_signal import StopSignal
 
 
 class Approval(Answer):
@@ -50,89 +46,6 @@ def test_stop_tree_inherits_stop_and_releases_completed_scopes() -> None:
     root.set()
     child.clear_stop()
     assert not child.is_set(), "Released operation scopes must be detached"
-
-
-def test_child_error_stops_only_its_scope_and_preserves_first_error() -> None:
-    root = StopSignal()
-    iteration = root.child()
-    operation = iteration.child()
-    sibling = iteration.child()
-    descendant = operation.child().child()
-    cause = ValueError("bad point")
-
-    operation.set_error("failed", "acquire failed", cause)
-    first_error = operation.error
-    operation.set_error("interrupted", "later interruption", None)
-
-    assert operation.is_set()
-    assert descendant.is_set()
-    assert descendant.error is None
-    assert operation.error is first_error
-    with pytest.raises(ScheduleOutcomeError, match="acquire failed") as raised:
-        operation.raise_if_error()
-    assert raised.value is first_error
-    assert raised.value.status == "failed"
-    assert raised.value.exception is cause
-    assert raised.value.__cause__ is cause
-    inherited = operation.child()
-    assert inherited.is_set()
-    assert inherited.error is first_error
-
-    next_sibling = iteration.child()
-    for unaffected in (root, iteration, sibling, next_sibling):
-        assert not unaffected.is_set()
-        assert unaffected.error is None
-        unaffected.raise_if_error()
-
-
-def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> None:
-    root = StopSignal()
-    iteration = root.child(boundary=False)
-    operation = iteration.child()
-    schedule = operation.child(boundary=False)
-    acquire = schedule.child(boundary=False)
-    later = schedule.child(boundary=False)
-    cause = OSError("acquire disconnected")
-    acquire.set_error("failed", "first failure", cause)
-    first = acquire.error
-    assert schedule.error is None
-    acquire.release()
-    assert schedule.error is first
-    assert not schedule.is_set()
-    later.set_error("failed", "second failure", ValueError("later"))
-    later.release()
-    assert schedule.error is first
-    schedule.release()
-    assert operation.error is first
-    assert not operation.is_set()
-    with pytest.raises(ScheduleOutcomeError, match="first failure") as caught:
-        operation.raise_if_error()
-    assert caught.value.__cause__ is cause
-    operation.release()
-    assert iteration.error is None
-    assert not iteration.is_set()
-    next_operation = iteration.child()
-    assert next_operation.error is None
-    assert not next_operation.is_set()
-
-
-def test_release_delivers_partial_without_stopping_parent_or_next_operation() -> None:
-    iteration = StopSignal()
-    operation = iteration.child()
-    assert getattr(operation, "partial_result", None) is False
-    schedule = operation.child(boundary=False)
-    acquire = schedule.child(boundary=False)
-    acquire.set()
-    assert not schedule.partial_result
-    acquire.release()
-    assert schedule.partial_result
-    assert not schedule.is_set()
-    schedule.release()
-    assert operation.partial_result
-    assert not operation.is_set()
-    operation.release()
-    assert not iteration.partial_result
-    assert not iteration.child().partial_result
 
 
 def test_host_labels_calls_under_explicit_iteration_lifetimes() -> None:
@@ -273,76 +186,6 @@ def test_close_drains_question_and_preserves_cancelled_cleanup_error() -> None:
     assert cleaned.is_set()
     assert host.status == "cancelled"
     assert str(host.error) == "cleanup failed"
-
-
-def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() -> None:
-    module = host_module()
-    host = module.ScriptHost(Scope("workflow", name="test"))
-    entered = Event()
-    delivered = Event()
-    attempts: list[CallResult[int | bool]] = []
-
-    def blocking(ctx) -> int:
-        entered.set()
-        assert ctx.scope.stop.event.wait(3)
-        return 11
-
-    async def script() -> int:
-        first = await host.call(blocking)
-        attempts.append(first)
-        delivered.set()
-        await host.wait_until_resumed()
-        second = await host.call(lambda ctx: ctx.scope.stop.is_set())
-        attempts.append(second)
-        return second.epoch
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(lambda: host.run(script()))
-        try:
-            assert entered.wait(3)
-            host.pause()
-            assert delivered.wait(3)
-            # A second acknowledged pause orders before the gate can release.
-            host.pause()
-            assert host.epoch == 2
-            host.resume()
-            assert future.result(timeout=3) == 2
-        finally:
-            if not future.done():
-                host.close()
-    assert [(item.result, item.epoch, item.partial_result) for item in attempts] == [
-        (11, 0, True),
-        (False, 2, False),
-    ]
-
-
-def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> None:
-    module = host_module()
-    changed = Event()
-    host = module.ScriptHost(Scope("workflow", name="test"), on_change=changed.set)
-    completions: list[CallResult[int]] = []
-
-    async def script() -> None:
-        completions.append(await host.call(lambda ctx: 19))
-        await host.ask(Confirm(evidence="natural completion"))
-        await host.wait_until_resumed()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(lambda: host.run(script()))
-        try:
-            assert changed.wait(3)
-            host.pause()
-            pending = host.pending_question
-            assert pending is not None
-            host.answer(pending.request_id, {"accepted": True})
-            host.resume()
-            future.result(timeout=3)
-        finally:
-            if not future.done():
-                host.close()
-    assert [(item.result, item.epoch, item.partial_result) for item in completions] == [
-        (19, 0, False)
-    ]
 
 
 def test_public_control_serializes_on_worker_returns_value_and_transports_errors() -> (

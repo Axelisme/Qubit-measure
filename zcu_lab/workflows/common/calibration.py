@@ -9,6 +9,7 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel
 from qick import QickConfig
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
 from zcu_tools.experiment.workflows import Failed
@@ -100,7 +101,7 @@ class CalCarry:
     stages that observe them during a measurement. seed_flux is the seed pulse's
     calibration setpoint in the plan's flux unit; None disables matrix-element
     feed-forward. Only calibrate_point updates the history fields, from stage
-    results. Pause preserves this carry; there are no stage checkpoints.
+    results. There are no stage checkpoints.
     """
 
     seed: Calibrated
@@ -368,7 +369,7 @@ async def calibrate_len_rabi(
         readout=ro,
         length=_len_rabi_sweep(settings, guess),
     )
-    outcome = await scope.run(measure_planned_rabi, cfg, name="Rabi")
+    outcome = await run_core(scope, measure_planned_rabi, cfg, name="Rabi")
     observe_operation(env.summary, outcome)
     diagnostics = RabiResult(
         "failed",
@@ -381,14 +382,8 @@ async def calibrate_len_rabi(
         target_pi_length_us=target_pi_us,
         gain_clamped=tuple(gain_clamped),
         requested_sweep=cfg.length,
-        planned_sweep=(
-            None
-            if isinstance(outcome, Failed) or outcome.value.cfg is None
-            else outcome.value.cfg.length
-        ),
+        planned_sweep=(None if outcome.value.cfg is None else outcome.value.cfg.length),
     )
-    if isinstance(outcome, Failed):
-        return RabiStageResult(record=replace(diagnostics, reason=outcome.reason))
     # Save before fitting, so rejected fits retain their native trace.
     save_native(
         outcome,
@@ -396,8 +391,9 @@ async def calibrate_len_rabi(
         spec=LenRabiExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.partial_result:
+    if outcome.facts.stopped:
         return RabiStageResult(
             record=replace(
                 diagnostics, status="rejected", reason="stopped", file="rabi.h5"
@@ -635,12 +631,8 @@ async def calibrate_readout(
             step=(gain_stop - gain_start) / (READOUT_GAIN_POINTS - 1),
         ),
     )
-    outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
+    outcome = await run_core(scope, FreqGainExp().run, cfg, name="readout")
     observe_operation(env.summary, outcome)
-    if isinstance(outcome, Failed):
-        return ReadoutResult(
-            "failed", outcome.reason, None, None, None, tuple(gain_clamped)
-        )
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
         outcome,
@@ -648,8 +640,9 @@ async def calibrate_readout(
         spec=FreqGainExp.AXES_SPEC,
         snapshot=env.snapshot,
         identity=scope.identity,
+        completion="stopped" if outcome.facts.stopped else "complete",
     )
-    if outcome.partial_result:
+    if outcome.facts.stopped:
         return ReadoutResult(
             "rejected", "stopped", None, None, "readout.h5", tuple(gain_clamped)
         )

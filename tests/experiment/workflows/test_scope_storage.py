@@ -4,16 +4,16 @@ import json
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
-from threading import Event
 
 import pytest
 from pydantic import BaseModel
 from zcu_tools.device import FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, saved_run
 
-from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, paused, running
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed
 
 
 class Collection(BaseModel):
@@ -121,7 +121,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         )
         with env.scope("calibration") as scope:
             cfg = Cfg(value=7)
-            record = completed(await scope.run(acquire, cfg, name="T1"))
+            record = completed(await run_core(scope, acquire, cfg, name="T1"))
             assert record.value.result == 8
             assert cfg.value == 7
             await scope.setup_device(
@@ -139,7 +139,7 @@ def test_child_scope_runs_core_device_and_wait_conveniences(tmp_path: Path) -> N
         assert rig.clock.targets == [rig.clock.value]
         assert [
             operation.kind for operation in rig.engine.records("run")[0].operations
-        ] == ["run", "setup_device", "wait_until"]
+        ] == ["call", "setup_device", "wait_until"]
     finally:
         rig.close()
 
@@ -173,33 +173,6 @@ def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(
     assert [record.encoded_record.value for record in rig.engine.records("run")] == [
         {"value": 3, "status": "collecting"}
     ]
-
-
-def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(
-    rig: Rig,
-) -> None:
-    committed = Event()
-    called = Event()
-
-    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        rig.engine.pause("run")
-        env.commit(Collection(value=7))
-        committed.set()
-        await env.call(lambda ctx: called.set())
-
-    rig.start(script)
-    with running(rig) as future:
-        assert committed.wait(10), (
-            "Author reaches synchronous commit after pause acknowledgement"
-        )
-        assert [
-            record.encoded_record.value for record in rig.engine.records("run")
-        ] == [{"value": 7, "status": "collecting"}]
-        assert not called.is_set()
-        paused(rig)
-        rig.engine.resume("run")
-        assert future.result(timeout=10).lifecycle == "done"
-    assert called.is_set()
 
 
 def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:

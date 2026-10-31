@@ -13,7 +13,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import PulseReadout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_output
@@ -33,6 +33,16 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    jpa_rf_dev: Annotated[
+        DeviceName,
+        FieldMeta(
+            label="JPA RF device",
+            description="Connected RF device whose output is toggled off then on.",
+        ),
+    ] = ""
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -49,16 +59,6 @@ class CheckCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    jpa_rf_dev: Annotated[
-        DeviceName,
-        FieldMeta(
-            label="JPA RF device",
-            description="Connected RF device whose output is toggled off then on.",
-        ),
-    ] = ""
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class CheckExp(Experiment[CheckResult, CheckCfg]):
@@ -67,10 +67,10 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
     # freqs stored as Hz on disk -> scale=1e6; outputs are int JPA labels.
     AXES_SPEC: ClassVar[AxesSpec[CheckResult, CheckCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("outputs", "JPA Output", "a.u.", dtype=np.int_),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("outputs", label="JPA Output", unit="a.u.", dtype=np.int_),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=CheckResult,
         cfg_type=CheckCfg,
         tag="jpa/check",
@@ -100,37 +100,37 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.readout.gen_ch},
         )
 
-        viewer = live_line(
-            context.plots, "measurement", "Frequency (MHz)", "Magnitude", num_lines=2
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Magnitude")
+        line = live_line(ax, num_lines=2)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(freqs, check_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(outputs), len(freqs)),
-            on_update=lambda data: viewer.update(freqs, check_signal2real(data)),
+            on_update=update,
         )
 
         # 2. Acquire OFF first, then ON; the final pump state is not restored.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for output, step in sched.scan("JPA on/off", outputs.tolist()):
-                set_output(
-                    context.devices[step.cfg.jpa_rf_dev], self.OUTPUT_MAP[output]
-                )
+                set_output(context.devices[cfg.jpa_rf_dev], self.OUTPUT_MAP[output])
 
                 # 3. Reset before each frequency-swept readout pulse.
-                step.cfg.readout.set_param("freq", sweep2param("freq", step.cfg.freq))
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        PulseReadout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("freq", step.cfg.freq)
-                    .build_and_acquire(rounds=cfg.rounds)
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
+                freq = builder.add_sweep("freq", cfg.freq)
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
+                builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
+                step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         # 4. Retain complex spectra; magnitude is only a display transform.
         signals = signals_buffer.array
@@ -152,7 +152,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         signals2D = result.signals
         real_signals = check_signal2real(signals2D)
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(
                 freqs,

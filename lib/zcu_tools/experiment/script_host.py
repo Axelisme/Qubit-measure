@@ -18,8 +18,11 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel
+from qick import QickConfig
 
 from zcu_tools.core.script_protocol import Answer, Question
+from zcu_tools.device import DeviceMapping
+from zcu_tools.plotting.plots import Plots
 
 from .scope import Scope, ScriptCancelled, parse_cancel_scope
 from .stop_signal import CancelResult
@@ -27,7 +30,7 @@ from .stop_signal import CancelResult
 logger = logging.getLogger(__name__)
 
 type ScriptStatus = Literal[
-    "ready", "running", "paused", "completed", "cancelled", "failed"
+    "ready", "running", "waiting", "completed", "cancelled", "failed"
 ]
 type CancelScope = str
 
@@ -36,30 +39,35 @@ type CancelScope = str
 class CallContext:
     """One blocking invocation's cooperative controls.
 
-    scope is this operation\'s explicit child boundary. It may be born stopped; fn must
-    still start and return its partial result. epoch identifies the invocation
-    attempt, for workflow owners that discard interrupted work. Do not clear or
-    release this token; the host owns its lifetime.
+    scope is this operation's explicit child boundary. It may be born stopped; fn
+    must still start and return its partial result. Do not clear or release this
+    token; the host owns its lifetime. WorkflowEnv supplies soc (borrowed native
+    handle), soccfg (matching QICK configuration), devices (detached connected
+    driver mapping) and plots (this operation's independent presentation).
+    None means that capability is unavailable; devices={} means available with
+    no connected drivers. Raw ScriptHost supplies only scope and leaves all
+    resources None. Drivers and hardware remain caller-owned. WorkflowEnv
+    finishes plots before delivery; callbacks must not finish or release them.
     """
 
     scope: Scope
-    epoch: int
+    soc: object | None = None
+    soccfg: QickConfig | None = None
+    devices: DeviceMapping | None = None
+    plots: Plots | None = None
 
 
 @dataclass(frozen=True)
 class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
-    result is fn's unchanged payload. epoch is the attempt's starting epoch.
-    partial_result snapshots cancellation of the operation or its completed
-    descendant scopes, not the payload's own data completeness. stopped snapshots
-    only the operation token's own stop bit. Both facts and pause have one lock
-    ordering; pause after this snapshot cannot retroactively mark completion.
+    result is fn's unchanged payload.
+    stopped snapshots the operation token's own stop bit at completion, not
+    descendant cancellation or scientific completeness. Later stop requests
+    cannot mark a completed callback retroactively.
     """
 
     result: T
-    epoch: int
-    partial_result: bool
     stopped: bool
 
 
@@ -95,8 +103,6 @@ class ScriptHost:
     ) -> None:
         self._on_change = on_change
         self._root = scope
-        self._active: Scope | None = None
-        self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._owner: int | None = None
         self._lock = RLock()
@@ -105,13 +111,11 @@ class ScriptHost:
         self._error: BaseException | None = None
         self._pending: PendingQuestion | None = None
         self._answer: asyncio.Future[Answer | None] | None = None
-        self._gate: asyncio.Event | None = None
-        self._paused = False
         self._root_ack: CancelResult | None = None
 
     @property
     def status(self) -> ScriptStatus:
-        """Read ready/running/paused or the final completed/cancelled/failed state."""
+        """Read ready/running/waiting or the final completed/cancelled/failed state."""
         with self._lock:
             return self._status
 
@@ -142,12 +146,6 @@ class ScriptHost:
         """Read the labeled live scope path, starting at the script root."""
         return self._root.active_path
 
-    @property
-    def epoch(self) -> int:
-        """Read the pause epoch; only acknowledged pause commands increment it."""
-        with self._lock:
-            return self._epoch
-
     def run[T](self, script: Coroutine[object, object, T]) -> T:
         """Drive script to completion on this calling worker and drain executors.
 
@@ -166,9 +164,6 @@ class ScriptHost:
             with asyncio.Runner() as runner:
                 with self._lock:
                     self._loop = runner.get_loop()
-                    self._gate = asyncio.Event()
-                    if not self._paused or self._root.cancelled:
-                        self._gate.set()
                 return runner.run(self._execute(script))
         except ScriptCancelled:
             raise
@@ -214,7 +209,6 @@ class ScriptHost:
         Root stop before admission raises without invoking fn or the hook.
         """
         loop = self._require_loop()
-        await self.wait_until_resumed()
         if self._root.cancelled:
             raise ScriptCancelled()
         parent = self._root if scope is None else scope
@@ -224,15 +218,13 @@ class ScriptHost:
         if ancestor is not self._root:
             raise ValueError("Call scope must belong to this host")
         token = parent.branch("operation", name=name)
-        self._active = token
-        context = CallContext(token, self._epoch)
+        context = CallContext(token)
 
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
-                return CallResult(
-                    value, context.epoch, token.stop.partial_result, token.cancelled
-                )
+                stopped = token.cancelled
+                return CallResult(value, stopped)
 
         try:
             result = await loop.run_in_executor(None, invoke)
@@ -242,7 +234,6 @@ class ScriptHost:
                 raise ScriptCancelled()
             return result
         finally:
-            self._active = None
             token.release()
 
     async def ask[A: Answer](self, question: Question[A]) -> A:
@@ -253,7 +244,6 @@ class ScriptHost:
         authorizes writes. Nested/concurrent asks raise RuntimeError.
         """
         loop = self._require_loop()
-        await self.wait_until_resumed()
         if self._root.cancelled:
             raise ScriptCancelled()
         if self._pending is not None:
@@ -263,7 +253,7 @@ class ScriptHost:
         with self._lock:
             self._answer = future
             self._pending = PendingQuestion(uuid4().hex, question, expected)
-            self._status = "paused"
+            self._status = "waiting"
         self._changed()
         try:
             answer = await future
@@ -305,47 +295,6 @@ class ScriptHost:
 
         self._command(deliver)
 
-    async def wait_until_resumed(self) -> None:
-        """Wait on the worker pause gate; script cancellation also opens it.
-
-        Workflow env calls this before delivering a naturally completed result
-        or retrying an interrupted request. The host never retries fn itself.
-        """
-        self._require_loop()
-        if self._gate is None:
-            raise RuntimeError("Host gate is not initialized")
-        await self._gate.wait()
-
-    def pause(self) -> None:
-        """Acknowledge operation-only stop, epoch increment, and a closed gate.
-
-        The iteration token stays clean. In-flight call still returns one
-        CallResult with its starting epoch; workflow env owns discard/retry
-        policy. New async work waits for Resume; synchronous commit does not.
-        No author task is cancelled.
-        """
-
-        def apply() -> None:
-            with self._lock:
-                self._paused = True
-                self._epoch += 1
-                if self._active is not None:
-                    self._active.stop.set()
-                if self._gate is not None and not self._root.cancelled:
-                    self._gate.clear()
-
-        self._command(apply, allow_idle=True)
-
-    def resume(self) -> None:
-        """Acknowledge opening the gate without changing epoch or scope tokens."""
-
-        def apply() -> None:
-            self._paused = False
-            if self._gate is not None:
-                self._gate.set()
-
-        self._command(apply, allow_idle=True)
-
     def cancel(
         self, scope: str | None = None, *, expected: int | None = None
     ) -> CancelResult:
@@ -356,8 +305,8 @@ class ScriptHost:
         loop notification. The first caller never waits for that notification;
         repeated requests return the same acknowledgement without posting again.
         None selects the root; expected optionally guards its birth number.
-        run aliases the current operation. Root notification opens the gate and
-        releases Ask; the next async boundary raises ScriptCancelled. Other
+        run aliases the current operation. Root notification releases Ask;
+        the next async boundary raises ScriptCancelled. Other
         targets leave parents running. Invalid syntax raises ValueError and
         inactive/stale targets refuse. Terminal hosts still refuse further stops.
         Completion and finally drain remain the responsibility of run()/close().
@@ -372,7 +321,8 @@ class ScriptHost:
         def stop() -> CancelResult:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
-            return self._root.cancel(selector, expected=expected)
+            with self._lock:
+                return self._root.cancel(selector, expected=expected)
 
         return self._command(stop, allow_idle=True)
 
@@ -401,8 +351,6 @@ class ScriptHost:
     def _wake_root(self) -> None:
         """Notify asyncio resources on their owner without reentering the author."""
         with self._lock:
-            if self._gate is not None:
-                self._gate.set()
             if self._answer is not None and not self._answer.done():
                 self._answer.set_result(None)
 

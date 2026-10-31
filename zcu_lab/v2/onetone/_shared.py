@@ -26,22 +26,6 @@ class FreqResult:
 class LinearFreqCfg(ConfigBase):
     """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
 
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[
         PulseReadoutCfg,
@@ -58,17 +42,38 @@ class LinearFreqCfg(ConfigBase):
             description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
         ),
     ]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
-def linear_freqs(config: LinearFreqCfg, *, context: RunContext) -> NDArray[np.float64]:
+def linear_freqs(
+    freq: SweepCfg,
+    readout: PulseReadoutCfg,
+    *,
+    context: RunContext,
+) -> NDArray[np.float64]:
     """Expand the absolute MHz sweep onto the readout's hardware frequency grid.
 
-    config supplies the sweep and generator/ADC channels without being changed.
+    freq supplies the MHz sweep; readout supplies generator/ADC channels.
+    Neither input is changed.
     context supplies cached SoC configuration. Invalid sweeps propagate errors.
     """
-    readout = config.readout
     return sweep2array(
-        config.freq,
+        freq,
         "freq",
         {"soccfg": context.soccfg, "gen_ch": readout.gen_ch, "ro_ch": readout.ro_ch},
     )
@@ -80,7 +85,13 @@ def spectrum_buffer(freqs: NDArray[np.float64], *, plots: Plots) -> SignalBuffer
     plots owns the measurement figure. Buffer updates draw the entire spectrum;
     acquisition and cancellation remain the caller's responsibility.
     """
-    viewer = live_line(plots, "measurement", "Frequency (MHz)", "Amplitude")
-    return SignalBuffer(
-        (len(freqs),), on_update=lambda data: viewer.update(freqs, np.abs(data))
-    )
+    fig, ax = plots.subplots(num="measurement")
+    ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+    line = live_line(ax)
+
+    @plots.on_plot_thread
+    def update(data):
+        return line.set(freqs, np.abs(data))
+
+    fig.show()
+    return SignalBuffer((len(freqs),), on_update=update)

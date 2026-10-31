@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -66,6 +67,8 @@ from zcu_tools.mcp.measure.writeback_recovery import (
     writeback_recovery,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _writeback_failure_receipt(
     error: GuiRpcError, identity: str | None
@@ -102,7 +105,7 @@ class _ScopeReply(BaseModel):
 class _ResultState(BaseModel):
     available: bool
     source_operation_id: str | int | None
-    partial_result: bool
+    stop_requested: bool
 
 
 class _Interaction(BaseModel):
@@ -155,7 +158,6 @@ class _Completion(BaseModel):
     reason: Literal["completed", "timeout"]
     status: Literal["finished", "cancelled", "failed"] | None = None
     error: str | _OperationError | None = None
-    failure_kind: Literal["analysis"] | None = None
 
     @property
     def error_message(self) -> str:
@@ -548,7 +550,7 @@ class RecipeRuntime:
                 self._runs[index] = replace(
                     self._runs[index],
                     run_id=result.run_id,
-                    partial_result=result.partial_result,
+                    stop_requested=result.stop_requested,
                 )
                 self._details[index] = replace(
                     self._details[index], run_id=result.run_id
@@ -772,9 +774,7 @@ class RecipeRuntime:
             raise GuiRpcError("Requested tab was not found", reason="unknown_tab")
         return snapshots[0]
 
-    def _await(
-        self, op: int, ctx: CallContext, *, analysis: bool = False
-    ) -> _Completion:
+    def _await(self, op: int, ctx: CallContext) -> _Completion:
         stopped = False
         while True:
             began = time.monotonic()
@@ -789,8 +789,6 @@ class RecipeRuntime:
             completion = _Completion.model_validate(reply)
             if completion.reason == "completed":
                 if completion.status == "failed":
-                    if analysis and completion.failure_kind == "analysis":
-                        return completion
                     raise GuiRpcError(
                         completion.error_message,
                         reason="operation_failed",
@@ -837,7 +835,25 @@ class RecipeRuntime:
             self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
         self._analysis_ops.pop((tab, "post"), None)
-        completion = self._await(started.handle, ctx)
+        try:
+            completion = self._await(started.handle, ctx)
+        except Exception:
+            # Failed Runs publish no record, but their frontend request facts
+            # still belong to this operation. Never borrow another Run's facts.
+            try:
+                failed = self._snapshot(tab).result_state
+                source = failed.source_operation_id
+                if (
+                    source is not None
+                    and self._tools.gui.expose_operation(source) == started.handle
+                ):
+                    with self._lock:
+                        self._runs[index] = replace(
+                            self._runs[index], stop_requested=failed.stop_requested
+                        )
+            except Exception:
+                logger.exception("Could not read failed Run request facts")
+            raise
         snapshot = self._snapshot(tab)
         source = snapshot.result_state.source_operation_id
         if (
@@ -852,7 +868,7 @@ class RecipeRuntime:
         return RunResult(
             "completed",
             snapshot.raw_data.run_id,
-            snapshot.result_state.partial_result,
+            snapshot.result_state.stop_requested,
         )
 
     def _analyze(
@@ -893,11 +909,7 @@ class RecipeRuntime:
                 tab, "primary" if stage == "primary" else "post", started.handle
             )
             self.host.control(lambda: self._publish_analysis(pending))
-        completion = self._await(started.handle, ctx, analysis=True)
-        if completion.status == "failed":
-            return AnalysisResult(
-                None, status="failed", reason=completion.error_message
-            )
+        completion = self._await(started.handle, ctx)
         if completion.status == "cancelled":
             return AnalysisResult(None, status="failed", reason="Analysis cancelled")
         recovery: AnalysisRecovery | None = (

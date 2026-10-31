@@ -14,7 +14,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -28,12 +28,23 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     settings = parse_ftf(ftf_document())
     snapshot = EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),))
     events = (
-        PulseEvent(2, 0.5, 0.5, 20.0, 90.0, -0.2),
-        PulseEvent(0, 2.0, 0.5, 6000.0, 90.0, 0.1),
+        PulseEvent(2, ticks(0.5), ticks(0.5), 20.0, 90.0, -0.2),
+        PulseEvent(0, ticks(2.0), ticks(0.5), 6000.0, 90.0, 0.1),
     )
-    window = ReadoutWindow(0, 0, 10, 100.0, (2.1,), (6000.0,), (45.0,), (0,))
-    template = single_point_template(PointTimeline((), events, (window,), 2.5))
-    plan = plan_template(settings, snapshot, template)
+    window = ReadoutWindow(
+        0,
+        0,
+        10,
+        TIME_BASE.period_ticks(100.0),
+        tick_tuple((2.1,)),
+        (6000.0,),
+        (45.0,),
+        (0,),
+    )
+    template = single_point_template(
+        PointTimeline((), events, (window,), ticks(2.5), time_base=TIME_BASE)
+    )
+    plan = plan_template(settings, snapshot, template, time_base=TIME_BASE)
     np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
     readout_event = plan.readouts[0].batch.events[0][0]
     pulse = readout_event.pulses[0]
@@ -93,17 +104,29 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
 
     settings = parse_ftf(ftf_document())
     snapshot = EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),))
-    window = ReadoutWindow(0, 0, 4, 100.0, (0.1,), (6000.0,), (0.0,), (0,))
+    window = ReadoutWindow(
+        0,
+        0,
+        4,
+        TIME_BASE.period_ticks(100.0),
+        tick_tuple((0.1,)),
+        (6000.0,),
+        (0.0,),
+        (0,),
+    )
     for second_start_us in (0.032, 0.033):
         events = (
-            PulseEvent(2, 0.0, 0.016, 250.0, 0.0, 0.2),
-            PulseEvent(2, second_start_us, 0.016, 250.0, phase_deg, -0.2),
-            PulseEvent(0, 0.1, 0.04, 6000.0, 0.0, 0.1),
+            PulseEvent(2, ticks(0.0), ticks(0.016), 250.0, 0.0, 0.2),
+            PulseEvent(2, ticks(second_start_us), ticks(0.016), 250.0, phase_deg, -0.2),
+            PulseEvent(0, ticks(0.1), ticks(0.04), 6000.0, 0.0, 0.1),
         )
         plan = plan_template(
             settings,
             snapshot,
-            single_point_template(PointTimeline((), events, (window,), 0.14)),
+            single_point_template(
+                PointTimeline((), events, (window,), ticks(0.14), time_base=TIME_BASE)
+            ),
+            time_base=TIME_BASE,
         )
         first, second = plan.batch.tracks
 

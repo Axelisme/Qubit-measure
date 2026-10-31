@@ -80,7 +80,7 @@ def test_native_save_load_uses_captured_environment_after_source_removal(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=metadata),
+            result=replace(record, metadata=metadata.model_dump(mode="json")),
             parameters=captured,
             storage=captured.storage,
         ),

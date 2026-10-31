@@ -73,7 +73,7 @@ class OvernightMuxPlan(BaseModel):
 class OvernightMuxTunables(BaseModel):
     """Set fixed delay grids, T1-based relaxation, averaging and fit acceptance.
 
-    uniform selects T1's linear delay grid; False concentrates delays within
+    sampling=linear selects T1's linear delay grid; sampling=decay concentrates delays within
     the same start/stop window. Echo always keeps its linear grid.
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive longest-qubit delay estimates in
@@ -90,7 +90,9 @@ class OvernightMuxTunables(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    uniform: bool = Field(default=True, description="Uniform (linear) sweep for T1")
+    sampling: Literal["linear", "decay"] = Field(
+        default="linear", description="T1 delay sampling"
+    )
     reps: int = Field(default=1000, ge=1, description="Native averages per acquisition")
     rounds: int = Field(default=10, ge=1, description="Native acquisition rounds")
     t1_guess_us: float = Field(
@@ -197,7 +199,7 @@ class OvernightMuxPoint(BaseModel):
 def _t1_settings(current: OvernightMuxTunables) -> T1Settings:
     """Copy this stage's settings from one captured tunables revision."""
     return T1Settings(
-        uniform=current.uniform,
+        sampling=current.sampling,
         reps=current.reps,
         rounds=current.rounds,
         acquire_retry=current.t1_acquire_retry,
@@ -243,7 +245,7 @@ async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads t
     Iteration cancellation skips remaining work; Stop/errors propagate after
     finally commits collected fields, then appends one sample per participant
     to the captured entry when result_path is set. Append failures propagate
-    without undoing commits or earlier rows. Pause retains local progress. Pair starts
+    without undoing commits or earlier rows. Each operation runs once. Pair starts
     follow max(now, previous completed pair's actual start + interval), matching
     overnight. Trends retain scalars only and are not automatically saved.
     """

@@ -12,12 +12,12 @@ from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Branch, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_rf_power
@@ -37,22 +37,6 @@ class PowerAnalysis:
 
 
 class PowerCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -82,13 +66,29 @@ class PowerCfg(ConfigBase):
             ),
         ),
     ] = None
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
     # powers stored in dBm on disk -> scale=IDENTITY (1.0); signals are real -> ZSpec dtype float64
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("powers", "JPA Power", "dBm"),),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
+        axes=(AxesSpec.Axis("powers", label="JPA Power", unit="dBm"),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         tag="jpa/power",
@@ -117,50 +117,60 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             ax.lines[0].set_marker("o")
 
         # Show independent points rather than connecting randomized settings.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Power (dBm)",
-            "Signal Difference",
-            configure_axes=configure_axes,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Power (dBm)", ylabel="Signal Difference")
+        line = live_line(ax)
+        configure_axes(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(jpa_powers, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(jpa_powers),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(jpa_powers, np.abs(data)),
+            on_update=update,
         )
 
         # 2. Set the external pump power for each host-side point.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
-                set_rf_power(context.devices[step.cfg.jpa_rf_dev], jpa_power)
+                set_rf_power(context.devices[cfg.jpa_rf_dev], jpa_power)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 tracker = MomentTracker()
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda raw, tracker=tracker, skew_penalty=step.cfg.skew_penalty: (
-                            snr_as_signal(
-                                [tracker],
-                                ge_axis=1,
-                                skew_penalty=skew_penalty,
-                            )
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
+                )
+                builder.add_loop("ge", 2)
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
+                builder.delay_by_timeline()
+                # Empty g case has no pi-length padding; preserve each case's readout time.
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.delay_by_timeline()
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog,
+                    soc,
+                    options=RunOptions(
+                        converter=lambda _raw, tracker=tracker: snr_as_signal(
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=cfg.skew_penalty,
                         ),
-                        trackers=[tracker],
-                        rounds=cfg.rounds,
-                    )
+                    ),
+                    trackers=[tracker],
+                    rounds=cfg.rounds,
                 )
 
         # 4. Keep SNR paired with the randomized power coordinates.
@@ -186,7 +196,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
         ax.axvline(
             best_jpa_power,

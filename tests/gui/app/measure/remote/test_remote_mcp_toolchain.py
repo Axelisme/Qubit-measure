@@ -225,9 +225,9 @@ def test_original_run_can_be_analyzed_without_bypassing_seen_guards(fx, monkeypa
         )
 
 
-@pytest.mark.parametrize("keep_partial", [True, False])
+@pytest.mark.parametrize("returns_record", [True, False])
 def test_gui_cancel_run_survives_eventless_remote_wait(
-    fx, monkeypatch: pytest.MonkeyPatch, keep_partial: bool
+    fx: Fixture, returns_record: bool
 ) -> None:
 
     tab_id = fx.ctrl.tab_control.new_tab("fake")
@@ -241,7 +241,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
         # The test finally releases the held collaborator.
         if not release.wait(30):
             raise TimeoutError("fake run release was not signalled")
-        if not keep_partial:
+        if not returns_record:
             raise InterruptedError("stopped before any acquisition")
         return original_run(cfg, context=context)
 
@@ -263,15 +263,24 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
         assert fx.ctrl.run_analyze_control.cancel_run()
         release.set()
         reply = await_terminal(sock, run_id)
-        assert reply["result"] == {
-            "reason": "completed",
-            "status": "cancelled",
-        }
+        if returns_record:
+            assert reply["result"] == {
+                "reason": "completed",
+                "status": "finished",
+            }
+        else:
+            assert reply["result"] == {
+                "reason": "completed",
+                "status": "failed",
+                "error": {
+                    "reason": "failed",
+                    "message": "stopped before any acquisition",
+                },
+            }
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
-        assert snapshot["result_state"]["available"] is keep_partial
-        assert snapshot["result_state"]["source_operation_id"] == (
-            run_id if keep_partial else None
-        )
+        assert snapshot["result_state"]["available"] is returns_record
+        assert snapshot["result_state"]["source_operation_id"] == run_id
+        assert snapshot["result_state"]["stop_requested"] is True
     finally:
         release.set()
         sock.close()

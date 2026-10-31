@@ -4,7 +4,7 @@ status: accepted
 
 # Persistence：保存權威與資料契約
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-01
 
 ## 脈絡
 
@@ -96,6 +96,16 @@ Workflow 本身的兩側目錄維持 `workflows/<workflow名>_<run_id>/`，保�
 
 `experiment.native_persistence.prepare_run_data` 從 typed RunRecord 與 axes spec 建立同一份 SI／離散 payload 和 cfg snapshot。Native 與 Labber writers 分別消費它，不先寫 native 再讀回轉成 Labber，也不互相呼叫。Datafile writer 只處理自己的格式與 caller 指定的目的地，不選路徑、不擷取 live context、不決定 batch。`experiment.artifacts` 的共用保存編排負責 artifact 選集、輸出順序與逐輸出失敗隔離，一個 writer 失敗不阻擋其他輸出。
 
+`RunRecord.metadata` 是中性的 `JsonObject`，預設為空 dict，建構時 deepcopy。「未填」表示缺 key，不使用 None 狀態。Record 不解讀 key，也不持有 native schema 或 reader；這份 JSON 物件與 datafile 的 `docs["metadata"]` 一對一。
+
+`RunMetadata` 是 experiment 擁有的 native metadata schema。產生方以它組好內容，再用 `model_dump(mode="json")` 填入 record。`RunMetadataContent` 是讀取方按需驗證欄位的工具，不存進 record。
+
+Native 與 artifact Save 在任何 I/O 前驗證完整 schema 與原 JSON 的有限值。GUI 在修改 comment 與 prepare_ledger 前完成驗證。`save_run` 與含 native DataItem 的 `save_artifacts` 另比對 experiment tag；analysis-only Save 只驗完整 schema 與有限 JSON，不比對 tag，也不新增 expected identity。
+
+寫入使用原 JSON 的全部 key，包括作者額外 key 與已廢棄 key，不以 schema 投影覆蓋原內容。Record 不持有廢棄 key 清單，也不新增相容層。
+
+2026-11-01，使用者要求：「但RunRecord是相當中性且底層的，不能帶有上層資訊的認知，且要夠通用靈活，可以放想要的格式，與datafile對接」。對 schema／reader 分工與 Save 驗證選擇「3aA 3bA」，對保留已廢棄 key 選擇「廢棄key選A」。
+
 RunMetadata 的 run_id、時間、completion、RunSnapshot 與 SoftwareProvenance 是 caller 提供的歷史事實。RunSnapshot 保存 entry_name、point 與 roles，不帶 entry UUID。Experiment 的 ParameterSnapshot 保存 resources 擁有的作用中參數內容、library Specs、authored aliases 與 fixed names。Session 的 capture／restore adapter 連接這兩個 owner，不讓 resources 或通用 ParameterContext 依賴 experiment。C8 分層、C9 無循環與 parameter-context-no-experiment contract 保護這個方向。
 
 GUI 在 Run admission 固定作用中文件組的參數環境，global 與 point 都可 Run、Analyze 與 Save。Global run 的 snapshot.point 為 None。Save 使用 metadata 內的快照，不重新讀 live 文件。Load 只還原檔內快照；缺快照回沒有 general、created_at、target 或 storage 的空內容，不補造歷史資訊。Analyze／Post 使用這份內容。寫回提案從歷史內容求值及解析 alias／slot，Apply 則重新取得當下作用中的文件組。Global 寫 entry 層，POINT 寫選定 point；未開 entry 才以 no_context 拒絕非空寫回，空歷史環境不是拒絕理由。
@@ -130,7 +140,9 @@ DataItem 保留 typed run 準備成功或失敗的結果；cfg=None 或 producer
 
 GUI Save／Save All 與 MCP 保存使用這條 run 保存流程。Save All 包含已保存的 artifact，每次重寫全部選定成員。GUI 在 owner thread 同步完成並回傳完整 SaveReport，不建立 Save handle、worker 或 save-busy phase。Data pane 唯讀顯示每個 output 的 path、status 和 error，不讓使用者改目的地。Notebook 的本機單檔 save 保留原入口，不猜格式；`save_run` 使用 bound PointView 的公開 capability。C8 與 C9 涵蓋 notebook → experiment/datafile/resources 的依賴，C12 保持 datafile 不依賴 stateful resources。
 
-GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，透過 experiment 的 metadata content 只讀驗 experiment tag，再交 adapter.restore(container)。Adapter 依 spec 呼叫 restore_run，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。RunMetadataContent 沿 RunRecord.metadata 保留原 run_id、時間、completion、snapshot 與 provenance，不包含輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
+GUI Native Load 由 LoadService 呼叫 datafile.load 讀成 Container，透過 experiment 的 metadata content 只讀驗 experiment tag，再交 adapter.restore(container)。Adapter 依 spec 呼叫 restore_run，共用資料優先轉換見 [[0069]]。核心與 Notebook 保持 typed RunRecord，GUI 只持有 opaque record 與明示 cfg_issue，不探測 cfg／result。
+
+Load 將 `docs["metadata"]` 的全部 key 原樣保留在 `RunRecord.metadata`，包括原 run_id、時間、completion、snapshot、provenance 及額外或已廢棄 key。Load 不預驗 admission 以外的 metadata 欄位。Reader 按需讀取，`MetadataFieldError` 保留欄位、`/docs/metadata/<field>` 文件路徑與原始原因。Load 不加入輸出路徑，也不產生 acquired。Load 不回填表單，不以目前 Form、library、default 或 live device 補回歷史 cfg。
 
 原始 cfg 正本保存在 native 資料檔的 docs/cfg，可透過公開 datafile.load 離線讀取。使用者於 2026-10-16 選擇「A」時不新增 GUI 入口；2026-10-23 批准的 Results browser 是唯讀檢視例外，呈現保存的 cfg_type、schema_version 與以 values 為根的相對路徑。瀏覽器不修改檔案、不回填表單，也不重新分析。視窗與前端邊界見 [[0067]]；Load 與 adapter 的 opaque record 契約不變。
 
@@ -140,13 +152,16 @@ Run 與 Load 的預覽及實際 Save 共用 SaveService 的公開 layout planner
 Planner 使用目前 roots、metadata 記錄的 entry 名稱與 point，以及 adapter.save_stem 的結果，只呼叫一次 bind_run_outputs，回傳具名的 binding 與 layout。
 預覽只使用 layout，Save 以同一 layout 寫檔、以 binding.prepare_ledger 準備 ledger。
 正常 Load 完成後立即有預覽，Analyze／PostAnalyze 後也有預覽，不依賴 run.storage。
-缺 metadata 時仍保留 artifact／member declarations，但沒有輸出預覽。
+Native eligibility 只檢查 schema 的 required keys 是否齊全，不驗值。空 dict 或缺 native 必填 key 時仍保留 artifact／member declarations，但沒有輸出預覽，也不寫 ledger acquired，GUI Save 以 storage_unavailable 拒絕。
+這項判斷共用 experiment 的 reader helper，不另列必填 key，也不以完整驗證代替 eligibility。Eligibility 通過不代表可保存，實際 Save 仍在任何 I/O 前完整驗證。
 預覽不建立目錄，也不標為 Saved。
 預覽只隔離 experiment.metadata 的 MetadataFieldError，保留含壞命名欄位的歷史資料供 Load；錯誤帶欄位、文件路徑與原始原因。
 其他規劃錯誤照常傳出，Save 仍完整驗證 metadata，不將壞內容改成空快照。
 Save report 發布實際路徑、成功或逐項失敗。
 預覽與 Save 使用各自計畫時的保存時間；自訂 stem 若依時間改名，實際輸出仍由該次 Save 計畫決定。
 實際 Save 建立目錄並覆寫同名 data.h5、分析與圖。Result 圖副本放到記錄的 `points/<point>/figures/`，缺 point 放 entry 層 `figures/`。不新增 source.json 或另一份來源權威。
+
+Tab／Analyze 逐欄讀取自身需要的 run_id、experiment 或 device_snapshot，不受其他缺欄影響。缺自身 key 時回 None，experiment 保留 adapter_name fallback；有 key 但值壞時仍拋 MetadataFieldError。
 
 2026-10-29，先前方案保留已綁定 Run 的路徑預覽，讓無 storage 的 Run 首次 Save 前只有 declarations、沒有 outputs。
 使用者回答是否保留這項安排時說「1A, 但第一次save前沒預覽很怪」。
