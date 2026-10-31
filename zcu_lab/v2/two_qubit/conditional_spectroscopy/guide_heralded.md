@@ -6,7 +6,7 @@
 
 每個 shot 執行可選 reset → herald mux readout → 兩顆準備 → 雙線 weak probe → 可選 Xπ⊗Xπ contrast → terminal mux readout。
 
-`prepared_f1`、`prepared_f2` 都是 2 點硬體 loop，0 不發射 pulse，1 發射該 qubit 的 Xπ。F1 在外層。Reset 與 herald 完成後先 sync，再 fork 成兩條 timeline 各做準備，join 後才 probe。兩條 probe 同時播放。Contrast 保留原先的 F1、F2 依序 Xπ。
+`prepared_f1`、`prepared_f2` 都是 2 點硬體 loop，0 不發射 pulse，1 發射該 qubit 的 Xπ。F1 在外層。準備的兩條 timeline 從 reset 與 herald 的結尾 fork，各做準備，join 後才 probe。兩條 probe 同時播放。Contrast 保留原先的 F1、F2 依序 Xπ。
 
 Herald 與 terminal 重複使用同一個 mux 物件、gain、積分窗口與 circle classifier。Readout 的 post_delay 是 herald 後的等待。F1/F2 tone 都須含 radius，缺少時先做 GE Post。`reset=None` 不發射 reset。Herald 不重設 qubit，也不決定是否執行後續 pulse。
 

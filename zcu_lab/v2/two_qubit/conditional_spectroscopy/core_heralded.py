@@ -213,7 +213,6 @@ class SpectroscopyHeraldedExp(
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
-                builder.sync()  # Herald/reset must finish before preparation.
                 builder.fork("default", into=["f1", "f2"])
                 with (
                     builder.timeline("f1"),

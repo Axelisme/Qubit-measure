@@ -263,7 +263,6 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
-                builder.sync()  # Reset must finish before the parallel preparation.
                 builder.fork("default", into=["f1", "f2"])
                 with (
                     builder.timeline("f1"),
