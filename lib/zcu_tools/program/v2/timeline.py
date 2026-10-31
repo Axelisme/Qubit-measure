@@ -800,6 +800,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Unhinted counts skip backedge bounds proofs. Invalid count/hint/name
         raises ValueError; QICK register exhaustion propagates unchanged.
         Runtime-only event getters raise RuntimeError, never return bounds.
+        Table loads written in the body are available to subsequent consumers in
+        that iteration. A hint or certified count bounds the counter's table
+        index; its body-only index proof expires after the closing increment.
+        A possibly empty loop does not initialize destinations on its skipped path.
         """
         selected = timeline if timeline is not None else self._timeline_default
         parent = selected if selected is not None else "default"

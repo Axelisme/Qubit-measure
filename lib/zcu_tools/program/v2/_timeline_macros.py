@@ -759,7 +759,10 @@ class RepeatTimelineCapture(Macro):
         self.entry = entry
 
     def preprocess(self, prog) -> None:
-        del prog  # QICK's override keeps the public keyword parameter name.
+        # The native closing shell leaves the counter at n, outside its body's
+        # zero-based index range. Do not export that proof past the backedge.
+        if self.entry.counter is not None:
+            prog._time_bounds.defined.discard(self.entry.counter)
         if not self.entry.constant:
             accumulator = self.entry.accumulator
             self.entry.book.math.operations.append(
