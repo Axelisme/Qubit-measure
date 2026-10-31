@@ -6,10 +6,10 @@ from dataclasses import dataclass, field, replace
 from qick.asm_v2 import QickParam, WriteReg
 
 from ._timeline_expression import (
-    CycleProducer,
     CycleAxis,
-    TimeVariable,
+    CycleProducer,
     TimeExpression,
+    TimeVariable,
     add_time,
     choose_time,
     cycle_axis,

@@ -10,11 +10,11 @@ from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
-    CycleProducer,
     CycleAxis,
-    TimeVariable,
-    TimeExtremum,
+    CycleProducer,
     TimeExpression,
+    TimeExtremum,
+    TimeVariable,
     add_time,
     ceiled_time,
     choose_time,
@@ -178,9 +178,7 @@ class RuntimeEnd:
             expression = (
                 TimeVariable(minimum)
                 if minimum is not None and minimum == maximum
-                else TimeVariable(
-                    terms=((cycle_axis(register, minimum, maximum), 1),)
-                )
+                else TimeVariable(terms=((cycle_axis(register, minimum, maximum), 1),))
             )
         object.__setattr__(self, "register", register)
         object.__setattr__(self, "covers", covers)
@@ -323,9 +321,7 @@ def source_expression(prog, name: str) -> TimeExpression:
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:
         return TimeVariable(limits.minimum)
-    return TimeVariable(
-        terms=((cycle_axis(name, limits.minimum, limits.maximum), 1),)
-    )
+    return TimeVariable(terms=((cycle_axis(name, limits.minimum, limits.maximum), 1),))
 
 
 def bounded_source_expression(

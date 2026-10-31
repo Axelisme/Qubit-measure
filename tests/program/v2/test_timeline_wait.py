@@ -703,6 +703,7 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
 @pytest.mark.filterwarnings("error")
 def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
     """Opposing two-point sweeps both end at 40, leaving 30 ADC cycles."""
+
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
             self.add_loop("i", 2)
