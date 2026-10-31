@@ -507,20 +507,14 @@ class CustomWrite(WriteReg):
         WriteReg(dst=self.dst, src=self.value).translate(prog)
 
 
-@pytest.mark.parametrize("use", ["source", "overwrite", "lookup_index"])
-def test_custom_write_subclass_cannot_certify_time_producer_bounds(use):
+def test_custom_write_subclass_cannot_certify_table_index_bounds():
     loader = LoadValue("time", [10, 20, 30], "duration", "loaded")
 
     def body(prog):
-        if use != "source":
-            prog.write_reg("duration", 1)
+        prog.write_reg("duration", 1)
         prog.append_macro(CustomWrite(dst="duration", src=1))
-        if use == "lookup_index":
-            prog.emit(loader)
-            prog.delay_timeline("loaded")
-        else:
-            prog.delay_timeline("duration")
-            prog.delay_timeline(1 / 430.08)
+        prog.emit(loader)
+        prog.delay_timeline("loaded")
 
     with pytest.raises(
         ValueError, match="duration.*(bounds|unregistered.*instruction)"

@@ -296,6 +296,26 @@ def test_nested_repeat_cannot_use_outer_nonparent_timeline(inner_parent):
         _program(body)
 
 
+@pytest.mark.parametrize("actual", [0, 3])
+def test_unhinted_register_repeat_preserves_actual_external_end(actual):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count"):
+            prog.pulse(0, "short", timeline="default")
+            prog.delay_timeline(9 / 430.08)
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    result = _shots(_program(body, initialize, reps=2))
+    expected = [100] if actual == 0 else [0, 15, 30, 100]
+    assert [_waves(s) for s in result] == [expected] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 2
+
+
 @pytest.mark.parametrize("consumer", ["body", "join", "fork", "sync"])
 def test_register_repeat_wait_consumers_use_actual_remaining_end(consumer):
     def body(prog):
