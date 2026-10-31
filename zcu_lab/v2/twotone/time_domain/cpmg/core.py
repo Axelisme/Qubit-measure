@@ -335,17 +335,17 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                     builder.emit(cfg.reset.build("reset"))
                 builder.fork("default", into="preparation")
                 builder.emit(Pulse("pi2_pulse", pi2_pulse), timeline="preparation")
-                builder.delay_timeline(interval - 0.5 * dpulse_len)
-                builder.sync()
+                builder.timeline_inc(interval - 0.5 * dpulse_len)
+                builder.delay_by_timeline()
                 with builder.repeat("pi_loop", time - 1):
                     builder.fork("default", into="refocus")
                     builder.emit(Pulse("pi_pulse", pi_pulse), timeline="refocus")
-                    builder.delay_timeline(2 * interval)
-                    builder.sync()
+                    builder.timeline_inc(2 * interval)
+                    builder.delay_by_timeline()
                 builder.fork("default", into="last_refocus")
                 builder.emit(Pulse("last_pi_pulse", pi_pulse), timeline="last_refocus")
-                builder.delay_timeline(interval + 0.5 * dpulse_len)
-                builder.sync()
+                builder.timeline_inc(interval + 0.5 * dpulse_len)
+                builder.delay_by_timeline()
                 builder.emit(
                     Pulse(
                         "pi2_projection",

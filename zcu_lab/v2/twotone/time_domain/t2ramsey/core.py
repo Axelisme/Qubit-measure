@@ -163,7 +163,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
             builder.emit(Delay("t2_delay", delay=length_param))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(
                 Pulse(
                     name="pi2_pulse2",

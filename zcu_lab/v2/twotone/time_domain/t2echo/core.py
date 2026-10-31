@@ -170,10 +170,10 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
             builder.emit(Delay("t2e_delay1", delay=0.5 * length_param))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.emit(Delay("t2e_delay2", delay=0.5 * length_param))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(
                 Pulse(
                     name="pi2_pulse2",

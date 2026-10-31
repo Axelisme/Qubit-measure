@@ -158,8 +158,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.delay_timeline(delay)
-            builder.sync()
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(
