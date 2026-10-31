@@ -1,5 +1,7 @@
 """Run owner scope identity shares the operation's cooperative stop bit."""
 
+from contextlib import ExitStack
+
 import pytest
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
@@ -16,10 +18,13 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
     record = RunRecord[ConfigBase, object](None, object())
 
     def run(*_args: object, context: RunContext) -> RunRecord[ConfigBase, object]:
-        with context.scope.branch("acquire") as acquire:
+        with ExitStack() as scopes:
+            selected = context.scope
+            if selector == "acquire":
+                selected = scopes.enter_context(context.scope.branch("acquire"))
             accepted = service.cancel_scope(token, scope=selector)
             assert accepted.cancelled
-            assert acquire.stop.reason is not None
+            assert selected.stop.reason is not None
             if fails:
                 raise RuntimeError("selector core error")
         return record
