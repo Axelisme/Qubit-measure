@@ -221,6 +221,7 @@ class PulseReset(AbsReset):
         """Capture named reset settings without changing the caller's cfg.
 
         Override freq (MHz), gain (normalized), phase (degrees), length (us).
+        Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
         """
@@ -267,6 +268,7 @@ class TwoPulseReset(AbsReset):
         """Capture named reset settings without changing the caller's cfg.
 
         Override gain1/gain2 (normalized), freq1/freq2 (MHz), shared length (us).
+        Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
         """
@@ -326,6 +328,7 @@ class BathReset(AbsReset):
         """Capture named reset settings without changing the caller's cfg.
 
         Override qub/res gain (normalized), freq (MHz), length (us), pi2_phase (degrees).
+        Unknown keys or nonnumeric overrides raise TypeError.
         Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
         waveform restrictions apply and unsupported length sweeps raise ValueError.
         """
