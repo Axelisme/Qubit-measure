@@ -365,20 +365,29 @@ class RuntimeMath(TimedMacro):
             self.claimed.update(previous.claimed)
 
     def reconstruct(
-        self, expression: TimeExpression, inputs: dict[CycleVariable, RuntimeEnd]
+        self, expression: TimeExpression, inputs: dict[CycleVariable, RuntimeEnd],
+        captured_ends: Sequence[RuntimeEnd] = (),
     ) -> RuntimeEnd:
         """Materialize exact cycle algebra using captured branch-entry inputs.
 
         Known point grids use the existing timing-table owner. Unknown terms
         read their immutable entry snapshots, never path-local scratch storage.
-        Every expression variable must be known on that grid or supplied in inputs.
+        captured_ends are immutable incoming timeline values. Reuse their cycle
+        algebra before reading source variables, which may have been overwritten
+        since those ends were computed. Other variables must be known on the
+        point grid or supplied in inputs.
         """
+        for captured in captured_ends:
+            delta = add_time(expression, scale_time(runtime_expression(captured), -1))
+            points = evaluate_time(delta, expression_axes(delta))
+            if points is not None and int(points.min()) >= 0:
+                return self.add(captured, self.lookup([int(v) for v in points.flat], expression_axes(delta)))
         axes = expression_axes(expression)
         points = evaluate_time(expression, axes)
         if points is not None:
             return self.lookup([int(value) for value in points.flat], axes)
         if isinstance(expression, TimeChoice):
-            values = [self.reconstruct(item, inputs) for item in expression.alternatives]
+            values = [self.reconstruct(item, inputs, captured_ends) for item in expression.alternatives]
             result = values[0]
             for value in values[1:]:
                 if expression.maximum:

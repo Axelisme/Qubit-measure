@@ -881,12 +881,11 @@ class TimelineBranch(Macro):
                         inputs[variable] = self.entry_math.snapshot(
                             RuntimeEnd(variable.name, variable.minimum, variable.maximum, expression=expression)
                         )
-            for end in initial.values():
-                for variable in time_variables(time_expression(prog, end)):
-                    if not variable.axes and variable.points is None and variable not in inputs:
-                        inputs[variable] = self.entry_math.snapshot(
-                            RuntimeEnd(variable.name, variable.minimum, variable.maximum)
-                        )
+        captured_ends = [
+            self.entry_math.snapshot(end)
+            for end in initial.values()
+            if self.align_timeline and isinstance(end, RuntimeEnd)
+        ]
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
@@ -899,7 +898,7 @@ class TimelineBranch(Macro):
         initial_defined = prog._time_bounds.defined.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
-        self.book.pinned.update(value.register for value in inputs.values())
+        self.book.pinned.update(value.register for value in [*inputs.values(), *captured_ends])
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
@@ -944,6 +943,7 @@ class TimelineBranch(Macro):
                     self.book.ends[name] = self.result_math.reconstruct(
                         choose_time(*(time_expression(prog, value) for value in values)),
                         inputs,
+                        captured_ends,
                     )
                 else:
                     end = values[0]
