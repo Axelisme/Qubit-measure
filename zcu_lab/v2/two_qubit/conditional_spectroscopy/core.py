@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -29,30 +28,26 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
-from .._drive import DualLineCfg, dual_line_drive
+from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
     marginal_probabilities,
-    terminal_counts,
     validate_classifiers,
 )
-from .analysis import SpectroscopyAnalysis, analyze_spectra
-
-BRANCH_LABELS = ("00", "01", "10", "11")
+from .analysis import SpectroscopyAnalysis, summarize_spectra
 
 
 class SpectroscopyCfg(ConfigBase):
     """Optional reset → B00/01/10/11 → dual probe → optional double Xπ → mux.
 
-    Frequency is a common MHz host scan; pulses carry explicit waveforms,
+    Frequency is a common MHz hardware sweep; pulses carry explicit waveforms,
     gains and phases (degrees), with timing in us. contrast applies both Xπ
     pulses after the probe. F1/F2 require circle classifiers with GE Post radii.
     rounds accumulate counts at acquisition, not on a host round axis.
@@ -134,146 +129,27 @@ class SpectroscopyCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class SpectroscopyResult:
-    """Raw float64 sums (DC,4,frequency,3,3), ordered terminal F1/F2 g/e/other.
+    """Raw float64 sums (DC,2,2,frequency,3,3), terminal F1/F2 g/e/other.
 
     DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
-    branches=[0,1,2,3] labels nominal B00/01/10/11, F1 first. Unmeasured points
+    prepared_f1/prepared_f2 are [0,1] (g/e), F1 outer. Unmeasured points
     remain NaN; completed acquisition rounds survive cancellation.
     """
 
     dc_values: NDArray[np.float64]
-    branches: NDArray[np.int64]
+    prepared_f1: NDArray[np.int64]
+    prepared_f2: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-def build_program(
-    cfg: SpectroscopyCfg,
-    soccfg: QickConfig,
-    branch: int,
-    frequency: float,
-    *,
-    heralded: bool,
-) -> TimelineProgramV2:
-    """Compile fresh reset/herald, nominal preparation, parallel probe and readout.
-
-    branch is 0..3. contrast adds F1 then F2 Xπ after the probe. Herald and
-    terminal reuse the same mux object; its post_delay supplies the herald gap.
-    No acquisition occurs and input pulses are unchanged.
-    """
-    if branch not in range(4):
-        raise ValueError("branch must be in 0..3")
-    validate_classifiers(cfg.readout, cfg.roles)
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    if branch & 2:
-        builder.emit(Pulse("prepare_f1", cfg.x180_f1))
-    if branch & 1:
-        builder.emit(Pulse("prepare_f2", cfg.x180_f2))
-    builder.emit(dual_line_drive(cfg.drive, frequency=frequency, name="probe"))
-    if cfg.contrast:
-        builder.emit(Pulse("contrast_f1", cfg.x180_f1))
-        builder.emit(Pulse("contrast_f2", cfg.x180_f2))
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: SpectroscopyCfg, *, context: RunContext, heralded: bool
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Share DC/branch/frequency acquisition; return DC, MHz and unchanged sums.
-
-    Optional named DC is left at its last setting. Rounds accumulate in the
-    acquisition backend. Live curves show F1/F2 P_e by DC and branch, selecting
-    herald (g,g) only for display in the heralded version.
-    """
-    validate_classifiers(config.readout, config.roles)
-    frequencies = sweep2array(config.frequency)
-    dc_values = (
-        np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
-    )
-    viewers = {
-        (d, branch): live_line(
-            context.plots,
-            f"measurement_dc_{d}_branch_{branch}",
-            "Common probe frequency (MHz)",
-            "P_e (F1 line 1, F2 line 2)",
-            title=f"B{branch:02b} · DC {dc:g}"
-            + (" · herald (g,g)" if heralded else ""),
-            num_lines=2,
-        )
-        for d, dc in enumerate(dc_values)
-        for branch in range(4)
-    }
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
-        f1 = marginal_probabilities(counts, "f1")[..., 1]
-        f2 = marginal_probabilities(counts, "f2")[..., 1]
-        for (d, branch), viewer in viewers.items():
-            viewer.update(frequencies, np.stack((f1[d, branch], f2[d, branch])))
-
-    classes = (3, 3, 3, 3) if heralded else (3, 3)
-    buffer = SignalBuffer(
-        (len(dc_values), 4, len(frequencies), *classes),
-        dtype=np.float64,
-        on_update=update_view,
-    )
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
-            if dc_step.cfg.dc_device is not None:
-                set_flux(
-                    context.devices[dc_step.cfg.dc_device],
-                    dc_value,
-                    unit=dc_step.cfg.dc_unit,
-                    stop=context.scope.stop,
-                )
-            for branch, branch_step in dc_step.scan("branch", list(range(4))):
-                for frequency, step in branch_step.scan(
-                    "frequency", frequencies.tolist()
-                ):
-                    prog = build_program(
-                        step.cfg, context.soccfg, branch, frequency, heralded=heralded
-                    )
-                    step.run_acquire_summed(
-                        prog,
-                        context.soc,
-                        processor=shot_sums(
-                            prog,
-                            [
-                                Classify(label, tone)
-                                for label in (
-                                    ("herald", "terminal")
-                                    if heralded
-                                    else ("terminal",)
-                                )
-                                for tone in (
-                                    step.cfg.roles.f1_tone,
-                                    step.cfg.roles.f2_tone,
-                                )
-                            ],
-                        ),
-                        rounds=step.cfg.rounds,
-                        options=RunOptions(),
-                    )
-    return dc_values, frequencies, buffer.array
 
 
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
     """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
     sums = data.variable("sums")
     return SpectroscopyResult(
-        dc_values=sums.axes[4],
-        branches=sums.axes[3].astype(np.int64),
+        dc_values=sums.axes[5],
+        prepared_f1=sums.axes[4].astype(np.int64),
+        prepared_f2=sums.axes[3].astype(np.int64),
         frequencies=sums.axes[2],
         sums=sums.z.astype(np.float64),
     )
@@ -294,7 +170,10 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                             "Probe frequency", "Hz", field_name="frequencies", scale=1e6
                         ),
                         VariableAxisSpec(
-                            "Nominal branch", "", field_name="branches", dtype=np.int64
+                            "Prepared F2", "", field_name="prepared_f2", dtype=np.int64
+                        ),
+                        VariableAxisSpec(
+                            "Prepared F1", "", field_name="prepared_f1", dtype=np.int64
                         ),
                         VariableAxisSpec(
                             "DC source value (inactive if dc_device=null)",
@@ -312,7 +191,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             ),
             result_type=SpectroscopyResult,
             cfg_type=SpectroscopyCfg,
-            cfg_schema_version="4.0",
+            cfg_schema_version="5.0",
             tag="two_qubit/conditional_spectroscopy",
             result_builder=restore_result,
         )
@@ -326,8 +205,109 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         Return raw counts, not IQ or proportions. Check the operation stop signal
         for acquisition errors; unmeasured points remain NaN after cancellation.
         """
-        dc, frequencies, sums = acquire_counts(config, context=context, heralded=False)
-        return SpectroscopyResult(dc, np.arange(4, dtype=np.int64), frequencies, sums)
+        validate_classifiers(config.readout, config.roles)
+        frequencies = sweep2array(config.frequency)
+        dc_values = (
+            np.array([0.0])
+            if config.dc_device is None
+            else sweep2array(config.dc_values)
+        )
+        viewers = {
+            (d, f1, f2): live_line(
+                context.plots,
+                f"measurement_dc_{d}_prep_{f1}_{f2}",
+                "Common probe frequency (MHz)",
+                "P_e (F1 line 1, F2 line 2)",
+                title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
+                num_lines=2,
+            )
+            for d, dc in enumerate(dc_values)
+            for f1 in range(2)
+            for f2 in range(2)
+        }
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            f1_pe = marginal_probabilities(sums, "f1")[..., 1]
+            f2_pe = marginal_probabilities(sums, "f2")[..., 1]
+            for (d, f1, f2), viewer in viewers.items():
+                viewer.update(
+                    frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
+                )
+
+        buffer = SignalBuffer(
+            (len(dc_values), 2, 2, len(frequencies), 3, 3),
+            dtype=np.float64,
+            on_update=update_view,
+        )
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            # DC stays on the host because each point sets an external instrument.
+            for dc_value, step in sched.scan("dc", dc_values.tolist()):
+                if config.dc_device is not None:
+                    set_flux(
+                        context.devices[config.dc_device],
+                        dc_value,
+                        unit=config.dc_unit,
+                        stop=context.scope.stop,
+                    )
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
+                builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
+                builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
+                frequency = builder.add_sweep("frequency", config.frequency)
+                x180_f1 = Pulse("prepare_f1", config.x180_f1)
+                x180_f2 = Pulse("prepare_f2", config.x180_f2)
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                builder.fork("default", into=["f1", "f2"])
+                with (
+                    builder.timeline("f1"),
+                    builder.branch(by="prepared_f1", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_f1)
+                with (
+                    builder.timeline("f2"),
+                    builder.branch(by="prepared_f2", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_f2)
+                builder.join("f1", "f2", into="default")
+                builder.emit(
+                    Join(
+                        Pulse("probe_f1", config.drive.f1, freq=frequency),
+                        Pulse("probe_f2", config.drive.f2, freq=frequency),
+                    )
+                )
+                if config.contrast:
+                    builder.emit(Pulse("contrast_f1", config.x180_f1))
+                    builder.emit(Pulse("contrast_f2", config.x180_f2))
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
+        return SpectroscopyResult(
+            dc_values,
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            frequencies,
+            buffer.array,
+        )
 
     def analyze(
         self,
@@ -339,9 +319,106 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         """Plot count-derived F1/F2 P_e with other retained in the denominator."""
         del options
         data = source.result
-        return analyze_spectra(
-            source.cfg,
-            data,
-            acquired_shots=data.sums.sum(axis=(-2, -1)),
-            plots=plots,
+        cfg = source.cfg
+        if cfg is None:
+            raise ValueError("Spectroscopy analysis requires saved cfg")
+        dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
+        frequencies = sweep2array(cfg.frequency)
+        if (
+            not np.array_equal(data.dc_values, dc)
+            or not np.array_equal(data.prepared_f1, np.arange(2))
+            or not np.array_equal(data.prepared_f2, np.arange(2))
+            or data.frequencies.shape != frequencies.shape
+            or not np.allclose(
+                data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+            )
+            or data.sums.shape != (len(dc), 2, 2, len(frequencies), 3, 3)
+        ):
+            raise ValueError(
+                "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
+            )
+        answer = summarize_spectra(
+            data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
         )
+        for target, role in enumerate(("F1", "F2")):
+            fig, _ = plots.subplots(
+                f"spectra_{role.lower()}",
+                nrows=2,
+                ncols=2,
+                figsize=(11, 7),
+                squeeze=False,
+                layout="constrained",
+            )
+            fig.suptitle(f"{role} P_e · double Xπ contrast {cfg.contrast}")
+            for f1, f2 in np.ndindex(2, 2):
+                ax = fig.axes[2 * f1 + f2]
+                for d, value in enumerate(dc):
+                    ax.plot(
+                        frequencies,
+                        answer.excitation[d, f1, f2, :, target],
+                        label=f"DC {value:g} {cfg.dc_unit}"
+                        if cfg.dc_device
+                        else "DC inactive",
+                    )
+                ax.set(
+                    title=f"Nominal preparation ({f1},{f2})",
+                    xlabel="Common probe frequency (MHz)",
+                    ylabel=f"{role} P_e",
+                    ylim=(0, 1),
+                )
+                ax.legend(fontsize="small")
+            if cfg.dc_device is not None:
+                fig, _ = plots.subplots(
+                    f"map_{role.lower()}",
+                    nrows=2,
+                    ncols=2,
+                    figsize=(11, 7),
+                    squeeze=False,
+                    layout="constrained",
+                )
+                for f1, f2 in np.ndindex(2, 2):
+                    ax = fig.axes[2 * f1 + f2]
+                    image = ax.pcolormesh(
+                        frequencies,
+                        dc,
+                        answer.excitation[:, f1, f2, :, target],
+                        shading="nearest",
+                        vmin=0,
+                        vmax=1,
+                    )
+                    fig.colorbar(image, ax=ax, label=f"{role} P_e")
+                    ax.set(
+                        title=f"Nominal preparation ({f1},{f2})",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
+                    )
+        fig, _ = plots.subplots(
+            "shots",
+            nrows=2,
+            ncols=2,
+            figsize=(11, 7),
+            squeeze=False,
+            layout="constrained",
+        )
+        fig.suptitle("Acquired shots per point · partial counts included")
+        for f1, f2 in np.ndindex(2, 2):
+            ax = fig.axes[2 * f1 + f2]
+            for d, value in enumerate(dc):
+                ax.plot(
+                    frequencies,
+                    answer.acquired_shots[d, f1, f2],
+                    label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}",
+                )
+            ax.axhline(
+                cfg.reps * cfg.rounds,
+                color="gray",
+                linestyle="--",
+                label="Requested shots",
+            )
+            ax.set(
+                title=f"Nominal preparation ({f1},{f2})",
+                xlabel="Common probe frequency (MHz)",
+                ylabel="Shots",
+            )
+            ax.legend(fontsize="small")
+        return answer
