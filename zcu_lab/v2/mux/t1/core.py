@@ -432,6 +432,8 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                     timeline=timeline,
                 )
             builder.join(*timelines, into="default")
+            # Start the register delay after the full pulse branches, including post.
+            builder.delay_by_timeline()
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
