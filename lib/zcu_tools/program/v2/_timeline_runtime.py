@@ -612,12 +612,7 @@ class RuntimeMath(TimedMacro):
             elif variable.reconstruction is not None:
                 term = self.reconstruct(variable.reconstruction, inputs)
             elif variable.fixed_point is not None:
-                numerator, shift = variable.fixed_point
-                raw = self.reconstruct(numerator, inputs)
-                if raw.minimum is None or raw.maximum is None:
-                    raise RuntimeError("fixed-point reconstruction lost bounds")
-                term = self.op(raw, "ASR", shift,
-                               limits=(raw.minimum >> shift, raw.maximum >> shift))
+                term = self._reconstruct_fixed_point(variable, inputs)
             elif variable.selection is not None:
                 index, words = variable.selection
                 selected = self.reconstruct(index, inputs)
@@ -649,6 +644,20 @@ class RuntimeMath(TimedMacro):
                 else self.subtract(result, scaled)
             )
         return result
+
+    def _reconstruct_fixed_point(
+        self, variable: CycleVariable, inputs: dict[CycleVariable, RuntimeEnd]
+    ) -> RuntimeEnd:
+        if variable.fixed_point is None:
+            raise RuntimeError("fixed-point producer has no numerator")
+        numerator, shift = variable.fixed_point
+        raw = self.reconstruct(numerator, inputs)
+        if raw.minimum is None or raw.maximum is None:
+            raise RuntimeError("fixed-point reconstruction lost bounds")
+        result = self.op(raw, "ASR", shift,
+                         limits=(raw.minimum >> shift, raw.maximum >> shift))
+        return RuntimeEnd(result.register, result.minimum, result.maximum,
+                          expression=LinearTime(terms=((variable, 1),)))
 
     def reconstruct_maximum(
         self,

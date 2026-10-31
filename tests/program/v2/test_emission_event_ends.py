@@ -3,6 +3,7 @@
 from collections.abc import Callable, Sequence
 from fractions import Fraction
 from functools import lru_cache
+from math import ceil
 
 import numpy as np
 import pytest
@@ -352,12 +353,13 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(cloc
     assert np.all(error_numerator >= 0)
     assert np.all(error_numerator <= 430.08 * ratio.denominator)
     admissible = []
-    for candidate in range(int(np.ceil(256 * ratio)), int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2):
+    for candidate in range(ceil(256 * ratio), int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2):
         error = ((counts * candidate + 255) // 256) * ratio.denominator - physical_numerator
         if np.all(error >= 0) and np.all(error <= 430.08 * ratio.denominator):
             admissible.append(candidate)
     assert observed == min(admissible, key=lambda w: (_signed_power_cost(w), w))
-    shifts = [i.get("OP", "") for i in prog.prog_list if any(op in i.get("OP", "") for op in ("SL", "SR", "ASR"))]
+    shifts = [op for inst in prog.prog_list if isinstance(op := inst.get("OP"), str)
+              and any(shift in op for shift in ("SL", "SR", "ASR"))]
     assert all(int(op.split("#")[-1]) <= 15 for op in shifts)
     if clock == 430.08:
         assert shifts == []
@@ -395,7 +397,8 @@ def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
         [0, end] for end in [44, 87, 129, 45, 88, 131]
     ] * 2
     # Two selector words and two author-declared waveform addresses, no time table.
-    assert len(prog.compile_datamem()) == 4
+    data = prog.compile_datamem()
+    assert data is not None and len(data) == 4
 
 
 def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
