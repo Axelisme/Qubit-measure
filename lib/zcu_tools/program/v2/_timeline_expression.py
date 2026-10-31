@@ -51,6 +51,8 @@ class CycleVariable:
     interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
     reconstruction: "TimeExpression | None" = None
     selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
+    # Checked numerator algebra and arithmetic shift for k=8 runtime lengths.
+    fixed_point: "tuple[TimeExpression, int] | None" = None
 
 
 @dataclass(frozen=True)
