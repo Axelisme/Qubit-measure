@@ -46,3 +46,74 @@ def test_ns_rounds_exact_grid_once_without_changing_array_shape(
     assert time_base.ns(np.array(212, dtype=np.int64)).shape == ()
     if frequency == Fraction(3, 2):
         assert time_base.ns(1) == 666.6666666666666
+
+
+def test_fixture_times_must_be_exactly_on_the_grid() -> None:
+    time_base = simulation.TimeBase.from_clocks((430.08, 384.0, 307.2, 6144.0))
+
+    assert time_base.ticks(0.5) == 21504
+    assert time_base.ticks(Fraction(1, 43008)) == 1
+    assert simulation.TimeBase(Fraction(3, 2)).ticks(Fraction(2, 3)) == 1
+    for time_us in (0.04, np.nextafter(0.5, 0.0).item()):
+        with pytest.raises(ValueError, match="grid"):
+            time_base.ticks(time_us)
+    with pytest.raises(ValueError, match="grid"):
+        time_base.period_ticks(5.0)
+
+
+@pytest.mark.parametrize("frequency", [Fraction(43008), Fraction(3, 2)])
+def test_ns_rejects_values_past_the_exact_numerator_boundary(
+    frequency: Fraction,
+) -> None:
+    time_base = simulation.TimeBase(frequency)
+    limit = 2**53 // (1000 * frequency.denominator)
+    for tick in (-limit, limit):
+        expected = float(Fraction(tick * 1000) / frequency)
+        assert time_base.ns(tick).hex() == expected.hex()
+        assert time_base.ticks(Fraction(tick) / frequency) == tick
+    for tick in (-limit - 1, limit + 1, -(2**63), 2**63):
+        with pytest.raises(OverflowError):
+            time_base.ns(tick)
+        with pytest.raises(OverflowError):
+            time_base.ticks(Fraction(tick) / frequency)
+    for tick in (-limit - 1, limit + 1, -(2**63)):
+        with pytest.raises(OverflowError):
+            time_base.ns(np.array([[0, tick]], dtype=np.int64))
+
+
+@pytest.mark.parametrize("clock", [0.0, -1.0, float("inf"), float("nan")])
+def test_clock_frequencies_must_be_positive_and_finite(clock: float) -> None:
+    with pytest.raises(ValueError):
+        simulation.TimeBase.from_clocks((clock,))
+    with pytest.raises(ValueError):
+        simulation.TimeBase(Fraction(1)).period_ticks(clock)
+
+
+@pytest.mark.parametrize(
+    "frequency",
+    [Fraction(2**53 + 1), Fraction(2**63), Fraction(1, 2**63), Fraction(1, 10**16)],
+)
+def test_unrepresentable_time_bases_fail_at_construction(frequency: Fraction) -> None:
+    with pytest.raises(OverflowError):
+        simulation.TimeBase(frequency)
+
+
+def test_common_clock_build_validates_input_and_intermediate_ranges() -> None:
+    with pytest.raises(ValueError):
+        simulation.TimeBase.from_clocks(())
+    with pytest.raises(OverflowError):
+        simulation.TimeBase.from_clocks((1e20,))
+    with pytest.raises(OverflowError):
+        simulation.TimeBase.from_clocks((1e-20,))
+    with pytest.raises(OverflowError):
+        simulation.TimeBase.from_clocks((2147483647.0, 4294967291.0, 3.0))
+    for frequency in (Fraction(0), Fraction(-1)):
+        with pytest.raises(ValueError):
+            simulation.TimeBase(frequency)
+
+
+def test_fixture_times_must_be_finite() -> None:
+    time_base = simulation.TimeBase(Fraction(1))
+    for time_us in (float("inf"), float("nan")):
+        with pytest.raises(ValueError):
+            time_base.ticks(time_us)
