@@ -11,8 +11,8 @@ from ._timeline_runtime import (
     RuntimeEnd,
     Time,
     align_end,
+    optional_time_bounds,
     placement_time,
-    time_bounds,
 )
 from ._timeline_state import TimelineBook
 
@@ -27,6 +27,7 @@ class TimelineObservedPulse(Pulse):
         )
         self.book = book
         self.source = source
+        self.runtime_start: RuntimeEnd | None = None
 
     def record(self, prog, t, limit: float | QickParam | None = None) -> None:
         if self.book.repeats:
@@ -48,6 +49,7 @@ class TimelineObservedPulse(Pulse):
         self.source.preprocess(prog)
         if self.source.t == "auto" and self.ch in self.book.runtime_gens:
             start = self.book.runtime_gens[self.ch]
+            self.runtime_start = start
             self.source.t_regs["t"] = start.register
             self.book.runtime_gens[self.ch] = self.book.math.add(
                 start, align_end(prog, prog.pulses[self.name].get_length())
@@ -61,6 +63,8 @@ class TimelineObservedPulse(Pulse):
         self.source.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.runtime_start is not None:
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
@@ -82,13 +86,20 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            if self.relative_t != "auto" and not (
-                (
-                    _bounds(self.relative_t)[0] >= -1e-12
-                    and self.book.math.covers(end, previous)
+            end_limits = optional_time_bounds(prog, end)
+            previous_limits = optional_time_bounds(prog, previous)
+            if (
+                end_limits is not None
+                and previous_limits is not None
+                and self.relative_t != "auto"
+                and not (
+                    (
+                        _bounds(self.relative_t)[0] >= -1e-12
+                        and self.book.math.covers(end, previous)
+                    )
+                    or end_limits[0] + _bounds(self.relative_t)[0]
+                    >= previous_limits[1] - 1e-12
                 )
-                or time_bounds(prog, end)[0] + _bounds(self.relative_t)[0]
-                >= time_bounds(prog, previous)[1] - 1e-12
             ):
                 raise ValueError(
                     f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove runtime start >= previous end"
@@ -97,7 +108,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 start = end
             else:
                 start = self.book.math.add(end, self.relative_t)
-            self.source.t = time_bounds(prog, start)[1]
+            self.runtime_start = start
+            self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
             self.source.t_regs["t"] = self.book.math.cycles(start).register
             finish = self.book.math.add(
@@ -114,14 +126,19 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
             self.book.record_native(prog, self.ch, finish, generator=True)
-            self.record(prog, time_bounds(prog, start)[1], time_bounds(prog, start)[0])
+            limits = optional_time_bounds(prog, start)
+            if limits is not None:
+                self.record(prog, limits[1], limits[0])
             return
         t = end if self.relative_t == "auto" else end + self.relative_t
         previous_end = prog.get_timestamp(gen_ch=self.ch)
         self.source.t = t
         self.source.preprocess(prog)
         actual_t = self.source.get_time_param("t")
-        if _bounds(actual_t - previous_end)[0] < -1e-12:
+        if (
+            optional_time_bounds(prog, previous) is not None
+            and _bounds(actual_t - previous_end)[0] < -1e-12
+        ):
             raise ValueError(
                 f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
                 "start >= previous end at every sweep point; use delay_timeline"
@@ -133,6 +150,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.book.set_end(self.timeline, finish)
         if isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish
+        else:
+            self.book.runtime_gens.pop(self.ch, None)
         self.book.record_native(prog, self.ch, finish, generator=True)
 
 
@@ -144,13 +163,15 @@ class TimelinePlacedConfig(ConfigReadout):
         self.source = source
         self.relative_t: float | QickParam = source.t
         self.event_end = EventEnd(0.0, 0.0)
+        self.runtime_start: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.add(origin, self.relative_t)
             self.event_end = EventEnd(origin, placement_time(prog, self.relative_t))
-            self.source.t = time_bounds(prog, start)[1]
+            self.runtime_start = start
+            self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
             self.source.t_regs["t"] = start.register
             self.book.set_end(self.timeline, self.book.math.maximum(0.0, start))
@@ -166,6 +187,8 @@ class TimelinePlacedConfig(ConfigReadout):
         self.source.translate(prog)
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.runtime_start is not None:
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
 
     def list_time_params(self) -> list[str]:
@@ -173,6 +196,11 @@ class TimelinePlacedConfig(ConfigReadout):
 
 
 class TimelinePlacedTrigger(Trigger):
+    def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.runtime_start is not None:
+            return self.book.math.time_parameter(self.runtime_start)
+        return super().get_time_param(name)
+
     def __init__(self, book: TimelineBook, timeline: str, source: Trigger):
         super().__init__(
             ros=source.ros,
@@ -187,12 +215,14 @@ class TimelinePlacedTrigger(Trigger):
         self.timeline = timeline
         self.relative_t: float | QickParam = source.t
         self.event_end = EventEnd(0.0, 0.0)
+        self.runtime_start: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.add(origin, self.relative_t)
-            self.t = time_bounds(prog, start)[1]
+            self.runtime_start = start
+            self.t = self.book.math.preprocess_time(start)
             super().preprocess(prog)
             self.t_regs["t"] = start.register
             duration = self.get_time_param("width")

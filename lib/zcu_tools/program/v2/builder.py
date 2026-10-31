@@ -184,8 +184,8 @@ class TimelineBuilder:
 
         None timeline selects the scoped name, or default outside a scope.
         name names the counter. n is a nonnegative integer or an existing
-        register name. Register counts require a guaranteed closed nonnegative
-        integer range_hint; fixed counts forbid it. Entry syncs timeline, each
+        register name. Register counts optionally accept a guaranteed closed
+        nonnegative integer range_hint; fixed counts forbid it. Entry syncs timeline, each
         iteration closes parent/local ends, and exit expires local names. Only
         parent and local timelines may be used inside. Zero still syncs entry
         but discards body operations. Invalid counts, ranges and timeline uses
@@ -362,15 +362,22 @@ class TimelineBuilder:
         *,
         timeline: str | None = None,
         tag: str | None = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         """Record end += t without moving reference; tag exposes static end.
 
         None timeline selects the scoped name, or default outside a scope.
-        t is us, a QICK parameter, or a certified nonnegative cycle register
-        name. Unknown/wait-only timelines, unknown bounds and overflow fail
-        during build, as in TimelineProgramV2.delay_timeline.
+        t is us, a QICK parameter, or an author-calculated nonnegative cycle
+        register name. range_hint optionally guarantees inclusive integer-cycle
+        bounds for a register. Unbounded values use runtime maxima; overlap and
+        overflow are author-owned. Invalid hints and unknown/wait-only timelines
+        fail during build, as in TimelineProgramV2.delay_timeline.
         """
-        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag))
+        self._record(
+            lambda prog: prog.delay_timeline(
+                t, timeline=timeline, tag=tag, range_hint=range_hint
+            )
+        )
 
     def fork(self, source: str, *, into: str | list[str]) -> None:
         """Record new timeline names copying source's current end.

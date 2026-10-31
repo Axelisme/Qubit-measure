@@ -46,10 +46,14 @@ class PulseGuard:
     floors: tuple[float | QickParam, ...] = ()  # Entry-independent lower ends in us.
     limits: tuple[float | QickParam, ...] = ()  # Required entry upper bounds in us.
 
+    unbounded: bool = False  # Author-owned segment cannot supply overlap proofs.
+
     def require(
         self, ends: Iterable[float | QickParam], limits: Iterable[float | QickParam]
     ) -> None:
         """Raise overlap if any end exceeds any limit at any sweep point (us)."""
+        if self.unbounded:
+            return
         for end in ends:
             for limit in limits:
                 if bounds(limit - end)[0] < -1e-12:
@@ -60,6 +64,9 @@ class PulseGuard:
 
     def then(self, other: "PulseGuard") -> None:
         """Compose a following transfer, pulling its guards back to our entry."""
+        if self.unbounded or other.unbounded:
+            self.unbounded = True
+            return
         self.require(self.floors, other.limits)
         limits = self.limits + tuple(
             limit - shift for limit in other.limits for shift in self.shifts
@@ -82,6 +89,8 @@ class PulseGuard:
         Each expression is affine in k, so its endpoints cover all interior
         integer counts at each sweep point, even when candidate sweeps cross.
         """
+        if self.unbounded:
+            return PulseGuard(self.channel, unbounded=True)
         if maximum == 0:
             return PulseGuard(self.channel)
         if maximum >= 2:

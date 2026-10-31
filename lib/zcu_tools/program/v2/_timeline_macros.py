@@ -40,6 +40,7 @@ from ._timeline_runtime import (
     Time,
     align_end,
     known_maximum,
+    optional_time_bounds,
     source_expression,
     step_time,
     time_bounds,
@@ -193,17 +194,22 @@ class TimelineShellWait(Wait):
 
 
 class TimelineAdvance(TimedMacro):
-    def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
+    def __init__(
+        self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None
+    ):
         super().__init__(tag=tag)
         self.book = book
         self.timeline = timeline
         self.duration = duration
+        self.range_hint = range_hint
         self.aligned = aligned
         self.event_ends: tuple[EventEnd | SelectedEventEnd, ...] = ()
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
-            duration = self.book.math.snapshot(self.book.math.source(self.duration))
+            duration = self.book.math.snapshot(
+                self.book.math.source(self.duration, self.range_hint, author=True)
+            )
         else:
             duration = step_time(prog, self.duration) if self.aligned else self.duration
         previous = self.book.end(self.timeline, placement=True)
@@ -302,7 +308,8 @@ class TimelineAdvance(TimedMacro):
         if (
             isinstance(result, RuntimeEnd)
             and event.rounded
-            and time_bounds(prog, duration)[0] >= 0
+            and (limits := optional_time_bounds(prog, duration)) is not None
+            and limits[0] >= 0
         ):
             covers = [*result.covers, *event.rounded]
             for previous in event.rounded:
@@ -356,7 +363,8 @@ class TimelineSync(Delay):
             self.t_regs["t"] = self.t.register
             self.book.native_only = True
             try:
-                prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
+                if self.t.minimum is not None:
+                    prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
             finally:
                 self.book.native_only = False
             self.book.decrement(self.t)
@@ -409,7 +417,7 @@ class TimelineRepeatExit(TimelineSync):
         self,
         book: TimelineBook,
         count: int,
-        maximum: int,
+        maximum: int | None,
         *,
         variable: bool = False,
         iterations: int | str = 1,
@@ -427,11 +435,7 @@ class TimelineRepeatExit(TimelineSync):
         frame = self.book.repeats.pop()
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
-        for ch, guard in frame.pulse_guards.items():
-            repeated = guard.repeated(self.count, self.maximum)
-            repeated.require((frame.native_gens[ch],), repeated.limits)
-            if self.book.repeats:
-                self.book.repeats[-1].pulse_guards[ch].then(repeated)
+        self._check_pulse_guards(frame)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(
@@ -498,6 +502,17 @@ class TimelineRepeatExit(TimelineSync):
             axis=self.axis,
         )
 
+    def _check_pulse_guards(self, frame: RepeatFrame) -> None:
+        """Validate bounded backedges and propagate author-owned unknown segments."""
+        for ch, guard in frame.pulse_guards.items():
+            if self.maximum is None:
+                repeated = _PulseGuard(ch, unbounded=True)
+            else:
+                repeated = guard.repeated(self.count, self.maximum)
+                repeated.require((frame.native_gens[ch],), repeated.limits)
+            if self.book.repeats:
+                self.book.repeats[-1].pulse_guards[ch].then(repeated)
+
     def _restore_native(self, prog, frame: RepeatFrame, *, variable: bool) -> None:
         for tails, initial, current, written, generator in (
             (
@@ -519,7 +534,7 @@ class TimelineRepeatExit(TimelineSync):
                 for ch, end in tails.items():
                     upper = (
                         end.maximum
-                        if ch in written
+                        if ch in written or end.maximum is None
                         else max(
                             0,
                             end.maximum
@@ -542,7 +557,7 @@ class TimelineRepeatExit(TimelineSync):
             for ch, end in current.items():
                 self.book.native_timestamp(
                     prog,
-                    time_bounds(prog, end)[1],
+                    end,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -985,7 +1000,9 @@ class TimelineBranch(Macro):
         self.entry_math = RuntimeMath(prog)
         self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
         if self.align_timeline:
-            for register in prog._time_bounds.defined:
+            for register in (
+                prog._time_bounds.defined | self.book.source_expressions.keys()
+            ):
                 expression = source_expression(prog, register)
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
@@ -1085,11 +1102,13 @@ class TimelineBranch(Macro):
     def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
         if not force and _same_times(values):
             return values[0]
-        limits = [time_bounds(prog, value) for value in values]
+        limits = [optional_time_bounds(prog, value) for value in values]
+        finite = [limit for limit in limits if limit is not None]
+        bounded = len(finite) == len(limits)
         merged = RuntimeEnd(
             prog.add_reg(),
-            round(min(lo for lo, _ in limits) * get_fclk(prog)),
-            round(max(hi for _, hi in limits) * get_fclk(prog)),
+            round(min(lo for lo, _ in finite) * get_fclk(prog)) if bounded else None,
+            round(max(hi for _, hi in finite) * get_fclk(prog)) if bounded else None,
             expression=self.book.selected_expression(prog, self.by, values),
         )
         for tail, value in zip(self.tails, values, strict=True):
@@ -1136,7 +1155,7 @@ class TimelineBranch(Macro):
                     self.book.ends[name] = replace(end, covers=(*end.covers, value))
             self.book.native_timestamp(
                 prog,
-                time_bounds(prog, value)[1],
+                value,
                 gen_ch=ch if generator else None,
                 ro_ch=None if generator else ch,
             )
@@ -1186,6 +1205,7 @@ class TimelineBranch(Macro):
                     tuple(value for guard in guards for value in guard.shifts),
                     tuple(value for guard in guards for value in guard.floors),
                     tuple(value for guard in guards for value in guard.limits),
+                    unbounded=any(guard.unbounded for guard in guards),
                 )
 
     def translate(self, prog) -> None:

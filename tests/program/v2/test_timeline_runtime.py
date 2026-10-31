@@ -78,6 +78,211 @@ def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
     assert [s.end_cycle - s.start_cycle for s in result] == [68] * 6
 
 
+@pytest.mark.parametrize("producer", ["alu", "dmem"])
+def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(producer):
+    def body(prog):
+        if producer == "alu":
+            prog.write_reg_op("duration", "scan", "+", 10)
+        else:
+            prog.read_dmem("duration", 0)
+        prog.fork("default", into="other")
+        prog.delay_timeline("duration")
+        prog.delay_timeline(11 / 430.08, timeline="other")
+        prog.join("other", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    def initialize(prog):
+        prog.add_dmem([11])
+
+    result = shots(program(body, reps=2, initialize=initialize))
+    expected = [11, 11, 12] if producer == "alu" else [11, 11, 11]
+    assert [waves(s) for s in result] == [[t] for t in expected] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        t + 28 for t in expected
+    ] * 2
+
+
+@pytest.mark.parametrize("producer", ["alu", "dmem"])
+@pytest.mark.parametrize("hint", [None, (6, 6)])
+def test_author_register_overwrite_after_constant_accepts_optional_hint(producer, hint):
+    def body(prog):
+        prog.write_reg("duration", 1)
+        if producer == "alu":
+            prog.write_reg_op("duration", "duration", "+", 5)
+        else:
+            prog.read_dmem("duration", 0)
+        prog.delay_timeline("duration", range_hint=hint)
+        prog.pulse(0, "p0", timeline="default")
+
+    def initialize(prog):
+        prog.add_dmem([6])
+
+    result = shots(program(body, initialize=initialize))
+    assert [waves(s) for s in result] == [[6]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [34] * 3
+
+
+@pytest.mark.parametrize("hint", [None, (10, 12)])
+def test_author_register_hint_controls_same_channel_overlap_proof(hint):
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 10)
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", t=0)
+        prog.delay_timeline("duration", timeline="other", range_hint=hint)
+        prog.pulse(0, "p0", timeline="other")
+
+    if hint is not None:
+        with pytest.raises(ValueError, match="channel 0.*overlap"):
+            program(body)
+    else:
+        assert [waves(s) for s in shots(program(body))] == [[0, 10], [0, 11], [0, 12]]
+
+
+@pytest.mark.parametrize("operation", ["delay", "pulse", "config", "trigger"])
+def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(operation):
+    def initialize(prog):
+        prog.add_dmem([40])
+        prog.declare_readout(0, length=4 / 307.2)
+        prog.add_readoutconfig(0, "ro", freq=100)
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.delay_timeline("duration", tag="runtime" if operation == "delay" else None)
+        if operation == "pulse":
+            prog.pulse(0, "p0", timeline="default", tag="runtime")
+        elif operation == "config":
+            prog.send_readoutconfig(0, "ro", timeline="default", tag="runtime")
+        elif operation == "trigger":
+            prog.trigger([0], timeline="default", tag="runtime")
+
+    prog = program(body, initialize=initialize)
+    with pytest.raises(RuntimeError, match="runtime"):
+        prog.get_time_param("runtime", "t")
+
+
+@pytest.mark.parametrize("synchronize", [False, True])
+def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait(
+    synchronize,
+):
+    def initialize(prog):
+        prog.add_dmem([40])
+        prog.declare_readout(0, length=4 / 307.2)
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        with prog.branch(by="scan", align_timeline=False) as branch, branch.case(0):
+            prog.fork("default", into="local")
+            prog.delay_timeline("duration", timeline="local")
+            prog.trigger([0], width=1 / 430.08, timeline="local")
+            if synchronize:
+                prog.join("local", into="default")
+
+    if not synchronize:
+        with pytest.raises(ValueError, match="ADC.*0.*range_hint.*sync"):
+            program(body, initialize=initialize)
+    else:
+        result = shots(program(body, initialize=initialize))
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [46, 0, 0]
+        assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0]
+
+
+def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 1)
+            self.add_reg("duration")
+            self.add_dmem([40])
+            self.declare_readout(0, length=4 / 307.2)
+
+        def _body(self, cfg):
+            self.read_dmem("duration", 0)
+            with self.branch(by="scan", align_timeline=False) as branch, branch.case(0):
+                self.fork("default", into="local")
+                self.delay_timeline("duration", timeline="local", range_hint=(30, 50))
+                self.trigger([0], width=1 / 430.08, timeline="local")
+
+    with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
+        prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
+    assert wait["TIME"] == "@56"
+    (shot,) = shots(prog)
+    assert shot.body_end_cycle - shot.start_cycle == 0
+
+
+@pytest.mark.parametrize("count", [2, "duration"])
+def test_author_register_duration_in_repeat_debits_actual_iteration_advances(count):
+    def initialize(prog):
+        prog.add_dmem([3])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", count):
+            prog.delay_timeline("duration")
+            prog.pulse(0, "p0", timeline="default")
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    result = shots(program(body, initialize=initialize))
+    expected = [3, 34, 100] if count == 2 else [3, 34, 65, 100]
+    assert [waves(s) for s in result] == [expected] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 3
+
+
+@pytest.mark.parametrize("align", [False, True])
+def test_branch_register_time_can_be_captured_from_author_entry_state(align):
+    def initialize(prog):
+        prog.add_dmem([40])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        with prog.branch(by="scan", align_timeline=align) as branch:
+            for index in range(3):
+                with branch.case(index):
+                    prog.delay_timeline("duration")
+                    prog.delay_timeline(index / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    expected = [42] * 3 if align else [40, 41, 42]
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [
+        [t] for t in expected
+    ]
+
+
+def test_hinted_register_time_name_does_not_conflict_with_repeat_counter_validation():
+    def initialize(prog):
+        prog.add_reg("time")
+
+    def body(prog):
+        prog.write_reg_op("time", "scan", "+", 10)
+        prog.delay_timeline("time", range_hint=(10, 12))
+
+    assert [
+        s.body_end_cycle - s.start_cycle
+        for s in shots(program(body, initialize=initialize))
+    ] == [10, 11, 12]
+
+
+def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
+    def initialize(prog):
+        prog.add_dmem([40])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.fork("default", into="fixed")
+        prog.delay_timeline("duration")
+        prog.pulse(0, "p0", timeline="default")
+        prog.delay_timeline(100 / 430.08, timeline="fixed")
+        prog.pulse(0, "p0", timeline="fixed")
+        prog.pulse(0, "p0", t="auto")
+
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [
+        [40, 100, 128]
+    ] * 3
+
+
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
@@ -486,20 +691,14 @@ class CustomWrite(WriteReg):
         WriteReg(dst=self.dst, src=self.value).translate(prog)
 
 
-@pytest.mark.parametrize("use", ["source", "overwrite", "lookup_index"])
-def test_custom_write_subclass_cannot_certify_time_producer_bounds(use):
+def test_custom_write_subclass_cannot_certify_table_index_bounds():
     loader = LoadValue("time", [10, 20, 30], "duration", "loaded")
 
     def body(prog):
-        if use != "source":
-            prog.write_reg("duration", 1)
+        prog.write_reg("duration", 1)
         prog.append_macro(CustomWrite(dst="duration", src=1))
-        if use == "lookup_index":
-            prog.emit(loader)
-            prog.delay_timeline("loaded")
-        else:
-            prog.delay_timeline("duration")
-            prog.delay_timeline(1 / 430.08)
+        prog.emit(loader)
+        prog.delay_timeline("loaded")
 
     with pytest.raises(
         ValueError, match="duration.*(bounds|unregistered.*instruction)"
@@ -750,12 +949,13 @@ def test_time_lookup_accepts_inclusive_index_bounds(loader_type, index):
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_time_lookup_rejects_sweep_larger_than_table(loader_type):
+@pytest.mark.parametrize("hint", [None, (5, 10)])
+def test_time_lookup_rejects_sweep_larger_than_table(loader_type, hint):
     loader = loader_type("time", [5, 10], "scan", "loaded")
 
     def body(prog):
         prog.emit(loader)
-        prog.delay_timeline("loaded")
+        prog.delay_timeline("loaded", range_hint=hint)
 
     with pytest.raises(ValueError, match=r"loaded.*scan.*allowed.*0.*1.*actual.*0.*2"):
         program(body, initialize=lambda p: p.declare(loader))

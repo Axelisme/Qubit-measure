@@ -31,7 +31,7 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
-            # dual_line_drive replaces both frequencies with the common scan.
+            # The run overrides both pulse frequencies with the common sweep.
             Slot(slot, copy=True, set={"freq": Hidden(0.0)})
             if ctx.has(slot)
             else Template(

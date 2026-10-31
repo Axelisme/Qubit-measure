@@ -59,18 +59,22 @@ from .sweep import SweepCfg
 from .utils import sweep2param
 
 
-def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None) -> int:
+def _repeat_minimum(
+    name: str | None, n: int | str, range_hint: tuple[int, int] | None
+) -> int:
     """Validate the public count contract and return its guaranteed minimum."""
     if isinstance(n, str):
+        if n == name:
+            raise ValueError("repeat count register must differ from counter")
+        if range_hint is None:
+            return 0
         if (
-            not isinstance(range_hint, tuple)
+            type(range_hint) is not tuple
             or len(range_hint) != 2
             or any(type(value) is not int or value < 0 for value in range_hint)
             or range_hint[0] > range_hint[1]
         ):
             raise ValueError("register repeat requires a valid nonnegative range_hint")
-        if n == name:
-            raise ValueError("repeat n must differ from its counter register name")
         return range_hint[0]
     if type(n) is not int or n < 0:
         raise ValueError("repeat n must be a nonnegative integer or register name")
@@ -683,6 +687,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         *,
         timeline: str | None = None,
         tag: str | None = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         """Add time to a timeline without advancing reference or channel timestamps.
 
@@ -690,11 +695,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Scalars and QickParam use us; the complete end plus t is ceiled to
         tProc cycles. In an emission, pending actual output ends are included
         before adding t as the owner post-delay. A string names an
-        existing nonnegative cycle register with compiler-known producer bounds.
-        Wait-only targets, unknown bounds and possible signed overflow raise
-        ValueError during compilation. tag exposes static ends as parameter 't';
-        runtime ends have no affine get_time_param value.
+        existing nonnegative integer-cycle register, including author-calculated
+        values. range_hint optionally guarantees an inclusive (lo, hi) cycle
+        range. With no known range, maxima execute at runtime; same-channel
+        overlap and signed overflow are the author's responsibility. Certified
+        producers and explicit hints retain finite-range checks. Hints on scalar
+        times and invalid ranges raise ValueError. Wait-only targets still fail
+        compilation. tag exposes static ends as 't'; runtime-only ends raise
+        RuntimeError from get_time_param rather than returning a bound.
         """
+        if range_hint is not None:
+            if not isinstance(t, str):
+                raise ValueError("range_hint requires a register time")
+            _repeat_minimum(None, t, range_hint)
         selected = timeline if timeline is not None else self._timeline_default
         self.append_macro(
             TimelineAdvance(
@@ -702,6 +715,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 selected if selected is not None else "default",
                 t,
                 tag=tag,
+                range_hint=range_hint,
             )
         )
 
@@ -843,8 +857,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         establish placement targets and full consumption restores placement. Only
         parent and locally forked names may be used inside. name is
         the native loop/counter name. n is a nonnegative integer or existing
-        register name. Register counts require an author-guaranteed closed
-        nonnegative integer range_hint; integer counts forbid range_hint. No
+        register name. Register counts optionally accept an author-guaranteed
+        closed nonnegative integer range_hint; integer counts forbid it. An
+        unhinted count uses runtime debits without a backedge overlap proof. No
         hardware range check is added. Invalid counts/ranges raise ValueError;
         unknown/inaccessible names fail during compile. Zero counts still sync
         the parent but discard body operations. Register-valued timeline delays
@@ -883,8 +898,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 TimelineRepeatExit(
                     self._timeline_book,
                     minimum,
-                    range_hint[1] if range_hint is not None else minimum,
-                    variable=range_hint is not None and minimum != range_hint[1],
+                    range_hint[1]
+                    if range_hint is not None
+                    else (None if variable else minimum),
+                    variable=variable
+                    and (range_hint is None or minimum != range_hint[1]),
                     iterations=n,
                     axis=name,
                 )

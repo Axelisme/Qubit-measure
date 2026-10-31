@@ -21,6 +21,7 @@ from ._timeline_expression import (
     projected_expression_bounds,
     scale_time,
     select_time,
+    unbounded_time,
 )
 from ._timeline_guard import bounds
 from .macro.dmem import DmemLookup, sweep_table_index
@@ -107,7 +108,9 @@ class RuntimeEnd:
     """Relative cycle end stored in register, with inclusive minimum/maximum.
 
     register is a compiler-owned data-register name. minimum/maximum bound the
-    value on every executable path. Arithmetic intermediates may be signed32;
+    value on every executable path. None marks an endpoint not established at
+    compile time; operations propagate unavailable bounds rather than guessing
+    a finite limit. Arithmetic intermediates may be signed32;
     final timeline ends must be nonnegative. covers lists ends proven no later than this
     value, allowing a following sync to consume them without new arithmetic.
     deferred records physical boundaries covered only after an additional proven
@@ -119,8 +122,8 @@ class RuntimeEnd:
     """
 
     register: str
-    minimum: int
-    maximum: int
+    minimum: int | None
+    maximum: int | None
     covers: tuple["Time", ...] = ()
     deferred: tuple[DeferredCoverage, ...] = ()
     expression: TimeExpression | None = None
@@ -129,7 +132,7 @@ class RuntimeEnd:
         if self.expression is None:
             value = (
                 LinearTime(self.minimum)
-                if self.minimum == self.maximum
+                if self.minimum is not None and self.minimum == self.maximum
                 else LinearTime(
                     terms=(
                         (CycleVariable(self.register, self.minimum, self.maximum), 1),
@@ -260,7 +263,9 @@ def bounded_source_expression(
         or name in prog.loop_dict
         or (register is not None and register.init is not None)
     ):
-        return source_expression(prog, name)
+        expression = source_expression(prog, name)
+        if not unbounded_time(expression):
+            return expression
     return (
         LinearTime(minimum)
         if minimum == maximum
@@ -325,10 +330,21 @@ class SelectedEventEnd:
     rounded: tuple[Time, ...] = ()
 
 
-def time_bounds(prog, value: Time) -> tuple[float, float]:
+def optional_time_bounds(prog, value: Time) -> tuple[float, float] | None:
+    """Return finite us bounds, or None for an unbounded runtime value."""
     if isinstance(value, RuntimeEnd):
+        if value.minimum is None or value.maximum is None:
+            return None
         return value.minimum / get_fclk(prog), value.maximum / get_fclk(prog)
     return bounds(value)
+
+
+def time_bounds(prog, value: Time) -> tuple[float, float]:
+    """Require finite us bounds; runtime-only inputs raise ValueError."""
+    result = optional_time_bounds(prog, value)
+    if result is None:
+        raise ValueError("runtime-only time has no compile-time bounds")
+    return result
 
 
 def known_maximum(a: Time, b: Time) -> Time | None:
@@ -456,6 +472,8 @@ class RuntimeMath(TimedMacro):
             axes = expression_axes(delta)
             points = evaluate_time(delta, axes)
             if points is not None and int(points.min()) >= 0:
+                if int(points.min()) == int(points.max()):
+                    return self.add(captured, int(points.min()) / get_fclk(self.prog))
                 return self.add(
                     captured, self.lookup([int(v) for v in points.flat], axes)
                 )
@@ -485,15 +503,50 @@ class RuntimeMath(TimedMacro):
             )
         return add_time(expression, scale_time(captured, -1))
 
-    def source(self, name: str) -> RuntimeEnd:
-        """Describe a certified register at this consumer, retaining known points."""
-        limits = self.prog._time_bounds.source(self.prog, name)
-        return RuntimeEnd(
-            name,
-            limits.minimum,
-            limits.maximum,
-            expression=source_expression(self.prog, name),
+    def source(
+        self,
+        name: str,
+        range_hint: tuple[int, int] | None = None,
+        *,
+        author: bool = False,
+    ) -> RuntimeEnd:
+        """Read cycle bounds, permitting unbounded author inputs when requested.
+
+        Hints are author guarantees, not hardware checks. Certified framework
+        sources keep their existing producer audit.
+        """
+        if not author:
+            limits = self.prog._time_bounds.source(self.prog, name)
+        else:
+            try:
+                self.prog._get_reg(name)
+            except KeyError as exc:
+                raise ValueError(f"{name}: unknown time register") from exc
+            if range_hint is not None:
+                if (
+                    name in self.prog._time_bounds.framework_sources
+                    or not self.prog._time_bounds.author_source(name)
+                    or name in self.prog.loop_dict
+                ):
+                    # A hint supplies bounds, not permission to bypass owner audits.
+                    self.prog._time_bounds.source(self.prog, name)
+                limits = CycleBounds(*range_hint)
+            elif (
+                name not in self.prog.loop_dict
+                and self.prog._time_bounds.author_source(name)
+            ):
+                limits = None
+            else:
+                limits = self.prog._time_bounds.source(self.prog, name)
+        if limits is None:
+            expression = self.prog._timeline_book.source_expressions.get(name)
+            return RuntimeEnd(name, None, None, expression=expression)
+        expression = (
+            bounded_source_expression(self.prog, name, limits.minimum, limits.maximum)
+            if range_hint is not None
+            else source_expression(self.prog, name)
         )
+        return RuntimeEnd(name, limits.minimum, limits.maximum, expression=expression)
 
     def lookup(self, values: list[int], axes: dict[str, int]) -> RuntimeEnd:
         """Materialize exact nonnegative cycle points over native sweep axes.
@@ -673,11 +726,52 @@ class RuntimeMath(TimedMacro):
 
     def check_end(self, end: Time) -> None:
         """Check an end without allocating registers for a static expression."""
-        lo, hi = time_bounds(self.prog, end)
+        limits = optional_time_bounds(self.prog, end)
+        if limits is None:
+            return
+        lo, hi = limits
         lower, upper = round(lo * get_fclk(self.prog)), round(hi * get_fclk(self.prog))
         self.check(lower, upper)
         if lower < 0:
             raise ValueError("timeline end must be nonnegative cycles")
+
+    def preprocess_time(self, value: RuntimeEnd) -> float:
+        """Supply QICK allocation metadata, not a runtime scheduling bound.
+
+        QICK requires a scalar while allocating outputs. Unbounded starts use
+        an inert placeholder; callers replace t_regs before translate and reject
+        runtime-only time getters.
+        """
+        limits = optional_time_bounds(self.prog, value)
+        return 0.0 if limits is None else limits[1]
+
+    def time_parameter(self, value: RuntimeEnd) -> QickParam:
+        """Return an exactly known affine time, never runtime allocation metadata.
+
+        A runtime-only or non-affine value cannot be returned as QickParam and
+        raises RuntimeError. This read does not alter the scheduled end.
+        """
+        expression = runtime_expression(value)
+        axes = expression_axes(expression)
+        points = evaluate_time(expression, axes)
+        if points is None:
+            raise RuntimeError(
+                "time is runtime-only; cannot evaluate it at compile time"
+            )
+        points = np.broadcast_to(points, tuple(axes.values()))
+        start = int(points.flat[0])
+        spans = {}
+        for dimension, (axis, count) in enumerate(axes.items()):
+            if count > 1:
+                index = [0] * len(axes)
+                index[dimension] = count - 1
+                spans[axis] = int(points[tuple(index)]) - start
+        parameter = QickParam(start, spans)
+        if not np.array_equal(points, parameter.to_array(axes, all_loops=True)):
+            raise RuntimeError(
+                "non-affine runtime time cannot be represented by QickParam"
+            )
+        return parameter / get_fclk(self.prog)
 
     def allocate(self) -> str:
         live = self.prog._timeline_live_registers()
@@ -701,10 +795,11 @@ class RuntimeMath(TimedMacro):
         operator: str,
         right: RuntimeEnd | int,
         *,
-        limits: tuple[int, int],
+        limits: tuple[int | None, int | None],
         target: str | None = None,
     ) -> RuntimeEnd:
-        self.check(*limits)
+        if limits[0] is not None and limits[1] is not None:
+            self.check(limits[0], limits[1])
         register = self.allocate() if target is None else target
         self.operations.append(
             WriteRegOp(
@@ -729,7 +824,7 @@ class RuntimeMath(TimedMacro):
             )
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
-            if right_minimum >= 0:
+            if right_minimum is not None and right_minimum >= 0:
                 covers = (left, *left.covers)
                 for proof in left.deferred:
                     remaining = max(0, proof.cycles - right_minimum)
@@ -770,7 +865,7 @@ class RuntimeMath(TimedMacro):
                 left,
                 "+",
                 amount,
-                limits=(left.minimum + amount, left.maximum + amount),
+                limits=self._sum_limits(left, amount),
                 target=target,
             )
         right = self.cycles(b)
@@ -780,7 +875,7 @@ class RuntimeMath(TimedMacro):
             left,
             "+",
             right,
-            limits=(left.minimum + right.minimum, left.maximum + right.maximum),
+            limits=self._sum_limits(left, right),
             target=target,
         )
 
@@ -790,15 +885,13 @@ class RuntimeMath(TimedMacro):
         left = self.cycles(a)
         if isinstance(b, (float, int)):
             amount = round(b * get_fclk(self.prog))
-            return self.op(
-                left, "-", amount, limits=(left.minimum - amount, left.maximum - amount)
-            )
+            return self.op(left, "-", amount, limits=self._sum_limits(left, -amount))
         right = self.cycles(b)
         return self.op(
             left,
             "-",
             right,
-            limits=(left.minimum - right.maximum, left.maximum - right.minimum),
+            limits=self._sum_limits(left, right, subtract=True),
         )
 
     def maximum(self, a: Time, b: Time, *, target: str | None = None) -> Time:
@@ -806,6 +899,13 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
+        if (
+            left.minimum is None
+            or left.maximum is None
+            or right.minimum is None
+            or right.maximum is None
+        ):
+            return self._unbounded_maximum(left, right, target=target)
         if left.minimum >= right.maximum:
             return a
         if right.minimum >= left.maximum:
@@ -826,6 +926,8 @@ class RuntimeMath(TimedMacro):
             target=self.scratch(0),
         )
         # Split before adding: (x + ABS(x))/2 can overflow even when max(0,x) fits.
+        if delta.minimum is None or delta.maximum is None:
+            raise RuntimeError("bounded maximum lost its interval")
         if delta.minimum == -(2**31):
             raise ValueError("timeline ABS may overflow signed 32-bit cycles")
         absolute = self.scratch(1)
@@ -904,6 +1006,68 @@ class RuntimeMath(TimedMacro):
             choose_time(runtime_expression(left), runtime_expression(right)),
         )
 
+    @staticmethod
+    def _sum_limits(
+        left: RuntimeEnd, right: RuntimeEnd | int, *, subtract: bool = False
+    ) -> tuple[int | None, int | None]:
+        lo = right.minimum if isinstance(right, RuntimeEnd) else right
+        hi = right.maximum if isinstance(right, RuntimeEnd) else right
+        if left.minimum is None or left.maximum is None or lo is None or hi is None:
+            return None, None
+        return (
+            (left.minimum - hi, left.maximum - lo)
+            if subtract
+            else (left.minimum + lo, left.maximum + hi)
+        )
+
+    def _unbounded_maximum(
+        self, left: RuntimeEnd, right: RuntimeEnd, *, target: str | None
+    ) -> RuntimeEnd:
+        """Emit max without interval shortcuts; signed overflow is author-owned."""
+        destination = self.allocate() if target is None else target
+        delta = self.op(left, "-", right, limits=(None, None), target=self.scratch(0))
+        absolute = self.scratch(1)
+        self.operations.append(
+            AsmInst(
+                inst={
+                    "CMD": "REG_WR",
+                    "DST": self.prog._get_reg(absolute),
+                    "SRC": "op",
+                    "OP": f"ABS {self.prog._get_reg(delta.register)}",
+                },
+                addr_inc=1,
+            )
+        )
+        # Divide before adding to avoid the unnecessary 2*x intermediate.
+        half = self.op(delta, "ASR", 1, limits=(None, None), target=self.scratch(2))
+        abs_half = self.op(
+            RuntimeEnd(absolute, None, None),
+            "ASR",
+            1,
+            limits=(None, None),
+            target=absolute,
+        )
+        remainder = self.op(
+            delta, "-", half, limits=(None, None), target=self.scratch(0)
+        )
+        parity = self.op(
+            remainder, "-", half, limits=(None, None), target=self.scratch(0)
+        )
+        total = self.op(
+            half, "+", abs_half, limits=(None, None), target=self.scratch(2)
+        )
+        positive = self.op(
+            total, "+", parity, limits=(None, None), target=self.scratch(2)
+        )
+        result = self.op(right, "+", positive, limits=(None, None), target=destination)
+        return RuntimeEnd(
+            result.register,
+            None,
+            None,
+            (left, right, *left.covers, *right.covers),
+            expression=choose_time(runtime_expression(left), runtime_expression(right)),
+        )
+
     def floor(self, end: Time, advance: Time) -> Time:
         key = (id(end), id(advance))
         if key not in self.floors:
@@ -924,9 +1088,13 @@ class RuntimeMath(TimedMacro):
             return 0.0
         if not isinstance(end, RuntimeEnd) and not isinstance(advance, RuntimeEnd):
             return self.maximum(0.0, end - advance)
-        _, hi = time_bounds(self.prog, end)
-        a_lo, _ = time_bounds(self.prog, advance)
-        if hi <= a_lo + 1e-12:
+        limits = optional_time_bounds(self.prog, end)
+        advance_limits = optional_time_bounds(self.prog, advance)
+        if (
+            limits is not None
+            and advance_limits is not None
+            and limits[1] <= advance_limits[0] + 1e-12
+        ):
             return 0.0
         delta = self.subtract(end, advance)
         return self.maximum(0.0, delta, target=delta.register)

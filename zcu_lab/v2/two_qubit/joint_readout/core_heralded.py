@@ -241,8 +241,6 @@ class JointReadoutHeraldedExp(
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset))
             builder.emit(readout, tag="herald")
-            # wait for herald/reset to finish before the branch-selected preparation
-            builder.sync()
             builder.fork("default", into=["f1", "f2"])
             with (
                 builder.branch(

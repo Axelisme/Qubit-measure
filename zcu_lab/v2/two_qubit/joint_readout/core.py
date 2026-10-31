@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import Field, field_serializer, model_validator
+from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -43,44 +43,6 @@ PREPARED_LABELS = tuple(f"{f1},{f2}" for f1, f2 in PREPARED_STATES)
 OUTCOME_LABELS = tuple(
     f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
-
-
-class GECenters(ConfigBase):
-    """Existing GE centers in normalized raw ADC units, with no radius cut.
-
-    Centers must be finite and distinct. Equidistant shots classify as G. This
-    nearest-center partition retains every acquired shot, including thermal and
-    higher-level contributions; it cannot identify leakage.
-    """
-
-    g: Annotated[
-        complex,
-        FieldMeta(
-            label="Ground center",
-            unit="normalized IQ",
-            description="填入 singleshot/ge 取得的 ground-state complex IQ center。",
-        ),
-    ]
-    e: Annotated[
-        complex,
-        FieldMeta(
-            label="Excited center",
-            unit="normalized IQ",
-            description="填入 singleshot/ge 取得的 excited-state complex IQ center。",
-        ),
-    ]
-
-    @field_serializer("g", "e")
-    def serialize_center(self, value: complex) -> str:
-        """Encode complex centers in cfg JSON without losing quadratures."""
-        return str(value)
-
-    @model_validator(mode="after")
-    def validate_centers(self) -> Self:
-        """Reject absent (by required fields), nonfinite or coincident centers."""
-        if not np.isfinite(self.g) or not np.isfinite(self.e) or self.g == self.e:
-            raise ValueError("GE centers must be finite and distinct")
-        return self
 
 
 class JointReadoutCfg(ConfigBase):
@@ -258,8 +220,6 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             x180_f2 = Pulse("x180_f2", config.x180_f2)
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset))
-            # wait for herald/reset to finish before the branch-selected preparation
-            builder.sync()
             builder.fork("default", into=["f1", "f2"])
             with (
                 builder.branch(

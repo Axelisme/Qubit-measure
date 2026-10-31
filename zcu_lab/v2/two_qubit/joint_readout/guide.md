@@ -18,7 +18,7 @@ F1 and F2 each require a circle classifier **with radius** in their readout tone
 
 Each shot starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. One program sweeps two hardware axes, `prepared_f1` outside `prepared_f2`. Each axis uses 0 for g (I) and 1 for e (Xπ), giving row order gg, ge, eg, ee.
 
-After reset finishes, the program forks into F1 and F2 timelines. Each timeline has an aligned branch that emits its Xπ only for case 1; case 0 is empty. Both Xπ pulses start together for ee. The timelines join before terminal readout, so all preparations have the same readout start time. Without reset, preparations act on the thermal ensemble.
+The program forks directly into F1 and F2 timelines after optional reset, without an extra sync. The forked timelines inherit the reset end. Each timeline has an aligned branch that emits its Xπ only for case 1; case 0 is empty. Both Xπ pulses start together for ee. The timelines join before terminal readout, so all preparations have the same readout start time. Without reset, preparations act on the thermal ensemble.
 
 `reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
 
