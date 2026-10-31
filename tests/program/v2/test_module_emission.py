@@ -161,7 +161,7 @@ def test_repeat_emissions_keep_independent_tags_and_actual_end_spacing():
 
     def body(prog):
         prog.emit(pulse, tag="before")
-        with prog.repeat("r", 2):
+        with prog.repeat("r", 2, advance_ref=True):
             prog.emit(pulse, tag="inside")
         prog.emit(pulse, tag="after")
 

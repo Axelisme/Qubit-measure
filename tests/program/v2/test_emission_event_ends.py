@@ -554,7 +554,7 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
         prog.add_loop("fine", 3)
 
     def body(prog):
-        with prog.repeat("outer", 2), prog.repeat("inner", 2):
+        with prog.repeat("outer", 2, advance_ref=True), prog.repeat("inner", 2, advance_ref=True):
             prog.emit(pulse)
 
     prog = _program([pulse], body, initialize)

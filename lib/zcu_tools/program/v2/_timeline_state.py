@@ -318,6 +318,31 @@ class RepeatFrame:
             prog.set_timestamp(value, ro_ch=ch)
 
 
+@dataclass
+class LoopTimelineFrame:
+    """One reference-preserving Repeat's accumulator and isolated namespace.
+
+    parent is the visible loop timeline. external/waiting restore outer names.
+    entry is its incoming end; origin adds an opaque iteration-progress identity.
+    initial_channels/native retain incoming physical tails and their provenance.
+    entry_math initializes shot-local storage before the loop. pinned restores
+    register liveness at exit. starts records managed starts and branch paths
+    for the backedge proof, in relative integer cycles.
+    """
+
+    parent: str
+    external: dict[str, Time]
+    waiting: set[str]
+    entry: Time
+    origin: RuntimeEnd
+    progress: CycleVariable
+    initial_channels: dict[tuple[bool, int], Time]
+    initial_native: dict[tuple[bool, int], TimeExpression]
+    entry_math: RuntimeMath
+    pinned: set[str]
+    starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class BranchProvenance:
     """Register and channel expressions captured at the same branch position.
@@ -369,6 +394,8 @@ class TimelineBook:
         self.native_expressions: dict[tuple[bool, int], TimeExpression] = {}
         self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
+        self.loop_timelines: list[LoopTimelineFrame] = []
+        self.case_path: list[tuple[str, int]] = []
         self.native_only = False
         self.reference_guards = 0
         self.used: set[str] | None = None
@@ -529,6 +556,8 @@ class TimelineBook:
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
+        if self.loop_timelines:
+            raise ValueError("cannot advance reference inside advance_ref=False; use delay_timeline or advance_ref=True instead")
         if self.used is not None or self.reference_guards:
             raise ValueError("cannot advance reference; use delay_timeline instead")
 

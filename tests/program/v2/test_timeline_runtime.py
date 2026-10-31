@@ -262,7 +262,7 @@ def test_author_register_duration_in_repeat_debits_actual_iteration_advances(cou
         prog.read_dmem("duration", 0)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", count):
+        with prog.repeat("r", count, advance_ref=True):
             prog.delay_timeline("duration")
             prog.pulse(0, "p0", timeline="default")
         prog.join("external", into="default")
@@ -331,7 +331,7 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", "duration", range_hint=(1, 3)):
+        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
             prog.delay_timeline(15 / 430.08)
         prog.join("external", into="default")
         prog.pulse(0, "p0", timeline="default")
@@ -469,7 +469,7 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(
             prog.pulse(0, "p0", timeline="default")
 
         if inside_repeat:
-            with prog.repeat("twice", 2):
+            with prog.repeat("twice", 2, advance_ref=True):
                 selected()
         else:
             selected()
@@ -548,7 +548,7 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
             prog.pulse(1, "p1", t=0)
 
         if inside_repeat:
-            with prog.repeat("twice", 2):
+            with prog.repeat("twice", 2, advance_ref=True):
                 selected()
         else:
             selected()
@@ -666,7 +666,7 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
         with (
             prog.repeat(
                 "r",
-                "duration" if register_count else 2,
+                "duration" if register_count else 2, advance_ref=True,
                 range_hint=(1, 3) if register_count else None,
             ),
             prog.branch(by="scan", align_timeline=True) as branch,
@@ -689,7 +689,7 @@ def test_register_timeline_time_inside_repeat_preserves_legal_pulse_backedge():
 
     def body(prog):
         prog.emit(loader)
-        with prog.repeat("r", 2):
+        with prog.repeat("r", 2, advance_ref=True):
             prog.delay_timeline("loaded")
             prog.pulse(0, "p0", timeline="default")
 
@@ -703,7 +703,7 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", 2), prog.branch(by="scan", align_timeline=True) as branch:
+        with prog.repeat("r", 2, advance_ref=True), prog.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
                     prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
@@ -721,7 +721,7 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
 @pytest.mark.parametrize("overlap", [False, True])
 def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overlap):
     def body(prog):
-        with prog.repeat("r", 2), prog.branch(by="scan", align_timeline=True) as branch:
+        with prog.repeat("r", 2, advance_ref=True), prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
                 with branch.case(i) as case:
                     prog.fork(case, into="raw")
@@ -747,7 +747,7 @@ def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding()
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
         prog.pulse(1, "p1", timeline="external")
-        with prog.repeat("r", "duration", range_hint=(1, 3)):
+        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
             prog.delay_timeline(5 / 430.08)
 
     result = shots(program(body))
@@ -865,7 +865,7 @@ def test_custom_native_subclass_writes_do_not_restrict_non_time_words(custom_wri
 def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
-        with prog.repeat("r", "duration", range_hint=(1, 3)):
+        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
         prog.pulse(0, "p0", timeline="default")
 
@@ -884,7 +884,7 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")
         prog.delay_timeline(external_cycles / 430.08, timeline="external")
-        with prog.repeat("r", "duration", range_hint=(1, 3)):
+        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
             prog.delay_timeline(1 / 430.08)
         prog.fork("external", into="working")
         if overwrite_before_branch:
@@ -933,7 +933,7 @@ def test_unregistered_translate_writer_invalidates_constant_time_proof(location)
                         if i == 1:
                             prog.append_macro(OverwriteTime())
         elif location == "backedge":
-            with prog.repeat("r", 2):
+            with prog.repeat("r", 2, advance_ref=True):
                 prog.append_macro(OverwriteTime())
 
     with pytest.raises(ValueError, match="duration.*unregistered.*instruction"):
@@ -955,7 +955,7 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works():
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", "duration", range_hint=(1, 3)):
+        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
@@ -1066,7 +1066,7 @@ def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
     def body(prog):
         prog.write_reg("duration", 0)
         if where == "backedge":
-            with prog.repeat("r", 2):
+            with prog.repeat("r", 2, advance_ref=True):
                 lookup(prog)
                 prog.write_reg("duration", 3)
         elif where == "branch":

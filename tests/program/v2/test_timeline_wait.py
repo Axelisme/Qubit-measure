@@ -487,7 +487,7 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
             self.delay_timeline("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
             self.delay_timeline(-200 / 430.08)
-            with self.repeat("repeat", "count_cycles", range_hint=(1, 3)):
+            with self.repeat("repeat", "count_cycles", advance_ref=True, range_hint=(1, 3)):
                 self.delay_timeline(10 / 430.08)
 
     with pytest.warns(
@@ -514,7 +514,7 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
             self.emit(counts)
             self.write_reg("duration", 10)
             self.trigger(ros=[0], width=1 / 430.08)
-            with self.repeat("inner", "count_cycles", range_hint=(0, 1)):
+            with self.repeat("inner", "count_cycles", advance_ref=True, range_hint=(0, 1)):
                 self.write_reg("duration", 20)
             self.delay_timeline("duration")
 
@@ -553,7 +553,7 @@ def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection
 
         def _body(self, cfg):
             self.trigger(ros=[0], width=1 / 430.08)
-            with self.repeat("inner", 2):
+            with self.repeat("inner", 2, advance_ref=True):
                 self.emit(delays)
                 self.delay_timeline("delay_cycles")
             if reuse_after:
@@ -576,7 +576,7 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
             self.declare_readout(0, length=50 / 307.2)
 
         def _body(self, cfg):
-            with self.repeat("inner", 2):
+            with self.repeat("inner", 2, advance_ref=True):
                 self.emit(delays)
                 self.delay_timeline(60 / 430.08)
                 self.trigger(ros=[0], width=1 / 430.08, timeline="default")
@@ -815,11 +815,11 @@ class MixedWaitProgram(TimelineProgramV2):
                             self.read(timeline=case)
                         self.delay_timeline(delay / 430.08)
         if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
-            with self.repeat("fixed", recipe.fixed_count):
+            with self.repeat("fixed", recipe.fixed_count, advance_ref=True):
                 if recipe.read_at == "fixed":
                     self.read()
                 self.delay_timeline(recipe.loop_delay / 430.08)
-            with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
+            with self.repeat("runtime", "count_cycles", advance_ref=True, range_hint=(0, 3)):
                 if recipe.read_at == "runtime":
                     self.read()
                 self.delay_timeline(recipe.loop_delay / 430.08)

@@ -53,7 +53,7 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
 def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
     def body(p):
         p.trigger([0], t=0)
-        with p.repeat("outer", 2), p.repeat("inner", 2):
+        with p.repeat("outer", 2, advance_ref=True), p.repeat("inner", 2, advance_ref=True):
             p.pulse(0, "p", timeline="default", tag="repeated")
 
     prog, env = program(body, trigger_time=None)
@@ -83,7 +83,7 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
     def body(p):
         p.trigger([0], t=0)
         p.emit(loader)
-        with p.repeat("inner", "count", range_hint=(0, 2)):
+        with p.repeat("inner", "count", advance_ref=True, range_hint=(0, 2)):
             p.pulse(0, "p", timeline="default", tag="repeated")
         p.pulse(0, "p", tag="final")
 
@@ -145,7 +145,7 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
             p.emit(loader)
         with p.repeat(
             "inner",
-            "count" if register_count else count,
+            "count" if register_count else count, advance_ref=True,
             **({"range_hint": (0, 3)} if register_count else {}),
         ):
             p.trigger([0], t=0)
@@ -183,7 +183,7 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
 
     def body(p):
         p.emit(loader)
-        with p.repeat("inner", "count", range_hint=(1, 3)):
+        with p.repeat("inner", "count", advance_ref=True, range_hint=(1, 3)):
             p.trigger([0], t=0)
             p.pulse(0, "p", timeline="default")
 
@@ -235,7 +235,7 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
     def body(p):
         p.emit(loader)
-        with p.repeat("inner", "count", range_hint=(0, 2)):
+        with p.repeat("inner", "count", advance_ref=True, range_hint=(0, 2)):
             p.trigger([0], t=0)
             p.pulse(0, "p", timeline="default")
 
@@ -271,7 +271,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.repeat("reads", 3), p.branch(by="scan", align_timeline=True) as branch:
+        with p.repeat("reads", 3, advance_ref=True), p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index) as case:
                     p.fork(case, into="capture")

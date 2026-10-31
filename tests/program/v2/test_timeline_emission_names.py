@@ -122,7 +122,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
     def lower(prog):
         name = prog.emission_name("loop")
         names.append(name)
-        with prog.repeat(name, 2):
+        with prog.repeat(name, 2, advance_ref=True):
             prog.delay_timeline(1 / 430.08)
 
     module = LoweringModule("loop_owner", lower)
@@ -130,7 +130,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
     def body(prog):
         prog.emit(module)
         if native_loop == "repeat":
-            with prog.repeat(names[0], 1):
+            with prog.repeat(names[0], 1, advance_ref=True):
                 prog.delay_timeline(1 / 430.08)
         else:
             prog.open_loop(1, name=names[0])

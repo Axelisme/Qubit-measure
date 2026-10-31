@@ -148,7 +148,7 @@ def test_branch_rejects_reference_advances_at_build(
             elif operation == "sync":
                 program.sync()
             else:
-                with program.repeat("inner", 0 if operation == "zero-repeat" else 2):
+                with program.repeat("inner", 0 if operation == "zero-repeat" else 2, advance_ref=True):
                     program.delay_timeline(0.1)
 
     message = "Repeat.*outside.*branch" if "repeat" in operation else "delay_timeline"
@@ -284,9 +284,9 @@ def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     readout = _readout()
     builder.emit(readout, tag="before")
-    with builder.repeat("outer", 2):
+    with builder.repeat("outer", 2, advance_ref=True):
         builder.emit(readout, tag="outer_read")
-        with builder.repeat("inner", 3):
+        with builder.repeat("inner", 3, advance_ref=True):
             builder.delay_timeline(0.1)
             builder.emit(readout, tag="inner_read")
     builder.emit(readout, tag="after")
@@ -298,9 +298,9 @@ def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
 
         def _body(self, cfg):
             self.emit(readout, tag="before")
-            with self.repeat("outer", 2):
+            with self.repeat("outer", 2, advance_ref=True):
                 self.emit(readout, tag="outer_read")
-                with self.repeat("inner", 3):
+                with self.repeat("inner", 3, advance_ref=True):
                     self.delay_timeline(0.1)
                     self.emit(readout, tag="inner_read")
             self.emit(readout, tag="after")
@@ -316,7 +316,7 @@ def test_builder_branch_timeline_delays_inside_repeat_match_native(mock_soccfg):
     builder.add_loop("scan", 2)
     readout = _readout()
     with (
-        builder.repeat("pairs", 2),
+        builder.repeat("pairs", 2, advance_ref=True),
         builder.branch(by="scan", align_timeline=True) as branch,
     ):
         with branch.case(0):
@@ -336,7 +336,7 @@ def test_builder_branch_timeline_delays_inside_repeat_match_native(mock_soccfg):
 
         def _body(self, cfg):
             with (
-                self.repeat("pairs", 2),
+                self.repeat("pairs", 2, advance_ref=True),
                 self.branch(by="scan", align_timeline=True) as branch,
             ):
                 with branch.case(0):
@@ -390,7 +390,7 @@ def test_builder_fork_emit_join_matches_native_and_captures_target_names(mock_so
 def test_builder_build_requires_closed_recording_contexts(mock_soccfg, structure):
     builder = v2.TimelineBuilder(mock_soccfg)
     if structure == "repeat":
-        context = builder.repeat("body", 2)
+        context = builder.repeat("body", 2, advance_ref=True)
     elif structure == "branch":
         context = builder.branch(by="scan", align_timeline=True)
     else:
@@ -414,17 +414,17 @@ def _invalid_structure(
 ) -> None:
     if scenario == "external-repeat":
         program.fork("default", into="external")
-        with program.repeat("body", 2):
+        with program.repeat("body", 2, advance_ref=True):
             program.delay_timeline(0.1, timeline="external")
     elif scenario == "expired-local":
-        with program.repeat("body", 2):
+        with program.repeat("body", 2, advance_ref=True):
             program.fork("default", into="local")
         program.sync(timeline="local")
     elif scenario == "negative-repeat":
-        with program.repeat("body", -1):
+        with program.repeat("body", -1, advance_ref=True):
             pass
     elif scenario == "fixed-range":
-        with program.repeat("body", 2, range_hint=(1, 2)):
+        with program.repeat("body", 2, advance_ref=True, range_hint=(1, 2)):
             pass
     elif scenario == "unknown-join":
         program.join("missing", into="default")
@@ -486,7 +486,7 @@ def test_builder_repeat_rebases_external_end_and_expires_local_names(
     builder.fork("default", into=["external", "parent"])
     builder.delay_timeline(2.0, timeline="external")
     builder.delay_timeline(0.1, timeline="parent")
-    with builder.repeat("body", count, timeline="parent"):
+    with builder.repeat("body", count, advance_ref=True, timeline="parent"):
         builder.fork("parent", into="local")
         builder.emit(readout, timeline="local")
     builder.fork("parent", into="local")
@@ -502,7 +502,7 @@ def test_builder_repeat_rebases_external_end_and_expires_local_names(
             self.fork("default", into=["external", "parent"])
             self.delay_timeline(2.0, timeline="external")
             self.delay_timeline(0.1, timeline="parent")
-            with self.repeat("body", count, timeline="parent"):
+            with self.repeat("body", count, advance_ref=True, timeline="parent"):
                 self.fork("parent", into="local")
                 self.emit(readout, timeline="local")
             self.fork("parent", into="local")
@@ -525,7 +525,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
     builder.emit(loader)
     builder.fork("default", into="external")
     builder.delay_timeline(2.0, timeline="external")
-    with builder.repeat("body", "n", range_hint=(2, 3)):
+    with builder.repeat("body", "n", advance_ref=True, range_hint=(2, 3)):
         builder.emit(readout)
     builder.join("external", into="default")
     builder.emit(readout)
@@ -541,7 +541,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
             self.emit(loader)
             self.fork("default", into="external")
             self.delay_timeline(2.0, timeline="external")
-            with self.repeat("body", "n", range_hint=(2, 3)):
+            with self.repeat("body", "n", advance_ref=True, range_hint=(2, 3)):
                 self.emit(readout)
             self.join("external", into="default")
             self.emit(readout)
@@ -632,7 +632,7 @@ def test_builder_freezes_after_build(mock_soccfg, operation):
         "sync": builder.sync,
         "fork": lambda: builder.fork("default", into="later"),
         "join": lambda: builder.join("default", into="default"),
-        "repeat": lambda: builder.repeat("later", 2),
+        "repeat": lambda: builder.repeat("later", 2, advance_ref=True),
         "branch": lambda: builder.branch(by="later", align_timeline=True),
         "timeline": lambda: builder.timeline("default"),
     }
@@ -1222,7 +1222,7 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
         with program.timeline("work"):
             program.delay_timeline(0.1)
             with (
-                program.repeat("body", 2),
+                program.repeat("body", 2, advance_ref=True),
                 program.branch(by="scan", align_timeline=True) as branch,
             ):
                 with branch.case(0):
@@ -1231,7 +1231,7 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
                 with branch.case(1):
                     program.delay_timeline(0.3)
                     program.emit(readout, timeline=None)
-            with program.repeat("override", 2, timeline="default"):
+            with program.repeat("override", 2, advance_ref=True, timeline="default"):
                 program.delay_timeline(0.05, timeline="default")
         program.emit(readout)
 
@@ -1244,7 +1244,7 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
             self.fork("default", into="work")
             self.delay_timeline(0.1, timeline="work")
             with (
-                self.repeat("body", 2, timeline="work"),
+                self.repeat("body", 2, advance_ref=True, timeline="work"),
                 self.branch(by="scan", align_timeline=True, timeline="work") as branch,
             ):
                 with branch.case(0) as case:
@@ -1253,7 +1253,7 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
                 with branch.case(1) as case:
                     self.delay_timeline(0.3, timeline=case)
                     self.emit(readout, timeline=case)
-            with self.repeat("override", 2, timeline="default"):
+            with self.repeat("override", 2, advance_ref=True, timeline="default"):
                 self.delay_timeline(0.05, timeline="default")
             self.emit(readout, timeline="default")
 
@@ -1274,7 +1274,7 @@ def test_timeline_scope_requires_a_currently_declared_name_even_when_empty(
     def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         name = "" if scenario == "empty-name" else "work"
         if scenario == "expired":
-            with program.repeat("body", 1):
+            with program.repeat("body", 1, advance_ref=True):
                 program.fork("default", into=name)
         with program.timeline(name):
             pass

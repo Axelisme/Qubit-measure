@@ -473,7 +473,7 @@ def test_readout_snapshot_labels_semantic_owner_and_author_children(native, form
 
         def _body(self, cfg):
             if form == "repeat":
-                with self.repeat("control", 2):
+                with self.repeat("control", 2, advance_ref=True):
                     self.emit(readout)
             else:
                 for module in modules:

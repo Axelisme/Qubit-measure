@@ -46,6 +46,7 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
+from ._timeline_repeat import LoopTimelineEnter, LoopTimelineExit
 from ._timeline_runtime import RuntimeEnd
 from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
@@ -866,13 +867,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         and differing Branch advances are supported. Native delay_reg_auto inside
         the body raises ValueError; it is not a timeline duration operation.
         """
-        if any(cases.active for cases in self._branch_cases):
+        if type(advance_ref) is not bool:
+            raise ValueError("advance_ref must be a bool")
+        if advance_ref and any(cases.active for cases in self._branch_cases):
             raise ValueError(
                 "move Repeat outside the branch: its entry and backedge advance reference"
             )
         selected = timeline if timeline is not None else self._timeline_default
         timeline = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)
+        if not advance_ref:
+            with self._repeat_timeline(name, n, timeline, range_hint, minimum):
+                yield
+            return
         if n == 0:
             self.sync(timeline=timeline)
             start = len(self.macro_list)
@@ -911,6 +918,36 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 self.close_inner_loop(name, name, n)
             elif fixed_loop is not None:
                 self.append_macro(fixed_loop.closing)
+
+    @contextmanager
+    def _repeat_timeline(
+        self, name: str, n: int | str, timeline: str,
+        range_hint: tuple[int, int] | None, minimum: int,
+    ) -> Generator[None]:
+        if n == 0:
+            start = len(self.macro_list)
+            try:
+                with self.timeline(timeline):
+                    yield
+            finally:
+                del self.macro_list[start:]
+            return
+        entry = LoopTimelineEnter(self._timeline_book, timeline, name if isinstance(n, str) else None)
+        self.append_macro(entry)
+        fixed = FixedRepeatLoop(name, n) if isinstance(n, int) else None
+        if fixed is None:
+            self.open_inner_loop(name, name, n, range_hint=range_hint)
+        else:
+            self.append_macro(fixed)
+        try:
+            with self.timeline(timeline):
+                yield
+        finally:
+            self.append_macro(LoopTimelineExit(entry, n, minimum, range_hint[1] if range_hint is not None else (n if isinstance(n, int) else None)))
+            if isinstance(n, str):
+                self.close_inner_loop(name, name, n)
+            elif fixed is not None:
+                self.append_macro(fixed.closing)
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).
