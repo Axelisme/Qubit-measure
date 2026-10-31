@@ -26,7 +26,7 @@ def test_record_metadata_uses_workflow_identity_and_delivered_attempt(
         started_at=datetime(2026, 10, 22, 1, 2, 3, tzinfo=UTC),
         finished_at=datetime(2026, 10, 22, 1, 2, 5, tzinfo=UTC),
         device_snapshot={"flux": {"value": 0.125}},
-        outcome="partial" if stopped else "completed",
+        outcome="completed",
         reason=None,
         stopped=stopped,
     )

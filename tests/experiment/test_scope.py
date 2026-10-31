@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 from zcu_tools import experiment
-from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 
 if TYPE_CHECKING:

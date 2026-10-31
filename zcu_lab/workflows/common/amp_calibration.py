@@ -204,21 +204,18 @@ async def calibrate_amp_rabi(
     trace = None
     accepted_gain = None
     pi2_gain = None
-    if isinstance(outcome, Failed):
-        amp = replace(amp, reason=outcome.reason)
+    save_native(
+        outcome,
+        scope.dir / "amp-rabi.h5",
+        spec=AmpRabiExp.AXES_SPEC,
+        snapshot=env.snapshot,
+        identity=scope.identity,
+    )
+    amp = replace(amp, file="amp-rabi.h5")
+    if outcome.stop_requested:
+        amp = replace(amp, status="rejected", reason="stopped")
     else:
-        save_native(
-            outcome,
-            scope.dir / "amp-rabi.h5",
-            spec=AmpRabiExp.AXES_SPEC,
-            snapshot=env.snapshot,
-            identity=scope.identity,
-        )
-        amp = replace(amp, file="amp-rabi.h5")
-        if outcome.stop_requested:
-            amp = replace(amp, status="rejected", reason="stopped")
-        else:
-            amp, trace = _analyze_completed(outcome.value.result, amp, settings, guess)
+        amp, trace = _analyze_completed(outcome.value.result, amp, settings, guess)
     if amp.status == "accepted":
         accepted_gain = (
             None

@@ -383,12 +383,10 @@ async def calibrate_len_rabi(
         requested_sweep=cfg.length,
         planned_sweep=(
             None
-            if isinstance(outcome, Failed) or outcome.value.cfg is None
+            if outcome.value.cfg is None
             else outcome.value.cfg.length
         ),
     )
-    if isinstance(outcome, Failed):
-        return RabiStageResult(record=replace(diagnostics, reason=outcome.reason))
     # Save before fitting, so rejected fits retain their native trace.
     save_native(
         outcome,
@@ -637,10 +635,6 @@ async def calibrate_readout(
     )
     outcome = await scope.run(FreqGainExp().run, cfg, name="readout")
     observe_operation(env.summary, outcome)
-    if isinstance(outcome, Failed):
-        return ReadoutResult(
-            "failed", outcome.reason, None, None, None, tuple(gain_clamped)
-        )
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
         outcome,

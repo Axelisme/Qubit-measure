@@ -245,18 +245,19 @@ def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:
     assert terminal.value.pending_request_id is None
 
 
-def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
+def test_caught_run_exception_does_not_poison_the_next_operation(
     rig: Rig,
 ) -> None:
     engine, paths, _devices = rig
-    outcomes: list[w.Completed[RunRecord[Cfg, int]] | w.Failed] = []
+    outcomes: list[w.Completed[RunRecord[Cfg, int]]] = []
     tokens: list[bool] = []
+    cause = OSError("first acquire failed")
+    caught: list[OSError] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         tokens.append(context.scope.stop.is_set())
         if len(tokens) == 1:
-            cause = OSError("first acquire failed")
-            context.scope.stop.set_error("failed", str(cause), cause)
+            raise cause
         return 42
 
     @w.workflow("recover", "A recoverable acquire failure permits an authored retry")
@@ -266,7 +267,10 @@ def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            outcomes.append(await iteration.run(acquire, Cfg()))
+            try:
+                await iteration.run(acquire, Cfg())
+            except OSError as error:
+                caught.append(error)
             outcomes.append(await iteration.run(acquire, Cfg()))
         finally:
             iterations.close()
@@ -274,11 +278,9 @@ def test_recoverable_acquire_failure_does_not_poison_the_next_operation(
     start(engine, paths, script)
     final = engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    assert isinstance(outcomes[0], w.Failed)
-    assert outcomes[0].reason == "first acquire failed"
-    assert isinstance(outcomes[1], w.Completed), (
-        "A new operation must not inherit handled acquire failure"
-    )
+    assert caught == [cause]
+    assert caught[0] is cause
+    assert outcomes[0].value.result == 42
     assert tokens == [False, False]
 
 

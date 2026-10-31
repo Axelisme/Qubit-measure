@@ -6,7 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.mux.t1.core import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
@@ -226,13 +225,6 @@ async def measure_mux_t1(
     )
     record = await scope.run(MuxT1Exp().run, cfg, name="Mux T1")
     observe_operation(env.summary, record)
-    if isinstance(record, Failed):
-        return MuxT1StageResult(
-            qubits=tuple(
-                QubitFitResult(index=index, status="failed", reason=record.reason)
-                for index in cfg.participants
-            )
-        )
     save_native(
         record,
         scope.dir / "t1.h5",
@@ -343,13 +335,6 @@ async def measure_mux_echo(
     )
     record = await scope.run(MuxT2EchoExp().run, cfg, name="Mux Echo")
     observe_operation(env.summary, record)
-    if isinstance(record, Failed):
-        return MuxEchoStageResult(
-            qubits=tuple(
-                QubitFitResult(index=index, status="failed", reason=record.reason)
-                for index in cfg.participants
-            )
-        )
     save_native(
         record,
         scope.dir / "t2echo.h5",

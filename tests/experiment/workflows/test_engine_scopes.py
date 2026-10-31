@@ -96,11 +96,8 @@ def test_workflow_scope_ack_status_and_partial_facts(
         assert [
             [operation.outcome for operation in record.operations] for record in records
         ] == [
-            [
-                "partial",
-                "partial" if scope in {"iteration", "workflow"} else "completed",
-            ],
-            ["partial" if scope == "workflow" else "completed"],
+            ["completed", "completed"],
+            ["completed"],
         ]
     finally:
         rig.close()

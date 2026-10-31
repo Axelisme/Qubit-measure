@@ -382,12 +382,22 @@ class ScriptHost:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
             with self._lock:
-                result = self._root.cancel(selector, expected=expected)
-                if result.cancelled and self._active is not None:
-                    self._active_stop_requested = True
-                return result
+                return self._root.cancel(
+                    selector, expected=expected, on_cancel=self._record_cancel
+                )
 
         return self._command(stop, allow_idle=True)
+
+    def _record_cancel(self, target: Scope) -> None:
+        if self._active is None:
+            return
+        active_path, target_path = self._active.path, target.path
+        if (
+            active_path == target_path
+            or active_path.startswith(target_path + "/")
+            or target_path.startswith(active_path + "/")
+        ):
+            self._active_stop_requested = True
 
     def _cancel_root(
         self, selector: str | None, *, expected: int | None
@@ -400,7 +410,9 @@ class ScriptHost:
                     return CancelResult(False, "sequence mismatch", self.active_path)
                 self._root.stop.set()
             else:
-                result = self._root.cancel(selector, expected=expected)
+                result = self._root.cancel(
+                    selector, expected=expected, on_cancel=self._record_cancel
+                )
                 if not result.cancelled:
                     return result
             if self._active is not None:

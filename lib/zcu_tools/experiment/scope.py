@@ -358,7 +358,12 @@ class Scope:
         return nodes
 
     def cancel(
-        self, scope: str, *, expected: int | None = None, reason: str | None = None
+        self,
+        scope: str,
+        *,
+        expected: int | None = None,
+        reason: str | None = None,
+        on_cancel: Callable[[Scope], None] | None = None,
     ) -> CancelResult:
         """Atomically select and stop a live subtree, never its parent.
 
@@ -368,6 +373,10 @@ class Scope:
         refuse without stopping anything. Invalid syntax raises ValueError.
         reason is optional opaque text forwarded to the selected stop subtree;
         it does not change the acknowledgement's reason or selector matching.
+        on_cancel, when supplied, synchronously receives the unique selected
+        Scope before its stop bit is set, under the scope lock. Refused selectors
+        do not invoke it. If it raises, the original exception propagates without
+        setting stop. The callback must not block or change scope topology.
         """
         label, sequence = parse_cancel_scope(scope, expected)
         if label == "run" and self.kind != "run":
@@ -398,6 +407,8 @@ class Scope:
                 return CancelResult(
                     False, "ambiguous", path, [node.path for node in matches]
                 )
+            if on_cancel is not None:
+                on_cancel(matches[0])
             matches[0].stop.set(reason=reason)
             return CancelResult(True, "scope cancellation requested", path)
 
