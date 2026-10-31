@@ -149,8 +149,12 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
             raise cause
         return raw
 
+    update_failed = False
+
     def update(_data: NDArray) -> None:
-        if ending == "update":
+        nonlocal update_failed
+        if ending == "update" and not update_failed:
+            update_failed = True
             raise cause
 
     with (
@@ -161,7 +165,7 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
             run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=lambda: observed.append(True)), convert)
         if ending != "interrupt":
             assert caught.value is cause
-        assert producer.calls == 1
+        assert producer.calls == (3 if ending == "failure" else 1)
         assert observed == []
         assert root.active_path == sched.scope.path
         assert all(bar.closed for bar in bars)
