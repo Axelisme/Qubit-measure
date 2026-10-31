@@ -149,11 +149,16 @@ def test_external_placement_reuses_runtime_control_storage(branch_after):
 
     unused, placed = build(False), build(True)
     assert len(placed.reg_dict) == len(unused.reg_dict) <= 16
-    # Three-case dispatch may own jump addresses, never extra time-table words.
+    # Repeat unrolling and Branch may own dispatch words, never time tables.
     unused_data, placed_data = unused.compile_datamem(), placed.compile_datamem()
     assert (0 if unused_data is None else len(unused_data)) == (
         0 if placed_data is None else len(placed_data)
-    ) == (3 if branch_after else 0)
+    )
+    for prog, memory in ((unused, unused_data), (placed, placed_data)):
+        if memory is not None:
+            assert set(int(word) for word in memory) <= {
+                int(str(address).lstrip("&")) for address in prog.labels.values()
+            }
 
 
 def test_repeat_fixed_point_matches_explicit_native_reference_loop():
