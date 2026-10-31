@@ -33,13 +33,13 @@ class ScalarConsumer(Module):
     @override
     def lower(self, prog, *, timeline, tag):
         parent = "default" if timeline is None else timeline
-        prog.sync(timeline=parent)
+        prog.delay_by_timeline(timeline=parent)
         if self.register != "output":
             prog.write_reg("output", self.register)
         prog.asm_inst(
             {"CMD": "DPORT_WR", "DST": "0", "SRC": "reg", "DATA": "r10", "TIME": "@0"}
         )
-        prog.delay_timeline(self.register, timeline=parent)
+        prog.timeline_inc(self.register, timeline=parent)
 
 
 def analyze(prog: TimelineProgramV2) -> ir.TimingAnalysis:
@@ -68,7 +68,7 @@ def compile_scan(
         def _body(self, cfg):
             if timeline != "default":
                 self.fork("default", into=timeline)
-            self.delay_timeline(prefix, timeline=timeline)
+            self.timeline_inc(prefix, timeline=timeline)
             for _ in range(emissions):
                 self.emit(scan, timeline=timeline)
 
@@ -158,9 +158,11 @@ def compile_fixed_lookup(loader: LoadValue, consumer: ScalarConsumer):
             self.declare(consumer)
 
         def _body(self, cfg):
+            self.delay_by_timeline()
             with self.repeat("scan_count", 3):
                 self.emit(loader)
                 self.emit(consumer)
+                self.delay_by_timeline()
 
     return Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
 

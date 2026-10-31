@@ -3,10 +3,12 @@
 # tolerated(file-size): Branch/Repeat preparation shares TimelineBook frame and
 # provenance state; snapshot/restore wiring must follow the same preparation order.
 
+import warnings
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from fractions import Fraction
 
 from qick.asm_v2 import (
     CondJump,
@@ -21,8 +23,9 @@ from qick.asm_v2 import (
     WriteReg,
 )
 
+from ._timeline_axis import CycleAxis
 from ._timeline_bounds import CycleBounds, FixedLoopIndex
-from ._timeline_expression import CycleVariable, time_variables
+from ._timeline_expression import time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -31,6 +34,7 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
+from ._timeline_repeat import LoopTimelineEnter, LoopTimelineExit
 from ._timeline_runtime import (
     DeferredCoverage,
     EventEnd,
@@ -39,10 +43,10 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     align_end,
-    known_maximum,
+    ceil_tick,
+    optional_time_bounds,
     source_expression,
     step_time,
-    time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import (
@@ -61,6 +65,10 @@ from .modules.util import get_fclk
 class TimelineFork(Macro):
     """Copy one declared end to fresh names at this preprocessing position."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: str, targets: tuple[str, ...]):
         self.book = book
         self.source = source
@@ -71,7 +79,10 @@ class TimelineFork(Macro):
         end = self.book.end(self.source)
         if len(set(self.targets)) != len(self.targets) or any(
             name in self.book.ends
-            or any(name in frame.external for frame in self.book.repeats)
+            or any(
+                name in frame.external
+                for frame in [*self.book.repeats, *self.book.loop_timelines]
+            )
             for name in self.targets
         ):
             raise ValueError("fork requires new, distinct timeline names")
@@ -84,6 +95,10 @@ class TimelineFork(Macro):
 class TimelineJoin(Macro):
     """Merge existing ends without emitting instructions or consuming sources."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, sources: tuple[str, ...], into: str):
         self.book = book
         self.sources = sources
@@ -91,11 +106,13 @@ class TimelineJoin(Macro):
 
     def preprocess(self, prog) -> None:
         super().preprocess(prog)
-        end = self.book.end(self.into)
-        for source in self.sources:
-            end = self.book.math.maximum(end, self.book.end(source))
+        end = self.book.math.join(
+            [
+                self.book.end(self.into),
+                *(self.book.end(source) for source in self.sources),
+            ]
+        )
         self.book.ends[self.into] = end
-        self.book.waiting.discard(self.into)
 
     def translate(self, prog) -> None:
         pass
@@ -104,16 +121,15 @@ class TimelineJoin(Macro):
 class TimelineRuntimeAdvance(Macro):
     """Guard all ends against the static part of an unknown nonnegative advance."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: DelayRegAuto):
         self.book = book
         self.source = source
 
     def preprocess(self, prog) -> None:
-        if self.book.repeats:
-            raise ValueError(
-                "repeat per-iteration reference advance cannot be expressed at compile time "
-                "when using a runtime register delay"
-            )
         auto = self.book.channel_maximum(
             prog, gens=self.source.gens, ros=self.source.ros
         )
@@ -129,7 +145,15 @@ class TimelineRuntimeAdvance(Macro):
         if isinstance(auto, RuntimeEnd):
             self.source.t_regs["auto_t"] = auto.register
         remaining = [
-            self.book.math.floor(end, advance) for end in self.book.ends.values()
+            self.book.math.floor(end, advance)
+            for end in [
+                *self.book.ends.values(),
+                *(
+                    end
+                    for frame in [*self.book.repeats, *self.book.loop_timelines]
+                    for end in frame.external.values()
+                ),
+            ]
         ]
         if all(
             not isinstance(end, RuntimeEnd) and _bounds(end)[1] <= 1e-12
@@ -147,6 +171,10 @@ class TimelineRuntimeAdvance(Macro):
 class TimelineBoundary(Macro):
     """Reset preprocessing state or emit a linked IR timing boundary."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, section: str):
         self.book = book
         self.section = section
@@ -156,16 +184,18 @@ class TimelineBoundary(Macro):
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
             self.book.cycle_axes.clear()
-            self.book.sweep_indices.clear()
             self.book.source_expressions.clear()
             self.book.branch_provenance.clear()
             self.book.shell_wait_bound = None
-            self.book.waiting.clear()
             self.book.repeats.clear()
+            self.book.loop_timelines.clear()
+            self.book.case_path.clear()
             self.book.native_only = False
+            self.book.reference_guards = 0
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
             self.book.native_expressions.clear()
+            self.book.native_length_sources.clear()
             self.book.pinned.clear()
         elif self.section == "body_end":
             self.book.check_shell_wait(prog)
@@ -180,6 +210,10 @@ class TimelineBoundary(Macro):
 class TimelineShellWait(Wait):
     """Project only the final WAIT literal, leaving native reference debits alone."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, t: float):
         super().__init__(t=t, auto=True, gens=False, ros=True, no_warn=True)
         self.book = book
@@ -193,26 +227,39 @@ class TimelineShellWait(Wait):
 
 
 class TimelineAdvance(TimedMacro):
-    def __init__(self, book, timeline, duration, *, tag=None, aligned=False):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(
+        self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None
+    ):
         super().__init__(tag=tag)
         self.book = book
         self.timeline = timeline
         self.duration = duration
+        self.range_hint = range_hint
         self.aligned = aligned
         self.event_ends: tuple[EventEnd | SelectedEventEnd, ...] = ()
 
     def preprocess(self, prog) -> None:
         if isinstance(self.duration, str):
-            duration = self.book.math.snapshot(self.book.math.source(self.duration))
+            duration = self.book.math.snapshot(
+                self.book.math.source(self.duration, self.range_hint, author=True)
+            )
         else:
-            duration = step_time(prog, self.duration) if self.aligned else self.duration
-        previous = self.book.end(self.timeline, placement=True)
+            duration = (
+                step_time(prog, self.duration)
+                if self.aligned or isinstance(self.duration, QickParam)
+                else self.duration
+            )
+        previous = self.book.end(self.timeline)
         events = self._events(previous)
-        end = self._finish(prog, events[0], duration)
-        for event in events[1:]:
-            # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
-            end = self.book.math.maximum(end, self._finish(prog, event, duration))
-        self.book.set_end(self.timeline, self.book.math.maximum(0.0, end))
+        # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
+        end = self.book.math.join(
+            [0.0, *(self._finish(prog, event, duration) for event in events)]
+        )
+        self.book.set_end(self.timeline, end)
         self.resolved_time = end
 
     def _events(self, previous: Time) -> list[EventEnd | SelectedEventEnd]:
@@ -242,8 +289,8 @@ class TimelineAdvance(TimedMacro):
                 lo, hi = _bounds(event.offset - candidate.offset)
                 if lo >= -1e-12 or hi <= 1e-12:
                     larger = event if lo >= -1e-12 else candidate
-                    events[index] = EventEnd(
-                        larger.origin, larger.offset, candidate.rounded + event.rounded
+                    events[index] = replace(
+                        larger, rounded=candidate.rounded + event.rounded
                     )
                     break
             else:
@@ -255,6 +302,15 @@ class TimelineAdvance(TimedMacro):
     def _finish_selected(self, event: SelectedEventEnd, duration: Time) -> RuntimeEnd:
         if isinstance(duration, RuntimeEnd):
             raise ValueError("selected post aggregate requires a scalar or swept post")
+        if (
+            isinstance(duration, (float, int))
+            and duration == 0
+            and all(
+                isinstance(post, (float, int)) and post == 0 for post in event.posts
+            )
+        ):
+            # The physical selection already materialized this exact aggregate.
+            return self.book.math.cycles(event.rounded[0])
         offsets = tuple(
             offset + post + duration
             for offset, post in zip(event.offsets, event.posts, strict=True)
@@ -265,13 +321,15 @@ class TimelineAdvance(TimedMacro):
             physical_offsets = tuple(event.origin + offset for offset in event.offsets)
             completed_offsets = tuple(event.origin + offset for offset in offsets)
         if isinstance(event.origin, RuntimeEnd):
-            selected = self.book.math.selected_end(event.selector, completed_offsets)
+            selected = self.book.math.selected_end(
+                event.selector, completed_offsets, native=event.native
+            )
             selected_result = self.book.math.add(
                 event.origin, selected, target=selected.register
             )
         else:
             selected_result = self.book.math.selected_end(
-                event.selector, completed_offsets
+                event.selector, completed_offsets, native=event.native
             )
         debt = self.book.math.coverage_debt(physical_offsets, completed_offsets)
         if debt == 0:
@@ -296,13 +354,36 @@ class TimelineAdvance(TimedMacro):
                 registers.append(value)
             else:
                 fractional += value
-        result: Time = fractional if self.aligned else align_end(prog, fractional)
+        static_cycles = event.static_cycles
+        if static_cycles is None and isinstance(event.offset, (float, int)):
+            static_cycles = Fraction(str(event.offset)) * Fraction(str(get_fclk(prog)))
+        if (
+            static_cycles is not None
+            and not isinstance(duration, (RuntimeEnd, QickParam))
+            and not isinstance(event.origin, QickParam)
+        ):
+            origin = (
+                0
+                if isinstance(event.origin, RuntimeEnd)
+                else round(event.origin * get_fclk(prog))
+            )
+            duration_cycles = Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
+            exact = static_cycles + origin + duration_cycles
+            # Apply the shared float-noise policy only to the complete aggregate.
+            result: Time = ceil_tick(float(exact)) / get_fclk(prog)
+        else:
+            result = (
+                fractional
+                if self.aligned
+                else align_end(prog, fractional, event.native)
+            )
         for register in registers:
             result = self.book.math.add(register, result)
         if (
             isinstance(result, RuntimeEnd)
             and event.rounded
-            and time_bounds(prog, duration)[0] >= 0
+            and (limits := optional_time_bounds(prog, duration)) is not None
+            and limits[0] >= 0
         ):
             covers = [*result.covers, *event.rounded]
             for previous in event.rounded:
@@ -318,7 +399,7 @@ class TimelineAdvance(TimedMacro):
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
         if isinstance(self.resolved_time, RuntimeEnd):
-            raise RuntimeError("runtime timeline end is not an affine time parameter")
+            return self.book.math.time_parameter(self.resolved_time)
         return (
             self.resolved_time
             if isinstance(self.resolved_time, QickParam)
@@ -330,33 +411,59 @@ class TimelineAdvance(TimedMacro):
 
 
 class TimelineSync(Delay):
+    """Advance reference to a selected end and debit the tracked remaining ends.
+
+    Args:
+        book: The program's TimelineBook, which supplies relative ends and
+            records their remaining times after reference advances.
+        timeline: A declared timeline name to select its end, or None to select
+            the maximum of all timeline ends via book.maximum().
+        sources: None keeps the timeline selection. A tuple of declared names
+            instead selects their maximum with zero, replacing that selection
+            rather than adding to it; an empty tuple selects zero. The initial
+            timeline selection is still resolved before this override.
+        close_adc: False leaves ADC selection unchanged. True lets the existing
+            all-timeline shot closure include actual ADC ends with no compile-time
+            upper bound. It only affects book.maximum() when timeline is None;
+            sources, when supplied, still overrides the selected end. This flag
+            is for shot closure, not ordinary author delay_by_timeline. Finite ADC tails keep
+            the constant shell WAIT and its slack checks.
+    """
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,
         timeline: str | None,
         *,
         sources: tuple[str, ...] | None = None,
+        close_adc: bool = False,
     ):
         super().__init__(t=0, auto=False)
         self.book = book
         self.timeline = timeline
         self.sources = sources
+        self.close_adc = close_adc
 
     def preprocess(self, prog) -> None:
         self.t = (
-            self.book.maximum()
+            self.book.maximum(close_adc=self.close_adc)
             if self.timeline is None
             else self.book.end(self.timeline)
         )
         if self.sources is not None:
-            self.t = 0.0
-            for name in self.sources:
-                self.t = self.book.math.maximum(self.t, self.book.end(name))
+            self.t = self.book.math.join(
+                [0.0, *(self.book.end(name) for name in self.sources)]
+            )
         if isinstance(self.t, RuntimeEnd):
             self.t_regs["t"] = self.t.register
             self.book.native_only = True
             try:
-                prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
+                if self.t.minimum is not None:
+                    prog.decrement_timestamps(self.t.minimum / get_fclk(prog))
             finally:
                 self.book.native_only = False
             self.book.decrement(self.t)
@@ -364,20 +471,22 @@ class TimelineSync(Delay):
             super().preprocess(prog)
 
 
-class TimelineRepeatEnter(TimelineSync):
-    """Synchronize the parent, then isolate this iteration's local namespace."""
+class ZeroEntryReferenceEnter(Macro):
+    """Isolate the constant-zero loop namespace without moving reference."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, timeline: str, counter: str | None = None):
-        super().__init__(book, timeline)
+        self.book = book
+        self.timeline = timeline
         self.counter = counter
 
     def preprocess(self, prog) -> None:
-        super().preprocess(prog)
         if self.counter is not None:
             prog.add_reg(self.counter)
         parent = self.timeline
-        if parent is None:
-            raise ValueError("repeat requires a parent timeline")
         external = self.book.ends.copy()
         del external[parent]
         initial_external = external.copy()
@@ -385,7 +494,6 @@ class TimelineRepeatEnter(TimelineSync):
             RepeatFrame(
                 parent,
                 external,
-                self.book.waiting.copy(),
                 {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
                 {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
                 pulse_guards={ch: _PulseGuard(ch) for ch in prog.gen_chs},
@@ -399,23 +507,26 @@ class TimelineRepeatEnter(TimelineSync):
             )
         )
         self.book.ends = {parent: 0.0}
-        self.book.waiting.clear()
 
 
-class TimelineRepeatExit(TimelineSync):
-    """Close one iteration, then rebase the outer namespace by all iterations."""
+class ZeroEntryReferenceExit(Macro):
+    """Restore outer ends using only the body's explicit reference advances."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(
         self,
         book: TimelineBook,
         count: int,
-        maximum: int,
+        maximum: int | None,
         *,
         variable: bool = False,
         iterations: int | str = 1,
         axis: str,
     ):
-        super().__init__(book, None)
+        self.book = book
         self.axis = axis
         self.iterations = iterations
         self.count = count
@@ -423,15 +534,10 @@ class TimelineRepeatExit(TimelineSync):
         self.variable = variable
 
     def preprocess(self, prog) -> None:
-        super().preprocess(prog)
         frame = self.book.repeats.pop()
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
-        for ch, guard in frame.pulse_guards.items():
-            repeated = guard.repeated(self.count, self.maximum)
-            repeated.require((frame.native_gens[ch],), repeated.limits)
-            if self.book.repeats:
-                self.book.repeats[-1].pulse_guards[ch].then(repeated)
+        self._check_pulse_guards(frame)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(
@@ -458,7 +564,6 @@ class TimelineRepeatExit(TimelineSync):
             self.book.repeats[-1].written_gens.update(frame.written_gens)
             self.book.repeats[-1].written_ros.update(frame.written_ros)
         self.book.ends = frame.external
-        self.book.waiting = frame.waiting
         # Pulse summaries already include every inner iteration's debit.
         static: dict[str, Time] = {
             name: end
@@ -468,26 +573,23 @@ class TimelineRepeatExit(TimelineSync):
         runtime: dict[str, Time] = {}
         for name, end in self.book.ends.items():
             if isinstance(end, RuntimeEnd):
-                upper = time_bounds(prog, frame.initial_external[name])[1]
+                limits = optional_time_bounds(prog, frame.initial_external[name])
                 debit = _bounds(frame.advance)[0] * self.count
+                upper = (
+                    None
+                    if limits is None
+                    else max(0, round((limits[1] - debit) * get_fclk(prog)))
+                )
                 runtime[name] = (
-                    RuntimeEnd(
-                        end.register, 0, max(0, round((upper - debit) * get_fclk(prog)))
-                    )
+                    RuntimeEnd(end.register, 0, upper)
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
                 )
         self.book.ends = static
         self.book.decrement(frame.advance * self.count, observe_pulses=False)
         self.book.ends.update(runtime)
-        if variable:
-            self.book.waiting.update(
-                name
-                for name, end in self.book.ends.items()
-                if time_bounds(prog, end)[1] > 1e-12
-            )
-            if self.book.repeats:
-                self.book.repeats[-1].variable = True
+        if variable and self.book.repeats:
+            self.book.repeats[-1].variable = True
         self.book.ends[frame.parent] = 0.0
         self._restore_native(prog, frame, variable=variable)
         frame.restore_expressions(
@@ -497,6 +599,17 @@ class TimelineRepeatExit(TimelineSync):
             generated_ros,
             axis=self.axis,
         )
+
+    def _check_pulse_guards(self, frame: RepeatFrame) -> None:
+        """Validate bounded backedges and propagate author-owned unknown segments."""
+        for ch, guard in frame.pulse_guards.items():
+            if self.maximum is None:
+                repeated = _PulseGuard(ch, unbounded=True)
+            else:
+                repeated = guard.repeated(self.count, self.maximum)
+                repeated.require((frame.native_gens[ch],), repeated.limits)
+            if self.book.repeats:
+                self.book.repeats[-1].pulse_guards[ch].then(repeated)
 
     def _restore_native(self, prog, frame: RepeatFrame, *, variable: bool) -> None:
         for tails, initial, current, written, generator in (
@@ -519,7 +632,7 @@ class TimelineRepeatExit(TimelineSync):
                 for ch, end in tails.items():
                     upper = (
                         end.maximum
-                        if ch in written
+                        if ch in written or end.maximum is None
                         else max(
                             0,
                             end.maximum
@@ -542,10 +655,161 @@ class TimelineRepeatExit(TimelineSync):
             for ch, end in current.items():
                 self.book.native_timestamp(
                     prog,
-                    time_bounds(prog, end)[1],
+                    end,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
+
+
+class RepeatLoweringEnter(Macro):
+    """Choose one lowering from recorded structure and the incoming end."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(self, book: TimelineBook, parent: str, counter: str | None):
+        self.book = book
+        self.parent = parent
+        self.tail_sync = False
+        self.reference = ZeroEntryReferenceEnter(book, parent, counter)
+        self.accumulator = LoopTimelineEnter(book, parent, counter)
+        self.constant = False
+        self.counter = counter
+        self.iterations: int | str = 0
+        self.maximum: int | None = None
+        self.counter_writers: tuple[Macro, ...] = ()
+
+    def preprocess(self, prog) -> None:
+        self.defined = prog._time_bounds.defined.copy()
+        if self.counter is not None:
+            maximum = self.maximum
+            # Only a certified count supplies an implicit finite index range.
+            # Arbitrary author counts retain their runtime-only contract.
+            if (
+                maximum is None
+                and isinstance(self.iterations, str)
+                and not prog._time_bounds.author_source(self.iterations)
+            ):
+                maximum = prog._time_bounds.describe(prog, self.iterations).maximum
+            if maximum is not None:
+                prog._time_bounds.register(
+                    self.counter,
+                    CycleBounds(0, max(0, maximum - 1)),
+                    self.counter_writers,
+                    (),
+                )
+        incoming = self.book.end(self.parent)
+        self.constant = (
+            self.tail_sync
+            and not isinstance(incoming, RuntimeEnd)
+            and _bounds(incoming) == (0.0, 0.0)
+        )
+        if self.tail_sync and not self.constant:
+            warnings.warn(
+                "Repeat entry is not constant zero; add delay_by_timeline() before the loop to avoid a tail register",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.constant:
+            self.reference.preprocess(prog)
+        else:
+            self.accumulator.preprocess(prog)
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class RepeatTimelineBody(Macro):
+    """Capture an iteration origin only when body clobbers require recovery."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(self, entry: RepeatLoweringEnter):
+        self.entry = entry
+
+    def preprocess(self, prog) -> None:
+        del prog  # QICK's override keeps the public keyword parameter name.
+        if not self.entry.constant:
+            frame = self.entry.accumulator.frame
+            self.entry.book.math.operations.append(
+                WriteReg(dst=frame.origin.register, src="s_out_time")
+            )
+            frame.recording = True
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class RepeatTimelineCapture(Macro):
+    """Capture the pointer after the loop, including the zero-iteration path."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(self, entry: RepeatLoweringEnter):
+        self.entry = entry
+
+    def preprocess(self, prog) -> None:
+        # The native closing shell leaves the counter at n, outside its body's
+        # zero-based index range. Do not export that proof past the backedge.
+        if self.entry.counter is not None:
+            prog._time_bounds.defined.discard(self.entry.counter)
+        if not self.entry.constant:
+            accumulator = self.entry.accumulator
+            self.entry.book.math.operations.append(
+                WriteReg(dst=accumulator.frame.origin.register, src="s_out_time")
+            )
+            self.entry.book.math.operations.extend(accumulator.post_operations)
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class RepeatLoweringExit(Macro):
+    """Close the selected lowering without adding an implicit synchronization."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(
+        self,
+        entry: RepeatLoweringEnter,
+        iterations: int | str,
+        minimum: int,
+        maximum: int | None,
+        axis: str,
+    ):
+        self.entry = entry
+        self.iterations = iterations
+        self.minimum = minimum
+        self.accumulator = LoopTimelineExit(
+            entry.accumulator, iterations, minimum, maximum
+        )
+        self.reference = ZeroEntryReferenceExit(
+            entry.book,
+            minimum,
+            maximum,
+            variable=isinstance(iterations, str)
+            and (maximum is None or minimum != maximum),
+            iterations=iterations,
+            axis=axis,
+        )
+
+    def preprocess(self, prog) -> None:
+        if self.entry.constant:
+            self.reference.preprocess(prog)
+        else:
+            self.accumulator.preprocess(prog)
+        if self.minimum == 0:
+            prog._time_bounds.defined.intersection_update(self.entry.defined)
+
+    def translate(self, prog) -> None:
+        pass
 
 
 class ModuleEmission(TimedMacro):
@@ -553,23 +817,22 @@ class ModuleEmission(TimedMacro):
 
     owner is the borrowed declaration object, macros are fresh native operations,
     and tag identifies this occurrence's first timed operation in get_time_param.
-    emission_name identifies this occurrence in timing-resource errors.
     Construction and timing placement are owned by TimelineProgramV2.emit.
     """
 
-    def __init__(
-        self, owner: Module, macros: list[Macro], tag: str | None, *, emission_name: str
-    ):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
         super().__init__(tag=tag)
-        self.emission_name = emission_name
         self.owner = owner
         self.macros = macros
         self.finishers: list[PreparedTimelineMacro] = []
 
     def preprocess(self, prog) -> None:
         """Collect actual ends at a common origin; an advance adds post then rounds."""
-        previous_owner = prog._timing_table_owner
-        prog._timing_table_owner = self.emission_name
+        previous_guards = prog._timeline_book.reference_guards
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
             self.finishers = []
@@ -601,7 +864,7 @@ class ModuleEmission(TimedMacro):
                 finisher.preprocess(prog)
                 self.finishers.append(finisher)
         finally:
-            prog._timing_table_owner = previous_owner
+            prog._timeline_book.reference_guards = previous_guards
 
     def translate(self, prog) -> None:
         """Translate lowered operations through the program's shared compiler."""
@@ -623,8 +886,41 @@ class ModuleEmission(TimedMacro):
         return []
 
 
+class ReferenceGuard(Macro):
+    """Mark the start/end of reference-preserving module lowering.
+
+    timeline is the parent placement target. Enter validates it even for empty
+    groups. enter=True starts the protected region; False closes it.
+    ModuleEmission also restores depth when a child fails during preprocessing.
+    """
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(self, book: TimelineBook, timeline: str, *, enter: bool):
+        self.book = book
+        self.timeline = timeline
+        self.enter = enter
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        if self.enter:
+            self.book.end(self.timeline)
+            self.book.reference_guards += 1
+        else:
+            self.book.reference_guards -= 1
+
+    def translate(self, prog) -> None:
+        pass
+
+
 class NativeTimelineDelay(TimedMacro):
     """Keep QICK auto-delay channel selection while consuming runtime tails."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, source: Delay):
         super().__init__(tag=getattr(source, "tag", None))
@@ -660,6 +956,10 @@ class NativeTimelineDelay(TimedMacro):
 class PreparedTimelineMacro(TimedMacro):
     """Keep cycle arithmetic at the native operation's execution position."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: Macro):
         super().__init__(tag=getattr(source, "tag", None))
         self.book = book
@@ -670,12 +970,6 @@ class PreparedTimelineMacro(TimedMacro):
         )
 
     def preprocess(self, prog) -> None:
-        if self.book.used is not None and isinstance(
-            self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)
-        ):
-            raise ValueError(
-                "branch cases cannot advance reference; use delay_timeline instead"
-            )
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
         previous_origin = prog._time_origin
@@ -701,6 +995,8 @@ class PreparedTimelineMacro(TimedMacro):
                 prog._time_bounds.time_parameters(timing_source)
             prog._time_bounds.activate(self.source)
             self.book.observe_write(prog, self.source)
+            if self.book.loop_timelines and self.book.loop_timelines[-1].recording:
+                self.book.loop_timelines[-1].body_math.append(self.math)
         finally:
             prog._time_origin = previous_origin
             self.book.preparing -= 1
@@ -739,6 +1035,10 @@ class FixedRepeatLoop(MarkedOpenLoop):
     this loop is nested inside a module emission rather than in loop_dict.
     """
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, name: str, count: int):
         super().__init__(name=name, n=count)
         self.index = FixedLoopIndex(name, name, count)
@@ -755,6 +1055,10 @@ class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
 
 
 class TimeProducer(Macro):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         register: str,
@@ -792,15 +1096,18 @@ class TimeProducer(Macro):
 class BranchCases:
     """Collect native macro lists without executing any case at build time."""
 
-    def __init__(self, prog):
+    def __init__(self, prog, by: str):
         self.prog = prog
+        self.by = by
         self.cases: dict[int, list[Macro]] = {}
         self.active = False
 
     @contextmanager
-    def case(self, index: int) -> Generator[None]:
+    def case(self, index: int) -> Generator[str]:
         """Record the zero-based selector point; omitted points do nothing.
 
+        Yield the implicit timeline name <by>[<index>], which shadows the
+        surrounding default. Only it and its local forks are accessible.
         Cases may be declared in any order. Duplicate indices and nested cases
         raise ValueError. Non-integer or out-of-range indices fail at compile.
         """
@@ -810,8 +1117,10 @@ class BranchCases:
             raise ValueError(f"duplicate branch case index: {index}")
         self.active = True
         start = len(self.prog.macro_list)
+        name = f"{self.by}[{index}]"
         try:
-            yield
+            with self.prog.timeline(name):
+                yield name
         finally:
             self.cases[index] = self.prog.macro_list[start:]
             del self.prog.macro_list[start:]
@@ -835,8 +1144,8 @@ def _same_times(values: Sequence[Time]) -> bool:
 class BranchCaseState:
     """Retain one prepared path for timeline/native end and proof merging.
 
-    ends maps live timeline names to reference-relative ends; waiting contains
-    wait-only names and used contains names accessed by this case. runtime_gens
+    ends maps live timeline names to reference-relative ends; used contains
+    names accessed by this case. runtime_gens
     and runtime_ros hold runtime native channel tails, while gens and ros hold
     their static QICK timestamps. provenance pairs register/channel expressions.
     frames captures active Repeat guard and advance state. defined contains
@@ -845,7 +1154,6 @@ class BranchCaseState:
     """
 
     ends: dict[str, Time]
-    waiting: set[str]
     used: set[str]
     runtime_gens: dict[int, RuntimeEnd]
     runtime_ros: dict[int, RuntimeEnd]
@@ -857,6 +1165,10 @@ class BranchCaseState:
 
 
 class TimelineBranch(Macro):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,
@@ -865,12 +1177,14 @@ class TimelineBranch(Macro):
         name: str,
         *,
         align_timeline: bool,
+        timeline: str,
     ):
         self.book = book
         self.by = by
+        self.timeline = timeline
         self.align_timeline = align_timeline
         self.indexed_cases = cases
-        # Producer and parallel-effect audits visit declared bodies before prepare.
+        # Producer audits visit declared bodies before prepare.
         self.cases: list[list[Macro]] = list(cases.values())
         self.name = name
         self.prepared: list[list[PreparedTimelineMacro]] = []
@@ -887,10 +1201,10 @@ class TimelineBranch(Macro):
                     f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
                 )
         self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
+        self.book.end(self.timeline)
         initial = self.book.ends.copy()
         self._capture_entry(prog, initial)
         self.book.begin_branch_sources(prog)
-        waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
         initial_ros = {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs}
         runtime_gens, runtime_ros = (
@@ -908,20 +1222,18 @@ class TimelineBranch(Macro):
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
-        for case in self.cases:
+        for index, case in enumerate(self.cases):
             self._restore_frames(frames)
             prog._time_bounds.defined = initial_defined.copy()
-            self.book.ends, self.book.waiting = initial.copy(), waiting.copy()
             self.book.runtime_gens, self.book.runtime_ros = (
                 runtime_gens.copy(),
                 runtime_ros.copy(),
             )
-            self.book.used = set()
             for ch, value in initial_gens.items():
                 self.book.native_timestamp(prog, value, gen_ch=ch)
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
-            self.prepared.append(self._prepare_case(prog, case))
+            self.prepared.append(self._prepare_case(prog, case, index, initial))
             states.append(self._capture_case(prog))
             self.book.pinned.update(prog._timeline_live_registers())
         states = self._record_case_sources(prog, states)
@@ -935,7 +1247,7 @@ class TimelineBranch(Macro):
         )
         results = [{name: state.ends[name] for name in initial} for state in states]
         self.book.finish_branch_sources(prog, self.by)
-        self.book.used, self.book.waiting = outer_used, waiting
+        self.book.used = outer_used
         self.tails = [RuntimeMath(prog) for _ in results]
         self.result_math = RuntimeMath(prog)
         used = set.union(*(state.used & initial.keys() for state in states))
@@ -956,13 +1268,30 @@ class TimelineBranch(Macro):
 
     def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
         self.entry_math = RuntimeMath(prog)
-        self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
+        self.entry_inputs: dict[CycleAxis, RuntimeEnd] = {}
         if self.align_timeline:
-            for register in prog._time_bounds.defined:
-                expression = source_expression(prog, register)
+            registers = prog._time_bounds.defined | self.book.source_expressions.keys()
+            registers |= {
+                macro.iterations
+                for case in self.cases
+                for macro in case
+                if isinstance(macro, (LoopTimelineExit, RepeatLoweringExit))
+                and isinstance(macro.iterations, str)
+            }
+            for register in registers:
+                expression = (
+                    self.entry_math.source(register, author=True).expression
+                    if register not in self.book.source_expressions
+                    and prog._time_bounds.author_source(register)
+                    and register not in prog.loop_dict
+                    else source_expression(prog, register)
+                )
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
-                    if not variable.axes and variable.points is None:
+                    if not variable.producer.axes or (
+                        variable.producer.points is not None
+                        and variable.name in prog.reg_dict
+                    ):
                         self.entry_inputs[variable] = self.entry_math.snapshot(
                             RuntimeEnd(
                                 variable.name,
@@ -991,26 +1320,33 @@ class TimelineBranch(Macro):
                 self.book.ends[name] = initial[name]
             elif not self.align_timeline:
                 self.book.ends[name] = self._merge_values(prog, values, force=True)
-            elif any(isinstance(value, RuntimeEnd) for value in values):
-                self.book.ends[name] = self.result_math.reconstruct_maximum(
+            else:
+                self.book.ends[name] = self.result_math.join(
                     values, self.entry_inputs, self.captured_ends
                 )
-            else:
-                end = values[0]
-                for value in values[1:]:
-                    end = self.result_math.maximum(end, value)
-                self.book.ends[name] = end
 
-    def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
+    def _prepare_case(
+        self, prog, case: list[Macro], index: int, initial: dict[str, Time]
+    ) -> list[PreparedTimelineMacro]:
+        case_name = f"{self.by}[{index}]"
+        # Hide all outer names while the implicit fork and its local forks live.
+        self.book.ends = {case_name: initial[self.timeline]}
+        self.book.used = set()
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
-        for macro in prepared:
-            macro.preprocess(prog)
+        self.book.case_path.append((self.by, index))
+        try:
+            for macro in prepared:
+                macro.preprocess(prog)
+        finally:
+            self.book.case_path.pop()
+        case_end = self.book.end(case_name)
+        self.book.ends = {**initial, self.timeline: case_end}
+        self.book.used = {self.timeline}
         return prepared
 
     def _capture_case(self, prog) -> BranchCaseState:
         return BranchCaseState(
             self.book.ends.copy(),
-            self.book.waiting.copy(),
             (self.book.used or set()).copy(),
             self.book.runtime_gens.copy(),
             self.book.runtime_ros.copy(),
@@ -1033,7 +1369,7 @@ class TimelineBranch(Macro):
 
     def _restore_case(self, prog, state: BranchCaseState) -> None:
         self._restore_frames(state.frames)
-        self.book.ends, self.book.waiting = state.ends.copy(), state.waiting.copy()
+        self.book.ends = state.ends.copy()
         self.book.used = state.used.copy()
         self.book.runtime_gens = state.runtime_gens.copy()
         self.book.runtime_ros = state.runtime_ros.copy()
@@ -1048,11 +1384,13 @@ class TimelineBranch(Macro):
     def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
         if not force and _same_times(values):
             return values[0]
-        limits = [time_bounds(prog, value) for value in values]
+        limits = [optional_time_bounds(prog, value) for value in values]
+        finite = [limit for limit in limits if limit is not None]
+        bounded = len(finite) == len(limits)
         merged = RuntimeEnd(
-            prog.add_reg(),
-            round(min(lo for lo, _ in limits) * get_fclk(prog)),
-            round(max(hi for _, hi in limits) * get_fclk(prog)),
+            self.result_math.allocate(),
+            round(min(lo for lo, _ in finite) * get_fclk(prog)) if bounded else None,
+            round(max(hi for _, hi in finite) * get_fclk(prog)) if bounded else None,
             expression=self.book.selected_expression(prog, self.by, values),
         )
         for tail, value in zip(self.tails, values, strict=True):
@@ -1093,13 +1431,13 @@ class TimelineBranch(Macro):
                 channels[ch] = value
             for name, end in self.book.ends.items():
                 if isinstance(end, RuntimeEnd) and all(
-                    known_maximum(result[name], snapshot[ch]) is result[name]
+                    self.result_math.covers(result[name], snapshot[ch])
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
                     self.book.ends[name] = replace(end, covers=(*end.covers, value))
             self.book.native_timestamp(
                 prog,
-                time_bounds(prog, value)[1],
+                value,
                 gen_ch=ch if generator else None,
                 ro_ch=None if generator else ch,
             )
@@ -1149,6 +1487,7 @@ class TimelineBranch(Macro):
                     tuple(value for guard in guards for value in guard.shifts),
                     tuple(value for guard in guards for value in guard.floors),
                     tuple(value for guard in guards for value in guard.limits),
+                    unbounded=any(guard.unbounded for guard in guards),
                 )
 
     def translate(self, prog) -> None:

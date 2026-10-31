@@ -254,65 +254,6 @@ def classification_processor(
     return process
 
 
-class QickThresholdOptions(TypedDict, total=False):
-    """Native acquire keywords; empty means ordinary IQ without projection.
-
-    threshold holds normalized ADC projection cutoffs in ADC declaration order.
-    angle holds matching QICK projection angles in radians. remove_offset=False
-    retains the calibration's normalized, unsubtracted ADC coordinates.
-    """
-
-    threshold: list[float]
-    angle: list[float]
-    remove_offset: Literal[False]
-
-
-def qick_threshold_options(
-    cfg: ReadoutCfg | Sequence[ReadoutCfg],
-) -> QickThresholdOptions:
-    """Convert readout calibration to optional native QICK projection keywords.
-
-    cfg is a native Pulse/Mux cfg or a sequence in declaration order. Repeated
-    ADCs with identical classifiers produce one entry at their first occurrence.
-    Empty input, any missing/unusable classifier or conflicting calibrations on
-    one ADC returns empty options for the entire acquisition.
-    Linear uses the opposite calibration angle and the same threshold; circle
-    uses the g/e perpendicular bisector, ignoring radius and other. Centroid3
-    or missing calibration returns empty options for ordinary IQ acquisition.
-    Result lists follow ADC declaration order. remove_offset=False preserves
-    normalized ADC calibration coordinates. No confusion correction is applied.
-    Caller must cover every program-declared ADC in declaration order: QICK
-    requires lists of exactly that length and uses that order. This helper does
-    not read a program, registry or live library to verify or guess its layout.
-    """
-    thresholds: list[float] = []
-    angles: list[float] = []
-    configs = [cfg] if isinstance(cfg, (PulseReadoutCfg, MuxReadoutCfg)) else cfg
-    classifiers: dict[int, ReadoutClassifier] = {}
-    for readout_cfg in configs:
-        for ch, classifier in _classifier_entries(readout_cfg):
-            if classifier is None or isinstance(classifier, Centroid3Classifier):
-                return {}
-            if ch in classifiers and classifiers[ch] != classifier:
-                return {}
-            classifiers[ch] = classifier
-    if not classifiers:
-        return {}
-    for classifier in classifiers.values():
-        if isinstance(classifier, LinearClassifier):
-            angle = -classifier.angle
-            threshold = classifier.threshold
-        elif isinstance(classifier, CircleClassifier):
-            angle = float(np.angle(classifier.e_center - classifier.g_center))
-            midpoint = (classifier.g_center + classifier.e_center) / 2
-            threshold = float((midpoint * np.exp(-1j * angle)).real)
-        else:
-            return {}
-        thresholds.append(threshold)
-        angles.append(angle)
-    return {"threshold": thresholds, "angle": angles, "remove_offset": False}
-
-
 class AbsReadout(Module):
     @abstractmethod
     def total_length(self, prog: ModularProgramV2) -> float | QickParam: ...
@@ -563,7 +504,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
@@ -763,8 +704,10 @@ class MuxReadout(AbsReadout):
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare tones/routes without enabling legacy raw-IQ collection.
 
-        Incompatible wiring, duplicate routes and illegal rounded durations raise
-        ValueError naming this module. QICK frequency/format errors propagate.
+        Incompatible wiring and illegal rounded durations raise ValueError.
+        ADC/generator declarations follow QICK: later declarations overwrite
+        earlier ones, and authors own their consistency. Read gen_chs/ro_chs
+        for settings. QICK frequency/format errors propagate.
         """
         self._declare_resources(prog)
 
@@ -786,11 +729,14 @@ class MuxReadout(AbsReadout):
             t=self.cfg.trig_offset,
             timeline=timeline,
         )
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self._validate_generator(prog)
-        self._validate_readouts(prog)
+        from ..timeline import TimelineProgramV2
+
+        allow_shared = isinstance(prog, TimelineProgramV2)
+        self._validate_generator(prog, allow_shared=allow_shared)
+        self._validate_readouts(prog, allow_shared=allow_shared)
         cfg = self.cfg
         prog.declare_gen(
             ch=cfg.gen_ch,
@@ -816,11 +762,16 @@ class MuxReadout(AbsReadout):
             mask=list(range(len(cfg.tones))),
             length=cfg.length,
         )
-        prog.protect_readout_routes(
-            self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
-        )
+        # Timeline authors own declaration consistency; legacy programs protect
+        # these routes explicitly to prevent QICK from overwriting them.
+        if not allow_shared:
+            prog.protect_readout_routes(
+                self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
+            )
 
-    def _validate_generator(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _validate_generator(
+        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
+    ) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -836,7 +787,7 @@ class MuxReadout(AbsReadout):
             raise ValueError(
                 f"{self.name}.gen_ch: generator {ch} requires mixmux8 mixer/gain/phase capacity"
             )
-        if ch in prog.gen_chs:
+        if ch in prog.gen_chs and not allow_shared:
             raise ValueError(
                 f"{self.name}.gen_ch: generator route {ch} already declared"
             )
@@ -846,7 +797,9 @@ class MuxReadout(AbsReadout):
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _validate_readouts(
+        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
+    ) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
@@ -854,7 +807,11 @@ class MuxReadout(AbsReadout):
         for i, tone in enumerate(self.cfg.tones):
             ch = tone.ro_ch
             where = f"{self.name}.tones[{i}].ro_ch: ADC {ch}"
-            if ch >= len(readouts) or ch in channels or ch in prog.ro_chs:
+            if (
+                ch >= len(readouts)
+                or ch in channels
+                or (ch in prog.ro_chs and not allow_shared)
+            ):
                 raise ValueError(f"{where} missing or duplicate readout route")
             ro = readouts[ch]
             if (

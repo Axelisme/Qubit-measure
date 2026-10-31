@@ -68,11 +68,13 @@ def test_nested_repeats_keep_outer_scan_shot_and_register_count_structure():
             self.write_reg("count", 2)
 
         def _body(self, cfg: None) -> None:
-            with (
-                self.repeat("fixed", 2),
-                self.repeat("variable", "count", range_hint=(0, 4)),
-            ):
-                self.delay_timeline(0.1)
+            self.delay_by_timeline()
+            with self.repeat("fixed", 2):
+                self.delay_by_timeline()
+                with self.repeat("variable", "count", range_hint=(0, 4)):
+                    self.timeline_inc(0.1)
+                    self.delay_by_timeline()
+                self.delay_by_timeline()
 
     prog = Program(make_mock_soccfg(), reps=2)
     starts = {}
@@ -117,9 +119,9 @@ def test_timeline_branch_preserves_order_compare_register_and_body_shell_boundar
         def _body(self, cfg: None) -> None:
             with self.branch(by="selector", align_timeline=True) as branch:
                 with branch.case(0):
-                    self.delay_timeline(0.1)
+                    self.timeline_inc(0.1)
                 with branch.case(1):
-                    self.delay_timeline(0.2)
+                    self.timeline_inc(0.2)
             self.wait(t=0.3)
 
     prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0.4)

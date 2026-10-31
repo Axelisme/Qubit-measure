@@ -152,10 +152,11 @@ class Branch(Module):
 
     On TimelineProgramV2, declare registers the children and lower uses native
     branch/case control with compare_reg as the sweep selector. Children execute
-    in order on the selected timeline. align_timeline=True joins case ends per
-    timeline, using static max or exact runtime pointwise max. Reference does
+    in order on each implicit case timeline. align_timeline=True joins case ends
+    into the emission parent, using static max or exact runtime pointwise max. Reference does
     not advance and no wait is inserted. Later emissions resume at the joined
-    end. Reference-moving children and case-local Repeat fail at build.
+    end. Reference-moving children fail at build, including explicit delay_by_timeline or
+    native delay inside Repeat. Accumulating Repeat scopes are allowed.
     Measurement feedback is not supported.
 
     Legacy init/run selection uses a dispatch-table island:
@@ -199,16 +200,18 @@ class Branch(Module):
         """Emit the sweep-selected case on timeline (default when None).
 
         Preserve empty cases and child order. Use align_timeline=True to join
-        all case ends per timeline, without advancing reference. Native
-        reference-moving children and case-local Repeat raise ValueError.
+        all implicit case ends into the parent, without advancing reference. Native
+        reference-moving children, including operations inside Repeat, raise ValueError.
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """
-        with prog.branch(by=self.compare_reg, align_timeline=True) as cases:
+        with prog.branch(
+            by=self.compare_reg, align_timeline=True, timeline=timeline
+        ) as cases:
             for index, branch in enumerate(self.branches):
                 with cases.case(index):
                     for mod in branch:
-                        prog.emit(mod, timeline=timeline)
+                        prog.emit(mod)
 
     def init(self, prog: ModularProgramV2) -> None:
         for branch in self.branches:

@@ -51,8 +51,8 @@ def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
 ):
     def body(prog):
         prog.fork("default", into="other")
-        prog.delay_timeline(200 / 430.08)
-        prog.delay_timeline(220 / 430.08, timeline="other")
+        prog.timeline_inc(200 / 430.08)
+        prog.timeline_inc(220 / 430.08, timeline="other")
         prog.pulse(0, "pulse")
         prog.trigger([0])
         prog.delay_auto(gens=gens, ros=ros)
@@ -86,7 +86,7 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.trigger([0], t=1)
-        prog.delay_timeline(10 / 430.08, timeline=timeline)
+        prog.timeline_inc(10 / 430.08, timeline=timeline)
         prog.send_readoutconfig(0, "config", t=offset / 430.08, timeline=timeline)
         prog.pulse(0, "pulse", timeline=timeline)
 
@@ -106,7 +106,7 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
 def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
     def body(prog):
         prog.pulse(0, "pulse")
-        prog.delay_timeline(delay / 430.08)
+        prog.timeline_inc(delay / 430.08)
         prog.pulse(0, "pulse", t="auto", timeline="default")
 
     shot = _shot(_program(body))
@@ -115,7 +115,7 @@ def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
 
 def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
     def body(prog):
-        prog.delay_timeline(10 / 430.08)
+        prog.timeline_inc(10 / 430.08)
         prog.trigger([0], timeline="default")
         prog.wait_auto(tag="wait")
         prog.pulse(0, "pulse", timeline="default")
@@ -133,6 +133,99 @@ def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
     assert shot.body_end_cycle == 226
 
 
+def test_fractional_event_start_and_trigger_width_ceil_once():
+    def body(prog):
+        prog.send_readoutconfig(
+            0, "ro", t=0.2 / 430.08, timeline="default", tag="config"
+        )
+        prog.trigger(
+            [0], t=0.2 / 430.08, width=0.2 / 430.08, timeline="default", tag="edge"
+        )
+        prog.delay_by_timeline()
+        prog.pulse(0, "pulse", timeline="default", tag="after")
+
+    prog = _program(body)
+    assert prog.get_time_param("config", "t") * 430.08 == pytest.approx(1)
+    assert prog.get_time_param("edge", "t") * 430.08 == pytest.approx(2)
+    assert prog.get_time_param("edge", "width") * 430.08 == pytest.approx(1)
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 175]
+
+
+@pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
+@pytest.mark.parametrize(
+    "ticks, rounded",
+    [
+        (119, 119),
+        (0.2, 1),
+        (1.0000000002, 2),
+        # Integer cycles round-trip through us with >1e-10-cycle float noise.
+        (1000006, 1000006),
+        (1000010, 1000010),
+        # This real fractional tail exceeds the relative tolerance.
+        (1000000.00001, 1000001),
+    ],
+)
+def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
+    operation, ticks, rounded
+):
+    def body(prog):
+        value = ticks / 430.08
+        if operation == "pulse":
+            prog.pulse(0, "pulse", t=value, timeline="default", tag="event")
+        elif operation == "config":
+            prog.send_readoutconfig(0, "ro", t=value, timeline="default", tag="event")
+        elif operation == "trigger":
+            prog.trigger([0], t=value, width=value, timeline="default", tag="event")
+        else:
+            prog.timeline_inc(value)
+            prog.timeline_inc(value, tag="event")
+        prog.delay_by_timeline()
+        prog.pulse(1, "p1", timeline="default", tag="after")
+
+    prog = _program(body)
+    start = 2 * rounded if operation == "delay" else rounded
+    assert prog.get_time_param("event", "t") * 430.08 == pytest.approx(
+        start, rel=0, abs=1e-8
+    )
+    if operation == "trigger":
+        assert prog.get_time_param("event", "width") * 430.08 == pytest.approx(
+            rounded, rel=0, abs=1e-8
+        )
+    # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
+    end = (
+        start
+        + {
+            "pulse": 43,
+            "config": 0,
+            "trigger": max(rounded, 173),
+            "delay": 0,
+        }[operation]
+    )
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"][-1] == end
+    assert prog.get_time_param("after", "t") == 0
+
+
+def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
+    def body(prog):
+        value = QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08)
+        prog.trigger([0], t=value, width=value, timeline="default", tag="edge")
+        prog.delay_by_timeline()
+        prog.pulse(0, "pulse", timeline="default", tag="after")
+
+    prog = _program(body, lambda p: p.add_loop("scan", 4))
+    assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx(
+        [0, 1, 2, 3]
+    )
+    assert prog.get_time_param(
+        "edge", "width", as_array=True
+    ) * 430.08 == pytest.approx([0, 1, 2, 3])
+    assert [
+        [e.cycle - s.start_cycle for e in s.events if e.kind == "wave"]
+        for s in _shots(prog)
+    ] == [[173], [174], [175], [176]]
+    assert prog.compile_datamem() is None
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):
@@ -144,8 +237,8 @@ def test_timeline_trigger_rejects_implicit_output_time_at_entry():
 def test_resync_compiles_and_statically_decrements_every_timeline():
     def body(prog):
         prog.fork("default", into="other")
-        prog.delay_timeline(40 / 430.08)
-        prog.delay_timeline(70 / 430.08, timeline="other")
+        prog.timeline_inc(40 / 430.08)
+        prog.timeline_inc(70 / 430.08, timeline="other")
         prog.resync(10 / 430.08)
         prog.pulse(0, "pulse", timeline="default", tag="default")
         prog.pulse(1, "p1", timeline="other", tag="other")
@@ -166,7 +259,7 @@ def test_swept_floor_proves_sign_including_zero(start, stop, expected):
         prog.add_loop("scan", 2)
 
     def body(prog):
-        prog.delay_timeline(QickSweep1D("scan", start / 430.08, stop / 430.08))
+        prog.timeline_inc(QickSweep1D("scan", start / 430.08, stop / 430.08))
         prog.delay(10 / 430.08)
         prog.pulse(0, "pulse", timeline="default")
 
@@ -185,7 +278,7 @@ def test_crossing_swept_floor_preserves_each_point():
 
     def body(prog):
         prog.fork("default", into="drive")
-        prog.delay_timeline(
+        prog.timeline_inc(
             QickSweep1D("scan", 9 / 430.08, 11 / 430.08), timeline="drive"
         )
         prog.delay(10 / 430.08)
@@ -201,7 +294,7 @@ def test_crossing_swept_auto_maximum_places_at_each_points_later_end():
     def body(prog):
         prog.fork("default", into="drive")
         prog.pulse(0, "pulse", t=QickSweep1D("scan", 0, 100 / 430.08))
-        prog.delay_timeline(QickSweep1D("scan", 100 / 430.08, 0), timeline="drive")
+        prog.timeline_inc(QickSweep1D("scan", 100 / 430.08, 0), timeline="drive")
         prog.pulse(0, "pulse", t="auto", timeline="drive")
 
     result = _shots(_program(body, initialize))
@@ -223,8 +316,8 @@ def test_crossing_body_maximum_closes_at_each_points_latest_end():
 
     def body(prog):
         prog.fork("default", into="other")
-        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
-        prog.delay_timeline(
+        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.timeline_inc(
             QickSweep1D("scan", 30 / 430.08, 10 / 430.08), timeline="other"
         )
 

@@ -52,8 +52,7 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(kind, values: Sequenc
         assert prog.binprog["dmem"] is None
 
 
-@pytest.mark.parametrize("kind", ["timeline", "modular"])
-def test_route_protection_is_atomic_and_unprotected_routes_remain_native(kind):
+def test_modular_route_protection_is_atomic_and_unprotected_routes_remain_native():
     def initialize(prog: TimelineProgramV2 | ModularProgramV2):
         prog.declare_gen(0, nqz=1)
         prog.declare_readout(0, length=0.4)
@@ -72,6 +71,6 @@ def test_route_protection_is_atomic_and_unprotected_routes_remain_native(kind):
         prog.declare_readout(1, length=0.2)
         prog.declare_readout(1, length=0.4)
 
-    prog = _program(kind, initialize)
+    prog = _program("modular", initialize)
     assert prog.gen_chs[1]["nqz"] == 2
     assert prog.ro_chs[1]["length"] == 123

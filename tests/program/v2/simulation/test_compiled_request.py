@@ -24,6 +24,28 @@ from tests.program.v2.simulation._compiled_support import (
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
+def test_author_dmem_time_materializes_pulse_and_readout_at_runtime_origin():
+    def initialize(p):
+        p.add_reg("duration")
+        p.add_dmem([40])
+
+    def body(p):
+        p.read_dmem("duration", 0)
+        p.timeline_inc("duration")
+        p.fork("default", into="read")
+        p.pulse(0, "p", timeline="default", tag="drive")
+        p.trigger([0], timeline="read", width=1 / 430.08)
+
+    prog, env = program(body, initialize, trigger_time=None, reps=1)
+    point = request(prog, env).materialize_point(0)
+    assert time_us(point.time_base, point.events[0].start_ticks) == pytest.approx(
+        40 / 430.08
+    )
+    assert times_us(point.time_base, point.readouts[0].trigger_ticks) == pytest.approx(
+        (40 / 430.08,)
+    )
+
+
 def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     prog, env = program(lambda p: p.pulse(0, "p", tag="drive"))
     result = request(prog, env)

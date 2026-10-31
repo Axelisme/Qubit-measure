@@ -173,7 +173,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             # Advance reference to consume duration-sweep runtime ends here.
             # Contrast, readout, ADC and shot end then use constant relative
             # times while their absolute event times remain unchanged.
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Join(contrast_f1, contrast_f2))
             builder.emit(readout, tag="terminal")
             prog = builder.build()
@@ -247,7 +247,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 builder.emit(Join(drive_f1, drive_f2))
                 # Advance reference at the same drive boundary as the hardware path.
                 # Keep downstream relative times constant without moving absolute events.
-                builder.sync()
+                builder.delay_by_timeline()
                 builder.emit(Join(contrast_f1, contrast_f2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()

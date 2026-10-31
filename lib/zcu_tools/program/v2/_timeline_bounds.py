@@ -78,6 +78,12 @@ class ProducerBounds:
         ] = {}
         self.selected: dict[str, TableSelection] = {}
         self.signed_sources: set[str] = set()
+        self.author_writes: set[str] = set()
+        self.framework_sources: set[str] = set()
+
+    def author_source(self, name: str) -> bool:
+        """Return whether a register has no certified range or arbitrary writes."""
+        return name in self.author_writes or name not in self.ranges
 
     def register_selection(
         self, register: str, selection: TableSelection, writers: tuple[Macro, ...]
@@ -104,9 +110,18 @@ class ProducerBounds:
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
         # Subclasses can replace translate/expand, so their src is not a proof.
+        if (
+            isinstance(getattr(macro, "dst", None), str)
+            and type(macro) is not WriteReg
+            and macro.dst not in self.allowed.get(id(macro), ())
+        ):
+            self.author_writes.add(macro.dst)
         if type(macro) is WriteReg and isinstance(macro.src, Integral):
             value = int(macro.src)
-            self.register(macro.dst, CycleBounds(value, value), (macro,), ())
+            # Native constants provide bounds, not framework ownership. Authors
+            # may overwrite them with their own arithmetic or memory reads.
+            self.ranges.setdefault(macro.dst, []).append(CycleBounds(value, value))
+            self.allowed.setdefault(id(macro), set()).add(macro.dst)
 
     def register(
         self,
@@ -122,6 +137,7 @@ class ProducerBounds:
         must themselves have known producers. The owner guarantees these bounds
         across its entire operation, including lookup/word conversion steps.
         """
+        self.framework_sources.add(name)
         self.ranges.setdefault(name, []).append(limits)
         self.dependencies.setdefault(name, set()).update(dependencies)
         if dependency_ranges is not None:
@@ -280,7 +296,9 @@ class ProducerBounds:
         self.origins[address] = origin
         if arithmetic:
             for register in BaseInst.from_dict(raw).reg_write:
-                self.generated.setdefault(register, set()).add(address)
+                # s14 is shared with native outputs, not compiler-owned storage.
+                if register != "s14":
+                    self.generated.setdefault(register, set()).add(address)
 
     def time_parameters(self, macro: TimedMacro) -> None:
         """Watch registers allocated by native time conversion, not arbitrary data."""

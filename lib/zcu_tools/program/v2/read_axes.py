@@ -13,12 +13,11 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 from ._timeline_macros import (
     ModuleEmission,
     PreparedTimelineMacro,
+    RepeatLoweringEnter,
+    RepeatLoweringExit,
     TimelineBranch,
-    TimelineRepeatEnter,
-    TimelineRepeatExit,
     TimeProducer,
 )
-from ._timeline_parallel import TimelineParallel
 from .macro.readout import ReadoutEmission, readout_control_scope
 from .modular import ModularProgramV2
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
@@ -62,14 +61,14 @@ def _read_macros(
     scopes = [scope]
     for macro in macros:
         source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
-        if isinstance(source, TimelineRepeatEnter):
+        if isinstance(source, RepeatLoweringEnter):
             scopes.append("Repeat")
-        elif isinstance(source, TimelineRepeatExit):
+        elif isinstance(source, RepeatLoweringExit):
             scopes.pop()
         elif isinstance(source, TimelineBranch):
             for case in source.cases:
                 yield from _read_macros(case, f"Branch {source.name!r}")
-        elif isinstance(source, (ModuleEmission, TimeProducer, TimelineParallel)):
+        elif isinstance(source, (ModuleEmission, TimeProducer)):
             yield from _read_macros(source.macros, scopes[-1])
         else:
             yield source, scopes[-1]

@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01，timeline_inc 與 delay_by_timeline 時間操作
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -38,30 +38,36 @@ Lowering 不用 `total_length` 重建時間，也不移動 reference。
 TwoPulseReset 合併各 pulse end 加各自 post-delay。BathReset 的 pi/2 從向上取整後的 cavity end 加 post-delay 開始。
 BathReset 最後合併 qubit 與 pi/2 的實際結尾，包含各自 post-delay，不漏掉較長的 qubit。
 Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
-非仿射 sweep 由 program owner 以 dmem table 提供逐點精確 ceil，包含多 axis 與重複／nested emission。
-Index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
-表超過剩餘 dmem 容量時，編譯錯誤指出 emission 與所需 word 數。
-Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
+作者 sweep 沿用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
+Runtime 跨 generator 格點的長度以 k=8 定點換算，再將 post 加入 aggregate 後 ceil。
+已是 tProc cycle 的 branch 合流以整數乘加、max 與選擇運算重建，不配置 selected-end table。
+作者明確宣告的 waveform／length／value tables 仍可使用 DMEM。IR branch／register-loop dispatch 也可配置 jump-address table，內容是程式位址，不是時間。
+Table index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
+Delay 與 SoftDelay 都只加 timeline 結尾。`delay_by_timeline()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
 Register cycles 必須非負。尚未被 native 部分完整消耗的 timeline，須以已知 producer bounds 扣除實際推進量。
-Repeat 內仍拒絕這個 native register reference 操作，具名 timeline 的 register 時間則可用。
+Repeat 內也可直接呼叫原生 delay_reg_auto；branch case 與 Join/Reset 仍禁止推進 reference。
+DelayAuto module 不接受 timeline 範圍，包括 Repeat 的預設 timeline。需要時直接呼叫原生操作。
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
 未列出的 module 不因 legacy 可用就表示可直接 emit。
 
 Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(index)`，None 是空 case。
-Lowering 選擇 align_timeline=True，按 timeline 合併各 case 結尾，靜態取 max，runtime 取精確逐點 max。
-Branch 只改結尾、不推進 reference，case 內的 native reference 操作與 Repeat 在 build 時報錯。
+Lowering 把 emission 的 timeline 傳為 branch 母 timeline，每個 case 用自己的隱式 timeline 發射 children。
+Lowering 選擇 align_timeline=True，將各 case 結尾併回母 timeline，靜態取 max，runtime 取精確逐點 max。
+Branch 只改結尾、不推進 reference。Case 內的 native reference 操作在 build 時報錯。
+`repeat(...)` 使用累加 timeline，可以放在 case 內，也可以巢狀。Case 內的 Repeat body 同樣不得推進 reference。
 後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
-Module Join 發射平行 sequences，保留每個 sequence 內的 Module 次序，並合併實際 end。
-Program emission owner 依 lowered operations 彙總 reference effects，將唯一會推進 reference 的 sequence 移到最後。
-零個推進型 sequence 保留次序，兩個以上或未知 reference effect 都拒絕。
-交換時，owner 以實際 register 與 wmem identity 檢查 RW、WR、WW，包含 register aliases。
-未知 resource effects 拒絕交換。Compiler 配置的 register 不會自動視為 scratch，原有 producer provenance 與翻譯後全流稽核照常執行。
+Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
+它保留 sequence 及內部 Module 的作者次序，不重排。
+Join 與 TwoPulseReset／BathReset 的 child 不得推進 reference。
+Native delay／delay_auto、delay_by_timeline、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯，與 branch case 共用守衛及錯誤。
+普通 Branch 不推進 reference，可以放進 Join。
+原有 producer provenance 與翻譯後全流稽核照常執行。
 同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
 TableLengthPulse Join 保留獨立 generators、共用 index 與相同 table count，逐 index 合併 runtime maximum。
 `prog.join` 只合併既有 timeline ends，不發射 children。
@@ -80,7 +86,7 @@ def _initialize(self, cfg):
 def _body(self, cfg):
     self.emit(self.gap, tag="gap_1")
     self.emit(self.gap, tag="gap_2")
-    self.sync()  # Advance reference by the two rounded gaps.
+    self.delay_by_timeline()  # Advance reference by the two rounded gaps.
 ```
 
 兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。
@@ -198,12 +204,6 @@ The processor sums ordered shot-vector outer products across reps, and
 `split_sums` converts a final IQ axis into counts and complex means.
 Zero or unmeasured NaN counts give NaN means without divide warnings.
 
-`readout.qick_threshold_options(cfg)` accepts a Pulse/Mux cfg or a cfg sequence.
-It converts linear/circle calibration to native QICK projection, without radius
-rejection or confusion correction. Missing, centroid3 or conflicting calibration
-returns empty options for the whole acquisition. The caller must supply every
-program ADC in declaration order; the helper does not inspect the program.
-
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules
 the ADC itself, sends configuration at the module start, triggers at
@@ -220,9 +220,14 @@ accident. Mixer declaration receives the channel only when mixing is configured.
 
 `MuxReadoutCfg` reuses the numeric cfg_model schema. `MuxReadout` declares fixed
 mixmux8 tones and explicit logical outputs on one static PFBv4, then plays one
-all-tone const mask and triggers the outputs together. It protects successful
-route declarations through `ModularProgramV2.protect_readout_routes`, including
-when nested; unprotected routes retain QICK's declaration semantics.
+all-tone const mask and triggers the outputs together. Timeline programs use
+QICK's native ADC/generator declarations: later declarations overwrite earlier
+ones, and authors own their consistency. Read gen_chs/ro_chs for declaration
+settings. Timeline modules do not protect routes automatically. Authors may
+explicitly call the inherited protect_readout_routes to prevent redeclaration.
+Static Mux does not switch runtime readout configurations.
+Legacy `ModularProgramV2.protect_readout_routes` protects successful declarations,
+including when nested; its unprotected routes retain QICK overwrite semantics.
 `collect_iq` selects one standard averaged read using that program's actual
 channel ordering and returns tone-ordered float64 I/Q. The experiment owns
 complex conversion, interpretation and persistence. `collect_raw_iq(prog)` reads

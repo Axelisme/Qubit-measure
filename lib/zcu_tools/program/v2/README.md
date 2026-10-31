@@ -1,8 +1,40 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，branch 索引、align_timeline 與 reference 邊界
+**Last updated:** 2026-11-01，外部 timeline 的後續事件與 storage 重用
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
+
+## Timeline rounding
+
+Timeline event starts now ceil to tProc cycles instead of nearest rounding.
+Each operation quantizes its result once. Ceil uses
+`math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` to treat values
+near the nearest integer as that integer. This absorbs floating-point conversion
+noise even at large cycle counts. For example, 119/430.08 us remains 119 cycles.
+Near 2³¹ cycles, the relative tolerance can also absorb real fractional tails
+of up to about 0.002 cycle. Positive tails outside both tolerances round up.
+Static waveform and ADC lengths use rational clock conversion
+before the aggregate ceil. Author sweeps retain QICK
+native start rounding and truncated steps; they do not allocate pointwise time
+tables. Runtime cross-grid generator lengths use k=8 fixed-point upper conversion.
+The compiler chooses W to minimize canonical signed-digit terms, breaking ties
+with the smaller W. For every integer length up to 500 us, ceil(n*W/256) is never
+earlier than the physical end and is at most 1 us late. The same W applies beyond
+500 us, but the 1 us error bound does not. Each operation adds its post before the
+final ceil. Static lengths and integer-affine tProc lengths stay exact.
+
+Conversion uses shifts of at most 15 bits and addition/subtraction, without ARITH,
+DIV or time tables. A clock ratio of one needs no conversion instructions.
+The compiler rejects signed32 overflow in the product or any intermediate at build.
+The existing native length sweeps and selected waveform/length tables supply
+runtime lengths. Timeline length-register playback still requires selection
+metadata. This does not add an arbitrary author length-register or ADC length API.
+The conversion rule also gives W=359 for ratio7/5 and W=2872 for ratio56/5, but
+ADC/PFB runtime length consumers are not exposed by the current API.
+
+Known scalar and affine time getters return actual quantized values. Runtime-only
+and non-affine time getters raise RuntimeError. Author-declared data tables and IR
+dispatch jump-address tables remain supported.
 
 ## Testing & Type Checking Conventions
 
@@ -126,7 +158,7 @@ Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
 它不接收 SoC，不取數，也不依賴 experiment runtime。
-Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告。
+Builder 依物件身分在第一次 emit 時記錄 module 宣告。
 同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。
 每個 program 依 module 物件身分保存宣告結果，compile 時重新配置自己的資源。
 Pulse 在各 program 內按定義去重，同名不同 cfg 的 Pulse 使用不同 waveform 名稱。
@@ -139,16 +171,25 @@ Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記
 `with builder.repeat(...)` 與 `with builder.branch(by=..., align_timeline=...)` 錄製巢狀動作。
 Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case(index):` 錄製指定 sweep 點的動作。
 Index 是 zero-based，可不按順序宣告。未宣告的點不發射動作，重複或超界 index 報錯。
-在 case 內仍呼叫原 builder 的 emit、delay_timeline 或其他不推進 reference 的 body 方法。
+在 case 內仍呼叫原 builder 的 emit、timeline_inc 或其他不推進 reference 的 body 方法。
 關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
 Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
 `SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
 既有 acquire 擴充仍由共同基底提供。
 
-`TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
-不同物件衝突時錯誤列出兩個名稱與物件。
-明示 register 借用與 Pulse registry 共用 generator／template 的規則不變。
-Body 可直接呼叫 `emit_parallel`，program 配置其命名 scope；module lowering 內沿用既有 scope。
+`TimelineProgramV2` 的 module 與原生直接 generator／ADC 宣告沿用 QICK 規則。
+後宣告覆蓋先宣告，由作者負責設定是否一致。
+需要宣告資訊時，直接讀 QICK 的 `gen_chs`／`ro_chs`。
+tProc readout 用各自具名 config 切換 freq、phase、outsel 與 generator 頻率匹配，每次 trigger 使用當次設定。
+原生 `add_readoutconfig` 保留 QICK 的 template 契約，不限制跨 template 的 mode、phrst 或 length。
+靜態 readout 不支援 runtime 切換。
+每 shot trigger 次數仍由 compiled 總數契約檢查，不按個別 module 的 emit 次數拒絕共用。
+Timeline module 不自動保護 route。作者明確呼叫繼承的 `protect_readout_routes` 後，該 route 不可重新宣告。
+不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
+Register 名稱與地址仍歸屬到宣告物件，衝突訊息列出兩個 module 名稱與物件。
+明示 register 借用與 Pulse registry 的 template 共用規則不變。
+`ModularProgramV2` 的宣告與 route protection 規則不變。
+Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
 
 每條 timeline 只保存相對 reference 的結尾。
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
@@ -159,33 +200,83 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
-省略 `timeline=` 或傳入 `None` 的 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
-`repeat` 省略母 timeline 時也使用此名字。
+省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：
+
+- `emit`、`pulse`、`trigger`。
+- `send_readoutconfig`、`send_readoutconfig_from_regs`。
+- `pulse_from_regs`、`pulse_by_reg`、`pulse_from_length_reg`。
+- `timeline_inc`、`delay_by_timeline` 與 `repeat` 的母 timeline。
+
+`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時仍須提供配對的 `selection` metadata。
+範圍外省略 timeline 的原生輸出保留 QICK 時間行為，不改選 `"default"`。
 顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
 名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
 範圍不 fork、不 join，也不移動 reference。
-`branch` 必填 keyword-only `by` 與 `align_timeline`，case 內的發射沿用當下範圍。
-範圍不改變 branch 的結尾合併與局部名字生命週期。
+`branch` 必填 keyword-only `by` 與 `align_timeline`。
+`timeline=None` 選目前範圍作為母 timeline，case 另建自己的預設名字。
 原生 `delay` 與 `delay_auto` 仍只推進 reference，不受範圍影響。
 
 ```python
 builder.fork("default", into="drive")
 with builder.timeline("drive"):
     builder.emit(drive)
-    builder.delay_timeline(0.1)
+    builder.timeline_inc(0.1)
+    builder.delay_by_timeline()
     with builder.repeat("pairs", 2):
         builder.emit(drive)
-    builder.sync()
+        builder.delay_by_timeline()
+    builder.delay_by_timeline()
 builder.emit(drive)  # Uses default again.
 ```
 
-`delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
-`sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
+`timeline_inc(t, timeline="drive")` 只將結尾加 t，不移動 reference。
+`delay_by_timeline(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
 可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
-Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，中間值也須能證明符合 signed 32-bit range，否則編譯報錯。
-每個 sweep／shot 重新建立所需狀態。`delay_timeline("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
-Register 時間須有原生常數、sweep 或 framework table／長度 producer 的 bounds，不能把任意 custom Macro 初值當成證明。
+Runtime 合流用 TEST 與條件 register 寫回，算術使用移位與加減。
+Runtime 事件直接寫 s14，沿 QICK preprocess 接縫把 `t_regs['t']` 設為 `s_out_time`。
+Pulse、ConfigReadout、Trigger 的 expand 仍由 QICK 負責，不另配事件時間 data register。
+同基準的後續事件使用 s14 差值增量。Native／raw 寫 s14 與 branch 合流會使記錄失效，下一個事件重新載入基準。
+原生 sweep 時間仍使用 QICK sweep register。IR 會刪除無條件、無 UF 且無其他效果的純 register 自我複製。
+End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
+每個 sweep／shot 重新建立所需狀態。`timeline_inc("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
+作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
+`range_hint=(lo, hi)` 可選，單位是整數 tProc cycles，表示作者保證的非負閉區間，不增加硬體 range check。
+沒有已知 bounds 且沒有 hint 時，時間入口依作者的非負契約使用下界 0，上界仍未知。
+這個時間視圖保留原來源的捕獲 recipe，不改 signed 非時間資料，也不加硬體檢查。
+仍需要 max 時，編譯器在 runtime 計算，不證明該段同 channel 不重疊，溢位也由作者負責。
+原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
+未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
+
+編譯器以軸 ID 對齊時間分量。同 loop 的 sweep、選表與定點換算共用 loop 名稱作 ID。
+已知分量是一維 numpy 陣列。只有範圍的分量是獨立未知軸的係數，常數使用大小為 1 的固定軸。
+作者 register 的每次寫入、量測結果選表與取整誤差各自獨立，range_hint 不建立 loop 相關性。
+加減先合併同軸分量並消去零項，再加總各軸的界。證明不建立多維網格。
+已知軸上逐點全等的分量移到 const 軸，原軸從變數中消失。
+靜態結尾因此成為常數時，後續事件用字面值時間，不配置結尾 register。
+Generator fabric 的逐操作 ceil 若留下逐點差異，該軸仍保留。
+同單一已知軸的非線性運算逐點計算。跨軸 ceil 與定點換算保留原式，另加有界取整誤差。
+跨軸 max/min 使用線性部分加有理係數的 Abs 項，允許負係數及巢狀 Abs。
+正規化合併同類項，消去零係數，並在已知符號時化簡 Abs。
+取界依共用軸分連通塊，在塊內分支定界並剪枝。每塊超過 20 個未定號 Abs 項時退回區間界。
+退回只影響證明，不改執行值，也不把保守 slack 當成實際差距來拒絕 relax_delay。
+不可變節點快取範圍，支配判斷以正規化相減式快取結果。
+Runtime 結尾、支配、重疊與 overflow 都從運算式取界，不另存結尾 min/max。
+所有 timeline 合流共用 N 路 max/min 的 runtime recipe planner。
+Planner 展平原 recipe 的同向候選，將捕獲進入點當作不透明變數。
+它以每個變數在 N 式中最常見的係數抽出公共部分 S，平手選絕對值較小的係數。
+相同變數餘項只留最大常數，min 則留最小常數。
+正規化差值的界剔除被任一候選支配的餘項。
+S 與每個剩餘項各算一次，再做 k−1 次實際選值，最後加回 S。
+
+兩路 max 使用 `TEST x−y`、複製 x、`if(S)` 寫入 y，共 3 條指令。
+x 已可覆寫時省去複製，剩 2 條。k 路選值共用結果 register，成本為 `1+2(k−1)` 條。
+這個成本不包含候選求值與加回 S。Min 使用 `if(NS)`。
+Compiler 先用差值界證明 signed32 安全，證明不了時以 sign-corrected mask 選值，不依賴溢位後的 S。
+TEST 更新旗標後由硬體 hazard 單元等待，不插入 NOP，也不使用外部 F/NF。
+後續操作讀取捕獲的 register，不從 Abs 證明式重建 max 或重讀已覆寫的來源。
+編譯期分量與誤差不配置時間 DMEM。
+
 Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
 Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。
 只有時間 consumer 啟用這些前置條件。證明涵蓋全部已登記 writes，不能用 lookup 後的合法 index 覆蓋先前非法讀取。
@@ -199,7 +290,9 @@ Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為�
 Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
 Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
-編譯期已知的非仿射 sweep 由 program／timeline owner 以 dmem table 提供逐點精確 aggregate ceil，不加 padding。
+作者 sweep 使用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
+Runtime 跨 generator 格點的長度使用 k=8 定點換算，aggregate 加 post 後再 ceil。
+作者明確宣告的值表與 waveform／length selection tables 保留。IR dispatch 的 jump-address table 也保留，不是逐點時間 table。
 ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
 未進入 timeline 範圍時，省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
@@ -220,7 +313,7 @@ def _initialize(self, cfg):
 def _body(self, cfg):
     self.emit(self.drive)
     self.pulse(1, "native", t=0)  # Relative to the original reference.
-    self.sync()
+    self.delay_by_timeline()
     self.pulse(1, "native", t=0)  # Relative to the drive end.
     self.fork("default", into="drive")
     self.emit(self.drive, timeline="drive")
@@ -237,83 +330,107 @@ Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較�
 它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
 交叉或 runtime source 以逐點 maximum 合併，不把所有掃描點補成同一個長度。
 
-`with self.branch(by="scan", align_timeline=True) as branch:` 依 sweep selector 選 `with branch.case(index):`。
+`with self.branch(by="scan", align_timeline=True, timeline="drive") as branch:` 依 sweep selector 選 case。
+`timeline` 指定母 timeline，省略或傳入 None 時選目前範圍，範圍外選 default。
+`with branch.case(index) as name:` 取得隱式 case timeline 的名字 `"scan[index]"`。
+Case 從母 timeline 的結尾 fork，並以自己的名字屏蔽範圍預設。
+Case 內只能使用這條 timeline 與其局部 fork。使用母 timeline 或其他外部名字會在 build 時報錯。
 Index 是 `scan` 的 zero-based 點索引，可只宣告部分點，也可完全不宣告。
 未宣告的點執行空 case，不要求作者填入空動作。重複、非整數或超界 index 報 ValueError。
 
-`align_timeline` 是必填 keyword-only bool。每個 case 從 branch 入口的 timeline 結尾與 reference 開始。
-True 對每條 timeline 的各 case 結尾做 join。全靜態時取靜態 max，有 runtime 值時取精確逐點 max。
+`align_timeline` 是必填 keyword-only bool。每個 case 保留 branch 入口的 reference。
+True 將各 case 結尾 join 回母 timeline。全靜態時取靜態 max，有 runtime 值時取精確逐點 max。
 True 需要每個 case 的結尾都能從 branch 入口狀態算出，不執行未選 case 的動作。
-False 將使用過的 timeline 結尾保留為實際執行 case 的 runtime 結尾，未使用的 timeline 不變。
-兩種都不推進 reference、不自動 sync，後續都可在各 timeline 結尾繼續發射。
+False 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
+兩種都不推進 reference、不自動 delay_by_timeline，後續可在母 timeline 結尾繼續發射。
 未使用的外部 long pulse 可以橫跨 Branch。
-Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
-Case 內 Repeat 的入口與回邊會隱含推進 reference，因此 build 時報錯，須移到 branch 外。
+Case 內的 native delay、delay_auto 與 delay_by_timeline 在 build 時報錯，等待改用 timeline_inc。
+Case 內可使用 `repeat(...)`。它的 body 同樣不得推進 reference，包括巢狀 Repeat 內的操作。
 Repeat 內放 branch 仍合法，兩種 align_timeline 都使用上述規則。
-Branch 區塊內、case 外的 emit、fork、join、delay_timeline 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
-Case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
+Branch 區塊內、case 外的 emit、fork、join、timeline_inc 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
+隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
 沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
 跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
 
-`with self.repeat(name, n, timeline="default", range_hint=None)` 先同步母 timeline，
-每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline
-fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 fork 同名。
-其他外部長 pulse 可以橫跨 Repeat，但不能在迴圈內使用它的 timeline。
-固定 n 是非負整數，退出時精確扣減外部結尾；n=0 仍同步入口，但不執行 body。
+`repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
+`timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。
+只可使用母 timeline 與其局部 fork，離開後局部名字失效。
+Repeat 不在入口或回邊自動推進 reference。作者可在 body 明寫 `delay_by_timeline()`、原生 `delay`／`delay_auto` 或巢狀 Repeat。
+Branch case 內仍禁止任何經 owner 推進 reference 的操作，包括 Repeat body 裡的操作。
+`n=0` 保留母 timeline，不執行或宣告 body 內容，也不自行同步入口。
+
+編譯器只按已錄製的 body 結構選 lowering，不分析定點，也不重播 preprocess。
+當 body 頂層最後一個操作是對循環 timeline 的 `delay_by_timeline()`，且入口結尾為常數 0，
+不攜帶循環尾端 register。固定圈長直接編成每圈的常數 `TIME inc_ref`。
+其他情況使用 s14 作循環時間指針，入口載入母 timeline 結尾，每圈推進到新的最晚結尾，離開時才捕獲尾端。
+簡單固定圈長 body 只留下事件與 s14 字面增量，不每圈搬運尾端 register。
+Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，保留 shot-local 原點 snapshot 供恢復。
+中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步其他 timeline 或沒有 delay_by_timeline 都走指針路徑。
+若 body 以循環 timeline 的 delay_by_timeline 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 delay_by_timeline。
+編譯器不自行插入它。IR 依實際時間窗口決定展開份數，branch-address DMEM 成本維持原契約。
+
+`n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
+Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。
+省略 hint 時使用實際 count，不證明回邊的同 channel overlap。固定次數不接受 hint。
+每 shot／sweep 點重新初始化循環狀態，局部 counter 不加入 QICK top-level sweep metadata。
 Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
-時間 producer 的 bounds 只接受相符的初始化、回邊與重設寫入，不把 nested loops 加入 QICK 的 top-level sweep metadata。
+Producer audit 仍只接受相符的初始化、回邊與重設寫入。
+累加器內事件的時間可能只在 runtime 可知，getter 會明確報 RuntimeError，不回上界。
+編譯期可知的累積結尾仍可讀取實際量化值。
 
-ScanWith 先載入 scalar，再依序執行 children。同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
-其 native lowering 使用 Repeat metadata，不傳 legacy `range_hint`。
-`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
+外部 long pulse 可以橫跨 Repeat，但不能在 body 內使用其 timeline。
+沒有 reference 操作時，其他外部結尾不變。
+作者明寫 reference 操作時，外部結尾逐圈按實際推進量 debit，再做 floor 0。
+固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時，各圈把實際 debit 寫入 storage。
+Branch 各 case 的結尾不同時，各 case 把自己的結尾寫入 selected-end register。
+離開 Branch 或 Repeat 後，可直接在外部 timeline 放 pulse、trigger、config 或使用 timeline_inc。
+後續事件從實際 remaining end 開始，不採範圍上界，也不要求先 delay_by_timeline、join 或 fork。
+事件沿用 shot 收尾等 consumer 已需要的 storage，透過 s14 放置，不另配事件時間 register。
+沒有後續事件時，不為可能的 placement 預配 register。每 shot／sweep 點仍重設狀態，data register 上限仍為 16。
+時間計算不配置 DMEM。Branch dispatch 的 jump-address table 保留。
+原生 `delay_reg_auto` 可在 Repeat 內使用，仍須遵守其 producer bounds 與未消耗外部結尾的原生契約。
 
-Module `Branch` lower 到原生 branch/case。Module `Join` 發射平行 sequences，與只記帳的 `prog.join` 不同。
-Join 的 program emission owner 檢查 lowered operations，保留每個 sequence 的內部次序。
-唯一會推進 reference 的 sequence 最後發射，其他 sequences 保持次序，從共同 origin 開始。
-兩個以上推進型 sequences 或未知 reference effects 拒絕編譯。
-需要交換時，owner 證明實際 register 與 wmem 資源沒有 RW、WR、WW 衝突，包含 aliases。
-未知 register/word effects 只在需要交換時拒絕。Wait-only parent 不能用內部 fork 繞過 placement 限制。
-這個 owner 不重排 sequence 內的事件，也不新增 scheduler。每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
-
-Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
-`range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
-Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
-未知 count 或 case advance 以 runtime storage 逐圈扣除實際執行路徑，並對每個 external end 做 floor 0。
-相同且可靜態表示的 Branch paths 保留 static，不因出現 Branch 就物化。
-原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗該 end。
-Join 目標與 fork 新名字是普通 timeline，從實際 remaining end 建立排程點，不採 minimum count 的等待上界。
-原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
-Join／fork 的普通結果，或 sync／原生推進完整消耗後的來源，可照常放置 config。
-不帶 timeline 的 config 呼叫保留原生行為。
-例如沿用上面的宣告，以下 `_body` 先安排跨 channel 重疊，再重複發射 drive：
+以下 body 明寫入口與每圈同步。每圈先合併局部結尾，再移動 reference：
 
 ```python
 def _body(self, cfg):
-    self.fork("default", into="parallel")
-    self.emit(self.drive, tag="first")  # Channel 0, ordinary default end.
-    self.pulse(1, "native", t=0, timeline="parallel")
-    self.join("parallel", into="default")  # Accounting only.
-    self.sync()  # Both channels have finished before the next group.
+    self.delay_by_timeline()
     with self.repeat("pair", 2):
         self.fork("default", into="local")
         self.emit(self.drive, timeline="local", tag="repeated")
-        self.delay_timeline(0.05, timeline="local")
-    # Parent default is zero. The local name is out of scope.
+        self.timeline_inc(0.05, timeline="local")
+        self.join("local", into="default")
+        self.delay_by_timeline()
+    # Parent default is zero. The local name has expired.
 ```
 
-每圈結尾自動對齊 local 的 module 結尾加 0.05 us，不必在迴圈內手動 sync。
-Register 次數改傳既有 register 名字，例如
-`with self.repeat("pair", "n_pair", range_hint=(2, 4)):`，body 可沿用上例。
-`n_pair` 須先由作者用公開 register API 準備，執行值必須符合作者保證的閉區間。
+Register 次數可改寫成 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`。
+`n_pair` 須先準備，執行值必須符合作者保證的範圍。Register 超限保留 QICK 原錯誤。
 
-Repeat body 內支援具名 timeline 的 register 時間與各 case 不同的 Branch advance。
-各 case 分別累積 pulse guard，回邊使用全路徑 envelope 證明不重疊。Envelope 只用於證明，不改實際 reference 或 body／shot end。
-Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 consumer 不受這項限制。
+ScanWith 先同步母 timeline，再載入 scalar、依序執行 children，每個 point 結尾明寫 delay_by_timeline。
+同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
+`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
+
+Module Branch lower 到原生 branch/case。Module Join 為各 sequence fork timeline，依作者順序發射，再 join 回母 timeline。
+各 sequence 從共同 origin 開始，不重排，與只記帳的 `prog.join` 不同。
+Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
+原生 delay、delay_auto、delay_by_timeline、register delay 與內含這些操作的 Repeat／ScanWith 在 build 時報錯。
+普通 Branch 只合併結尾，可以放進 Join。
+同 generator 的 physical-end 與全部 case、Repeat backedge guards 保留，不加 padding 或 rewind。
+
+守衛只涵蓋 timeline／module API 的 reference 操作。
+Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeline 記帳，也不受 Join／Reset 或 case 守衛保護，結果由作者負責。
+它們不是已分析 instruction effects 的安全入口。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
-`sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
+ADC tail 沒有編譯期上界時，收尾同步也納入它的實際 runtime 結尾，取最大值推進 reference。
+無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `delay_by_timeline`，不因未知 ADC tail 而 build 報錯。
+作者負責未知時間的重疊與溢位；編譯器不要求補 hint，也不假造上界。
+`delay_by_timeline` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
+已同步消耗的 ADC tail 剩餘量為 0。
 Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
-這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
+有限 ADC tail 保留既有常數上界與 slack 檢查，不因其他 ADC tail 未知而丟掉已知來源資訊。
+這些式子用於編譯期記帳；實際同步仍沿用 runtime register 計算，不是第二個 scheduler。
 能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
 已知點的 `slack=max-min` 大於 0 時會 warning。
 已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。

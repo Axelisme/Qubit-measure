@@ -316,10 +316,11 @@ class TwoPulseReset(AbsReset):
         timeline = timeline if timeline is not None else "default"
         first = prog.emission_name("reset_first")
         second = prog.emission_name("reset_second")
-        prog.fork(timeline, into=[first, second])
-        self.reset_pulse1.lower(prog, timeline=first, tag=tag)
-        self.reset_pulse2.lower(prog, timeline=second, tag=None)
-        prog.join(first, second, into=timeline)
+        with prog.reference_guard(timeline):
+            prog.fork(timeline, into=[first, second])
+            self.reset_pulse1.lower(prog, timeline=first, tag=tag)
+            self.reset_pulse2.lower(prog, timeline=second, tag=None)
+            prog.join(first, second, into=timeline)
 
 
 class BathReset(AbsReset):
@@ -381,8 +382,9 @@ class BathReset(AbsReset):
         timeline = timeline if timeline is not None else "default"
         cavity = prog.emission_name("reset_cavity")
         qubit = prog.emission_name("reset_qubit")
-        prog.fork(timeline, into=[cavity, qubit])
-        self.res_pulse.lower(prog, timeline=cavity, tag=tag)
-        self.qub_pulse.lower(prog, timeline=qubit, tag=None)
-        self.pi2_pulse.lower(prog, timeline=cavity, tag=None)
-        prog.join(cavity, qubit, into=timeline)
+        with prog.reference_guard(timeline):
+            prog.fork(timeline, into=[cavity, qubit])
+            self.res_pulse.lower(prog, timeline=cavity, tag=tag)
+            self.qub_pulse.lower(prog, timeline=qubit, tag=None)
+            self.pi2_pulse.lower(prog, timeline=cavity, tag=None)
+            prog.join(cavity, qubit, into=timeline)

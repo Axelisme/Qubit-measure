@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-31，TimelineBuilder、compiled simulation 與 joint-ADC shot sums
+**Last updated:** 2026-11-01，s14 runtime event time
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -18,10 +18,7 @@
 with final axis `[I,Q]`. It retains QICK's `remove_offset` policy and native
 `threshold`/`angle` projection. Projection returns excited fraction in I and
 zero in Q, using QICK's angle sign, offset and equality rules.
-`v2.modules.readout.qick_threshold_options(cfg)` converts stored linear/circle
-calibration to native projection options. The caller opts in and supplies all
-declared ADCs in declaration order. Missing, centroid3 or conflicting
-calibration returns empty options for ordinary IQ.
+Callers supply native projection options explicitly in ADC declaration order.
 
 Host classification uses `acquire_summed` with read axes, not an acquire option.
 `centroid3_classifier(cfg, ro_ch=...)` returns detached g/e/f calibration
@@ -144,6 +141,13 @@ shots.
 - 想改「accumulated 輸出格式」：看 `ImproveAcquireMixin._process_accumulated()` 與 `AcquireMixin._average_buf()`。
 - 想改「時間軸或原始資料格式」：看 `AcquireMixin.get_time_axis()`、`get_raw()`。
 - 想改「執行控制（early stop）」：看 `EarlyStopMixin.acquire()` 的 `cancel_flag` 參數與 `finish_round()`。
+
+## Runtime event time
+
+Timeline runtime 事件直接用 s14 保存輸出 offset，不另配事件時間 data register。
+Pulse、ConfigReadout、Trigger 在 preprocess 後以 `t_regs['t'] = 's_out_time'` 交回 QICK expand。
+同基準的下一事件只加差值。原生 macro／raw 寫 s14 或 branch 合流後會重新載入基準。
+一般 Repeat 用 s14 作時間指針。TIME 更新獨立的 reference clock，不讀寫 s14。
 
 ## QICK ASM dict 注意事項
 

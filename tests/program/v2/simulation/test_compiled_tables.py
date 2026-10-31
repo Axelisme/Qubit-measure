@@ -408,7 +408,7 @@ def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_end
     def body(p):
         p.emit(origin)
         p.fork("default", into="parallel")
-        p.delay_timeline("origin_cycles", timeline="parallel")
+        p.timeline_inc("origin_cycles", timeline="parallel")
         for occurrence in range(2):
             if bookkeeping:
                 # Only the emits output waves. Fork/join manipulate timeline ends.
@@ -440,46 +440,6 @@ def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_end
         ) == pytest.approx(((start + 174) / 430.08,))
 
 
-@pytest.mark.parametrize("nested", [False, True])
-def test_parallel_exchange_preserves_child_sources_and_complete_scan_sequences(nested):
-    first_cfg = drive(25 / 384)
-    first_cfg.pre_delay = 7 / 430.08
-    first = first_cfg.build("first")
-    scan = ScanWith("local", [7, 9], "value").add_content(
-        drive(25 / 384).build("scan_pulse")
-    )
-    other_cfg = drive(50 / 384, ch=2)
-    other_cfg.pre_delay = 17 / 430.08
-    other = other_cfg.build("other")
-    advancing = Join([first, scan]) if nested else [first, scan]
-    joined = Join(advancing, other)
-    readout = receiver().build("readout")
-
-    def body(p):
-        p.emit(joined, tag="first_group")
-        p.delay_timeline(11 / 430.08)
-        p.emit(joined, tag="second_group")
-        p.emit(readout)
-
-    prog, env = module_program([joined, readout], body=body, data_registers=32)
-    observed = request(prog, env)
-    point = observed.materialize_point(0)
-    # The advancing author-first sequence emits last, without moving its origin.
-    assert [e.source for e in point.events] == [
-        "other",
-        "first",
-        "scan_pulse",
-        "scan_pulse",
-    ] * 2 + ["readout"]
-    assert [
-        time_us(observed.time_base, e.start_ticks) for e in point.events
-    ] == pytest.approx([t / 430.08 for t in [17, 7, 35, 63, 119, 109, 137, 165, 193]])
-    assert [point.events[i].iterations[-1][1] for i in [2, 3, 6, 7]] == [0, 1, 0, 1]
-    assert times_us(
-        observed.time_base, point.readouts[0].trigger_ticks
-    ) == pytest.approx((193 / 430.08,))
-
-
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
     left = TableLengthPulse(
         "left", drive(), lengths=[25 / 384, 50 / 384, 75 / 384], idx_reg="scan"
@@ -493,7 +453,7 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
 
     def body(p):
         p.emit(origin)
-        p.delay_timeline("origin_cycles")
+        p.timeline_inc("origin_cycles")
         p.emit(joined)
         p.emit(joined)
         p.emit(readout)
@@ -516,55 +476,3 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
         ) == pytest.approx(((origin_cycle + 2 * maximum) / 430.08,))
-
-
-@pytest.mark.parametrize("nested", [False, True])
-def test_parallel_scanwith_inside_repeat_keeps_selected_words_coordinates_and_runtime_debits(
-    nested,
-):
-    selected = ComputedPulse(
-        "choice",
-        val_reg="selected",
-        pulses=[drive(25 / 384, 0.1), drive(25 / 384, 0.3)],
-    )
-    scan = ScanWith("local", [1, 0], "selected").add_content(selected)
-    other = drive(50 / 384, ch=2).build("other")
-    # Keep the reference-advancing sequence last; selected playback's resource
-    # effects are not admitted for exchange by the producer.
-    joined = Join(other, Join(scan) if nested else scan)
-    origin = LoadValue("origin", [7, 11, 19], "scan", "origin_cycles")
-    readout = receiver().build("readout")
-
-    def body(p):
-        p.emit(origin)
-        p.fork("default", into="external")
-        p.delay_timeline(200 / 430.08, timeline="external")
-        p.delay_timeline("origin_cycles")
-        with p.repeat("outer", 2):
-            p.emit(joined)
-        p.join("external", into="default")
-        p.emit(readout)
-
-    prog, env = module_program(
-        [origin, joined, readout], sweep=(("scan", 3),), body=body, data_registers=32
-    )
-    result = request(prog, env)
-    assert result.point_dims == (3,)
-    for index, start in enumerate([7, 11, 19]):
-        events = result.materialize_point(index).events
-        assert [e.source for e in events] == ["other", "choice", "choice"] * 2 + [
-            "readout"
-        ]
-        assert [
-            time_us(result.time_base, e.start_ticks) for e in events
-        ] == pytest.approx(
-            [(start + t) / 430.08 for t in [0, 0, 28, 56, 56, 84]] + [200 / 430.08]
-        )
-        assert [e.gain for e in events[:-1]] == pytest.approx(
-            [0.2, 0.3, 0.1] * 2, abs=1e-4
-        )
-        assert [e.iterations[0] for e in events[:-1]] == [("outer", 0)] * 3 + [
-            ("outer", 1)
-        ] * 3
-        assert [events[i].iterations[-1][1] for i in [1, 2, 4, 5]] == [0, 1, 0, 1]
-        assert events[-1].iterations == ()

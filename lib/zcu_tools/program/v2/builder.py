@@ -1,7 +1,7 @@
 """Record timeline actions without acquiring data or touching hardware."""
 
 from collections.abc import Callable, Generator, Sequence
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager
 from typing import Literal, TypedDict, Unpack, override
 
 from qick import QickConfig
@@ -65,23 +65,25 @@ class BuilderBranchCases:
     """
 
     def __init__(
-        self, record_case: Callable[[int], AbstractContextManager[None]]
+        self, record_case: Callable[[int], AbstractContextManager[str]]
     ) -> None:
         """Use record_case to open a case; normally yielded by builder.branch().
 
         The callback captures operations on its builder and enforces recording
-        lifetime/overlap constraints. It returns a context yielding None.
+        lifetime/overlap constraints. It yields the implicit case timeline name.
         """
         self._record_case = record_case
 
-    def case(self, index: int) -> AbstractContextManager[None]:
+    def case(self, index: int) -> AbstractContextManager[str]:
         """Record a zero-based sweep point's body; omitted points do nothing.
 
-        Record through the owning builder. Duplicate, non-integer and out-of-range
+        Yield <by>[<index>], the case's default timeline; only it and local
+        forks are accessible inside. Record through the owning builder.
+        Duplicate, non-integer and out-of-range
         indices raise ValueError at build. Calls after branch exit or build,
         and overlapping cases, raise ValueError immediately.
-        Nested branches are supported. Repeat in a case fails at build because
-        its entry/backedge advance reference; put Repeat outside the branch.
+        Nested branches and accumulating Repeat are supported. Repeat bodies
+        inside a case must also preserve reference, including nested Repeat.
         """
         return self._record_case(index)
 
@@ -142,8 +144,8 @@ class TimelineBuilder:
     def timeline(self, name: str) -> AbstractContextManager[None]:
         """Record a scoped default for omitted timeline arguments.
 
-        Applies to emit, emit_parallel, pulse, trigger, delay_timeline, sync and
-        the repeat parent. Branch case emissions use the same default.
+        Applies to emit, pulse, trigger, timeline_inc, delay_by_timeline and
+        the repeat and branch parents. Branch cases shadow this default.
         name must exist at replay (default or forked); errors surface at build.
         Explicit names win, nested scopes override and exit restores the prior
         default. No fork/join or native delay/delay_auto change occurs. Close
@@ -178,17 +180,22 @@ class TimelineBuilder:
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> AbstractContextManager[None]:
-        """Record a repeated body; replay program-owned timing rules at build.
+        """Record a scoped loop, replaying program-owned timing at build.
 
-        None timeline selects the scoped name, or default outside a scope.
-        name names the counter. n is a nonnegative integer or an existing
-        register name. Register counts require a guaranteed closed nonnegative
-        integer range_hint; fixed counts forbid it. Entry syncs timeline, each
-        iteration closes parent/local ends, and exit expires local names. Only
-        parent and local timelines may be used inside. Zero still syncs entry
-        but discards body operations. Invalid counts, ranges and timeline uses
-        fail at build with the program error. Recording after build raises
-        ValueError. Close all recording contexts before build.
+        timeline=None selects the scope or default. Times use us. Only the parent
+        and local forks are accessible; local names expire on exit. The loop
+        accumulates its relative end without implicit reference advancement.
+        Explicit delay_by_timeline/delay/delay_auto are allowed outside branch
+        cases and reference-preserving groups. A final top-level
+        delay_by_timeline of the loop timeline with constant-zero entry avoids
+        a tail register; nonzero entry warns to call delay_by_timeline before
+        the loop. Nested/other/middle delay_by_timeline retains the accumulator.
+        name identifies the counter. n is a nonnegative integer or existing
+        count register. Optional range_hint guarantees a closed nonnegative count
+        range without hardware checks; fixed counts forbid hints. Zero discards
+        the body. Invalid count/hint/timeline raises ValueError at build; QICK
+        register exhaustion propagates. Close contexts before build. Recording
+        after build raises ValueError.
         """
         self._ensure_recording()
         return self._repeat(name, n, timeline, range_hint)
@@ -206,42 +213,50 @@ class TimelineBuilder:
         recorded = tuple(actions)
 
         def replay(prog: TimelineProgramV2) -> None:
-            with prog.repeat(name, n, timeline=timeline, range_hint=range_hint):
+            with prog.repeat(
+                name,
+                n,
+                timeline=timeline,
+                range_hint=range_hint,
+            ):
                 for action in recorded:
                     action(prog)
 
         self._record(replay)
 
     def branch(
-        self, *, by: str, align_timeline: bool
+        self, *, by: str, align_timeline: bool, timeline: str | None = None
     ) -> AbstractContextManager[BuilderBranchCases]:
         """Record indexed cases without advancing the shared reference.
 
         by names an existing sweep loop. The yielded handle's case(index) records
         a zero-based point, in any order; omitted points execute no actions.
-        Each case starts with the branch-entry ends and reference. Required
-        align_timeline=True joins case ends per timeline, using static max or
-        exact runtime pointwise max. False keeps the executed case end as a
-        runtime value for each used timeline. Unused timelines remain unchanged.
+        timeline selects the parent; None uses the current scope or default.
+        Each case implicitly forks it and yields <by>[<index>], shadowing the
+        default. Only that case timeline and its local forks may be used;
+        other names fail at build. Required align_timeline=True joins case ends
+        into the parent, using static max or exact runtime pointwise max. False
+        keeps the executed case end. Other timelines remain unchanged.
         Local fork names expire and unjoined local ends are discarded. True
         requires all ends to be reconstructible from branch-entry state.
-        Case delay/delay_auto/sync fail at build; use delay_timeline. Repeat in
-        a case fails at build; move it outside the branch. Branch inside Repeat
-        is supported. Unconditional actions in this context fail at build; move
+        Case delay/delay_auto/delay_by_timeline fail at build; use timeline_inc.
+        Repeat in a case may accumulate timeline ends, but its body must also
+        preserve reference, including nested Repeat. Branch inside Repeat is
+        supported. Unconditional actions in this context fail at build; move
         them before or after the with block. Unknown selectors, invalid indices,
         timing and native register-capacity errors propagate from the program.
         Calls after build raise ValueError. Close before build; the handle
         expires on exit.
         """
         self._ensure_recording()
-        return self._branch(by, align_timeline=align_timeline)
+        return self._branch(by, align_timeline=align_timeline, timeline=timeline)
 
     @contextmanager
     def _branch(
-        self, by: str, *, align_timeline: bool
+        self, by: str, *, align_timeline: bool, timeline: str | None
     ) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
-        cases: list[tuple[int, str | None, tuple[_Action, ...]]] = []
+        cases: list[tuple[int, tuple[_Action, ...]]] = []
         is_open = True
         case_active = False
 
@@ -253,20 +268,22 @@ class TimelineBuilder:
                 raise ValueError("branch.case cannot overlap another case")
 
         @contextmanager
-        def capture_case(index: int) -> Generator[None]:
+        def capture_case(index: int) -> Generator[str]:
             nonlocal case_active
             ensure_case()
             case_active = True
-            timeline = self._timeline_name
+            previous = self._timeline_name
+            self._timeline_name = f"{by}[{index}]"
             try:
                 with self._capture() as case_actions:
-                    yield
+                    yield self._timeline_name
                 # Cases replay separately from the branch's surrounding actions.
-                cases.append((index, timeline, tuple(case_actions)))
+                cases.append((index, tuple(case_actions)))
             finally:
+                self._timeline_name = previous
                 case_active = False
 
-        def record_case(index: int) -> AbstractContextManager[None]:
+        def record_case(index: int) -> AbstractContextManager[str]:
             ensure_case()
             return capture_case(index)
 
@@ -279,14 +296,13 @@ class TimelineBuilder:
         recorded_cases = tuple(cases)
 
         def replay(prog: TimelineProgramV2) -> None:
-            with prog.branch(by=by, align_timeline=align_timeline) as branch:
+            with prog.branch(
+                by=by, align_timeline=align_timeline, timeline=timeline
+            ) as branch:
                 for action in recorded:
                     action(prog)
-                for index, timeline, case in recorded_cases:
-                    with (
-                        branch.case(index),
-                        nullcontext() if timeline is None else prog.timeline(timeline),
-                    ):
+                for index, case in recorded_cases:
+                    with branch.case(index):
                         for action in case:
                             action(prog)
 
@@ -332,31 +348,6 @@ class TimelineBuilder:
             self._modules.append(module)
             self._initialize_actions.append(lambda prog: prog.declare(module))
 
-    def emit_parallel(
-        self,
-        branches: Sequence[Sequence[Module]],
-        *,
-        timeline: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        """Record ordered branches at one timeline origin and merge their ends.
-
-        None selects the scoped name, or default outside a scope.
-        Each branch is an ordered module sequence; first encounters declare
-        objects in branch/child order. The sequences are captured, modules are
-        borrowed. tag belongs to the first child in author order. Multiple
-        reference-advancing branches or unsafe reordering fail at build under
-        TimelineProgramV2.emit_parallel's contract.
-        """
-        self._ensure_recording()
-        recorded = tuple(tuple(branch) for branch in branches)
-        for branch in recorded:
-            for module in branch:
-                self._declare(module)
-        self._record(
-            lambda prog: prog.emit_parallel(recorded, timeline=timeline, tag=tag)
-        )
-
     def delay(self, t: float | QickParam, tag: str | None = None) -> None:
         """Record native reference advance by t us; tag exposes resolved time."""
         self._record(lambda prog: prog.delay(t, tag=tag))
@@ -376,29 +367,37 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.delay_auto(t, gens=gens, ros=ros, tag=tag))
 
-    def delay_timeline(
+    def timeline_inc(
         self,
         t: float | QickParam | str,
         *,
         timeline: str | None = None,
         tag: str | None = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         """Record end += t without moving reference; tag exposes static end.
 
         None timeline selects the scoped name, or default outside a scope.
-        t is us, a QICK parameter, or a certified nonnegative cycle register
-        name. Unknown/wait-only timelines, unknown bounds and overflow fail
-        during build, as in TimelineProgramV2.delay_timeline.
+        t is us, a QICK parameter, or an author-calculated nonnegative cycle
+        register name. range_hint optionally guarantees inclusive integer-cycle
+        bounds for a register. Unbounded values use runtime maxima; overlap and
+        overflow are author-owned. Invalid hints and unknown timelines fail
+        during build, as in TimelineProgramV2.timeline_inc.
         """
-        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag))
+        self._record(
+            lambda prog: prog.timeline_inc(
+                t, timeline=timeline, tag=tag, range_hint=range_hint
+            )
+        )
 
     def fork(self, source: str, *, into: str | list[str]) -> None:
         """Record new timeline names copying source's current end.
 
         source must exist; into is one fresh name or a list of distinct fresh
-        names, captured now. Wait-only sources produce ordinary placement
-        targets. No reference advance or output occurs. Unknown/duplicate names
-        fail at build, and recording after build raises ValueError.
+        names, captured now. Source and targets permit placement at their
+        actual remaining ends. No reference advance or output occurs.
+        Unknown/duplicate names fail at build, and recording after build raises
+        ValueError.
         """
         self._ensure_recording()
         recorded = into if isinstance(into, str) else list(into)
@@ -407,19 +406,19 @@ class TimelineBuilder:
     def join(self, *sources: str, into: str) -> None:
         """Record max of existing sources and target into target's end.
 
-        Sources remain unchanged; the target becomes ordinary, including when
-        sources are wait-only. This is bookkeeping, not a context manager; it
-        emits no output or reference advance. Unknown names fail at build with
+        Sources remain unchanged; the target uses their actual maximum end.
+        This is bookkeeping, not a context manager. It emits no output or
+        reference advance. Unknown names fail at build with
         the program error. Recording after build raises ValueError.
         """
         self._record(lambda prog: prog.join(*sources, into=into))
 
-    def sync(self, *, timeline: str | None = None) -> None:
+    def delay_by_timeline(self, *, timeline: str | None = None) -> None:
         """Record reference advance to the selected end; unknown names fail at build.
 
         None selects the scoped name, or default outside a scope.
         """
-        self._record(lambda prog: prog.sync(timeline=timeline))
+        self._record(lambda prog: prog.delay_by_timeline(timeline=timeline))
 
     def pulse(
         self,

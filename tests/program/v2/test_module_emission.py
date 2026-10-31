@@ -101,7 +101,7 @@ def test_shared_pulse_definitions_deduplicate_in_each_program():
     "delays, events, duration",
     [
         ((0, 0), [0, 43], 86),
-        ((0.01, 0.02), [4, 60], 112),
+        ((0.01, 0.02), [5, 62], 114),
     ],
 )
 def test_reused_scalar_pulse_has_independent_tags_and_common_end(
@@ -118,7 +118,7 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(
 
     prog = _program([pulse], body)
     # Native .1-us playback is38 generator clocks =42.56 tProc cycles.
-    # With pre/post: ceil(4+42.56+.02*430.08)=56, without them ceil42.56=43.
+    # With pre/post: ceil(5+42.56+.02*430.08)=57, without them ceil42.56=43.
     assert [_waves(s) for s in _shots(prog)] == [events] * 2
     assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [duration] * 2
     assert prog.get_time_param("first", "t") * 430.08 == pytest.approx(events[0])
@@ -161,8 +161,10 @@ def test_repeat_emissions_keep_independent_tags_and_actual_end_spacing():
 
     def body(prog):
         prog.emit(pulse, tag="before")
+        prog.delay_by_timeline()
         with prog.repeat("r", 2):
             prog.emit(pulse, tag="inside")
+            prog.delay_by_timeline()
         prog.emit(pulse, tag="after")
 
     prog = _program([pulse], body)
@@ -173,18 +175,18 @@ def test_repeat_emissions_keep_independent_tags_and_actual_end_spacing():
     assert prog.get_time_param("inside", "t") * 430.08 == pytest.approx(0)
 
 
-@pytest.mark.parametrize("sync", [False, True])
-def test_default_emit_only_moves_end_until_sync(sync):
+@pytest.mark.parametrize("delay_by_timeline", [False, True])
+def test_default_emit_only_moves_end_until_sync(delay_by_timeline):
     pulse = _pulse()
 
     def body(prog):
         prog.emit(pulse)
-        if sync:
-            prog.sync()
+        if delay_by_timeline:
+            prog.delay_by_timeline()
         prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([pulse], body))
-    assert [_waves(s) for s in shots] == [[0, 43 if sync else 0]] * 2
+    assert [_waves(s) for s in shots] == [[0, 43 if delay_by_timeline else 0]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [43] * 2
 
 
@@ -264,22 +266,21 @@ def test_t1_including_readout_uses_event_end_at_each_scan_point(
             prog.emit(module, timeline=timeline)
 
     shots = _shots(_program(modules, body, initialize))
-    # Drive ceil(38/384*430.08)=43; wait starts87, step86.
-    # Readout config at130+86*k, trigger+43, playback+22.
-    # ADC end43+123/307.2*430.08=215.2; plus post8.6016 =>ceil224.
-    offsets = [130, 216, 302, 388] if swept else [130]
+    # Drive closes43. Native wait sweep starts86 and steps86; scalar ceils87.
+    # Readout trigger ceil43.008=44; ceil(44+172.2+8.6016)=225.
+    offsets = [129, 215, 301, 387] if swept else [130]
     assert [_waves(s) for s in shots] == [
         [0, offset, offset + 22] for offset in offsets
     ] * 2
     assert [
         [(e.cycle - s.start_cycle, e.value) for e in s.events if e.kind == "data"]
         for s in shots
-    ] == [[(offset + 43, 1), (offset + 53, 0)] for offset in offsets] * 2
+    ] == [[(offset + 44, 1), (offset + 54, 0)] for offset in offsets] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [
-        offset + 224 for offset in offsets
+        offset + 225 for offset in offsets
     ] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
-        offset + 224 for offset in offsets
+        offset + 225 for offset in offsets
     ] * 2
 
 
@@ -291,7 +292,7 @@ def test_delay_emit_does_not_move_reference_and_does_not_receil(delay_type):
     def body(prog):
         prog.emit(delay)
         prog.pulse(0, pulse.pulse_name(prog))
-        prog.sync()
+        prog.delay_by_timeline()
         prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([delay, pulse], body))
@@ -347,7 +348,7 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
     def body(prog):
         if timeline is not None:
             prog.fork("default", into=timeline)
-        prog.delay_timeline(10 / 430.08, timeline=timeline or "default")
+        prog.timeline_inc(10 / 430.08, timeline=timeline or "default")
         prog.emit(reset, timeline=timeline)
         prog.emit(readout, timeline=timeline)
 
@@ -357,11 +358,11 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
     assert [_waves(s) for s in shots] == [
         [10 + t for t in reset_waves] + [length + 10, length + 32]
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 234] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 234] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 235] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 235] * 2
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in shots
-    ] == [[length + 53, length + 63]] * 2
+    ] == [[length + 54, length + 64]] * 2
 
 
 class _PrepareRegisters(Macro):
@@ -391,7 +392,7 @@ def test_delay_auto_owner_rejects_every_explicit_timeline_at_entry(timeline, wai
     auto = DelayAuto("auto", wait)
 
     def body(prog):
-        with pytest.raises(ValueError, match="delay_auto.*delay_timeline"):
+        with pytest.raises(ValueError, match="delay_auto.*timeline_inc"):
             prog.emit(auto, timeline=timeline)
 
     _program([auto], body, _prepare_registers)
@@ -434,8 +435,8 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
 
     def body(prog):
         prog.fork("default", into="other")
-        prog.delay_timeline(40 / 430.08)
-        prog.delay_timeline(60 / 430.08, timeline="other")
+        prog.timeline_inc(40 / 430.08)
+        prog.timeline_inc(60 / 430.08, timeline="other")
         prog.pulse(0, pulse.pulse_name(prog))
         if consumer == "native":
             prog.delay_reg_auto("wait_cycles")
@@ -473,7 +474,7 @@ def test_runtime_guard_rejects_unknown_custom_time_producer(timeline, end):
     def body(prog):
         if timeline != "default":
             prog.fork("default", into=timeline)
-        prog.delay_timeline(end, timeline=timeline)
+        prog.timeline_inc(end, timeline=timeline)
         prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
 
@@ -548,7 +549,7 @@ def test_runtime_words_bind_requested_registers_to_output_fields(words, timeline
             )
             assert (output["DST"], output["SRC"]) == (str(port), "r_wave")
     assert [_waves(s) for s in _shots(prog)] == [[0, 22]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [224] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [225] * 2
 
 
 @pytest.mark.parametrize("timeline", ["default", "other"])
@@ -562,7 +563,7 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
     def body(prog):
         if timeline != "default":
             prog.fork("default", into=timeline)
-        prog.delay_timeline(
+        prog.timeline_inc(
             QickSweep1D("scan", 60 / 430.08, 86 / 430.08), timeline=timeline
         )
         prog.pulse(0, pulse.pulse_name(prog))
@@ -584,12 +585,12 @@ def test_swept_sync_leaves_zero_end_for_subsequent_runtime_guard():
         prog.add_loop("scan", 4)
 
     def body(prog):
-        prog.delay_timeline(QickSweep1D("scan", 0.2, 0.8))
-        prog.sync()
+        prog.timeline_inc(QickSweep1D("scan", 0.2, 0.8))
+        prog.delay_by_timeline()
         prog.emit(auto)
 
     shots = _shots(_program([auto], body, initialize))
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [187, 273, 359, 445] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [186, 272, 358, 444] * 2
 
 
 def test_emit_cannot_overlap_same_channel_via_another_fork():

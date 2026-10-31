@@ -653,7 +653,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 編譯與 IR timing analysis 不需要取數，實際執行則需要相容的 acquisition backend。
 支援邊界見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
 
-`sync` 依每個掃描點的 runtime 結尾推進 reference，shell 收尾 WAIT 使用編譯期常數。
+`delay_by_timeline` 依每個掃描點的 runtime 結尾推進 reference，shell 收尾 WAIT 使用編譯期常數。
 已知合法掃描點間的剩餘時間差距大於 0 時編譯發 warning，超過 `relax_delay` 時 raise ValueError。
 未知差距只警告上界，不以該上界拒絕編譯。
 兩種寫法共用 [ADR-0083 的收尾 WAIT 契約](../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
@@ -684,7 +684,7 @@ with Schedule(config, signals, scope=context.scope) as sched:
     drive = Pulse("pi_pulse", config.pi_pulse)
     readout = Readout("readout", config.readout)
     builder.emit(drive)
-    builder.delay_timeline(delay)
+    builder.timeline_inc(delay)
     builder.emit(readout, tag="terminal")
 
     prog = builder.build()
@@ -700,11 +700,16 @@ with Schedule(config, signals, scope=context.scope) as sched:
 `add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
 多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
 `LoadValue` 或 `ScanWith`，不要把不等距點轉成 `add_sweep`。
-Builder 的 `emit`、`emit_parallel`、`delay`、`delay_auto`、`delay_timeline`、
-`sync`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
+Builder 的 `emit`、`delay`、`delay_auto`、`timeline_inc`、
+`delay_by_timeline`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
 沿用 program 層的同名 API。原生布林控制選項用 keyword，例如
 `builder.delay_auto(0.1, gens=False, ros=True)`。
 `build()` 後 builder 凍結，再記錄動作或再次 build 都會 raise ValueError。
+平行發射用 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
+Module `Join` 封裝相同的 fork／emit／join 操作，不重排 children。
+Join 與 TwoPulseReset／BathReset 的 child 若推進 reference，build 報錯。
+Native delay／delay_auto、delay_by_timeline、register delay 與推進 reference 的 Repeat／ScanWith 都受此限制。
+普通 Branch 只合併 timeline 結尾，可以放進 Join。
 
 ### 手寫 TimelineProgramV2
 
@@ -735,7 +740,7 @@ class T1Program(TimelineProgramV2):
 
     def _body(self, _cfg):
         self.emit(self.drive)
-        self.delay_timeline(self.delay_param)
+        self.timeline_inc(self.delay_param)
         self.emit(self.readout, tag="terminal")
 
 
@@ -761,7 +766,7 @@ Pulse 家族原有的 generator 與 template 共用規則不變。
 ### Timeline 範圍只切換預設名字
 
 Module 的 default timeline 與 QICK reference 分開。
-`delay_timeline` 只加 timeline 結尾，`sync` 才把 reference 推到該結尾。
+`timeline_inc` 只加 timeline 結尾，`delay_by_timeline` 才把 reference 推到該結尾。
 原生 `delay` 與 `delay_auto` 仍只推進 reference，不受 timeline 範圍影響。
 未進範圍時，省略 timeline 的 module emit 使用 default，原生 pulse／trigger 保留原生 reference timing。
 
@@ -769,7 +774,7 @@ Module 的 default timeline 與 QICK reference 分開。
 若後續一組 pulse 都需要同一個掃描時間位移，先以掃描值推進 reference，可將這次位移集中成一次時間加總。
 若把掃描值留在 timeline，後續各 pulse 可能都需要以暫存器計算發射時間，增加指令數。
 先按排程需求決定是否推進共用 reference，再比較編譯結果的成本；這些方法的效果不同，不能只按指令數互換。
-作者自行選擇 `delay`、`delay_auto` 或 `delay_timeline`，builder 不自動替換或優化。
+作者自行選擇 `delay`、`delay_auto` 或 `timeline_inc`，builder 不自動替換或優化。
 
 以下是同一 builder 在 build 前的 body 片段。`drive` 是這次 build 新建的 module。
 手寫 program 可在 `_body` 將 `builder` 換成 `self`，使用已 declare 的 `self.drive`。
@@ -779,38 +784,45 @@ builder.fork("default", into=["drive", "other"])
 
 with builder.timeline("drive"):
     builder.emit(drive)
-    builder.delay_timeline(0.1, timeline="default")  # Explicit name wins.
+    builder.timeline_inc(0.1, timeline="default")  # Explicit name wins.
 
     with builder.timeline("other"):
-        builder.delay_timeline(0.2)
+        builder.timeline_inc(0.2)
 
-    builder.delay_timeline(0.05)  # Restores drive after the nested scope.
+    builder.timeline_inc(0.05)  # Restores drive after the nested scope.
+    builder.delay_by_timeline()
     with builder.repeat("pairs", 2):
         builder.emit(drive)
+        builder.delay_by_timeline()
 
 builder.join("drive", "other", into="default")
-builder.sync()
+builder.delay_by_timeline()
 ```
 
 名字須先存在，只有 `"default"` 預先存在，其餘須先 `fork`。
 `timeline(name)` 不 fork、不自行 join，離開範圍也不移動 reference。
 省略 `timeline=` 或傳入 `None` 會選目前範圍，顯式名字優先，巢狀範圍離開後還原外層。
-`emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
-`repeat` 的預設母 timeline 都遵守這條規則。
+`emit`、`pulse`、`trigger`、`timeline_inc`、`delay_by_timeline` 與
+`repeat` 與 `branch` 的預設母 timeline 都遵守這條規則。
 `fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
 `branch` 必填 `by` 與 `align_timeline`，例如 `with builder.branch(by="scan", align_timeline=True) as cases:`。
-Case 用 `with cases.case(index):` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
+`branch(..., timeline="drive")` 指定母 timeline。省略或傳入 None 時選目前範圍，範圍外選 default。
+Case 用 `with cases.case(index) as name:` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
 未宣告的點不發射動作，重複、非整數或超界 index 報 ValueError。
-Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
-每個 case 從 branch 入口的結尾與 reference 開始。
-`align_timeline=True` 按 timeline 對各 case 結尾做 join，靜態取 max，runtime 取精確逐點 max。
+每個 case 從母 timeline 隱式 fork，`name` 是 `"<by>[<index>]"`，例如 `"scan[1]"`。
+Case 內仍對原 builder 呼叫 emit，省略名字時選 case timeline，不沿用外層範圍。
+只能使用 case timeline 與其局部 fork，使用母 timeline 或其他外部名字會在 build 時報錯。
+每個 case 保留 branch 入口的 reference。
+`align_timeline=True` 將各 case 結尾 join 回母 timeline，靜態取 max，runtime 取精確逐點 max。
 True 需要每個 case 的結尾能從 branch 入口狀態算出。
-`align_timeline=False` 保留實際執行 case 的 runtime 結尾，未使用的 timeline 不變。
-兩種都不推進共用 reference、不自動 sync，後續可在同一 timeline 繼續發射。
-Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
-Case 內 Repeat 也在 build 時報錯，須移到 branch 外。Repeat 內放 branch 仍合法。
-Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 delay_timeline 寫在 with 區塊前或後。
-局部 fork 名字在 case 結束後失效。沒有 join 的局部結尾直接丟棄，不合回祖先，也不報錯。
+`align_timeline=False` 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
+兩種都不推進共用 reference、不自動 delay_by_timeline，後續可在母 timeline 繼續發射。
+Case 內的 native delay、delay_auto 與 delay_by_timeline 在 build 時報錯，等待改用 timeline_inc。
+Case 內可使用 `repeat(...)`。Repeat body 內同樣不能 delay_by_timeline 或呼叫原生 reference 操作，巢狀 Repeat 也一樣。
+Repeat 內放 branch 仍合法。
+Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 timeline_inc 寫在 with 區塊前或後。
+隱式 case 名字與局部 fork 名字在 case 結束後失效。
+沒有 join 回 case timeline 的局部結尾直接丟棄，不合回祖先，也不報錯。
 
 兩顆 qubit 的準備 pulse 放在各自 fork 的 timeline，才能同時發射。
 以下 body 片段使用本次 build 預先建立的 `x180_f1`、`x180_f2` 與 `readout`。
@@ -820,21 +832,34 @@ Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork�
 builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e, outer
 builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e, inner
 # Emit optional reset and herald here.
-builder.sync()  # wait for herald/reset to finish before the branch-selected preparation
+builder.delay_by_timeline()  # wait for herald/reset to finish before the branch-selected preparation
 builder.fork("default", into=["f1", "f2"])
-with builder.timeline("f1"):
-    with builder.branch(by="prepared_f1", align_timeline=True) as cases:
-        with cases.case(1):
-            builder.emit(x180_f1)
-with builder.timeline("f2"):
-    with builder.branch(by="prepared_f2", align_timeline=True) as cases:
-        with cases.case(1):
-            builder.emit(x180_f2)
+with builder.branch(by="prepared_f1", align_timeline=True, timeline="f1") as cases:
+    with cases.case(1):
+        builder.emit(x180_f1)
+with builder.branch(by="prepared_f2", align_timeline=True, timeline="f2") as cases:
+    with cases.case(1):
+        builder.emit(x180_f2)
 builder.join("f1", "f2", into="default")
 builder.emit(readout, tag="terminal")
 ```
 
-Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
+`repeat(name, n, *, timeline=None, range_hint=None)` 使用累加 timeline，不自動同步入口或回邊。
+Body 的預設名字改用循環 timeline，只可使用母 timeline 與局部 fork，離開後局部名字失效。
+作者可在 case 外的 body 明寫 delay_by_timeline、原生 delay／delay_auto 或巢狀 Repeat。
+若每圈都要推進 reference，在 body 頂層最後明寫 `delay_by_timeline()`，並先在循環前同步母 timeline。
+當入口結尾為常數 0 且最後操作是這個 delay_by_timeline，固定圈長使用常數 inc_ref，不配循環尾端 register。
+編譯器只看已錄製結構，不分析定點或重播 preprocess。
+中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步別條 timeline 或沒有 delay_by_timeline 都用 shot-local register 累加器。
+Body 以循環 timeline 的 delay_by_timeline 結尾但入口不是常數 0 時，UserWarning 會提示在循環前加 delay_by_timeline，編譯器不自行加入。
+這條變數尾端路徑仍沿用現有 IR 展開與 address DMEM 成本，尚未改成 s14 指針。
+
+`n` 是非負整數或既有 count register 名字。固定 0 不執行 body，也不自動同步。
+Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
+省略 hint 時不證明回邊同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
+每 shot 內初始化循環狀態，register 超限保留 QICK 錯誤。
+Runtime-only 事件 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
+Reference 操作按每圈實際推進量扣減外部結尾。Runtime 推進後未消耗的外部來源可能是 wait-only，先經 join/fork 建立普通排程點，或明寫 delay_by_timeline 完整消耗。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
 它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。

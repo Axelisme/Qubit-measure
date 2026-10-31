@@ -132,21 +132,14 @@ Check 的 raw Run 不要求 classifier，到分析才從 saved cfg 要求 circle
 
 ### 原生 QICK projection 的 readout 與 caller 分工
 
-Readout owner 的 `qick_threshold_options(cfg)` 將既有 linear／circle classifier 轉成 QICK threshold／angle options。
-Helper 不執行 acquire，也不讀 program registry、硬體或 live library。
-Caller 依實驗語意決定是否把 options 傳給普通 `acquire`，並負責校準是否仍適用。
+普通 `acquire` 保留原生 QICK threshold／angle projection。
+Caller 依實驗語意決定是否傳入 threshold／angle，並負責 ADC 宣告順序、完整覆蓋與校準是否仍適用。
 原生 projection 將 excited fraction 放在 I，Q 為零，讓既有 IQ analysis 可使用這個等效 IQ。
 使用者於 2026-10-29 說：「1混入IQ是故意的，就是要變成等效IQ，好讓分析程序可以不用動。2所以是由實驗方手動傳遞3這是用戶責任。4目的是自帶0~1的合理範圍，這樣數據的值本身就有意義。」
 
-任一 ADC 缺少可用的 linear／circle classifier，包含 centroid3，helper 就回傳空 options，整次 acquire 保持普通 IQ，不只對部分 ADC 啟用 projection。
-使用者於 2026-10-29 對缺少分類的情境裁定：「有一個沒有不要抱錯，就當都沒有用」。
-這個 fallback 不適用於 `classification_processors`；要求 processed populations 的 caller 仍須提供完整可用的校準。
-
-Advisor 依使用者 2026-10-30 的代理授權，具體化 cfg sequence 的順序與 conflict／empty fallback。
-Helper 接受單一 Pulse／Mux cfg 或 cfg sequence，依 ADC 初次出現順序產生 options，相同 ADC 的相同校準只保留一份。
-同一 ADC 的校準衝突或 sequence 為空時，整體回傳空 options。
-Caller 必須提供涵蓋全部 program ADC 的 cfg，且順序符合 program 的 ADC 宣告順序。
-Helper 不讀 program，因此不替 caller 猜測或驗證這個對應。
+使用者於 2026-10-31 裁定：「7,8,9,13照建議」。
+沒有 caller 的 classifier-to-QICK options helper 已移除。
+Caller 自行準備原生 projection 參數，readout 不提供缺少校準時整體退回普通 IQ 的 helper。
 此分工沿用 [[0072]] 與 `.importlinter` C8、C15、C16 的依賴方向，不新增跨層入口。
 
 ### Shot sums 與 heralding

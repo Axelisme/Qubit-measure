@@ -5,12 +5,12 @@ from dataclasses import dataclass, field, replace
 
 from qick.asm_v2 import QickParam, WriteReg
 
+from ._timeline_axis import CycleAxis, CycleProducer, TimeVariable
 from ._timeline_expression import (
-    CycleVariable,
-    LinearTime,
     TimeExpression,
     add_time,
     choose_time,
+    cycle_axis,
     exact_bounds,
     expression_axes,
     multiply_time,
@@ -19,6 +19,8 @@ from ._timeline_expression import (
     scale_time,
     select_time,
     slack_variables,
+    substitute_time,
+    unbounded_time,
 )
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds
@@ -29,7 +31,9 @@ from ._timeline_runtime import (
     bounded_source_expression,
     lookup_expression,
     native_event_expression,
+    optional_time_bounds,
     projected_bounds,
+    runtime_expression,
     source_expression,
     time_bounds,
     time_expression,
@@ -59,7 +63,6 @@ class RepeatFrameSnapshot:
 class RepeatFrame:
     parent: str
     external: dict[str, Time]
-    waiting: set[str]
     native_gens: dict[int, float | QickParam]
     native_ros: dict[int, float | QickParam]
     advance: float | QickParam = 0.0
@@ -75,7 +78,7 @@ class RepeatFrame:
     tail_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
-    expression_advance: TimeExpression = field(default_factory=LinearTime)
+    expression_advance: TimeExpression = field(default_factory=TimeVariable)
     initial_native_expressions: dict[tuple[bool, int], TimeExpression] = field(
         default_factory=dict
     )
@@ -110,7 +113,7 @@ class RepeatFrame:
             current = book.ends[name]
             if isinstance(current, RuntimeEnd):
                 expression = choose_time(
-                    LinearTime(),
+                    TimeVariable(),
                     add_time(time_expression(prog, initial), scale_time(total, -1)),
                 )
                 book.ends[name] = replace(current, expression=expression)
@@ -134,7 +137,7 @@ class RepeatFrame:
                 initial = initial_runtime.get(ch, native[ch])
                 expression = (
                     select_time(
-                        choose_time(LinearTime(1), count, maximum=False),
+                        choose_time(TimeVariable(1), count, maximum=False),
                         (
                             time_expression(prog, initial),
                             time_expression(prog, generated[ch]),
@@ -142,7 +145,7 @@ class RepeatFrame:
                     )
                     if ch in written
                     else choose_time(
-                        LinearTime(),
+                        TimeVariable(),
                         add_time(time_expression(prog, initial), scale_time(total, -1)),
                     )
                 )
@@ -155,31 +158,31 @@ class RepeatFrame:
                 if axis in expression_axes(generated):
                     generated = reduce_loop_time(generated, axis, last=True)
                 expression = select_time(
-                    choose_time(LinearTime(1), count, maximum=False),
+                    choose_time(TimeVariable(1), count, maximum=False),
                     (initial, generated),
                 )
             else:
                 expression = choose_time(
-                    LinearTime(), add_time(initial, scale_time(total, -1))
+                    TimeVariable(), add_time(initial, scale_time(total, -1))
                 )
             book.native_expressions[key] = expression
         self.restore_sources(book, count, axis=axis)
-        book.source_expressions[axis] = LinearTime(0)
+        book.source_expressions[axis] = TimeVariable(0)
 
     def restore_sources(
         self, book: "TimelineBook", count: TimeExpression, *, axis: str
     ) -> None:
         """Keep entry values at zero iterations, otherwise the last body write."""
-        limits = projected_expression_bounds(count)
-        if limits.maximum == 0:
+        limits = None if unbounded_time(count) else projected_expression_bounds(count)
+        if limits is not None and limits.maximum == 0:
             book.source_expressions = self.initial_source_expressions.copy()
             return
-        executed = choose_time(LinearTime(1), count, maximum=False)
+        executed = choose_time(TimeVariable(1), count, maximum=False)
         restored = {}
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
                 expression = reduce_loop_time(expression, axis, last=True)
-            if limits.minimum == 0:
+            if limits is None or limits.minimum == 0:
                 if name not in self.initial_source_expressions:
                     # A body-only definition is not available on the zero path.
                     continue
@@ -210,7 +213,8 @@ class RepeatFrame:
         if self.entry_math is None:
             raise RuntimeError("repeat entry has no arithmetic plan")
         for name, end in self.external.items():
-            if time_bounds(prog, end)[1] > 1e-12:
+            limits = optional_time_bounds(prog, end)
+            if limits is None or limits[1] > 1e-12:
                 self.external[name] = self._store(prog, end)
         self.tail_gens = self._native_stores(
             prog, self.native_gens, self.initial_runtime_gens, self.written_gens
@@ -243,8 +247,12 @@ class RepeatFrame:
                     WriteReg(dst=tails[ch].register, src=operand.register)
                 )
                 tail = tails[ch]
-                tails[ch] = RuntimeEnd(
-                    tail.register, 0, max(tail.maximum, operand.maximum)
+                tails[ch] = (
+                    RuntimeEnd(tail.register, None, None)
+                    if tail.maximum is None or operand.maximum is None
+                    else RuntimeEnd(
+                        tail.register, 0, max(tail.maximum, operand.maximum)
+                    )
                 )
 
     def _store(self, prog, end: Time) -> RuntimeEnd:
@@ -265,7 +273,8 @@ class RepeatFrame:
         result: dict[int, RuntimeEnd] = {}
         for ch, value in initial.items():
             end = runtime.get(ch, value)
-            if time_bounds(prog, end)[1] <= 1e-12 and ch not in written:
+            limits = optional_time_bounds(prog, end)
+            if limits is not None and limits[1] <= 1e-12 and ch not in written:
                 continue
             match = next(
                 (
@@ -311,6 +320,45 @@ class RepeatFrame:
             prog.set_timestamp(value, ro_ch=ch)
 
 
+@dataclass
+class LoopTimelineFrame:
+    """One Repeat accumulator, isolated namespace and explicit reference debits.
+
+    parent is the visible loop timeline. external restores outer names.
+    entry is its incoming end; origin adds an opaque iteration-progress identity.
+    initial_channels/native retain incoming physical tails and their provenance.
+    entry_math initializes shot-local storage before the loop. pinned restores
+    register liveness at exit. starts records managed starts and branch paths
+    for the backedge proof, in relative integer cycles. advance is cumulative
+    reference movement in cycles; debits retain its execution-position plans.
+    written_channels distinguishes generated tails from untouched outer tails.
+    body_math starts empty and retains the prepared RuntimeMath plans emitted
+    in this frame's body, in preparation order. Loop exit may rewrite these plans
+    to s14-only pointer updates when their event offsets and duration are proven
+    constant. recording starts False and becomes True at the body boundary,
+    after the iteration-origin capture. Only the active innermost frame records
+    plans; popping the frame at exit ends recording before exit plans prepare.
+    """
+
+    parent: str
+    external: dict[str, Time]
+    entry: Time
+    origin: RuntimeEnd
+    progress: CycleAxis
+    initial_channels: dict[tuple[bool, int], Time]
+    initial_native: dict[tuple[bool, int], TimeExpression]
+    entry_math: RuntimeMath
+    pinned: set[str]
+    starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
+        default_factory=list
+    )
+    advance: TimeExpression = field(default_factory=TimeVariable)
+    debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
+    written_channels: set[tuple[bool, int]] = field(default_factory=set)
+    body_math: list[RuntimeMath] = field(default_factory=list)
+    recording: bool = False
+
+
 @dataclass(frozen=True)
 class BranchProvenance:
     """Register and channel expressions captured at the same branch position.
@@ -343,13 +391,17 @@ class TimelineBook:
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
         self.shell_wait_bound: int | None = None
-        self.cycle_axes: dict[str, CycleVariable] = {}
-        # Ordered native axes/counts identify one index for this compile only.
-        self.sweep_indices: dict[tuple[tuple[str, int], ...], str] = {}
+        self.cycle_axes: dict[str, CycleAxis] = {}
+        # Native length sweeps are immutable program parameters. Share their
+        # QICK initialization registers across physical-end and post plans.
+        self.native_length_sources: dict[
+            tuple[int, tuple[tuple[str, int], ...]], RuntimeEnd
+        ] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
+        self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
@@ -357,19 +409,26 @@ class TimelineBook:
         # their existing scheduling roles; these expressions never emit code.
         # Keys are (is_generator, channel_id).
         self.native_expressions: dict[tuple[bool, int], TimeExpression] = {}
-        self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
+        self.loop_timelines: list[LoopTimelineFrame] = []
+        self.case_path: list[tuple[str, int]] = []
         self.native_only = False
+        self.reference_guards = 0
         self.used: set[str] | None = None
 
     def repeat_count(
-        self, prog, iterations: int | str, minimum: int, maximum: int
+        self, prog, iterations: int | str, minimum: int, maximum: int | None
     ) -> TimeExpression:
         """Describe count points without requiring a bounds-only count producer."""
+        if isinstance(iterations, str) and maximum is None:
+            return self.source_expressions.get(
+                iterations,
+                TimeVariable(terms=((cycle_axis(iterations, None, None), 1),)),
+            )
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
-            if isinstance(iterations, str)
-            else LinearTime(iterations)
+            if isinstance(iterations, str) and maximum is not None
+            else TimeVariable(iterations if isinstance(iterations, int) else minimum)
         )
 
     def observe_selection(
@@ -439,16 +498,25 @@ class TimelineBook:
         }
 
     def observe_write(self, prog, macro) -> None:
-        """Keep current native constant/copy/add/subtract point metadata in sync."""
+        """Keep current producer identities and known arithmetic points in sync."""
+        if type(macro) is WriteRegOp:
+            self._observe_alu(prog, macro)
+            return
+        if (
+            type(macro) is not WriteReg
+            and isinstance(getattr(macro, "dst", None), str)
+            and macro.dst in prog._time_bounds.author_writes
+        ):
+            self.source_expressions[macro.dst] = TimeVariable(
+                terms=((cycle_axis(macro.dst, None, None), 1),)
+            )
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
-                self.source_expressions[macro.dst] = LinearTime(macro.src)
+                self.source_expressions[macro.dst] = TimeVariable(macro.src)
             elif isinstance(macro.src, str) and self._known_source(prog, macro.src):
                 self.source_expressions[macro.dst] = source_expression(prog, macro.src)
             else:
                 self.source_expressions.pop(macro.dst, None)
-        elif type(macro) is WriteRegOp:
-            self._observe_alu(prog, macro)
 
     def _known_source(self, prog, name: str) -> bool:
         register = prog.reg_dict.get(name)
@@ -459,21 +527,47 @@ class TimelineBook:
         )
 
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
-        if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
-            self.source_expressions.pop(macro.dst, None)
-            return
         right = macro.rhs
-        if isinstance(right, int):
-            rhs = LinearTime(right)
-        elif isinstance(right, str) and self._known_source(prog, right):
-            rhs = source_expression(prog, right)
-        else:
-            self.source_expressions.pop(macro.dst, None)
+        rhs = (
+            TimeVariable(right)
+            if isinstance(right, int)
+            else source_expression(prog, right)
+            if isinstance(right, str) and self._known_source(prog, right)
+            else None
+        )
+        if (
+            macro.op not in ("+", "-")
+            or not self._known_source(prog, macro.lhs)
+            or rhs is None
+        ):
+            if macro.dst in prog._time_bounds.allowed.get(id(macro), ()):
+                # Unsupported ALU operations retain the owner's certified range.
+                self.source_expressions.pop(macro.dst, None)
+            else:
+                self.source_expressions[macro.dst] = TimeVariable(
+                    terms=((cycle_axis(macro.dst, None, None), 1),)
+                )
             return
-        self.source_expressions[macro.dst] = add_time(
+        expression = add_time(
             source_expression(prog, macro.lhs),
             rhs if macro.op == "+" else scale_time(rhs, -1),
         )
+        if macro.dst not in prog._time_bounds.allowed.get(id(macro), ()):
+            # Author arithmetic is a runtime recipe, not a certified loop range.
+            expression = TimeVariable(
+                terms=(
+                    (
+                        cycle_axis(
+                            macro.dst,
+                            None,
+                            None,
+                            CycleProducer(reconstruction=expression),
+                        ),
+                        1,
+                    ),
+                )
+            )
+        self.source_expressions[macro.dst] = expression
 
     def set_end(self, name: str, end: Time) -> None:
         self.math.check_end(end)
@@ -484,34 +578,53 @@ class TimelineBook:
         if name not in self.ends:
             raise ValueError(f"{name}: unknown timeline; declare it with fork in _body")
 
-    def end(self, name: str, *, placement: bool = False) -> Time:
+    def end(self, name: str) -> Time:
         self.require(name)
         if self.used is not None:
             self.used.add(name)
-        if placement and name in self.waiting:
-            raise ValueError(
-                f"{name}: timeline can only wait after register repeat; "
-                "sync it or use join/fork to establish a conservative scheduling point"
-            )
         return self.ends[name]
 
+    def check_loop_pulse(self, prog, channel: int, start: Time) -> None:
+        """Prove managed starts against physical tails, cancelling loop origins."""
+        if not self.loop_timelines:
+            return
+        expression = time_expression(prog, start)
+        gap = add_time(
+            expression,
+            scale_time(self.native_expression(prog, channel, generator=True), -1),
+        )
+        gap = substitute_time(
+            gap, {frame.progress: TimeVariable() for frame in self.loop_timelines}
+        )
+        if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
+            raise ValueError(
+                f"channel {channel} pulse overlap inside repeat; use timeline_inc"
+            )
+        self.loop_timelines[-1].starts.append(
+            (channel, expression, tuple(self.case_path))
+        )
+
+    def require_reference_advance(self) -> None:
+        """Reject reference operations inside branch cases or guarded lowering."""
+        if self.used is not None or self.reference_guards:
+            raise ValueError("cannot advance reference; use timeline_inc instead")
+
     def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
+        self.require_reference_advance()
         if self.native_only:
             return
         if observe_pulses:
             advance = time_expression(self.math.prog, t)
+            for frame in self.loop_timelines:
+                frame.advance = add_time(frame.advance, advance)
+                frame.debits.append((self.math, t))
             self.native_expressions = {
-                key: choose_time(LinearTime(), add_time(end, scale_time(advance, -1)))
+                key: choose_time(TimeVariable(), add_time(end, scale_time(advance, -1)))
                 for key, end in self.native_expressions.items()
             }
         consumed = self._debit_native(t) if observe_pulses else set()
         self._debit_repeats(t, observe_pulses=observe_pulses, consumed=consumed)
         self.ends = {name: self.math.floor(end, t) for name, end in self.ends.items()}
-        self.waiting = {
-            name
-            for name in self.waiting
-            if time_bounds(self.math.prog, self.ends[name])[1] > 1e-12
-        }
 
     def _debit_native(self, t: Time) -> set[int]:
         consumed: set[int] = set()
@@ -527,9 +640,13 @@ class TimelineBook:
                     del channels[ch]
                     if generator and time_bounds(self.math.prog, remaining)[1] <= 1e-12:
                         consumed.add(ch)
+                if not isinstance(remaining, RuntimeEnd):
+                    self.native_expressions[generator, ch] = native_event_expression(
+                        self.math.prog, remaining
+                    )
                 self.native_timestamp(
                     self.math.prog,
-                    projected_bounds(self.math.prog, remaining).maximum,
+                    remaining,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -547,9 +664,17 @@ class TimelineBook:
                         active.expression_advance, time_expression(self.math.prog, t)
                     )
             frame = self.repeats[-1]
+            limits = optional_time_bounds(self.math.prog, t)
+            # Sync advances are nonnegative by construction. Zero is only the
+            # guaranteed minimum, never the actual runtime reference debit.
             proof_advance = (
-                time_bounds(self.math.prog, t)[0] if isinstance(t, RuntimeEnd) else t
+                (0.0 if limits is None else limits[0])
+                if isinstance(t, RuntimeEnd)
+                else t
             )
+            if limits is None:
+                for guard in frame.pulse_guards.values():
+                    guard.unbounded = True
             frame.variable = frame.variable or isinstance(t, RuntimeEnd)
             frame.advance += proof_advance
             if observe_pulses:
@@ -562,12 +687,20 @@ class TimelineBook:
     def native_timestamp(
         self,
         prog,
-        value: float | QickParam,
+        value: Time,
         *,
         gen_ch: int | None = None,
         ro_ch: int | None = None,
     ) -> None:
-        """Project a compiler bound without recording a new hardware event."""
+        """Project a finite bound without claiming an unbounded hardware time.
+
+        Runtime channel maps retain exact storage when no finite native
+        timestamp can be projected. This does not record a new event.
+        """
+        if isinstance(value, RuntimeEnd):
+            if value.maximum is None or unbounded_time(runtime_expression(value)):
+                return
+            value = projected_bounds(prog, value).maximum
         previous = self.native_only
         self.native_only = True
         try:
@@ -613,25 +746,24 @@ class TimelineBook:
         None means neither selection contains a declared channel, matching QICK
         auto-delay behavior. Static channels keep their native timestamps.
         """
-        result: Time | None = None
-        for enabled, channels, generator in (
-            (gens, prog.gen_chs, True),
-            (ros, prog.ro_chs, False),
-        ):
-            if enabled:
-                for ch in channels:
-                    value = self.channel_end(prog, ch, generator=generator)
-                    result = (
-                        value if result is None else self.math.maximum(result, value)
-                    )
-        return result
+        values = [
+            self.channel_end(prog, ch, generator=generator)
+            for enabled, channels, generator in (
+                (gens, prog.gen_chs, True),
+                (ros, prog.ro_chs, False),
+            )
+            if enabled
+            for ch in channels
+        ]
+        return self.math.join(values) if values else None
 
     def check_shell_wait(self, prog) -> None:
         """Project final ADC WAIT and diagnose slack after all body cancellation.
 
         Known producers use exact legal-point extrema. A bounds-only unknown
         emits an explicitly conservative warning and never triggers the relax
-        guard. This check emits no runtime instructions.
+        guard. Body closure has already consumed unbounded ADC tails at runtime.
+        This check emits no runtime instructions.
         """
         if not prog.ro_chs:
             return
@@ -656,8 +788,26 @@ class TimelineBook:
                 raise ValueError(f"{message}, relax={relax} cycles")
             warnings.warn(message, UserWarning, stacklevel=2)
 
-    def maximum(self) -> Time:
-        end: Time = 0.0
-        for candidate in self.ends.values():
-            end = self.math.maximum(end, candidate)
-        return end
+    def maximum(self, *, close_adc: bool = False) -> Time:
+        """Return the maximum selected relative end as a Time value.
+
+        With close_adc=False, select only the current timeline ends. With
+        close_adc=True, also select actual native ADC ends whose expressions
+        have no compile-time upper bound. True is only for the existing
+        all-timeline shot closure; finite ADC tails stay on the constant shell
+        WAIT and slack-proof path rather than being added as extra candidates.
+
+        Return a float or QickParam when the maximum is statically representable,
+        otherwise a RuntimeEnd for the actual runtime maximum. An empty selection
+        returns zero. This method does not advance reference or debit ends; the
+        caller consumes the returned end when synchronizing.
+        """
+        values = list(self.ends.values())
+        if close_adc:
+            prog = self.math.prog
+            values.extend(
+                self.channel_end(prog, ch, generator=False)
+                for ch in prog.ro_chs
+                if unbounded_time(self.native_expression(prog, ch, generator=False))
+            )
+        return self.math.join(values or [0.0])

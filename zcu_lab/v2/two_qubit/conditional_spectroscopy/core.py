@@ -266,14 +266,16 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     builder.emit(Reset("reset", config.reset))
                 builder.fork("default", into=["f1", "f2"])
                 with (
-                    builder.timeline("f1"),
-                    builder.branch(by="prepared_f1", align_timeline=True) as cases,
+                    builder.branch(
+                        by="prepared_f1", align_timeline=True, timeline="f1"
+                    ) as cases,
                     cases.case(1),
                 ):
                     builder.emit(x180_f1)
                 with (
-                    builder.timeline("f2"),
-                    builder.branch(by="prepared_f2", align_timeline=True) as cases,
+                    builder.branch(
+                        by="prepared_f2", align_timeline=True, timeline="f2"
+                    ) as cases,
                     cases.case(1),
                 ):
                     builder.emit(x180_f2)

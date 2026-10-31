@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickRawParam
+from qick.asm_v2 import QickRawParam, Trigger
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst, TestInst, WaitInst
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
@@ -28,7 +28,7 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
             p.branch(by="scan", align_timeline=align_timeline) as branch,
             branch.case(1),
         ):
-            p.pulse(1, "drive", timeline="default", tag="selected-drive")
+            p.pulse(1, "drive", tag="selected-drive")
         # The routed ADC always needs a carrier, including undeclared points.
         p.pulse(0, "p", t=0, tag="terminal")
         p.trigger([0], t=0)
@@ -51,11 +51,17 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
         env.devices.close_all_devices()
 
 
-def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
+@pytest.mark.parametrize("sync_at_end", [False, True])
+def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(sync_at_end):
     def body(p):
         p.trigger([0], t=0)
-        with p.repeat("outer", 2), p.repeat("inner", 2):
-            p.pulse(0, "p", timeline="default", tag="repeated")
+        with p.repeat("outer", 2):
+            with p.repeat("inner", 2):
+                p.pulse(0, "p", timeline="default", tag="repeated")
+                if sync_at_end:
+                    p.delay_by_timeline()
+            if sync_at_end:
+                p.delay_by_timeline()
 
     prog, env = program(body, trigger_time=None)
     result = request(prog, env)
@@ -74,7 +80,10 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
     assert times_us(result.time_base, result.readouts[0].trigger_ticks) == (0,)
 
 
-def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
+@pytest.mark.parametrize("sync_at_end", [False, True])
+def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(
+    sync_at_end,
+):
     loader = LoadValue("counts", [0, 1, 2], "scan", "count")
 
     def initialize(p):
@@ -86,7 +95,9 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
         p.emit(loader)
         with p.repeat("inner", "count", range_hint=(0, 2)):
             p.pulse(0, "p", timeline="default", tag="repeated")
-        p.pulse(0, "p", tag="final")
+            if sync_at_end:
+                p.delay_by_timeline()
+        p.pulse(0, "p", timeline="default", tag="final")
 
     # Counts 0..2 leave 86 cycles of shell WAIT slack; allow that exact budget.
     prog, env = program(body, initialize, trigger_time=None, relax_delay=0.2)
@@ -103,6 +114,45 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
         ]
 
 
+@pytest.mark.parametrize("align", [False, True])
+def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
+    def initialize(p):
+        p.add_loop("scan", 2)
+        p.declare_gen(1, nqz=1)
+        p.add_pulse(1, "drive", style="const", freq=80, phase=0, gain=0.2, length=0.1)
+
+    def body(p):
+        p.pulse(0, "p", t=0, tag="carrier")
+        p.trigger([0], t=0)
+        with p.branch(by="scan", align_timeline=align) as cases:
+            with (
+                cases.case(0),
+                p.repeat("outer", 2),
+                p.repeat("inner", 2),
+            ):
+                p.pulse(1, "drive", tag="repeated")
+            with cases.case(1):
+                p.timeline_inc(43 / 430.08)
+        p.pulse(1, "drive", timeline="default", tag="final")
+
+    prog, env = program(body, initialize, trigger_time=None)
+    result = request(prog, env)
+    for index in range(2):
+        events = [
+            e for e in result.materialize_point(index).events if e.source != "carrier"
+        ]
+        expected = [0, 43, 86, 129, 172] if index == 0 else [172 if align else 43]
+        assert [time_us(result.time_base, e.start_ticks) * 430.08 for e in events] == (
+            pytest.approx(expected)
+        )
+        assert [e.iterations for e in events[:-1]] == (
+            [(("outer", o), ("inner", i)) for o in range(2) for i in range(2)]
+            if index == 0
+            else []
+        )
+    assert result.reps == 2
+
+
 def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
     def initialize(p):
         p.add_loop("scan", 3)
@@ -112,12 +162,12 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
     def body(p):
         p.trigger([0], t=0)
         p.fork("default", into="external")
-        p.delay_timeline(100 / 430.08, timeline="external")
+        p.timeline_inc(100 / 430.08, timeline="external")
         with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
-                    p.pulse(0, "p", timeline="default", tag=f"case-{index}")
-                    p.delay_timeline((10 + index * 10) / 430.08)
+                    p.pulse(0, "p", tag=f"case-{index}")
+                    p.timeline_inc((10 + index * 10) / 430.08)
         p.join("external", into="default")
         p.pulse(1, "tail", timeline="default", tag="tail")
 
@@ -146,13 +196,26 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
     def body(p):
         if register_count:
             p.emit(loader)
+        p.delay_by_timeline()
         with p.repeat(
             "inner",
             "count" if register_count else count,
-            **({"range_hint": (0, 3)} if register_count else {}),
+            **{"range_hint": (0, 3)} if register_count else {},
         ):
-            p.trigger([0], t=0)
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     static = prog.ro_chs[0]["trigs"]
@@ -195,9 +258,22 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
 
     def body(p):
         p.emit(loader)
+        p.delay_by_timeline()
         with p.repeat("inner", "count", range_hint=(1, 3)):
-            p.trigger([0], t=0)
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     static = prog.ro_chs[0]["trigs"]
@@ -222,12 +298,12 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
         p.fork("default", into=["left", "right"])
         p.emit(left)
         p.emit(right)
-        p.delay_timeline("left_time", timeline="left")
-        p.delay_timeline("right_time", timeline="right")
-        p.delay_timeline(25 / 430.08)
+        p.timeline_inc("left_time", timeline="left")
+        p.timeline_inc("right_time", timeline="right")
+        p.timeline_inc(25 / 430.08)
         p.join("left", "right", into="default")
         p.delay(20 / 430.08)
-        p.sync()
+        p.delay_by_timeline()
         p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, initialize, trigger_time=None)
@@ -248,9 +324,22 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
     def body(p):
         p.emit(loader)
+        p.delay_by_timeline()
         with p.repeat("inner", "count", range_hint=(0, 2)):
-            p.trigger([0], t=0)
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None)
     assert prog.ro_chs[0]["trigs"] == 1
@@ -265,7 +354,7 @@ def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
         p.pulse(0, "p", timeline="default")
         with p.branch(by="scan", align_timeline=True) as branch, branch.case(0):
             p.trigger([0], t=43 / 430.08)
-            p.pulse(0, "p", timeline="default")
+            p.pulse(0, "p")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
     # Lane zero has two reads, matching the two statically emitted triggers.
@@ -284,11 +373,15 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.repeat("reads", 3), p.branch(by="scan", align_timeline=True) as branch:
-            for index in range(3):
-                with branch.case(index):
-                    p.trigger([0, 1], t=0)
-                    p.pulse(0, "p", timeline="default", tag=f"case-{index}")
+        p.delay_by_timeline()
+        with p.repeat("reads", 3):
+            with p.branch(by="scan", align_timeline=True) as branch:
+                for index in range(3):
+                    with branch.case(index) as case:
+                        p.fork(case, into="capture")
+                        p.trigger([0, 1], t=0, timeline="capture")
+                        p.pulse(0, "p", tag=f"case-{index}")
+            p.delay_by_timeline()
 
     prog, env = program(
         body,
@@ -336,7 +429,7 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
         with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(2):
                 with branch.case(index):
-                    p.pulse(0, "p", timeline="default")
+                    p.pulse(0, "p")
 
     prog, env = program(
         body, lambda p: p.add_loop("scan", 2), stream_transform=transform
@@ -390,7 +483,7 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(2):
                 with branch.case(index):
-                    p.pulse(0, "p", timeline="default")
+                    p.pulse(0, "p")
 
     def triggered_body(p):
         p.trigger([0], t=0)
@@ -454,7 +547,7 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
     def body(p):
         with p.branch(by="scan", align_timeline=True) as branch:
             with branch.case(0):
-                p.pulse(0, "p", timeline="default", tag="drive")
+                p.pulse(0, "p", tag="drive")
                 if effect == "measurement":
                     p.read_and_jump(0, "I", 0, ">=", "done")
                     p.label("done")
@@ -465,7 +558,7 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
                 else:
                     p.jump("HERE")
             with branch.case(1):
-                p.pulse(0, "p", timeline="default")
+                p.pulse(0, "p")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2))
     with pytest.raises(ValueError, match=rf"{instruction}.*preopt.*case-0"):

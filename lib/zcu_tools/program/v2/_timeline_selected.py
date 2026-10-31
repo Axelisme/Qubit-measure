@@ -6,11 +6,13 @@ from qick.asm_v2 import QickParam, QickRawParam, TimedMacro
 
 from ._timeline_guard import PulseGuard, bounds
 from ._timeline_runtime import (
+    NativeLength,
     RuntimeEnd,
     SelectedEventEnd,
     Time,
+    optional_time_bounds,
     placement_time,
-    time_bounds,
+    step_time,
 )
 from ._timeline_state import TimelineBook
 from .macro.pluse_reg import PulseByReg
@@ -55,6 +57,10 @@ class TimelineSelectedPulse(TimedMacro):
     Invalid selector/producer provenance or channel overlap fails at compile.
     """
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,
@@ -69,6 +75,7 @@ class TimelineSelectedPulse(TimedMacro):
         self.selection = selection
         self.relative_t: float | QickParam = source.t
         self.event_end = SelectedEventEnd(0.0, selection.selector, (), ())
+        self.runtime_start: RuntimeEnd | None = None
 
     def _lengths(self, prog) -> tuple[float | QickParam, ...]:
         lengths: list[float | QickParam] = []
@@ -118,57 +125,79 @@ class TimelineSelectedPulse(TimedMacro):
                 f"{selection.register}: selected playback requires a table relation"
             )
         prog._time_bounds.require_selection(prog, selection.relation)
-        origin = self.book.end(self.timeline, placement=True)
+        origin = self.book.end(self.timeline)
         previous = self.book.channel_end(prog, self.source.ch, generator=True)
         offset = placement_time(prog, self.relative_t)
         start: Time
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, offset)
+            start = self.book.math.event_time(origin, offset)
             raw_origin = origin
         else:
-            start = placement_time(prog, origin + self.relative_t)
+            start = origin + offset
             raw_origin = 0.0
             offset = start
+        start_limits = optional_time_bounds(prog, start)
+        previous_limits = optional_time_bounds(prog, previous)
+        self.book.check_loop_pulse(prog, self.source.ch, start)
         if (
-            not (
+            start_limits is not None
+            and previous_limits is not None
+            and not (
                 bounds(self.relative_t)[0] >= 0
                 and self.book.math.covers(origin, previous)
             )
-            and time_bounds(prog, start)[0] < time_bounds(prog, previous)[1] - 1e-12
+            and start_limits[0] < previous_limits[1] - 1e-12
         ):
             raise ValueError(
                 f"{self.timeline}: channel {self.source.ch} pulse overlap; cannot prove runtime start >= previous end"
             )
-        self.source.t = time_bounds(prog, start)[1]
+        self.source.t = (
+            self.book.math.preprocess_time(start)
+            if isinstance(start, RuntimeEnd)
+            else start
+        )
         self.source.preprocess(prog)
         if isinstance(start, RuntimeEnd):
-            self.source.t_regs["t"] = start.register
+            self.runtime_start = start
+            self.source.t_regs["t"] = "s_out_time"
         else:
             self.source.t = start
             self.source.preprocess(prog)
         lengths = self._lengths(prog)
         offsets = tuple(offset + length for length in lengths)
-        physical = self.book.math.selected_end(selection.selector, offsets)
+        native = tuple(
+            NativeLength(length, prog.soccfg["gens"][self.source.ch]["f_fabric"])
+            for length in lengths
+        )
+        physical = self.book.math.selected_end(
+            selection.selector, offsets, native=native
+        )
         finish = self.book.math.add(raw_origin, physical, target=physical.register)
         self.event_end = SelectedEventEnd(
             raw_origin,
             selection.selector,
             offsets,
-            tuple(c.post for c in selection.choices),
+            tuple(step_time(prog, c.post) for c in selection.choices),
             (finish,),
+            native,
         )
         self.book.set_end(self.timeline, finish)
         self.book.runtime_gens[self.source.ch] = finish
         self.book.record_native(prog, self.source.ch, finish, generator=True)
-        self.book.native_timestamp(
-            prog, time_bounds(prog, finish)[1], gen_ch=self.source.ch
-        )
-        if self.book.repeats:
-            lo = time_bounds(prog, start)[0]
-            hi = time_bounds(prog, finish)[1]
-            self.book.repeats[-1].pulse_guards[self.source.ch].then(
-                PulseGuard(self.source.ch, shifts=(), floors=(hi,), limits=(lo,))
+        self.book.native_timestamp(prog, finish, gen_ch=self.source.ch)
+        if self.book.repeats and not self.book.loop_timelines:
+            finish_limits = optional_time_bounds(prog, finish)
+            guard = (
+                PulseGuard(self.source.ch, unbounded=True)
+                if start_limits is None or finish_limits is None
+                else PulseGuard(
+                    self.source.ch,
+                    shifts=(),
+                    floors=(finish_limits[1],),
+                    limits=(start_limits[0],),
+                )
             )
+            self.book.repeats[-1].pulse_guards[self.source.ch].then(guard)
 
         if isinstance(self.source, PulseByReg):
             # Address preparation is the final part of this pulse's arithmetic
@@ -188,4 +217,6 @@ class TimelineSelectedPulse(TimedMacro):
         return self.source.list_time_params()
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.runtime_start is not None:
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
