@@ -393,7 +393,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                 if run_cfg.reset is not None:
                     builder.emit(Reset("reset", run_cfg.reset))
                 with (
-                    builder.branch(by="ge", align_timeline=True) as cases,
+                    builder.branch(by="ge", align_timeline=False) as cases,
                     cases.case(1),
                 ):
                     builder.emit(Pulse("qub_pulse", run_cfg.qub_pulse))

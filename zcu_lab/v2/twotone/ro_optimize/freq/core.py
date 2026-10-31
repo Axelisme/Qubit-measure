@@ -146,7 +146,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             with (
-                builder.branch(by="ge", align_timeline=True) as cases,
+                builder.branch(by="ge", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse))

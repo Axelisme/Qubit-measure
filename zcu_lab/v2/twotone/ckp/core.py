@@ -337,7 +337,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             with (
-                builder.branch(by="ge", align_timeline=True) as cases,
+                builder.branch(by="ge", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
