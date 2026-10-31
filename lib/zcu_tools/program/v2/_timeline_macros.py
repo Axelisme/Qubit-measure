@@ -433,6 +433,9 @@ class TimelineRepeatExit(TimelineSync):
             prog._time_bounds.defined.intersection_update(frame.defined)
         for ch, guard in frame.pulse_guards.items():
             if self.maximum is None:
+                guard.unbounded = True
+                if self.book.repeats:
+                    self.book.repeats[-1].pulse_guards[ch].then(guard)
                 continue
             repeated = guard.repeated(self.count, self.maximum)
             repeated.require((frame.native_gens[ch],), repeated.limits)
@@ -525,7 +528,7 @@ class TimelineRepeatExit(TimelineSync):
                 for ch, end in tails.items():
                     upper = (
                         end.maximum
-                        if ch in written
+                        if ch in written or end.maximum is None
                         else max(
                             0,
                             end.maximum
@@ -546,9 +549,12 @@ class TimelineRepeatExit(TimelineSync):
                         else:
                             current.pop(ch, None)
             for ch, end in current.items():
+                limits = optional_time_bounds(prog, end)
+                if limits is None:
+                    continue
                 self.book.native_timestamp(
                     prog,
-                    time_bounds(prog, end)[1],
+                    limits[1],
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -1075,11 +1081,13 @@ class TimelineBranch(Macro):
     def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
         if not force and _same_times(values):
             return values[0]
-        limits = [time_bounds(prog, value) for value in values]
+        limits = [optional_time_bounds(prog, value) for value in values]
+        finite = [limit for limit in limits if limit is not None]
+        bounded = len(finite) == len(limits)
         merged = RuntimeEnd(
             prog.add_reg(),
-            round(min(lo for lo, _ in limits) * get_fclk(prog)),
-            round(max(hi for _, hi in limits) * get_fclk(prog)),
+            round(min(lo for lo, _ in finite) * get_fclk(prog)) if bounded else None,
+            round(max(hi for _, hi in finite) * get_fclk(prog)) if bounded else None,
             expression=self.book.selected_expression(prog, self.by, values),
         )
         for tail, value in zip(self.tails, values, strict=True):
@@ -1124,9 +1132,12 @@ class TimelineBranch(Macro):
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
                     self.book.ends[name] = replace(end, covers=(*end.covers, value))
+            limits = optional_time_bounds(prog, value)
+            if limits is None:
+                continue
             self.book.native_timestamp(
                 prog,
-                time_bounds(prog, value)[1],
+                limits[1],
                 gen_ch=ch if generator else None,
                 ro_ch=None if generator else ch,
             )
@@ -1176,6 +1187,7 @@ class TimelineBranch(Macro):
                     tuple(value for guard in guards for value in guard.shifts),
                     tuple(value for guard in guards for value in guard.floors),
                     tuple(value for guard in guards for value in guard.limits),
+                    unbounded=any(guard.unbounded for guard in guards),
                 )
 
     def translate(self, prog) -> None:

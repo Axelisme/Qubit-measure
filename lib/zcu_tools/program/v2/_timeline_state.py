@@ -563,9 +563,13 @@ class TimelineBook:
                         active.expression_advance, time_expression(self.math.prog, t)
                     )
             frame = self.repeats[-1]
-            proof_advance = (
-                time_bounds(self.math.prog, t)[0] if isinstance(t, RuntimeEnd) else t
-            )
+            limits = optional_time_bounds(self.math.prog, t)
+            # Sync advances are nonnegative by construction. Zero is only the
+            # guaranteed minimum, never the actual runtime reference debit.
+            proof_advance = (0.0 if limits is None else limits[0]) if isinstance(t, RuntimeEnd) else t
+            if limits is None:
+                for guard in frame.pulse_guards.values():
+                    guard.unbounded = True
             frame.variable = frame.variable or isinstance(t, RuntimeEnd)
             frame.advance += proof_advance
             if observe_pulses:
