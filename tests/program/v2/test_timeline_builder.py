@@ -49,9 +49,7 @@ def test_named_time_operations_keep_end_and_reference_separate(
     assert waves(shot) == [0, 143]
     assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
     expected_offset = 143 if operation == "timeline_inc" else 0
-    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(
-        expected_offset
-    )
+    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(expected_offset)
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])

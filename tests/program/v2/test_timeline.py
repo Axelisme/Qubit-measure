@@ -143,7 +143,9 @@ def test_fork_rejects_unknown_source_and_duplicate_targets(body):
         _program(body)
 
 
-@pytest.mark.parametrize("operation", ["pulse", "trigger", "delay", "delay_by_timeline", "config"])
+@pytest.mark.parametrize(
+    "operation", ["pulse", "trigger", "delay", "delay_by_timeline", "config"]
+)
 def test_timeline_operations_reject_undeclared_names(operation):
     def body(prog):
         if operation == "pulse":

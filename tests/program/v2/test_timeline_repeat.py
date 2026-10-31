@@ -1005,9 +1005,7 @@ def test_register_repeat_clamps_crossing_wait_bound_or_partial_consumption(
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(
-            (100 if consume_after else 30) / 430.08, timeline="external"
-        )
+        prog.timeline_inc((100 if consume_after else 30) / 430.08, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
             prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))

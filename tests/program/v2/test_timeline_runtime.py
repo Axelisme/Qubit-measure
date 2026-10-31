@@ -180,12 +180,8 @@ def rebased_runtime_end_program():
     def body(prog):
         prog.emit(loader)
         prog.fork("default", into=["a", "b", "c"])
-        prog.timeline_inc(
-            QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a"
-        )
-        prog.timeline_inc(
-            QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b"
-        )
+        prog.timeline_inc(QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a")
+        prog.timeline_inc(QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b")
         prog.timeline_inc("c_duration", timeline="c")
         prog.join("a", "b", into="default")
         prog.delay_by_timeline(timeline="default")
@@ -899,9 +895,7 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
             with prog.branch(by="scan", align_timeline=True) as branch:
                 for index in range(3):
                     with branch.case(index):
-                        prog.timeline_inc(
-                            QickSweep1D("scan", 10 / 430.08, 20 / 430.08)
-                        )
+                        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
             prog.delay_by_timeline()
         prog.timeline_inc(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")

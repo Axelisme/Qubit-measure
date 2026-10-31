@@ -369,7 +369,15 @@ def _advancing_pulse(operation: str, scan: ScanWith) -> Pulse:
 
 @pytest.mark.parametrize(
     "operation",
-    ["delay", "delay_auto", "delay_by_timeline", "runtime_sync", "register", "repeat", "scan"],
+    [
+        "delay",
+        "delay_auto",
+        "delay_by_timeline",
+        "runtime_sync",
+        "register",
+        "repeat",
+        "scan",
+    ],
 )
 @pytest.mark.parametrize("position", ["first", "last", "nested"])
 def test_module_join_rejects_reference_advancing_child_at_build(operation, position):
@@ -393,7 +401,15 @@ def test_module_join_rejects_reference_advancing_child_at_build(operation, posit
 @pytest.mark.parametrize("kind", ["two_pulse", "bath"])
 @pytest.mark.parametrize(
     "operation",
-    ["delay", "delay_auto", "delay_by_timeline", "runtime_sync", "register", "repeat", "scan"],
+    [
+        "delay",
+        "delay_auto",
+        "delay_by_timeline",
+        "runtime_sync",
+        "register",
+        "repeat",
+        "scan",
+    ],
 )
 def test_reset_rejects_reference_advancing_pulse_lowering_at_build(kind, operation):
     scan = ScanWith("scan_child", [7, 9], "value").add_content(_pulse("scan_pulse", 0))
