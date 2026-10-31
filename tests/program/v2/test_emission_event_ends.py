@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import LoadValue, Module, Pulse, PulseCfg
+from zcu_tools.program.v2.modules import ComputedPulse, LoadValue, Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.delay import Delay, SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.reset import (
@@ -313,6 +313,33 @@ def test_runtime_cross_grid_length_sweep_ceil_without_implicit_time_table():
     assert [waves(shot) for shot in shots(prog)] == [[0, 44], [0, 87], [0, 129]] * 2
     assert prog.compile_datamem() is None
     assert not any(i["CMD"] in {"ARITH", "DIV"} for i in prog.prog_list)
+
+
+def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
+    selector = LoadValue("selector", [0, 1], "choice", "selected")
+    playback = ComputedPulse(
+        "chosen", val_reg="selected",
+        pulses=[_pulse_cfg(length=QickSweep1D("scan", n / 384, (n + 76) / 384), pre=0, post=0)
+                for n in (39, 40)],
+    )
+    tail = Pulse("tail", _pulse_cfg(1, length=10 / 384, pre=0, post=0))
+
+    def initialize(prog):
+        prog.add_loop("choice", 2)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.emit(selector)
+        prog.emit(playback)
+        prog.emit(tail)
+
+    prog = _program([selector, playback, tail], body, initialize)
+    # Candidate-specific fabric lengths use W=287, never longest-candidate padding.
+    assert [waves(shot) for shot in shots(prog)] == [
+        [0, end] for end in [44, 87, 129, 45, 88, 131]
+    ] * 2
+    # Two selector words and two author-declared waveform addresses, no time table.
+    assert len(prog.compile_datamem()) == 4
 
 
 def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
