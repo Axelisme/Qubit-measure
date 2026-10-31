@@ -402,6 +402,11 @@ class RuntimeMath(TimedMacro):
                     delta = self.subtract(result, value)
                     result = self.subtract(result, self.maximum(0.0, delta))
             return result
+        return self._reconstruct_linear(expression, inputs)
+
+    def _reconstruct_linear(
+        self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
+    ) -> RuntimeEnd:
         result = self.cycles(expression.constant / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
             term = inputs[variable]

@@ -22,7 +22,7 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex
-from ._timeline_expression import choose_time, time_variables
+from ._timeline_expression import CycleVariable, time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -42,7 +42,6 @@ from ._timeline_runtime import (
     known_maximum,
     source_expression,
     step_time,
-    time_expression,
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
@@ -829,7 +828,16 @@ def _same_times(values: Sequence[Time]) -> bool:
 
 @dataclass
 class BranchCaseState:
-    """Suspend a prepared path until the whole branch's closing mode is known."""
+    """Retain one prepared path for timeline/native end and proof merging.
+
+    ends maps live timeline names to reference-relative ends; waiting contains
+    wait-only names and used contains names accessed by this case. runtime_gens
+    and runtime_ros hold runtime native channel tails, while gens and ros hold
+    their static QICK timestamps. provenance pairs register/channel expressions.
+    frames captures active Repeat guard and advance state. defined contains
+    registers with certified producers at this case exit. All containers are
+    detached snapshots; native times use us and RuntimeEnd stores cycle bounds.
+    """
 
     ends: dict[str, Time]
     waiting: set[str]
@@ -870,22 +878,7 @@ class TimelineBranch(Macro):
                 )
         self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
         initial = self.book.ends.copy()
-        self.entry_math = RuntimeMath(prog)
-        inputs = {}
-        if self.align_timeline:
-            for register in prog._time_bounds.defined:
-                expression = source_expression(prog, register)
-                self.book.source_expressions.setdefault(register, expression)
-                for variable in time_variables(expression):
-                    if not variable.axes and variable.points is None:
-                        inputs[variable] = self.entry_math.snapshot(
-                            RuntimeEnd(variable.name, variable.minimum, variable.maximum, expression=expression)
-                        )
-        captured_ends = [
-            self.entry_math.snapshot(end)
-            for end in initial.values()
-            if self.align_timeline and isinstance(end, RuntimeEnd)
-        ]
+        self._capture_entry(prog, initial)
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
@@ -898,7 +891,7 @@ class TimelineBranch(Macro):
         initial_defined = prog._time_bounds.defined.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
-        self.book.pinned.update(value.register for value in [*inputs.values(), *captured_ends])
+        self.book.pinned.update(value.register for value in [*self.entry_inputs.values(), *self.captured_ends])
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
@@ -932,22 +925,8 @@ class TimelineBranch(Macro):
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
         self.result_math = RuntimeMath(prog)
-        self.book.ends = {}
         used = set.union(*(state.used & initial.keys() for state in states))
-        for name in initial:
-            values = [result[name] for result in results]
-            if name not in used:
-                self.book.ends[name] = initial[name]
-            elif self.align_timeline:
-                if any(isinstance(value, RuntimeEnd) for value in values):
-                    self.book.ends[name] = self.result_math.reconstruct_maximum(values, inputs, captured_ends)
-                else:
-                    end = values[0]
-                    for value in values[1:]:
-                        end = self.result_math.maximum(end, value)
-                    self.book.ends[name] = end
-            else:
-                self.book.ends[name] = self._merge_values(prog, values, force=True)
+        self._merge_ends(prog, initial, results, used)
         self._merge_native(
             prog,
             [{**state.gens, **state.runtime_gens} for state in states],
@@ -961,6 +940,42 @@ class TimelineBranch(Macro):
             generator=False,
         )
         self.book.pinned = saved_pins
+
+    def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
+        self.entry_math = RuntimeMath(prog)
+        self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
+        if self.align_timeline:
+            for register in prog._time_bounds.defined:
+                expression = source_expression(prog, register)
+                self.book.source_expressions.setdefault(register, expression)
+                for variable in time_variables(expression):
+                    if not variable.axes and variable.points is None:
+                        self.entry_inputs[variable] = self.entry_math.snapshot(
+                            RuntimeEnd(variable.name, variable.minimum, variable.maximum, expression=expression)
+                        )
+        self.captured_ends = [
+            self.entry_math.snapshot(end)
+            for end in initial.values()
+            if self.align_timeline and isinstance(end, RuntimeEnd)
+        ]
+
+    def _merge_ends(
+        self, prog, initial: dict[str, Time], results: list[dict[str, Time]], used: set[str]
+    ) -> None:
+        self.book.ends = {}
+        for name in initial:
+            values = [result[name] for result in results]
+            if name not in used:
+                self.book.ends[name] = initial[name]
+            elif not self.align_timeline:
+                self.book.ends[name] = self._merge_values(prog, values, force=True)
+            elif any(isinstance(value, RuntimeEnd) for value in values):
+                self.book.ends[name] = self.result_math.reconstruct_maximum(values, self.entry_inputs, self.captured_ends)
+            else:
+                end = values[0]
+                for value in values[1:]:
+                    end = self.result_math.maximum(end, value)
+                self.book.ends[name] = end
 
     def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]

@@ -247,10 +247,9 @@ def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
     def body(p):
         p.trigger([0], t=0)
         p.pulse(0, "p", timeline="default")
-        with p.branch(by="scan", align_timeline=True) as branch:
-            with branch.case(0):
-                p.trigger([0], t=43 / 430.08)
-                p.pulse(0, "p", timeline="default")
+        with p.branch(by="scan", align_timeline=True) as branch, branch.case(0):
+            p.trigger([0], t=43 / 430.08)
+            p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
     # Lane zero has two reads, matching the two statically emitted triggers.

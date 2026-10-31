@@ -215,7 +215,7 @@ class TimelineBuilder:
     def branch(self, *, by: str, align_timeline: bool) -> AbstractContextManager[BuilderBranchCases]:
         """Record indexed cases without advancing the shared reference.
 
-        by names an existing sweep loop. The yielded handle\'s case(index) records
+        by names an existing sweep loop. The yielded handle's case(index) records
         a zero-based point, in any order; omitted points execute no actions.
         Each case starts with the branch-entry ends and reference. Required
         align_timeline=True joins case ends per timeline, using static max or
@@ -232,10 +232,10 @@ class TimelineBuilder:
         expires on exit.
         """
         self._ensure_recording()
-        return self._branch(by, align_timeline)
+        return self._branch(by, align_timeline=align_timeline)
 
     @contextmanager
-    def _branch(self, by: str, align_timeline: bool) -> Generator[BuilderBranchCases]:
+    def _branch(self, by: str, *, align_timeline: bool) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
         cases: list[tuple[int, str | None, tuple[_Action, ...]]] = []
         is_open = True
