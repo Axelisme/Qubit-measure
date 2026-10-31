@@ -508,7 +508,10 @@ class RuntimeMath(TimedMacro):
         if not author:
             limits = self.prog._time_bounds.source(self.prog, name)
         else:
-            self.prog._get_reg(name)
+            try:
+                self.prog._get_reg(name)
+            except KeyError as exc:
+                raise ValueError(f"{name}: unknown time register") from exc
             if range_hint is not None:
                 limits = CycleBounds(*range_hint)
             elif name not in self.prog.loop_dict and self.prog._time_bounds.author_source(name):
