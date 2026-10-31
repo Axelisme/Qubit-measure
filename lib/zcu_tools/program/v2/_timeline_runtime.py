@@ -846,7 +846,11 @@ class RuntimeMath(TimedMacro):
                 if (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
                     return value
         if inputs is not None:
-            print("JOIN DEBUG", repr(expressions), "CAPTURED", repr(tuple(bindings)), "COMMON", repr(common), "RESIDUALS", repr(residuals), "ATOMS", repr(atoms), flush=True)
+            def show(e):
+                if isinstance(e, TimeAbs):
+                    return (e.runtime.kind, *(show(x) for x in e.runtime.operands))
+                return (e.constant, [(a.name, id(a), c) for a, c in e.terms])
+            print("JOIN SUMMARY", [show(e) for e in expressions], "CAPTURED", [show(e) for e in bindings], "COMMON", show(common), "RESIDUALS", [show(e) for e in residuals], "ATOMS", [(id(a), show(e)) for a,e in atoms.items()], flush=True)
         sources = {} if inputs is None else inputs.copy()
         for axis, expression in atoms.items():
             if expression in bindings:
