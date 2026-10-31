@@ -22,7 +22,7 @@ edits and captures sources again.
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
 - `tones[i].flux_dev` starts from that Q's captured `flux_dev`.
-- Each `tones[i].sweep` has independent native-unit Start and Stop.
+- Each `tones[i].flux` has independent native-unit Start and Stop.
   `flux_expts` is the one point count shared by all local lines, initially 101.
   Lines advance together by point index, not as a Cartesian product.
 - Project integer (flux=0) and half (flux=0.5) from each Q's `{offset, period}`
@@ -102,7 +102,7 @@ uniqueness is checked only for selected tones.
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
 `frequency.df` is a SweepCfg of common nominal MHz offsets.
-`tones[i]` contains its fixed name, `flux_dev`, and `sweep.start/stop` in native DC units. `flux_expts` is their shared positive count.
+`tones[i]` contains its fixed name, `flux_dev`, and `flux.start/stop` in native DC units. `flux_expts` is their shared positive count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
 are finite nonnegative microseconds. `settle` is finite nonnegative seconds.

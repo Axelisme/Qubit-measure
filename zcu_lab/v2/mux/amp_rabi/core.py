@@ -6,7 +6,7 @@ MuxAmpRabiExp.run(config, *, context) sweeps participant gains simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxAmpRabiToneCfg has a fixed name, a required drive and gain bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -16,7 +16,7 @@ does not resolve component identities.
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program advances all gains in a shared hardware loop.
-Each point executes optional common reset, Join of independent drive pulses,
+Each point executes optional common reset, parallel emission of independent drive pulses,
 then active mux readout. Branches start together; short branches wait for the
 longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -146,7 +146,7 @@ class MuxAmpRabiCfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     reset and readout hold the common modules. tones contains one
-    MuxToneCfg per original readout position, with unique nonempty names.
+    MuxAmpRabiToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
@@ -300,19 +300,11 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.require_drive().model_copy(deep=True)
-                drive.set_param(
-                    "gain",
-                    sweep2param(
-                        "point",
-                        make_sweep(
-                            tone.require_gain().start,
-                            tone.require_gain().stop,
-                            cfg.expts,
-                        ),
-                    ),
+                gain = sweep2param(
+                    "point",
+                    make_sweep(tone.require_gain().start, tone.require_gain().stop, cfg.expts),
                 )
-                drives.append(Pulse(f"drive_{index}", drive, pulse_id=f"drive_{index}"))
+                drives.append(Pulse(f"drive_{index}", tone.require_drive(), gain=gain, pulse_id=f"drive_{index}"))
 
             # Reset -> simultaneous drives -> fixed readout after the longest drive.
             builder = TimelineBuilder(

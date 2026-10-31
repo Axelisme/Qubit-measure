@@ -6,7 +6,7 @@ MuxFreqExp.run(config, *, context) drives selected qubits simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxFreqToneCfg has a fixed name, a required drive and freq bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -16,7 +16,7 @@ does not resolve component identities.
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program sweeps drive DAC frequencies in a shared hardware loop.
-Each point executes optional common reset, Join of independent drive pulses,
+Each point executes optional common reset, parallel emission of independent drive pulses,
 then active fixed-frequency mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -285,19 +285,11 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.require_drive().model_copy(deep=True)
-                drive.set_param(
-                    "freq",
-                    sweep2param(
-                        "point",
-                        make_sweep(
-                            tone.require_freq().start,
-                            tone.require_freq().stop,
-                            cfg.expts,
-                        ),
-                    ),
+                freq = sweep2param(
+                    "point",
+                    make_sweep(tone.require_freq().start, tone.require_freq().stop, cfg.expts),
                 )
-                drives.append(Pulse(f"drive_{index}", drive))
+                drives.append(Pulse(f"drive_{index}", tone.require_drive(), freq=freq))
 
             # Reset -> simultaneous drives -> fixed mux readout after the longest drive.
             builder = TimelineBuilder(

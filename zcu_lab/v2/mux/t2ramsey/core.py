@@ -29,8 +29,8 @@ different from the readout generator. Pulse parameters must be fixed and finite.
 The delay bounds must be finite and nonnegative. Numeric cfg validation does not
 resolve component identities; the caller supplies valid tone/qubit bindings.
 
-The sequence is reset, Join of first x90 pulses, common Delay, Join of final x90
-pulses, then active mux readout. Each Join starts its branches at the same stage
+The sequence is reset, parallel first x90 pulses, common delay, parallel final x90
+pulses, then active mux readout. Each fork starts its branches at the same stage
 origin. Native pulse pre/post delays remain unchanged. The Delay starts after the
 longest first stage, not independently after each qubit's own pulse.
 For zero pre/post delays, a shorter pulse waits an extra fixed

@@ -10,16 +10,16 @@ readout positions. `participants` is a nonempty, unique list of original indices
 Only participants require valid drives. Inactive drives may be None.
 
 `MuxT1Exp` excites active qubits with fixed pi pulses on independent drive generators.
-It uses the existing `Join` to start all pulses together. Each shorter branch waits
-for the longest branch to finish. One common `Delay` follows the Join, then one
+Timeline forks start all pulses together. Each shorter branch waits
+for the longest branch to finish. One common delay follows the join, then one
 active mux readout. Reset, reps, rounds, initial delay and relax delay are shared.
 Pulse pre/post delays remain part of their native branches; no end-alignment
 padding or second compilation is added.
 
-`MuxT1Cfg.delays` defines a finite, nonnegative, strictly increasing start/stop
-window and point count in microseconds. `uniform=True` uses its linear SweepCfg
+`MuxT1Cfg.delay` defines a finite, nonnegative, strictly increasing start/stop
+window and point count in microseconds. `sampling="linear"` uses its linear SweepCfg
 axis in one hardware loop. The result and fit retain requested times; readout
-can differ by native timing ticks. `uniform=False` uses the single-qubit T1
+can differ by native timing ticks. `sampling="decay"` uses the single-qubit T1
 sampling policy to concentrate points in the decay region of the same window.
 LoadValue and DelayAuto execute one shared cycle table for all qubits. Results
 and fits then retain quantized delays; duplicate/reordered quantized points
@@ -36,7 +36,7 @@ T1 with a probe tone or singleshot T1.
 Import the leaf without loading a GUI:
 
 ```python
-from zcu_lab.v2.support.mux_sweep_cfg import MuxDriveModuleCfg
+from zcu_lab.v2.support.mux_sweep_cfg import MuxT1ToneCfg
 from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -56,7 +56,7 @@ cfg = MuxT1Cfg(
         MuxT1ToneCfg(name="Q3", drive=pi_2),
     ],
     participants=[2, 0],
-    delays=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
+    delay=SweepCfg(start=0.0, stop=8.0, expts=41, step=0.2),
     reps=128,
     rounds=2,
     initial_delay=1.0,
@@ -182,9 +182,9 @@ class MuxT1Cfg(ConfigBase):
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
-    generators distinct from readout. delays is one common linear SweepCfg of
-    strictly increasing, finite, nonnegative requested us. uniform defaults True
-    for a linear hardware sweep. False concentrates points within that window
+    generators distinct from readout. delay is one common SweepCfg of
+    strictly increasing, finite, nonnegative requested us. sampling defaults to
+    linear; decay concentrates points within that window
     using a shared cycle table. Fits retain requested times for uniform sampling,
     quantized times otherwise.
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
@@ -296,10 +296,10 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
 
         config supplies the full tone list, ordered participants, pi pulses,
         reset/readout and averaging controls; it is validated without mutation.
-        Join waits for the longest pi branch, including its pulse delays, before
+        The join waits for the longest pi branch, including its pulse delays, before
         the shared wait. Return times (P,), original tone indices (K,) and
-        averaged complex IQ (K,P), with one live figure per tone. uniform=True
-        retains the requested linear times; False returns quantized nonuniform
+        averaged complex IQ (K,P), with one live figure per tone. sampling="linear"
+        retains requested times; "decay" returns quantized nonuniform
         delays in the same window using the single-qubit T1 sampling policy.
         Both paths use one hardware loop. Nonuniform quantization collisions
         raise ValueError before acquisition. Cancellation retains

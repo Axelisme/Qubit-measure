@@ -6,7 +6,7 @@ MuxLenRabiExp.run(config, *, context) sweeps selected drive lengths together.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxLenRabiToneCfg has a fixed name, a required drive and length bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -16,7 +16,7 @@ does not resolve component identities.
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program executes a shared hardware point loop with
-optional common reset, Join of table-length drive pulses, then active mux readout.
+optional common reset, parallel emission of table-length drive pulses, then active mux readout.
 Branches start together; short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
 All participants share reps, rounds, initial_delay and relax_delay.
@@ -151,7 +151,7 @@ class MuxLenRabiCfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     reset and readout hold the common modules. tones contains one
-    MuxToneCfg per original readout position, with unique nonempty names.
+    MuxLenRabiToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
@@ -286,7 +286,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         config supplies full tones, ordered participants and shared averaging
         and delays. Each point pairs the participants' own quantized lengths;
-        Join starts them together and readout waits for the last drive, without
+        The fork starts them together and readout waits for the last drive, without
         end alignment or sweep-wide padding. Return original tone indices (K,),
         requested total lengths (K,P) in us and average complex IQ (K,P) in
         ADC-length-normalized a.u. Flat-top lengths include their ramps.
