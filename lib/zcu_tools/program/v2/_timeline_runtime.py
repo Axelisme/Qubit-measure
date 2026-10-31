@@ -1530,6 +1530,11 @@ class RuntimeMath(TimedMacro):
             and limits[1] <= advance_limits[0] + 1e-12
         ):
             return 0.0
+        _, remaining_upper = difference_limits(
+            time_expression(self.prog, end), time_expression(self.prog, advance)
+        )
+        if remaining_upper is not None and remaining_upper <= 0:
+            return 0.0
         delta = self.subtract(end, advance)
         return self.maximum(0.0, delta, target=delta.register)
 

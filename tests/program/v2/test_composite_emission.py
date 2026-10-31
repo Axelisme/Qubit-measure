@@ -642,13 +642,14 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         prog = build()
         for _ in range(2):
             result = shots(prog)
-            # Both selected physical ends are 148/176. Equal numeric aggregate
-            # ends must retain both channels' coverage, including the 60-cycle debt.
+            # The 0.01 us pre-delay ceils to 5 cycles. Both selected physical
+            # ends are 149/177. Equal aggregates must retain both channels'
+            # coverage, including the 60-cycle debt.
             assert [waves(s) for s in result] == [
-                [104, 104, 148],
-                [104, 104, 176],
+                [105, 105, 149],
+                [105, 105, 177],
             ] * 2
-            assert [s.body_end_cycle - s.start_cycle for s in result] == [192, 220] * 2
+            assert [s.body_end_cycle - s.start_cycle for s in result] == [193, 221] * 2
             recompile(prog)
 
 
