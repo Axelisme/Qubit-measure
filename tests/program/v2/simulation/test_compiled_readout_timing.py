@@ -1,9 +1,49 @@
 """Runtime readout timing through public native compile/request seams."""
 
+from dataclasses import replace
+
 import pytest
 from qick.asm_v2 import QickSweep1D
+from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
+from zcu_tools.program.v2.ir.io_instructions import DportWriteInst
+from zcu_tools.program.v2.ir.operands import ImmValue, Register
 
 from tests.program.v2.simulation._compiled_support import program, request
+
+
+def test_register_data_triggers_keep_each_adc_lanes_actual_window():
+    def initialize(p):
+        p.add_loop("scan", 2)
+        p.add_reg("mask", addr=9)
+        p.add_reg("when", addr=10)
+        p.add_pulse(0, "long", style="const", freq=100, phase=0, gain=0.2, length=0.5)
+
+    def body(p):
+        p.pulse(0, "long", t=0)
+        with p.repeat("inner", 2):
+            p.write_reg_op("mask", "scan", "XOR", "inner")
+            bit = p.soccfg["readouts"][0]["trigger_bit"]
+            p.write_reg_op("mask", "mask", "SL", bit)
+            p.write_reg_op("when", "inner", "*", 100)
+            p.trigger([0], t=0)
+
+    def transform(snapshot):
+        records = []
+        for record in snapshot.records:
+            inst = record.instruction
+            if isinstance(inst, DportWriteInst) and isinstance(inst.data, ImmValue) and inst.data.value:
+                inst = replace(inst, src="reg", data=Register("r9"), time=Register("r10"))
+            records.append(CompiledRecord(inst, record.p_addr))
+        return CompiledStream(tuple(records))
+
+    prog, env = program(body, initialize, trigger_time=None, stream_transform=transform)
+    assert prog.ro_chs[0]["trigs"] == 1
+    result = request(prog, env)
+    for point, ticks in enumerate((100, 0)):
+        read = result.materialize_point(point).readouts[0]
+        assert read.trigger_us == pytest.approx((ticks / 430.08,))
+        assert read.duration_us == pytest.approx(61 / 307.2)
+        assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
 
 
 def send_config(p, name, time, phase=0):
