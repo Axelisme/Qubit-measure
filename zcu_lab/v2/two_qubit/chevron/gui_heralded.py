@@ -10,11 +10,11 @@ from zcu_tools.gui.app.measure.adapter import (
     Analysis,
     AnalyzeRequest,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from .._rabi_analysis import RabiAnalysis
 from .core_heralded import ChevronHeraldedCfg, ChevronHeraldedExp, ChevronHeraldedResult
-from zcu_tools.gui.form_adapter import Form, FormContext
 from .form import scan_form
 
 ChevronHeraldedRun: TypeAlias = RunRecord[ChevronHeraldedCfg, ChevronHeraldedResult]

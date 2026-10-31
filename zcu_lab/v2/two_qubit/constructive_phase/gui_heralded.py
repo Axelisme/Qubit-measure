@@ -15,13 +15,17 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
 from .analysis import ConstructivePhaseAnalysis
-from .core_heralded import ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedExp, ConstructivePhaseHeraldedResult
-from zcu_tools.gui.form_adapter import Form, FormContext
+from .core_heralded import (
+    ConstructivePhaseHeraldedCfg,
+    ConstructivePhaseHeraldedExp,
+    ConstructivePhaseHeraldedResult,
+)
 from .form import scan_form
 
 ConstructivePhaseHeraldedRun: TypeAlias = RunRecord[ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult]

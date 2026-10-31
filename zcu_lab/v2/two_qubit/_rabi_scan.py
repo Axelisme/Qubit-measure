@@ -9,18 +9,30 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
 from qick import QickConfig
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import Pulse, PulseCfg, SweepCfg, TimelineBuilder, TimelineProgramV2, shot_sums
+from zcu_tools.program.v2 import (
+    Pulse,
+    PulseCfg,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadoutCfg, Reset
 
 from zcu_lab.v2.support import live_line
 
 from ._drive import DualLineCfg, dual_line_drive
 from ._readout import JointRoles
-from ._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from ._sums import (
+    joint_probabilities,
+    readout_axes,
+    terminal_counts,
+    validate_classifiers,
+)
 from ._timeline import emit_readout_prefix
 
 

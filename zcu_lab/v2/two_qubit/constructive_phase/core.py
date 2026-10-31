@@ -6,18 +6,24 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, GroupedLoadData, VariableAxisSpec, VariableSpec, VariableZSpec
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-
 from zcu_tools.program.v2 import SweepCfg
 
 from .._drive import DualLineCfg
 from .._rabi_analysis import joint_return, plot_return_data
-from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 from .._rabi_scan import DurationScanCfg, RabiScanResult, acquire_counts
+from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 
 
 class ConstructivePhaseCfg(DurationScanCfg):

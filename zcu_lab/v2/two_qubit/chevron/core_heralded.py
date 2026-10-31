@@ -4,13 +4,20 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-from zcu_tools.experiment import Experiment, GroupedAxesSpec, GroupedLoadData, VariableAxisSpec, VariableSpec, VariableZSpec
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
-from .._rabi_scan import RabiScanResult
 from .._rabi_analysis import RabiAnalysis
+from .._rabi_scan import RabiScanResult
 from .core import ChevronCfg, acquire_scan, analyze_scan
 
 
