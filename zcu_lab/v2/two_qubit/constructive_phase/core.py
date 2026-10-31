@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import (
@@ -16,13 +17,26 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import SweepCfg
+from zcu_tools.program.v2 import Classify, Pulse, SweepCfg, TimelineBuilder, shot_sums
+from zcu_tools.program.v2.modules import (
+    ConstWaveformCfg,
+    FlatTopWaveformCfg,
+    Join,
+    MuxReadout,
+    Reset,
+)
 
-from .._drive import DualLineCfg
-from .._rabi_analysis import joint_return, plot_return_data
-from .._rabi_scan import DurationScanCfg, RabiScanResult, acquire_counts
+from zcu_lab.v2.support import live_line
+
+from .._rabi_analysis import ReturnData
+from .._rabi_scan import DurationScanCfg, RabiScanResult
+from .._sums import (
+    joint_probabilities,
+    validate_classifiers,
+)
 from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 
 
@@ -57,52 +71,6 @@ class ConstructivePhaseResult(RabiScanResult):
     Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
     Counts are float64 totals, not normalized probabilities.
     """
-
-
-def acquire_scan(
-    config: ConstructivePhaseCfg, *, context: RunContext, heralded: bool
-) -> RabiScanResult:
-    """Acquire this scan with optional herald; no input mutation or host round loop.
-
-    Coordinate transforms preserve signed gains, timing and source waveforms.
-    The shared duration sequence prepares B11, drives both lines, applies double
-    Xπ contrast and emits terminal readout. Check context.scope.stop for errors.
-    """
-    coordinates = sweep2array(config.relative_phase)
-    drives = [
-        DualLineCfg(
-            f1=config.drive.f1.model_copy(deep=True),
-            f2=config.drive.f2.with_updates(
-                phase=float(config.drive.f1.phase) + coordinate
-            ),
-        )
-        for coordinate in coordinates
-    ]
-    return acquire_counts(
-        config, coordinates, drives, context=context, heralded=heralded
-    )
-
-
-def analyze_scan(
-    cfg: ConstructivePhaseCfg, result: RabiScanResult, *, plots: Plots, heralded: bool
-) -> ConstructivePhaseAnalysis:
-    """Analyze count-derived P00 and the constructive rate² maximum.
-
-    Heralded input selects herald (g,g) and additionally plots its nine-class
-    distribution. Other remains in the terminal denominator. Empty traces are
-    unresolved. Saved cfg determines axes; the current Form/library is unused.
-    """
-    answer = joint_return(
-        cfg, result, sweep2array(cfg.relative_phase), heralded=heralded
-    )
-    plot_return_data(
-        result,
-        answer,
-        coordinate_label="F2 relative to F1 phase (deg)",
-        map_name="interference",
-        plots=plots,
-    )
-    return analyze_constructive_phase(result, answer, plots=plots)
 
 
 def restore_result(
@@ -160,8 +128,83 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         Return unchanged counts, including completed rounds on cancellation.
         Rounds accumulate at acquisition. Check context.scope.stop for errors.
         """
-        data = acquire_scan(config, context=context, heralded=False)
-        return ConstructivePhaseResult(data.coordinates, data.durations, data.sums)
+        validate_classifiers(config.readout, config.roles)
+        coordinates = sweep2array(config.relative_phase)
+        durations = sweep2array(config.duration)
+        hardware_duration = all(
+            isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
+            for pulse in (config.drive.f1, config.drive.f2)
+        )
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Drive duration (us)",
+            "Terminal P00",
+            num_lines=len(coordinates),
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            ordered = sums[0] if hardware_duration else sums.swapaxes(0, 1)
+            counts = ordered
+            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+
+        class_shape = (3, 3)
+        shape = (
+            (1, len(coordinates), len(durations), *class_shape)
+            if hardware_duration
+            else (len(durations), len(coordinates), *class_shape)
+        )
+        buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
+        # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
+        # duration stays on the host; coordinate remains a hardware sweep.
+        batches = [None] if hardware_duration else durations.tolist()
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            for duration, step in sched.scan("duration_batch", batches):
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
+                coordinate = builder.add_sweep("relative_phase", config.relative_phase)
+                length = (
+                    builder.add_sweep("duration", config.duration)
+                    if hardware_duration
+                    else duration
+                )
+                drive_f1 = Pulse("drive_f1", config.drive.f1, length=length)
+                drive_f2 = Pulse(
+                    "drive_f2",
+                    config.drive.f2,
+                    length=length,
+                    phase=float(config.drive.f1.phase) + coordinate,
+                )
+                prepare_f1 = Pulse("prepare_f1", config.x180_f1)
+                prepare_f2 = Pulse("prepare_f2", config.x180_f2)
+                contrast_f1 = Pulse("contrast_f1", config.x180_f1)
+                contrast_f2 = Pulse("contrast_f2", config.x180_f2)
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                builder.emit(Join(prepare_f1, prepare_f2))
+                builder.emit(Join(drive_f1, drive_f2))
+                builder.emit(Join(contrast_f1, contrast_f2))
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                axes = [
+                    Classify("terminal", config.roles.f1_tone),
+                    Classify("terminal", config.roles.f2_tone),
+                ]
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
+        buffer.trigger_update(flush=True)
+        sums = buffer.array[0] if hardware_duration else buffer.array.swapaxes(0, 1)
+        return ConstructivePhaseResult(coordinates, durations, sums)
 
     def analyze(
         self,
@@ -180,4 +223,119 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             raise ValueError(
                 "Rabi analysis requires saved cfg; current Form/library is not a substitute"
             )
-        return analyze_scan(source.cfg, source.result, plots=plots, heralded=False)
+        cfg, result = source.cfg, source.result
+        coordinates = sweep2array(cfg.relative_phase)
+        durations = sweep2array(cfg.duration)
+        if (
+            not np.array_equal(result.coordinates, coordinates)
+            or not np.array_equal(result.durations, durations)
+            or result.sums.shape != (len(coordinates), len(durations), 3, 3)
+        ):
+            raise ValueError(
+                "Rabi count axes/shape must match saved cfg and class axes"
+            )
+        counts = result.sums
+        totals = counts.sum(axis=(-2, -1))
+        answer = ReturnData(
+            joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
+            (totals == cfg.reps * cfg.rounds) & (totals > 0),
+            totals,
+            None,
+        )
+        fig, ax = plots.subplots("interference", figsize=(9, 6), layout="constrained")
+        image = ax.pcolormesh(
+            result.durations,
+            result.coordinates,
+            answer.populations[..., 0],
+            shading="nearest",
+            vmin=0,
+            vmax=1,
+        )
+        fig.colorbar(image, ax=ax, label="Observed joint P00 after double Xπ")
+        ax.set(
+            xlabel="Drive duration (us)",
+            ylabel="F2 relative to F1 phase (deg)",
+            title="Nominal B11 return proxy · not gate fidelity",
+        )
+        labels = tuple(
+            f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
+        )
+        fig, _ = plots.subplots(
+            "return",
+            nrows=3,
+            ncols=3,
+            figsize=(13, 10),
+            squeeze=False,
+            layout="constrained",
+        )
+        for outcome, ax in enumerate(fig.axes):
+            for coordinate, values in zip(
+                result.coordinates, answer.populations, strict=True
+            ):
+                ax.plot(
+                    result.durations, values[:, outcome], ".-", label=f"{coordinate:g}"
+                )
+            ax.set(
+                xlabel="Drive duration (us)",
+                ylabel=f"Observed P{labels[outcome]}",
+                title=f"Terminal {labels[outcome]} · other retained in denominator",
+            )
+            ax.legend(
+                title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2
+            )
+        analysis = analyze_constructive_phase(coordinates, durations, answer)
+        rates = analysis.rates
+        _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
+        ax.errorbar(
+            coordinates,
+            [rate.rate if rate.rate is not None else np.nan for rate in rates],
+            yerr=[
+                rate.uncertainty if rate.uncertainty is not None else np.nan
+                for rate in rates
+            ],
+            fmt="o",
+            color="C0",
+        )
+        ax.text(
+            0.02,
+            0.98,
+            "\n".join(
+                f"{coordinate:g}: {rate.reason}"
+                for coordinate, rate in zip(coordinates, rates, strict=True)
+                if rate.reason
+            ),
+            va="top",
+            transform=ax.transAxes,
+            fontsize="small",
+        )
+        ax.set(
+            xlabel="F2 relative to F1 phase (deg)",
+            ylabel="Rabi rate (MHz)",
+            title="Undamped cosine model · rates below 1/duration span excluded",
+        )
+        _, ax = plots.subplots("rabi_traces", figsize=(10, 6), layout="constrained")
+        for coordinate, rate in zip(coordinates, rates, strict=True):
+            if rate.fitted is not None:
+                ax.plot(durations, rate.fitted, label=f"{coordinate:g}")
+        ax.set(
+            xlabel="Drive duration (us)",
+            ylabel="Fitted joint P00",
+            title="Duration cosine fits · inspect model against measured return curves",
+        )
+        ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
+
+        if analysis.interference is not None:
+            phases, squared, dense, curve, maximum_phase = analysis.interference
+            _, ax = plots.subplots(
+                "constructive_phase", figsize=(9, 6), layout="constrained"
+            )
+            ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
+            ax.plot(dense, curve, label="A + B cosφ + C sinφ")
+            ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
+            ax.set(
+                xlabel="F2 relative to F1 phase (deg)",
+                ylabel="Rabi rate² (MHz²)",
+                title="Constructive phase · fixed signed gain ratio",
+            )
+            ax.legend()
+        return analysis

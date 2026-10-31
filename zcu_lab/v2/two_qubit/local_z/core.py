@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -27,18 +26,19 @@ from zcu_tools.program.v2 import (
     Classify,
     Pulse,
     Reset,
+    SweepCfg,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg, dual_line_drive
+from .._drive import DualLineCfg
+from .._phase import count_phase, phase_variance, sigma_variance
 from .._readout import JointRoles
-from .._sums import sigma, terminal_counts, validate_classifiers
-from .analysis import LocalZAnalysis, analyze_local_z
+from .._sums import sigma, validate_classifiers
+from .analysis import LocalZAnalysis, fit_target
 
 
 class LocalZCfg(ConfigBase):
@@ -143,124 +143,6 @@ class LocalZResult:
     sums: NDArray[np.float64]
 
 
-@dataclass(frozen=True)
-class LocalZPoint:
-    """One host-scan coordinate; quadrature 0/1 is X/Y, gate_count is train length.
-
-    target selects lowercase f1/f2; n=0 emits no CZ pair.
-    """
-
-    target: Literal["f1", "f2"]
-    quadrature: int
-    gate_count: int
-
-
-def build_program(
-    cfg: LocalZCfg, soccfg: QickConfig, point: LocalZPoint, *, heralded: bool
-) -> TimelineProgramV2:
-    """Compile optional reset → optional herald → preparation → CZ train → projection → terminal.
-
-    Each call creates fresh modules. Herald and terminal emit one mux object.
-    Input cfg is unchanged; invalid scan coordinates or classifiers raise ValueError.
-    No acquisition occurs.
-    """
-    validate_classifiers(cfg.readout, cfg.roles)
-    if point.target not in ("f1", "f2") or point.quadrature not in (0, 1):
-        raise ValueError("target must be f1/f2 and quadrature 0 or 1")
-    if point.gate_count not in cfg.gate_counts:
-        raise ValueError("gate_count must be in the configured scan")
-    target = cfg.x90_f1 if point.target == "f1" else cfg.x90_f2
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    builder.emit(Pulse("prepare_target", target))
-    for gate in range(point.gate_count):
-        builder.emit(
-            dual_line_drive(
-                cfg.drive,
-                frequency=float(cfg.drive.f1.freq),
-                name=f"cz_{gate}",
-            )
-        )
-    builder.emit(
-        Pulse(
-            "projection",
-            target.with_updates(phase=target.phase + 90 * point.quadrature),
-        )
-    )
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: LocalZCfg, *, context: RunContext, heralded: bool
-) -> NDArray[np.float64]:
-    """Acquire the host scan; return unnormalized 9/81-class float64 sums.
-
-    Completed rounds accumulate at acquisition and survive cancellation. Live
-    quadratures use terminal counts, conditioned on herald (g,g) when requested.
-    Schedule owns the cfg copy; no host round axis or per-shot storage remains.
-    """
-    validate_classifiers(config.readout, config.roles)
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "CZ gate count",
-        "Target sigma" + (" | herald (g,g)" if heralded else ""),
-        num_lines=4,
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
-        values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-        viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
-
-    shape = (2, 2, len(config.gate_counts)) + ((3, 3, 3, 3) if heralded else (3, 3))
-    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        targets: list[Literal["f1", "f2"]] = ["f1", "f2"]
-        for target, target_step in sched.scan("target", targets):
-            for quadrature, projection_step in target_step.scan("quadrature", [0, 1]):
-                for n, step in projection_step.scan(
-                    "gate_count", sched.cfg.gate_counts
-                ):
-                    point = LocalZPoint(target, quadrature, n)
-                    prog = build_program(
-                        step.cfg, context.soccfg, point, heralded=heralded
-                    )
-                    step.run_acquire_summed(
-                        prog,
-                        context.soc,
-                        processor=shot_sums(
-                            prog,
-                            [
-                                Classify(label, tone)
-                                for label in (
-                                    ("herald", "terminal")
-                                    if heralded
-                                    else ("terminal",)
-                                )
-                                for tone in (
-                                    step.cfg.roles.f1_tone,
-                                    step.cfg.roles.f2_tone,
-                                )
-                            ],
-                        ),
-                        rounds=step.cfg.rounds,
-                        options=RunOptions(),
-                    )
-    buffer.trigger_update(flush=True)
-    return buffer.array
-
-
 def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
@@ -311,12 +193,92 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
     )
 
     def run(self, config: LocalZCfg, *, context: RunContext) -> LocalZResult:
-        """Acquire optional reset and the original sequence; save summed counts."""
+        """Acquire target/quadrature hardware loops for each host gate count.
+
+        Counts retain target × quadrature × gate_count axes. No IQ is stored.
+        cfg stays unchanged; completed rounds survive cancellation.
+        """
+        validate_classifiers(config.readout, config.roles)
+        viewer = live_line(
+            context.plots, "measurement", "CZ gate count", "Target sigma", num_lines=4
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            counts = np.moveaxis(sums, 0, 2)
+            values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+            viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
+
+        buffer = SignalBuffer(
+            (len(config.gate_counts), 2, 2, 3, 3),
+            dtype=np.float64,
+            on_update=update_view,
+        )
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            # gate_count changes sequence structure, so only this axis stays on host.
+            for n, step in sched.scan("gate_count", config.gate_counts):
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
+                builder.add_loop("target", 2)  # 0 = F1, 1 = F2
+                quadrature = builder.add_sweep(
+                    "quadrature", SweepCfg(start=0, stop=90, expts=2, step=90)
+                )
+                prepare_f1 = Pulse("prepare_f1", config.x90_f1)
+                prepare_f2 = Pulse("prepare_f2", config.x90_f2)
+                projection_f1 = Pulse(
+                    "projection_f1",
+                    config.x90_f1,
+                    phase=config.x90_f1.phase + quadrature,
+                )
+                projection_f2 = Pulse(
+                    "projection_f2",
+                    config.x90_f2,
+                    phase=config.x90_f2.phase + quadrature,
+                )
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                with builder.branch(by="target", align_timeline=True) as cases:
+                    with cases.case(0):
+                        builder.emit(prepare_f1)
+                    with cases.case(1):
+                        builder.emit(prepare_f2)
+                drive = Join(
+                    Pulse("cz_f1", config.drive.f1),
+                    Pulse("cz_f2", config.drive.f2),
+                )
+                for _ in range(n):
+                    builder.emit(drive)
+                builder.sync()  # finish the common train before target projection
+                with builder.branch(by="target", align_timeline=True) as cases:
+                    with cases.case(0):
+                        builder.emit(projection_f1)
+                    with cases.case(1):
+                        builder.emit(projection_f2)
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
+        buffer.trigger_update(flush=True)
         return LocalZResult(
             np.arange(2, dtype=np.int64),
             np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
-            acquire_counts(config, context=context, heralded=False),
+            np.moveaxis(buffer.array, 0, 2),
         )
 
     def analyze(
@@ -326,8 +288,118 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         *,
         plots: Plots,
     ) -> LocalZAnalysis:
-        """Analyze saved cfg and classified quadratures; never read current Form."""
+        """Fit complete classified phase rows with count-propagated WLS weights."""
         del options
-        if source.cfg is None:
+        cfg, data = source.cfg, source.result
+        if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        return analyze_local_z(source.cfg, source.result, plots=plots)
+        for actual, expected in (
+            (data.targets, np.arange(2)),
+            (data.quadratures, np.arange(2)),
+            (data.gate_counts, np.array(cfg.gate_counts)),
+        ):
+            if not np.array_equal(actual, expected):
+                raise ValueError("LocalZ count axes must match saved cfg")
+        if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3):
+            raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
+        counts = data.sums
+        quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+        variances = np.stack(
+            (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
+        )
+        targets = tuple(
+            tuple(
+                count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
+                for n in range(len(cfg.gate_counts))
+            )
+            for t in range(2)
+        )
+        fits = tuple(
+            fit_target(
+                np.array(cfg.gate_counts, dtype=np.float64),
+                targets[t],
+                phase_variance(
+                    quadratures[t, 0],
+                    quadratures[t, 1],
+                    variances[t, 0],
+                    variances[t, 1],
+                ),
+            )
+            for t in range(2)
+        )
+        answer = LocalZAnalysis(
+            targets,
+            quadratures,
+            counts.sum(axis=(-2, -1)),
+            tuple(cfg.gate_counts),
+            fits,
+        )
+
+        fig, _ = plots.subplots(
+            "phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
+        )
+        fig.suptitle("Both targets · independent classified X/Y acquisitions")
+        for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
+            fig.axes[0].plot(
+                answer.gate_counts,
+                [p.contrast for p in answer.phases[t]],
+                ".-",
+                label=f"F{t + 1} {role}",
+            )
+            fig.axes[1].plot(
+                answer.gate_counts,
+                [
+                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                    for p in answer.phases[t]
+                ],
+                ".-",
+                label=f"F{t + 1} {role}",
+            )
+            fit = answer.fits[t]
+            if fit.unwrapped_deg is not None and fit.fit_curve is not None:
+                fig.axes[2].plot(
+                    answer.gate_counts,
+                    fit.unwrapped_deg,
+                    ".",
+                    label=f"F{t + 1} {role} unwrapped",
+                )
+                fig.axes[2].plot(
+                    answer.gate_counts,
+                    fit.fit_curve,
+                    "-",
+                    label=f"F{t + 1} WLS; correction={fit.correction_deg:.5g} ± {fit.slope_error_deg:.2g} deg (1σ)",
+                )
+        fig.axes[2].set_title(
+            "\n".join(
+                f"F{t + 1}: {fit.reason}"
+                for t, fit in enumerate(answer.fits)
+                if fit.reason
+            )
+            or "Complete-row WLS with intercept; correction = −slope"
+        )
+        for ax, label in zip(
+            fig.axes,
+            (
+                "Classified quadrature contrast",
+                "Logical phase (deg, wrapped)",
+                "Logical phase (deg, unwrapped)",
+            ),
+            strict=True,
+        ):
+            ax.set(xlabel="CZ gate count", ylabel=label)
+            ax.set_xlim(answer.gate_counts[0], answer.gate_counts[-1])
+            if ax.get_legend_handles_labels()[0]:
+                ax.legend()
+        fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+        for t in range(2):
+            for q, projection in enumerate(("X", "Y")):
+                axes.plot(
+                    answer.gate_counts,
+                    answer.quadratures[t, q],
+                    ".-",
+                    label=f"F{t + 1} {projection}",
+                )
+        axes.set(xlabel="CZ gate count", ylabel="Target sigma")
+        axes.legend()
+
+        return answer
