@@ -14,8 +14,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Pulse, Readout, Reset
+from zcu_tools.program.v2 import Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.singleshot.plot import plot_with_classified
@@ -87,7 +86,12 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         signals_buffer = SignalBuffer((cfg.shots,))
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             # Prepare the same state for every shot before probing and readout.
-            builder = TimelineBuilder(soccfg, reps=cfg.shots, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg,
+                reps=cfg.shots,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
+            )
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse))

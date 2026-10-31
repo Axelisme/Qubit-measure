@@ -21,8 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
@@ -75,8 +74,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[LenRabiResult, LenRabiCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", label="Shot Index", unit="None", dtype=np.int64),
-            AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis(
+                "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=LenRabiResult,
@@ -157,7 +160,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         with Schedule(None, buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
                 # Acquire one length at a time to bound the board raw-buffer size.
-                builder = TimelineBuilder(soccfg, reps=cfg.shots, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                )
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
                 builder.emit(Readout("readout", cfg.readout))

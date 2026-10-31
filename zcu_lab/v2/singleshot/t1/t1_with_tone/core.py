@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-
 from dataclasses import dataclass, field
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
-
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
@@ -23,8 +21,16 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_pulse_lengths,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Classify, TimelineProgramV2, Pulse, Readout, Reset, SweepCfg, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 
 from zcu_lab.v2.support import live_line
@@ -104,9 +110,15 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
-            AxesSpec.Axis("initial_states", label="Initial State", unit="None", dtype=np.int64),
-            AxesSpec.Axis("lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
+            ),
         ),
         z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
         data_variable=DataVariable("counts"),
@@ -121,15 +133,19 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         lines = [live_line(ax, num_lines=3) for ax in axes]
         for ax in axes:
             ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
-            for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
                 line.set_label(label)
             ax.legend()
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
-            return (*lines[0].set(lengths, populations[:, 0].T),
-                    *lines[1].set(lengths, populations[:, 1].T))
+            return (
+                *lines[0].set(lengths, populations[:, 0].T),
+                *lines[1].set(lengths, populations[:, 1].T),
+            )
 
         figure.show()
         return update
@@ -148,12 +164,18 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             return self._run_linear(cfg, context=context)
         return self._run_decay(cfg, context=context)
 
-    def _run_linear(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1WithToneResult:
-        lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg, "gen_ch": cfg.probe_pulse.ch})
+    def _run_linear(
+        self, cfg: T1WithToneCfg, *, context: RunContext
+    ) -> T1WithToneResult:
+        lengths = sweep2array(
+            cfg.delay, "time", {"soccfg": context.soccfg, "gen_ch": cfg.probe_pulse.ch}
+        )
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
         with Schedule(None, buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             delay = builder.add_sweep("delay", cfg.delay)
             builder.add_loop("ge", 2)
             builder.emit(Reset("reset", cfg.reset))
@@ -166,22 +188,38 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse, length=delay))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
-            axis = Classify("readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0)
-            sched.run_acquire_summed(program, context.soc, processor=shot_sums(program, [axis]), rounds=cfg.rounds)
+            axis = Classify(
+                "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
+            )
+            sched.run_acquire_summed(
+                program,
+                context.soc,
+                processor=shot_sums(program, [axis]),
+                rounds=cfg.rounds,
+            )
         return T1WithToneResult(lengths=lengths, counts=buffer.array)
 
-    def _run_decay(self, cfg: T1WithToneCfg, *, context: RunContext) -> T1WithToneResult:
-        lengths = materialize_nonuniform_t1_pulse_lengths(cfg.delay, soccfg=context.soccfg, gen_ch=cfg.probe_pulse.ch)
+    def _run_decay(
+        self, cfg: T1WithToneCfg, *, context: RunContext
+    ) -> T1WithToneResult:
+        lengths = materialize_nonuniform_t1_pulse_lengths(
+            cfg.delay, soccfg=context.soccfg, gen_ch=cfg.probe_pulse.ch
+        )
         update = self._live_update(context.plots, lengths)
-        buffer = SignalBuffer((cfg.rounds, len(lengths), 2, 3), dtype=np.float64,
-                              on_update=lambda data: update(_sum_rounds(data)))
+        buffer = SignalBuffer(
+            (cfg.rounds, len(lengths), 2, 3),
+            dtype=np.float64,
+            on_update=lambda data: update(_sum_rounds(data)),
+        )
         programs: dict[float, TimelineProgramV2] = {}
         with Schedule(None, buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("delay", lengths.tolist()):
                     length_key = float(length)
                     if length_key not in programs:
-                        builder = TimelineBuilder(context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                        builder = TimelineBuilder(
+                            context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                        )
                         builder.add_loop("ge", 2)
                         builder.emit(Reset("reset", cfg.reset))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
@@ -192,12 +230,22 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                         builder.sync()
                         # Zero duration still prepares and reads, without a zero-cycle pulse.
                         if length > 0.0:
-                            builder.emit(Pulse("probe_pulse", cfg.probe_pulse, length=length))
+                            builder.emit(
+                                Pulse("probe_pulse", cfg.probe_pulse, length=length)
+                            )
                         builder.emit(Readout("readout", cfg.readout))
                         programs[length_key] = builder.build()
                     program = programs[length_key]
-                    axis = Classify("readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0)
-                    step.run_acquire_summed(program, context.soc, processor=shot_sums(program, [axis]), rounds=1)
+                    axis = Classify(
+                        "readout",
+                        tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0,
+                    )
+                    step.run_acquire_summed(
+                        program,
+                        context.soc,
+                        processor=shot_sums(program, [axis]),
+                        rounds=1,
+                    )
         return T1WithToneResult(lengths=lengths, counts=_sum_rounds(buffer.array))
 
     def analyze(
@@ -241,7 +289,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         t1_b = 1.0 / lambdas[1]
 
         # 3. Compare the fitted G/E/Other curves with each preparation's data.
-        fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(12, 6), sharex=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=1, ncols=2, figsize=(12, 6), sharex=True
+        )
         ax1, ax2 = fig.axes
 
         fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")

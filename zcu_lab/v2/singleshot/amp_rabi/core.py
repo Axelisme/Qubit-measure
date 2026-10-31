@@ -21,8 +21,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, TimelineBuilder
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
 from zcu_lab.v2.support import live_line
@@ -108,7 +107,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", label="Shot Index", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+            ),
             AxesSpec.Axis("gains", label="Gain", unit="a.u.", dtype=np.float64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -201,7 +202,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         )
         with Schedule(None, buffer, scope=context.scope) as sched:
             # The board sweeps gain within each reset/drive/readout acquisition.
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain = builder.add_sweep("gain", cfg.gain)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain))

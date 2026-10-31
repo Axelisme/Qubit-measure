@@ -17,8 +17,16 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, SweepCfg, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -105,9 +113,15 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
-            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6, dtype=np.float64),
-            AxesSpec.Axis("gains", label="Stark Pulse Gain", unit="a.u.", dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "freqs", label="Frequency", unit="Hz", scale=1e6, dtype=np.float64
+            ),
+            AxesSpec.Axis(
+                "gains", label="Stark Pulse Gain", unit="a.u.", dtype=np.float64
+            ),
         ),
         z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
         result_type=AcStarkResult,
@@ -173,11 +187,21 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 line.set_label(label)
             ax.legend()
 
-        figure, _ = context.plots.subplots(nrows=2, ncols=2, num="measurement", figsize=(8, 6))
+        figure, _ = context.plots.subplots(
+            nrows=2, ncols=2, num="measurement", figsize=(8, 6)
+        )
         ax_ground, ax_excited, ax_other, ax_current = figure.axes
         heatmaps = []
-        for state, ax in (("ground", ax_ground), ("excited", ax_excited), ("other", ax_other)):
-            ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Probe Frequency (MHz)", title=state.capitalize())
+        for state, ax in (
+            ("ground", ax_ground),
+            ("excited", ax_excited),
+            ("other", ax_other),
+        ):
+            ax.set(
+                xlabel="Stark Pulse Gain (a.u.)",
+                ylabel="Probe Frequency (MHz)",
+                title=state.capitalize(),
+            )
             heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
         ax_current.set(xlabel="Probe Frequency (MHz)", ylabel="Population")
         cur_1d = live_line(ax_current, num_lines=3)
@@ -187,8 +211,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
-            artists = [artist for i, heatmap in enumerate(heatmaps)
-                       for artist in heatmap.set(gains, freqs, populations[..., i])]
+            artists = [
+                artist
+                for i, heatmap in enumerate(heatmaps)
+                for artist in heatmap.set(gains, freqs, populations[..., i])
+            ]
             return (*artists, *cur_1d.set(freqs, populations[current_index, :].T))
 
         figure.show()
@@ -205,19 +232,24 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 current_index = gain_idx
 
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.fork("default", into="stark")
-                builder.emit(Pulse("stark_pulse1", cfg.stark_pulse1, gain=gain), timeline="stark")
+                builder.emit(
+                    Pulse("stark_pulse1", cfg.stark_pulse1, gain=gain), timeline="stark"
+                )
                 builder.emit(Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq))
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, soc,
+                    prog,
+                    soc,
                     processor=shot_sums(prog, [read_axis]),
-                                        rounds=cfg.rounds,
+                    rounds=cfg.rounds,
                 )
 
         # Preserve unnormalized G/E/Other counts in the Result.
@@ -366,7 +398,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         photons = ac_coeff * gains2
 
-        fig, _ = plots.subplots(num="populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True)
+        fig, _ = plots.subplots(
+            num="populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True
+        )
         ax1, ax2, ax3 = fig.axes
 
         max_p = np.max(populations).item()

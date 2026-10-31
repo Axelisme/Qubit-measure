@@ -16,8 +16,15 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
 from zcu_lab.v2.support import live_line
@@ -93,8 +100,12 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[ResetCheckResult, ResetCheckCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
-            AxesSpec.Axis("reset_states", label="Reset State", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "reset_states", label="Reset State", unit="None", dtype=np.int64
+            ),
             AxesSpec.Axis("gains", label="Gain", unit="a.u.", dtype=np.float64),
         ),
         z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
@@ -153,7 +164,10 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            return viewer.set(gains, (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T)
+            return viewer.set(
+                gains,
+                (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T,
+            )
 
         figure.show()
         buffer = SignalBuffer(
@@ -163,7 +177,9 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         with Schedule(None, buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain = builder.add_sweep("gain", cfg.gain)
             rabi_pulse = Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain)
             tested_reset = Reset("tested_reset", cfg.tested_reset)
@@ -183,8 +199,9 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             # 4. Retain cumulative class counts, including completed partial rounds.
             program = builder.build()
             sched.run_acquire_summed(
-                program, soc,
-                                processor=shot_sums(program, [axis]),
+                program,
+                soc,
+                processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
             sched.trigger_update(flush=True)

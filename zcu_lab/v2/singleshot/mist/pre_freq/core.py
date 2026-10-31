@@ -16,8 +16,15 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Classify, Pulse, Readout, Reset, SweepCfg, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -81,7 +88,9 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[PreFreqResult, PreFreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
             AxesSpec.Axis(
                 "freqs",
                 label="PrePulse frequency",
@@ -154,7 +163,9 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             freq_sweep = cfg.freq
 
             # Vary initialization before the optional pi pulse and fixed probe.
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             freq = builder.add_sweep("freq", freq_sweep)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse, freq=freq))
@@ -163,9 +174,10 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(
-                prog, soc,
+                prog,
+                soc,
                 processor=shot_sums(prog, [read_axis]),
-                                rounds=cfg.rounds,
+                rounds=cfg.rounds,
             )
 
         # Keep the unnormalized G/E/Other counts in the saved Result.

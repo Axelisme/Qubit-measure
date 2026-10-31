@@ -15,8 +15,16 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, SweepCfg, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -83,8 +91,12 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqPowerResult, FreqPowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
-            AxesSpec.Axis("freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64
+            ),
             AxesSpec.Axis("gains", label="Drive gain", unit="a.u.", dtype=np.float64),
         ),
         z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
@@ -139,7 +151,9 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         )
 
         # Display the measured G/E/Other fractions in classifier order.
-        figure, _ = context.plots.subplots(nrows=3, ncols=1, num="measurement", figsize=(12, 6))
+        figure, _ = context.plots.subplots(
+            nrows=3, ncols=1, num="measurement", figsize=(12, 6)
+        )
         viewers = []
         for state, ax in zip(("ground", "excited", "other"), figure.axes, strict=True):
             ax.set(xlabel="gain (a.u.)", ylabel="freq (MHz)", title=state.capitalize())
@@ -148,8 +162,11 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
-            return tuple(artist for i, viewer in enumerate(viewers)
-                         for artist in viewer.set(gains, freqs, populations[..., i]))
+            return tuple(
+                artist
+                for i, viewer in enumerate(viewers)
+                for artist in viewer.set(gains, freqs, populations[..., i])
+            )
 
         figure.show()
 
@@ -160,19 +177,23 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         )
         with Schedule(None, buffer, scope=context.scope) as sched:
             for gain, step in sched.scan("gain", gains.tolist()):
-
                 # Fix gain for this row and sweep probe frequency after preparation.
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
-                builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain, freq=freq))
+                builder.emit(
+                    Pulse("probe_pulse", cfg.probe_pulse, gain=gain, freq=freq)
+                )
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, soc,
+                    prog,
+                    soc,
                     processor=shot_sums(prog, [read_axis]),
-                                        rounds=cfg.rounds,
+                    rounds=cfg.rounds,
                 )
 
         # Preserve gain/frequency/state order with explicit G/E/Other columns.
@@ -205,7 +226,9 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
-        fig, _ = plots.subplots(num="fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained")
+        fig, _ = plots.subplots(
+            num="fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained"
+        )
         ax_g, ax_e, ax_o = fig.axes
 
         # Stored populations are (gain, frequency, state); display frequency rows.

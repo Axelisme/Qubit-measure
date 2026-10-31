@@ -16,8 +16,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Pulse, PulseReadout
+from zcu_tools.program.v2 import Pulse, PulseReadout, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
@@ -83,9 +82,14 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
     AXES_SPEC: ClassVar[AxesSpec[QutritPopulationResult, QutritPopulationCfg]] = (
         AxesSpec(
             axes=(
-                AxesSpec.Axis("shot_indices", label="Shot Index", unit="None", dtype=np.int64),
                 AxesSpec.Axis(
-                    "prepared_states", label="Prepared State", unit="None", dtype=np.int64
+                    "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+                ),
+                AxesSpec.Axis(
+                    "prepared_states",
+                    label="Prepared State",
+                    unit="None",
+                    dtype=np.int64,
                 ),
             ),
             z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -110,7 +114,12 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         buffer = SignalBuffer((3, cfg.shots))
         with Schedule(None, buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
-                builder = TimelineBuilder(context.soccfg, reps=cfg.shots, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                )
                 if label == 1:
                     builder.emit(Pulse("pi01", cfg.pi01))
                 elif label == 2:
@@ -170,7 +179,9 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         result = analyze_reference_iq(
             source.result.signals, source.result.prepared_states
         )
-        figure, _ = plots.subplots(nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained")
+        figure, _ = plots.subplots(
+            nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"
+        )
 
         def diagnostics(figure):
             for ax, matrix, title in zip(

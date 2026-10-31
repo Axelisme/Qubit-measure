@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated, ClassVar, Literal, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -21,7 +21,6 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
     materialize_nonuniform_t1_pulse_lengths,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
@@ -30,6 +29,7 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TableLengthPulse,
+    TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
@@ -192,9 +192,15 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneSweepResult, T1WithToneSweepCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
-            AxesSpec.Axis("lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64),
-            AxesSpec.Axis("initial_states", label="Initial State", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
+            ),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
             AxesSpec.Axis("xs", label="Sweep Value", unit="a.u.", dtype=np.float64),
         ),
         z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
@@ -225,7 +231,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         return sweep_name, xs
 
     def _make_viewers(self, plots: Plots, sweep_name: str):
-        figure, _ = plots.subplots(nrows=4, ncols=2, num="measurement", figsize=(12, 10))
+        figure, _ = plots.subplots(
+            nrows=4, ncols=2, num="measurement", figsize=(12, 10)
+        )
         # Row-major grid: columns are initial g/e; rows are g/e/other and current.
         cells = figure.axes
         heatmaps = []
@@ -236,9 +244,15 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
         lines = []
         for column, ax in enumerate(cells[6:]):
-            ax.set(xlabel="Time (us)", ylabel="Population" if column == 0 else "", ylim=(0.0, 1.0))
+            ax.set(
+                xlabel="Time (us)",
+                ylabel="Population" if column == 0 else "",
+                ylim=(0.0, 1.0),
+            )
             lines.append(live_line(ax, num_lines=3))
-            for line, label in zip(ax.lines, ("Ground", "Excited", "Other"), strict=True):
+            for line, label in zip(
+                ax.lines, ("Ground", "Excited", "Other"), strict=True
+            ):
                 line.set_label(label)
             ax.legend()
         figure.show()
@@ -273,9 +287,13 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         soc, soccfg = context.soc, context.soccfg
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
         if cfg.sampling == "linear":
-            lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch})
+            lengths = sweep2array(
+                cfg.delay, "time", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
+            )
         else:
-            lengths = materialize_nonuniform_t1_pulse_lengths(cfg.delay, soccfg=soccfg, gen_ch=cfg.probe_pulse.ch)
+            lengths = materialize_nonuniform_t1_pulse_lengths(
+                cfg.delay, soccfg=soccfg, gen_ch=cfg.probe_pulse.ch
+            )
         _require_positive_lengths(lengths)
 
         # 2. Display populations for both preparations and the current scan row.
@@ -315,7 +333,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 builder.add_loop("ge", 2)
                 builder.add_loop("delay", len(lengths))
                 builder.emit(Reset("reset", cfg.reset))
@@ -324,18 +344,21 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     with cases.case(1):
                         builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.sync()
-                builder.emit(TableLengthPulse(
-                            "probe_pulse",
-                            probe_cfg,
-                            lengths=lengths,
-                            idx_reg="delay",
-                        ))
+                builder.emit(
+                    TableLengthPulse(
+                        "probe_pulse",
+                        probe_cfg,
+                        lengths=lengths,
+                        idx_reg="delay",
+                    )
+                )
                 builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()
                 step.run_acquire_summed(
-                    program, soc,
+                    program,
+                    soc,
                     processor=shot_sums(program, [axis]),
-                                        rounds=cfg.rounds,
+                    rounds=cfg.rounds,
                 )
 
         # 4. Keep cumulative counts, including partial rows, in saved-axis order.

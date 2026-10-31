@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
-
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -20,8 +19,7 @@ from zcu_tools.experiment.utils.single_shot.ge import (
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2 import Pulse, PulseReadout, Reset
+from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
@@ -142,8 +140,12 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[GE_Result, GE_Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", label="Shot Index", unit="None", dtype=np.int64),
-            AxesSpec.Axis("prepared_states", label="Prepared State", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "prepared_states", label="Prepared State", unit="None", dtype=np.int64
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GE_Result,
@@ -181,7 +183,9 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 ("tab:blue", "tab:red"),
                 strict=True,
             ):
-                axes.scatter(cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label)
+                axes.scatter(
+                    cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
+                )
             axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
             axes.set_aspect("equal", adjustable="datalim")
             axes.grid()
@@ -196,7 +200,12 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 probe_cfg = cfg.probe_pulse if with_probe else None
 
                 # Compare identical preparations with the probe omitted/applied.
-                builder = TimelineBuilder(soccfg, reps=cfg.shots, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                )
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(Pulse("probe_pulse", probe_cfg))
