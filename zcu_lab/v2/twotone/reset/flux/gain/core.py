@@ -109,9 +109,17 @@ class GainExp(Experiment[GainResult, GainCfg]):
     AXES_SPEC: ClassVar[AxesSpec[GainResult, GainCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("gains", label="Flux reset gain", unit="a.u."),
-            AxesSpec.Axis("after_pi", label="After reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+            AxesSpec.Axis(
+                "after_pi",
+                label="After reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
-            AxesSpec.Axis("before_pi", label="Before reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+            AxesSpec.Axis(
+                "before_pi",
+                label="Before reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -150,7 +158,9 @@ class GainExp(Experiment[GainResult, GainCfg]):
 
         # Each gain has the Cartesian product of the two calibrated pi switches.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("before_pi", 2)
             builder.add_loop("after_pi", 2)
             gain = builder.add_sweep("gain", cfg.gain)

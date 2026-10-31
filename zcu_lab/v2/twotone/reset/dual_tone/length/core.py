@@ -68,7 +68,7 @@ class LengthCfg(ConfigBase):
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     # Length stores seconds on disk; Result holds us -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("lengths", label="Length", unit="s", 1e-6),),
+        axes=(AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6),),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=LengthResult,
         cfg_type=LengthCfg,

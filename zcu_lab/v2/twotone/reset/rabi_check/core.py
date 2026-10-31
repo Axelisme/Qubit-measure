@@ -118,7 +118,9 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         signals_buffer = SignalBuffer((3, len(gains)), on_update=update)
 
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("reset_sel", 3)
             gain = builder.add_sweep("gain", cfg.gain)
             builder.emit(Reset("reset", cfg.reset))

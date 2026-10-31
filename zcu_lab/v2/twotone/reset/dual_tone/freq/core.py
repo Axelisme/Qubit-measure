@@ -19,8 +19,8 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    TwoPulseReset,
     TimelineBuilder,
+    TwoPulseReset,
 )
 from zcu_tools.utils.process import (
     SmoothingOptions,
@@ -136,8 +136,12 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         return self._run_hard(cfg, freqs1, freqs2, context=context)
 
     def _run_soft(
-        self, cfg: FreqCfg, freqs1: NDArray[np.float64], freqs2: NDArray[np.float64],
-        *, context: RunContext,
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> FreqResult:
         # Host rows are frequency 2; the Result restores frequency-1 rows.
         soc, soccfg = context.soc, context.soccfg
@@ -158,25 +162,37 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.show()
         signals_buffer = SignalBuffer(
-            (len(freqs2), len(freqs1)), on_update=update,
+            (len(freqs2), len(freqs1)),
+            on_update=update,
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 freq1 = builder.add_sweep("freq1", cfg.freq1)
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
-                builder.emit(TwoPulseReset(
-                    "tested_reset", cfg.tested_reset, freq1=freq1, freq2=freq2,
-                ))
+                builder.emit(
+                    TwoPulseReset(
+                        "tested_reset",
+                        cfg.tested_reset,
+                        freq1=freq1,
+                        freq2=freq2,
+                    )
+                )
                 builder.emit(Readout("readout", cfg.readout))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return FreqResult(freqs1, freqs2, signals_buffer.array.T)
 
     def _run_hard(
-        self, cfg: FreqCfg, freqs1: NDArray[np.float64], freqs2: NDArray[np.float64],
-        *, context: RunContext,
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> FreqResult:
         # Sweep frequency 1 outside frequency 2 in one FPGA program.
         soc, soccfg = context.soc, context.soccfg
@@ -191,17 +207,25 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
         fig.show()
         signals_buffer = SignalBuffer(
-            (len(freqs1), len(freqs2)), on_update=update,
+            (len(freqs1), len(freqs2)),
+            on_update=update,
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             freq1 = builder.add_sweep("freq1", cfg.freq1)
             freq2 = builder.add_sweep("freq2", cfg.freq2)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
-            builder.emit(TwoPulseReset(
-                "tested_reset", cfg.tested_reset, freq1=freq1, freq2=freq2,
-            ))
+            builder.emit(
+                TwoPulseReset(
+                    "tested_reset",
+                    cfg.tested_reset,
+                    freq1=freq1,
+                    freq2=freq2,
+                )
+            )
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

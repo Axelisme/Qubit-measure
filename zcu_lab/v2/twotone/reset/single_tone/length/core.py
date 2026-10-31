@@ -94,7 +94,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Sweep only the tested reset length after the optional preparation.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             length = builder.add_sweep("length", cfg.length)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))

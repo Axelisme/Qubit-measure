@@ -16,7 +16,15 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import (
+    BathReset,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+)
 
 from zcu_lab.v2.support import live_line
 
@@ -71,7 +79,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
-            AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis(
+                "lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=LengthResult,
@@ -147,16 +157,22 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     program = prog_cache.get(length)
                     if program is None:
                         builder = TimelineBuilder(
-                            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                            soccfg,
+                            reps=cfg.reps,
+                            relax_delay=cfg.relax_delay,
                         )
                         builder.add_loop("phase", 4)
                         builder.emit(Reset("reset", cfg.reset))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
-                        builder.emit(BathReset(
-                            "tested_reset", cfg.tested_reset,
-                            qub_length=length, res_length=length + length_diff,
-                            pi2_phase=QickSweep1D("phase", 0.0, 270.0),
-                        ))
+                        builder.emit(
+                            BathReset(
+                                "tested_reset",
+                                cfg.tested_reset,
+                                qub_length=length,
+                                res_length=length + length_diff,
+                                pi2_phase=QickSweep1D("phase", 0.0, 270.0),
+                            )
+                        )
                         builder.emit(Readout("readout", cfg.readout))
                         program = builder.build()
                         prog_cache[length] = program

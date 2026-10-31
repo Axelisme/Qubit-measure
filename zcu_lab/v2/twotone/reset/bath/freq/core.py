@@ -94,9 +94,16 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqGainResult, FreqGainCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", label="Cavity Frequency", unit="Hz", scale=1e6, dtype=np.float64
+            AxesSpec.Axis(
+                "freqs",
+                label="Cavity Frequency",
+                unit="Hz",
+                scale=1e6,
+                dtype=np.float64,
             ),
-            AxesSpec.Axis("gains", label="Cavity drive Gain", unit="a.u.", dtype=np.float64),
+            AxesSpec.Axis(
+                "gains", label="Cavity drive Gain", unit="a.u.", dtype=np.float64
+            ),
             AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -154,15 +161,24 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("phase", 4)
             gain = builder.add_sweep("gain", cfg.gain)
             freq = builder.add_sweep("freq", cfg.freq)
             phase = QickSweep1D("phase", 0.0, 270.0) + cfg.tested_reset.pi2_cfg.phase
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
-            builder.emit(BathReset("tested_reset", cfg.tested_reset,
-                res_gain=gain, res_freq=freq, pi2_phase=phase))
+            builder.emit(
+                BathReset(
+                    "tested_reset",
+                    cfg.tested_reset,
+                    res_gain=gain,
+                    res_freq=freq,
+                    pi2_phase=phase,
+                )
+            )
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

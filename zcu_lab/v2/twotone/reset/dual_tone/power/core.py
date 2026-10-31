@@ -19,8 +19,8 @@ from zcu_tools.program.v2 import (
     Pulse,
     Readout,
     Reset,
-    TwoPulseReset,
     TimelineBuilder,
+    TwoPulseReset,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
@@ -142,12 +142,18 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         # Sweep both reset gains in hardware and collect mean IQ.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain1 = builder.add_sweep("gain1", cfg.gain1)
             gain2 = builder.add_sweep("gain2", cfg.gain2)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
-            builder.emit(TwoPulseReset("tested_reset", cfg.tested_reset, gain1=gain1, gain2=gain2))
+            builder.emit(
+                TwoPulseReset(
+                    "tested_reset", cfg.tested_reset, gain1=gain1, gain2=gain2
+                )
+            )
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

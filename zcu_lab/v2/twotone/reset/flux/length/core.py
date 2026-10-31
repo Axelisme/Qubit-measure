@@ -126,9 +126,17 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("lengths", label="Flux reset length", unit="s", scale=1e-6),
-            AxesSpec.Axis("after_pi", label="After reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+            AxesSpec.Axis(
+                "after_pi",
+                label="After reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
-            AxesSpec.Axis("before_pi", label="Before reset pi (0=off, 1=on)", unit="None", dtype=np.int64
+            AxesSpec.Axis(
+                "before_pi",
+                label="Before reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -167,7 +175,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Each hold length has the Cartesian product of the two calibrated pi switches.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             builder.add_loop("before_pi", 2)
             builder.add_loop("after_pi", 2)
             length = builder.add_sweep("length", cfg.length)

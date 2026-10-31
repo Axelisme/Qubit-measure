@@ -15,7 +15,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    BathReset,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -117,7 +124,9 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
 
         # Sweep only the final rotation; keep the simultaneous bath tones fixed.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             phase = builder.add_sweep("phase", cfg.phase)
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
