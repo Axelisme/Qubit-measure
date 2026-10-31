@@ -321,14 +321,16 @@ class RepeatFrame:
 
 @dataclass
 class LoopTimelineFrame:
-    """One reference-preserving Repeat's accumulator and isolated namespace.
+    """One Repeat accumulator, isolated namespace and explicit reference debits.
 
     parent is the visible loop timeline. external/waiting restore outer names.
     entry is its incoming end; origin adds an opaque iteration-progress identity.
     initial_channels/native retain incoming physical tails and their provenance.
     entry_math initializes shot-local storage before the loop. pinned restores
     register liveness at exit. starts records managed starts and branch paths
-    for the backedge proof, in relative integer cycles.
+    for the backedge proof, in relative integer cycles. advance is cumulative
+    reference movement in cycles; debits retain its execution-position plans.
+    written_channels distinguishes generated tails from untouched outer tails.
     """
 
     parent: str

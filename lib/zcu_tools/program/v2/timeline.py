@@ -681,7 +681,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         time_reg contains nonnegative tProc cycles. Remaining ends debit the
         actual advance using certified producer bounds. No bounds are needed
         when the selected native ends already consume every timeline. This
-        native register reference operation remains forbidden inside Repeat.
+        operation is allowed in Repeat but forbidden in branch cases and
+        reference-preserving module groups, like other reference operations.
         """
         super().delay_reg_auto(time_reg, gens=gens, ros=ros)
         source = self._pop_native(DelayRegAuto)
@@ -720,8 +721,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         exit; unjoined local ends are discarded, not merged into their ancestor.
         True requires every end to be reconstructible from branch-entry state.
         Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
-        Repeat with advance_ref=True in a case raises ValueError; use False
-        or move it outside this branch. Branch inside Repeat is supported. Unconditional actions inside this context
+        Repeat may accumulate inside cases; its body obeys the same reference
+        prohibition. Branch inside Repeat is supported. Unconditional actions inside this context
         raise ValueError; put them before or after the with block.
         Duplicate, non-integer/out-of-range indices and measurement selectors
         raise ValueError. Register exhaustion propagates QICK errors unchanged.

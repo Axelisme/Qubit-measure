@@ -1,4 +1,4 @@
-"""Shot-local accumulator lowering for reference-preserving Repeat scopes."""
+"""Shot-local Repeat accumulators and explicit reference-debit bookkeeping."""
 
 from dataclasses import replace
 

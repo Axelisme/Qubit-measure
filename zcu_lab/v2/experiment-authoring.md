@@ -790,8 +790,10 @@ with builder.timeline("drive"):
         builder.delay_timeline(0.2)
 
     builder.delay_timeline(0.05)  # Restores drive after the nested scope.
-    with builder.repeat("pairs", 2, advance_ref=True):
+    builder.sync()
+    with builder.repeat("pairs", 2):
         builder.emit(drive)
+        builder.sync()
 
 builder.join("drive", "other", into="default")
 builder.sync()
@@ -816,7 +818,7 @@ True 需要每個 case 的結尾能從 branch 入口狀態算出。
 `align_timeline=False` 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
 兩種都不推進共用 reference、不自動 sync，後續可在母 timeline 繼續發射。
 Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
-Case 內可使用 `repeat(..., advance_ref=False)`。`advance_ref=True` 在 case 內 build 報錯，須移到 branch 外。
+Case 內可使用 `repeat(...)`。Repeat body 內同樣不能 sync 或呼叫原生 reference 操作，巢狀 Repeat 也一樣。
 Repeat 內放 branch 仍合法。
 Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 delay_timeline 寫在 with 區塊前或後。
 隱式 case 名字與局部 fork 名字在 case 結束後失效。
@@ -842,18 +844,22 @@ builder.join("f1", "f2", into="default")
 builder.emit(readout, tag="terminal")
 ```
 
-`repeat(name, n, *, advance_ref, timeline=None, range_hint=None)` 必須明寫 bool `advance_ref`。
-兩種模式內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。離開後局部名字失效。
-`advance_ref=False` 以母 timeline 結尾初始化 shot-local cycle 累加器，並用迴圈 timeline 屏蔽預設名字。
-每圈把本圈最晚結尾存回累加器。離開時母 timeline 保留累積結尾，reference 與外部 timeline 不動。
-False 可以放進 branch case，也可巢狀 False。整個 body 禁止顯式 sync、原生 delay／delay_auto 或 inner True。
-等待請用 delay_timeline。需要推進 reference 時，改選 True，並移到 case 與 False 範圍外。
-`advance_ref=True` 先同步母 timeline，每圈結尾推進 reference，離開時母 timeline 為零。
-它保留外部結尾扣除與 wait-only 規則，不能放進 branch case。
-`n` 是非負整數或既有 count register 名字。Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
-省略 hint 時，回邊不證明同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
-False 的累加器在每 shot 內初始化。Register 用量仍由作者負責，超限保留 QICK 錯誤。
-False 迴圈內的事件時間 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
+`repeat(name, n, *, timeline=None, range_hint=None)` 使用累加 timeline，不自動同步入口或回邊。
+Body 的預設名字改用循環 timeline，只可使用母 timeline 與局部 fork，離開後局部名字失效。
+作者可在 case 外的 body 明寫 sync、原生 delay／delay_auto 或巢狀 Repeat。
+若每圈都要推進 reference，在 body 頂層最後明寫 `sync()`，並先在循環前同步母 timeline。
+當入口結尾為常數 0 且最後操作是這個 sync，固定圈長使用常數 inc_ref，不配循環尾端 register。
+編譯器只看已錄製結構，不分析定點或重播 preprocess。
+中途 sync、只在巢狀區塊末尾 sync、同步別條 timeline 或沒有 sync 都用 shot-local register 累加器。
+Body 以循環 timeline 的 sync 結尾但入口不是常數 0 時，UserWarning 會提示在循環前加 sync，編譯器不自行加入。
+這條變數尾端路徑仍沿用現有 IR 展開與 address DMEM 成本，尚未改成 s14 指針。
+
+`n` 是非負整數或既有 count register 名字。固定 0 不執行 body，也不自動同步。
+Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
+省略 hint 時不證明回邊同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
+每 shot 內初始化循環狀態，register 超限保留 QICK 錯誤。
+Runtime-only 事件 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
+Reference 操作按每圈實際推進量扣減外部結尾。Runtime 推進後未消耗的外部來源可能是 wait-only，先經 join/fork 建立普通排程點，或明寫 sync 完整消耗。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
 它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。

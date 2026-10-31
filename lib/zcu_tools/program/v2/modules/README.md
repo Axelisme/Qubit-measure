@@ -49,7 +49,8 @@ DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 de
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
 Register cycles 必須非負。尚未被 native 部分完整消耗的 timeline，須以已知 producer bounds 扣除實際推進量。
-Repeat 內仍拒絕這個 native register reference 操作，具名 timeline 的 register 時間則可用。
+Repeat 內也可直接呼叫原生 delay_reg_auto；branch case 與 Join/Reset 仍禁止推進 reference。
+DelayAuto module 不接受 timeline 範圍，包括 Repeat 的預設 timeline。需要時直接呼叫原生操作。
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
@@ -58,8 +59,8 @@ PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用
 Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(index)`，None 是空 case。
 Lowering 把 emission 的 timeline 傳為 branch 母 timeline，每個 case 用自己的隱式 timeline 發射 children。
 Lowering 選擇 align_timeline=True，將各 case 結尾併回母 timeline，靜態取 max，runtime 取精確逐點 max。
-Branch 只改結尾、不推進 reference。Case 內的 native reference 操作與 `repeat(..., advance_ref=True)` 在 build 時報錯。
-`repeat(..., advance_ref=False)` 使用累加 timeline，可以放在 case 內，也可以巢狀 False。其整個 body 不得推進 reference。
+Branch 只改結尾、不推進 reference。Case 內的 native reference 操作在 build 時報錯。
+`repeat(...)` 使用累加 timeline，可以放在 case 內，也可以巢狀。Case 內的 Repeat body 同樣不得推進 reference。
 後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
 Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
 它保留 sequence 及內部 Module 的作者次序，不重排。

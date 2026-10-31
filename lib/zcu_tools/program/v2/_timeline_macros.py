@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from fractions import Fraction
+import warnings
 
 from qick.asm_v2 import (
     CondJump,
@@ -621,8 +622,6 @@ class RepeatTimelineEnter(Macro):
         incoming = self.book.end(self.parent, placement=True)
         self.constant = self.tail_sync and not isinstance(incoming, RuntimeEnd) and _bounds(incoming) == (0.0, 0.0)
         if self.tail_sync and not self.constant:
-            import warnings
-
             warnings.warn("Repeat entry is not constant zero; add sync() before the loop to avoid a tail register", UserWarning, stacklevel=2)
         if self.constant:
             self.reference.preprocess(prog)
