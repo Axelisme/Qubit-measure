@@ -922,6 +922,67 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     return result
 
 
+class _ChoiceRecipes:
+    """Linearize original recipes while keeping captured storage opaque."""
+
+    def __init__(self, captured: tuple[TimeExpression, ...], maximum: bool):
+        self.captured = captured
+        self.maximum = maximum
+        self.atoms: dict[TimeExpression, CycleAxis] = {}
+
+    def atom(self, value: TimeExpression) -> TimeVariable:
+        if value not in self.atoms:
+            lo, hi = expression_limits(value)
+            self.atoms[value] = cycle_axis(
+                "join operand",
+                None if lo is None else math.ceil(lo),
+                None if hi is None else math.floor(hi),
+                CycleProducer(reconstruction=value),
+            )
+        return TimeVariable(terms=((self.atoms[value], 1),))
+
+    def linear(self, value: TimeExpression) -> TimeVariable:
+        if value in self.captured:
+            return self.atom(value)
+        if isinstance(value, TimeAbs):
+            recipe = value.runtime
+            if recipe.kind == "add":
+                return _linear_add(self.linear(recipe.operands[0]), self.linear(recipe.operands[1]))
+            if recipe.kind == "scale" and recipe.coefficient == int(recipe.coefficient):
+                return _linear_scale(self.linear(recipe.operands[0]), recipe.coefficient)
+            return self.atom(value)
+        result = TimeVariable(value.constant)
+        for axis, coefficient in value.terms:
+            recipe = axis.producer.reconstruction
+            source = TimeVariable(terms=((axis, 1),))
+            term = (
+                self.atom(source)
+                if source in self.captured
+                else self.linear(recipe)
+                if recipe is not None and _integer_recipe(recipe)
+                else source
+            )
+            result = _linear_add(result, _linear_scale(term, coefficient))
+        return result
+
+    def candidates(self, value: TimeExpression) -> list[TimeVariable]:
+        if value in self.captured:
+            return [self.atom(value)]
+        for entry in self.captured:
+            delta = add_time(value, scale_time(entry, -1))
+            lo, hi = expression_limits(delta)
+            if lo is not None and lo == hi:
+                return [_linear_add(self.atom(entry), TimeVariable(lo))]
+        if isinstance(value, TimeAbs) and value.runtime.kind == ("max" if self.maximum else "min"):
+            return [item for operand in value.runtime.operands for item in self.candidates(operand)]
+        if isinstance(value, TimeVariable) and value.constant == 0 and len(value.terms) == 1:
+            axis, coefficient = value.terms[0]
+            recipe = axis.producer.reconstruction
+            if coefficient == 1 and recipe is not None:
+                return self.candidates(recipe)
+        return [self.linear(value)]
+
+
 def plan_time_choice(
     values: tuple[TimeExpression, ...],
     *,
@@ -936,61 +997,8 @@ def plan_time_choice(
     Other atoms retain their original integer producer, never Abs proof terms.
     Coefficients use the N-input mode, breaking ties toward smaller magnitude.
     """
-    atoms: dict[TimeExpression, CycleAxis] = {}
-
-    def atom(value: TimeExpression) -> TimeVariable:
-        if value not in atoms:
-            lo, hi = expression_limits(value)
-            atoms[value] = cycle_axis(
-                "join operand",
-                None if lo is None else math.ceil(lo),
-                None if hi is None else math.floor(hi),
-                CycleProducer(reconstruction=value),
-            )
-        return TimeVariable(terms=((atoms[value], 1),))
-
-    def linear(value: TimeExpression) -> TimeVariable:
-        if value in captured:
-            return atom(value)
-        if isinstance(value, TimeAbs):
-            recipe = value.runtime
-            if recipe.kind == "add":
-                return _linear_add(linear(recipe.operands[0]), linear(recipe.operands[1]))
-            if recipe.kind == "scale" and recipe.coefficient == int(recipe.coefficient):
-                return _linear_scale(linear(recipe.operands[0]), recipe.coefficient)
-            return atom(value)
-        result = TimeVariable(value.constant)
-        for axis, coefficient in value.terms:
-            recipe = axis.producer.reconstruction
-            source = TimeVariable(terms=((axis, 1),))
-            term = (
-                atom(source)
-                if source in captured
-                else linear(recipe)
-                if recipe is not None and _integer_recipe(recipe)
-                else source
-            )
-            result = _linear_add(result, _linear_scale(term, coefficient))
-        return result
-
-    def candidates(value: TimeExpression) -> list[TimeVariable]:
-        if value in captured:
-            return [atom(value)]
-        for entry in captured:
-            delta = add_time(value, scale_time(entry, -1))
-            lo, hi = expression_limits(delta)
-            if lo is not None and lo == hi:
-                return [_linear_add(atom(entry), TimeVariable(lo))]
-        if isinstance(value, TimeAbs) and value.runtime.kind == ("max" if maximum else "min"):
-            return [item for operand in value.runtime.operands for item in candidates(operand)]
-        if isinstance(value, TimeVariable) and value.constant == 0 and len(value.terms) == 1:
-            axis, coefficient = value.terms[0]
-            recipe = axis.producer.reconstruction
-            if coefficient == 1 and recipe is not None:
-                return candidates(recipe)
-        return [linear(value)]
-
-    lines = [line for value in values for line in candidates(value)]
+    recipes = _ChoiceRecipes(captured, maximum)
+    lines = [line for value in values for line in recipes.candidates(value)]
     if not lines:
         raise ValueError("time choice requires at least one value")
     variables = dict.fromkeys(axis for line in lines for axis, _ in line.terms)
@@ -1002,7 +1010,7 @@ def plan_time_choice(
             common_terms.append((axis, coefficient))
     common = TimeVariable(terms=tuple(common_terms))
     residuals = [_linear_add(line, _linear_scale(common, -1)) for line in lines]
-    replacements = {axis: value for value, axis in atoms.items()}
+    replacements = {axis: value for value, axis in recipes.atoms.items()}
     proofs = [substitute_time(line, replacements) for line in residuals]
     kept: list[TimeVariable] = []
     for index, residual in enumerate(residuals):

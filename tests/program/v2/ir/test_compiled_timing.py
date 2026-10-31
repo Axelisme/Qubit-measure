@@ -467,7 +467,7 @@ def test_sign_condition_selects_pointwise_minimum_and_is_sensitive_to_inversion(
         {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r0"},
         {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r1", "IF": "NS"},
         {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r2 + #200"},
-        {"CMD": "TIME", "C_OP": "inc_ref", "SRC": "op", "OP": "r2"},
+        {"CMD": "TIME", "C_OP": "inc_ref", "R1": "r2"},
         {"CMD": "JUMP", "LABEL": "HERE"},
     ]
     compiled = [{**inst, "P_ADDR": address} for address, inst in enumerate(instructions)]
