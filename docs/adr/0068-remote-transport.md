@@ -6,7 +6,7 @@ status: accepted
 
 **狀態：** accepted。
 
-**Last updated:** 2026-10-22，workflow async host 與 request_id
+**Last updated:** 2026-11-01，移除 Pause／Resume、Ask waiting 與 GUI Run terminal
 
 ## 問題與選擇
 
@@ -107,9 +107,9 @@ candidate 和固定 capture，不下載 schema tree。Tunables Apply 的 [] 提�
 draft，只有 native publication 成功才接受 input/base。Expression 留在 FormInput，
 journal 只記普通值。Form 與 lowered cfg 的責任見 [[0065]]。
 
-Start／Resume 回 pending operation receipt，不代表 native acceptance。
-Pause／Stop 只代表控制請求，不代表 producer 已停止。Pause 保留原 operation
-與 RUN lease，Resume 重用同一 handle。終局由原 owner delivery 交付。
+Start 回 pending operation receipt，不代表 native acceptance。
+Stop 只代表停止請求，不代表 producer 已停止。原 operation 與 RUN lease
+保留到真正終局，由原 owner delivery 交付。Workflow 不提供 Pause／Resume。
 Busy close 回 false，不暗中 Stop、drain 或 disconnect。這只是本程序互斥，
 不是跨程序硬體仲裁。原生 run、device capture 與保存仍依 [[0062]]、[[0063]]。
 
@@ -121,13 +121,17 @@ lifecycle、Form path 與拒絕保留 code/message/reason/data；unexpected prod
 Records 直接投影 Engine facts，since 是嚴格大於的 commit_seq cursor。
 依 2026-10-22 operation 繪圖邊界裁定，Figures 使用同一 WorkflowPlots 投影。
 Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。
-新 attempt release 並整組替換舊 operation，workflow 圖跨 iteration 保留。
+新 operation release 並整組替換舊 operation 圖，workflow 圖跨 iteration 保留。
 Terminal 保留最新 operation，replacement 或 close 釋放兩組 presentation。
 Status 與 names 不 render。Figure 在 owner 以 shared renderer 產生 PNG，MCP
 驗證 PNG 並附 image content，不在文字中保留 base64，也不建立 preview 檔。
 Terminal records 保留到 replacement 或 close。獨立集合的生命週期見 [[0062]]、[[0069]]。
 
-2026-10-22 依單一 async 腳本契約同步 workflow answer。Status 提供
+2026-11-01，使用者以「5a」將 Ask 等答覆命名為 waiting。Workflow lifecycle
+與 recipe pending Ask 的 status／phase 都使用 waiting，不表示可恢復的 Pause。
+Journal 保留 QuestionAnswered，不記 PauseRequested／Paused／Resumed，不新增 QuestionAsked。
+Answer 讓同一作者 coroutine 繼續一次，root Stop 可中斷等待。
+Status 提供
 pending_question 的 request_id/question_type/question/answer_schema 固定 envelope，
 authored fields 只在 question 內。Engine 先比對 request_id，再驗答案 schema 與
 JSON 轉換。過期 ID 或無 pending 問題拒絕並回目前 pending_request_id，狀態不變，
@@ -135,11 +139,18 @@ JSON 轉換。過期 ID 或無 pending 問題拒絕並回目前 pending_request_
 同一 pending handle。
 
 共用 async host、answer Future 與 control 序列依 [[0075]] 的「Async 協作與控制命令」。
-整個 coroutine 只佔一個 worker，Resume／Answer／Stop 不另排 execution 或 drain segment。
+整個 coroutine 只佔一個 worker，每個 operation 只呼叫一次。
+Answer／Stop 不另排 execution 或 drain segment。
 RPC/UI owner thread 不執行作者 coroutine。控制 I/O 失敗保留 cause，原 worker 完成
 finally 與 executor drain 後才交終局。原 owner terminal delivery 才釋放 operation
 與 RUN lease，維持 [[0066]] 的 settlement。狀態仍以公開 reads／polling 觀察，
 此變更不承諾 native lifecycle push 或 subscribe。
+
+GUI 單次 Run 的 core 正常返回時，MCP wait／RPC operation.await 回 finished，
+不因停止 root 或子孫而改 cancelled。Core 拋錯仍為 failed。停止事實另由
+stop_requested 與存檔 completion stopped 表達。2026-11-01，使用者以
+「6b 其餘採用建議」選擇此規則。Workflow root Stop 的 ScriptCancelled
+與 terminal cancelled 仍依 [[0062]]，不與 GUI 單次 Run 混用。
 
 ## 事件與錯誤
 
