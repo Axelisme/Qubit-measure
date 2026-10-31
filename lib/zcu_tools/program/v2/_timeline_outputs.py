@@ -106,7 +106,7 @@ class TimelineObservedPulse(Pulse):
         if self.source.t == "auto" and self.ch in self.book.runtime_gens:
             start = self.book.runtime_gens[self.ch]
             self.runtime_start = start
-            self.source.t_regs["t"] = start.register
+            self.source.t_regs["t"] = self.book.math.cycles(start).register
             self.book.runtime_gens[self.ch] = self.book.math.add(
                 start,
                 align_end(

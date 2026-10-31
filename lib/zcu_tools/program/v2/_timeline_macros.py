@@ -144,7 +144,7 @@ class TimelineRuntimeAdvance(Macro):
             static = 0.0
         advance = auto if isinstance(auto, RuntimeEnd) else static
         if isinstance(auto, RuntimeEnd):
-            self.source.t_regs["auto_t"] = auto.register
+            self.source.t_regs["auto_t"] = self.book.math.cycles(auto).register
         remaining = [
             self.book.math.floor(end, advance)
             for end in [
@@ -460,7 +460,7 @@ class TimelineSync(Delay):
                 [0.0, *(self.book.end(name) for name in self.sources)]
             )
         if isinstance(self.t, RuntimeEnd):
-            self.t_regs["t"] = self.t.register
+            self.t_regs["t"] = self.book.math.cycles(self.t).register
             self.book.native_only = True
             try:
                 if self.t.minimum is not None:
@@ -578,7 +578,10 @@ class TimelineRepeatExit(Macro):
                 debit = _bounds(frame.advance)[0] * self.count
                 runtime[name] = (
                     RuntimeEnd(
-                        end.register, 0, max(0, round((upper - debit) * get_fclk(prog)))
+                        end.register,
+                        0,
+                        max(0, round((upper - debit) * get_fclk(prog))),
+                        offset=end.offset,
                     )
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
@@ -639,7 +642,7 @@ class TimelineRepeatExit(Macro):
                             ),
                         )
                     )
-                    current[ch] = RuntimeEnd(end.register, 0, upper)
+                    current[ch] = RuntimeEnd(end.register, 0, upper, offset=end.offset)
             else:
                 for ch, end in initial.items():
                     if ch not in written:
@@ -938,7 +941,7 @@ class NativeTimelineDelay(TimedMacro):
             self.source.preprocess(prog)
         finally:
             self.book.native_only = False
-        self.source.t_regs["t"] = actual.register
+        self.source.t_regs["t"] = self.book.math.cycles(actual).register
         self.book.decrement(actual)
 
     def translate(self, prog) -> None:
