@@ -112,6 +112,7 @@ def test_return_cancels_deadline_before_restoring_handler(
 
     original = signal.signal(signal.SIGINT, previous)
     try:
+
         def check_cancel() -> None:
             assert signal.getsignal(signal.SIGINT) is not previous
 
