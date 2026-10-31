@@ -232,8 +232,9 @@ def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
     def body(p):
         with p.repeat("reads", 2), p.branch(by="scan", align_timeline=False) as branch:
             for case in range(2):
-                with branch.case(case):
-                    p.trigger([0], t=0)
+                with branch.case(case) as timeline:
+                    p.fork(timeline, into="capture")
+                    p.trigger([0], t=0, timeline="capture")
                     p.pulse(0, "p")
                     p.delay_timeline(case * 43 / 430.08)
 

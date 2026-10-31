@@ -273,8 +273,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
         p.send_readoutconfig(1, "ro1", t=0)
         with p.repeat("reads", 3), p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
-                with branch.case(index):
-                    p.trigger([0, 1], t=0)
+                with branch.case(index) as case:
+                    p.fork(case, into="capture")
+                    p.trigger([0, 1], t=0, timeline="capture")
                     p.pulse(0, "p", tag=f"case-{index}")
 
     prog, env = program(
