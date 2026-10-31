@@ -24,7 +24,7 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
             p.write_reg_op("mask", "scan", "XOR", "inner")
             bit = p.soccfg["readouts"][0]["trigger_bit"]
             p.write_reg_op("mask", "mask", "SL", bit)
-            p.write_reg_op("when", "inner", "*", 100)
+            p.write_reg_op("when", "inner", "SL", 7)
             p.trigger([0], t=0)
 
     def transform(snapshot):
@@ -39,7 +39,7 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     prog, env = program(body, initialize, trigger_time=None, stream_transform=transform)
     assert prog.ro_chs[0]["trigs"] == 1
     result = request(prog, env)
-    for point, ticks in enumerate((100, 0)):
+    for point, ticks in enumerate((128, 0)):
         read = result.materialize_point(point).readouts[0]
         assert read.trigger_us == pytest.approx((ticks / 430.08,))
         assert read.duration_us == pytest.approx(61 / 307.2)
