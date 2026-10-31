@@ -198,7 +198,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("gate_idxs", "Gate Pair Index", "", dtype=np.int64),),
+        axes=(AxesSpec.Axis("gate_idxs", label="Gate Pair Index", unit="", dtype=np.int64),),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,

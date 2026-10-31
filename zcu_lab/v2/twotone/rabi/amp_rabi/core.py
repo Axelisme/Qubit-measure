@@ -98,7 +98,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("amps", "Gain", ""),),
+        axes=(AxesSpec.Axis("amps", label="Gain", unit=""),),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
