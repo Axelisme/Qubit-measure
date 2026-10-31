@@ -544,6 +544,7 @@ class SingleFluxoniumSource:
                 repr(
                     (
                         self._facts_key,
+                        request.time_base,
                         request.point_dims,
                         request.loop_dims,
                         request.avg_level,
