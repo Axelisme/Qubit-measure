@@ -230,11 +230,11 @@ class TimelineAdvance(TimedMacro):
             )
         previous = self.book.end(self.timeline, placement=True)
         events = self._events(previous)
-        end = self._finish(prog, events[0], duration)
-        for event in events[1:]:
-            # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
-            end = self.book.math.maximum(end, self._finish(prog, event, duration))
-        self.book.set_end(self.timeline, self.book.math.maximum(0.0, end))
+        # max(ceil(Ei+post)) equals ceil(max(Ei)+post).
+        end = self.book.math.join(
+            [0.0, *(self._finish(prog, event, duration) for event in events)]
+        )
+        self.book.set_end(self.timeline, end)
         self.resolved_time = end
 
     def _events(self, previous: Time) -> list[EventEnd | SelectedEventEnd]:
@@ -405,9 +405,9 @@ class TimelineSync(Delay):
             else self.book.end(self.timeline)
         )
         if self.sources is not None:
-            self.t = 0.0
-            for name in self.sources:
-                self.t = self.book.math.maximum(self.t, self.book.end(name))
+            self.t = self.book.math.join(
+                [0.0, *(self.book.end(name) for name in self.sources)]
+            )
         if isinstance(self.t, RuntimeEnd):
             self.t_regs["t"] = self.t.register
             self.book.native_only = True

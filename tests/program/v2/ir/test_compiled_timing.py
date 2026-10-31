@@ -453,6 +453,31 @@ def test_wait_rejects_a_target_that_would_change_control_flow():
         ir.analyze_timing(compiled)
 
 
+@pytest.mark.parametrize(
+    ("left", "right", "minimum", "maximum"),
+    [(20, 100, 20, 100), (100, 20, 20, 100), (-20, 100, -20, 100), (100, -20, -20, 100)],
+)
+def test_sign_condition_selects_pointwise_minimum_and_is_sensitive_to_inversion(
+    left, right, minimum, maximum
+):
+    instructions = [
+        {"CMD": "REG_WR", "DST": "r0", "SRC": "imm", "LIT": f"#{left}"},
+        {"CMD": "REG_WR", "DST": "r1", "SRC": "imm", "LIT": f"#{right}"},
+        {"CMD": "TEST", "OP": "r0 - r1", "UF": "1"},
+        {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r0"},
+        {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r1", "IF": "NS"},
+        {"CMD": "REG_WR", "DST": "r2", "SRC": "op", "OP": "r2 + #200"},
+        {"CMD": "TIME", "C_OP": "inc_ref", "SRC": "op", "OP": "r2"},
+        {"CMD": "JUMP", "LABEL": "HERE"},
+    ]
+    compiled = [{**inst, "P_ADDR": address} for address, inst in enumerate(instructions)]
+    normal = ir.analyze_timing(ir.CompiledTimingInput(compiled, {}, ir.TimingLayout(0, 7)))
+    assert normal.shots[0].body_end_cycle == 200 + minimum
+    compiled[4] = {**compiled[4], "IF": "S"}
+    inverted = ir.analyze_timing(ir.CompiledTimingInput(compiled, {}, ir.TimingLayout(0, 7)))
+    assert inverted.shots[0].body_end_cycle == 200 + maximum
+
+
 def test_known_false_output_condition_does_not_emit_an_event():
     compiled = ir.CompiledTimingInput(
         [

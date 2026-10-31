@@ -748,18 +748,16 @@ class TimelineBook:
         None means neither selection contains a declared channel, matching QICK
         auto-delay behavior. Static channels keep their native timestamps.
         """
-        result: Time | None = None
-        for enabled, channels, generator in (
-            (gens, prog.gen_chs, True),
-            (ros, prog.ro_chs, False),
-        ):
-            if enabled:
-                for ch in channels:
-                    value = self.channel_end(prog, ch, generator=generator)
-                    result = (
-                        value if result is None else self.math.maximum(result, value)
-                    )
-        return result
+        values = [
+            self.channel_end(prog, ch, generator=generator)
+            for enabled, channels, generator in (
+                (gens, prog.gen_chs, True),
+                (ros, prog.ro_chs, False),
+            )
+            if enabled
+            for ch in channels
+        ]
+        return self.math.join(values) if values else None
 
     def check_shell_wait(self, prog) -> None:
         """Project final ADC WAIT and diagnose slack after all body cancellation.
@@ -801,8 +799,4 @@ class TimelineBook:
             warnings.warn(message, UserWarning, stacklevel=2)
 
     def maximum(self) -> Time:
-        values = iter(self.ends.values())
-        end = next(values, 0.0)
-        for candidate in values:
-            end = self.math.maximum(end, candidate)
-        return end
+        return self.math.join(list(self.ends.values()) or [0.0])
