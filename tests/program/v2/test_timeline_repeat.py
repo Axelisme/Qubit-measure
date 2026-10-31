@@ -613,6 +613,26 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
     assert [_waves(s) for s in _shots(prog)] == [[40, 88, 96], [41, 95, 108]] * 2
 
 
+@pytest.mark.parametrize("actual", [0, 2])
+def test_unbounded_external_timeline_survives_synchronized_repeat(actual):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+        prog.add_loop("scan", 2)
+        prog.add_reg("duration")
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.write_reg_op("duration", "scan", "+", 100)
+        prog.timeline_inc("duration", timeline="external")
+        with prog.repeat("r", "count", range_hint=(0, 3)):
+            prog.timeline_inc(10 / 430.08)
+            prog.delay_by_timeline()
+        prog.pulse(1, "p1", timeline="external")
+
+    prog = _program(body, initialize, reps=2)
+    assert [_waves(s) for s in _shots(prog)] == [[100], [101]] * 2
+
+
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
