@@ -116,6 +116,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     Simulation frontend migration is separate.
     """
 
+    _dmem_dispatch = False
     macro_list: list[Macro]
 
     def __init__(self, *args, **kwargs):

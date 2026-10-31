@@ -530,8 +530,9 @@ class IRPipeLine:
 
 
 def make_default_pipeline(
-    pmem_capacity: int, max_unroll_factor: int | None = None
+    pmem_capacity: int, max_unroll_factor: int | None = None, *, dmem_dispatch: bool = True
 ) -> IRPipeLine:
+    """Build the optimizer; false dmem_dispatch keeps dispatch islands in PMEM."""
     from .passes import (
         BlockMergePass,
         BranchEliminationPass,
@@ -572,6 +573,6 @@ def make_default_pipeline(
             UnrollLoopPass(),
             UnpackIRBranchPass(),
             SimplifyDispatchPass(),
-            DmemDispatchPass(),
+            *([DmemDispatchPass()] if dmem_dispatch else []),
         ],
     )

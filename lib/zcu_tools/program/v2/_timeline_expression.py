@@ -36,7 +36,9 @@ class CycleVariable:
     points denotes a bounds-only unknown source. interval_points optionally
     stores row-major lower/upper grids for a nonlinear unknown result whose
     known loop coordinates must survive later arithmetic; these are not actual
-    point values and never authorize an exact-slack guard.
+    point values and never authorize an exact-slack guard. reconstruction retains
+    exact integer producer algebra when a lookup has an affine declared mapping;
+    None means that no such reconstruction has been established.
     """
 
     name: str
@@ -45,6 +47,7 @@ class CycleVariable:
     axes: tuple[tuple[str, int], ...] = ()
     points: tuple[int, ...] | None = None
     interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
+    reconstruction: "TimeExpression | None" = None
 
 
 @dataclass(frozen=True)

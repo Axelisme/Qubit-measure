@@ -284,10 +284,11 @@ def lookup_expression(
 ) -> TimeExpression:
     """Preserve one lookup's legal points using the selector at this occurrence."""
     index = source_expression(prog, selector)
+    reconstruction = None
     if len(values) > 1:
         step = values[1] - values[0]
         if all(value == values[0] + step * i for i, value in enumerate(values)):
-            return add_time(LinearTime(values[0]), scale_time(index, step))
+            reconstruction = add_time(LinearTime(values[0]), scale_time(index, step))
     axes = expression_axes(index)
     points = evaluate_time(index, axes)
     if points is None:
@@ -297,7 +298,8 @@ def lookup_expression(
     if lower == upper:
         return LinearTime(lower)
     variable = CycleVariable(
-        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in selected.flat)
+        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in selected.flat),
+        reconstruction=reconstruction,
     )
     return LinearTime(terms=((variable, 1),))
 
@@ -434,10 +436,21 @@ class RuntimeMath(TimedMacro):
     def _reconstruct_linear(
         self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
     ) -> RuntimeEnd:
+        if all(
+            variable not in inputs and len(variable.axes) == 1 and variable.points is None
+            for variable, _ in expression.terms
+        ):
+            spans: dict[str, int] = {}
+            for variable, coefficient in expression.terms:
+                axis, count = variable.axes[0]
+                spans[axis] = spans.get(axis, 0) + coefficient * (count - 1)
+            return self.cycles(QickParam(expression.constant, spans) / get_fclk(self.prog))
         result = self.cycles(expression.constant / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
             if variable in inputs:
                 term = inputs[variable]
+            elif variable.reconstruction is not None:
+                term = self.reconstruct(variable.reconstruction, inputs)
             elif len(variable.axes) == 1 and variable.points is None:
                 axis, count = variable.axes[0]
                 term = self.cycles(QickParam(0, {axis: count - 1}) / get_fclk(self.prog))

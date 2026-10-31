@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class IRCompileMixin(QickProgramV2):
+    _dmem_dispatch = True
+
     def __init__(self, *args: Any, **kwargs: Any):
         self.meta_infos: list[dict[str, Any]] = []
         self._compiled_stream: CompiledStream | None = None
@@ -96,7 +98,9 @@ class IRCompileMixin(QickProgramV2):
         # the pipeline where in dmem they may start (current buffer length).
         dmem_base = len(getattr(self, "_dmem_buffer", []))
 
-        pipeline = make_default_pipeline(pmem_capacity=self.tproccfg["pmem_size"])
+        pipeline = make_default_pipeline(
+            pmem_capacity=self.tproccfg["pmem_size"], dmem_dispatch=self._dmem_dispatch
+        )
         # QICK owns native sweep increments/resets. These artifact annotations
         # must not ask IRParser to discard and rebuild that control shell.
         optimizer_insts = [
