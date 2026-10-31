@@ -177,6 +177,7 @@ def test_known_affine_register_getter_returns_actual_time_without_rescheduling()
         [5, 10, 15]
     )
     value = prog.get_time_param("end", "t")
+    assert isinstance(value, QickParam)
     assert value.to_array({"scan": 3}) * 430.08 == pytest.approx([5, 10, 15])
     assert shots(prog) == before
 

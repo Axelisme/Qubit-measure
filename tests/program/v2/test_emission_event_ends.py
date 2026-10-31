@@ -3,7 +3,7 @@
 from collections.abc import Callable, Sequence
 
 import pytest
-from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D, WriteReg
+from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.delay import Delay, SoftDelay

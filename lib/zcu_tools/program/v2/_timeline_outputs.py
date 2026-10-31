@@ -268,13 +268,14 @@ class TimelinePlacedTrigger(Trigger):
         self.book = book
         self.timeline = timeline
         self.relative_t: float | QickParam = source.t
+        self.relative_width: float | QickParam | None = source.width
         self.event_end = EventEnd(0.0, 0.0)
         self.runtime_start: RuntimeEnd | None = None
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
-        if self.width is not None:
-            self.width = placement_time(prog, self.width)
+        if self.relative_width is not None:
+            self.width = placement_time(prog, self.relative_width)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
