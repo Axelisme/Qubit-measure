@@ -1,9 +1,9 @@
 """Axis-component cycle algebra. Proof envelopes never supply runtime values."""
 
-import logging
 import math
 from dataclasses import dataclass, field
 from fractions import Fraction
+from functools import cached_property, lru_cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,10 +12,7 @@ from ._timeline_bounds import CycleBounds
 
 CycleValues = NDArray[np.int64] | NDArray[np.object_]
 Scalar = int | Fraction
-MAX_BRANCHES = 8
-MAX_CANDIDATES = 81
-MAX_DEPTH = 2
-MAX_LEAVES = 81
+MAX_ABS_TERMS = 20
 
 
 @dataclass(frozen=True)
@@ -110,9 +107,27 @@ class TimeVariable:
                     coefficient if axis.values is None else axis.values * coefficient
                 )
                 components = _merge_components(components, ((axis, component),))
+        frozen = []
+        for axis, component in components:
+            if isinstance(component, np.ndarray):
+                component = component.copy()
+                component.flags.writeable = False
+            frozen.append((axis, component))
+        components = tuple(frozen)
         object.__setattr__(self, "constant", constant)
         object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "components", components)
+
+    @cached_property
+    def limits(self) -> tuple[Fraction | None, Fraction | None]:
+        """Return this immutable variable's cached independent-axis bounds."""
+        lower: Fraction | None = Fraction(0)
+        upper: Fraction | None = Fraction(0)
+        for axis, component in self.components:
+            lo, hi = _component_limits(axis, component)
+            lower = None if lower is None or lo is None else lower + lo
+            upper = None if upper is None or hi is None else upper + hi
+        return lower, upper
 
     def __hash__(self) -> int:
         return hash(frozenset(_component_key(axis, c) for axis, c in self.components))
@@ -124,24 +139,38 @@ class TimeVariable:
 
 
 @dataclass(frozen=True)
-class TimeExtremum:
-    """Bounded max/min proof branches, optional residual envelope and ledger.
+class TimeOperation:
+    """Exact integer runtime recipe, never inferred from Abs proof terms.
 
-    Each max branch is <= the true value; residual bounds all unrepresented
-    parts from above. Min mirrors this. runtime_values retains the unpruned
-    operation inputs solely for reconstruction, never for proof evaluation.
+    kind selects max/min/add/scale. operands retain the original immutable
+    values; coefficient is used only by scale.
     """
 
-    alternatives: tuple["TimeExpression", ...]
-    maximum: bool
-    residual: TimeVariable | None = None
-    ledger: tuple[str, ...] = ()
-    runtime_values: tuple["TimeExpression", ...] = field(
-        default=(), compare=False, hash=False
-    )
+    kind: str
+    operands: tuple["TimeExpression", ...]
+    coefficient: Scalar = 1
 
 
-TimeExpression = TimeVariable | TimeExtremum
+@dataclass(frozen=True)
+class TimeAbs:
+    """Linear axis components plus rational multiples of nested absolute values.
+
+    linear is the additive variable. absolute contains normalized arguments and
+    nonzero coefficients, including negative coefficients. runtime preserves the
+    integer operation independently of proof normalization and range fallback.
+    """
+
+    linear: TimeVariable
+    absolute: tuple[tuple["TimeExpression", Fraction], ...]
+    runtime: TimeOperation = field(compare=False, hash=False)
+
+    @cached_property
+    def limits(self) -> tuple[Fraction | None, Fraction | None]:
+        """Return this immutable node's cached conservative cycle range."""
+        return _abs_limits(self)
+
+
+TimeExpression = TimeVariable | TimeAbs
 
 
 def _merge_components(
@@ -172,33 +201,8 @@ def _component_limits(
 
 
 def expression_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
-    """Add independent component bounds; extrema use retained branches and R."""
-    if isinstance(value, TimeExtremum):
-        bounds = [expression_limits(v) for v in value.alternatives]
-        if value.residual is not None:
-            residual = expression_limits(value.residual)
-            if value.maximum:
-                bounds.append((None, residual[1]))
-            else:
-                bounds.append((residual[0], None))
-        select = max if value.maximum else min
-        lows = [lo for lo, _ in bounds if lo is not None]
-        highs = [hi for _, hi in bounds if hi is not None]
-        return (
-            select(lows)
-            if lows and (value.maximum or len(lows) == len(bounds))
-            else None,
-            select(highs)
-            if highs and (not value.maximum or len(highs) == len(bounds))
-            else None,
-        )
-    lower: Fraction | None = Fraction(0)
-    upper: Fraction | None = Fraction(0)
-    for axis, component in value.components:
-        lo, hi = _component_limits(axis, component)
-        lower = None if lower is None or lo is None else lower + lo
-        upper = None if upper is None or hi is None else upper + hi
-    return lower, upper
+    """Return cached bounds without reading mutable runtime storage."""
+    return value.limits
 
 
 def expression_bounds(value: TimeExpression) -> CycleBounds:
@@ -215,28 +219,22 @@ def unbounded_time(value: TimeExpression) -> bool:
 
 
 def time_variables(value: TimeExpression) -> tuple[CycleAxis, ...]:
-    """Return surviving runtime recipe identities in traversal order."""
+    """Return surviving source identities for runtime capture and diagnostics."""
     if isinstance(value, TimeVariable):
         return tuple(axis for axis, _ in value.terms)
-    return tuple(
-        dict.fromkeys(
-            axis
-            for v in (
-                *value.alternatives,
-                *((value.residual,) if value.residual else ()),
-            )
-            for axis in time_variables(v)
-        )
-    )
+    return tuple(dict.fromkeys(
+        axis for item in (value.linear, *(x for x, _ in value.absolute))
+        for axis in time_variables(item)
+    ))
 
 
 def expression_axes(value: TimeExpression) -> dict[str, int]:
-    """Return known loop dimensions without consulting source recipes for bounds."""
-    if isinstance(value, TimeExtremum):
+    """Return known dimensions from proof components, not producer recipes."""
+    if isinstance(value, TimeAbs):
         return {
             name: count
-            for v in value.alternatives
-            for name, count in expression_axes(v).items()
+            for item in (value.linear, *(x for x, _ in value.absolute))
+            for name, count in expression_axes(item).items()
         }
     return {
         axis.identity: len(c)
@@ -248,22 +246,21 @@ def expression_axes(value: TimeExpression) -> dict[str, int]:
 
 
 def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | None:
-    """Evaluate known components for getters, never for multi-axis range proofs.
+    """Evaluate actual known values for getters; never evaluate proof envelopes.
 
-    Unknown or compressed extrema return None, not an envelope masquerading as
-    a runtime value. Caller dimensions determine output broadcasting order.
+    axes controls ndarray broadcasting order. Scalars return a zero-dimensional
+    ndarray. Unknown independent sources return None.
     """
-    if isinstance(value, TimeExtremum):
-        if value.residual is not None:
+    if isinstance(value, TimeAbs):
+        result = evaluate_time(value.linear, axes)
+        if result is None:
             return None
-        result = None
-        select = np.maximum if value.maximum else np.minimum
-        for alternative in value.alternatives:
-            points = evaluate_time(alternative, axes)
+        for argument, coefficient in value.absolute:
+            points = evaluate_time(argument, axes)
             if points is None:
                 return None
-            result = points if result is None else select(result, points)
-        return result
+            result = result + coefficient * np.abs(points)
+        return np.asarray(result, dtype=object)
     result = np.asarray(0, dtype=object)
     for axis, component in value.components:
         if not isinstance(component, np.ndarray):
@@ -273,21 +270,17 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
         elif axis.identity == "const":
             result = result + component[0]
         else:
-            shape = tuple(
-                len(component) if name == axis.identity else 1 for name in axes
-            )
+            shape = tuple(len(component) if name == axis.identity else 1 for name in axes)
             result = result + component.reshape(shape)
-    return result
+    return np.asarray(result, dtype=object)
 
 
 def ceiled_time(value: TimeExpression) -> TimeExpression:
     """Ceil single-axis components exactly; cross-axis branches get fresh errors."""
-    if isinstance(value, TimeExtremum):
-        return choose_time(
-            *(ceiled_time(v) for v in value.alternatives),
-            maximum=value.maximum,
-            residual=ceiled_time(value.residual) if value.residual else None,
-        )
+    if isinstance(value, TimeAbs):
+        # Runtime integer choices are already integral. Rational clock conversion
+        # only enters the linear producer paths below.
+        return value
     axes = expression_axes(value)
     if len(axes) <= 1:
         points = evaluate_time(value, axes)
@@ -315,13 +308,6 @@ def _ceil_fraction(value: Fraction) -> int:
 
 def shifted_time(value: TimeExpression, shift: int) -> TimeExpression:
     """Arithmetic right shift: one-axis exact values, otherwise bounded errors."""
-    if isinstance(value, TimeExtremum):
-        residual = shifted_time(value.residual, shift) if value.residual else None
-        return choose_time(
-            *(shifted_time(v, shift) for v in value.alternatives),
-            maximum=value.maximum,
-            residual=residual,
-        )
     axes = expression_axes(value)
     if len(axes) <= 1:
         points = evaluate_time(value, axes)
@@ -366,9 +352,9 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
     limits = expression_bounds(value)
     if limits.minimum == limits.maximum:
         return limits
-    if isinstance(value, TimeExtremum):
+    if any(axis.values is None for axis in _proof_axes(value).values()):
         return None
-    if any(not isinstance(c, np.ndarray) for _, c in value.components):
+    if isinstance(value, TimeAbs) and any(len(block.absolute) > MAX_ABS_TERMS for block in _connected_blocks(value)):
         return None
     return limits
 
@@ -411,8 +397,8 @@ def reduce_loop_time(
     value: TimeExpression, axis: str, *, last: bool = False
 ) -> TimeExpression:
     """Reduce a local loop component without constructing a Cartesian grid."""
-    if isinstance(value, TimeExtremum):
-        # A nonlinear reduction cannot be distributed through max/min.
+    if isinstance(value, TimeAbs):
+        # A nonlinear reduction cannot be distributed through absolute values.
         lo, hi = expression_limits(value)
         count = expression_axes(value)[axis]
         factor = 1 if last else count
@@ -519,270 +505,202 @@ def select_time(
     )
 
 
-def _envelope(values: tuple[TimeExpression, ...], *, upper: bool) -> TimeVariable:
-    """Bound every input by an additive per-axis envelope (missing axes are 0)."""
-    linear = [v for v in values if isinstance(v, TimeVariable)]
-    if len(linear) != len(values):
-        limits = [expression_limits(v)[1 if upper else 0] for v in values]
-        endpoint = (
-            None
-            if any(v is None for v in limits)
-            else (max if upper else min)(v for v in limits if v is not None)
-        )
-        return (
-            TimeVariable(
-                terms=(
-                    (
-                        cycle_axis(
-                            "residual envelope",
-                            None if endpoint is None else math.floor(endpoint),
-                            None if endpoint is None else math.ceil(endpoint),
-                        ),
-                        1,
-                    ),
-                )
-            )
-            if endpoint is None
-            else TimeVariable(endpoint)
-        )
-    sources = {axis.identity: axis for v in linear for axis, _ in v.components}
-    components = []
-    for identity, axis in sources.items():
-        candidates = [
-            next((c for a, c in v.components if a.identity == identity), 0)
-            for v in linear
-        ]
-        if axis.values is not None:
-            arrays = np.broadcast_arrays(*[np.asarray(c) for c in candidates])
-            component = (np.maximum if upper else np.minimum).reduce(arrays)
-            components.append((axis, component))
-        elif all(c == candidates[0] for c in candidates):
-            components.append((axis, candidates[0]))
+def _proof_axes(value: TimeExpression) -> dict[object, CycleAxis]:
+    linear, absolute = _parts(value)
+    axes = {axis.identity: axis for axis, _ in linear.components if axis.identity != "const"}
+    for argument, _ in absolute:
+        axes.update(_proof_axes(argument))
+    return axes
+
+
+def _connected_blocks(value: TimeAbs) -> list[TimeAbs]:
+    groups: list[tuple[set[object], list[tuple[TimeExpression, Fraction]]]] = []
+    for argument, coefficient in value.absolute:
+        axes = set(_proof_axes(argument))
+        terms = [(argument, coefficient)]
+        separate = []
+        for previous, items in groups:
+            if axes & previous:
+                axes |= previous
+                terms.extend(items)
+            else:
+                separate.append((previous, items))
+        groups = [*separate, (axes, terms)]
+    blocks = []
+    used: set[object] = set()
+    for axes, terms in groups:
+        components = tuple((a, c) for a, c in value.linear.components if a.identity in axes)
+        used |= axes
+        blocks.append(TimeAbs(TimeVariable(components=components), tuple(terms), value.runtime))
+    remaining = tuple((a, c) for a, c in value.linear.components if a.identity not in used)
+    if remaining:
+        blocks.append(TimeAbs(TimeVariable(components=remaining), (), value.runtime))
+    return blocks
+
+
+def _interval_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
+    linear, absolute = _parts(value)
+    lower, upper = linear.limits
+    for argument, coefficient in absolute:
+        lo, hi = expression_limits(argument)
+        abs_lo = Fraction(0) if lo is None or hi is None or lo <= 0 <= hi else min(abs(lo), abs(hi))
+        abs_hi = None if lo is None or hi is None else max(abs(lo), abs(hi))
+        a, b = (abs_lo, abs_hi) if coefficient > 0 else (abs_hi, abs_lo)
+        lower = None if lower is None or a is None else lower + coefficient * a
+        upper = None if upper is None or b is None else upper + coefficient * b
+    return lower, upper
+
+
+def _abs_arguments(value: TimeExpression) -> list[TimeExpression]:
+    arguments: list[TimeExpression] = []
+    if isinstance(value, TimeAbs):
+        for argument, _ in value.absolute:
+            arguments.extend(_abs_arguments(argument))
+            arguments.append(argument)
+    return list(dict.fromkeys(arguments))
+
+
+def _signed_linear(value: TimeExpression, signs: dict[TimeExpression, int]) -> TimeVariable:
+    linear, absolute = _parts(value)
+    for argument, coefficient in absolute:
+        linear = _linear_add(linear, _linear_scale(_signed_linear(argument, signs), coefficient * signs[argument]))
+    return linear
+
+
+def _domain_limits(value: TimeVariable, domains: dict[object, CycleValues]) -> tuple[Fraction | None, Fraction | None]:
+    components = tuple(
+        (axis, component[domains[axis.identity]] if isinstance(component, np.ndarray) and axis.identity in domains else component)
+        for axis, component in value.components
+    )
+    return TimeVariable(components=components).limits
+
+
+def _constrain_domains(constraints: tuple[TimeVariable, ...], domains: dict[object, CycleValues]) -> dict[object, CycleValues] | None:
+    domains = domains.copy()
+    changed = True
+    while changed:
+        changed = False
+        for constraint in constraints:
+            _, upper = _domain_limits(constraint, domains)
+            if upper is not None and upper < 0:
+                return None
+            for axis, component in constraint.components:
+                if not isinstance(component, np.ndarray) or axis.identity not in domains:
+                    continue
+                rest = TimeVariable(components=tuple((a, c) for a, c in constraint.components if a.identity != axis.identity))
+                _, rest_upper = _domain_limits(rest, domains)
+                if rest_upper is None:
+                    continue
+                previous = domains[axis.identity]
+                kept = previous[np.asarray(component[previous] + rest_upper >= 0, dtype=bool)]
+                if not len(kept):
+                    return None
+                if len(kept) != len(previous):
+                    domains[axis.identity] = kept
+                    changed = True
+    return domains
+
+
+def _endpoint_witness(value: TimeVariable, domains: dict[object, CycleValues], *, upper: bool) -> dict[object, int]:
+    witness = {axis: int(indices[0]) for axis, indices in domains.items()}
+    for axis, component in value.components:
+        if isinstance(component, np.ndarray) and axis.identity in domains:
+            indices = domains[axis.identity]
+            select = np.argmax if upper else np.argmin
+            witness[axis.identity] = int(indices[int(select(component[indices]))])
+    return witness
+
+
+def _witness_satisfies(constraint: TimeVariable, witness: dict[object, int]) -> bool:
+    result = Fraction(0)
+    for axis, component in constraint.components:
+        if isinstance(component, np.ndarray):
+            result += Fraction(component[witness.get(axis.identity, 0)])
         else:
-            endpoints = [
-                _component_limits(axis, c)[1 if upper else 0] for c in candidates
-            ]
-            if any(v is None for v in endpoints):
-                return TimeVariable(
-                    terms=((cycle_axis("residual envelope", None, None), 1),)
-                )
-            endpoint = (max if upper else min)(v for v in endpoints if v is not None)
-            components.append((CONST_AXIS, np.asarray([endpoint], dtype=object)))
-    merged: tuple[tuple[CycleAxis, Component], ...] = ()
-    for component in components:
-        merged = _merge_components(merged, (component,))
-    return TimeVariable(components=merged)
+            return False
+    return result >= 0
 
 
-def _dominates(left: TimeExpression, right: TimeExpression, maximum: bool) -> bool:
-    if not isinstance(left, TimeVariable) or not isinstance(right, TimeVariable):
-        return False
-    lower, upper = expression_limits(add_time(left, scale_time(right, -1)))
+def _linear_extreme(value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: dict[object, CycleValues], *, upper: bool) -> Fraction | None:
+    best: Fraction | None = None
+    pending = [domains]
+    while pending:
+        current = _constrain_domains(constraints, pending.pop())
+        if current is None:
+            continue
+        lo, hi = _domain_limits(value, current)
+        estimate = hi if upper else lo
+        if estimate is None:
+            return None
+        if best is not None and (estimate <= best if upper else estimate >= best):
+            continue
+        witness = _endpoint_witness(value, current, upper=upper)
+        violated = next((c for c in constraints if not _witness_satisfies(c, witness)), None)
+        if violated is None:
+            best = estimate
+            continue
+        split = next((a.identity for a, _ in violated.components if a.identity in current and len(current[a.identity]) > 1), None)
+        if split is None:
+            continue
+        indices = current[split]
+        middle = len(indices) // 2
+        pending.extend(({**current, split: indices[:middle]}, {**current, split: indices[middle:]}))
+    return best
+
+
+def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
+    arguments = _abs_arguments(value)
+    if len(arguments) > MAX_ABS_TERMS:
+        return _interval_limits(value)
+    axes = _proof_axes(value)
+    known = all(axis.values is not None for axis in axes.values())
+    domains = {identity: np.arange(len(axis.values), dtype=np.int64) for identity, axis in axes.items() if axis.values is not None}
+    leaves: list[tuple[Fraction | None, Fraction | None]] = []
+    pending: list[tuple[dict[TimeExpression, int], tuple[TimeVariable, ...], dict[object, CycleValues]]] = [({}, (), domains)]
+    while pending:
+        signs, constraints, current = pending.pop()
+        current = _constrain_domains(constraints, current)
+        if current is None:
+            continue
+        if len(signs) < len(arguments):
+            argument = arguments[len(signs)]
+            linear = _signed_linear(argument, signs)
+            lo, hi = _domain_limits(linear, current)
+            choices = (1,) if lo is not None and lo >= 0 else (-1,) if hi is not None and hi <= 0 else (1, -1)
+            for sign in choices:
+                pending.append(({**signs, argument: sign}, (*constraints, _linear_scale(linear, sign)), current))
+            continue
+        linear = _signed_linear(value, signs)
+        if known:
+            bounds = (_linear_extreme(linear, constraints, current, upper=False),
+                      _linear_extreme(linear, constraints, current, upper=True))
+            if bounds == (None, None):
+                continue
+        else:
+            bounds = _domain_limits(linear, current)
+        leaves.append(bounds)
+    if not leaves:
+        return _interval_limits(value)
     return (
-        lower is not None and lower >= 0
-        if maximum
-        else upper is not None and upper <= 0
+        None if any(lo is None for lo, _ in leaves) else min(lo for lo, _ in leaves if lo is not None),
+        None if any(hi is None for _, hi in leaves) else max(hi for _, hi in leaves if hi is not None),
     )
 
 
-def _size(value: TimeExpression) -> tuple[int, int]:
-    if isinstance(value, TimeVariable):
-        return 0, 1
-    sizes = [_size(v) for v in value.alternatives]
-    return 1 + max(d for d, _ in sizes), sum(n for _, n in sizes) + int(
-        value.residual is not None
+def _abs_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
+    axes = expression_axes(value)
+    if len(axes) <= 1:
+        points = evaluate_time(value, axes)
+        if points is not None:
+            return Fraction(points.min()), Fraction(points.max())
+    limits = [_block_limits(block) for block in _connected_blocks(value)]
+    return (
+        None if any(lo is None for lo, _ in limits) else sum((lo for lo, _ in limits if lo is not None), Fraction(0)),
+        None if any(hi is None for _, hi in limits) else sum((hi for _, hi in limits if hi is not None), Fraction(0)),
     )
 
 
-def _collapse_deepest(value: TimeExtremum) -> TimeExtremum:
-    branches = list(value.alternatives)
-    nested = [(i, v) for i, v in enumerate(branches) if isinstance(v, TimeExtremum)]
-    if not nested:
-        return value
-    index, child = max(nested, key=lambda item: _size(item[1])[0])
-    if any(isinstance(v, TimeExtremum) for v in child.alternatives):
-        branches[index] = _collapse_deepest(child)
-        return TimeExtremum(
-            tuple(branches),
-            value.maximum,
-            value.residual,
-            (*value.ledger, "deepest subtree"),
-            value.runtime_values,
-        )
-    # max contains min: retain a lower envelope, cover the missing part with
-    # the min branch having the lowest upper bound. Min mirrors this rule.
-    branches[index] = _envelope(child.alternatives, upper=not value.maximum)
-    candidates = (*child.alternatives, *((child.residual,) if child.residual else ()))
-
-    def rank(v: TimeExpression) -> Fraction:
-        lo, hi = expression_limits(v)
-        endpoint = hi if value.maximum else lo
-        return Fraction(0) if endpoint is None else endpoint
-
-    covering = (min if value.maximum else max)(candidates, key=rank)
-    residuals = (covering, *((value.residual,) if value.residual else ()))
-    residual = _envelope(residuals, upper=value.maximum)
-    event = "collapse max/min subtree" if value.maximum else "collapse min/max subtree"
-    logging.getLogger(__name__).info("Timeline proof ledger: %s", event)
-    return TimeExtremum(
-        tuple(branches),
-        value.maximum,
-        residual,
-        (*value.ledger, event),
-        value.runtime_values,
-    )
-
-
-def choose_time(
-    *values: TimeExpression,
-    maximum: bool = True,
-    residual: TimeExpression | None = None,
-) -> TimeExpression:
-    """Simplify a pointwise extremum with m/K/depth/leaf proof budgets."""
-    if not values:
-        raise ValueError("time extremum requires at least one alternative")
-    alternatives: list[TimeExpression] = []
-    residues = [] if residual is None else [residual]
-    ledger = []
-    for value in values:
-        if isinstance(value, TimeExtremum) and value.maximum == maximum:
-            alternatives.extend(value.alternatives)
-            if value.residual is not None:
-                residues.append(value.residual)
-            ledger.extend(value.ledger)
-        else:
-            alternatives.append(value)
-    unique = list(dict.fromkeys(alternatives))
-    # Merge every group involving one known axis, including constants. This
-    # happens before cross-axis bounds, so opposing sweeps retain their max.
-    groups: dict[str, list[TimeVariable]] = {}
-    for value in unique:
-        axes = expression_axes(value)
-        if (
-            isinstance(value, TimeVariable)
-            and len(axes) == 1
-            and evaluate_time(value, axes) is not None
-        ):
-            groups.setdefault(next(iter(axes)), []).append(value)
-    for axis, group in groups.items():
-        if len(group) < 2:
-            continue
-        axes = expression_axes(group[0])
-        points = [evaluate_time(v, axes) for v in group]
-        known = [p for p in points if p is not None]
-        merged = (np.maximum if maximum else np.minimum).reduce(
-            np.broadcast_arrays(*known)
-        )
-        names = ", ".join(
-            sorted({v.name for item in group for v in time_variables(item)})
-        )
-        replacement = point_time(
-            names, axes, merged, reconstruction=TimeExtremum(tuple(group), maximum)
-        )
-        unique = [v for v in unique if v not in group]
-        unique.append(replacement)
-    # Cheap bound filter, then aligned-axis subtraction. Keep one on ties.
-    limits = [expression_limits(v) for v in unique]
-    endpoints = [lo if maximum else hi for lo, hi in limits]
-    finite = [v for v in endpoints if v is not None]
-    threshold = (max if maximum else min)(finite) if finite else None
-    kept: list[TimeExpression] = []
-    for index, value in enumerate(unique):
-        lo, hi = limits[index]
-        bound = hi if maximum else lo
-        if (
-            threshold is not None
-            and bound is not None
-            and (bound < threshold if maximum else bound > threshold)
-        ):
-            continue
-        if any(_dominates(other, value, maximum) for other in kept):
-            continue
-        kept = [other for other in kept if not _dominates(value, other, maximum)]
-        kept.append(value)
-    if len(kept) > MAX_BRANCHES:
-
-        def rank(v: TimeExpression) -> tuple[float, float]:
-            lo, hi = expression_limits(v)
-            return (
-                float(hi) if hi is not None else math.inf,
-                float(lo) if lo is not None else -math.inf,
-            )
-
-        kept.sort(key=rank, reverse=maximum)
-        residues.extend(kept[MAX_BRANCHES:])
-        ledger.append(f"branches {len(kept)} -> {MAX_BRANCHES}")
-        kept = kept[:MAX_BRANCHES]
-    remainder = _envelope(tuple(residues), upper=maximum) if residues else None
-    if remainder is not None and any(_dominates(v, remainder, maximum) for v in kept):
-        remainder = None
-    if len(kept) == 1 and remainder is None:
-        return kept[0]
-    result = TimeExtremum(tuple(kept), maximum, remainder, tuple(ledger), values)
-    while _size(result)[0] > MAX_DEPTH or _size(result)[1] > MAX_LEAVES:
-        collapsed = _collapse_deepest(result)
-        if collapsed == result:
-            break
-        result = collapsed
-    return result
-
-
-def substitute_time(
-    value: TimeExpression, replacements: dict[CycleAxis, TimeExpression]
-) -> TimeExpression:
-    """Substitute immutable runtime identities for Repeat reduction."""
-    if isinstance(value, TimeExtremum):
-        return choose_time(
-            *(substitute_time(v, replacements) for v in value.alternatives),
-            maximum=value.maximum,
-            residual=substitute_time(value.residual, replacements)
-            if value.residual
-            else None,
-        )
-    result: TimeExpression = TimeVariable(value.constant)
-    for variable, coefficient in value.terms:
-        result = add_time(
-            result,
-            scale_time(
-                replacements.get(variable, TimeVariable(terms=((variable, 1),))),
-                coefficient,
-            ),
-        )
-    return result
-
-
-def scale_time(value: TimeExpression, coefficient: Scalar) -> TimeExpression:
-    """Scale components; a negative factor swaps max/min and residual direction."""
-    if coefficient == 0:
-        return TimeVariable()
-    if isinstance(value, TimeExtremum):
-        return choose_time(
-            *(scale_time(v, coefficient) for v in value.alternatives),
-            maximum=value.maximum if coefficient > 0 else not value.maximum,
-            residual=scale_time(value.residual, coefficient)
-            if value.residual
-            else None,
-        )
-    return TimeVariable(
-        value.constant * coefficient,
-        tuple((v, c * coefficient) for v, c in value.terms if c * coefficient),
-        components=tuple(
-            (axis, c * coefficient)
-            for axis, c in value.components
-            if np.any(c * coefficient)
-        ),
-    )
-
-
-def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
-    """Align axes and distribute proof branches, with at most K candidates."""
-    if isinstance(left, TimeExtremum):
-        # Each node has <=m branches plus R; one product therefore fits K.
-        candidates = tuple(add_time(v, right) for v in left.alternatives)
-        remainder = add_time(left.residual, right) if left.residual else None
-        return choose_time(*candidates, maximum=left.maximum, residual=remainder)
-    if isinstance(right, TimeExtremum):
-        return add_time(right, left)
+def _linear_add(left: TimeVariable, right: TimeVariable) -> TimeVariable:
     coefficients = dict(left.terms)
     for axis, coefficient in right.terms:
         coefficients[axis] = coefficients.get(axis, 0) + coefficient
@@ -791,3 +709,143 @@ def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
         tuple((v, c) for v, c in coefficients.items() if c),
         components=_merge_components(left.components, right.components),
     )
+
+
+def _linear_scale(value: TimeVariable, coefficient: Scalar) -> TimeVariable:
+    return TimeVariable(
+        value.constant * coefficient,
+        tuple((v, c * coefficient) for v, c in value.terms if c * coefficient),
+        components=tuple((axis, c * coefficient) for axis, c in value.components
+                         if np.any(c * coefficient)),
+    )
+
+
+def _parts(value: TimeExpression) -> tuple[TimeVariable, tuple[tuple[TimeExpression, Fraction], ...]]:
+    return (value, ()) if isinstance(value, TimeVariable) else (value.linear, value.absolute)
+
+
+def _orientation(value: TimeExpression) -> int:
+    linear, absolute = _parts(value)
+    for _, component in sorted(linear.components, key=lambda item: repr(item[0].identity)):
+        items = component.flat if isinstance(component, np.ndarray) else (component,)
+        for amount in items:
+            if amount:
+                return 1 if amount > 0 else -1
+    for _, coefficient in absolute:
+        if coefficient:
+            return 1 if coefficient > 0 else -1
+    return 1
+
+
+def _normalized(
+    linear: TimeVariable,
+    absolute: tuple[tuple[TimeExpression, Fraction], ...],
+    runtime: TimeOperation,
+) -> TimeExpression:
+    combined: dict[TimeExpression, Fraction] = {}
+    for argument, coefficient in absolute:
+        if not coefficient:
+            continue
+        lo, hi = expression_limits(argument)
+        if lo is not None and lo >= 0:
+            replacement = argument
+        elif hi is not None and hi <= 0:
+            replacement = scale_time(argument, -1)
+        else:
+            if _orientation(argument) < 0:
+                argument = scale_time(argument, -1)
+            combined[argument] = combined.get(argument, Fraction(0)) + coefficient
+            continue
+        variable, terms = _parts(replacement)
+        linear = _linear_add(linear, _linear_scale(variable, coefficient))
+        for term, amount in terms:
+            combined[term] = combined.get(term, Fraction(0)) + coefficient * amount
+    terms = tuple(sorted(((x, c) for x, c in combined.items() if c), key=lambda item: repr(item[0])))
+    return TimeAbs(linear, terms, runtime) if terms else linear
+
+
+def scale_time(value: TimeExpression, coefficient: Scalar) -> TimeExpression:
+    """Multiply every linear and Abs coefficient, retaining negative rationals."""
+    if coefficient == 0:
+        return TimeVariable()
+    if coefficient == 1:
+        return value
+    linear, absolute = _parts(value)
+    return _normalized(
+        _linear_scale(linear, coefficient),
+        tuple((x, c * coefficient) for x, c in absolute),
+        TimeOperation("scale", (value,), coefficient),
+    )
+
+
+def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
+    """Align linear axes and concatenate Abs terms without branch products."""
+    a, x = _parts(left)
+    b, y = _parts(right)
+    return _normalized(_linear_add(a, b), (*x, *y), TimeOperation("add", (left, right)))
+
+
+@lru_cache(maxsize=4096)
+def difference_limits(left: TimeExpression, right: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
+    """Cache normalized structural differences for dominance, not runtime values."""
+    return expression_limits(add_time(left, scale_time(right, -1)))
+
+
+def _binary_choice(left: TimeExpression, right: TimeExpression, *, maximum: bool) -> TimeExpression:
+    lo, hi = difference_limits(left, right)
+    if lo is not None and lo >= 0:
+        return left if maximum else right
+    if hi is not None and hi <= 0:
+        return right if maximum else left
+    total = add_time(scale_time(left, Fraction(1, 2)), scale_time(right, Fraction(1, 2)))
+    linear, terms = _parts(total)
+    difference = add_time(left, scale_time(right, -1))
+    recipe = TimeOperation("max" if maximum else "min", (left, right))
+    return _normalized(linear, (*terms, (difference, Fraction(1 if maximum else -1, 2))), recipe)
+
+
+def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression:
+    """Return exact max/min proof algebra; runtime keeps original integer inputs."""
+    if not values:
+        raise ValueError("time choice requires at least one value")
+    unique = list(dict.fromkeys(values))
+    # Reduce same-axis subsets before introducing independent dimensions.
+    groups: dict[str, list[TimeExpression]] = {}
+    for value in unique:
+        axes = expression_axes(value)
+        if len(axes) == 1 and evaluate_time(value, axes) is not None:
+            groups.setdefault(next(iter(axes)), []).append(value)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        axes = expression_axes(group[0])
+        points = [evaluate_time(value, axes) for value in group]
+        known = [point for point in points if point is not None]
+        merged = (np.maximum if maximum else np.minimum).reduce(np.broadcast_arrays(*known))
+        proof = group[0]
+        for value in group[1:]:
+            proof = _binary_choice(proof, value, maximum=maximum)
+        names = ", ".join(sorted({axis.name for value in group for axis in time_variables(value)}))
+        replacement = point_time(names, axes, merged, reconstruction=proof)
+        unique = [value for value in unique if value not in group]
+        unique.append(replacement)
+    result = unique[0]
+    for value in unique[1:]:
+        result = _binary_choice(result, value, maximum=maximum)
+    return result
+
+
+def substitute_time(value: TimeExpression, replacements: dict[CycleAxis, TimeExpression]) -> TimeExpression:
+    """Substitute captured immutable sources, including nested Abs arguments."""
+    if isinstance(value, TimeAbs):
+        linear = substitute_time(value.linear, replacements)
+        result = linear
+        for argument, coefficient in value.absolute:
+            substituted = substitute_time(argument, replacements)
+            absolute = choose_time(substituted, scale_time(substituted, -1))
+            result = add_time(result, scale_time(absolute, coefficient))
+        return result
+    result: TimeExpression = TimeVariable(value.constant)
+    for variable, coefficient in value.terms:
+        result = add_time(result, scale_time(replacements.get(variable, TimeVariable(terms=((variable, 1),))), coefficient))
+    return result

@@ -13,7 +13,7 @@ from ._timeline_expression import (
     CycleAxis,
     CycleProducer,
     TimeExpression,
-    TimeExtremum,
+    TimeAbs,
     TimeVariable,
     add_time,
     ceiled_time,
@@ -674,17 +674,22 @@ class RuntimeMath(TimedMacro):
                     if not np.any(points):
                         return captured
                     return self.add(captured, self.reconstruct(delta, inputs))
-        if isinstance(expression, TimeExtremum):
-            values = [
-                self.reconstruct(item, inputs, captured_ends)
-                for item in expression.alternatives
-            ]
+        if isinstance(expression, TimeAbs):
+            operation = expression.runtime
+            values = [self.reconstruct(item, inputs, captured_ends) for item in operation.operands]
+            if operation.kind == "add":
+                return self.add(values[0], values[1])
+            if operation.kind == "scale":
+                coefficient = operation.coefficient
+                if coefficient != int(coefficient):
+                    raise RuntimeError("runtime recipe requires an integer multiplier")
+                scaled = self.multiply(values[0], abs(int(coefficient)))
+                return scaled if coefficient >= 0 else self.subtract(0.0, scaled)
             result = values[0]
             for value in values[1:]:
-                if expression.maximum:
+                if operation.kind == "max":
                     result = self.cycles(self.maximum(result, value))
                 else:
-                    # min(a,b) = a - max(0,a-b), with the same flag-free math.
                     delta = self.subtract(result, value)
                     result = self.subtract(result, self.maximum(0.0, delta))
             return result
@@ -842,25 +847,6 @@ class RuntimeMath(TimedMacro):
     def _captured_delta(
         self, expression: TimeExpression, captured: TimeExpression
     ) -> TimeExpression | None:
-        # Addition distributes over max/min. Match the same shift on every
-        # alternative before flattening case maxima loses the incoming floor.
-        if isinstance(expression, TimeExtremum) and isinstance(captured, TimeExtremum):
-            if expression.maximum != captured.maximum or len(
-                expression.alternatives
-            ) != len(captured.alternatives):
-                return None
-            shifts = [
-                self._captured_delta(value, origin)
-                for value, origin in zip(
-                    expression.alternatives, captured.alternatives, strict=True
-                )
-            ]
-            first = shifts[0]
-            return (
-                first
-                if first is not None and all(shift == first for shift in shifts)
-                else None
-            )
         return add_time(expression, scale_time(captured, -1))
 
     def source(
