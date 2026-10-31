@@ -9,7 +9,7 @@ from scipy.integrate import solve_ivp
 
 from ._constant import ConstantLine
 from .model import ReadoutModel, RealArray, readonly_array, readout_model_key
-from .readout_batch import ConditionalSums, ReadoutBatch
+from .readout_batch import ConditionalSums, ReadoutBatch, ReadoutEvent
 from .request import (
     ConditionalResponse,
     PiecewiseLinearEnvelope,
@@ -152,12 +152,7 @@ class ConditionalReadout:
             for event in events
         ]
         relative_keys = [
-            np.maximum(
-                times
-                - batch.model.receiver.time_of_flight_ns
-                - (event.pulses[0].start_ns if event.pulses else 0.0),
-                0.0,
-            ).tobytes()
+            _relative_grid_key(event, times, batch.model.receiver.time_of_flight_ns)
             for event, times in zip(events, times_by_content, strict=True)
         ]
         grid_uses = Counter(relative_keys)
@@ -617,6 +612,12 @@ class ConditionalReadout:
             raise RuntimeError("readout produced invalid probabilities")
         if not np.allclose(probabilities.sum(axis=0), 1, rtol=0, atol=1e-8):
             raise RuntimeError("readout probabilities do not sum to one")
+
+
+def _relative_grid_key(event: ReadoutEvent, times: RealArray, delay: float) -> bytes:
+    """Key relative sample times for reusable carrier field projections."""
+    start = event.pulses[0].start_ns if event.pulses else 0.0
+    return np.maximum(times - delay - start, 0.0).tobytes()
 
 
 def _sample_counts(batch: ReadoutBatch) -> NDArray[np.int64]:
