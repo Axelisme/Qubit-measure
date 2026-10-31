@@ -92,17 +92,13 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `sched.scan(...)` / `step.scan(...)` 表示 host-side Python loop。
 - `sched.repeat(name, times, interval)` 表示 host-side repeat；等待期間會檢查
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
-- `sched.batch({key: callable})` 執行 replayable child callable；child 取得獨立
-  deepcopy cfg 與同一個 typed env。batch child 出現一般例外或 `KeyboardInterrupt`
-  時會標記 `Schedule.outcome`、停止後續 child，並回傳已完成 child 的 partial
-  result；per-child retry 由 caller 編排。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot。
 - `with Schedule(cfg, result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
-- `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
+- `ScheduleStep.value` 是 scan/repeat 的 control-flow coordinate；result tree 由
   `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
   `step.array_data` 做型別邊界。`flush=True` 對 ResultTree 表示立即送出 node event；
   對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
@@ -175,7 +171,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 將第一個 error 與 partial 完成事實交到父 token，不設父 event。交付在 operation 層截止。GUI 的 run root 收到 Schedule error 後仍可用 `raise_if_error()` 轉成 failure。已完成 child 從 active tree 移除，不隨 run 長度累積。
 - `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 schedule child 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
-- `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
+- `Schedule` 的 scan/repeat 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   composite `cancel_flag` 傳給 program acquire：它讀取 acquire child 的 external
   stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome` 或 partial 完成事實。
   `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
@@ -199,8 +195,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   一般 producer failure 直接傳播，不等 consumer 呼叫 `raise_if_error()`，也不轉成 workflow 的 `Failed` 回傳值。
   Notebook 不發布失敗當次的 record。GUI 將例外交給既有 operation failure 收尾。`stopped` 不記錄 error cause。
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
-  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
-  per-child retry。
+  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry。
 - 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。
   預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。
   耗盡後拋出最後一次 attempt 的同一例外。若失敗時也收到合作取消，不再重試，但仍拋出 producer 例外，不當作正常 partial。
@@ -222,7 +217,7 @@ acquisition pipeline，不宣稱 legacy simulator 支援 emit 寫法。
 modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
 `test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；
 `test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
-`test_schedule.py` 覆蓋 typed env 與 host scan/repeat/batch；`test_schedule_buffers.py` 覆蓋
+`test_schedule.py` 覆蓋 typed env 與 host scan/repeat；`test_schedule_buffers.py` 覆蓋
 root buffer 註冊、child buffer 同步與 shape validation。`test_signal_buffer_flush.py` 覆蓋
 SignalBuffer 寫入通知、manual update 與 flush。
 `test_schedule_lifecycle.py` 覆蓋 context 使用邊界、schedule child 的停止與錯誤交付、host body 中斷的
