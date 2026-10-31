@@ -341,9 +341,14 @@ class JointReadoutHeraldedExp(
                         else "No shots"
                     )
                     ax.text(col, row, label, ha="center", va="center", fontsize=7)
+            ax.set_xticks(
+                range(9),
+                OUTCOME_LABELS,
+                rotation=45,
+                ha="right",
+                rotation_mode="anchor",
+            )
             ax.set(
-                xticks=range(9),
-                xticklabels=OUTCOME_LABELS,
                 yticks=range(4),
                 yticklabels=[
                     f"{state}; n={shots:g}"
