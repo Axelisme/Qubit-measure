@@ -16,7 +16,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import Pulse, PulseReadout
+from zcu_tools.program.v2 import Pulse, PulseReadout, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
 
@@ -68,11 +68,11 @@ class QutritPopulationCfg(ConfigBase):
     shots: Annotated[int, FieldMeta(label="Shots per preparation")] = Field(
         default=4096, ge=6
     )
-    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
-        default=1.0, ge=0
-    )
     initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = (
         Field(default=1.0, ge=0)
+    )
+    relax_delay: Annotated[float, FieldMeta(label="Relax delay", unit="us")] = Field(
+        default=1.0, ge=0
     )
 
 
@@ -82,12 +82,17 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
     AXES_SPEC: ClassVar[AxesSpec[QutritPopulationResult, QutritPopulationCfg]] = (
         AxesSpec(
             axes=(
-                AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
                 AxesSpec.Axis(
-                    "prepared_states", "Prepared State", "None", dtype=np.int64
+                    "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+                ),
+                AxesSpec.Axis(
+                    "prepared_states",
+                    label="Prepared State",
+                    unit="None",
+                    dtype=np.int64,
                 ),
             ),
-            z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+            z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
             result_type=QutritPopulationResult,
             cfg_type=QutritPopulationCfg,
             cfg_schema_version="3.0",
@@ -100,29 +105,28 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
     ) -> QutritPopulationResult:
         """Acquire g/no pulse, e/pi01, f/pi03 then pi32, followed by readout.
 
-        Use legacy Modules and one acquire round with shots repetitions per row.
+        Use one acquire round with shots repetitions per row.
         Return complex ADC IQ (3,shots) with explicit preparation/shot axes.
         Cancellation leaves unfinished rows NaN; analysis rejects partial data.
         No reset or preparation pulse is emitted for g. The operator must supply
         measured pulse calibrations and a relaxation interval suitable for g.
         """
         buffer = SignalBuffer((3, cfg.shots))
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
-                builder = step.prog_builder(
-                    context.soc,
+                builder = TimelineBuilder(
                     context.soccfg,
                     reps=cfg.shots,
                     initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
                 if label == 1:
-                    builder.add(Pulse("pi01", step.cfg.pi01))
+                    builder.emit(Pulse("pi01", cfg.pi01))
                 elif label == 2:
-                    builder.add(
-                        Pulse("pi03", step.cfg.pi03), Pulse("pi32", step.cfg.pi32)
-                    )
-                program = builder.add(PulseReadout("readout", step.cfg.readout)).build()
+                    builder.emit(Pulse("pi03", cfg.pi03))
+                    builder.emit(Pulse("pi32", cfg.pi32))
+                builder.emit(PulseReadout("readout", cfg.readout))
+                program = builder.build()
                 try:
                     program.acquire(context.soc, progress=True, cancel_flag=step.stop)
                 except StoppedPartialAcquireError:
@@ -135,7 +139,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             prepared_states=np.arange(3, dtype=np.int64),
         )
         plots = context.plots
-        plots.subplots("measurement")
+        figure, _ = plots.subplots(num="measurement")
 
         def scatter(figure):
             ax = figure.axes[0]
@@ -152,7 +156,8 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             )
             ax.legend()
 
-        plots.draw("measurement", scatter)
+        scatter(figure)
+        figure.show()
         return result
 
     def analyze(
@@ -174,7 +179,9 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         result = analyze_reference_iq(
             source.result.signals, source.result.prepared_states
         )
-        plots.subplots("fit", nrows=2, ncols=2, figsize=(10, 7), layout="constrained")
+        figure, _ = plots.subplots(
+            nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"
+        )
 
         def diagnostics(figure):
             for ax, matrix, title in zip(
@@ -224,5 +231,5 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                 fontsize=10,
             )
 
-        plots.draw("fit", diagnostics)
+        diagnostics(figure)
         return result
