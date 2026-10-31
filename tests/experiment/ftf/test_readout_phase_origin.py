@@ -18,11 +18,15 @@ from tests.experiment._ftf_templates import settings, snapshot, template
 pytestmark = pytest.mark.sim
 
 
-def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
-    """Keep two flat carriers in the plan, with only the addressed one incident."""
+def isolated_carrier_plan(
+    addressed_tone: int | None,
+    phase_reference_us: float,
+    *,
+    frequencies: tuple[float, ...] = (6000.0, 6080.0),
+):
+    """Use flat carriers; None gives every carrier a nonzero incident gain."""
     base = template()
-    start = np.array([0, 406250], dtype=np.int64)  # 130 tProc cycles.
-    frequencies = (6000.0, 6080.0)
+    start = np.array([0, 92 * TIME_BASE.period_ticks(430.08)], dtype=np.int64)
     pulses = tuple(
         replace(
             base.events[0],
@@ -32,7 +36,9 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
             frequency_mhz=np.full(2, frequency),
             phase_deg=np.full(2, 23.0),
             phase_reference_ticks=ticks(phase_reference_us),
-            gain=np.full(2, 0.2 if tone == addressed_tone else 0.0),
+            gain=np.full(
+                2, 0.2 if addressed_tone is None or tone == addressed_tone else 0.0
+            ),
             envelopes=(None,),
         )
         for tone, frequency in enumerate(frequencies)
@@ -61,7 +67,7 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
                     gain=100,
                     noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
                 )
-                for tone in range(2)
+                for tone in range(len(frequencies))
             ),
         ),
     )
@@ -104,6 +110,15 @@ def centers(batch, route):
 
 
 @pytest.mark.parametrize("route", ["integrated", "ode"])
+@pytest.mark.parametrize("tone", [0, 1])
+def test_distinct_pfb_channels_are_invariant_under_92_cycle_translation(route, tone):
+    batch = classical_batch(isolated_carrier_plan(None, 0.001), tone)
+    values = centers(batch, route)
+    assert np.linalg.norm(values[0]) > 1
+    np.testing.assert_allclose(values[1], values[0], rtol=1e-7, atol=1e-7)
+
+
+@pytest.mark.parametrize("route", ["integrated", "ode"])
 @pytest.mark.parametrize("phase_reference_us", [0.0, 0.001])
 @pytest.mark.parametrize("tone", [0, 1])
 def test_isolated_mux_carrier_center_is_invariant_under_readout_translation(
@@ -112,17 +127,28 @@ def test_isolated_mux_carrier_center_is_invariant_under_readout_translation(
     batch = classical_batch(isolated_carrier_plan(tone, phase_reference_us), tone)
     values = centers(batch, route)
     assert np.linalg.norm(values[0]) > 1, "exercise a nonzero conditional center"
-    # The other carrier is zero: finite-window cross-tone leakage is not an
-    # invariant under translation, but the addressed carrier's phase must be.
+    # A zero-gain companion must not change the addressed carrier's phase.
     np.testing.assert_allclose(values[1], values[0], rtol=1e-7, atol=1e-7)
 
 
 @pytest.mark.parametrize("route", ["integrated", "ode"])
+def test_same_pfb_channel_companion_still_changes_iq(route):
+    frequencies = (6000.0, 6005.0)
+    both = classical_batch(
+        isolated_carrier_plan(None, 0.001, frequencies=frequencies), 0
+    )
+    isolated = classical_batch(
+        isolated_carrier_plan(0, 0.001, frequencies=frequencies), 0
+    )
+    assert np.linalg.norm(centers(both, route) - centers(isolated, route)) > 0.1
+
+
+@pytest.mark.parametrize("route", ["integrated", "ode"])
 def test_reference_carrier_output_is_bitwise_equal_to_unconverted_phase(route):
-    plan = isolated_carrier_plan(0, 0.001)
+    plan = isolated_carrier_plan(0, 0.001, frequencies=(6000.0,))
     batch = classical_batch(plan, 0)
-    # Drop the zero-gain companion for a genuine single-tone response. The
-    # existing common-origin phase expression must remain bit-for-bit intact.
+    # Compare a genuine addressed single carrier to the original common-origin
+    # phase expression, independently of planner phase localization.
     original_phase = float(np.deg2rad(23.0 - 360 * 6000.0 * 0.001))
     single = replace(
         batch,

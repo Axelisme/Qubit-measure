@@ -230,15 +230,25 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
             events = item.batch.events[item.batch.content_index[point]]
             assert len(events) == 2
             assert tuple(len(event.grids) for event in events) == expected_grids
-            assert tuple(p.start_ns for p in events[0].pulses) == (start, start)
-            assert tuple(p.frequency_ghz for p in events[0].pulses) == (5.9, 5.98)
-            assert tuple(p.amplitude for p in events[0].pulses) == (0.6j, 0.6j)
+            herald_frequencies = (5.9,) if item.channel == 4 else (5.9, 5.98)
+            assert tuple(p.start_ns for p in events[0].pulses) == (start,) * len(
+                herald_frequencies
+            )
+            assert (
+                tuple(p.frequency_ghz for p in events[0].pulses) == herald_frequencies
+            )
+            assert tuple(p.amplitude for p in events[0].pulses) == (0.6j,) * len(
+                herald_frequencies
+            )
             assert events[0].pulses[0].phase_rad == pytest.approx(
                 np.pi / 6 - 2 * np.pi * 5.9 + 2 * np.pi * 0.1 * start
             )
-            assert tuple(p.start_ns for p in events[1].pulses) == (start + 8, start + 8)
-            assert tuple(p.frequency_ghz for p in events[1].pulses) == (6.0, 6.08)
-            assert events[1].pulses[0].phase_rad == pytest.approx(np.deg2rad(-2130))
+            frequency = 6.0 if item.channel == 4 else 6.08
+            assert tuple(p.start_ns for p in events[1].pulses) == (start + 8,)
+            assert tuple(p.frequency_ghz for p in events[1].pulses) == (frequency,)
+            expected_phase = np.deg2rad(30 - 360 * frequency)
+            expected_phase -= 2 * np.pi * (frequency - 6.0) * (start + 8)
+            assert events[1].pulses[0].phase_rad == pytest.approx(expected_phase)
             np.testing.assert_array_equal(
                 events[1].grids[0].times_ns, np.arange(start + 8, start + 12)
             )
