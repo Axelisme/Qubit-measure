@@ -373,7 +373,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         )
         return MuxOnetoneAnalysis(outcomes)
 
-    def run(self,
+    def run(
+        self,
         config: MuxOnetoneCfg,
         *,
         context: RunContext,
@@ -441,7 +442,9 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                 prog = builder.build()
                 # Collect all selected ADCs and average reps/rounds into this scan row.
                 _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_mux_signal, prog), rounds=cfg.rounds,
+                    prog,
+                    raw2signal_fn=partial(_mux_signal, prog),
+                    rounds=cfg.rounds,
                     options=AcquireOptions(on_stop=on_acquire_stop),
                 )
 

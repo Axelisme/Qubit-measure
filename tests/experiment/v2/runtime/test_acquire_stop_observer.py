@@ -7,8 +7,17 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.v2.runtime import AcquireOptions, RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor, StoppedPartialAcquireError
+from zcu_tools.experiment.v2.runtime import (
+    AcquireOptions,
+    RunOptions,
+    Schedule,
+    SignalBuffer,
+)
+from zcu_tools.program.acquisition import (
+    CancelFlagProtocol,
+    ShotSumProcessor,
+    StoppedPartialAcquireError,
+)
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_fakes import (
@@ -17,10 +26,20 @@ from tests.experiment.v2.runtime._flow_fakes import (
 )
 
 Entry = Literal[
-    "builder", "builder_decimated", "builder_summed", "direct", "direct_decimated", "direct_summed"
+    "builder",
+    "builder_decimated",
+    "builder_summed",
+    "direct",
+    "direct_decimated",
+    "direct_summed",
 ]
 ENTRIES: tuple[Entry, ...] = (
-    "builder", "builder_decimated", "builder_summed", "direct", "direct_decimated", "direct_summed"
+    "builder",
+    "builder_decimated",
+    "builder_summed",
+    "direct",
+    "direct_decimated",
+    "direct_summed",
 )
 
 
@@ -38,7 +57,9 @@ class Producer:
         soc: object,
         *,
         rounds: int,
-        round_hook: Callable[[int, list[NDArray[np.float64]], CancelFlagProtocol], object],
+        round_hook: Callable[
+            [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+        ],
         cancel_flag: CancelFlagProtocol,
         **_kwargs: object,
     ) -> list[NDArray[np.float64]]:
@@ -60,14 +81,24 @@ class Producer:
         return raw
 
     acquire_decimated = acquire
+
     def acquire_summed(
-        self, soc: object, *, processor: ShotSumProcessor, rounds: int = 1,
-        step_rounds: bool = False, **qick_options: Any,
+        self,
+        soc: object,
+        *,
+        processor: ShotSumProcessor,
+        rounds: int = 1,
+        step_rounds: bool = False,
+        **qick_options: Any,
     ) -> NDArray[np.float64]:
         # The native summed boundary accepts dynamically typed QICK keywords.
         return self.acquire(
-            soc, rounds=rounds, cancel_flag=qick_options["cancel_flag"],
-            round_hook=lambda ir, raw, flag: qick_options["round_hook"](ir, raw[0], flag),
+            soc,
+            rounds=rounds,
+            cancel_flag=qick_options["cancel_flag"],
+            round_hook=lambda ir, raw, flag: qick_options["round_hook"](
+                ir, raw[0], flag
+            ),
         )[0]
 
 
@@ -83,31 +114,59 @@ def run_entry(
         builder = sched.prog_builder(object(), object())
         if entry == "builder_summed":
             return builder.run_program_summed(
-                producer, processor=lambda iq: iq[0], sums2signal_fn=convert,
-                rounds=2, options=options,
+                producer,
+                processor=lambda iq: iq[0],
+                sums2signal_fn=convert,
+                rounds=2,
+                options=options,
             )
-        method = builder.run_program_decimated if entry == "builder_decimated" else builder.run_program
-        return method(producer, rounds=2, raw2signal_fn=lambda raw: convert(raw[0]), options=options)
+        method = (
+            builder.run_program_decimated
+            if entry == "builder_decimated"
+            else builder.run_program
+        )
+        return method(
+            producer,
+            rounds=2,
+            raw2signal_fn=lambda raw: convert(raw[0]),
+            options=options,
+        )
     if entry == "direct_summed":
         direct_sums = RunOptions(
-            retry=options.retry, converter=convert, stop_condition=options.stop_condition,
+            retry=options.retry,
+            converter=convert,
+            stop_condition=options.stop_condition,
             on_stop=options.on_stop,
         )
         return sched.run_acquire_summed(
-            producer, object(), processor=lambda iq: iq[0], rounds=2, options=direct_sums,
+            producer,
+            object(),
+            processor=lambda iq: iq[0],
+            rounds=2,
+            options=direct_sums,
         )
     direct: RunOptions[list[NDArray[np.float64]]] = RunOptions(
-        retry=options.retry, converter=lambda raw: convert(raw[0]),
-        stop_condition=options.stop_condition, on_stop=options.on_stop,
+        retry=options.retry,
+        converter=lambda raw: convert(raw[0]),
+        stop_condition=options.stop_condition,
+        on_stop=options.on_stop,
     )
-    method = sched.run_acquire_decimated if entry == "direct_decimated" else sched.run_acquire
+    method = (
+        sched.run_acquire_decimated
+        if entry == "direct_decimated"
+        else sched.run_acquire
+    )
     return method(producer, object(), rounds=2, options=direct)
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
-@pytest.mark.parametrize("ending", ["before_data", "finite", "final_hook", "pre_stopped", "complete", "data_stop"])
+@pytest.mark.parametrize(
+    "ending",
+    ["before_data", "finite", "final_hook", "pre_stopped", "complete", "data_stop"],
+)
 def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquire(
-    entry: Entry, ending: str,
+    entry: Entry,
+    ending: str,
 ) -> None:
     root = Scope("run")
     bars: list[RecordingProgressBar] = []
@@ -117,20 +176,25 @@ def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquir
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
+
         def on_stop() -> None:
             assert root.active_path == sched.scope.path
             assert bars and all(bar.closed for bar in bars)
             observed.append(producer.calls)
 
         options = AcquireOptions(
-            retry=2, on_stop=on_stop, stop_condition=lambda: ending == "data_stop",
+            retry=2,
+            on_stop=on_stop,
+            stop_condition=lambda: ending == "data_stop",
         )
         if ending == "pre_stopped":
             sched.set_stop()
         result = run_entry(entry, sched, producer, options)
         cancelled = ending not in {"complete", "data_stop"}
         assert observed == ([producer.calls] if cancelled else [])
-        assert sched.outcome.status == ("stopped" if ending == "pre_stopped" else "completed")
+        assert sched.outcome.status == (
+            "stopped" if ending == "pre_stopped" else "completed"
+        )
         if ending in {"before_data", "pre_stopped"}:
             assert np.isnan(result).all()
         else:
@@ -171,10 +235,24 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
 
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, SignalBuffer((1,), dtype=np.float64, on_update=update, update_interval=None), scope=root) as sched,
+        Schedule(
+            {},
+            SignalBuffer(
+                (1,), dtype=np.float64, on_update=update, update_interval=None
+            ),
+            scope=root,
+        ) as sched,
     ):
-        with pytest.raises(KeyboardInterrupt if ending == "interrupt" else RuntimeError) as caught:
-            run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=lambda: observed.append(True)), convert)
+        with pytest.raises(
+            KeyboardInterrupt if ending == "interrupt" else RuntimeError
+        ) as caught:
+            run_entry(
+                entry,
+                sched,
+                producer,
+                AcquireOptions(retry=2, on_stop=lambda: observed.append(True)),
+                convert,
+            )
         if ending != "interrupt":
             assert caught.value is cause
         assert producer.calls == (3 if ending == "failure" else 1)
@@ -184,7 +262,9 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
-def test_stop_callback_failure_propagates_without_retry_or_outcome_change(entry: Entry) -> None:
+def test_stop_callback_failure_propagates_without_retry_or_outcome_change(
+    entry: Entry,
+) -> None:
     root = Scope("run")
     producer = Producer(root, "finite")
     cause = ValueError("observer failed")

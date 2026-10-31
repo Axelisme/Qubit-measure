@@ -535,7 +535,6 @@ def test_run_callback_failure_propagates_without_retry_or_failed_outcome(
     assert schedule.outcome.status == "completed"
 
 
-
 def test_run_accepts_acquire_only_program_and_forwards_native_keywords() -> None:
     transport = object()
     buffer = SignalBuffer((1,))

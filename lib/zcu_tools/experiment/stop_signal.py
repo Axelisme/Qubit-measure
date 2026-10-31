@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
+
 @dataclass(frozen=True)
 class CancelResult:
     """Acknowledged scope request, not a promise that work has drained.
@@ -103,4 +104,3 @@ class StopSignal:
     def event(self) -> threading.Event:
         """Borrow this token's event for cooperative waits."""
         return self._event
-
