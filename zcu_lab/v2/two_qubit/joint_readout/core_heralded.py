@@ -244,14 +244,18 @@ class JointReadoutHeraldedExp(
             # wait for herald/reset to finish before the branch-selected preparation
             builder.sync()
             builder.fork("default", into=["f1", "f2"])
-            with builder.timeline("f1"):
-                with builder.branch(by="prepared_f1", align_timeline=True) as cases:
-                    with cases.case(1):  # F1 prepared in e
-                        builder.emit(x180_f1)
-            with builder.timeline("f2"):
-                with builder.branch(by="prepared_f2", align_timeline=True) as cases:
-                    with cases.case(1):  # F2 prepared in e
-                        builder.emit(x180_f2)
+            with (
+                builder.timeline("f1"),
+                builder.branch(by="prepared_f1", align_timeline=True) as cases,
+                cases.case(1),  # F1 prepared in e
+            ):
+                builder.emit(x180_f1)
+            with (
+                builder.timeline("f2"),
+                builder.branch(by="prepared_f2", align_timeline=True) as cases,
+                cases.case(1),  # F2 prepared in e
+            ):
+                builder.emit(x180_f2)
             builder.join("f1", "f2", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
