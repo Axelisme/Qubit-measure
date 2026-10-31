@@ -17,16 +17,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Classify,
-    GainSweep,
-    Pulse,
-    Readout,
-    Reset,
-    SweepCfg,
-    shot_sums,
-    sweep2param,
-)
+from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, SweepCfg, shot_sums
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -61,6 +53,15 @@ class AcStarkResult:
 
 
 class AcStarkCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    stark_pulse1: Annotated[
+        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
+    ]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -77,15 +78,6 @@ class AcStarkCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    stark_pulse1: Annotated[
-        Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
-    ]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
 
 
 @dataclass(frozen=True)
@@ -113,11 +105,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6, dtype=np.float64),
-            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6, dtype=np.float64),
+            AxesSpec.Axis("gains", label="Stark Pulse Gain", unit="a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         data_variable=DataVariable("counts"),
@@ -181,87 +173,51 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 line.set_label(label)
             ax.legend()
 
-        figure, _ = context.plots.subplots(
-            "measurement", nrows=2, ncols=2, figsize=(8, 6)
-        )
+        figure, _ = context.plots.subplots(nrows=2, ncols=2, num="measurement", figsize=(8, 6))
         ax_ground, ax_excited, ax_other, ax_current = figure.axes
-        g_2d, e_2d, o_2d = (
-            live_heatmap(
-                context.plots,
-                "measurement",
-                "Stark Pulse Gain (a.u.)",
-                "Probe Frequency (MHz)",
-                title=state.capitalize(),
-                uniform=False,
-                clim=(0.0, 1.0),
-                axes=ax,
-            )
-            for state, ax in (
-                ("ground", ax_ground),
-                ("excited", ax_excited),
-                ("other", ax_other),
-            )
-        )
-        cur_1d = live_line(
-            context.plots,
-            "measurement",
-            "Probe Frequency (MHz)",
-            "Population",
-            num_lines=3,
-            configure_axes=configure_axes,
-            axes=ax_current,
-        )
+        heatmaps = []
+        for state, ax in (("ground", ax_ground), ("excited", ax_excited), ("other", ax_other)):
+            ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Probe Frequency (MHz)", title=state.capitalize())
+            heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
+        ax_current.set(xlabel="Probe Frequency (MHz)", ylabel="Population")
+        cur_1d = live_line(ax_current, num_lines=3)
+        configure_axes(ax_current)
         current_index = 0
 
-        def plot_fn(counts: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def plot_fn(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
-            i = current_index
+            artists = [artist for i, heatmap in enumerate(heatmaps)
+                       for artist in heatmap.set(gains, freqs, populations[..., i])]
+            return (*artists, *cur_1d.set(freqs, populations[current_index, :].T))
 
-            g_2d.update(gains, freqs, populations[..., 0])
-            e_2d.update(gains, freqs, populations[..., 1])
-            o_2d.update(gains, freqs, populations[..., 2])
-            cur_1d.update(freqs, populations[i, :].T)
+        figure.show()
 
         buffer = SignalBuffer(
             (len(gains), len(freqs), 3),
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            sched.cfg.stark_pulse2.set_param(
-                "freq", sweep2param("freq", sched.cfg.freq)
-            )
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for gain_idx, (gain, step) in enumerate(
                 sched.scan("resonator gain", gains.tolist())
             ):
-                step.cfg.stark_pulse1.set_param("gain", gain)
                 current_index = gain_idx
 
                 # Start the cavity tone nonblocking so the qubit probe can overlap.
-                builder = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add_reset("reset", step.cfg.reset)
-                    .add_pulse("init_pulse", step.cfg.init_pulse)
-                    .add_pulse(
-                        "stark_pulse1",
-                        step.cfg.stark_pulse1,
-                        block_mode=False,
-                    )
-                    .add_pulse("stark_pulse2", step.cfg.stark_pulse2)
-                    .add_readout("readout", step.cfg.readout)
-                    .declare_sweep("freq", step.cfg.freq)
-                )
+                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                freq = builder.add_sweep("freq", cfg.freq)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.fork("default", into="stark")
+                builder.emit(Pulse("stark_pulse1", cfg.stark_pulse1, gain=gain), timeline="stark")
+                builder.emit(Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq))
+                builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-                builder.run_program_summed(
-                    prog,
+                step.run_acquire_summed(
+                    prog, soc,
                     processor=shot_sums(prog, [read_axis]),
-                    sums2signal_fn=lambda sums: sums,
-                    rounds=cfg.rounds,
+                                        rounds=cfg.rounds,
                 )
 
         # Preserve unnormalized G/E/Other counts in the Result.
@@ -328,7 +284,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         avg_n = ac_coeff * gains2
 
-        fig, ax1 = plots.subplots("fit")
+        fig, ax1 = plots.subplots(num="fit")
 
         # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
@@ -410,9 +366,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         # plot the data and the fitted polynomial
         photons = ac_coeff * gains2
 
-        fig, _ = plots.subplots(
-            "populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True
-        )
+        fig, _ = plots.subplots(num="populations", nrows=1, ncols=3, figsize=(12, 4), sharey=True)
         ax1, ax2, ax3 = fig.axes
 
         max_p = np.max(populations).item()

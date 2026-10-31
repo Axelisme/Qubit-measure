@@ -34,6 +34,6 @@ Proposes the fitted T1 relaxation time under the probe tone at `$qubit.ext.t1_wi
 
 ## Recommended
 
-Run singleshot/ge Primary and Post, then Apply to the selected readout module. Use 'uniform=False' (default) to cluster points along the expected exponential decay while preserving the configured window and point count; use 'uniform=True' for a linear sweep. The probe-tone gain and frequency are set in the `probe_pulse` module slot.
+Run singleshot/ge Primary and Post, then Apply to the selected readout module. Use 'sampling="decay"' (default) to cluster points along the expected exponential decay while preserving the configured window and point count; use 'sampling="linear"' for a linear sweep. The probe-tone gain and frequency are set in the `probe_pulse` module slot. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
 **Last updated:** 2026-10-29

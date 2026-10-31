@@ -16,15 +16,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Classify,
-    GainSweep,
-    Pulse,
-    Readout,
-    Reset,
-    shot_sums,
-    sweep2param,
-)
+from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, shot_sums
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -54,6 +47,11 @@ class PowerResult:
 
 
 class PowerCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -70,11 +68,6 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -89,10 +82,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("gains", "Drive gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
+            AxesSpec.Axis("gains", label="Drive gain", unit="a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         data_variable=DataVariable("counts"),
@@ -137,43 +130,36 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Pulse gain",
-            "MIST",
-            num_lines=3,
-            configure_axes=configure_axes,
-        )
+        figure, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain", ylabel="MIST")
+        viewer = live_line(ax, num_lines=3)
+        configure_axes(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            return viewer.set(gains, (data / data.sum(axis=-1, keepdims=True)).T)
+
+        figure.show()
         buffer = SignalBuffer(
             (len(gains), 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                gains, (data / data.sum(axis=-1, keepdims=True)).T
-            ),
+            on_update=update,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            run_cfg = sched.cfg
-            gain_sweep = run_cfg.gain
-            run_cfg.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+        with Schedule(None, buffer, scope=context.scope) as sched:
+            gain_sweep = cfg.gain
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.
-            builder = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add_reset("reset", run_cfg.reset)
-                .add_pulse("init_pulse", run_cfg.init_pulse)
-                .add_pulse("probe_pulse", run_cfg.probe_pulse)
-                .add_readout("readout", run_cfg.readout)
-                .declare_sweep("gain", gain_sweep)
-            )
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            gain = builder.add_sweep("gain", gain_sweep)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            builder.run_program_summed(
-                prog,
+            sched.run_acquire_summed(
+                prog, soc,
                 processor=shot_sums(prog, [read_axis]),
-                sums2signal_fn=lambda sums: sums,
-                rounds=cfg.rounds,
+                                rounds=cfg.rounds,
             )
 
         # Keep the unnormalized G/E/Other counts in the saved Result.
@@ -213,7 +199,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             xs = options.ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
-        _, ax = plots.subplots("fit", figsize=(6, 6))
+        _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(
             xs,

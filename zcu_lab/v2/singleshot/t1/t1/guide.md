@@ -34,6 +34,6 @@ T1 appears in the plot title; calibration parameters stay unchanged. Use 'single
 
 ## Recommended
 
-Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts length stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'uniform=True' to sweep linearly; leave False to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count.
+Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts length stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
 **Last updated:** 2026-10-29

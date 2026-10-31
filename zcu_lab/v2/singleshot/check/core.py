@@ -14,6 +14,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2 import Pulse, Readout, Reset
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
@@ -28,6 +29,11 @@ class CheckResult:
 
 
 class CheckCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    shots: Annotated[int, FieldMeta(label="Shots")]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -43,11 +49,6 @@ class CheckCfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots")]
 
 
 @dataclass(frozen=True)
@@ -59,8 +60,8 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
     Options: ClassVar[type[CheckAnalyzeOptions]] = CheckAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[CheckResult, CheckCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("shots", "shot", "point", dtype=np.int64),),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        axes=(AxesSpec.Axis("shots", label="shot", unit="point", dtype=np.int64),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=CheckResult,
         cfg_type=CheckCfg,
         cfg_schema_version="3.0",
@@ -84,24 +85,14 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         cfg = deepcopy(cfg)
 
         signals_buffer = SignalBuffer((cfg.shots,))
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             # Prepare the same state for every shot before probing and readout.
-            program = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=cfg.shots,
-                    initial_delay=cfg.initial_delay,
-                    relax_delay=cfg.relax_delay,
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    Pulse("probe_pulse", sched.cfg.probe_pulse),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .build()
-            )
+            builder = TimelineBuilder(soccfg, reps=cfg.shots, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("probe_pulse", cfg.probe_pulse))
+            builder.emit(Readout("readout", cfg.readout))
+            program = builder.build()
 
             # Retain raw IQ; an interrupted acquisition leaves missing data.
             try:
@@ -147,7 +138,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             classifier.e_center,
             classifier.radius,
         )
-        _, ax = plots.subplots("fit", figsize=(6, 6))
+        _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
         ng = mask_g.sum() / signals.shape[0]

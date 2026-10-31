@@ -34,6 +34,6 @@ This is a diagnostic only. Read the rate landscape from the grid; calibration pa
 
 ## Recommended
 
-Run singleshot/ge Primary and Post, then Apply to the selected readout module. Keep the gain sweep coarse (the inner length sweep multiplies the run time). Provide '`$qubit.ext.ac_stark_coeff`' for a photon-number x-axis. 'uniform=True' (default) uses a linear length sweep; set False to cluster points along the expected exponential decay while preserving the configured window and count.
+Run singleshot/ge Primary and Post, then Apply to the selected readout module. Keep the gain sweep coarse (the inner length sweep multiplies the run time). Provide '`$qubit.ext.ac_stark_coeff`' for a photon-number x-axis. 'sampling="linear"' (default) uses a linear length sweep; set 'sampling="decay"' to cluster points along the expected exponential decay while preserving the configured window and count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
 **Last updated:** 2026-10-29

@@ -15,16 +15,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import (
-    Classify,
-    GainSweep,
-    Pulse,
-    Readout,
-    Reset,
-    SweepCfg,
-    shot_sums,
-    sweep2param,
-)
+from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2 import Classify, GainSweep, Pulse, Readout, Reset, SweepCfg, shot_sums
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     require_circle_classifiers,
@@ -57,6 +49,12 @@ class FreqPowerResult:
 
 
 class FreqPowerCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
+    gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -73,12 +71,6 @@ class FreqPowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
-    gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -91,11 +83,11 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqPowerResult, FreqPowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("freqs", "Drive Freq", "Hz", scale=1e6, dtype=np.float64),
-            AxesSpec.Axis("gains", "Drive gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis("population_states", label="Population", unit="None", dtype=np.int64),
+            AxesSpec.Axis("freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64),
+            AxesSpec.Axis("gains", label="Drive gain", unit="a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
         result_type=FreqPowerResult,
         cfg_type=FreqPowerCfg,
         data_variable=DataVariable("counts"),
@@ -147,59 +139,40 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         )
 
         # Display the measured G/E/Other fractions in classifier order.
-        figure, _ = context.plots.subplots(
-            "measurement", nrows=3, ncols=1, figsize=(12, 6)
-        )
-        viewers = tuple(
-            live_heatmap(
-                context.plots,
-                "measurement",
-                "gain (a.u.)",
-                "freq (MHz)",
-                title=state.capitalize(),
-                uniform=False,
-                axes=ax,
-            )
-            for state, ax in zip(
-                ("ground", "excited", "other"), figure.axes, strict=True
-            )
-        )
+        figure, _ = context.plots.subplots(nrows=3, ncols=1, num="measurement", figsize=(12, 6))
+        viewers = []
+        for state, ax in zip(("ground", "excited", "other"), figure.axes, strict=True):
+            ax.set(xlabel="gain (a.u.)", ylabel="freq (MHz)", title=state.capitalize())
+            viewers.append(live_heatmap(ax, uniform=False))
 
-        def plot_fn(counts: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def plot_fn(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
-            for i, viewer in enumerate(viewers):
-                viewer.update(gains, freqs, populations[..., i])
+            return tuple(artist for i, viewer in enumerate(viewers)
+                         for artist in viewer.set(gains, freqs, populations[..., i]))
+
+        figure.show()
 
         buffer = SignalBuffer(
             (len(gains), len(freqs), 3),
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            sched.cfg.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for gain, step in sched.scan("gain", gains.tolist()):
-                step.cfg.probe_pulse.set_param("gain", gain)
 
                 # Fix gain for this row and sweep probe frequency after preparation.
-                builder = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add_reset("reset", step.cfg.reset)
-                    .add_pulse("init_pulse", step.cfg.init_pulse)
-                    .add_pulse("probe_pulse", step.cfg.probe_pulse)
-                    .add_readout("readout", step.cfg.readout)
-                    .declare_sweep("freq", step.cfg.freq)
-                )
+                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                freq = builder.add_sweep("freq", cfg.freq)
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain, freq=freq))
+                builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-                builder.run_program_summed(
-                    prog,
+                step.run_acquire_summed(
+                    prog, soc,
                     processor=shot_sums(prog, [read_axis]),
-                    sums2signal_fn=lambda sums: sums,
-                    rounds=cfg.rounds,
+                                        rounds=cfg.rounds,
                 )
 
         # Preserve gain/frequency/state order with explicit G/E/Other columns.
@@ -232,9 +205,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
-        fig, _ = plots.subplots(
-            "fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained"
-        )
+        fig, _ = plots.subplots(num="fit", nrows=3, ncols=1, figsize=(8, 10), layout="constrained")
         ax_g, ax_e, ax_o = fig.axes
 
         # Stored populations are (gain, frequency, state); display frequency rows.
