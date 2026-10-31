@@ -7,12 +7,12 @@ from qick.asm_v2 import QickParam, WriteReg
 
 from ._timeline_expression import (
     CycleProducer,
-    CycleVariable,
-    LinearTime,
+    CycleAxis,
+    TimeVariable,
     TimeExpression,
     add_time,
     choose_time,
-    cycle_variable,
+    cycle_axis,
     exact_bounds,
     expression_axes,
     multiply_time,
@@ -81,7 +81,7 @@ class RepeatFrame:
     tail_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_gens: dict[int, RuntimeEnd] = field(default_factory=dict)
     initial_runtime_ros: dict[int, RuntimeEnd] = field(default_factory=dict)
-    expression_advance: TimeExpression = field(default_factory=LinearTime)
+    expression_advance: TimeExpression = field(default_factory=TimeVariable)
     initial_native_expressions: dict[tuple[bool, int], TimeExpression] = field(
         default_factory=dict
     )
@@ -116,7 +116,7 @@ class RepeatFrame:
             current = book.ends[name]
             if isinstance(current, RuntimeEnd):
                 expression = choose_time(
-                    LinearTime(),
+                    TimeVariable(),
                     add_time(time_expression(prog, initial), scale_time(total, -1)),
                 )
                 book.ends[name] = replace(current, expression=expression)
@@ -140,7 +140,7 @@ class RepeatFrame:
                 initial = initial_runtime.get(ch, native[ch])
                 expression = (
                     select_time(
-                        choose_time(LinearTime(1), count, maximum=False),
+                        choose_time(TimeVariable(1), count, maximum=False),
                         (
                             time_expression(prog, initial),
                             time_expression(prog, generated[ch]),
@@ -148,7 +148,7 @@ class RepeatFrame:
                     )
                     if ch in written
                     else choose_time(
-                        LinearTime(),
+                        TimeVariable(),
                         add_time(time_expression(prog, initial), scale_time(total, -1)),
                     )
                 )
@@ -161,16 +161,16 @@ class RepeatFrame:
                 if axis in expression_axes(generated):
                     generated = reduce_loop_time(generated, axis, last=True)
                 expression = select_time(
-                    choose_time(LinearTime(1), count, maximum=False),
+                    choose_time(TimeVariable(1), count, maximum=False),
                     (initial, generated),
                 )
             else:
                 expression = choose_time(
-                    LinearTime(), add_time(initial, scale_time(total, -1))
+                    TimeVariable(), add_time(initial, scale_time(total, -1))
                 )
             book.native_expressions[key] = expression
         self.restore_sources(book, count, axis=axis)
-        book.source_expressions[axis] = LinearTime(0)
+        book.source_expressions[axis] = TimeVariable(0)
 
     def restore_sources(
         self, book: "TimelineBook", count: TimeExpression, *, axis: str
@@ -180,7 +180,7 @@ class RepeatFrame:
         if limits is not None and limits.maximum == 0:
             book.source_expressions = self.initial_source_expressions.copy()
             return
-        executed = choose_time(LinearTime(1), count, maximum=False)
+        executed = choose_time(TimeVariable(1), count, maximum=False)
         restored = {}
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
@@ -338,7 +338,7 @@ class LoopTimelineFrame:
     waiting: set[str]
     entry: Time
     origin: RuntimeEnd
-    progress: CycleVariable
+    progress: CycleAxis
     initial_channels: dict[tuple[bool, int], Time]
     initial_native: dict[tuple[bool, int], TimeExpression]
     entry_math: RuntimeMath
@@ -380,7 +380,7 @@ class TimelineBook:
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
         self.shell_wait_bound: int | None = None
-        self.cycle_axes: dict[str, CycleVariable] = {}
+        self.cycle_axes: dict[str, CycleAxis] = {}
         # Native length sweeps are immutable program parameters. Share their
         # QICK initialization registers across physical-end and post plans.
         self.native_length_sources: dict[
@@ -412,12 +412,12 @@ class TimelineBook:
         if isinstance(iterations, str) and maximum is None:
             return self.source_expressions.get(
                 iterations,
-                LinearTime(terms=((cycle_variable(iterations, None, None), 1),)),
+                TimeVariable(terms=((cycle_axis(iterations, None, None), 1),)),
             )
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
             if isinstance(iterations, str) and maximum is not None
-            else LinearTime(iterations if isinstance(iterations, int) else minimum)
+            else TimeVariable(iterations if isinstance(iterations, int) else minimum)
         )
 
     def observe_selection(
@@ -496,12 +496,12 @@ class TimelineBook:
             and isinstance(getattr(macro, "dst", None), str)
             and macro.dst in prog._time_bounds.author_writes
         ):
-            self.source_expressions[macro.dst] = LinearTime(
-                terms=((cycle_variable(macro.dst, None, None), 1),)
+            self.source_expressions[macro.dst] = TimeVariable(
+                terms=((cycle_axis(macro.dst, None, None), 1),)
             )
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
-                self.source_expressions[macro.dst] = LinearTime(macro.src)
+                self.source_expressions[macro.dst] = TimeVariable(macro.src)
             elif isinstance(macro.src, str) and self._known_source(prog, macro.src):
                 self.source_expressions[macro.dst] = source_expression(prog, macro.src)
             else:
@@ -518,7 +518,7 @@ class TimelineBook:
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
         right = macro.rhs
         rhs = (
-            LinearTime(right)
+            TimeVariable(right)
             if isinstance(right, int)
             else source_expression(prog, right)
             if isinstance(right, str) and self._known_source(prog, right)
@@ -533,8 +533,8 @@ class TimelineBook:
                 # Unsupported ALU operations retain the owner's certified range.
                 self.source_expressions.pop(macro.dst, None)
             else:
-                self.source_expressions[macro.dst] = LinearTime(
-                    terms=((cycle_variable(macro.dst, None, None), 1),)
+                self.source_expressions[macro.dst] = TimeVariable(
+                    terms=((cycle_axis(macro.dst, None, None), 1),)
                 )
             return
         expression = add_time(
@@ -543,10 +543,10 @@ class TimelineBook:
         )
         if macro.dst not in prog._time_bounds.allowed.get(id(macro), ()):
             # Author arithmetic is a runtime recipe, not a certified loop range.
-            expression = LinearTime(
+            expression = TimeVariable(
                 terms=(
                     (
-                        cycle_variable(
+                        cycle_axis(
                             macro.dst,
                             None,
                             None,
@@ -588,7 +588,7 @@ class TimelineBook:
             scale_time(self.native_expression(prog, channel, generator=True), -1),
         )
         gap = substitute_time(
-            gap, {frame.progress: LinearTime() for frame in self.loop_timelines}
+            gap, {frame.progress: TimeVariable() for frame in self.loop_timelines}
         )
         if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
             raise ValueError(
@@ -614,7 +614,7 @@ class TimelineBook:
         if observe_pulses:
             advance = time_expression(self.math.prog, t)
             self.native_expressions = {
-                key: choose_time(LinearTime(), add_time(end, scale_time(advance, -1)))
+                key: choose_time(TimeVariable(), add_time(end, scale_time(advance, -1)))
                 for key, end in self.native_expressions.items()
             }
         consumed = self._debit_native(t) if observe_pulses else set()

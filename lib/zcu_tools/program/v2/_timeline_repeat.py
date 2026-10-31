@@ -5,11 +5,11 @@ from dataclasses import replace
 from qick.asm_v2 import Macro, WriteReg
 
 from ._timeline_expression import (
-    LinearTime,
+    TimeVariable,
     TimeExpression,
     add_time,
     choose_time,
-    cycle_variable,
+    cycle_axis,
     multiply_time,
     projected_expression_bounds,
     scale_time,
@@ -48,13 +48,13 @@ class LoopTimelineEnter(Macro):
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
-        progress = cycle_variable(storage.register, 0, None)
+        progress = cycle_axis(storage.register, 0, None)
         origin = RuntimeEnd(
             storage.register,
             0,
             None,
             expression=add_time(
-                time_expression(prog, entry), LinearTime(terms=((progress, 1),))
+                time_expression(prog, entry), TimeVariable(terms=((progress, 1),))
             ),
         )
         channels = {
@@ -116,7 +116,7 @@ class LoopTimelineExit(Macro):
         if book.loop_timelines:
             for ch, start, path in frame.starts:
                 book.loop_timelines[-1].starts.append(
-                    (ch, substitute_time(start, {frame.progress: LinearTime()}), path)
+                    (ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
                 )
         result = _end(frame.origin.register, result_expression)
         book.math.check_end(result)
@@ -138,11 +138,11 @@ class LoopTimelineExit(Macro):
                 result_expression, add_time(relative, scale_time(duration, -1))
             )
             if self.minimum == 0:
-                active = choose_time(count, LinearTime(1), maximum=False)
+                active = choose_time(count, TimeVariable(1), maximum=False)
                 last_expression = add_time(
                     multiply_time(
                         frame.initial_native[generator, ch],
-                        add_time(LinearTime(1), scale_time(active, -1)),
+                        add_time(TimeVariable(1), scale_time(active, -1)),
                     ),
                     multiply_time(last_expression, active),
                 )
@@ -172,7 +172,7 @@ class LoopTimelineExit(Macro):
         book = self.entry.book
         for ch in prog.gen_chs:
             starts = [
-                substitute_time(start, {frame.progress: LinearTime()})
+                substitute_time(start, {frame.progress: TimeVariable()})
                 for channel, start, _ in frame.starts
                 if channel == ch
             ]
@@ -205,13 +205,13 @@ class LoopTimelineExit(Macro):
                 scale_time(book.native_expression(prog, ch, generator=True), -1),
             )
             gap = substitute_time(
-                gap, {f.progress: LinearTime() for f in [*book.loop_timelines, frame]}
+                gap, {f.progress: TimeVariable() for f in [*book.loop_timelines, frame]}
             )
             for selector, index in reversed(path):
                 gap = select_time(
                     book.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
                     tuple(
-                        gap if i == index else LinearTime()
+                        gap if i == index else TimeVariable()
                         for i in range(prog.loop_dict[selector])
                     ),
                 )

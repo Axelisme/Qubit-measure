@@ -11,14 +11,14 @@ from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
     CycleProducer,
-    CycleVariable,
-    LinearTime,
-    TimeChoice,
+    CycleAxis,
+    TimeVariable,
+    TimeExtremum,
     TimeExpression,
     add_time,
     ceiled_time,
     choose_time,
-    cycle_variable,
+    cycle_axis,
     evaluate_time,
     expression_axes,
     expression_limits,
@@ -176,10 +176,10 @@ class RuntimeEnd:
         # Endpoints seed a fresh producer only. Existing algebra is authoritative.
         if expression is None:
             expression = (
-                LinearTime(minimum)
+                TimeVariable(minimum)
                 if minimum is not None and minimum == maximum
-                else LinearTime(
-                    terms=((cycle_variable(register, minimum, maximum), 1),)
+                else TimeVariable(
+                    terms=((cycle_axis(register, minimum, maximum), 1),)
                 )
             )
         object.__setattr__(self, "register", register)
@@ -245,18 +245,18 @@ def parameter_expression(
     """
     factor = 1 if cycles else get_fclk(prog)
     if not isinstance(value, QickParam):
-        return LinearTime(round(value * factor))
+        return TimeVariable(round(value * factor))
     axes = prog._timeline_book.cycle_axes
-    terms: list[tuple[CycleVariable, int]] = []
+    terms: list[tuple[CycleAxis, int]] = []
     for name, span in value.spans.items():
         count = prog.loop_dict[name]
         if count > 1:
             if name not in axes:
-                axes[name] = cycle_variable(
+                axes[name] = cycle_axis(
                     name, 0, count - 1, CycleProducer(((name, count),))
                 )
             terms.append((axes[name], round(span * factor / (count - 1))))
-    return LinearTime(round(value.start * factor), tuple(terms))
+    return TimeVariable(round(value.start * factor), tuple(terms))
 
 
 def time_expression(prog, value: "Time") -> TimeExpression:
@@ -282,10 +282,10 @@ def native_event_expression(prog, value: "Time") -> TimeExpression:
         return runtime_expression(value)
     ticks = value * get_fclk(prog)
     if not isinstance(ticks, QickParam):
-        return LinearTime(ceil_tick(ticks))
+        return TimeVariable(ceil_tick(ticks))
     axes = {name: prog.loop_dict[name] for name in ticks.spans}
     if len(axes) > 1:
-        line = LinearTime(Fraction(str(ticks.start)))
+        line = TimeVariable(Fraction(str(ticks.start)))
         for name, span in ticks.spans.items():
             count = axes[name]
             if count > 1:
@@ -293,7 +293,7 @@ def native_event_expression(prog, value: "Time") -> TimeExpression:
                     source_expression(prog, name), Fraction(str(span)) / (count - 1)
                 )
                 combined = add_time(line, contribution)
-                if not isinstance(combined, LinearTime):
+                if not isinstance(combined, TimeVariable):
                     raise RuntimeError("native affine time lost its loop algebra")
                 line = combined
         return ceiled_time(line)
@@ -312,19 +312,19 @@ def source_expression(prog, name: str) -> TimeExpression:
     if name in prog.loop_dict:
         count = prog.loop_dict[name]
         if name not in book.cycle_axes:
-            book.cycle_axes[name] = cycle_variable(
+            book.cycle_axes[name] = cycle_axis(
                 name, 0, count - 1, CycleProducer(((name, count),))
             )
-        return LinearTime(terms=((book.cycle_axes[name], 1),))
+        return TimeVariable(terms=((book.cycle_axes[name], 1),))
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
         raw = register.init
         return parameter_expression(prog, QickParam(raw.start, raw.spans), cycles=True)
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:
-        return LinearTime(limits.minimum)
-    return LinearTime(
-        terms=((cycle_variable(name, limits.minimum, limits.maximum), 1),)
+        return TimeVariable(limits.minimum)
+    return TimeVariable(
+        terms=((cycle_axis(name, limits.minimum, limits.maximum), 1),)
     )
 
 
@@ -342,12 +342,12 @@ def bounded_source_expression(
         if not unbounded_time(expression):
             return expression
     return (
-        LinearTime(minimum)
+        TimeVariable(minimum)
         if minimum == maximum
-        else LinearTime(
+        else TimeVariable(
             terms=(
                 (
-                    cycle_variable(
+                    cycle_axis(
                         name,
                         minimum,
                         maximum,
@@ -373,16 +373,16 @@ def lookup_expression(
     if len(values) > 1:
         step = values[1] - values[0]
         if all(value == values[0] + step * i for i, value in enumerate(values)):
-            reconstruction = add_time(LinearTime(values[0]), scale_time(index, step))
+            reconstruction = add_time(TimeVariable(values[0]), scale_time(index, step))
     axes = expression_axes(index)
     points = evaluate_time(index, axes)
     if points is None:
-        return LinearTime(terms=((cycle_variable(name, min(values), max(values)), 1),))
+        return TimeVariable(terms=((cycle_axis(name, min(values), max(values)), 1),))
     selected = np.asarray(values, dtype=np.int64)[points.astype(np.int64)]
     lower, upper = int(selected.min()), int(selected.max())
     if lower == upper:
-        return LinearTime(lower)
-    variable = cycle_variable(
+        return TimeVariable(lower)
+    variable = cycle_axis(
         name,
         lower,
         upper,
@@ -393,7 +393,7 @@ def lookup_expression(
             selection=(index, values),
         ),
     )
-    return LinearTime(terms=((variable, 1),))
+    return TimeVariable(terms=((variable, 1),))
 
 
 Time = float | QickParam | RuntimeEnd
@@ -657,7 +657,7 @@ class RuntimeMath(TimedMacro):
     def reconstruct(
         self,
         expression: TimeExpression,
-        inputs: dict[CycleVariable, RuntimeEnd],
+        inputs: dict[CycleAxis, RuntimeEnd],
         captured_ends: Sequence[RuntimeEnd] = (),
     ) -> RuntimeEnd:
         """Materialize exact cycle algebra using captured branch-entry inputs.
@@ -678,7 +678,7 @@ class RuntimeMath(TimedMacro):
                     if not np.any(points):
                         return captured
                     return self.add(captured, self.reconstruct(delta, inputs))
-        if isinstance(expression, TimeChoice):
+        if isinstance(expression, TimeExtremum):
             values = [
                 self.reconstruct(item, inputs, captured_ends)
                 for item in expression.alternatives
@@ -695,7 +695,7 @@ class RuntimeMath(TimedMacro):
         return self._reconstruct_linear(expression, inputs)
 
     def _reconstruct_linear(
-        self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
+        self, expression: TimeVariable, inputs: dict[CycleAxis, RuntimeEnd]
     ) -> RuntimeEnd:
         quotient = self._reconstruct_quotients(expression, inputs)
         if quotient is not None:
@@ -731,7 +731,7 @@ class RuntimeMath(TimedMacro):
                 term = self.reconstruct(variable.producer.reconstruction, inputs)
                 term = replace(
                     term,
-                    expression=LinearTime(terms=((variable, 1),)),
+                    expression=TimeVariable(terms=((variable, 1),)),
                 )
             elif variable.producer.fixed_point is not None:
                 term = self._reconstruct_fixed_point(variable, inputs)
@@ -765,7 +765,7 @@ class RuntimeMath(TimedMacro):
         return result
 
     def _reconstruct_quotients(
-        self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
+        self, expression: TimeVariable, inputs: dict[CycleAxis, RuntimeEnd]
     ) -> RuntimeEnd | None:
         """Recover whole integer shifts before reconstructing rational proof terms."""
         for variable, coefficient in expression.terms:
@@ -780,7 +780,7 @@ class RuntimeMath(TimedMacro):
                     )
                 quotient = add_time(
                     scale_time(numerator, Fraction(1, divisor)),
-                    LinearTime(terms=((variable, Fraction(-1, divisor)),)),
+                    TimeVariable(terms=((variable, Fraction(-1, divisor)),)),
                 )
                 rest = add_time(expression, scale_time(quotient, -copies))
                 converted = self._reconstruct_fixed_point(variable, inputs)
@@ -794,7 +794,7 @@ class RuntimeMath(TimedMacro):
         return None
 
     def _reconstruct_fixed_point(
-        self, variable: CycleVariable, inputs: dict[CycleVariable, RuntimeEnd]
+        self, variable: CycleAxis, inputs: dict[CycleAxis, RuntimeEnd]
     ) -> RuntimeEnd:
         if variable.producer.fixed_point is None:
             raise RuntimeError("fixed-point producer has no numerator")
@@ -805,19 +805,19 @@ class RuntimeMath(TimedMacro):
         result = self.op(
             raw, "ASR", shift, limits=(raw.minimum >> shift, raw.maximum >> shift)
         )
-        expression = LinearTime(terms=((variable, 1),))
+        expression = TimeVariable(terms=((variable, 1),))
         if variable.producer.rounding_remainder:
             divisor = 1 << shift
             expression = add_time(
                 scale_time(numerator, Fraction(1, divisor)),
-                LinearTime(terms=((variable, Fraction(-1, divisor)),)),
+                TimeVariable(terms=((variable, Fraction(-1, divisor)),)),
             )
         return RuntimeEnd(result.register, expression=expression)
 
     def reconstruct_maximum(
         self,
         values: Sequence[Time],
-        inputs: dict[CycleVariable, RuntimeEnd],
+        inputs: dict[CycleAxis, RuntimeEnd],
         captured_ends: Sequence[RuntimeEnd],
     ) -> RuntimeEnd:
         """Join case ends using immutable entry values and exact known increments.
@@ -848,7 +848,7 @@ class RuntimeMath(TimedMacro):
     ) -> TimeExpression | None:
         # Addition distributes over max/min. Match the same shift on every
         # alternative before flattening case maxima loses the incoming floor.
-        if isinstance(expression, TimeChoice) and isinstance(captured, TimeChoice):
+        if isinstance(expression, TimeExtremum) and isinstance(captured, TimeExtremum):
             if expression.maximum != captured.maximum or len(
                 expression.alternatives
             ) != len(captured.alternatives):
@@ -1153,7 +1153,7 @@ class RuntimeMath(TimedMacro):
             rhs = (
                 runtime_expression(right)
                 if isinstance(right, RuntimeEnd)
-                else LinearTime(right)
+                else TimeVariable(right)
             )
             expression = add_time(
                 runtime_expression(left),
@@ -1376,7 +1376,7 @@ class RuntimeMath(TimedMacro):
         rhs = (
             runtime_expression(right)
             if isinstance(right, RuntimeEnd)
-            else LinearTime(right)
+            else TimeVariable(right)
         )
         expression = add_time(
             runtime_expression(left), scale_time(rhs, -1) if subtract else rhs

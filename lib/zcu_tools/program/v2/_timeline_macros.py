@@ -23,7 +23,7 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex
-from ._timeline_expression import CycleVariable, time_variables
+from ._timeline_expression import CycleAxis, time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -1036,7 +1036,7 @@ class TimelineBranch(Macro):
 
     def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
         self.entry_math = RuntimeMath(prog)
-        self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
+        self.entry_inputs: dict[CycleAxis, RuntimeEnd] = {}
         if self.align_timeline:
             registers = prog._time_bounds.defined | self.book.source_expressions.keys()
             registers |= {
