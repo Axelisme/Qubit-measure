@@ -114,4 +114,3 @@ def test_schedule_repeat_validates_times_and_interval():
             assert "interval" in str(exc)
         else:
             raise AssertionError("repeat should reject negative interval")
-

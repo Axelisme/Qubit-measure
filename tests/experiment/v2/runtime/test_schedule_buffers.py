@@ -109,9 +109,7 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
     result_buffer = RecordingBuffer(
         root,
-        on_update=lambda step: updates.append(
-            (step.path, root[0]["signals"].copy())
-        ),
+        on_update=lambda step: updates.append((step.path, root[0]["signals"].copy())),
     )
 
     with Schedule(_cfg(), result_buffer, scope=Scope("run")) as sched:
