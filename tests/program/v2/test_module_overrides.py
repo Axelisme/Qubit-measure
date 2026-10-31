@@ -12,6 +12,9 @@ from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg, Readout
+from zcu_tools.program.v2.modules.reset import (
+    BathReset, BathResetCfg, PulseReset, PulseResetCfg, Reset, TwoPulseReset, TwoPulseResetCfg,
+)
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 
@@ -105,5 +108,41 @@ def test_readout_overrides_match_set_param_without_mutating_cfg(kind, swept, fac
     equivalent.set_param(knob, value)
     actual = _compile(kind, [factory("read", cfg, **{knob: value})], swept)
     expected = _compile(kind, [factory("read", equivalent)], swept)
+    _assert_same_compile(actual, expected)
+    assert cfg.model_dump() == original
+
+
+@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("swept", [False, True])
+@pytest.mark.parametrize("use_factory", [False, True])
+@pytest.mark.parametrize("variant,knob,start,stop", [
+    ("pulse", "freq", 200, 220), ("pulse", "gain", 0.3, 0.5),
+    ("pulse", "phase", 30, 50), ("pulse", "length", 0.2, 0.3),
+    ("two", "gain1", 0.3, 0.5), ("two", "gain2", 0.3, 0.5),
+    ("two", "freq1", 200, 220), ("two", "freq2", 200, 220),
+    ("two", "length", 0.2, 0.3),
+    ("bath", "qub_gain", 0.3, 0.5), ("bath", "qub_freq", 200, 220),
+    ("bath", "qub_length", 0.2, 0.3), ("bath", "res_gain", 0.3, 0.5),
+    ("bath", "res_freq", 200, 220), ("bath", "res_length", 0.2, 0.3),
+    ("bath", "pi2_phase", 30, 50),
+])
+def test_reset_overrides_match_set_param_without_mutating_cfg(kind, swept, use_factory, variant, knob, start, stop):
+    if variant == "pulse":
+        cfg = PulseResetCfg(pulse_cfg=_pulse_cfg())
+        ctor = PulseReset
+    elif variant == "two":
+        cfg = TwoPulseResetCfg(pulse1_cfg=_pulse_cfg(), pulse2_cfg=_pulse_cfg(1))
+        ctor = TwoPulseReset
+    else:
+        cfg = BathResetCfg(cavity_tone_cfg=_pulse_cfg(), qubit_tone_cfg=_pulse_cfg(1), pi2_cfg=_pulse_cfg(2))
+        ctor = BathReset
+    if use_factory:
+        ctor = Reset
+    original = cfg.model_dump()
+    value = QickSweep1D("point", start, stop) if swept else start
+    equivalent = cfg.model_copy(deep=True)
+    equivalent.set_param(knob, value)
+    actual = _compile(kind, [ctor("reset", cfg, **{knob: value})], swept)
+    expected = _compile(kind, [ctor("reset", equivalent)], swept)
     _assert_same_compile(actual, expected)
     assert cfg.model_dump() == original
