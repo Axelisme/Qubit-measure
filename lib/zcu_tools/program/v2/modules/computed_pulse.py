@@ -65,13 +65,14 @@ class ComputedPulse(Module):
         base_idxs = self._declare_candidates(
             prog, declare_pulse=lambda pulse: pulse.declare(prog)
         )
-        self._address_loader = LoadValue(
+        address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
             idx_reg=self.val_reg,
             val_reg=f"{self.name}_wmem_index",
         )
-        self._address_loader.declare(prog)
+        address_loader.declare(prog)
+        prog.set_module_state(self, address_loader)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -82,15 +83,16 @@ class ComputedPulse(Module):
         path. Address/selector writes and same-channel overlap fail at compile.
         """
         del tag  # ModuleEmission owns the occurrence tag.
-        relation = self._address_loader.lower_selected(prog)
+        address_loader = prog.get_module_state(self, LoadValue)
+        relation = address_loader.lower_selected(prog)
         choices = tuple(
-            PlaybackChoice(pulse.pulse_id, pulse.cfg.post_delay)
+            PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules
-            if pulse.pulse_id is not None and pulse.cfg is not None
+            if pulse.cfg is not None
         )
         prog.pulse_by_reg(
             self.ref_cfg.ch,
-            self._address_loader.val_reg,
+            address_loader.val_reg,
             t=self.ref_cfg.pre_delay,
             flat_top_pulse=self._is_flat_top,
             timeline="default" if timeline is None else timeline,
@@ -140,11 +142,11 @@ class ComputedPulse(Module):
         base_idxs: list[int] = []
         for pulse_mod in self.pulse_modules:
             wave_names = prog.list_pulse_waveforms(
-                pulse_mod.pulse_id, exclude_special=False
+                pulse_mod.pulse_name(prog), exclude_special=False
             )
             if len(wave_names) != self._stride:
                 raise ValueError(
-                    f"ComputedPulse candidate {pulse_mod.pulse_id!r} expected "
+                    f"ComputedPulse candidate {pulse_mod.pulse_name(prog)!r} expected "
                     f"{self._stride} waveform(s) (style={self.ref_cfg.waveform.style}), "
                     f"got {len(wave_names)}"
                 )
