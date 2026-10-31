@@ -68,11 +68,13 @@ def test_nested_repeats_keep_outer_scan_shot_and_register_count_structure():
             self.write_reg("count", 2)
 
         def _body(self, cfg: None) -> None:
-            with (
-                self.repeat("fixed", 2, advance_ref=True),
-                self.repeat("variable", "count", advance_ref=True, range_hint=(0, 4)),
-            ):
-                self.delay_timeline(0.1)
+            self.sync()
+            with self.repeat('fixed', 2):
+                self.sync()
+                with self.repeat('variable', 'count', range_hint=(0, 4)):
+                    self.delay_timeline(0.1)
+                    self.sync()
+                self.sync()
 
     prog = Program(make_mock_soccfg(), reps=2)
     starts = {}

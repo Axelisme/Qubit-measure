@@ -24,12 +24,14 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
 
     def body(p):
         p.pulse(0, "long", t=0)
-        with p.repeat("inner", 2, advance_ref=True):
+        p.sync()
+        with p.repeat('inner', 2):
             p.write_reg_op("mask", "scan", "XOR", "inner")
             bit = p.soccfg["readouts"][0]["trigger_bit"]
             p.write_reg_op("mask", "mask", "SL", bit)
             p.write_reg_op("when", "inner", "SL", 7)
             p.trigger([0], t=0)
+            p.sync()
 
     def transform(snapshot):
         records = []

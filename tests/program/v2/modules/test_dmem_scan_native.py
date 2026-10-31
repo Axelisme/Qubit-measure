@@ -158,9 +158,11 @@ def compile_fixed_lookup(loader: LoadValue, consumer: ScalarConsumer):
             self.declare(consumer)
 
         def _body(self, cfg):
-            with self.repeat("scan_count", 3, advance_ref=True):
+            self.sync()
+            with self.repeat('scan_count', 3):
                 self.emit(loader)
                 self.emit(consumer)
+                self.sync()
 
     return Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
 

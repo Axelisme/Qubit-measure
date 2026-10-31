@@ -233,11 +233,13 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
                 if not inside:
                     self.emit(ro, tag="selected")
                 if control == "Repeat":
-                    with self.repeat("repeat_scope", 2, advance_ref=True):
+                    self.sync()
+                    with self.repeat('repeat_scope', 2):
                         if inside:
                             self.emit(ro, tag="selected")
                         else:
                             self.trigger([0], t=0, timeline="default")
+                        self.sync()
                 else:
                     with self.branch(by="choice", align_timeline=True) as branch:
                         with branch.case(0):
