@@ -80,6 +80,12 @@ def test_run_stop_displays_returned_result_or_original_core_error(
     driver.screenshot(tmp_path / "02-running.png")
     driver.click("Stop")
     driver.screenshot(tmp_path / "03-stop-requested.png")
+    qt_until(
+        lambda: any(w.text == "Run" and w.enabled for w in driver.visible().widgets),
+        label="core terminal delivery",
+    )
+    assert driver.observe("Run").enabled
+    driver.select_tab("Analysis")
     if fails:
         qt_until(lambda: bool(driver.dialogs()), label="core failure visible")
         assert any(
@@ -91,5 +97,4 @@ def test_run_stop_displays_returned_result_or_original_core_error(
     else:
         qt_until(lambda: driver.observe("Analyze").enabled, label="returned result available")
         assert not driver.dialogs()
-    assert driver.observe("Run").enabled
     driver.screenshot(tmp_path / "04-terminal.png")
