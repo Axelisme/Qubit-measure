@@ -1273,86 +1273,29 @@ class RuntimeMath(TimedMacro):
         ):
             return self._unbounded_maximum(left, right, target=target)
         destination = self.allocate() if target is None else target
-        # A fresh result can hold intermediates. An explicitly aliased target
-        # must preserve both input operands until the final addition.
-        work = (
-            destination
-            if destination not in (left.register, right.register)
-            else self.scratch(2)
-        )
-        delta = self.op(
-            left,
-            "-",
-            right,
-            limits=(left.minimum - right.maximum, left.maximum - right.minimum),
-            target=self.scratch(0),
-        )
-        # Split before adding: (x + ABS(x))/2 can overflow even when max(0,x) fits.
-        if delta.minimum is None or delta.maximum is None:
-            raise RuntimeError("bounded maximum lost its interval")
-        if delta.minimum == -(2**31):
-            raise ValueError("timeline ABS may overflow signed 32-bit cycles")
-        absolute = self.scratch(1)
         self.operations.append(
             AsmInst(
                 inst={
-                    "CMD": "REG_WR",
-                    "DST": self.prog._get_reg(absolute),
-                    "SRC": "op",
-                    "OP": f"ABS {self.prog._get_reg(delta.register)}",
+                    "CMD": "TEST",
+                    "OP": f"{self.prog._get_reg(left.register)} - {self.prog._get_reg(right.register)}",
+                    "UF": "1",
                 },
                 addr_inc=1,
             )
         )
-        half = self.op(
-            delta,
-            "ASR",
-            1,
-            limits=(delta.minimum // 2, delta.maximum // 2),
-            target=work,
-        )
-        abs_half = self.op(
-            RuntimeEnd(
-                absolute,
-                0,
-                max(abs(delta.minimum), abs(delta.maximum)),
-                expression=choose_time(
-                    runtime_expression(delta), scale_time(runtime_expression(delta), -1)
-                ),
-            ),
-            "ASR",
-            1,
-            limits=(0, max(abs(delta.minimum), abs(delta.maximum)) // 2),
-            target=self.scratch(1),
-        )
-        remainder = self.op(
-            delta,
-            "-",
-            half,
-            limits=((delta.minimum + 1) // 2, (delta.maximum + 1) // 2),
-            target=self.scratch(0),
-        )
-        parity = self.op(remainder, "-", half, limits=(0, 1), target=self.scratch(0))
-        total = self.op(
-            half,
-            "+",
-            abs_half,
-            limits=(min(0, delta.minimum), max(0, delta.maximum)),
-            target=work,
-        )
-        positive = self.op(
-            total,
-            "+",
-            parity,
-            limits=(max(0, delta.minimum), max(0, delta.maximum)),
-            target=work,
-        )
-        result = self.op(
-            right,
-            "+",
-            positive,
-            limits=(max(left.minimum, right.minimum), max(left.maximum, right.maximum)),
-            target=destination,
+        if destination != left.register:
+            self.operations.append(WriteReg(dst=destination, src=left.register))
+        self.operations.append(
+            AsmInst(
+                inst={
+                    "CMD": "REG_WR",
+                    "DST": self.prog._get_reg(destination),
+                    "SRC": "op",
+                    "OP": self.prog._get_reg(right.register),
+                    "IF": "S",
+                },
+                addr_inc=1,
+            )
         )
         covers = (
             a,
@@ -1367,12 +1310,10 @@ class RuntimeMath(TimedMacro):
             *(b.deferred if isinstance(b, RuntimeEnd) else ()),
         )
         return RuntimeEnd(
-            result.register,
-            result.minimum,
-            result.maximum,
-            covers,
-            deferred,
-            choose_time(runtime_expression(left), runtime_expression(right)),
+            destination,
+            covers=covers,
+            deferred=deferred,
+            expression=choose_time(runtime_expression(left), runtime_expression(right)),
         )
 
     @staticmethod
