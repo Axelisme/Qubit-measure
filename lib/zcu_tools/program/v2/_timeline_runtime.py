@@ -1288,6 +1288,8 @@ class RuntimeMath(TimedMacro):
     def _select(
         self, left: RuntimeEnd, right: RuntimeEnd, *, maximum: bool, target: str | None
     ) -> RuntimeEnd:
+        if target == right.register:
+            left, right = right, left
         lower, upper = difference_limits(
             runtime_expression(left), runtime_expression(right)
         )
@@ -1299,8 +1301,6 @@ class RuntimeMath(TimedMacro):
         if not safe:
             return self._masked_select(left, right, maximum=maximum, target=target)
         destination = self.allocate() if target is None else target
-        if destination == right.register:
-            left, right = right, left
         self.operations.append(
             AsmInst(
                 inst={
