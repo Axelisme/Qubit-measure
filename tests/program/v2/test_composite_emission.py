@@ -600,8 +600,9 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         source, target = ("default", "other") if reverse else ("other", "default")
         prog.join(source, into=target)
         prog.delay_timeline(advance / 430.08, timeline=target)
-        for pulse in following:
-            prog.emit(pulse, timeline=target)
+        prog.fork(target, into=["following_0", "following_1"])
+        for ch, pulse in enumerate(following):
+            prog.emit(pulse, timeline=f"following_{ch}")
 
     def build():
         return _program(
@@ -618,10 +619,10 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
             # Both selected physical ends are 148/176. Equal numeric aggregate
             # ends must retain both channels' coverage, including the 60-cycle debt.
             assert [waves(s) for s in result] == [
-                [104, 104, 148, 192],
-                [104, 104, 176, 220],
+                [104, 104, 148, 148],
+                [104, 104, 176, 176],
             ] * 2
-            assert [s.body_end_cycle - s.start_cycle for s in result] == [236, 264] * 2
+            assert [s.body_end_cycle - s.start_cycle for s in result] == [192, 220] * 2
             recompile(prog)
 
 
