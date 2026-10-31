@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-01，Ask waiting 與 GUI run terminal，wire 136／GUI 169
+**Last updated:** 2026-11-01，Ask waiting 與 GUI run terminal，wire 137／GUI 170
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 

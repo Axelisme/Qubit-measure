@@ -334,8 +334,8 @@ not whichever question is pending at click time. Submitted is not acceptance.
 Stop releases Ask with None on its existing worker. Control I/O failure retains
 its original cause and fails after worker cleanup. Only terminal owner delivery
 settles the operation and releases RUN.
-The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
-same-host operation Plots and finishes before returning or being discarded.
+The tab injects `WorkflowPlots`. Each `Scope.call` receives fresh same-host operation Plots. The framework
+finishes them before returning or propagating an error; run_core adapts core calls.
 `WorkflowFigures` tiles workflow figures and the current operation together,
 with up to four figures per page and page controls for larger sets.
 Follow latest starts checked and selects each newly presented or live-refreshed
