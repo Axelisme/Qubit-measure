@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
 from zcu_tools.experiment.records import RunRecord
@@ -103,7 +104,7 @@ class FakeBg:
         self._fail_work = fail_work
         self.last_work: Callable[[], Any] | None = None
         self.last_on_done: Callable[[Any], None] | None = None
-        self.last_on_error: Callable[[Exception], None] | None = None
+        self.last_on_error: Callable[[BackgroundError], None] | None = None
 
     def submit(
         self,
@@ -111,7 +112,7 @@ class FakeBg:
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._fail_submit:
             raise RuntimeError("worker boom")

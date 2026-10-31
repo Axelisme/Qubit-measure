@@ -11,6 +11,7 @@ from matplotlib.backend_bases import MouseButton, MouseEvent
 from numpy.typing import NDArray
 from qtpy import QtCore, QtWidgets
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.analysis.fluxdep.stroke import (
     BrushMode,
     BrushPoint,
@@ -39,7 +40,7 @@ TwoTonePreviewSubmitter = Callable[
     [
         Callable[[], TwoTonePickView],
         Callable[[TwoTonePickView], None],
-        Callable[[Exception], None],
+        Callable[[BackgroundError], None],
     ],
     None,
 ]
@@ -385,7 +386,7 @@ class FindPointsWidget(InteractiveMplWidget):
         self,
         compute: Callable[[], TwoTonePickView],
         on_done: Callable[[TwoTonePickView], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._runner is None:
             raise RuntimeError("owned TwoTone preview runner is unavailable")

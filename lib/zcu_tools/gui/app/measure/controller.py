@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -927,7 +929,7 @@ class Controller:
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Run captured interactive computation off-main; deliver on the owner loop."""
         self._background_svc.submit(

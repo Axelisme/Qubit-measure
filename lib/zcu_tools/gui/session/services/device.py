@@ -6,6 +6,8 @@
 # callbacks scatters that transition; short helpers/projections add no new owner.
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import logging
 import threading
 from collections.abc import Generator
@@ -965,7 +967,7 @@ class DeviceService:
             if self._state.refresh_device_info_cache(name, info):
                 self._emit_device_changed(name)
 
-        def on_read_failed(exc: Exception) -> None:
+        def on_read_failed(exc: BackgroundError) -> None:
             # Best-effort: a failed single read is logged and dropped so the
             # poller keeps ticking.
             logger.debug("device poll read failed: name=%r error=%s", name, exc)

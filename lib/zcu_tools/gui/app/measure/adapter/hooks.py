@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Protocol
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -75,7 +76,7 @@ class InteractiveFrontendEnv(Protocol):
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Submit compute off-owner and return None without waiting for its result.
 

@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from qtpy import QtCore, QtWidgets
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.analysis.fluxdep.cross_selection import (
     CrossSelectionResult,
     CrossSelectionState,
@@ -38,7 +39,7 @@ CrossSelectionPreviewSubmitter = Callable[
     [
         Callable[[], CrossSelectionView],
         Callable[[CrossSelectionView], None],
-        Callable[[Exception], None],
+        Callable[[BackgroundError], None],
     ],
     None,
 ]
@@ -325,7 +326,7 @@ class SelectorWidget(InteractiveMplWidget):
         self,
         compute: Callable[[], CrossSelectionView],
         on_done: Callable[[CrossSelectionView], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._runner is None:
             raise RuntimeError("owned cross-selection runner is unavailable")

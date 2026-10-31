@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Generic, TypeVar
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import ParamSpec
 from zcu_tools.gui.session.ports import OwnerScheduler
@@ -17,7 +18,7 @@ P = TypeVar("P")
 R = TypeVar("R")
 
 BackgroundSubmitter = Callable[
-    [Callable[[], object], Callable[[object], None], Callable[[Exception], None]], None
+    [Callable[[], object], Callable[[object], None], Callable[[BackgroundError], None]], None
 ]
 
 
@@ -127,7 +128,7 @@ class PluginDefinition(Generic[S, R]):
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Submit compute to the bound runner with owner-loop completion callbacks.
 

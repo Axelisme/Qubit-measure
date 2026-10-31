@@ -5,6 +5,7 @@ import weakref
 from collections.abc import Callable
 
 import pytest
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.gui.session.adapters.thread_pool_background import (
     ThreadPoolBackgroundExecutor,
@@ -67,7 +68,7 @@ def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) 
     executor = make_executor(scheduler)
     owner_id = threading.get_ident()
     boom = ValueError("boom")
-    delivered: list[tuple[Exception, int]] = []
+    delivered: list[tuple[BackgroundError, int]] = []
 
     def work() -> None:
         raise boom

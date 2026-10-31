@@ -7,6 +7,7 @@ from pydantic import JsonValue
 from pydantic_core import PydanticCustomError
 from qick import QickConfig
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.core.script_protocol import Answer
 from zcu_tools.experiment.acquisition import capture_software_provenance
 from zcu_tools.experiment.context import RunContext
@@ -339,7 +340,7 @@ class WorkflowTab[C]:
         self._changed()
         return token
 
-    def _finished(self, status: RunStatus | None, error: Exception | None) -> None:
+    def _finished(self, status: RunStatus | None, error: BackgroundError | None) -> None:
         self.error = None if error is None else str(error)
         if self.plots is not None and (status is None or status.lifecycle != "paused"):
             self.plots.finish()

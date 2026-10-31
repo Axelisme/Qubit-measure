@@ -20,6 +20,8 @@ distinct gates (run_result vs analyze_result) live in the subclasses, not here.
 
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -185,7 +187,7 @@ class StagedAnalyzeService:
             )
 
         def _fail(
-            error: Exception,
+            error: BackgroundError,
             settle: SettleFn,
             *,
             failure_kind: Literal["analysis"] | None = None,

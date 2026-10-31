@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import dataclasses
 import logging
 import time
@@ -310,7 +312,7 @@ def _release_connected(soc: SocHandle, req: ConnectRemoteRequest) -> None:
     )
 
 
-def _format_error(exc: Exception) -> str:
+def _format_error(exc: BackgroundError) -> str:
     """Classify connection exceptions to user-facing prefixes (§B.5).
 
     Mirrors the old _ConnectWorker.run error classification so MCP / View error

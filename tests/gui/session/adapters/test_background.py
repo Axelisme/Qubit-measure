@@ -15,6 +15,7 @@ import sys
 import threading
 
 import pytest
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
@@ -93,7 +94,7 @@ def test_none_result_is_delivered_not_swallowed(qapp):
 def test_dedicated_delivers_error(qapp):
     bg = _bg()
     boom = RuntimeError("boom")
-    errs: list[Exception] = []
+    errs: list[BackgroundError] = []
 
     def work() -> object:
         raise boom
@@ -133,7 +134,7 @@ def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
 def test_pool_delivers_error(qapp):
     bg = _bg()
     boom = ValueError("pool boom")
-    errs: list[Exception] = []
+    errs: list[BackgroundError] = []
 
     def work() -> object:
         raise boom

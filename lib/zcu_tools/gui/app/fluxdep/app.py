@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.app.analysis_project.entry import AnalysisTarget
 from zcu_tools.gui.app.analysis_project.selection import AnalysisSelection
 from zcu_tools.gui.app.fluxdep.lab import FluxDepGuiLab
@@ -78,7 +79,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         def submit_interactive(
             compute: Callable[[], object],
             on_done: Callable[[object], None],
-            on_error: Callable[[Exception], None],
+            on_error: Callable[[BackgroundError], None],
         ) -> None:
             runner.submit(compute, on_done=on_done, on_error=on_error)
 

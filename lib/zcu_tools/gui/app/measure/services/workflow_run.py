@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -135,7 +137,7 @@ class WorkflowController[F: FormModel, C]:
         runner: OperationRunner,
         owner_id: str,
         *,
-        on_finished: Callable[[RunStatus | None, Exception | None], None],
+        on_finished: Callable[[RunStatus | None, BackgroundError | None], None],
     ) -> None:
         """Borrow runner and report terminal native delivery to the view.
 
@@ -276,7 +278,7 @@ class WorkflowController[F: FormModel, C]:
             run.phase = "producing"
         return token
 
-    def _notify(self, status: RunStatus | None, error: Exception | None) -> None:
+    def _notify(self, status: RunStatus | None, error: BackgroundError | None) -> None:
         try:
             self._on_finished(status, error)
         except Exception:
@@ -293,7 +295,7 @@ class WorkflowController[F: FormModel, C]:
         ):
             run.native_error = error
 
-    def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
+    def _finish(self, run: _Run[F, C], error: BackgroundError | None) -> None:
         if run.phase in {"finishing", "terminal"}:
             return
         status = None if run.engine is None else run.engine.status()

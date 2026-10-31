@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -196,7 +198,7 @@ class SharedFluxPickPlugin(PluginDefinition[FluxPickState, R], Generic[R]):
         object.__setattr__(self, "_alignment_error", None)
         self._notify_alignment()
 
-        def settle(error: Exception | None = None) -> None:
+        def settle(error: BackgroundError | None = None) -> None:
             object.__setattr__(self, "_alignment_busy", False)
             object.__setattr__(self, "_alignment_error", str(error) if error else None)
             if error is not None:
