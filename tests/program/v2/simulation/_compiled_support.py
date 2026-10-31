@@ -16,6 +16,7 @@ def program(
     config_time: float | None = 0,
     readout_length: float = 0.2,
     initial_delay: float = 0,
+    relax_delay: float = 0.1,
     cleanup=None,
     stream_transform=None,
 ):
@@ -49,7 +50,7 @@ def program(
                 cleanup(self)
 
     return Program(
-        env.soccfg, reps=reps, initial_delay=initial_delay, relax_delay=0.1
+        env.soccfg, reps=reps, initial_delay=initial_delay, relax_delay=relax_delay
     ), env
 
 

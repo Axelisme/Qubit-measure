@@ -48,7 +48,8 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
             p.pulse(0, "p", timeline="default", tag="repeated")
         p.pulse(0, "p", tag="final")
 
-    prog, env = program(body, initialize, trigger_time=None)
+    # Counts 0..2 leave 86 cycles of shell WAIT slack; allow that exact budget.
+    prog, env = program(body, initialize, trigger_time=None, relax_delay=0.2)
     result = request(prog, env)
     assert result.point_names == ("scan",)
     for index in range(3):

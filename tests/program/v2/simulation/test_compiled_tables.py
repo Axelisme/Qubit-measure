@@ -8,7 +8,7 @@ from zcu_tools.program.v2.modules import LoadValue, LoadWord, ScanWith
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Join
-from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
+from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
     PulseReadoutCfg,
@@ -81,16 +81,32 @@ def module_program(
     return Program(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1), env
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_shared_readout_cfg_keeps_each_semantic_source(native):
+def test_modular_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
     prog, env = module_program(
-        [cfg.build("herald"), cfg.build("terminal")], native=native
+        [cfg.build("herald"), cfg.build("terminal")], native=False
     )
     point = request(prog, env).materialize_point(0)
     assert [event.source for event in point.events] == ["herald", "terminal"]
     assert [event.gen_ch for event in point.events] == [0, 0]
     assert len(point.readouts[0].trigger_us) == 2
+
+
+def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
+    cfg = drive()
+    prog, env = module_program(
+        [Pulse("first", cfg), Pulse("second", cfg), receiver().build("readout")]
+    )
+    point = request(prog, env).materialize_point(0)
+    assert [event.source for event in point.events] == ["first", "second", "readout"]
+    assert [event.gen_ch for event in point.events] == [1, 1, 0]
+    first, second, _ = point.events
+    for event in (first, second):
+        assert event.duration_us == 38 / 384
+        assert event.frequency_mhz == pytest.approx(80, abs=1e-5)
+        assert event.gain == pytest.approx(0.2, abs=1e-4)
+    assert [first.start_us, second.start_us] == [0, 43 / 430.08]
+    assert len(point.readouts[0].trigger_us) == 1
 
 
 @pytest.mark.parametrize("native", [False, True])
