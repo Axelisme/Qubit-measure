@@ -108,7 +108,9 @@ def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
     qapp, monkeypatch: pytest.MonkeyPatch, run_in_pool: bool
 ) -> None:
     unhandled: list[BaseException] = []
-    monkeypatch.setattr(sys, "excepthook", lambda _kind, exc, _tb: unhandled.append(exc))
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _kind, exc, _tb: unhandled.append(exc)
+    )
     bg = _bg()
     error = KeyboardInterrupt("core interrupted")
     delivered: list[tuple[BaseException, int]] = []
@@ -118,7 +120,9 @@ def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
         raise error
 
     bg.submit(
-        work, run_in_pool=run_in_pool, on_done=succeeded.append,
+        work,
+        run_in_pool=run_in_pool,
+        on_done=succeeded.append,
         on_error=lambda exc: delivered.append((exc, threading.get_ident())),
     )
     # Submitted work has no blocker. Drain also waits for the owner delivery.

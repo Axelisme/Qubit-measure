@@ -177,7 +177,8 @@ def test_timeout_fallback_delivers_keyboard_interrupt(
 
 @pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX signal contract")
 def test_controlled_deadline_targets_main_thread_during_blocking_wait(
-    monkeypatch: pytest.MonkeyPatch, timers: list[ManualTimer],
+    monkeypatch: pytest.MonkeyPatch,
+    timers: list[ManualTimer],
 ) -> None:
     send = signal.pthread_kill
     main_thread = threading.get_ident()

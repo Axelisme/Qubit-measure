@@ -186,7 +186,11 @@ def test_pre_stopped_build_shortcut_notifies_once_without_build_or_retry(
         builder = sched.prog_builder(object(), object(), program_cls=factory).add(
             FakeModule("readout")
         )
-        run = builder.build_and_acquire_decimated if decimated else builder.build_and_acquire
+        run = (
+            builder.build_and_acquire_decimated
+            if decimated
+            else builder.build_and_acquire
+        )
         sched.set_stop()
         if callback_fails:
             with pytest.raises(ValueError, match="stop observer failed") as caught:

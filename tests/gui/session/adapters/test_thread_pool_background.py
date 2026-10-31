@@ -87,7 +87,9 @@ def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) 
 
 
 @pytest.mark.parametrize("run_in_pool", [True, False])
-def test_keyboard_interrupt_is_delivered_unchanged_and_drained(make_executor, run_in_pool: bool) -> None:
+def test_keyboard_interrupt_is_delivered_unchanged_and_drained(
+    make_executor, run_in_pool: bool
+) -> None:
     scheduler = ManualOwnerScheduler()
     executor = make_executor(scheduler)
     error = KeyboardInterrupt("core interrupted")
@@ -97,7 +99,8 @@ def test_keyboard_interrupt_is_delivered_unchanged_and_drained(make_executor, ru
         raise error
 
     executor.submit(
-        work, run_in_pool=run_in_pool,
+        work,
+        run_in_pool=run_in_pool,
         on_done=lambda value: pytest.fail(f"unexpected result: {value}"),
         on_error=lambda exc: delivered.append((exc, threading.get_ident())),
     )

@@ -323,13 +323,20 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
 
 @pytest.mark.parametrize(
     ("stopped", "source", "snapshot_fails", "expected"),
-    [(True, 1, False, True), (False, 1, False, False),
-     (True, None, False, False), (True, 99, False, False),
-     (True, 1, True, False)],
+    [
+        (True, 1, False, True),
+        (False, 1, False, False),
+        (True, None, False, False),
+        (True, 99, False, False),
+        (True, 1, True, False),
+    ],
 )
 def test_failed_run_retains_only_its_own_frontend_stop_facts(
-    tmp_path: Path, stopped: bool, source: int | None,
-    snapshot_fails: bool, expected: bool,
+    tmp_path: Path,
+    stopped: bool,
+    source: int | None,
+    snapshot_fails: bool,
+    expected: bool,
 ) -> None:
     gui = SyntheticGui()
     errors: list[GuiRpcError] = []
@@ -340,13 +347,21 @@ def test_failed_run_retains_only_its_own_frontend_stop_facts(
         if method == "tab.snapshot" and gui.runs == 1:
             if snapshot_fails:
                 return {"tabs": []}
-            return {"tabs": [{
-                "tab_id": "tab-1", "adapter_name": "synthetic",
-                "interaction": {"is_running": False, "is_analyzing": False},
-                "raw_data": {"run_id": None, "saved": False},
-                "result_state": {"available": False,
-                    "source_operation_id": source, "stop_requested": stopped},
-            }]}
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "tab-1",
+                        "adapter_name": "synthetic",
+                        "interaction": {"is_running": False, "is_analyzing": False},
+                        "raw_data": {"run_id": None, "saved": False},
+                        "result_state": {
+                            "available": False,
+                            "source_operation_id": source,
+                            "stop_requested": stopped,
+                        },
+                    }
+                ]
+            }
         return gui.respond(method, params)
 
     @recipe("synthetic", "Retain failed Run facts without contaminating another Run")

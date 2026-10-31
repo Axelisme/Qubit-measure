@@ -340,7 +340,9 @@ class WorkflowTab[C]:
         self._changed()
         return token
 
-    def _finished(self, status: RunStatus | None, error: BackgroundError | None) -> None:
+    def _finished(
+        self, status: RunStatus | None, error: BackgroundError | None
+    ) -> None:
         self.error = None if error is None else str(error)
         if self.plots is not None and (status is None or status.lifecycle != "paused"):
             self.plots.finish()

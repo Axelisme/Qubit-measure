@@ -30,8 +30,13 @@ def test_core_keyboard_interrupt_fails_run_without_record_and_releases_ownership
     progress = ProgressService(DirectProgressTransport())
     runner = OperationRunner(gate, handles, progress, background, bus)
     service = RunService(
-        state, runner, bus, handles, gate=gate,
-        devices=lambda: {}, refresh_devices=lambda: None,
+        state,
+        runner,
+        bus,
+        handles,
+        gate=gate,
+        devices=lambda: {},
+        refresh_devices=lambda: None,
     )
     entered = threading.Event()
     release = threading.Event()
@@ -46,14 +51,18 @@ def test_core_keyboard_interrupt_fails_run_without_record_and_releases_ownership
 
     adapter.run.side_effect = core
     try:
-        token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
+        token = service.start_run(
+            make_inputs(state, tab_id, adapter), plots=make_plots()
+        )
         qt_until(entered.is_set, label="core reached external barrier")
         assert state.is_tab_busy(tab_id)
         assert gate.snapshot()
         if requested:
             assert service.cancel_run()
         release.set()
-        qt_until(lambda: handles.poll(token) is not None, label="failed Run owner delivery")
+        qt_until(
+            lambda: handles.poll(token) is not None, label="failed Run owner delivery"
+        )
         outcome = handles.poll(token)
         assert outcome is not None
         assert outcome.status == "failed"

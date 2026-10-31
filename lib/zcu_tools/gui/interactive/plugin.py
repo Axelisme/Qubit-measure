@@ -17,7 +17,8 @@ P = TypeVar("P")
 R = TypeVar("R")
 
 BackgroundSubmitter = Callable[
-    [Callable[[], object], Callable[[object], None], Callable[[BackgroundError], None]], None
+    [Callable[[], object], Callable[[object], None], Callable[[BackgroundError], None]],
+    None,
 ]
 
 
