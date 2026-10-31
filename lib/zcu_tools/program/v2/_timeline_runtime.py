@@ -303,7 +303,7 @@ def bounded_source_expression(
     return (
         LinearTime(minimum)
         if minimum == maximum
-        else LinearTime(terms=((CycleVariable(name, minimum, maximum), 1),))
+        else LinearTime(terms=((CycleVariable(name, minimum, maximum, reconstruction=prog._timeline_book.source_expressions.get(name)), 1),))
     )
 
 

@@ -1032,10 +1032,21 @@ class TimelineBranch(Macro):
         self.entry_math = RuntimeMath(prog)
         self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
         if self.align_timeline:
-            for register in (
-                prog._time_bounds.defined | self.book.source_expressions.keys()
-            ):
-                expression = source_expression(prog, register)
+            registers = prog._time_bounds.defined | self.book.source_expressions.keys()
+            registers |= {
+                name for name in prog.reg_dict
+                if name not in prog.loop_dict and prog._time_bounds.author_source(name)
+            }
+            for register in registers:
+                expression = (
+                    self.entry_math.source(register, author=True).expression
+                    if register not in self.book.source_expressions
+                    and prog._time_bounds.author_source(register)
+                    and register not in prog.loop_dict
+                    else source_expression(prog, register)
+                )
+                if expression is None:
+                    raise RuntimeError("branch entry source has no cycle expression")
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
                     if not variable.axes or (

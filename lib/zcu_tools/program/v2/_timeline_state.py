@@ -405,7 +405,7 @@ class TimelineBook:
     ) -> TimeExpression:
         """Describe count points without requiring a bounds-only count producer."""
         if isinstance(iterations, str) and maximum is None:
-            return LinearTime(terms=((CycleVariable(iterations, None, None), 1),))
+            return self.source_expressions.get(iterations, LinearTime(terms=((CycleVariable(iterations, None, None), 1),)))
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
             if isinstance(iterations, str) and maximum is not None
