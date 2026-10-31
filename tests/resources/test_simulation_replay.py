@@ -143,6 +143,18 @@ def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
     assert loaded.round.index == 2
 
 
+def test_replay_rejects_float_time_format_version() -> None:
+    from zcu_tools.resources.simulation_replay import ReplayRound
+
+    with pytest.raises(ValueError, match="version"):
+        ReplayRound.model_validate({
+            "version": 1,
+            "acquire_identity": "0" * 64,
+            "snapshot": {"version": "test", "model_identity": "test", "values": []},
+            "index": 0,
+        })
+
+
 def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
     from zcu_tools.resources.simulation_replay import read_replay
 
