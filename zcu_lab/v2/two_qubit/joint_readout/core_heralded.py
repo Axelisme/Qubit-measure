@@ -342,7 +342,11 @@ class JointReadoutHeraldedExp(
                     )
                     ax.text(col, row, label, ha="center", va="center", fontsize=7)
             ax.set_xticks(
-                range(9), OUTCOME_LABELS, rotation=45, ha="right", rotation_mode="anchor"
+                range(9),
+                OUTCOME_LABELS,
+                rotation=45,
+                ha="right",
+                rotation_mode="anchor",
             )
             ax.set(
                 yticks=range(4),
