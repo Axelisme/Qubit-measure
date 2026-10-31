@@ -195,7 +195,7 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     second_device = FakeDevice(fast_mode=True)
     manager.drop_device("flux")
     manager.register_device("flux", second_device)
-    core.contexts[0].scope.stop.set_error("failed", "old run", None)
+    core.contexts[0].scope.stop.set(reason="old run")
 
     first_evidence = adapter.acquisition_for(first)
     second = adapter.run(cfg)
@@ -217,7 +217,6 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     assert first_context.plots is not second_context.plots
     assert first_context.scope.stop is not second_context.scope.stop
     assert not second_context.scope.stop.is_set()
-    assert second_context.scope.stop.error is None
     assert first_context.devices["flux"] is first_device
     assert second_context.devices["flux"] is second_device
     assert first_context.soc is soc and second_context.soc is soc
@@ -318,20 +317,14 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )
 
 
-@pytest.mark.parametrize("outcome", ["stopped", "interrupted", "failed"])
-def test_core_stop_facts_do_not_override_returned_record(outcome: str) -> None:
+def test_core_stop_request_does_not_override_returned_record() -> None:
     core = _Core()
     host = _Host()
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
     previous = adapter.run(_Cfg(scale=5.0))
-    if outcome == "stopped":
-        core.signal_outcome = "stopped"
-    elif outcome == "interrupted":
-        core.signal_outcome = "interrupted"
-    else:
-        core.signal_outcome = "failed"
+    core.request_stop = True
 
     partial = adapter.run(_Cfg(scale=9.0))
 

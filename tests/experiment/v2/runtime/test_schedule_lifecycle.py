@@ -118,7 +118,6 @@ def test_schedule_body_other_exception_still_propagates(error: BaseException) ->
         raise error
     assert caught.value is error
     assert sched.outcome.status == "completed"
-    assert stop.error is None
     np.testing.assert_allclose(buffer.data, [7.0, np.nan, np.nan], equal_nan=True)
 
 
@@ -231,7 +230,6 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
         run()
     assert caught_body.value is error
     assert sched.outcome.status == "completed"
-    assert stop.error is None
     np.testing.assert_array_equal(buffer.data, [1.0, 2.0])
 
 

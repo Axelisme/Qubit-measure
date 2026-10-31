@@ -533,7 +533,7 @@ def test_run_callback_failure_propagates_without_retry_or_failed_outcome(
     assert caught.value is cause
     assert calls == 1
     assert schedule.outcome.status == "completed"
-    assert root.stop.error is None
+
 
 
 def test_run_accepts_acquire_only_program_and_forwards_native_keywords() -> None:

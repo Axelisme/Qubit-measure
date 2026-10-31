@@ -143,8 +143,8 @@ class Scope:
     name (run normally has none). A non-None name must be nonempty and contain
     no #, / or :. Invalid kinds/names raise ValueError. stop optionally borrows
     a caller-owned token.
-    Children inherit stop bits at birth. Cancellation travels down, while error
-    and partial completion travel up on release and stop at operation children.
+    Children inherit stop requests at birth. Cancellation travels down;
+    release only detaches children and never reports completion facts.
     Construction/child attach immediately; with or release closes the boundary.
     No current/latest child is registered. All tree operations are thread-safe.
     """
