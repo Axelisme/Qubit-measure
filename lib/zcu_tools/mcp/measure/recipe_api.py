@@ -267,12 +267,13 @@ class RunResult:
 
 @dataclass(frozen=True)
 class AnalysisResult[T]:
-    """Analysis success or an expected failure that the author can act on.
+    """Analysis success or descendant cancellation.
 
-    Completed result is TypeAdapter(T).validate_python(summary); incompatible
-    fields raise without repair. Failed result is None and reason explains the
-    expected fitting failure or descendant cancellation. Programming errors
-    still raise. Root cancellation raises ScriptCancelled after owner drain.
+    result is TypeAdapter(T).validate_python(summary) on success, or None after
+    descendant cancellation. status is completed on success or failed after
+    descendant cancellation; reason is None on success or the cancellation
+    message. Analyze errors and incompatible fields raise without repair.
+    Root cancellation raises ScriptCancelled after owner drain.
     """
 
     result: T | None
@@ -581,11 +582,11 @@ class RecipeTab:
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
-        No automatic Save or preview occurs. Expected fitting failures and
-        descendant cancellation return status="failed", result=None and reason;
-        the author decides whether to save, retry, skip or stop. Root cancellation
-        raises ScriptCancelled after owner drain. Invalid stages, stale sources,
-        incompatible summary fields, programming and transport errors propagate.
+        No automatic Save or preview occurs. Any analyze failure raises to the
+        author with the operation's original error message, regardless of type.
+        Descendant cancellation returns status="failed", result=None and reason.
+        Root cancellation raises ScriptCancelled after owner drain. Invalid stages,
+        stale sources, incompatible summary fields and transport errors propagate.
         updates maps the adapter's analysis parameter names to ordinary values
         in their declared units; no conversion or Form expression evaluation
         occurs. None or an empty mapping keeps the owner's current parameters.

@@ -6,8 +6,8 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.analysis.failure import AnalysisFailed
 from matplotlib.figure import Figure
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
@@ -68,7 +68,6 @@ def test_analyze_errors_settle_failed_with_original_message(qapp, phase, error_t
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
     assert outcome.error == str(error)
-
 
 
 @pytest.mark.parametrize("has_run_source", [True, False])
