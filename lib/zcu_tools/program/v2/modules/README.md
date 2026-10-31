@@ -22,7 +22,12 @@ without leaking hardware register choreography into experiment classes.
 Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
-同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
+同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
+各 program 以 module 物件身分持有 pulse／waveform、runtime readout、table offset 與 loader 的宣告結果。
+重新 compile 只重建該 program 的資源，不覆寫其他 program 的宣告。
+`Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
+舊 module 的 tag 與 block_mode 不控制新路徑。
+Legacy init／run 仍將狀態放在 module 上，不提供此跨 program 重用契約。
 
 Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
 Lowering 不用 `total_length` 重建時間，也不移動 reference。

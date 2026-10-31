@@ -125,6 +125,11 @@ Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
 它不接收 SoC，不取數，也不依賴 experiment runtime。
 Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告。
+同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。
+每個 program 依 module 物件身分保存宣告結果，compile 時重新配置自己的資源。
+Pulse 在各 program 內按定義去重，同名不同 cfg 的 Pulse 使用不同 waveform 名稱。
+原生 QICK 呼叫需要 pulse 名稱時，用 `pulse.pulse_name(prog)` 取得該 program 的宣告結果。
+Legacy `ModularProgramV2` 仍將宣告狀態保存在 module 上，不適用跨 program 重用。
 同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
 Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
 Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。

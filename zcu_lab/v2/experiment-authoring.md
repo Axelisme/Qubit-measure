@@ -729,10 +729,10 @@ with Schedule(config, signals, scope=context.scope) as sched:
     )
 ```
 
-**每個 program 或 build 都要建立全新的 module 物件。** 不把已被 built program 使用的
-module 傳給另一個 program，也不從 cache 拿出 module 重新 build。
-目前宣告結果仍保存在 module 上，跨 program 共用會混入前一個 program 的資源狀態。
-將宣告狀態搬進 program 是後續工作。
+同一 module 物件可以傳給多個 `TimelineBuilder` 或原生 `TimelineProgramV2`。
+每個 program 依 module 物件身分保存宣告結果，重新 compile 時配置自己的資源。
+錄製或編譯後不要修改 module 或它的 cfg。不同掃描設定仍要建立不同 module。
+Legacy `ModularProgramV2` 仍在 module 上保存宣告狀態，不適用這個重用契約。
 同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
 重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
 相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
@@ -835,7 +835,7 @@ Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用�
 
 Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
 預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
-這次建構建立新的 readout，不重用前一個 built program 的物件。
+範例建立新的 readout，也可以重用設定不變的 module；宣告結果由各 program 持有。
 
 ```python
 trace_builder = TimelineBuilder(context.soccfg, reps=1)
