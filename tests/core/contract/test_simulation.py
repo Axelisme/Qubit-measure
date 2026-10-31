@@ -31,6 +31,19 @@ def test_request_rejects_noninteger_or_out_of_range_time_arrays(duration, error)
         )
 
 
+@pytest.mark.parametrize("durations", [[-1], []])
+def test_request_rejects_negative_body_durations_and_empty_templates(durations):
+    values = np.array(durations, dtype=np.int64)
+    template = simulation.TimelineTemplate(
+        np.arange(values.size, dtype=np.int64), (), (), values
+    )
+    with pytest.raises(ValueError, match="body duration|template"):
+        simulation.AcquireRequest(
+            "decimated", (1,), 0, (), 1, 0, "test",
+            templates=(template,), time_base=simulation.TimeBase(Fraction(1)),
+        )
+
+
 def template_request():
     """Two structural classes with local arrays in sorted flat-point order."""
     envelope = simulation.PulseEnvelope(2, (1j, -1j))
