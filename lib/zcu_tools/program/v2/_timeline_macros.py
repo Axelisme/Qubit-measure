@@ -433,8 +433,6 @@ class TimelineRepeatEnter(Macro):
         if self.counter is not None:
             prog.add_reg(self.counter)
         parent = self.timeline
-        if parent is None:
-            raise ValueError("repeat requires a parent timeline")
         external = self.book.ends.copy()
         del external[parent]
         initial_external = external.copy()

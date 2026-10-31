@@ -1,6 +1,6 @@
 """Shot-local Repeat accumulators and explicit reference-debit bookkeeping."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from qick.asm_v2 import Macro, WriteReg
 
@@ -33,6 +33,15 @@ def _end(
     return RuntimeEnd(
         register, limits.minimum, limits.maximum, covers=covers, expression=expression
     )
+
+
+@dataclass(frozen=True)
+class _ReferenceSummary:
+    """Relative end, total reference advance and final entry, in tProc cycles."""
+
+    end: TimeExpression
+    advance: TimeExpression
+    last_entry: TimeExpression
 
 
 class LoopTimelineEnter(Macro):
@@ -173,12 +182,33 @@ class LoopTimelineExit(Macro):
         book.pinned = frame.pinned
 
     def _reference_exit(self, prog, frame: LoopTimelineFrame, finish: Time) -> None:
-        """Carry the relative end while debiting actual advances on every path.
+        """Store exact runtime debits, then restore loop-relative provenance."""
+        book = self.entry.book
+        summary = self._reference_summary(prog, frame, finish)
+        result = _end(frame.origin.register, summary.end)
+        book.math.check_end(result)
+        operand = book.math.cycles(finish)
+        book.math.operations.append(WriteReg(dst=result.register, src=operand.register))
+        external = self._reference_external(prog, frame, summary.advance)
+        result = self._reference_channels(prog, frame, result, summary)
+        self._check_backedge(prog, frame, LinearTime(), next_entry=time_expression(prog, finish))
+        extra_advance = add_time(summary.advance, scale_time(frame.advance, -1))
+        for outer in book.loop_timelines:
+            outer.advance = add_time(outer.advance, extra_advance)
+            outer.starts.extend(
+                (ch, substitute_time(start, {frame.progress: LinearTime()}), path) for ch, start, path in frame.starts
+            )
+        for outer in book.repeats:
+            outer.expression_advance = add_time(outer.expression_advance, extra_advance)
+        if book.repeats and not book.loop_timelines:
+            self._publish_reference_guards(prog, frame)
+        book.ends = {**external, frame.parent: result}
+        book.waiting = frame.waiting
+        book.pinned = frame.pinned
 
-        Folding here is compile-only provenance, never a lowering decision or
-        a replay of macros. Hardware keeps one accumulator and the recorded
-        reference operations, including zero-count and shot-local entry stores.
-        """
+
+    def _reference_summary(self, prog, frame: LoopTimelineFrame, finish: Time) -> "_ReferenceSummary":
+        """Fold compile-only provenance, without choosing or replaying lowering."""
         book = self.entry.book
         incoming = time_expression(prog, frame.entry)
         transfer = time_expression(prog, finish)
@@ -251,65 +281,74 @@ class LoopTimelineExit(Macro):
                 terms=((CycleVariable("repeat final entry", 0, None), 1),)
             )
 
-        result = _end(frame.origin.register, result_expression)
-        book.math.check_end(result)
-        operand = book.math.cycles(finish)
-        book.math.operations.append(WriteReg(dst=result.register, src=operand.register))
+        return _ReferenceSummary(result_expression, total_advance, last_entry)
 
-        def store(
-            initial: Time, expression: TimeExpression, *, generated: Time | None = None
-        ) -> RuntimeEnd:
-            register = prog.add_reg()
-            book.pinned.add(register)
-            initial_operand = frame.entry_math.cycles(initial)
-            frame.entry_math.operations.append(
-                WriteReg(dst=register, src=initial_operand.register)
-            )
-            storage = _end(register, time_expression(prog, initial))
-            if generated is None:
-                for math, advance in frame.debits:
-                    remainder = math.cycles(math.floor(storage, advance))
-                    math.operations.append(
-                        WriteReg(dst=register, src=remainder.register)
-                    )
-            else:
-                tail = book.math.cycles(generated)
-                book.math.operations.append(WriteReg(dst=register, src=tail.register))
-            return _end(register, expression)
+    def _reference_store(
+        self, prog, frame: LoopTimelineFrame, initial: Time, expression: TimeExpression, *, generated: Time | None = None
+    ) -> RuntimeEnd:
+        book = self.entry.book
+        register = prog.add_reg()
+        book.pinned.add(register)
+        initial_operand = frame.entry_math.cycles(initial)
+        frame.entry_math.operations.append(
+            WriteReg(dst=register, src=initial_operand.register)
+        )
+        storage = _end(register, time_expression(prog, initial))
+        if generated is None:
+            for math, advance in frame.debits:
+                remainder = math.cycles(math.floor(storage, advance))
+                math.operations.append(
+                    WriteReg(dst=register, src=remainder.register)
+                )
+        else:
+            tail = book.math.cycles(generated)
+            book.math.operations.append(WriteReg(dst=register, src=tail.register))
+        return _end(register, expression)
 
+
+    def _reference_external(self, prog, frame: LoopTimelineFrame, advance: TimeExpression) -> dict[str, Time]:
+        """Debit each outer name at the reference operation's execution position."""
         external = {}
         for name, initial in frame.external.items():
             expression = choose_time(
                 LinearTime(),
-                add_time(time_expression(prog, initial), scale_time(total_advance, -1)),
+                add_time(time_expression(prog, initial), scale_time(advance, -1)),
             )
             if time_expression(prog, initial) == LinearTime():
                 external[name] = initial
             else:
-                external[name] = store(initial, expression)
+                external[name] = self._reference_store(prog, frame, initial, expression)
                 frame.waiting.add(name)
 
+        return external
+
+    def _reference_channels(self, prog, frame: LoopTimelineFrame, result: RuntimeEnd, summary: "_ReferenceSummary") -> RuntimeEnd:
+        """Keep last-generated tails distinct from repeatedly debited outer tails."""
+        book = self.entry.book
+        count = book.repeat_count(prog, self.iterations, self.minimum, self.maximum)
+        active = choose_time(count, LinearTime(1), maximum=False)
         for (generator, ch), initial in frame.initial_channels.items():
             current = book.channel_end(prog, ch, generator=generator)
             if (generator, ch) in frame.written_channels:
-                last = apply(
-                    book.native_expression(prog, ch, generator=generator), last_entry
+                last = substitute_time(
+                    book.native_expression(prog, ch, generator=generator),
+                    {frame.progress: add_time(summary.last_entry, scale_time(time_expression(prog, frame.entry), -1))},
                 )
                 expression = select_time(
                     active, (frame.initial_native[generator, ch], last)
                 )
-                tail = store(initial, expression, generated=current)
+                tail = self._reference_store(prog, frame, initial, expression, generated=current)
             else:
                 expression = choose_time(
                     LinearTime(),
                     add_time(
                         frame.initial_native[generator, ch],
-                        scale_time(total_advance, -1),
+                        scale_time(summary.advance, -1),
                     ),
                 )
                 if expression == LinearTime():
                     continue
-                tail = store(initial, expression)
+                tail = self._reference_store(prog, frame, initial, expression)
             channels = book.runtime_gens if generator else book.runtime_ros
             channels[ch] = tail
             book.native_expressions[generator, ch] = expression
@@ -319,23 +358,10 @@ class LoopTimelineExit(Macro):
                 gen_ch=ch if generator else None,
                 ro_ch=None if generator else ch,
             )
-            if expression == result_expression:
+            if expression == summary.end:
                 result = replace(result, covers=(*result.covers, tail))
 
-        self._check_backedge(prog, frame, LinearTime(), next_entry=transfer)
-        extra_advance = add_time(total_advance, scale_time(frame.advance, -1))
-        for outer in book.loop_timelines:
-            outer.advance = add_time(outer.advance, extra_advance)
-            outer.starts.extend(
-                (ch, apply(start, incoming), path) for ch, start, path in frame.starts
-            )
-        for outer in book.repeats:
-            outer.expression_advance = add_time(outer.expression_advance, extra_advance)
-        if book.repeats and not book.loop_timelines:
-            self._publish_reference_guards(prog, frame)
-        book.ends = {**external, frame.parent: result}
-        book.waiting = frame.waiting
-        book.pinned = frame.pinned
+        return result
 
     def _publish_reference_guards(self, prog, frame: LoopTimelineFrame) -> None:
         book = self.entry.book
