@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-30，Schedule run acquisition
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -109,9 +109,33 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - 正常離開 scope 時（包含 requested stop），`Schedule` 對 root `SignalBuffer` 呼叫 `flush_pending_update()`，交付最後尚未呈現的資料。已顯式 flush 或已經呈現的更新不重複發布。Body 拋出例外或 `KeyboardInterrupt` 時不做自動 flush；正常退出的 callback 錯誤會傳播，但 scope 仍關閉。
 - 自動 flush 不擴充 `BufferProtocol`，也不對其它實作廣播 root update。`ResultTree` 維持由 caller 顯式 flush，以保留既有 env 與 path 事件語意。
 
+### Schedule run acquisition
+
+`Schedule` 與 scan step 提供 `run_acquire(program, soc, ...)`、
+`run_acquire_summed(program, soc, processor=..., ...)` 與
+`run_acquire_decimated(program, soc, ...)`。三個方法不建立 program，也不經過
+`ProgramBuilder`。Caller 可傳入手寫或 builder 產生的 program，只需提供對應的同步
+acquire 方法。
+
+Run 會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 live update。
+它依 `RunOptions.retry` 自動重試，並依 `RunOptions.stop_condition` 停止目前 acquire。
+`RunOptions[T_Raw]` 提供 retry、progress、stop_condition 與 converter。`rounds` 等 native 參數直接傳給 run 方法。
+program 層無前綴的 `acquire*` 只取數並回傳，不承擔 slot/live update、自動 retry 或
+Schedule stop_condition。
+Integrated 的預設 converter 將第一個 ADC/readout 的 IQ 轉成複數，summed 直接寫入
+累積總和，decimated 將第一個 ADC 的 trace 轉成複數並保留 repetitions 與 sample axes。
+
+`run_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
+或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
+partial-result、overrun 與 progress；新入口與舊 builder 共用這份執行邏輯。
+`AcquireOptions`、同步 producer keyword 型別與 raw converters 也由該模組提供，舊匯入位置保留。
+
 ### `ProgramBuilder`
 
-`program_builder.py` 擁有完整的 QICK program 組裝與同步 acquire：`ProgramBuilder`、`ModuleFacade`、`AcquireOptions`、producer 型別契約與 raw conversion。`schedule.py` 保留 Schedule／Step、buffer／slot 與 run lifecycle。Builder 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome 與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
+`program_builder.py` 擁有 QICK program 組裝與舊 acquire 入口：`ProgramBuilder`、
+`ModuleFacade` 與舊 producer 型別契約。`schedule.py` 保留 Schedule／Step、buffer／slot
+與 run lifecycle。共用 runner 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome
+與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
 
 `acquire_cancel.py` 合成 acquire child 的取消與作者的 data stop condition。Data stop 是正常完成，不設 scope event，也不標記 partial。
 
@@ -120,18 +144,17 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `build_and_acquire()` 是 `build()` 後立刻 `run_program(...)` 的 convenience。
 - Decimated trace 使用獨立方法：`run_program_decimated(program)` 與
   `build_and_acquire_decimated()`。
-- Processed payload 使用 `run_program_processed(program)` 與
-  `build_and_acquire_processed()`。兩者都要求 `processors` 和 `processed2signal_fn`。
-  同一 converter 處理 cumulative round updates 和 final result，不使用 builder-wide 或預設 IQ converter。
-  Heralded converter 呼叫 `herald_ratio`，將 fraction 寫入實驗擁有的 slot，再回傳 conditional signal。
-- 六個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
+- `run_program_summed(program)` 要求單一 `processor` 與 `sums2signal_fn`。
+  Caller 先 build，再解析讀出 label。Converter 收累積與最終總和，不使用 IQ 預設轉換。
+  這條路徑沿用相同的 retry、progress 與 stop_condition，不提供 build-and-acquire shortcut。
+- 五個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
   Retry 重用同一個 rounds 值。`reps` 與 `rounds` 必須為正整數，拒絕 bool。
   Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
   預設使用 `default_decimated_raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- 六個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
+- 五個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
   progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
   `progress_label` 覆寫 rounds bar label；`progress_leave=None` 保留 root-vs-step 的
   close/retain policy。`progress` 控制 native acquisition progress，不控制 rounds bar。
@@ -178,6 +201,10 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 
 ## 測試
 
+`test_run_acquire.py` 經 Schedule 公開入口覆蓋三種 acquisition 的 simulator 路徑、
+slot/live update、converter、retry、data stop、取消、部分 round 與 callback 錯誤。
+`test_run_timeline.py` 以 deterministic transport 跑 emit program 的一般 QICK
+acquisition pipeline，不宣稱 legacy simulator 支援 emit 寫法。
 `tests/experiment/v2/runtime/test_program_builder.py` 覆蓋顯式 program 控制、Schedule cfg 隔離、
 modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
 `test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；

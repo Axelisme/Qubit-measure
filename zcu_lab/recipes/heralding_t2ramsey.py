@@ -22,44 +22,44 @@ class HeraldingT2RamseyInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value, null clears/disables it.",
+        description="Readout library key.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null clears/disables it.",
+        description="Preparation module option.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key; omission retains the Form value, null clears/disables it.",
+        description="Calibrated pi/2-pulse library key.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us; omission retains the Form value, null clears/disables it.",
+        description="Delay sweep stop in us.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value, null clears/disables it.",
+        description="Final-pulse phase-ramp ratio, dimensionless.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value, null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value, null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value, null clears/disables it.",
+        description="Averaging round count.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         KEEP,
-        description="Fit fringe; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit fringe. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase offset (fringe only); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit phase offset (fringe only). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
@@ -86,10 +86,12 @@ async def heralding_t2ramsey(
 ) -> HeraldingT2RamseyReport:
     """Measure Ramsey fringes and their decay during free qubit evolution.
 
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
     After optional reset and ground-herald readout, apply pi/2, wait the swept delay, then apply a
     phase-shifted pi/2 pulse and read out, averaging only accepted shots.
-    Readout requires a classifier; circle requires radius. Pass fraction is
-    saved on the delay grid and is not independently validated ground purity. Analyze before fitting the decay
+    Readout requires a GE Post circle classifier with radius. Per-class shot sums are
+    saved on the delay grid. Pass fraction is computed from counts, not saved. Analyze before fitting the decay
     to estimate Ramsey T2; fringe fitting also estimates detuning. Ask before
     applying the proposed calibration; skipping writes nothing. Analysis keeps
     the GUI parameters, which fit a free fringe phase by default. Turn off Fit

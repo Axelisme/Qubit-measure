@@ -25,46 +25,46 @@ class HeraldingAmpRabiInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Pulse-readout library key including classifier; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Pulse-readout library key including classifier. Sources are chosen by the Form.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key; omission retains the Form value; null clears/disables it. No pi calibration is required for this sweep.",
+        description="Drive library key. No pi calibration is required for this sweep.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option; omission retains the Form selection, null disables it.",
+        description="Reset module option.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse frequency in MHz. Omission retains the Form value; null clears it.",
+        description="Fixed pulse frequency in MHz.",
     )
     pulse_length_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed drive pulse duration in us; omission retains the Form value; null clears/disables it.",
+        description="Fixed drive pulse duration in us.",
     )
     gain_range: (
         Annotated[list[float], Field(min_length=2, max_length=2)] | None | Keep
     ) = Field(
         KEEP,
-        description="Two native gain endpoints; omission retains the Form value; null clears/disables it.",
+        description="Two native gain endpoints.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     skip: int | None | Keep = Field(
         KEEP,
-        description="Skip points; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Skip points. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
@@ -87,13 +87,15 @@ class HeraldingAmpRabiReport(RecipeReport):
 
 @recipe(
     "heralding_amp_rabi",
-    description="Run ground-heralded gain Rabi and save selected IQ, pass fraction and analysis.",
+    description="Run ground-heralded gain Rabi and save per-class shot sums and analysis.",
 )
 async def heralding_amp_rabi(
     session: RecipeSession, inputs: HeraldingAmpRabiInputs
 ) -> HeraldingAmpRabiReport:
     """Sweep drive gain at fixed pulse length to calibrate pi and pi/2 rotations.
 
+    Store per-class shot sums; compute herald-g conditional IQ for fitting.
+    Readout must include a GE Post circle classifier with calibrated radius.
     After optional reset, herald ground with the saved readout classifier,
     apply the drive pulse and read out at each gain. Average only accepted shots.
     No active reset or joint herald is added. Fit the Rabi oscillations to estimate pi and pi/2 gains,

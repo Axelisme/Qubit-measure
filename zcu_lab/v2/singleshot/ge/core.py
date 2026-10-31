@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -21,7 +22,6 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset
 
-from zcu_lab.v2.support.singleshot.plot import draw_ge_scatter
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
 from .analysis import GEConfusionResult, calc_confusion_matrix, plot_confusion_matrix
@@ -169,10 +169,31 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
 
-        signals_buffer = SignalBuffer(
-            (2, cfg.shots),
-            on_update=lambda data: draw_ge_scatter(context.plots, "measurement", data),
-        )
+        context.plots.subplots("measurement")
+
+        def update(data: NDArray[np.complex128]) -> None:
+            clouds = data.copy()
+
+            def draw(figure: Figure) -> None:
+                axes = figure.axes[0]
+                axes.clear()
+                for cloud, label, color in zip(
+                    clouds,
+                    ("g preparation (probe off)", "e preparation (probe on)"),
+                    ("tab:blue", "tab:red"),
+                    strict=True,
+                ):
+                    axes.scatter(
+                        cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
+                    )
+                axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+                axes.set_aspect("equal", adjustable="datalim")
+                axes.grid()
+                axes.legend()
+
+            context.plots.draw("measurement", draw)
+
+        signals_buffer = SignalBuffer((2, cfg.shots), on_update=update)
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 probe_cfg = step.cfg.probe_pulse if with_probe else None
@@ -218,7 +239,6 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         options: GEAnalyzeOptions,
         *,
         plots: Plots,
-        figure_name: str = "fit",
     ) -> GEAnalysis:
         """Fit readout separation and preparation populations from raw IQ clouds.
 
@@ -228,7 +248,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         fidelity, which includes preparation mixing and is not pure-state readout
         fidelity. Poor histogram fit quality makes model populations and post
         population correction unreliable. Publish raw g/e IQ scatter to plots
-        as figure_name, including on numerical failure. Histogram fitting stays
+        as "fit", including on numerical failure. Histogram fitting stays
         internal. cfg=None is supported.
 
         Rotation/classification, histogram fitting, fitted population/center
@@ -241,11 +261,22 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
         if options.backend not in ("pca", "center"):
             raise ValueError(f"Unknown backend: {options.backend}")
-        if figure_name in plots:
-            raise ValueError(f"Figure already exists: {figure_name}")
-        draw_ge_scatter(
-            plots, figure_name, signals, labels=("g preparation", "e preparation")
-        )
+        if "fit" in plots:
+            raise ValueError("Figure already exists: fit")
+        _, axes = plots.subplots("fit")
+        for cloud, label, color in zip(
+            signals,
+            ("g preparation", "e preparation"),
+            ("tab:blue", "tab:red"),
+            strict=True,
+        ):
+            axes.scatter(
+                cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
+            )
+        axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+        axes.set_aspect("equal", adjustable="datalim")
+        axes.grid()
+        axes.legend()
         fidelity, init_pops, fit = singleshot_ge_analysis(
             signals,
             angle=options.angle,
@@ -278,14 +309,13 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         options: GEPostAnalyzeOptions,
         *,
         plots: Plots,
-        figure_name: str = "post",
     ) -> GEPostAnalysis:
         """Derive classification radius and confusion matrix without refitting IQ.
 
         source contains probe-off/on IQ shaped (2, N), in normalized ADC units.
         primary supplies physical G/E mapping and fitted populations/centers.
         options sets the radius policy, in the same IQ units. Return the
-        classification diagnostic and publish it as figure_name in plots.
+        classification diagnostic and publish it as "post" in plots.
         Classification uses nearest-center regions and radius, not the primary
         histogram threshold. Solving the fitted preparation matrix removes its
         inferred mixing; poor primary histogram fits make this correction
@@ -311,5 +341,5 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             np.linalg.LinAlgError,
         ) as exc:
             raise GENumericalError(str(exc)) from exc
-        plot_confusion_matrix(confusion, signals, primary, plots, figure_name)
+        plot_confusion_matrix(confusion, signals, primary, plots, "post")
         return GEPostAnalysis(confusion=confusion)

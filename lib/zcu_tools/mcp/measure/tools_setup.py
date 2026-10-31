@@ -407,7 +407,7 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
     return {
         "device_setup": {
             "handler": partial(device_setup, ctx),
-            "description": "Merge partial cfg with before Info and submit complete cfg once. "
+            "description": "Set up a device: merge partial cfg with before Info and submit complete cfg once. "
             "When Info stores value_unit, value patches require explicit value_unit. "
             "RPC Info owns model validation; "
             "GUI service owns connected admission. Wait up to 300 seconds, without cancellation, "
@@ -424,7 +424,7 @@ def build_setup_tools(ctx: MeasureToolContext) -> ToolTable:
         },
         "recipe_guide": {
             "handler": partial(recipe_guide, ctx),
-            "description": "Read the named adapter's complete Markdown guide and resource_dir. Recipe Form fields may be omitted to retain values; null clears/disables nullable fields. Ordered overrides use dotted paths after experiment values, before check_ready. Images remain relative to that directory and are not attached. Does not run a recipe, infer an adapter mapping or mutate the GUI. For point parameter/library/aliases edits, follow the server instructions' direct-file read/edit/context.reload contract.",
+            "description": "Read an adapter's complete Markdown guide and resource_dir. Images stay relative to that directory, not attached. Does not run recipes, infer recipe-to-adapter mapping or mutate the GUI.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"adapter": {"type": "string", "minLength": 1}},

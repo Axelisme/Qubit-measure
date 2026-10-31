@@ -14,12 +14,12 @@ from zcu_tools.analysis.fitting import (
 from zcu_tools.experiment import AnalysisFailed
 from zcu_tools.experiment.workflows import Failed
 
-from zcu_lab.v2.support.lifetime_models import (
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real
+from zcu_lab.workflows.common.lifetime_models import (
     LifetimeComparison,
     LifetimeCurve,
     compare_lifetime_models,
 )
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real
 
 
 @dataclass(frozen=True)

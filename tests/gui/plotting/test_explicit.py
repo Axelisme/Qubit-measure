@@ -1,18 +1,31 @@
 from __future__ import annotations
 
+import gc
+import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
+from weakref import ref
 
 import numpy as np
 import pytest
+from matplotlib.artist import Artist
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
-from qtpy.QtWidgets import QApplication, QLabel, QStackedWidget
+from qtpy.QtWidgets import (
+    QApplication,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.plotting import FigureContainer, get_figure_container
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
@@ -20,6 +33,7 @@ from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
 from zcu_tools.plotting.plots import Plots
 
 from tests._plotting import create_trace
+from tests.gui._user_input import ComponentDriver
 
 
 @pytest.fixture
@@ -66,6 +80,197 @@ def _run_worker(qapp: QApplication, work: Callable[[], int]) -> int:
         assert background.quiesce()
         background.deleteLater()
         qapp.processEvents()
+
+
+def test_figure_show_survives_qt_canvas_swap(qapp, hosts) -> None:
+    stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    figure, axes = plots.subplots(num="explicit")
+    axes.plot([0, 1], [2, 3])
+    assert stacks[0].count() == 1
+    figure.show()
+    canvas = figure.canvas
+    assert get_figure_container(figure) is containers[0]
+    assert stacks[0].count() == 2
+    figure.show()
+    assert figure.canvas is canvas
+    assert stacks[0].count() == 2
+    plots.finish()
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
+    plots.release()
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    adapters[1].present(figure)
+    assert get_figure_container(figure) is containers[1]
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    adapters[1].release(figure)
+
+
+def _native_callbacks(
+    plots: Plots, axes: Axes
+) -> tuple[Callable[[str], None], Callable[[NDArray[np.float64]], None]]:
+    owner_id = threading.get_ident()
+    (curve,) = axes.plot([], [], "o-")
+    annotation = axes.text(0.5, 0.9, "", transform=axes.transAxes, ha="center")
+
+    @plots.on_plot_thread
+    def set_caption(text: str) -> tuple[Artist, ...]:
+        assert threading.get_ident() == owner_id
+        axes.set_title(text)
+        return (axes.title,)
+
+    @plots.on_plot_thread
+    def push(values: NDArray[np.float64]) -> tuple[Artist, ...]:
+        assert threading.get_ident() == owner_id
+        curve.set_data([0.0, 1.0, 2.0], values)
+        axes.relim()
+        axes.autoscale_view()
+        annotation.set_text(f"Worker peak {values[1]:g} mV")
+        return (curve, annotation, axes)
+
+    return set_caption, push
+
+
+def _finish_actions(
+    plots: Plots, figure: Figure, container: FigureContainer, status: QLabel
+) -> tuple[Callable[[], None], Callable[[], None], Callable[[], None]]:
+    def finish_and_clear() -> None:
+        plots.finish()
+        container.clear_dynamic_canvases()
+        status.setText("Finished and cleared")
+
+    def try_finished_show() -> None:
+        try:
+            figure.show()
+        except RuntimeError as error:
+            status.setText(str(error))
+
+    def finish() -> None:
+        plots.finish()
+        plots.release()
+        status.setText("Released")
+
+    return finish_and_clear, try_finished_show, finish
+
+
+@pytest.fixture
+def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
+    window = QWidget()
+    layout = QVBoxLayout(window)
+    status = QLabel("Ready")
+    layout.addWidget(status)
+    stack = QStackedWidget()
+    placeholder = QLabel("No figure shown")
+    stack.addWidget(placeholder)
+    layout.addWidget(stack, stretch=1)
+    container = FigureContainer(stack, placeholder)
+    owner = QtOwnerScheduler()
+    host = QtPlotHost(container, owner)
+    plots = Plots(host)
+    figure, axes = plots.subplots(
+        num="explicit",
+        subplot_kw={"xlabel": "Frequency (MHz)", "ylabel": "Signal (mV)"},
+    )
+    scope = LifetimeScope(window)
+    set_caption, push = _native_callbacks(plots, axes)
+
+    def show() -> None:
+        set_caption("Native decorated update")
+        figure.show()
+        status.setText("Shown")
+
+    def update(peak: float) -> None:
+        def work() -> int:
+            push(np.array([1.0, peak, 2.0]))
+            return threading.get_ident()
+
+        _run_worker(qapp, work)
+        if get_figure_container(figure) is not None:
+            host.refresh(figure, final=True)
+        status.setText("Worker complete")
+
+    def legacy() -> None:
+        create_trace(plots, "legacy", "Time (us)", "Legacy signal").update(
+            (np.array([0.0, 1.0]), np.array([1.0, 2.0]))
+        )
+        host.refresh(plots["legacy"], final=True)
+        status.setText("Legacy shown")
+
+    finish_and_clear, try_finished_show, finish = _finish_actions(
+        plots, figure, container, status
+    )
+    for caption, action in (
+        ("Show figure", show),
+        ("Prime before show", lambda: update(3.0)),
+        ("Update from worker", lambda: update(5.0)),
+        ("Legacy live", legacy),
+        ("Finish and clear", finish_and_clear),
+        ("Try finished show", try_finished_show),
+        ("Finish and release", finish),
+    ):
+        button = QPushButton(caption)
+        layout.addWidget(button)
+        scope.connect(button.clicked, action)
+    window.show()
+    try:
+        yield ComponentDriver(window)
+    finally:
+        plots.finish(present=False)
+        plots.release()
+        scope.close()
+        container.clear_dynamic_canvases()
+        window.close()
+        window.deleteLater()
+        owner.deleteLater()
+        qapp.processEvents()
+
+
+def test_component_driver_explicit_show_worker_update_and_legacy_live(
+    explicit_show_driver: ComponentDriver, tmp_path: Path
+) -> None:
+    driver = explicit_show_driver
+    driver.resize_window(800, 650)
+    evidence = Path(os.environ.get("PLOT_SHOW_EVIDENCE", str(tmp_path)))
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "01-unshown.png")
+    driver.click("Prime before show")
+    assert driver.observe("Worker complete").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "01b-updated-before-show.png")
+    driver.click("Show figure")
+    assert driver.observe("Shown").visible
+    assert driver.plots().axes[0].xlabel == "Frequency (MHz)"
+    assert driver.plots().axes[0].visible_curves == 1
+    assert "Worker peak 3 mV" in driver.plots().axes[0].annotations
+    driver.screenshot(evidence / "02-shown.png")
+    driver.click("Update from worker")
+    assert driver.observe("Worker complete").visible
+    assert driver.plots().axes[0].visible_curves == 1
+    assert "Worker peak 5 mV" in driver.plots().axes[0].annotations
+    driver.screenshot(evidence / "04-worker-update.png")
+    driver.click("Legacy live")
+    assert driver.observe("Legacy shown").visible
+    assert driver.plots().axes[0].ylabel == "Legacy signal"
+    assert driver.plots().axes[0].visible_curves == 1
+    driver.screenshot(evidence / "05-legacy-live.png")
+    driver.click("Finish and clear")
+    assert driver.observe("Finished and cleared").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "06-cleared.png")
+    driver.click("Try finished show")
+    assert driver.observe("Plot operation has finished").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "07-finished-show-rejected.png")
+    driver.click("Finish and release")
+    assert driver.observe("Released").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "08-released.png")
+    driver.click("Try finished show")
+    assert driver.observe("Plot operation has finished").visible
+    assert driver.plots().axes == ()
+    driver.screenshot(evidence / "09-released-show-rejected.png")
 
 
 def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
@@ -177,6 +382,33 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
     plots.release()
     other.release()
     assert stacks[0].count() == stacks[1].count() == 1
+
+
+@pytest.mark.parametrize(
+    "release", [False, True], ids=["before-release", "after-release"]
+)
+def test_clearing_finished_container_preserves_show_lifetime(
+    hosts, release: bool
+) -> None:
+    _stacks, containers, adapters = hosts
+    plots = Plots(adapters[0])
+    figure, axes = plots.subplots(num="finished")
+    axes.plot([0, 1], [2, 3])
+    plots.finish()
+    containers[0].clear_dynamic_canvases()
+    try:
+        if release:
+            plots.release()
+        with pytest.raises(RuntimeError, match="operation.*finished"):
+            figure.show()
+    finally:
+        plots.release()
+    operation = ref(plots)
+    del plots
+    gc.collect()
+    assert operation() is None
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
 
 
 def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> None:

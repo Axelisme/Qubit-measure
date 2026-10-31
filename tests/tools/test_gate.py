@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock
@@ -7,6 +8,92 @@ from unittest.mock import Mock
 import _support
 import gate
 import pytest
+
+
+@pytest.mark.parametrize(
+    ("budget_exit", "budget_stdout", "budget_stderr", "gate_exit", "mark", "detail"),
+    [
+        (0, '{"overage_count": 0}', "", 0, "ok  ", ""),
+        (
+            1,
+            json.dumps(
+                {
+                    "overage_count": 1,
+                    "overages": [
+                        {"item": "instructions", "length": 2001, "limit": 2000}
+                    ],
+                }
+            ),
+            "instructions: 2001 characters (limit 2000)",
+            1,
+            "FAIL",
+            "instructions",
+        ),
+        (2, "", "MCP stdio timed out", 1, "FAIL", "MCP stdio timed out"),
+    ],
+    ids=["within-budget", "over-budget", "checker-error"],
+)
+def test_main_rejects_a_failed_mcp_budget_check(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    budget_exit: int,
+    budget_stdout: str,
+    budget_stderr: str,
+    gate_exit: int,
+    mark: str,
+    detail: str,
+) -> None:
+    """The gate owns exit semantics; the external checker owns the measurement."""
+
+    def external_tool(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if any(Path(part).name == "check_mcp_text_budget.py" for part in command):
+            return subprocess.CompletedProcess(
+                command, budget_exit, budget_stdout, budget_stderr
+            )
+        stdout = ""
+        if command[:2] == ("git", "rev-parse"):
+            stdout = "abcdef1234\n"
+        elif command[0] != "git":
+            stdout = "{}"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", external_tool)
+
+    assert gate.main(["--base", "abcdef1234", "--no-fix"]) == gate_exit
+    output = capsys.readouterr()
+    assert f"{mark} mcp text budget" in output.out
+    if detail:
+        assert detail in output.out
+
+
+@pytest.mark.parametrize("overage_count", [0, 2])
+def test_main_status_reports_mcp_budget_overages_without_a_base(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    overage_count: int,
+) -> None:
+    def external_tool(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if any(Path(part).name == "check_mcp_text_budget.py" for part in command):
+            return subprocess.CompletedProcess(
+                command,
+                int(overage_count > 0),
+                json.dumps({"overage_count": overage_count}),
+                "",
+            )
+        return subprocess.CompletedProcess(command, 0, "[]", "")
+
+    monkeypatch.setattr(subprocess, "run", external_tool)
+
+    assert gate.main([]) == 0
+    output = capsys.readouterr().out
+    reading = next(
+        line for line in output.splitlines() if line.startswith("mcp text budget")
+    )
+    assert reading.split()[-1] == str(overage_count)
 
 
 def test_formatting_runs_before_anything_measures_the_code() -> None:
@@ -18,6 +105,7 @@ def test_formatting_runs_before_anything_measures_the_code() -> None:
         "ruff format",
         "import contracts",
         "script awaits",
+        "mcp text budget",
         "ratchet",
     ]
 
@@ -26,7 +114,7 @@ def test_the_ratchet_runs_even_when_no_python_file_changed() -> None:
     """A candidate can widen a per-file-ignore without touching any Python."""
     names = [step.name for step in gate.steps("abc", (), fix=True)]
 
-    assert names == ["import contracts", "script awaits", "ratchet"]
+    assert names == ["import contracts", "script awaits", "mcp text budget", "ratchet"]
 
 
 def test_the_rewriting_steps_receive_only_the_changed_files() -> None:

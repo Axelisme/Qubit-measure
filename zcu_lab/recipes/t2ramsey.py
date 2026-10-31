@@ -22,44 +22,44 @@ class T2RamseyInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value, null clears/disables it.",
+        description="Readout library key.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Preparation module option; omission retains the Form value, null clears/disables it.",
+        description="Preparation module option.",
     )
     pi2_ref: str | None | Keep = Field(
         KEEP,
-        description="Calibrated pi/2-pulse library key; omission retains the Form value, null clears/disables it.",
+        description="Calibrated pi/2-pulse library key.",
     )
     max_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Delay sweep stop in us; omission retains the Form value, null clears/disables it.",
+        description="Delay sweep stop in us.",
     )
     detune_ratio: float | None | Keep = Field(
         KEEP,
-        description="Final-pulse phase-ramp ratio, dimensionless; omission retains the Form value, null clears/disables it.",
+        description="Final-pulse phase-ramp ratio, dimensionless.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value, null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value, null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value, null clears/disables it.",
+        description="Averaging round count.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         KEEP,
-        description="Fit fringe; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit fringe. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase offset (fringe only); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit phase offset (fringe only). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

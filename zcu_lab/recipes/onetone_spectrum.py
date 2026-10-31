@@ -29,48 +29,48 @@ class OnetoneSpectrumInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz; omission retains the Form range, null clears it.",
+        description="Sweep center in MHz. Supply with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz; omission retains the Form range, null clears it.",
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
+        description="Fixed pulse amplitude in native gain units.",
     )
     points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
         KEEP,
-        description="Model type; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Model type. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_bg_amp_slope: bool | None | Keep = Field(
         KEEP,
-        description="Fit amplitude background; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit amplitude background. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_bg_phase_curvature: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase curvature; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit phase curvature. Analysis only; omitted keeps value, null passes to owner.",
     )
     edelay: float | None | Keep = Field(
         KEEP,
-        description="Electrical delay seed (us; blank = auto); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Electrical delay seed (us; blank = auto). Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

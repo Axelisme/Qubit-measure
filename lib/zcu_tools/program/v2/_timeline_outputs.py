@@ -52,6 +52,9 @@ class TimelineObservedPulse(Pulse):
             self.book.runtime_gens[self.ch] = self.book.math.add(
                 start, align_end(prog, prog.pulses[self.name].get_length())
             )
+            self.book.record_native(
+                prog, self.ch, self.book.runtime_gens[self.ch], generator=True
+            )
         self.record(prog, t)
 
     def translate(self, prog) -> None:
@@ -110,6 +113,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             )
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
+            self.book.record_native(prog, self.ch, finish, generator=True)
             self.record(prog, time_bounds(prog, start)[1], time_bounds(prog, start)[0])
             return
         t = end if self.relative_t == "auto" else end + self.relative_t
@@ -129,6 +133,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.book.set_end(self.timeline, finish)
         if isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish
+        self.book.record_native(prog, self.ch, finish, generator=True)
 
 
 class TimelinePlacedConfig(ConfigReadout):
@@ -199,6 +204,7 @@ class TimelinePlacedTrigger(Trigger):
                 duration = self.book.math.maximum(duration, length)
                 ro_end = self.book.math.add(start, align_end(prog, length))
                 self.book.runtime_ros[ch] = ro_end
+                self.book.record_native(prog, ch, ro_end, generator=False)
                 end = self.book.math.maximum(end, ro_end)
             offset = placement_time(prog, self.relative_t)
             self.event_end = EventEnd(
@@ -218,6 +224,7 @@ class TimelinePlacedTrigger(Trigger):
             # QICK's timestamp uses the requested trigger time, not its rounded placement.
             ro_end = actual_t + length
             self.book.native_timestamp(prog, ro_end, ro_ch=ch)
+            self.book.record_native(prog, ch, ro_end, generator=False)
             end = self.book.math.maximum(end, ro_end)
         self.event_end = EventEnd(0.0, end)
         self.book.set_end(

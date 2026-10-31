@@ -118,14 +118,15 @@ fig.savefig(image_dir / "ac_stark.png")
 
 # Power dep
 
+Set `filepath` to a new native `singleshot/mist/power` run containing `counts`
+shaped `(Ngain, 3)` in `[g,e,other]` order. Analyze normalizes each point before
+confusion correction and photon-number conversion. Files storing the former
+`data` or `signals` variable fail Load with an error naming the missing `counts`
+variable. Acquire a new run instead of converting old fractions to shot counts.
+
 ```python
 %matplotlib inline
-filepath = (
-    "../../../Database/Q12_2D[5]/Q4/Q4_mist_g_singleshot_short@-4.000mA_2.hdf5"
-    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-4.000mA_3.hdf5"
-    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_g_singleshot_short@-0.650mA_1.hdf5"
-    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
-)
+filepath = "./data/mist-power-counts.h5"
 
 exp = nb_adapter(ze.singleshot.mist.power.core.PowerExp())
 power_run = exp.load(Path(filepath))

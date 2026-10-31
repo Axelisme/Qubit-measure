@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2`
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。實驗 runtime、硬體量化與共用工具入口。
 
@@ -28,5 +28,17 @@ Frequency scalar 與 sweep 也使用 QICK 自身的 signed DDS conversion，沒�
 `ro_ch` 選共同 DAC/ADC grid。Regular frequency sweep 使用 start/span 與 signed step
 量化，不能逐點 rounding 或把負向 step 當成 unsigned register 解碼。未提供 mixer 時
 介面明確代表 DDS 頻率；既有其它 caller 不因 helper 更新就自動取得 mixer 資訊。
+
+Gain 座標先沿用向零截斷規則決定整數 word，再選最接近 `word / (scaler * maxv)`、
+且經 QICK constant-pulse 換算仍得到同一 word 的 float。正負 gain 都向 word 那一側
+逐 ULP 調整，零 word 回傳 `0.0`。最多調整八個 ULP，仍不相符就 raise。
+Scalar 與 custom array 共用這項契約，scaler 可為負值，但必須有限且非零。
+
+Regular host gain grid 分別截斷 start 與 step，再以 `start_word + i * step_word`
+產生各點座標，避免浮點插值後再次截斷掉一個 word。存檔與逐點 pulse 使用同一座標。
+硬體 sweep 則穩定化 start 與 stop，讓 QICK start/span 轉換產生相同的 word 序列。
+硬體內部 span 以實際 generator conversion factor 反推，不是存檔座標。
+此因子含 `maxv_scale`，可能與 `get_maxv` 向下取整後的值不同。
+硬體 endpoint 搜尋同樣有八個 ULP 上限，無法重現目標 span 就 raise。
 
 Concrete callers 從這個 package 取得通用機制，並自行擁有量測與分析政策。核心與前端的組合不在 framework import 時執行。

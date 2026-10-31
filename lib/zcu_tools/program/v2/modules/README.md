@@ -151,11 +151,16 @@ ADC channel number, not a tone position. It accepts centers without radius or
 matrix and rejects unknown ADCs, missing classifiers and linear mode with an
 ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 
-`readout.classification_processors(cfg, require_other=False)` returns detached
-ADC-keyed processors for `acquire_processed`. Circle emits g/e/other, linear
-emits g/e, and centroid3 emits g/e/f. `require_other=True` accepts only circle.
-Missing calibration or circle radius raises an ADC-named ValueError.
-The processors do not read a program, registry or hardware.
+`v2.shot_sums(prog, axes)` resolves compiled read labels for `Classify` and `IQ`
+axes. Timeline labels use emit tags or untagged module names; modular labels
+use module names. Mux axes select the cfg tone position. Each Classify axis
+snapshots its explicit or cfg classifier. Circle emits g/e/other, linear g/e,
+and centroid3 g/e/f. Circle requires a GE Post radius.
+The processor sums ordered shot-vector outer products across reps, and
+`acquire_summed` adds completed rounds without normalization.
+`split_sums` converts a final IQ axis into counts and complex means.
+Zero or unmeasured NaN counts give NaN means without divide warnings.
+
 `readout.qick_threshold_options(cfg)` accepts a Pulse/Mux cfg or a cfg sequence.
 It converts linear/circle calibration to native QICK projection, without radius
 rejection or confusion correction. Missing, centroid3 or conflicting calibration
@@ -194,7 +199,7 @@ physical simulation support.
 
 `centroid3_classifier(cfg, ro_ch=...)` 由 native Pulse 或 Mux cfg 取得 detached g/e/f 校準。
 它依 ADC 編號查詢，不使用 tone 位置或 live library。Missing、錯型與未知 ADC 都 raise ValueError。
-`classification_processors` 支援 centroid3，但 `require_other=True` 與 heralding 拒絕它，因為其第三類是 f 而非 circle 的 other。
+Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consumer 須明確要求 circle。
 
 ## Readout Runtime Words
 

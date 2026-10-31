@@ -10,6 +10,7 @@ from zcu_tools.experiment.v2.runtime.result_tree import (
     ResultTree,
     ResultUpdateEvent,
 )
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     BufferProtocol,
     RunStatus,
@@ -26,6 +27,7 @@ __all__ = [
     "ResultNode",
     "ResultTree",
     "ResultUpdateEvent",
+    "RunOptions",
     "RunStatus",
     "Schedule",
     "ScheduleOutcome",

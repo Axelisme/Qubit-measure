@@ -36,21 +36,21 @@ class OnetoneRangeFindInputs(RecipeInputs):
     )
     resonators: list[str] | None | Keep = Field(
         KEEP,
-        description="Optional picker labels, initially paired in ascending frequency order and freely reassignable before Done. Omission retains analysis names, an empty list discovers unnamed dips, and null is passed to the analysis owner. Names never enter acquisition cfg.",
+        description="Picker labels, not cfg; omit keeps names, [] finds unnamed dips, null passes to analysis owner.",
     )
     min_separation: (
         Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)] | None | Keep
     ) = Field(
         KEEP,
-        description="Minimum spacing between selected dips in MHz; finite and > 0. Omission retains the analysis value (initially 1 MHz); null is passed to the owner. Does not affect acquisition.",
+        description="Analysis dip spacing in MHz (>0, initially 1); omitted keeps value, null passes to owner.",
     )
     reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
-        description="Acquisition repetitions; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetitions.",
     )
     rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         KEEP,
-        description="Averaging rounds; omission retains the Form value; null clears/disables it.",
+        description="Averaging rounds.",
     )
 
 

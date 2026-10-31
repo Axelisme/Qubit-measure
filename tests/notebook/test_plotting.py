@@ -1,12 +1,16 @@
+import threading
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import IPython.display
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from ipympl.backend_nbagg import Canvas, FigureManager, Toolbar
 from ipywidgets import Widget
+from matplotlib.artist import Artist
 from matplotlib.figure import Figure
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.notebook import NotebookAdapter
@@ -36,6 +40,25 @@ def widget_registry_guard() -> Iterator[None]:
     assert widget_ids() == before
 
 
+def test_host_initialization_styles_new_figures_and_allows_native_overrides() -> None:
+    backend, managers = matplotlib.get_backend(), plt.get_fignums()
+    with matplotlib.rc_context({"axes.labelsize": 37}):
+        plots = Plots(NotebookPlotHost())
+        try:
+            _, axes = plots.subplots("styled")
+            assert axes.xaxis.label.get_fontsize() != 37
+            axes.set_xlabel("Frequency", fontsize=23)
+            assert axes.xaxis.label.get_fontsize() == 23
+            with plt.style.context({"axes.labelsize": 31}):
+                _, custom = plots.subplots("custom")
+                assert custom.xaxis.label.get_fontsize() == 31
+            assert matplotlib.get_backend() == backend
+            assert plt.get_fignums() == managers
+        finally:
+            plots.finish(present=False)
+            plots.release()
+
+
 @pytest.fixture
 def notebook_plots(
     monkeypatch: pytest.MonkeyPatch,
@@ -53,6 +76,37 @@ def notebook_plots(
     for plots in operations:
         plots.finish(present=False)
         plots.release()
+
+
+def test_figure_show_survives_notebook_manager_replacement(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+) -> None:
+    create, published = notebook_plots
+    plots = create()
+    figure, axes = plots.subplots(num="explicit")
+    axes.plot([0, 1], [2, 3])
+    backend, numbers = matplotlib.get_backend(), plt.get_fignums()
+    assert published == []
+    figure.show()
+    assert published == [figure.canvas]
+    figure.show()
+    assert published == [figure.canvas]
+    plots.finish()
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
+    assert matplotlib.get_backend() == backend
+    assert plt.get_fignums() == numbers
+    plots.release()
+    with pytest.raises(RuntimeError, match="operation.*finished"):
+        figure.show()
+    another_host = NotebookPlotHost()
+    try:
+        another_host.present(figure)
+        assert published == [published[0], figure.canvas]
+        with pytest.raises(RuntimeError, match="operation.*finished"):
+            figure.show()
+    finally:
+        another_host.release(figure)
 
 
 def test_initial_frame_is_ready_before_widget_publication(
@@ -128,6 +182,95 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     assert plt.get_backend() == backend
 
 
+@pytest.mark.parametrize("worker", [False, True])
+def test_decorated_updates_run_on_caller_and_send_full_frames_only_after_show(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+    worker: bool,
+) -> None:
+    create, published = notebook_plots
+    plots = create()
+    figure, axes = plots.subplots(num="decorated")
+    (curve,) = axes.plot([], [], "o-")
+    frames: list[bytes] = []
+    body_threads: list[int] = []
+    send_binary = Canvas.send_binary
+
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
+        frames.append(data)
+
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
+
+    @plots.on_plot_thread
+    def push(value: int) -> tuple[Artist, ...]:
+        body_threads.append(threading.get_ident())
+        curve.set_data([0, 1, 2], [0, value, 0])
+        axes.relim()
+        axes.autoscale_view()
+        return (curve, axes, figure)
+
+    def produce(value: int) -> int:
+        push(value)
+        return threading.get_ident()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+
+        def call(value: int) -> int:
+            return pool.submit(produce, value).result() if worker else produce(value)
+
+        caller = call(1)
+        assert body_threads == [caller]
+        assert published == []
+        assert frames == []
+        figure.show()
+        np.testing.assert_array_equal(curve.get_ydata(), [0, 1, 0])
+        frames.clear()
+        assert call(3) == caller
+        assert call(5) == caller
+    assert body_threads == [caller, caller, caller]
+    assert len(frames) == 2  # Duplicate artists still produce just one frame per push.
+    assert published == [figure.canvas]
+    for data in frames:
+        alpha = plt.imread(BytesIO(data), format="png")[..., 3]
+        assert np.all(alpha == 1.0)
+    np.testing.assert_array_equal(curve.get_ydata(), [0, 5, 0])
+    plots.finish()
+    plots.release()
+    with pytest.raises(RuntimeError, match="finished"):
+        push(7)
+
+
+def test_every_live_refresh_sends_a_complete_opaque_frame(
+    notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A busy cell delays the frontend's base-image request, so a diff frame would
+    # composite over a blank canvas; each refresh must therefore stand alone.
+    frames: list[bytes] = []
+    send_binary = Canvas.send_binary
+
+    def record_frame(canvas: Canvas, data: bytes) -> None:
+        send_binary(canvas, data)
+        frames.append(data)
+
+    monkeypatch.setattr(Canvas, "send_binary", record_frame)
+    create, _ = notebook_plots
+    plots = create()
+    live = create_trace(plots, "live", "x", "y")
+    frames.clear()
+
+    for count in range(2, 6):
+        xs = np.arange(count, dtype=float)
+        live.update((xs, xs**2))
+
+    assert len(frames) == 4
+    for data in frames:
+        assert data.startswith(b"\x89PNG")
+        alpha = plt.imread(BytesIO(data), format="png")[..., 3]
+        assert np.all(alpha == 1.0)
+
+
 def test_release_closes_widgets_and_preserves_other_operation_and_savefig(
     notebook_plots: tuple[Callable[[], Plots], list[Canvas]],
 ) -> None:
@@ -188,7 +331,8 @@ def test_toolbar_release_error_still_closes_canvas_and_keeps_figure_savable(
     assert toolbar.comm is None
     assert toolbar.layout.comm is None
     assert figure.canvas is not canvas
-    assert figure.canvas.manager is None
+    with pytest.raises(RuntimeError, match="finished"):
+        figure.show()
     output = BytesIO()
     figure.savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG")
@@ -298,13 +442,15 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
     acquired: list[Canvas] = []
     error = RuntimeError("manager construction failed")
 
-    def fail_manager(canvas: Canvas, num: int) -> FigureManager:
+    initialize = FigureManager.__init__
+
+    def fail_manager(manager: FigureManager, canvas: Canvas, num: int) -> None:
         acquired.append(canvas)
         if stage == "toolbar":
-            FigureManager(canvas, num)
+            initialize(manager, canvas, num)
         raise error
 
-    monkeypatch.setattr("ipympl.backend_nbagg.FigureManager", fail_manager)
+    monkeypatch.setattr(FigureManager, "__init__", fail_manager)
     plots = create()
     with pytest.raises(RuntimeError, match="manager construction failed") as exc:
         create_trace(plots, "live", "x", "y")
@@ -317,7 +463,7 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
         assert canvas.toolbar.comm is None
         assert canvas.toolbar.layout.comm is None
     assert plots["live"].canvas is not canvas
-    assert plots["live"].canvas.manager is None
+    assert plots["live"].canvas.manager is not None
     plots.finish(present=False)
     plots.release()
     output = BytesIO()

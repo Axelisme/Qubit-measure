@@ -1,10 +1,11 @@
 # v2 experiments
 
-**Last updated:** 2026-10-28，flux offset／period writeback
-
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
+**Last updated:** 2026-10-31，作者寫法慣例
+
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
+實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
 
 ## Reading routes
 
@@ -14,7 +15,7 @@
   - [Conditional phase](two_qubit/conditional_phase/guide.md) 提供獨立 X/Y acquisition、phase 診斷與 n=1 frequency proposal。
   - [Local-Z](two_qubit/local_z/guide.md) 以雙 target 完整列估計 slope，依 correction=-slope 提供 correction pair 與手動 parameter Apply。
 - [Heralded T1](heralding/t1/guide.md) 說明單 qubit pulse readout 的 ground post-selection、pass fraction 與保存。沒有 active reset 或 joint herald。
-- [Experiment authoring](experiment-authoring.md) 說明核心 records、資料形狀與 run 慣例。
+- [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
 - [Measure support](support/measure/README.md) 提供共享 domain mechanics。
@@ -51,16 +52,27 @@ Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已
 
 ## 即時圖工具
 
-從 `zcu_lab.v2.support` import `live_line`、`live_scatter`、`live_heatmap` 與
-`live_heatmap_with_line`，以 `live_line(context.plots, name, xlabel, ylabel, ...)`
-建立 typed handle。工具與格式直接放在公開支援套件，不另建 plotting 子套件。
+`zcu_lab.v2.support` 匯出 `live_line`、`live_scatter`、`live_heatmap` 與舊版面工具
+`live_heatmap_with_line`。新實驗可從下例開始，顯示、owner 更新、artist 回傳與
+舊介面的界線統一見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+
+```python
+fig, ax = context.plots.subplots(num="signal")
+ax.set(xlabel="Time (us)", ylabel="Signal")
+line = live_line(ax)
+
+
+@context.plots.on_plot_thread
+def update(data):
+    return line.set(delays, data)
+
+
+fig.show()
+```
+
 `support/live.py` 選擇格式與 scan-line 呈現，私有格式及 handle 檔保存 artists 與輸入檢查。
 作者要改 ticks、顏色、最近掃描線或增添工具時，從這裡修改。
-
-四工具保留既有 defaults、數值、具名圖及既有 axes 接入。Line 的 configure_axes 在 owner
-初始化後、呈現前執行。Handle 更新實數資料，保留 NaN 未測點與可選 title；
-`refresh=False` 可批次更新。Lib 的通用 LiveUpdate 負責複製資料、owner 執行與 refresh，
-finish／release 後拒絕更新。Reference marker 與動畫錄影不在這些工具中。
+Reference marker 與動畫錄影不在這些工具中。
 
 Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`，joint-fit population／histogram／
 confusion 圖在 `singleshot/plot_rabi.py`。它們保留既有用途，分析計算仍由原分析 owner 負責。
@@ -165,9 +177,9 @@ Amp Rabi 仍逐點 compile。
 Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
 requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
-`support.singleshot.plot.draw_ge_scatter` 供單 qubit 與 mux GE 共用，先複製 IQ，
+單 qubit 與 mux GE 各自用 matplotlib 畫 IQ scatter，live 更新先複製 IQ，
 再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
-partial NaN 不補零。
+partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。
 每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，

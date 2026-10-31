@@ -91,21 +91,54 @@ mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core
 gui.py 保留來源與 route prior 解析，以及 writeback。
 此規則以直接審閱確認，不新增靜態內容測試；core 不依賴 GUI 的方向仍由 C15 保護。
 
+Workflow 的替代壽命模型比較與疊圖由 `zcu_lab/workflows/common` 擁有。Mux T1／T2echo core 只回本次選定模型的擬合，不為 workflow 額外比較模型。使用者於 2026-10-30 選擇「18A」，將這項診斷留在使用它的 workflow。
+
+Mux onetone core 只接收每 tone 的 edelay 種子並回傳擬合結果。Adapter 決定手動值、capture prior 與全域搜尋的優先序，記錄來源並判斷 writeback。使用者於 2026-10-30 指出「這不對勁，聽起來像是adapter的邏輯漏進core」，並選擇「A」。
+
+各實驗獨立完成 analyze 與畫圖，不組假 source 呼叫另一個實驗的 analyze。實驗可共用數值分析工具，不共用分析圖的畫法。使用者於 2026-10-30 裁定「不能獨立重複分析嗎？可以共用分析工具，但畫圖就有點超過了，不利於客製化」。Mux GE 因而逐 tone 呼叫既有數值工具並自行畫圖。
+
+以上分工沿用 lab → analysis／plotting 的依賴方向。Framework 不反向 import lab 由 C16 保護，core 不依賴 GUI 由 C15 保護，分層與無循環由 C8、C9 檢查。
+
+Local flux reset 沿用 `reset/pulse`，由 lab 的 library 範本與 `twotone/reset/flux/{gain,length}` 實驗組裝及校準。
+所需脈衝已能由既有 reset 模組播放，因此框架不新增 reset 型別。驗收重用既有 reset check，不另建專用檢查實驗。
+範本名稱與參數留在 lab 範本及 [gain](../../zcu_lab/v2/twotone/reset/flux/gain/guide.md)、[length](../../zcu_lab/v2/twotone/reset/flux/length/guide.md) 操作文件，不成為框架規則。
+2026-10-30，使用者選擇：「1A 2同意 3感覺復用reset/check就好？倒是reset/可以加一個flux_reset，4同意」，並對上述組裝與校準方式回覆「確認」。
+
 ### 即時圖工具與機制
 
 使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」
 
-Lib 保留 Plots、FigureCollection、PlotHost 與通用 LiveUpdate。它們管理具名圖、複製更新資料、
-在 host owner 執行作者 callback、refresh，以及 finish／release 後拒絕更新。
-LiveUpdate 不決定資料格式，不反向 import lab。
+Lib 保留 Plots、FigureCollection、PlotHost 與通用 LiveUpdate。作者用不帶參數的
+`@plots.on_plot_thread` 包裝原生 matplotlib 更新函式，呼叫時先檢查 lifetime，再 deepcopy
+資料，並在 host owner 執行本體。本體回傳改了的 artists，Figure 也可回傳。框架先驗證
+所有 artists 的歸屬，再對已由此 Plots 呈現的根圖去重 refresh。None 回傳 raise TypeError，
+外來圖 raise ValueError，finish／release 後拒絕呼叫。本體失敗不 refresh，也不回滾修改。
+
+即時更新與一次性改動共用這個 decorator。圖顯示後的改動一律經此入口。
+`fig.show()` 顯式呈現；show 前的更新只保留 artist 修改，不 refresh、不載入 ipympl。
+之後 show 或 finish(present=True) 呈現最新內容。混合回傳只 refresh 已呈現的圖，
+未呈現的外來圖仍拒絕。Notebook 與 Qt host 的 refresh 前置條件不變。
+LiveUpdate 與字串圖名的 draw 保留舊行為直到大量遷移收縮，不決定資料格式，也不反向 import lab。
+
+使用者於 2026-10-30 裁定：「畫圖採用建議，但名字叫live不太好懂」、
+「@plots.on_plot_thread好了，隱藏執行線程的機制資訊可能在某些時候造成難以發現的bug」。
 
 四個 live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
 共用支援套件的直接層。實驗作者可以直接修改或擴充，不另建 plotting 子套件。
+`live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是本地選用工具，只掛在給定 axes，
+在 caller thread 修改並回傳 changed artists。不建圖、不設標籤與標題、不切換執行緒、
+不 refresh、不 present。作者可在 decorator 本體內回傳 `line.set(xs, signals)`。
+這些工具與 decorator 不登記 axes，不檢查彼此或與舊 helper 的佔用。
+多個新 helper 可共用 axes，由作者協調 artists、autoscale 與色階。
+只有舊 create_live／舊 helper 保留既有 axes 佔用規則。
+`live_heatmap_with_line` 保留舊寫法，新版面由作者用 subplots 排。
+使用者於 2026-10-30 裁定：「我也傾向後者，live_line只是本地執行緒的」。
 Singleshot 分類圖與 joint-fit 診斷圖歸 lab 的 singleshot 家族，分析計算不隨圖搬移。
 獨立 liveplot plotter／backend、reference marker 與動畫錄影退休。
 Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 工具。
 
-這個分工讓四個既有工具共用資料隔離、owner 與 lifetime 機制，而實驗格式仍可在 lab 修改。
+這個分工讓 decorator 與舊 handle 共用 host 的 owner 執行與 lifetime 機制，
+新 helper 不綁 Plots lifetime。實驗格式仍可在 lab 修改。
 依賴方向是 lab → plotting；framework 不 import lab 由 import-linter C16 保護，
 能力層與使用者層的方向沿用 C8，core 不依賴 GUI 沿用 C15。
 
@@ -128,9 +161,13 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
 - tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
-框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。實驗定義錯誤由 GUI 啟動或載入時回報，不另維護個別實驗測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
+框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。Tests 不 import `zcu_lab`，也不增加個別實驗的 durable 測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
+
+實驗定義（`zcu_lab`）的改動，包含畫面改動，使用 `experiment` 層的共用離線 probe 驗收。Probe 只依賴框架型別，依序執行公開 run → native 存檔 → 讀回 → analyze，將 live plot 與分析圖輸出成 PNG。Agent 看圖並記錄判讀，probe 腳本與結果留在 task scratch，不 commit 成 durable 測試。框架 UI 改動仍使用 ComponentDriver 情境。操作與完成條件由 [UI 驗證](../../tests/README.md#ui-驗證) 擁有。
+
+2026-10-30 使用者提出：「關於測試實驗定義的方式，用ui跑e2e有點太重量級了，我認為可以修改規則，透過建立context的方式測試run與analysis」。當時比較 A（只改驗收規則）、B（改規則並提供共用 probe）、C（再加 `zcu_lab` 自有的 durable 測試）。使用者回答：「B」。採用共用 probe，讓各實驗只需提供實驗與 cfg，不再各自組裝離線驗收流程；durable lab 測試不在此決定範圍。
 
 ### Lab 定義與組合根
 

@@ -31,19 +31,19 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     center_mhz: float | None | Keep = Field(
         KEEP,
-        description="Sweep center in MHz. Supply with span_mhz; omission retains the Form range, null clears it.",
+        description="Sweep center in MHz. Supply with span_mhz.",
     )
     span_mhz: Annotated[float, Field(gt=0)] | None | Keep = Field(
         KEEP,
-        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz; omission retains the Form range, null clears it.",
+        description="Full frequency span in MHz; endpoints are center minus/plus span/2. Supply with center_mhz.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
+        description="Fixed pulse amplitude in native gain units.",
     )
     flux_device: DeviceName = Field(
         description="Registered flux-device name; read only its cached snapshot, without connecting."
@@ -53,7 +53,7 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     )
     freq_points: Annotated[int, Field(ge=2)] | None | Keep = Field(
         KEEP,
-        description="Frequency sample count; omission retains the Form value; null clears/disables it.",
+        description="Frequency sample count.",
     )
     flux_points: int = Field(
         ge=2, description="Required native-flux sample count, at least two."
@@ -65,11 +65,11 @@ class OnetoneSpectrumOverFluxInputs(RecipeInputs):
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
 

@@ -148,7 +148,8 @@ def _flux_inputs(
     tracks: tuple[DriveTrack, ...],
     ends: NDArray[np.float64],
 ) -> tuple[FluxSchedule, FluxWaveform | None]:
-    if settings.flux_line is None:
+    # No active controls means exact DC, regardless of line delay or tails.
+    if settings.flux_line is None or not any(np.any(t.active) for t in tracks):
         return FluxSchedule(
             np.arange(len(ends) + 1, dtype=np.int64),
             np.zeros(len(ends)),

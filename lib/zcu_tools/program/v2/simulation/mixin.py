@@ -110,7 +110,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         assert self.acquire_params is not None
         assert self.loop_dims is not None
         params = self.acquire_params
-        self._simulation_needs_raw = self._processors is not None or any(
+        self._simulation_needs_raw = self._sum_processor is not None or any(
             params.get(key) is not None for key in ("threshold", "trackers")
         )
         self._simulation_normalization: list[tuple[int | None, float | None]] = []
@@ -290,7 +290,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
         """Return native averaged IQ, preserving ADC declaration order.
 
         QICK threshold/angle projects normalized shots into excited fraction I
-        and zero Q. Shot processors use acquire_processed and materialize each
+        and zero Q. Shot-sum processors use acquire_summed and materialize each
         round's retained raw source through the same pipeline as hardware.
         True step_rounds prepares hardware and returns None; SimulationSoc raises
         ValueError before admission. Extra positional options or a dynamic bool

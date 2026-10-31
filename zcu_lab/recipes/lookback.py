@@ -19,36 +19,36 @@ class LookbackInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Readout frequency in MHz; omission retains the Form value, null clears it.",
+        description="Readout frequency in MHz.",
     )
     readout_length_us: float | None | Keep = Field(
         KEEP,
-        description="ADC acquisition window in us; omission retains the Form value; null clears/disables it.",
+        description="ADC acquisition window in us.",
     )
     trigger_offset_us: float | None | Keep = Field(
         KEEP,
-        description="ADC trigger offset in us; omission retains the Form value; null clears/disables it.",
+        description="ADC trigger offset in us.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     ratio: float | None | Keep = Field(
         KEEP,
-        description="Threshold ratio; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Threshold ratio. Analysis only; omitted keeps value, null passes to owner.",
     )
     smooth: float | None | Keep = Field(
         KEEP,
-        description="Smooth sigma; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Smooth sigma. Analysis only; omitted keeps value, null passes to owner.",
     )
     plot_fit: bool | None | Keep = Field(
         KEEP,
-        description="Plot fit; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Plot fit. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

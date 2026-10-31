@@ -1,6 +1,6 @@
 # gui/form_adapter — 從輸入型別生成 Form
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30
 
 **讀者：** framework-dev。Adapter 輸入型別與持久 Spec 的表單推導與轉換契約。
 
@@ -38,7 +38,7 @@ Readout 的可選 classifier 在 Advanced 群組，None、circle、linear、cent
 
 新型別的每個欄位若在舊型別有同名且相同的可編輯 Form 型別，就沿用原始輸入；否則用目標初值。比較沿生成器去除 QickParam 的規則，不依 raw 值的 Python 型別或有效性判斷。各次生成的同一持久 model 視為同型，巢狀逐層套用。Waveform 與 Pulse、PulseReadout、MuxReadout、各 Reset 都用這條規則。Expression、缺席與 invalid 值原樣保留，超出目標限制由一般驗證報錯，不求值或修正。同型 ref→inline 與 inline→inline 保留全部可編輯欄位，ref 讀固定 Spec，inline 不重新讀來源。Gauss 切 FlatTop 保留 length，raise_waveform 用初值，不把舊 waveform 包進去。Pulse 切 PulseReadout 保留 freq／gain／waveform，但 ch 與 gen_ch 不同名，不搬移。Core 不加入 domain 規則或補 defaults，converter 提供完整目標 input。
 
-只有 key 選項帶 `to_inline` 指令，label 是 Convert to inline。Inline 選項不宣告這個選單動作。`Form.prepare_command` 與 `Form.prepare_logical_command` 在 owner 入口判斷 selector；已 inline 時回 changed=False，保留完整草稿，host 不安裝也不發通知。`FormState.run_command` 執行 ref 選項的指令時，用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 owner 的 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製或缺來源 fallback。
+只有 key 選項帶 `to_inline` 指令，label 是 Convert to inline。Inline 選項不宣告這個選單動作。`Form.prepare_command` 與 `Form.prepare_logical_command` 在 owner 入口判斷 selector；已 inline 時回 changed=False，保留完整草稿，host 不安裝也不發通知。`FormState.run_command` 執行 ref 選項的指令時，用固定 FormEnv 的 library 複製持久 Spec，保留 child key、丟棄屏蔽欄位，以一次原子安裝提交快照。來源失敗不改 input。明確複製使用 owner 的 `to_inline` 指令或 `Form.prepare_inline_copy`，普通 defaults 只建 fresh 範本／型別初值，不提供隱含複製。作者可用 `Slot(path, fallback=Template(...))` 在固定 capture 缺來源時採用範本；可解析但 family 不相容的來源仍報錯。
 
 持久 Spec 與範本 seed 路徑仍使用原欄位名稱，不含 wrapper。生成器在 input 邊界加入 wrapper，`to_cfg` 去掉 wrapper，保留 child key 字串。Nested ref 使用本 package 的 `KeyRef`，不限制 choices，也不新增 captured source 檢查。Core module ref 仍使用 `ModuleRef` 並檢查固定 library。兩種 ref 的 name 都只接受 literal key，不求 Expr。
 
@@ -57,7 +57,7 @@ Template／Slot 節點在 host 呼叫 `Form.bind_templates(catalog, adapter=...)
 FormEnv 只提供來源，不提供模板綁定預設值。
 綁定 catalog 時保留語法、family 與 seed 路徑檢查，真正建立 input 時才展開佔位符並拒絕缺 binding。
 
-Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的 fresh input，不需先 bind。它沿用 Expr 初值與宣告唯讀規則。缺 Slot 來源時，required 欄位留空並標 Invalid；alternate 來源由 make_form(ctx) 決定。已綁定 Slot 保留 child library key，`to_cfg` 回持久 Spec，不展開 native cfg。Core cfg Form 拒絕這個入口。
+Spec Form 的 `template_input(Template(id), catalog, env)` 直接建立範本的 fresh input，不需先 bind。它沿用 Expr 初值與宣告唯讀規則。缺 Slot 來源且未宣告 fallback 時，required 欄位留空並標 Invalid；宣告 fallback 時採用其 Template，包含 nested Slot。已綁定 Slot 保留 child library key，`to_cfg` 回持久 Spec，不展開 native cfg。Core cfg Form 拒絕這個入口。
 
 各範本保留自己的 input projection／model，承載非 lock 初值、Expr requiredness 與 branch ancestry，不在其中生成單值 Literal 來實作 lock。範本初值、依 branch ancestry 的 inline 切換初值與 `input.model.default_input(env)` 重算維持既有行為，不改用通用 defaults。用回傳 input 建新 `FormState`，換範本則建新 state。範本目錄與 captured sources 不因這項操作改變。
 
@@ -108,7 +108,7 @@ Bath reset phase 維持可編輯。決策見 [ADR-0073](../../../../docs/adr/007
 
 所有位置共用元素宣告，各位置可提供不同的唯讀初值。位置 tree 直接放 `Hidden` 仍在建立 Form 時拒絕。
 位置的 `Template.set`／`Slot.set` 可用 `Hidden(value)`。同一 module 欄位的所有非 None 位置必須宣告相同的 Hidden Spec 路徑，
-`bind_templates` 才把隱藏政策套到共享元素 model；路徑不同時，錯誤列出 list 路徑與不一致的 indices。
+`bind_templates` 把隱藏政策套到共享元素 model；有 Slot fallback 時，`default_input` 先依固定 capture 選中分支，再套用該分支的隱藏政策。路徑不同時，錯誤列出 list 路徑與不一致的 indices。
 明示為 None 的 nullable module 不宣告 Hidden 政策，不參與該 module 的比較，也不免除同位置其他 module 的比較。
 全為 None 時沒有額外隱藏路徑。省略初值或非 nullable module 的 None 仍照原規則比較。
 共享 model 只取得隱藏路徑，不取得第一個位置的值、來源、bindings 或其他 defaults。
@@ -175,9 +175,11 @@ Log→List 帶入實際清單，List→Log 回填最大值與清單長度。切�
 
 ## Seed diagnostics
 
+`Template.seed_metadata` 與 `Form.with_seed_metadata` 使用相同的 root-relative canonical paths。只有實際採用的 Template 才貢獻 metadata，包括其缺來源的 nested Slot fallback。顯式 Form metadata 在同一路徑優先；resolved Slot 不套用 fallback 的 metadata。
+
 `Form.with_seed_metadata(mapping)` 回傳帶逐位置 metadata 的新 Form，原 Form 不變。Mapping 以 canonical typed paths 指向 FieldMeta，來源公式使用 description，calibration 接受 uncalibrated／None。後一次呼叫取代整份 mapping。只有實際產生推導初值的 Form 需要這項宣告，不將動態 seed 的校準狀態綁到 core 靜態欄位。
 
-`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。保留 input 的 host 在 Refresh 換 Form 時也保留這份 mapping，Reset 才重算。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
+`default_input` 保存一次 raw seed 宣告及其求值結果。`seed_sources` 是唯讀 path mapping，保存 expression、slot 或 template 來源與 missing／available／literal 狀態。`template_seed_metadata` 是同次 Open／Reset 實際採用範本的唯讀 FieldMeta mapping。保留 input 的 host 在 Refresh 換 Form 時，先呼叫 `Form.select_sources(env)`，使 Hidden 與 Expr requiredness 採用新 capture 選中的分支。這一步不求初值、不呼叫 `initial_values`，也不重算 seed 快照。Host 再轉交 `seed_sources`、`seed_metadata` 與 `template_seed_metadata` 三份公開 mapping；Reset 才重算來源與範本快照。`Form.diagnostics(input, env, errors)` 把 caller 提供的 canonical errors 與全部目前／seed 欄位合併成 FieldDiagnostic。它不重新驗證或 lower cfg，也不呼叫 defaults 或 capture。欄位的 message 可為 None，name／index 來自同一 input 的 model-list description。Uncalibrated 只讀作者 metadata，未知為 None。Candidate preflight 可交同一 Form 的 detached input 與驗證 errors 使用這個入口。
 
 ## 依賴方向
 

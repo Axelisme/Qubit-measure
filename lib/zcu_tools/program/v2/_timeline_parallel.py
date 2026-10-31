@@ -45,6 +45,7 @@ from .macro.delay import DelayRegAuto
 from .macro.dmem import DmemLookup
 from .macro.meta import MetaMacro
 from .macro.pluse_reg import PulseByReg
+from .macro.readout import ReadoutEmission
 from .macro.structure import MarkedCloseLoop, SourcePulse
 from .macro.wmem import (
     ConfigReadoutFromRegs,
@@ -92,6 +93,7 @@ _REFERENCE_STABLE = (
     FixedRepeatLoop,
     CloseLoop,
     MarkedCloseLoop,
+    ReadoutEmission,
 )
 
 
@@ -360,7 +362,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
         PatchWmemFromDmem,
     ):
         return _wave_resource(prog, macro)
-    return None
+    return _Effects(set(), set(), set()) if type(macro) is ReadoutEmission else None
 
 
 def _timeline_resource(prog, macro) -> _Effects:

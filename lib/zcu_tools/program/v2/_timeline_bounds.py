@@ -14,11 +14,14 @@ from .macro.table import TableSelection
 
 @dataclass(frozen=True)
 class CycleBounds:
-    """Inclusive range of a producer's integer tProc cycle value.
+    """Inclusive ordered bounds for integer tProc-cycle values or expressions.
 
-    minimum and maximum bound every executable write, across cases, loop
-    back-edges and sweep resets. Values used as time must be nonnegative and
-    no larger than 2147483647. Non-time words need not satisfy that restriction.
+    minimum and maximum are signed cycle endpoints. Producer bounds cover every
+    executable write, including cases, back-edges and sweep resets; expression
+    bounds cover every legal point and any unknown inputs conservatively.
+    Values used as time must be nonnegative and no larger than 2147483647.
+    Non-time words need not satisfy that restriction. Reversed endpoints raise
+    ValueError during construction.
     """
 
     minimum: int
@@ -152,12 +155,14 @@ class ProducerBounds:
         """Retain each producer's input proof at its actual execution position.
 
         Structured owners restore/intersect defined on Branch/Repeat paths.
-        Snapshot errors survive later initialization, overwrites and other cases.
-        They become errors only when name participates in a time dependency;
-        non-time table consumers keep their existing runtime contract.
+        Snapshot errors include dependency failures and survive later initialization,
+        overwrites and other cases. They become errors only when name participates
+        in a time dependency. Non-time table consumers keep their runtime contract.
         """
         for dependency in set(dependencies) | requirements.keys():
             try:
+                if errors := self.input_errors.get(dependency):
+                    raise ValueError(errors[0])
                 actual = self._resolve(prog, dependency, check_defined=True)
                 allowed = requirements.get(dependency)
                 if allowed is not None and (
@@ -170,6 +175,15 @@ class ProducerBounds:
                     )
             except ValueError as exc:
                 self.input_errors.setdefault(name, []).append(str(exc))
+
+    def describe(self, prog, name: str) -> CycleBounds:
+        """Read current producer bounds without activating a timing audit.
+
+        Metadata capture for non-time scalar lookups must not turn them into
+        timing consumers. Actual consumers still call source() for full proof.
+        Unknown or uninitialized sources raise ValueError.
+        """
+        return self._resolve(prog, name, check_defined=True)
 
     def source(self, prog, name: str, *, check_defined: bool = True) -> CycleBounds:
         """Resolve a nonnegative cycle source and all of its producer dependencies.

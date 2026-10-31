@@ -2,18 +2,20 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫實驗 core，查閱 records、資料形狀、執行與保存慣例。
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-31
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
 ## 目錄
 
 - [實驗序列與 recipe 撰寫規則](#讓使用者只看一個檔案就能理解實驗)
+- [寫法慣例](#寫法慣例)
 - [使用者實驗的測試](#使用者實驗的測試)
 - [實驗家族 records](#實驗家族-records)
 - [目錄佈局](#目錄佈局)
 - [實驗特有的分析與保存](#實驗特有的分析與保存)
 - [典型 Exp.run 範本](#典型-exprun-範本以-onetonefreqcorepy-為例)
+- [Timeline program 與 Schedule 取數](#timeline-program-與-schedule-取數)
 - [v2 cfg 組合慣例](#v2-cfg-組合慣例)
 - [Signal/Raw 處理慣例](#signalraw-處理慣例)
 - [v2 工具與實驗輔助](#v2-工具與實驗輔助)
@@ -72,7 +74,13 @@ Ramsey 與 Echo 也各自列出 pulse 與 delay，不能交給 `acquire(mode="ra
 同一條規則也適用 `analyze()`。Echo 在自己的 core 明示跳過第 1 點，Ramsey 在自己的
 core 依資料選固定 0°／180° 相位。共用 fitting helper 只接收明確的 skip、phase 等
 擬合參數，不用實驗名稱或 mode 選擇不同實驗的政策。phase 只傳數值或代表自由擬合的
-`None`，不傳選政策的 callback。搬移政策時，保持數值結果與失敗語義不變。
+`None`，不傳選政策的 callback。各實驗獨立完成分析與畫圖，只共用數值分析工具。
+例如 mux GE 對每個 tone 呼叫 `singleshot_ge_analysis`，自己用 matplotlib 畫 `fit_i`，
+不組假 RunRecord 呼叫單 qubit GE 的 analyze。
+
+Workflow 的壽命模型比較留在 workflow，mux T1／T2echo core 只算本次選定的模型。
+Mux onetone core 以 `Options.edelay_seeds` 接收每 tone 的種子。Adapter 決定手動值、
+capture prior 與全域搜尋的優先序，並記錄來源與決定 writeback，不把 route prior 政策塞進 core。
 
 ### 2. 在 recipe 函式本體寫出操作流程
 
@@ -93,7 +101,8 @@ Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，�
 
 ### 3. Docstring 說明量測、序列與結果
 
-公開 docstring 先說量什麼、序列怎麼做、回傳結果代表什麼。
+`core.py` 的 module 與公開函式 docstring 只寫序列、輸入、結果與失敗條件。
+開頭先說量什麼、序列怎麼做、回傳結果代表什麼。操作教學、使用範例與環境指引放該實驗的 `guide.md`。
 單位、資料形狀及必要的失敗條件仍要交代。Lifecycle、rollback 與 caller 責任
 只在必要時用一句帶過，詳細契約連到 framework 文件，不在每個實驗重貼。
 
@@ -129,6 +138,228 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 ```
 
 這是分段示意，不是可執行的範本。Recipe 同樣按設定、量測、分析與 writeback 問答分段。
+
+## 寫法慣例
+
+以下寫法供新實驗採用。既有實驗可保留舊寫法，全面改名與移除舊介面留待大量遷移。
+序列、獨立分析與 docstring 的規則及短例見[前節](#讓使用者只看一個檔案就能理解實驗)。
+
+### Cfg 名稱、順序與取數欄位
+
+掃描欄位用被掃量的單數名，例如 cfg 的 `delay`、`gain`、`freq`。
+`declare_sweep`／`add_sweep` 名稱跟 cfg 欄位相同，Result 用 `delays`、`gains`、`freqs`。
+新實驗的軸 label 沿用同一個字，例如 `Delay`。既有存檔軸的 label／unit 不改，避免舊檔無法載入。
+Module 名稱等於提供設定的 cfg 欄位名，例如 `Pulse("pi_pulse", cfg.pi_pulse)`。
+欄位名寫角色，例如 `stark_tone`、`probe`，只有角色對稱時才用 `gain1`／`gain2`。
+既有持久 cfg 欄位改名時，隨遷移更新 `cfg_schema_version`。
+
+Cfg 宣告順序就是 Form 顯示順序，依序放播放順序的 modules、外到內的掃描量、取樣方式、取數欄位。
+Form 預設不寫 `field_order`。特殊需求才覆寫順序，並在原地用一行註解說明原因，
+例如讓 mux 的 participants 出現在 tones 前。
+
+取樣方式用 `sampling: Literal["linear", "decay"]`，掃描欄位只接受 `SweepCfg`。
+Linear 使用線性格點，decay 把同一時間窗的點集中在衰減段，不另接受 list 模式。
+各實驗保留原本的取樣預設；既有 `uniform` 欄位待遷移時改名。
+
+取數欄位在每個 cfg 最後完整寫出，不用額外基底或型別別名藏住欄位。
+平均類建議提供 `reps`、`rounds`、`relax_delay`、`acquire_retry`，有 SNR 定義才加 `earlystop_snr`，
+需要才加 `initial_delay`。這是風格建議，不因缺少標準組的某一項阻擋 review。
+
+Readout 選實驗接受的最窄型別。只接受 pulse 的寫 `PulseReadout.Cfg`，只接受 mux 的寫
+`MuxReadout.Cfg`，確實支援兩者才寫 `Readout.Cfg`。其他 module 同樣用自己的 `.Cfg`。
+以下是新實驗的 cfg 宣告片段，省略 run 與 Result：
+
+```python
+from typing import Annotated, Literal
+
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, SweepCfg
+
+
+class DelayCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    readout: PulseReadout.Cfg
+
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "linear"
+
+    reps: int = 1000
+    rounds: int = 10
+    relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
+    acquire_retry: int = 0
+```
+
+Module 建構時用 keyword 覆寫掃描量的介面**尚未提供，隨 D＋B1 提供**。
+未來例如 `Pulse("probe", cfg.probe, freq=freq)`，不修改 cfg，`None` 表示沿用 cfg。
+目前仍用既有 `set_param` 路徑，不把這個未來片段當成可執行 API。
+
+### 存檔軸用關鍵字，固定座標不塞進 Result
+
+`Axis`／`Z` 在欄位名之後用關鍵字寫 label、unit、scale 與 dtype。
+Scale 表示 `disk = memory * scale`，axes 仍是 inner-first。
+固定類別軸用 `values`，不要求 Result 有對應欄位：
+
+```python
+import numpy as np
+
+from zcu_tools.experiment import AxesSpec
+
+
+frequency_axis = AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6)
+class_axis = AxesSpec.Axis(
+    values=(0, 1, 2), label="Population", unit="None", dtype=np.int64,
+)
+signal = AxesSpec.Z("signals", label="Signal", unit="a.u.")
+```
+
+`field_name` 與 `values` 必須恰好給一個，否則建構時 raise ValueError。
+Z 的每個維度仍須匹配軸長，固定軸也計入。固定值不會在 load 時寫進 Result。
+同樣寫法也適用 `GroupedAxesSpec`，原有位置參數寫法保留到遷移收縮。
+
+### 分析選項自行驗證，fit 結果用屬性讀取
+
+分析選項以 pydantic dataclass 的欄位限制驗證，不在 gui.py 重做同一檢查。
+例如負的 skip 在建構時就拒絕，GUI 顯示表單錯誤，remote 回 `INVALID_PARAMS`：
+
+```python
+from typing import Annotated
+
+from pydantic import Field
+from pydantic.dataclasses import dataclass
+
+from zcu_tools.cfg_model import FieldMeta
+
+
+@dataclass(frozen=True)
+class AnalyzeOptions:
+    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
+
+
+options = AnalyzeOptions(skip=1)
+```
+
+`fit_decay`、`fit_dual_decay`、`fit_rabi` 與 `fit_decay_fringe` 已回傳具名結果。
+新程式碼讀屬性，tuple 解構只保留給既有 caller。以下的 `delays` 與 `real_signals`
+是同長度的一維 float64 陣列，delays 非負，回傳時間沿用 delays 的單位：
+
+```python
+from zcu_tools.analysis.fitting import fit_decay
+
+
+fit = fit_decay(delays, real_signals)
+lifetime = fit.decay_time
+uncertainty = fit.decay_time_err
+curve = fit.curve
+params, covariance, quality = fit.params, fit.cov, fit.quality
+```
+
+### Slot fallback 與分類 read axis
+
+有 library slot 就引用，沒有才採用 Template。Metadata 放在 Template 上，只有採用該範本才合併。
+Metadata key 是 Form root-relative canonical path，同路徑以 `Form.with_seed_metadata` 的顯式值優先。
+以下宣告給 Form tree 的 readout 欄位，不會在建構 node 時讀來源：
+
+```python
+from zcu_tools.cfg_model import FieldMeta, Slot, Template
+
+
+readout = Slot(
+    "$resonator.module.readout",
+    fallback=Template(
+        "readout",
+        bindings={"resonator": "$resonator"},
+        seed_metadata={
+            ("readout", "module", "gain"): FieldMeta(
+                description="Confirm readout gain before Run.",
+            ),
+        },
+    ),
+)
+```
+
+Slot 可解析時忽略 fallback，family 不相容仍報錯，不以範本掩蓋。
+未提供 fallback 時，required 欄位缺來源保持 Invalid，nullable 且預設 None 的欄位保持停用。
+
+單 tone 的分類宣告用 `Classify("readout")`，不用依 readout 類型手選 tone 0。
+`shot_sums(prog, [axis])` 在 program 編譯後解析 label；pulse 或單 tone mux 自動選取。
+多 tone mux 必須明寫原始 tone 序號，否則錯誤列出可選 tones：
+
+```python
+from zcu_tools.program.v2 import Classify
+
+
+axis = Classify("readout")
+mux_axis = Classify("readout", tone=2)
+```
+
+### 圖的建立、顯示與更新
+
+GUI、Notebook host 建構與離線 probe 入口會套用 `zcu_tools.plotting.DEFAULT_STYLE`。
+直接建立 `Plots` 不套用。入口初始化後，以原生 matplotlib 參數或 style context 覆寫：
+
+```python
+import matplotlib.pyplot as plt
+
+
+with plt.style.context({"axes.grid": False}):
+    fig, ax = plots.subplots(num="fit")
+    ax.set_xlabel("Delay (us)", fontsize=16)
+```
+
+`plots.subplots(2, 2, num="measurement", figsize=(8, 6))` 的列數、欄數、sharing 與 layout
+沿用 matplotlib。`num` 是此 Plots 內唯一的字串名字，供 GUI、MCP 與輸出檔名識別。
+省略時自動產生 `figure_N`，重複名字 raise ValueError。新 API 以 figure 物件指定圖。
+
+建圖不顯示，呼叫 `fig.show()` 才交給 host，不用 `plt.show()`。
+未 show 的分析圖可等操作的 `finish(present=True)` 呈現。
+操作結束前重複 show 不重建呈現；finish 後 show 或更新都 raise RuntimeError，release 後相同。
+Notebook 第一次呈現才載入 ipympl，並將 pyplot backend 切成 widget，不還原。
+Import notebook 模組與 show 前更新不會觸發這次載入。
+
+顯示前可直接用 matplotlib 設定。顯示後的即時更新與一次性改動一律經 `@plots.on_plot_thread`。
+裝飾後的函式接受一個可 deepcopy 的 payload，從任何執行緒呼叫都先複製，再同步在 host owner 執行本體。
+本體只改回傳 artists 所屬的圖，並回傳這次改了的 artist iterable，Figure 也可回傳。
+框架驗證全部歸屬後，對已呈現的根圖去重 refresh。回傳 None 會 raise TypeError，外來圖 raise ValueError，
+空 iterable 不重繪。本體或 copy 失敗直接傳回 caller，不 refresh，也不回滾已做的修改。
+Show 前也能呼叫，只保留修改，不 present、不 refresh，之後 show 或 finish 顯示最新內容。
+
+`live_line(ax)`、`live_heatmap(ax)`、`live_scatter(ax)` 只在 caller thread 掛到給定 axes。
+它們不建圖、不設 labels／title、不切執行緒、不 refresh 或 present，`set` 回傳改了的 artists。
+在 decorator 本體中呼叫 helper，例如下例。新 helper 與 decorator 不登記或檢查 axes 佔用，
+多個工具可共用 axes，由作者協調 artists、autoscale 與色階。
+
+```python
+from zcu_lab.v2.support import live_line
+
+
+fig, ax = plots.subplots(num="measurement")
+ax.set(xlabel="Delay (us)", ylabel="Signal")
+line = live_line(ax)
+
+
+@plots.on_plot_thread
+def update(data):
+    return line.set(delays, data)
+
+
+update(real_signals)
+fig.show()
+
+
+@plots.on_plot_thread
+def set_title(title):
+    return (ax.set_title(title),)
+
+
+set_title("Acquired signal")
+```
+
+此處 show 前先推一筆資料，show 後再做一次性標題更新。
+Qt 在 GUI 主執行緒執行本體，Notebook 在 caller thread 同步執行並送完整 frame，
+NonPresenting host 直接執行且不開視窗。
+舊字串圖名 `plots.draw(name, fn)` 與舊 live helper 保留原有隱式顯示及 axes 佔用規則。
+`live_heatmap_with_line` 只保留舊寫法，新版面由作者用 subplots 排列。
 
 ## 使用者實驗的測試
 
@@ -267,10 +498,13 @@ blocks。Backend minimum或covariance無效時fast-fail；`CKPAnalysis`只含chi
 數值分析由同目錄`fit.py`擁有，GUI adapter只投影其純量；acquisition與持久化
 資料格式維持三分支gain sweep。
 
-`singleshot/ResetCheckExp`沿用MIST power的population acquisition，以硬體gain／branch
-sweep保存`(Ngain, 3, 2)` G/E populations。analysis可用外部confusion matrix修正，
-回傳reset-only平均／最差excited population，不提供IQ校準writeback。
-Other不是校準後leakage，這些population不是reset-channel fidelity。
+`singleshot/ResetCheckExp` 以硬體 gain／branch sweep 保存 `ResetCheckResult.counts`，
+shape 為 `(Ngain, 3, 3)`，順序是 gain、reset branch、G/E/Other。
+三個 branch 依序是 reset 前、reset-only、reset 後追加 Rabi，屬於獨立 preparations，不是配對 shot 軌跡。
+Counts 是已取得 rounds 的分類計數總和。Analyze 先按每點總計數轉成比例，
+再選用 `ResetCheckAnalyzeOptions.confusion_matrix` 修正，回傳 reset-only 的平均／最差 excited population
+與最大 Other population，不提供 IQ 校準 writeback。
+Other 不是校準後 leakage，這些 population 不是 reset-channel fidelity。
 Run 使用 explicit RunContext，回傳純 Result。Analyze 接 RunRecord 與 ResetCheckAnalyzeOptions，回傳純 ResetCheckAnalysis，另向本次 Plots 發布 `populations` 圖。
 
 `singleshot/AmpRabiExp`保留硬體gain sweep，每個host round擷取所有gain的Reps筆raw IQ；
@@ -300,9 +534,23 @@ Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，unifor
 
 - **grouped experiment variables**：`CPMG_Exp` 使用 variables `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 variables `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 variables `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` variable unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。`load_run_with_metadata(path, spec=Exp.AXES_SPEC)` 讀取與 grouped spec 相符的 native `data.h5`，並透過 `restore_run` 還原 typed record。Labber 匯出由獨立的 `save_labber(record, path, spec=Exp.AXES_SPEC)` 提供，不能直接交給 native loader。既有 Labber 舊檔依 [migrations](../../migrations/README.md#legacy-resultdatabase--native-storage) 提供歷史證據並離線轉換；legacy `.npz` 或 sidecar 不是 runtime 可載入格式。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
-- **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料；MIST `power` / `freq` / `pre_freq` 把 `g/e/other` population components 視為 `population_states=[0, 1, 2]` axis，canonical shape 為 `(Nsweep, 3)`；singleshot `ac_stark` 與 MIST `power_freq` 使用 `population_states` 加兩個 sweep axes，canonical shape 為 `(Ngain, Nfreq, 3)`；singleshot `t1` / `t1_with_tone` 使用 `population_states`、`initial_states` 與 `lengths`，canonical shape 為 `(Nt, 2, 3)`；`t1_with_tone_sweep` 使用 `population_states`、`lengths`、`initial_states` 與 generic `xs`/`Sweep Value` axis，canonical shape 為 `(Nx, 2, Nt, 3)`。這些 Result 保存完整 `[g,e,other]`，analysis 不重建 other。舊兩欄 population 檔案不能直接交給新的 analyze，不提供轉換 adapter。Cfg 未變，`cfg_schema_version` 維持 `3.0`，不作 Result 資料版本。這類 homogeneous Result 的 native 資料存成單一 `data.h5`，Labber 另匯出單一 `.hdf5`。離散狀態不是 Data Variable，不拆成多個 sidecar artifact；legacy artifact 不由 runtime 載入；舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向也不在 runtime 重排。
+- **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料。
+- **分類計數與狀態軸**：以下 Result 的 `counts` 保存完整 `[g,e,other]` 計數，`population_states=[0, 1, 2]` 是最內層軸。比例由 counts 正規化，analysis 不重建 other。
 
-Singleshot MIST 的 Freq／Power／PreFreq／FreqPower 使用 explicit RunContext，回傳純 Result。所有 classification 校準值屬於 typed cfg。同步 analyze 接 RunRecord、對應 AnalyzeOptions 與 Plots，允許 cfg=None，只發布 fit 圖。Power 支援 photon 軸與 log scale；FreqPower 不宣告未實作的軸選項。單 sweep 即時圖使用 measurement，二維掃描的 Ground／Excited／Other 熱圖各自具名；圖的 `Population` 標籤對應完整三態 payload。
+  | 實驗 | Result-native counts shape | 其餘軸，由外到內 |
+  | --- | --- | --- |
+  | MIST `power`／`freq`／`pre_freq` | `(Nsweep, 3)` | 對應的 gain／frequency |
+  | Singleshot `ac_stark`、MIST `power_freq` | `(Ngain, Nfreq, 3)` | gains、freqs |
+  | Singleshot `t1`／`t1_with_tone` | `(Nt, 2, 3)` | lengths、initial_states |
+  | Singleshot `t1_with_tone_sweep` | `(Nx, 2, Nt, 3)` | xs、initial_states、lengths |
+
+  舊兩欄 population 檔案不能直接交給新的 analyze，不提供轉換 adapter。
+  Cfg 未變，`cfg_schema_version` 維持 `3.0`，不作 Result 資料版本。
+  這類 homogeneous Result 的 native 資料存成單一 `data.h5`，Labber 另匯出單一 `.hdf5`。
+  離散狀態不是 Data Variable，不拆成多個 sidecar artifact。Runtime 不載入 legacy artifact，
+  也不重排舊 singleshot population HDF5 的 `(2, Nsweep)` 或 multi-sidecar z 方向。
+
+Singleshot MIST 的 Freq／Power／PreFreq／FreqPower 使用 explicit RunContext，回傳純 Result。所有 classification 校準值屬於 typed cfg。同步 analyze 接 RunRecord、對應 AnalyzeOptions 與 Plots，允許 cfg=None，只發布 fit 圖。Power 支援 photon 軸與 log scale；FreqPower 不宣告未實作的軸選項。單 sweep 即時圖使用 measurement，二維掃描的 Ground／Excited／Other 熱圖各自具名；圖的 `Population` 標籤表示 counts 正規化後的三態比例。
 
 Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個program只擷取
 單一length的`shots`筆raw IQ，再寫入sweep-first Result row，避免FPGA同時配置完整
@@ -311,7 +559,10 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
 Singleshot consumers 的分類參數由 RunRecord.cfg.readout 的 classifier 提供。
-Population acquisition 透過 `acquire_processed` 明傳完整 per-ADC processors，所有 ADC 都須有 circle 與 radius，不能用 linear 表達 Other。
+分類取數先 build program，再用 `shot_sums(prog, [Classify("readout")])` 解析讀出 label，交給 `run_program_summed`。
+Result 的 `counts` 保存各 round 的 class counts 總和，形狀與原有狀態軸相同；分析與 live plot 才按每點總計數轉成比例。
+需要 Other 的讀出須有 circle 與 radius，不能用 linear 或 centroid3 表達 Other。
+舊比例存檔缺少 counts 時明確拒絕，不以比例推算計數。
 GUI confusion correction 只取 saved readout cfg 的 matrix；缺 cfg／classifier／matrix 時略過。
 Rabi 與 Check 保留單 ADC raw IQ。Rabi 無 classifier 仍可 Run／fit，Check 在分析才要求 circle／radius。
 Classifier 的複數持久格式由 cfg_model 與 core complex codec 擁有，lab 不另加 serializer。
@@ -370,20 +621,253 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ---
 
+## Timeline program 與 Schedule 取數
+
+`TimelineBuilder` 只記錄 program 動作，`build()` 產生並編譯 `TimelineProgramV2`。
+它不接收 soc，不取數，也不是 context manager。
+需要自訂 register 運算或 dmem 操作時，改寫 `TimelineProgramV2` 子類別。
+兩種寫法都把 program 交給 Schedule 或 scan step 的 `run_acquire*`。
+
+舊 `ProgramBuilder`、`sched.prog_builder(...)` 與 `AcquireOptions` 仍可並存。
+本節不要求遷移現有實驗。**目前 legacy simulator 不支援 emit 寫法**，
+承接 `acquire*` 介面不代表能在該 simulator 執行。
+編譯與 IR timing analysis 不需要取數，實際執行則需要相容的 acquisition backend。
+支援邊界見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
+
+`sync` 依每個掃描點的 runtime 結尾推進 reference，shell 收尾 WAIT 使用編譯期常數。
+已知合法掃描點間的剩餘時間差距大於 0 時編譯發 warning，超過 `relax_delay` 時 raise ValueError。
+未知差距只警告上界，不以該上界拒絕編譯。
+兩種寫法共用 [ADR-0083 的收尾 WAIT 契約](../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
+Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
+
+### 用 TimelineBuilder 寫序列
+
+以下片段放在實驗 `run(config, *, context)` 中。
+`config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
+以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
+`on_update` 是本次實驗的 live plot callback，接收完整 signal array。
+
+```python
+import numpy as np
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.utils.snr import snr_checker
+from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
+
+signals = SignalBuffer((config.length.expts,), on_update=on_update)
+with Schedule(config, signals, scope=context.scope) as sched:
+    cfg = sched.cfg
+    builder = TimelineBuilder(
+        context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+    )
+    delay = builder.add_sweep("length", cfg.length)
+
+    drive = Pulse("pi_pulse", cfg.pi_pulse)
+    readout = Readout("readout", cfg.readout)
+    builder.emit(drive)
+    builder.delay_timeline(delay)
+    builder.emit(readout, tag="terminal")
+
+    prog = builder.build()
+    sched.run_acquire(
+        prog, context.soc, rounds=cfg.rounds,
+        options=RunOptions(
+            retry=cfg.acquire_retry,
+            stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, np.abs),
+        ),
+    )
+```
+
+`add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
+多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
+`LoadValue` 或 `ScanWith`，不要把不等距點轉成 `add_sweep`。
+Builder 的 `emit`、`emit_parallel`、`delay`、`delay_auto`、`delay_timeline`、
+`sync`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
+沿用 program 層的同名 API。原生布林控制選項用 keyword，例如
+`builder.delay_auto(0.1, gens=False, ros=True)`。
+`build()` 後 builder 凍結，再記錄動作或再次 build 都會 raise ValueError。
+
+### 手寫 TimelineProgramV2
+
+手寫版本在 `_initialize` 建立 module 並 `declare`，在 `_body` 發射。
+下例與上例使用相同的輸入欄位，每次建構都複製 cfg 並建立新的 module。
+
+```python
+from copy import deepcopy
+
+from zcu_tools.program.v2 import Pulse, Readout, TimelineProgramV2
+
+
+class T1Program(TimelineProgramV2):
+    def __init__(self, soccfg, cfg):
+        self.inputs = deepcopy(cfg)
+        super().__init__(
+            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+        )
+
+    def _initialize(self, _cfg):
+        cfg = self.inputs
+        self.delay_param = self.add_sweep("length", cfg.length)
+
+        self.drive = Pulse("pi_pulse", cfg.pi_pulse)
+        self.readout = Readout("readout", cfg.readout)
+        self.declare(self.drive)
+        self.declare(self.readout)
+
+    def _body(self, _cfg):
+        self.emit(self.drive)
+        self.delay_timeline(self.delay_param)
+        self.emit(self.readout, tag="terminal")
+
+
+signals = SignalBuffer((config.length.expts,), on_update=on_update)
+with Schedule(config, signals, scope=context.scope) as sched:
+    prog = T1Program(context.soccfg, sched.cfg)
+
+    sched.run_acquire(
+        prog, context.soc, rounds=sched.cfg.rounds,
+        options=RunOptions(retry=sched.cfg.acquire_retry),
+    )
+```
+
+**每個 program 或 build 都要建立全新的 module 物件。** 不把已被 built program 使用的
+module 傳給另一個 program，也不從 cache 拿出 module 重新 build。
+目前宣告結果仍保存在 module 上，跨 program 共用會混入前一個 program 的資源狀態。
+將宣告狀態搬進 program 是後續工作。
+同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
+重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
+相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
+Pulse 家族原有的 generator 與 template 共用規則不變。
+
+### Timeline 範圍只切換預設名字
+
+Module 的 default timeline 與 QICK reference 分開。
+`delay_timeline` 只加 timeline 結尾，`sync` 才把 reference 推到該結尾。
+原生 `delay` 與 `delay_auto` 仍只推進 reference，不受 timeline 範圍影響。
+未進範圍時，省略 timeline 的 module emit 使用 default，原生 pulse／trigger 保留原生 reference timing。
+
+選擇 delay 方法時，也要考慮指令成本。
+若後續一組 pulse 都需要同一個掃描時間位移，先以掃描值推進 reference，可將這次位移集中成一次時間加總。
+若把掃描值留在 timeline，後續各 pulse 可能都需要以暫存器計算發射時間，增加指令數。
+先按排程需求決定是否推進共用 reference，再比較編譯結果的成本；這些方法的效果不同，不能只按指令數互換。
+作者自行選擇 `delay`、`delay_auto` 或 `delay_timeline`，builder 不自動替換或優化。
+
+以下是同一 builder 在 build 前的 body 片段。`drive` 是這次 build 新建的 module。
+手寫 program 可在 `_body` 將 `builder` 換成 `self`，使用已 declare 的 `self.drive`。
+
+```python
+builder.fork("default", into=["drive", "other"])
+
+with builder.timeline("drive"):
+    builder.emit(drive)
+    builder.delay_timeline(0.1, timeline="default")  # Explicit name wins.
+
+    with builder.timeline("other"):
+        builder.delay_timeline(0.2)
+
+    builder.delay_timeline(0.05)  # Restores drive after the nested scope.
+    with builder.repeat("pairs", 2):
+        builder.emit(drive)
+
+builder.join("drive", "other", into="default")
+builder.sync()
+```
+
+名字須先存在，只有 `"default"` 預先存在，其餘須先 `fork`。
+`timeline(name)` 不 fork、不自行 join，離開範圍也不移動 reference。
+省略 `timeline=` 或傳入 `None` 會選目前範圍，顯式名字優先，巢狀範圍離開後還原外層。
+`emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
+`repeat` 的預設母 timeline 都遵守這條規則。
+`fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
+`branch` 只有 `by` 參數，例如 `with builder.branch(by="scan") as cases:`。
+Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
+Case 只同步自身使用的 timeline 與局部 fork，不把不等長 case 補成共同長度。
+Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
+
+`DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
+它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。
+在範圍內要推 reference，直接呼叫原生 `delay_auto`。
+完整控制流與時間單位見 [program 作者 API](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+
+### 用 run_acquire* 寫入與停止
+
+Schedule 與 scan step 都提供以下入口，接受 builder 產生或手寫的 program：
+
+| 入口 | 預設寫入 slot 的資料 |
+| --- | --- |
+| `run_acquire(prog, soc, ...)` | 第一個 ADC 的第一次 read，IQ 轉 complex |
+| `run_acquire_summed(prog, soc, processor=..., ...)` | 累積總和，不除 reps 或 rounds |
+| `run_acquire_decimated(prog, soc, ...)` | 第一個 ADC 的 complex trace，保留 repetitions 與 samples 軸 |
+
+`run` 把轉換後的資料寫進目前 Schedule 或 step 的 slot，並觸發 buffer 的 live update。
+Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_acquire(...)`。
+每次 completed round 都先轉換與寫入，再檢查 `RunOptions.stop_condition`。
+Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
+Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後續 host loop。
+外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
+失敗或中斷可能留下 partial data，回傳後仍須檢查本次 `context.scope.stop.raise_if_error()`。
+
+`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 至少重試一次，並先還原取數前的 slot。
+外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
+`progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
+`rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
+不要把 `rounds` 放進 `RunOptions`。
+
+Summed 範例先 build 再解析 read label。以下是上方 builder 範例的替代取數段，
+使用同一個 `prog`，但 slot 改為 float64 的 count、sum I、sum Q 三欄。
+
+```python
+from zcu_tools.program.v2 import IQ, shot_sums
+
+processor = shot_sums(prog, [IQ("terminal")])
+sums = SignalBuffer((config.length.expts, 3), dtype=np.float64)
+
+with Schedule(config, sums, scope=context.scope) as sched:
+    sched.run_acquire_summed(
+        prog, context.soc, processor=processor, rounds=sched.cfg.rounds,
+        options=RunOptions(retry=sched.cfg.acquire_retry),
+    )
+```
+
+需要不同形狀或 conditional mean 時，用 `RunOptions(converter=...)` 明確轉換。
+`shot_sums`、分類軸與 `split_sums` 見 [program acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
+Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用只取第一個 ADC 的預設。
+新 emit 路徑不支援 legacy `MuxReadout.collect_raw_iq`，不要用該方法作 converter。
+
+Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
+預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
+這次建構建立新的 readout，不重用前一個 built program 的物件。
+
+```python
+trace_builder = TimelineBuilder(context.soccfg, reps=1)
+trace_builder.emit(Readout("readout", config.readout))
+trace_prog = trace_builder.build()
+
+with Schedule(config, trace_buffer, scope=context.scope) as sched:
+    sched.run_acquire_decimated(
+        trace_prog, context.soc, rounds=sched.cfg.rounds,
+        options=RunOptions(progress=True),
+    )
+```
+
+Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數並回傳。
+它們不寫 Schedule slot，不管理 live update、retry 或 Schedule stop_condition。
+直接呼叫時，caller 自己傳入 cancel flag 並處理結果。
+
 ## v2 cfg 組合慣例
 
-實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 依 `field_order` 平鋪，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
+實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 的排序見[寫法慣例](#cfg-名稱順序與取數欄位)，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
 
-Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helpers 使用 `live_line(plots, ...)`、`live_scatter(plots, ...)`、`live_heatmap(plots, ...)` 與 `live_heatmap_with_line(plots, ...)`。它們由 `zcu_lab.v2.support` 匯出。
+Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helper 的新寫法與舊介面界線見[圖的建立、顯示與更新](#圖的建立顯示與更新)。
 
 平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 
-Core import `Pulse`、`Readout`、`Reset` 等實際使用的模組，欄位型別寫 `Pulse.Cfg`、`Readout.Cfg`、`Reset.Cfg`。具體 readout／reset／waveform 也使用自己的 `.Cfg`，例如 `MuxReadout.Cfg` 與 `BathReset.Cfg`。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
+Core import 實際使用的 module，型別選擇見[寫法慣例](#cfg-名稱順序與取數欄位)。`SweepCfg` 與硬體指令仍按需 import。`SweepCfg` 定義在 `program/v2/sweep.py`。父層 cfg 型別與執行前組裝方式見[父層 README](../../lib/zcu_tools/experiment/README.md#cfg-與父層支援)。
 
 ---
 
 ## Signal/Raw 處理慣例
 
+- 除了用來產生分類參數的 `singleshot/ge`、`mux/singleshot_ge`、`singleshot/qutrit_population`、`singleshot/amp_rabi`、`singleshot/len_rabi`、`singleshot/check`，實驗不保存逐 shot 資料。分類在取數時做，Result 存計數或總和，避免為事後分類保存整批 IQ。校準實驗仍保留逐 shot 分布，供分類參數的擬合與驗證使用。
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
 - **`default_raw2signal_fn`**：Schedule 路徑使用 `zcu_tools.experiment.v2.runtime.schedule` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
 - **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換。
@@ -449,7 +933,7 @@ distinct depths 時分析明確失敗。
 
 ## 寫新 Experiment 時的檢查清單
 
-1. 定義 `XxxCfg(ConfigBase)`，在頂層宣告 module、掃描與實際使用的 averaging／timing 欄位。Module 欄位用 `Pulse.Cfg`、`Readout.Cfg` 等型別，掃描欄位用 `SweepCfg`。不加 Modules／Sweep group，以 Form 的 `field_order` 排列模組、掃描與 controls。Pulse 的 Advanced group 維持既有行為。
+1. 定義 `XxxCfg(ConfigBase)`，頂層欄位與 module 型別依[寫法慣例](#cfg-名稱順序與取數欄位)宣告。平鋪、版本與 Advanced group 見[v2 cfg 組合慣例](#v2-cfg-組合慣例)。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。

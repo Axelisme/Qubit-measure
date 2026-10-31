@@ -22,48 +22,48 @@ class TimeRabiInputs(RecipeInputs):
 
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value; null clears/disables it. Sources are chosen by the Form.",
+        description="Readout library key. Sources are chosen by the Form.",
     )
     drive_ref: str | None | Keep = Field(
         KEEP,
-        description="Drive library key; omission retains the Form value; null clears/disables it. No pi calibration is required for this sweep.",
+        description="Drive library key. No pi calibration is required for this sweep.",
     )
     use_reset: str | None | Keep = Field(
         KEEP,
-        description="Reset module option; omission retains the Form selection, null disables it.",
+        description="Reset module option.",
     )
     frequency_mhz: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse frequency in MHz. Omission retains the Form value; null clears it.",
+        description="Fixed pulse frequency in MHz.",
     )
     gain: float | None | Keep = Field(
         KEEP,
-        description="Fixed pulse amplitude in native gain units; omission retains the Form value; null clears/disables it.",
+        description="Fixed pulse amplitude in native gain units.",
     )
     max_length_us: float | None | Keep = Field(
         KEEP,
-        description="Pulse-length sweep stop in us; omission retains the Form value; null clears/disables it.",
+        description="Pulse-length sweep stop in us.",
     )
     points: int | None | Keep = Field(
         KEEP,
-        description="Sweep sample count; omission retains the Form value; null clears/disables it.",
+        description="Sweep sample count.",
     )
     reps: int | None | Keep = Field(
         KEEP,
-        description="Acquisition repetition count; omission retains the Form value; null clears/disables it.",
+        description="Acquisition repetition count.",
     )
     rounds: int | None | Keep = Field(
         KEEP,
-        description="Averaging round count; omission retains the Form value; null clears/disables it.",
+        description="Averaging round count.",
     )
 
     decay: bool | None | Keep = Field(
         KEEP,
-        description="Fit decay envelope; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit decay envelope. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         KEEP,
-        description="Fit phase offset; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Fit phase offset. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

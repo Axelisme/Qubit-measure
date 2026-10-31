@@ -3,35 +3,46 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass
-from logging import getLogger
-from math import isfinite
 from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
-    Literal,
-    NotRequired,
     Protocol,
     Self,
     TypeAlias,
-    TypedDict,
     Unpack,
 )
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import ReadOnly, TypeVar
+from typing_extensions import TypeVar
 
-from zcu_tools.experiment.acquisition_facts import StopDecision
-from zcu_tools.experiment.v2.runtime.acquire_cancel import AcquireCancelFlag
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    AcquireOptions as AcquireOptions,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    AcquisitionRunner,
+    require_positive_rounds,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    SignalArray as SignalArray,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    StopCondition as StopCondition,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    SynchronousAcquireKeywords as SynchronousAcquireKeywords,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    default_decimated_raw2signal_fn as default_decimated_raw2signal_fn,
+)
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    default_raw2signal_fn as default_raw2signal_fn,
+)
 from zcu_tools.program.acquisition import (
-    AcquisitionContractError,
-    CancelFlagProtocol,
-    ShotProcessor,
-    StoppedPartialAcquireError,
+    ShotSumProcessor,
 )
 from zcu_tools.program.v2 import (
     Module,
@@ -44,7 +55,6 @@ from zcu_tools.program.v2 import (
     SweepCfg,
 )
 from zcu_tools.program.v2.modules.base import ModuleGroup, as_modules
-from zcu_tools.progress_bar import BaseProgressBar, make_pbar
 
 if TYPE_CHECKING:
     from zcu_tools.experiment.v2.runtime.schedule import (
@@ -52,69 +62,10 @@ if TYPE_CHECKING:
         ScheduleStep,
         SignalSlot,
     )
-    from zcu_tools.program.herald import HeraldSpec
 
 T_Raw = TypeVar("T_Raw")
-T_KeywordRaw_contra = TypeVar("T_KeywordRaw_contra", contravariant=True)
 T_AcquireRaw_co = TypeVar("T_AcquireRaw_co", covariant=True)
 T_DecimatedRaw_co = TypeVar("T_DecimatedRaw_co", covariant=True)
-SignalArray: TypeAlias = NDArray[Any]
-StopCondition: TypeAlias = Callable[[], bool | StopDecision]
-logger = getLogger(__name__)
-
-
-def _require_positive_rounds(rounds: object) -> None:
-    if isinstance(rounds, bool) or not isinstance(rounds, int) or rounds < 1:
-        raise ValueError("rounds must be a positive integer")
-
-
-class _AcquireStopped(Exception):
-    """An acquire child was cancelled; retain its completed-round slot."""
-
-
-class _CallbackError(Exception):
-    """Carry callback origin across the producer's synchronous acquire boundary."""
-
-    def __init__(self, error: Exception) -> None:
-        super().__init__(str(error))
-        self.error = error
-
-
-class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
-    """Keywords required by a synchronous builder-managed acquisition.
-
-    rounds is the software average count and progress controls native progress.
-    round_hook receives each completed-round summary and its cancel flag.
-    Its keyword entry is read-only: consumers call the supplied hook without
-    replacing it. The callback consumes raw data, making these keywords
-    contravariant in that data. Passing them as method arguments preserves
-    the producer protocol's raw-result covariance.
-    cancel_flag also carries external stop requests. Omitted step_rounds keeps
-    synchronous operation; stepped preparation is outside this producer seam.
-    This protocol does not promise arbitrary keyword acceptance. The builder
-    still forwards producer-specific keywords unchanged at runtime.
-    """
-
-    rounds: int
-    progress: bool
-    round_hook: ReadOnly[
-        Callable[[int, T_KeywordRaw_contra, CancelFlagProtocol], object]
-    ]
-    cancel_flag: CancelFlagProtocol
-    step_rounds: NotRequired[Literal[False]]
-
-
-class SynchronousDecimatedAcquireKeywords(
-    SynchronousAcquireKeywords[T_KeywordRaw_contra]
-):
-    """Synchronous decimated options, including the existing herald keyword.
-
-    herald=None or an empty sequence leaves decimated IQ traces unchanged.
-    A nonempty sequence raises ValueError because decimated acquisition does
-    not support herald selection. Other keywords follow SynchronousAcquireKeywords.
-    """
-
-    herald: NotRequired[Sequence[HeraldSpec] | None]
 
 
 class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
@@ -127,10 +78,9 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     and the supplied cancel_flag; they check that flag before starting another
     round. Return the final raw data, retaining completed rounds on cancellation.
     Raise StoppedPartialAcquireError if cancelled before any round completes.
-    acquire does not accept herald; use acquire_processed with a heralded
-    processor for shot selection. Only acquire_decimated retains the herald
-    keyword; a nonempty sequence raises ValueError. This synchronous contract
-    uses the default step_rounds=False mode; stepped preparation is not a
+    Use acquire_summed with read axes for joint classification and selection.
+    This synchronous contract uses the default step_rounds=False mode;
+    stepped preparation is not a
     completed raw result.
     Other producer errors propagate to the builder's partial-result policy.
     """
@@ -144,57 +94,34 @@ class ProgramProtocol(Protocol[T_AcquireRaw_co, T_DecimatedRaw_co]):
     def acquire_decimated(
         self,
         soc: object,
-        **kwargs: Unpack[SynchronousDecimatedAcquireKeywords[T_DecimatedRaw_co]],
+        **kwargs: Unpack[SynchronousAcquireKeywords[T_DecimatedRaw_co]],
     ) -> T_DecimatedRaw_co: ...
 
 
-class ProcessedProgramProtocol(ProgramProtocol[object, object], Protocol):
-    """Program with per-ADC shot processing in addition to IQ acquisition.
+class SummedProgramProtocol(ProgramProtocol[object, object], Protocol):
+    """Program with one joint-ADC processor returning per-point shot sums.
 
-    processors maps ADC numbers to normalized float64 (shots, reads, 2) IQ
-    processors returning (shots, out_reads, N). rounds is the software average
-    count. With step_rounds=False, return ADC-ordered cumulative arrays of shape
-    (out_reads, *point_dims, N); True prepares only and returns None. Native
-    options include progress, round_hook and cancel_flag as in ProgramProtocol.
-    threshold, angle and herald are not supported. See program.acquire_processed
-    for payload failures, normalization and completed-round cancellation policy.
+    processor receives ADC-keyed normalized float64 (points, reps, reads, 2)
+    arrays and returns float64 (points, *axes). Completed rounds add without
+    normalization. round_hook and final data have shape (*point_dims, *axes).
+    rounds, step_rounds, native keywords and cancellation follow ProgramProtocol;
+    step_rounds=True prepares only, returning None. threshold, angle and herald
+    raise ValueError. See program.acquire_summed for shape/dtype validation.
     """
 
-    def acquire_processed(
+    def acquire_summed(
         self,
         soc: object,
         *,
-        processors: Mapping[int, ShotProcessor],
+        processor: ShotSumProcessor,
         rounds: int = 1,
         step_rounds: bool = False,
         **qick_options: object,
-    ) -> list[NDArray[np.float64]] | None: ...
+    ) -> NDArray[np.float64] | None: ...
 
 
-ProcessedProgramT = TypeVar("ProcessedProgramT", bound=ProcessedProgramProtocol)
 ProgramT = TypeVar("ProgramT", bound=ProgramProtocol[Any, Any])
 ProgramFactory: TypeAlias = Callable[..., ProgramT]
-
-
-def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-    """Convert the first receiver/readout's final-axis IQ pairs to complex signals.
-
-    raw follows integrated program acquisition layout: receiver, readout, then
-    signal axes ending in a length-two I/Q axis. Invalid layouts raise NumPy or
-    indexing errors; this function does not modify raw.
-    """
-    return raw[0][0].dot([1, 1j])
-
-
-def default_decimated_raw2signal_fn(
-    raw: Sequence[NDArray[np.float64]],
-) -> NDArray[np.complex128]:
-    """Convert the first receiver's decimated IQ trace to a complex array.
-
-    raw contains receiver arrays ending in a length-two I/Q axis. Invalid layouts
-    raise NumPy or indexing errors; this function does not modify raw.
-    """
-    return raw[0].dot([1, 1j])
 
 
 class ModuleFacade(ABC):
@@ -222,75 +149,6 @@ class ModuleFacade(ABC):
     def add_readout(self, name: str, cfg: ReadoutCfg) -> Self:
         """Append a named Readout from cfg and return this builder."""
         return self.add(Readout(name, cfg))
-
-
-@dataclass(frozen=True)
-class AcquireOptions:
-    """Policy shared by integrated and decimated program acquisition.
-
-    retry is a non-negative number of extra attempts, default zero. Shot
-    overrun (AcquisitionContractError) uses max(retry, 1) extra attempts, even
-    when retry is zero. Each retry reruns all rounds on the same program with
-    fresh producer buffers; overrun discards the failed attempt's slot data.
-    External cancellation and interruption are never retried. progress
-    defaults to hiding native acquisition progress. progress_label names the
-    rounds bar (default "rounds"). progress_leave=None keeps the completed bar
-    visible at the root and removes it for a host step; explicit True/False
-    overrides this display policy. Every bar closes before acquire returns.
-    stop_condition=None disables data-driven early stop; otherwise the callback
-    runs after each completed round is converted and written to the buffer.
-    Returning True or StopDecision(met=True) requests acquire-local cancellation
-    before the next round. StopDecision additionally supplies a scalar observation
-    logged if finite and acquisition actually ends early. Each retry logs its
-    reason and next attempt number at warning level; early stops log the stop
-    value and completed rounds at info level.
-    """
-
-    retry: int = 0
-    progress: bool = False
-    progress_label: str = "rounds"
-    progress_leave: bool | None = None
-    stop_condition: StopCondition | None = None
-
-
-@dataclass
-class _AcquireProgress:
-    pbar: BaseProgressBar
-    attempts: int = 0
-    completed_rounds: int = 0
-    decision: bool | StopDecision = False
-
-    def retry_after(
-        self,
-        error: Exception,
-        retry: int,
-        slot: SignalSlot,
-        initial_signal: SignalArray,
-    ) -> bool:
-        overrun = isinstance(error, AcquisitionContractError)
-        if overrun:
-            slot.set(initial_signal)
-        retry_limit = max(retry, 1) if overrun else retry
-        if self.attempts > retry_limit:
-            return False
-        reason = "shot_overrun" if overrun else type(error).__name__
-        logger.warning(
-            "Retrying acquisition, attempt %s after %s: %s",
-            self.attempts + 1,
-            reason,
-            error,
-        )
-        return True
-
-    def log_early_stop(self, requested_rounds: int) -> None:
-        if not self.decision or self.completed_rounds >= requested_rounds:
-            return
-        value = self.decision.value if isinstance(self.decision, StopDecision) else None
-        logger.info(
-            "Acquisition stopped early: stop value %s, completed rounds %s",
-            value if value is not None and isfinite(value) else None,
-            self.completed_rounds,
-        )
 
 
 class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
@@ -455,75 +313,41 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             acquire_kwargs=acquire_kwargs,
         )
 
-    def build_and_acquire_processed(
-        self: ProgramBuilder[ProcessedProgramT],
-        *,
-        processors: Mapping[int, ShotProcessor],
-        processed2signal_fn: Callable[[list[NDArray[np.float64]]], SignalArray],
-        rounds: int = 1,
-        options: AcquireOptions | None = None,
-        **acquire_kwargs: object,
-    ) -> SignalArray:
-        """Build once and run processed acquisition with an explicit converter.
-
-        processors maps declared ADC numbers to ShotProcessor callables.
-        processed2signal_fn converts ADC-ordered (out_reads, *point_dims, N)
-        payloads to the owner's slot shape, for both completed rounds and final
-        data. No builder-wide or default IQ converter is used. For heralded
-        payloads the converter calls herald_ratio and owns any fraction slot.
-        rounds must be a positive integer excluding bool. options controls
-        retry, progress and stop; acquire_kwargs forwards native QICK options.
-        See the class contract for build errors, cancellation and partial data.
-        """
-        self._schedule.ensure_active()
-        self._ensure_modules()
-        _require_positive_rounds(rounds)
-        selected_options = AcquireOptions() if options is None else options
-        if selected_options.retry < 0:
-            raise ValueError("retry must be non-negative")
-        if self._schedule.check_stop_requested():
-            return self._default_slot().view
-        return self.run_program_processed(
-            self._build_program(),
-            processors=processors,
-            processed2signal_fn=processed2signal_fn,
-            rounds=rounds,
-            options=selected_options,
-            **acquire_kwargs,
-        )
-
-    def run_program_processed(
+    def run_program_summed(
         self,
-        program: ProcessedProgramProtocol,
+        program: SummedProgramProtocol,
         *,
-        processors: Mapping[int, ShotProcessor],
-        processed2signal_fn: Callable[[list[NDArray[np.float64]]], SignalArray],
+        processor: ShotSumProcessor,
+        sums2signal_fn: Callable[[NDArray[np.float64]], SignalArray],
         rounds: int = 1,
         options: AcquireOptions | None = None,
         **acquire_kwargs: object,
     ) -> SignalArray:
-        """Run caller-owned processed acquisition, reusing it across retries.
+        """Run a compiled program with one processor and an explicit sum converter.
 
-        processors and required processed2signal_fn follow
-        build_and_acquire_processed. The same converter receives cumulative
-        round updates and final data; IQ defaults and builder-wide conversion
-        are never selected. rounds, options, native keywords and partial-result
-        policy follow run_program. This method requires synchronous results;
-        a producer returning None raises ValueError during conversion.
+        Build program first, then resolve any read labels in processor.
+        sums2signal_fn converts cumulative and final (*point_dims, *axes) sums
+        to the default signal slot's array shape. No IQ or builder-wide converter
+        is selected. rounds is a positive software round count. options controls
+        retry, progress and data stop exactly as run_program; native
+        acquire_kwargs pass through unchanged. Retries reuse program and reset
+        acquisition sums. None results raise ValueError during conversion because
+        this runner requires synchronous acquisition. Cancellation retains
+        completed-round slot data; a stop before any data retains initial NaNs.
         """
 
-        def convert(raw: list[NDArray[np.float64]] | None) -> SignalArray:
+        def convert(raw: NDArray[np.float64] | None) -> SignalArray:
             if raw is None:
-                raise ValueError("processed builder requires synchronous acquisition")
-            return processed2signal_fn(raw)
+                raise ValueError("summed builder requires synchronous acquisition")
+            return sums2signal_fn(raw)
 
         return self._run_program(
-            acquire=program.acquire_processed,
+            acquire=program.acquire_summed,
             rounds=rounds,
             raw2signal_fn=convert,
             default_raw2signal_fn=convert,
             options=AcquireOptions() if options is None else options,
-            acquire_kwargs=dict(acquire_kwargs, processors=processors),
+            acquire_kwargs=dict(acquire_kwargs, processor=processor),
         )
 
     def run_program_decimated(
@@ -559,7 +383,7 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
-        _require_positive_rounds(rounds)
+        require_positive_rounds(rounds)
         if options.retry < 0:
             raise ValueError("retry must be non-negative")
         if self._schedule.check_stop_requested():
@@ -583,73 +407,13 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
     ) -> SignalArray:
-        _require_positive_rounds(rounds)
-        retry = options.retry
-        if retry < 0:
-            raise ValueError("retry must be non-negative")
-        self._schedule.ensure_active()
-
-        slot = self._default_slot()
-        initial_signal = slot.view.copy()
-        signal_fn = self._resolve_raw2signal_fn(raw2signal_fn, default_raw2signal_fn)
-
-        pbar = make_pbar(
-            total=rounds,
-            smoothing=0,
-            desc=options.progress_label,
-            leave=self._resolve_progress_leave(progress_leave=options.progress_leave),
-            disable=rounds == 1,
+        return AcquisitionRunner(self._owner, self._soc).run(
+            acquire=acquire,
+            rounds=rounds,
+            signal_fn=self._resolve_raw2signal_fn(raw2signal_fn, default_raw2signal_fn),
+            options=options,
+            acquire_kwargs=acquire_kwargs,
         )
-        observation = _AcquireProgress(pbar)
-        try:
-            for _ in range(max(retry, 1) + 1):
-                if self._schedule.check_stop_requested():
-                    break
-                pbar.reset()
-                observation.attempts += 1
-                observation.completed_rounds = 0
-                observation.decision = False
-                try:
-                    raw = self._acquire_once(
-                        acquire=acquire,
-                        options=options,
-                        acquire_kwargs=dict(acquire_kwargs, rounds=rounds),
-                        signal_fn=signal_fn,
-                        slot=slot,
-                        observation=observation,
-                    )
-                except _AcquireStopped:
-                    self._schedule.check_stop_requested()
-                    break
-                except _CallbackError as exc:
-                    raise exc.error from None
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                    break
-                # tolerated: Native acquisition failures retain partial data and may be retried.
-                except Exception as exc:  # noqa: BLE001
-                    # The producer reports first-round cancellation with an exception.
-                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
-                    if self._schedule.check_stop_requested(exception=cause):
-                        break
-                    if not observation.retry_after(exc, retry, slot, initial_signal):
-                        self._schedule.mark_failed(exc)
-                        break
-                    continue
-
-                if self._schedule.check_stop_requested():
-                    break
-
-                pbar.set_progress(rounds)
-                slot.set(signal_fn(raw))
-                observation.log_early_stop(rounds)
-                break
-        except KeyboardInterrupt as exc:
-            self._schedule.mark_interrupted(exc)
-        finally:
-            pbar.close()
-
-        return slot.view
 
     def _resolve_raw2signal_fn(
         self,
@@ -673,59 +437,6 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
             sweep=deepcopy(self._sweeps) or None,
             **program_kwargs,
         )
-
-    def _acquire_once(
-        self,
-        *,
-        acquire: Callable[..., T_Raw],
-        options: AcquireOptions,
-        acquire_kwargs: dict[str, object],
-        signal_fn: Callable[[T_Raw], SignalArray],
-        slot: SignalSlot,
-        observation: _AcquireProgress,
-    ) -> T_Raw:
-        scope = self._schedule.scope.branch("acquire")
-        token = scope.stop
-        acquire_cancel_flag = AcquireCancelFlag(token)
-
-        def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
-            observation.completed_rounds = ir
-            try:
-                observation.pbar.set_progress(ir)
-                slot.set(signal_fn(raw))
-                if options.stop_condition is not None:
-                    observation.decision = options.stop_condition()
-                    if observation.decision:
-                        cancel_flag.set()
-            except Exception as exc:
-                raise _CallbackError(exc) from exc
-
-        try:
-            try:
-                raw = acquire(
-                    self._soc,
-                    progress=options.progress,
-                    round_hook=update_hook,
-                    cancel_flag=acquire_cancel_flag,
-                    **dict(acquire_kwargs),
-                )
-            except StoppedPartialAcquireError as exc:
-                if token.is_set():
-                    raise _AcquireStopped from exc
-                raise
-            if token.is_set():
-                raise _AcquireStopped
-            return raw
-        finally:
-            scope.release()
-
-    def _resolve_progress_leave(self, *, progress_leave: bool | None) -> bool:
-        # Import the concrete step at call time to avoid a module initialization cycle.
-        from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
-
-        if progress_leave is not None:
-            return progress_leave
-        return not isinstance(self._owner, ScheduleStep)
 
     def _default_slot(self) -> SignalSlot:
         return self._schedule.default_slot_for(self._owner)

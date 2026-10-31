@@ -45,23 +45,12 @@ def build_writeback_tools(ctx: MeasureToolContext) -> ToolTable:
         "apply_writeback": {
             "handler": partial(apply_writeback, ctx),
             "description": (
-                "Write current Primary and Post draft candidates by stable target_name. "
-                "Omit items for all; an empty array writes none. Ignores checkboxes and "
-                "rejects unknown or ambiguous names before any write. Resolves current "
-                "IDs, not earlier proposal IDs. Writes Primary then Post and stops on "
-                "the first error without retry or rollback. Returns tab, status "
-                "(finished|failed|unknown), completed ([{stage,written}]), skipped and "
-                "not_started. Failed replies also include failed_stage, error "
-                "({code,reason,message}) and failed_stage_may_have_partial_writes. "
-                "Record candidates use kind=record, record-<n> IDs and written.records. "
-                "Their JSON fields are adapter-owned; no coordinate is added. "
-                "Only GUI-confirmed writes count as completed. The failed stage is "
-                "separate from not_started. Each attempted pane has an owner submission_id "
-                "in submissions; recovery queries the latest tab.writeback_receipt. "
-                "A write timeout returns unknown, not failed. Check status before "
-                "deciding whether to resubmit. IDs last for this GUI lifetime only. "
-                "Reads do not refresh guards: explicitly "
-                "observe tab/context before writing. Does not answer recipe questions."
+                "Apply current Primary/Post writeback drafts by stable target_name. "
+                "Omit items for all; [] writes none. Ignores checkboxes; rejects unknown, "
+                "duplicate or ambiguous names before writing. Primary then Post, first "
+                "error stops. Returns confirmed progress, submissions and receipt recovery. "
+                "Timeout is unknown: query recovery before resubmitting. No retry, rollback "
+                "or recipe answer."
             ),
             "inputSchema": {
                 "type": "object",

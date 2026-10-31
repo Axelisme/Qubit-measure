@@ -9,6 +9,39 @@ from zcu_tools.analysis.fitting.decay import (
     fit_ge_decay,
 )
 
+from tests.analysis.fitting._fit_contract import assert_frozen_fields
+
+
+@pytest.mark.parametrize("fixed_offset", [None, 0.2])
+def test_decay_named_result_preserves_unpacking_and_quality(
+    fixed_offset: float | None,
+) -> None:
+    xs = np.linspace(0.0, 20.0, 100)
+    ys = 0.2 + 0.8 * np.exp(-xs / 5.0)
+    ys += np.random.default_rng(42).normal(0.0, 0.001, xs.size)
+    result = fit_decay(xs, ys, fixedparams=(fixed_offset, None, None))
+    time, error, curve, (params, cov) = result
+
+    assert isinstance(result, tuple)
+    assert result.decay_time == time == pytest.approx(5.0, rel=0.01)
+    assert result.decay_time_err == error
+    assert result.curve is curve
+    assert result.params is params
+    assert result.cov is cov
+    expected = compute_fit_quality(
+        ys,
+        curve,
+        dict(zip(("y0", "yscale", "decay_time"), params, strict=True)),
+        cov,
+        decay_bounds=decay_time_bounds(xs),
+        fixed_parameters=() if fixed_offset is None else ("y0",),
+    )
+    assert result.quality == expected
+    assert result.quality.invalid == ()
+    assert result.quality.r2 is not None and result.quality.r2 > 0.999
+    assert error > 0.0
+    assert_frozen_fields(result, ("decay_time", "params", "cov", "curve", "quality"))
+
 
 def test_fit_decay_recovers_T1():
     xs = np.linspace(0, 20, 300)
@@ -65,6 +98,52 @@ def test_decay_time_is_bounded_by_the_observation_window(fringe: bool) -> None:
         ys = expfunc(xs, 0.2, 1.0, 1e6)
         time, *_ = fit_decay(xs, ys)
     assert time <= 10 * (xs[-1] - xs[0])
+
+
+@pytest.mark.parametrize("fixed_slow_time", [None, 12.0])
+def test_dual_decay_named_result_keeps_longer_time_and_fixed_quality(
+    fixed_slow_time: float | None,
+) -> None:
+    xs = np.linspace(0.0, 60.0, 160)
+    ys = 0.2 + 0.3 * np.exp(-xs / 2.0) + 0.6 * np.exp(-xs / 12.0)
+    ys += np.random.default_rng(42).normal(0.0, 0.001, xs.size)
+    result = fit_dual_decay(
+        xs,
+        ys,
+        fit_params=(0.2, 0.3, 2.0, 0.6, 12.0),
+        fixedparams=(0.2, None, None, None, fixed_slow_time),
+    )
+    slow, slow_err, fast, fast_err, curve, (params, cov) = result
+
+    assert isinstance(result, tuple)
+    assert result.decay_time1 == slow == pytest.approx(12.0, rel=0.03)
+    assert result.decay_time2 == fast == pytest.approx(2.0, rel=0.03)
+    assert result.decay_time1_err == slow_err
+    assert result.decay_time2_err == fast_err
+    assert result.curve is curve
+    assert result.params is params
+    assert result.cov is cov
+    expected = compute_fit_quality(
+        ys,
+        curve,
+        dict(
+            zip(
+                ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2"),
+                params,
+                strict=True,
+            )
+        ),
+        cov,
+        decay_bounds=decay_time_bounds(xs),
+        fixed_parameters=("y0",) if fixed_slow_time is None else ("y0", "decay_time1"),
+    )
+    assert result.quality == expected
+    assert result.quality.invalid == ()
+    assert fast_err > 0.0
+    assert (slow_err > 0.0) if fixed_slow_time is None else (slow_err == 0.0)
+    assert_frozen_fields(
+        result, ("decay_time1", "decay_time2", "params", "cov", "curve", "quality")
+    )
 
 
 def test_fit_dual_decay_recovers_two_times():
@@ -129,6 +208,46 @@ def test_fixed_fringe_phase_does_not_invalidate_a_resolved_decay(phase: float) -
     assert quality.invalid == ()
     assert quality.relative_parameter_errors["phase"] == (None if phase == 0 else 0.0)
     assert quality.r2 is not None and quality.r2 > 0.999
+
+
+@pytest.mark.parametrize("fixed_phase", [None, 0.0, 180.0])
+def test_fringe_named_result_preserves_frequency_and_quality(
+    fixed_phase: float | None,
+) -> None:
+    xs = np.linspace(0.0, 20.0, 160)
+    phase = 30.0 if fixed_phase is None else fixed_phase
+    ys = 0.2 + 0.8 * np.exp(-xs / 5.0) * np.cos(2 * np.pi * (0.5 * xs + phase / 360))
+    ys += np.random.default_rng(42).normal(0.0, 0.001, xs.size)
+    result = fit_decay_fringe(
+        xs,
+        ys,
+        fit_params=(0.2, 0.8, 0.5, phase, 5.0),
+        fixedparams=(None, None, None, fixed_phase, None),
+    )
+    time, time_err, freq, freq_err, curve, (params, cov) = result
+
+    assert isinstance(result, tuple)
+    assert result.decay_time == time == pytest.approx(5.0, rel=0.01)
+    assert result.decay_time_err == time_err
+    assert result.freq == freq == pytest.approx(0.5, rel=0.01)
+    assert result.freq_err == freq_err
+    assert result.curve is curve
+    assert result.params is params
+    assert result.cov is cov
+    expected = compute_fit_quality(
+        ys,
+        curve,
+        dict(zip(("y0", "yscale", "freq", "phase", "decay_time"), params, strict=True)),
+        cov,
+        decay_bounds=decay_time_bounds(xs),
+        fixed_parameters=() if fixed_phase is None else ("phase",),
+    )
+    assert result.quality == expected
+    assert result.quality.invalid == ()
+    assert time_err > 0.0 and freq_err > 0.0
+    assert_frozen_fields(
+        result, ("decay_time", "freq", "params", "cov", "curve", "quality")
+    )
 
 
 def test_fit_decay_fringe_recovers_T2_and_detune():

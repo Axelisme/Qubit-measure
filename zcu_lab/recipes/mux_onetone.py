@@ -27,40 +27,40 @@ class MuxOnetoneInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Original tone indices in execution order; omission keeps the Form selection; null clears it.",
+        description="Original tone indices in execution order.",
     )
     df: ToneRangeInputs | None | Keep = Field(
         default=KEEP,
-        description="Common MHz offset start/stop added to every base tone frequency; omission keeps the Form range; null clears its bounds.",
+        description="Common MHz offset start/stop added to every base tone frequency.",
     )
     n: Annotated[int, Field(strict=True, ge=2)] | None | Keep = Field(
         default=KEEP,
-        description="Shared offset sample count; omission keeps Expts; null clears it.",
+        description="Shared offset sample count.",
     )
     reps: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Acquisition repetitions; omission keeps the Form value; null clears it.",
+        description="Acquisition repetitions.",
     )
     rounds: Annotated[int, Field(strict=True, gt=0)] | None | Keep = Field(
         default=KEEP,
-        description="Averaging rounds; omission keeps the Form value; null clears it.",
+        description="Averaging rounds.",
     )
 
     model_type: Literal["hm", "t", "auto"] | None | Keep = Field(
         default=KEEP,
-        description="Resonator fit model. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Resonator fit model. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_bg_amp_slope: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the amplitude background slope. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit the amplitude background slope. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_bg_phase_curvature: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit background phase curvature. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit background phase curvature. Analysis only; omitted keeps value, null passes to owner.",
     )
     edelay: float | None | Keep = Field(
         default=KEEP,
-        description="Manual cable-delay seed in inverse MHz. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Manual cable-delay seed in inverse MHz. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

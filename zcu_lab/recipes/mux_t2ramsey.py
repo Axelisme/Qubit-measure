@@ -26,16 +26,16 @@ class MuxT2RamseyInputs(RecipeInputs):
 
     participants: list[StrictInt] | None | Keep = Field(
         default=KEEP,
-        description="Unique original tone indices in acquisition order; omission keeps the Form selection; null clears it.",
+        description="Unique original tone indices in acquisition order.",
     )
 
     fit_fringe: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit oscillations instead of a pure decay. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit oscillations instead of a pure decay. Analysis only; omitted keeps value, null passes to owner.",
     )
     fit_phase: bool | None | Keep = Field(
         default=KEEP,
-        description="Fit the phase offset when fitting fringes. Omission keeps analysis settings; null is passed to the analysis owner.",
+        description="Fit the phase offset when fitting fringes. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 

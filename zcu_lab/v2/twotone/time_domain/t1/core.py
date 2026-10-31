@@ -9,6 +9,7 @@ import numpy as np
 import zcu_tools.analysis.fitting as ft
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -88,10 +89,12 @@ class T1Cfg(ConfigBase):
     uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class T1AnalyzeOptions:
+    """Fit one or two decays after skipping a nonnegative number of leading points."""
+
     dual_exp: Annotated[bool, FieldMeta(label="Dual exponential")] = False
-    skip: Annotated[int, FieldMeta(label="Skip leading points")] = 0
+    skip: Annotated[int, FieldMeta(label="Skip leading points"), Field(ge=0)] = 0
 
 
 @dataclass(frozen=True)

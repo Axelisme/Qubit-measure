@@ -57,7 +57,7 @@ MEASUREMENT 只套用本節與語言規則。以下規則屬於 DEVELOPMENT。
 - **局部性（Locality of Behaviour）。** 一個函式的行為，看函式本身，加上它呼叫的黑箱的簽名與文件就知道。檢查：理解某個函式需要打開另一個函式的實作時，調整邊界、命名或介面文件。
 - **無聊程式碼（boring code）。** 用一眼就懂的寫法。sentinel 物件、互相遞迴、只用到一半的回傳值這類需要另外解釋的寫法，換成無聊的寫法；確實需要時，在原地加一行理由。檢查：diff 中每處這類寫法都已換掉，或旁邊有理由。
 - **Fast Fail。** 契約外的輸入在進入點 raise，不以預設值、空資料或 `None` 掩蓋。只有能恢復、轉譯或隔離失敗的地方才 catch。檢查：每個 `except` 都做其中一件事。
-- **強型別。** 模組邊界用具名型別（dataclass、pydantic model、TypedDict）傳遞資料，不用無結構的 `dict` 或 `Any`。新程式碼不新增 `cast` 或 suppression，不放寬型別配合錯誤。
+- **強型別。** 公開函式的參數與回傳用具名型別（dataclass、pydantic model、TypedDict）。上層資訊往下層傳時，能直接傳上層原物件就傳原物件；沒有現成型別的少量附加資訊可以用 `dict`，consumer 讀不到需要的 key 就 fast fail。不要為了跨層傳遞，在每一層各定義一個對應的類別。新程式碼不新增 `cast` 或 suppression，不放寬型別配合錯誤。
   已明確授權清洗的既有未處置診斷，先逐位置嘗試修除，確定保留後才用指定實際 rule 的 suppression。既有 suppression 按種類抽樣試清，展開條件見 [程式碼品質](docs/code-quality.md#既有容忍項先嘗試修除理由留在原地)。
   Ruff 用 `# noqa: PLR0913  # tolerated: <reason>`，Pyright 用 `# pyright: ignore[reportPrivateUsage]  # tolerated: <reason>`。Suppression 留在診斷行，理由寫同行，放不下時放正上方的 `# tolerated: <reason>`。禁止無 rule 的 noqa、type ignore 或 pyright ignore。
   既有 `cast` 與設定項也先嘗試清除。保留時分別用 `# tolerated(cast): <reason>` 與 `# tolerated(config): <reason>`，放原行行尾或正上方。保留設定值不變，不新增 `cast`，不新增或放寬設定。
@@ -94,7 +94,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 
 ### 4. 實作與測試
 
-有 UI 改動時，實作與 review 前讀 [UI 驗證](tests/README.md#ui-驗證)，依元件情境驗收。
+框架 UI 或 `zcu_lab/` 實驗定義有改動時，實作與 review 前讀 [UI 驗證](tests/README.md#ui-驗證)，依框架 ComponentDriver／實驗定義離線 probe 分支驗收。實驗定義的畫面改動也走 probe 分支；兩者都改時，兩種驗收都要做。
 
 優先使用內建工具。子字串替換先用 function 或 MCP 工具，其次用 Python script，不用 `sed`。
 

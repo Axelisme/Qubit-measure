@@ -72,6 +72,16 @@ class FreqCfg(ConfigBase):
             description="Nonnegative SNR skew penalty.",
         ),
     ] = Field(default=0.0, ge=0.0)
+    seed: Annotated[
+        int | None,
+        FieldMeta(
+            label="Scan-order seed",
+            description=(
+                "Fixes the shuffled order of interior frequencies; empty draws a new "
+                "order each run."
+            ),
+        ),
+    ] = None
 
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
@@ -101,7 +111,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
         jpa_freqs = sweep2array(cfg.jpa_freq, allow_array=True)
-        np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
+        np.random.default_rng(cfg.seed).shuffle(jpa_freqs[1:-1])
 
         def configure_axes(ax: Axes) -> None:
             ax.lines[0].set_linestyle("None")

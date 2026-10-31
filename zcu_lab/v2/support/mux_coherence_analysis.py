@@ -15,8 +15,6 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support.lifetime_models import LifetimeComparison
-
 
 @dataclass(frozen=True)
 class MuxCoherenceFit:
@@ -29,9 +27,10 @@ class MuxCoherenceFit:
     sampling_quality describes delay-grid density relative to the fitted fringe
     and caller-supplied known frequency lower bound; it is None for decay.
     Adequate sampling does not exclude unknown higher-frequency aliases.
-    comparison is optional diagnostic model records/curves supplied by the
-    Echo caller; it never changes the primary scalars or quality. Actual detune
-    and source frequency remain in the measurement Result.
+    times is the float64 (N,) delay axis in us after omission/finite filtering.
+    observed and fitted are float64 (N,) projected IQ and primary predictions in
+    signal units, aligned to times. Actual detune and source frequency remain
+    in the measurement Result.
     """
 
     index: int
@@ -42,7 +41,9 @@ class MuxCoherenceFit:
     quality: FitQuality
     fit_fringe: bool
     sampling_quality: FringeSamplingQuality | None
-    comparison: LifetimeComparison | None = None
+    times: NDArray[np.float64]
+    observed: NDArray[np.float64]
+    fitted: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,9 @@ def fit_coherence_trace(
             assess_fringe_sampling(trace.times, float(detune), expected_frequency_mhz)
             if fit_fringe
             else None,
+            trace.times,
+            real,
+            fitted,
         ),
         fitted,
     )

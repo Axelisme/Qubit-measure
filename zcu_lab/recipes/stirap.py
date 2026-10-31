@@ -19,74 +19,75 @@ class StirapInputs(RecipeInputs):
     """Operator-selected scan mode, carriers and controls; no tuning policy."""
 
     scan_mode: Literal["delay", "amplitude", "detuning"] = Field(
-        description="Required mode: lead scan, common-gain scale scan or Cartesian Pump/Stokes detuning scan. Never selected automatically."
+        description="Required mode: Stokes lead, common gain scale or Cartesian Pump/Stokes detuning; no auto choice."
     )
     start: float | None | Keep = Field(
         KEEP,
-        description="First-axis start: Stokes lead in us for delay, dimensionless common gain scale for amplitude, Pump detuning in MHz for detuning. Omit to retain; null clears it.",
+        description="Start: Stokes lead (us) for delay, common gain scale (unitless) for amplitude, Pump detuning (MHz).",
     )
     stop: float | None | Keep = Field(
         KEEP,
-        description="First-axis stop, with the same mode-dependent units as start. Omit to retain; null clears it.",
+        description="First-axis stop, with the same mode-dependent units as start.",
     )
     n: int | None | Keep = Field(
         KEEP,
-        description="First-axis sample count: Form n to cfg expts. Omit to retain; null clears it.",
+        description="First-axis sample count: Form n to cfg expts.",
     )
     stokes_start_mhz: float | None | Keep = Field(
         KEEP,
-        description="Stokes detuning start in MHz, used only in detuning mode. Omit to retain; null clears it.",
+        description="Stokes detuning start in MHz, used only in detuning mode.",
     )
     stokes_stop_mhz: float | None | Keep = Field(
         KEEP,
-        description="Stokes detuning stop in MHz, used only in detuning mode. Omit to retain; null clears it.",
+        description="Stokes detuning stop in MHz, used only in detuning mode.",
     )
     stokes_n: int | None | Keep = Field(
         KEEP,
-        description="Stokes-axis sample count, used only in detuning mode: Form n to cfg expts. Omit to retain; null clears it.",
+        description="Stokes-axis sample count, used only in detuning mode: Form n to cfg expts.",
     )
     pump_freq_mhz: float | None | Keep = Field(
         KEEP,
-        description="Operator-measured 0-3 Pump carrier in MHz, never inferred from a model. Omit to retain; null clears it.",
+        description="Operator-measured 0-3 Pump carrier in MHz, never inferred from a model.",
     )
     stokes_freq_mhz: float | None | Keep = Field(
         KEEP,
-        description="Operator-measured 3-2 Stokes carrier in MHz, never inferred from a model. Omit to retain; null clears it.",
+        description="Operator-measured 3-2 Stokes carrier in MHz, never inferred from a model.",
     )
     pump_ch: int | None | Keep = Field(
         KEEP,
-        description="Pump generator, separately bound from Stokes. Omit to retain; null clears it.",
+        description="Pump generator, separately bound from Stokes.",
     )
     stokes_ch: int | None | Keep = Field(
         KEEP,
-        description="Stokes generator, separately bound from Pump. Omit to retain; null clears it.",
+        description="Stokes generator, separately bound from Pump.",
     )
     pump_gain: float | None | Keep = Field(
         KEEP,
-        description="Signed Pump gain in native units. Omit to retain; null clears it.",
+        description="Signed Pump gain in native units.",
     )
     stokes_gain: float | None | Keep = Field(
         KEEP,
-        description="Signed Stokes gain in native units. Omit to retain; null clears it.",
+        description="Signed Stokes gain in native units.",
     )
     width_us: float | None | Keep = Field(
         KEEP,
-        description="Common Gaussian sigma in us; each pulse lasts six sigma. Omit to retain; null clears it.",
+        description="Common Gaussian sigma in us; each pulse lasts six sigma.",
     )
     stokes_lead_us: float | None | Keep = Field(
         KEEP,
-        description="Fixed lead in us outside delay mode; positive means Stokes first. Omit to retain; null clears it.",
+        description="Fixed lead in us outside delay mode; positive means Stokes first.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key with acquired centroid3 calibration. Omit to retain; null goes unchanged to the Form.",
+        description="Readout library key with acquired centroid3 calibration.",
     )
     shots: int | None | Keep = Field(
-        KEEP, description="Raw IQ shots per scan point. Omit to retain; null clears it."
+        KEEP,
+        description="Repetitions per scan point, classified into saved g/e/f counts.",
     )
     relax_delay_us: float | None | Keep = Field(
         KEEP,
-        description="Relaxation interval in us for ground preparation. Omit to retain; null clears it.",
+        description="Relaxation interval in us for ground preparation.",
     )
 
 
@@ -105,7 +106,7 @@ class StirapReport(RecipeReport):
 
 @recipe(
     "stirap",
-    description="Run an operator-selected STIRAP scan, analyze saved centroid3 IQ and save raw data and analysis.",
+    description="Run an operator-selected STIRAP scan, analyze g/e/f counts and save counts and analysis.",
 )
 async def stirap(session: RecipeSession, inputs: StirapInputs) -> StirapReport:
     """Overlap Stokes/Pump Gaussians, read out after both, analyze and save.
@@ -125,7 +126,7 @@ async def stirap(session: RecipeSession, inputs: StirapInputs) -> StirapReport:
     inputs, then the Form reports missing/invalid inputs before Run. Analysis
     uses only this run's saved readout centroid3 calibration, never live
     calibration or simulator truth. No writeback is proposed or requested.
-    Analysis failure still saves raw IQ; owner errors propagate after Save.
+    Analysis failure still saves g/e/f counts; owner errors propagate after Save.
     Save receipts identify failed outputs, not just completion of the recipe.
     """
     tab = session.open_tab(

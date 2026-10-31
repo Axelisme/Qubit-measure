@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，compiled simulation acquisition
+**Last updated:** 2026-10-31，compiled simulation、TimelineBuilder 與 shell WAIT 契約
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -103,6 +103,10 @@ The cfg-based APIs delegate to these same word decoders.
   `initial_delay=1.0`、`relax_delay=1.0`，兩個 delay 的單位為 us。
 - `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
   `reps` 與 `rounds` 必須為正整數，bool 不算整數。無效值在編譯或 acquire admission 前 raise ValueError。
+- `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
+  `shot_sums(prog, axes)` 在 compile 後以讀出 label 解析 `Classify` 與 `IQ` 軸。
+  Timeline 以 emit tag 或未標記 module 名稱識別讀出，modular 以 module 名稱識別。
+  外積總和與取消契約見 [program](../README.md#summed-acquisition)。
 - `BaseCustomProgramV2.make_modules()` 回傳 modules。作者自行保存組裝 modules 所需的輸入，
   program 的控制參數仍由建構子接收。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
@@ -118,8 +122,25 @@ The cfg-based APIs delegate to these same word decoders.
 `initial_delay` 的型別為 `float`，不接受 `None`。
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
-Builder 尚未遷移。`SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
+`TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
+它不接收 SoC，不取數，也不依賴 experiment runtime。
+Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告。
+同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
+Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
+Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
+Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記帳方法。
+`with builder.repeat(...)` 與 `with builder.branch(by=...)` 錄製巢狀動作。
+Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case():` 錄製每個 sweep 點的動作。
+在 case 內仍呼叫原 builder 的 emit、delay 或其他 body 方法。
+關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
+Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
+`SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
 既有 acquire 擴充仍由共同基底提供。
+
+`TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
+不同物件衝突時錯誤列出兩個名稱與物件。
+明示 register 借用與 Pulse registry 共用 generator／template 的規則不變。
+Body 可直接呼叫 `emit_parallel`，program 配置其命名 scope；module lowering 內沿用既有 scope。
 
 每條 timeline 只保存相對 reference 的結尾。
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
@@ -127,7 +148,28 @@ Source 必須存在，into 接受一個新名字或名字 list。未知來源、
 帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
 同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
 Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
-未帶 timeline 的原生指令保留 QICK 行為。
+未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
+
+`with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
+省略 `timeline=` 或傳入 `None` 的 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
+`repeat` 省略母 timeline 時也使用此名字。
+顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
+名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
+範圍不 fork、不 join，也不移動 reference。
+`branch` 仍只有 `by` 參數，case 內的發射沿用當下範圍。
+範圍不改變 case used/local 同步與不等長規則。
+原生 `delay` 與 `delay_auto` 仍只推進 reference，不受範圍影響。
+
+```python
+builder.fork("default", into="drive")
+with builder.timeline("drive"):
+    builder.emit(drive)
+    builder.delay_timeline(0.1)
+    with builder.repeat("pairs", 2):
+        builder.emit(drive)
+    builder.sync()
+builder.emit(drive)  # Uses default again.
+```
 
 `delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
 `sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
@@ -151,7 +193,7 @@ Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end �
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
 編譯期已知的非仿射 sweep 由 program／timeline owner 以 dmem table 提供逐點精確 aggregate ceil，不加 padding。
 ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
-省略 timeline 選 default，但不移動 reference。
+未進入 timeline 範圍時，省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
 時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
 
@@ -176,8 +218,9 @@ def _body(self, cfg):
     self.emit(self.drive, timeline="drive")
 ```
 
-DelayAuto 是唯一例外。未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
-指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
+DelayAuto 是唯一例外。在 timeline 範圍外省略 timeline 時，它包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
+任何 timeline 名稱都在 emit 入口報錯，包含顯式 default 與範圍選出的名字。
+在 timeline 範圍內需要推進 reference 時，直接呼叫原生 `delay_auto`。
 原生 delay_reg_auto 先消耗選定 native channels，再推進 register cycles。尚未消耗的 timeline 以已知 producer bounds 扣除實際推進量。
 若 native 部分已完整消耗全部 timeline，register 部分沿用原生的非負時間契約。
 PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
@@ -247,6 +290,13 @@ Repeat body 內支援具名 timeline 的 register 時間與各 case 不同的 Br
 Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 consumer 不受這項限制。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
+`sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
+Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
+這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
+能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
+已知點的 `slack=max-min` 大於 0 時會 warning。
+已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。
+來源相關性、精確 min／max 與未知值政策見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
 每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
 將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
 Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `CompiledTimingInput.dmem`

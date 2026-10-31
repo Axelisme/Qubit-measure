@@ -10,7 +10,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、五層、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、charge admission 的 caller／program／environment 分工與硬體隔離、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、workflow 壽命比較與 adapter edelay 政策、各實驗獨立分析與畫圖、local flux reset 由 lab 組裝既有能力、五層、實驗定義的離線 probe 驗收與框架測試邊界、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、charge admission 的 caller／program／environment 分工與硬體隔離、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
@@ -29,7 +29,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、一般 tagged-model union 的同名同型別 raw 繼承、普通 select 與明確數值換算 command 的區別、具名固定 list／原始索引 participants、非 participant tone 的 None 初值與一般 nullable 編輯、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
 
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 自有 generator／ADC 欄位，分別保存單一頻率與有序 tones；規範 waveform 引用、label、Library 新建、表單路徑與 classifier 所有權；分類與 correction 只取 run cfg；三態 reference Apply 到 readout library，processed acquire 明列 g/e/other 或 g/e/f；作者以 herald processor 輸出 numerator／acceptance，builder converter 還原 conditional signal，lab 保存 pass_fraction 並合併跨 acquire 結果；單 qubit heralding 實驗組保存每點通過比例，第二階段成員沿用普通版 writeback 目標。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 擁有 generator／ADC、waveform 與 classifier 配置；分類與 correction 只取 run cfg，三態 reference Apply 到 readout library；單一 processor 同時接收所有 ADC，Classify／IQ 軸的逐 shot 外積求總和，框架只累加 round，Result 保存總和；emit tag 識別讀出，舊 ModularProgramV2 暫用 module 名稱；herald 條件平均與通過比例由總和衍生，舊格式明確拒絕；原生 QICK projection 仍由 readout 轉換校準、caller 明確選用。
 
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。
@@ -52,7 +52,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、顯式 module 宣告與每次 emission、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。A、B 已交付；C frontend 遷移與 D 舊路徑移除另行交付。
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime sync 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。A、B 與 builder 已交付；C frontend、實驗遷移與 D 舊路徑移除另行交付。
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Pause 中斷及同 request 重試、live tunables、core 同簽名 env.run、operation facts 與作者自存 commit 目錄。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
@@ -67,7 +67,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Plotting
 
-具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。Live 工具與格式歸 lab，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
+具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。原生更新用 `@plots.on_plot_thread`，只 refresh 已呈現的根圖。Live 工具與格式歸 lab，新 helper 在 caller thread 回傳 changed artists，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
 
 ## Agents
 

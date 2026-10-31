@@ -14,11 +14,6 @@ from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.support import LinePlot, live_line
-from zcu_lab.v2.support.lifetime_models import (
-    LifetimeComparison,
-    LifetimeModelRecord,
-    draw_lifetime_comparison,
-)
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
@@ -31,6 +26,11 @@ from zcu_lab.workflows.common.analysis import (
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_models import (
+    LifetimeComparison,
+    LifetimeModelRecord,
+    draw_lifetime_comparison,
+)
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 

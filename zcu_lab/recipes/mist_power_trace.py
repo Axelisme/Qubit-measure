@@ -17,24 +17,24 @@ class MistPowerTraceInputs(RecipeInputs):
 
     probe_ref: str | None | Keep = Field(
         KEEP,
-        description="Probe library key; omission retains the Form value, null clears/disables it.",
+        description="Probe library key.",
     )
     readout_ref: str | None | Keep = Field(
         KEEP,
-        description="Readout library key; omission retains the Form value, null clears/disables it.",
+        description="Readout library key.",
     )
 
     g0: str | None | Keep = Field(
         KEEP,
-        description="Ground IQ (empty = first point); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Ground IQ (empty = first point). Analysis only; omitted keeps value, null passes to owner.",
     )
     e0: str | None | Keep = Field(
         KEEP,
-        description="Excited IQ (optional y-limit); omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Excited IQ (optional y-limit). Analysis only; omitted keeps value, null passes to owner.",
     )
     ac_coeff: float | None | Keep = Field(
         KEEP,
-        description="Photon number / gain squared; omission retains the analysis value; null is passed to the analysis owner. Analysis only.",
+        description="Photon number / gain squared. Analysis only; omitted keeps value, null passes to owner.",
     )
 
 
