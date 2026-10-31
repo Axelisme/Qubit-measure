@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-31，fork／join 與 reference 推進守衛
+**Last updated:** 2026-10-31，Repeat 模式與 reference 推進守衛
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 

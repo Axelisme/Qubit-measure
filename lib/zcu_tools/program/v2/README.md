@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，runtime 跨格點長度的定點換算
+**Last updated:** 2026-10-31，Repeat 累加 timeline 與明示 reference 模式
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 

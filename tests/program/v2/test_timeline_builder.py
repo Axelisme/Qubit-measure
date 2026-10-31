@@ -30,9 +30,12 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0, reps=2)
     builder.add_loop("scan", 2)
     drive = _pulse("drive")
-    with builder.branch(by="scan", align_timeline=align) as cases:
-        with cases.case(0), builder.repeat("r", 2, advance_ref=False):
-            builder.emit(drive)
+    with (
+        builder.branch(by="scan", align_timeline=align) as cases,
+        cases.case(0),
+        builder.repeat("r", 2, advance_ref=False),
+    ):
+        builder.emit(drive)
     builder.emit(drive)
     prog = builder.build()
     assert [waves(s) for s in shots(prog)] == [[0, 43, 86], [86 if align else 0]] * 2
