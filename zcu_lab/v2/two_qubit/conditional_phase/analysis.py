@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from math import gcd
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,8 +13,31 @@ from zcu_tools.analysis.fitting.shared import (
     fit_shared,
 )
 
-from .._phase import QuadraturePhase, count_phase
+from .._phase import QuadraturePhase, count_phase, sigma_variance
+from .._sums import sigma
 from .crossing import PhaseCrossings, phase_crossings
+
+
+@dataclass(frozen=True)
+class CountQuadratures:
+    """Count reductions with spectator × quadrature × n × frequency axes.
+
+    values is target sigma, variances is its count-derived variance, acquired
+    is each projection's shot total. Empty counts give NaN values/variances.
+    """
+    values: NDArray[np.float64]
+    variances: NDArray[np.float64]
+    acquired: NDArray[np.float64]
+
+
+def count_quadratures(
+    counts: NDArray[np.float64], target: Literal["f1", "f2"],
+) -> CountQuadratures:
+    """Reduce terminal (...,3,3) counts to sigma, variance and shot totals."""
+    return CountQuadratures(
+        sigma(counts, target), sigma_variance(counts, target),
+        counts.sum(axis=(-2, -1)),
+    )
 
 
 @dataclass(frozen=True)

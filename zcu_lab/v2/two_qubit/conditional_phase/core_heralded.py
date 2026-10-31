@@ -31,10 +31,11 @@ from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._phase import QuadraturePhase, sigma_variance
+from .._phase import QuadraturePhase
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from .analysis import (
     ConditionalPhaseAnalysis,
+    count_quadratures,
     PhaseSlopeFit,
     fit_phase_slopes,
     fitted_crossings,
@@ -289,24 +290,21 @@ class ConditionalPhaseHeraldedExp(
         # ee starts the target in e (both sigma signs reverse); nominal I/Xπ
         # now means actual spectator e/g. Reorder to actual g/e before sharing.
         ee = terminal_counts(data.sums, ("e", "e"))[::-1]
-        gg_quadratures = sigma(gg, cfg.target)
-        ee_quadratures = -sigma(ee, cfg.target)
-        gg_acquired, ee_acquired = gg.sum(axis=(-2, -1)), ee.sum(axis=(-2, -1))
-        gg_variances = sigma_variance(gg, cfg.target)
-        ee_variances = sigma_variance(ee, cfg.target)
-        phases = phase_points(gg_quadratures)
-        ee_phases = phase_points(ee_quadratures)
+        gg_stats = count_quadratures(gg, cfg.target)
+        ee_stats = count_quadratures(ee, cfg.target)
+        phases = phase_points(gg_stats.values)
+        ee_phases = phase_points((-ee_stats.values))
         fitted = fit_phase_slopes(
             data.gate_counts,
-            np.stack((gg_quadratures, ee_quadratures)),
-            np.stack((gg_variances, ee_variances)),
-            np.stack((gg_acquired, ee_acquired)),
+            np.stack((gg_stats.values, (-ee_stats.values))),
+            np.stack((gg_stats.variances, ee_stats.variances)),
+            np.stack((gg_stats.acquired, ee_stats.acquired)),
         )
         gg_fitted = fit_phase_slopes(
             data.gate_counts,
-            gg_quadratures[None],
-            gg_variances[None],
-            gg_acquired[None],
+            gg_stats.values[None],
+            gg_stats.variances[None],
+            gg_stats.acquired[None],
         )
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
         gg_conditional = (
@@ -317,8 +315,8 @@ class ConditionalPhaseHeraldedExp(
         herald_matrix = herald_probabilities(data.sums)
         answer = ConditionalPhaseHeraldedAnalysis(
             phases,
-            gg_quadratures,
-            gg_acquired,
+            gg_stats.values,
+            gg_stats.acquired,
             tuple(cfg.gate_counts),
             tuple(float(f) for f in data.frequencies),
             fitted,
@@ -327,8 +325,8 @@ class ConditionalPhaseHeraldedExp(
             crossings.frequencies_mhz[0] if crossings.reason is None else None,
             crossings.reason,
             ee_phases,
-            ee_quadratures,
-            ee_acquired,
+            (-ee_stats.values),
+            ee_stats.acquired,
             gg_fitted,
             gg_conditional,
             gg_crossings,
@@ -400,7 +398,7 @@ class ConditionalPhaseHeraldedExp(
         axes.legend()
         fig, axes = plots.subplots("quadratures", figsize=(11, 6))
         for (herald, values), (b, state), (q, projection), (j, n) in product(
-            (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
+            (("gg", gg_stats.values), ("ee sign-corrected", (-ee_stats.values))),
             enumerate(("g", "e")),
             enumerate(("X", "Y")),
             enumerate(data.gate_counts),
