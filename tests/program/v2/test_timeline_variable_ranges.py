@@ -51,7 +51,7 @@ def test_complementary_tproc_pulses_leave_a_literal_constant_end():
     prog = Program(QickConfig(cfg), reps=2, initial_delay=0, relax_delay=0)
     # Native QICK steps are +/-430 ticks. Rounded starts sum to 4301.
     assert [waves(s) for s in shots(prog)] == [
-        [0, 430 + 430 * i, 4301] for i in range(9) for _ in range(2)
+        [0, 430 + 430 * i, 4301] for _ in range(2) for i in range(9)
     ]
     assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(4301)
     assert not any(name.startswith("_timeline_end_") for name in prog.reg_dict)
