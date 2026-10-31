@@ -667,6 +667,32 @@ def test_mux_objects_share_resources_despite_different_emission_timing():
     assert len(waves(shots(prog)[0])) == 2
 
 
+@pytest.mark.parametrize("field", ["ro_length", "freq", "gain"])
+def test_static_mux_mismatches_name_both_objects_and_resource_field(field):
+    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    cfg = MuxReadoutCfg(
+        gen_ch=0, nqz=1, mixer_freq=1000, length=0.1, ro_length=0.2,
+        tones=[MuxReadoutTone(ro_ch=0, freq=1000, gain=0.1)],
+    )
+    first = cfg.build("first")
+    if field == "ro_length":
+        cfg = cfg.with_updates(ro_length=0.3)
+        diagnostic = "ro_length"
+    else:
+        tone = cfg.tones[0].with_updates(**{field: 1080 if field == "freq" else 0.2})
+        cfg = cfg.with_updates(tones=[tone])
+        diagnostic = "mux_freqs" if field == "freq" else "mux_gains"
+    second = cfg.build("second")
+    builder = v2.TimelineBuilder(soccfg)
+    builder.emit(first)
+    builder.emit(second)
+    with pytest.raises(ValueError, match=diagnostic) as error:
+        builder.build()
+    for module in (first, second):
+        assert module.name in str(error.value)
+        assert repr(module) in str(error.value)
+
+
 def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     builder.emit(_readout("first"))
@@ -710,6 +736,8 @@ def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, fron
 
     with pytest.raises(ValueError, match="(readout|register)") as error:
         compile_program()
+    if resource == "adc":
+        assert "ro_length" in str(error.value)
     for module in (first, second):
         assert module.name in str(error.value)
         assert repr(module) in str(error.value)
