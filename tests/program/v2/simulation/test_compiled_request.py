@@ -26,7 +26,7 @@ def test_author_dmem_time_materializes_pulse_and_readout_at_runtime_origin():
 
     def body(p):
         p.read_dmem("duration", 0)
-        p.delay_timeline("duration")
+        p.timeline_inc("duration")
         p.fork("default", into="read")
         p.pulse(0, "p", timeline="default", tag="drive")
         p.trigger([0], timeline="read", width=1 / 430.08)

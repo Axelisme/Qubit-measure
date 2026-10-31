@@ -426,7 +426,7 @@ class TimelineSync(Delay):
             all-timeline shot closure include actual ADC ends with no compile-time
             upper bound. It only affects book.maximum() when timeline is None;
             sources, when supplied, still overrides the selected end. This flag
-            is for shot closure, not ordinary author sync. Finite ADC tails keep
+            is for shot closure, not ordinary author delay_by_timeline. Finite ADC tails keep
             the constant shell WAIT and its slack checks.
     """
 
@@ -682,7 +682,7 @@ class RepeatTimelineEnter(Macro):
         )
         if self.tail_sync and not self.constant:
             warnings.warn(
-                "Repeat entry is not constant zero; add sync() before the loop to avoid a tail register",
+                "Repeat entry is not constant zero; add delay_by_timeline() before the loop to avoid a tail register",
                 UserWarning,
                 stacklevel=2,
             )

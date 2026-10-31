@@ -596,7 +596,7 @@ class TimelineBook:
         )
         if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
             raise ValueError(
-                f"channel {channel} pulse overlap inside repeat; use delay_timeline"
+                f"channel {channel} pulse overlap inside repeat; use timeline_inc"
             )
         self.loop_timelines[-1].starts.append(
             (channel, expression, tuple(self.case_path))
@@ -605,7 +605,7 @@ class TimelineBook:
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
         if self.used is not None or self.reference_guards:
-            raise ValueError("cannot advance reference; use delay_timeline instead")
+            raise ValueError("cannot advance reference; use timeline_inc instead")
 
     def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
         self.require_reference_advance()

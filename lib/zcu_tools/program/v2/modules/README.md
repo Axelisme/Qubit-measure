@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-31，Repeat 模式與 reference 推進守衛
+**Last updated:** 2026-11-01，timeline_inc 與 delay_by_timeline 時間操作
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -43,7 +43,7 @@ Runtime 跨 generator 格點的長度以 k=8 定點換算，再將 post 加入 a
 已是 tProc cycle 的 branch 合流以整數乘加、max 與選擇運算重建，不配置 selected-end table。
 作者明確宣告的 waveform／length／value tables 仍可使用 DMEM。IR branch／register-loop dispatch 也可配置 jump-address table，內容是程式位址，不是時間。
 Table index 使用 QICK 原生 sweep 初始化、回邊與 reset，並連同所依賴的 loop counter 接受時間 producer 的全流寫入稽核。
-Delay 與 SoftDelay 都只加 timeline 結尾。`sync()` 或 body 收尾才推進 reference。
+Delay 與 SoftDelay 都只加 timeline 結尾。`delay_by_timeline()` 或 body 收尾才推進 reference。
 
 DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 delay_reg_auto。
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
@@ -65,7 +65,7 @@ Branch 只改結尾、不推進 reference。Case 內的 native reference 操作�
 Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
 它保留 sequence 及內部 Module 的作者次序，不重排。
 Join 與 TwoPulseReset／BathReset 的 child 不得推進 reference。
-Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯，與 branch case 共用守衛及錯誤。
+Native delay／delay_auto、delay_by_timeline、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯，與 branch case 共用守衛及錯誤。
 普通 Branch 不推進 reference，可以放進 Join。
 原有 producer provenance 與翻譯後全流稽核照常執行。
 同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
@@ -86,7 +86,7 @@ def _initialize(self, cfg):
 def _body(self, cfg):
     self.emit(self.gap, tag="gap_1")
     self.emit(self.gap, tag="gap_2")
-    self.sync()  # Advance reference by the two rounded gaps.
+    self.delay_by_timeline()  # Advance reference by the two rounded gaps.
 ```
 
 兩次 emit 各有一個 emission 與 tag，不修改 module 的發射狀態。

@@ -169,7 +169,7 @@ Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記
 `with builder.repeat(...)` 與 `with builder.branch(by=..., align_timeline=...)` 錄製巢狀動作。
 Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case(index):` 錄製指定 sweep 點的動作。
 Index 是 zero-based，可不按順序宣告。未宣告的點不發射動作，重複或超界 index 報錯。
-在 case 內仍呼叫原 builder 的 emit、delay_timeline 或其他不推進 reference 的 body 方法。
+在 case 內仍呼叫原 builder 的 emit、timeline_inc 或其他不推進 reference 的 body 方法。
 關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
 Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
 `SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
@@ -203,7 +203,7 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 - `emit`、`pulse`、`trigger`。
 - `send_readoutconfig`、`send_readoutconfig_from_regs`。
 - `pulse_from_regs`、`pulse_by_reg`、`pulse_from_length_reg`。
-- `delay_timeline`、`sync` 與 `repeat` 的母 timeline。
+- `timeline_inc`、`delay_by_timeline` 與 `repeat` 的母 timeline。
 
 `pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時仍須提供配對的 `selection` metadata。
 範圍外省略 timeline 的原生輸出保留 QICK 時間行為，不改選 `"default"`。
@@ -218,17 +218,17 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 builder.fork("default", into="drive")
 with builder.timeline("drive"):
     builder.emit(drive)
-    builder.delay_timeline(0.1)
-    builder.sync()
+    builder.timeline_inc(0.1)
+    builder.delay_by_timeline()
     with builder.repeat("pairs", 2):
         builder.emit(drive)
-        builder.sync()
-    builder.sync()
+        builder.delay_by_timeline()
+    builder.delay_by_timeline()
 builder.emit(drive)  # Uses default again.
 ```
 
-`delay_timeline(t, timeline="drive")` 只將結尾加 t，不移動 reference。
-`sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
+`timeline_inc(t, timeline="drive")` 只將結尾加 t，不移動 reference。
+`delay_by_timeline(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
 可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
 Runtime 合流用 TEST 與條件 register 寫回，算術使用移位與加減。
@@ -237,7 +237,7 @@ Pulse、ConfigReadout、Trigger 的 expand 仍由 QICK 負責，不另配事件�
 同基準的後續事件使用 s14 差值增量。Native／raw 寫 s14 與 branch 合流會使記錄失效，下一個事件重新載入基準。
 原生 sweep 時間仍使用 QICK sweep register。IR 會刪除無條件、無 UF 且無其他效果的純 register 自我複製。
 End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
-每個 sweep／shot 重新建立所需狀態。`delay_timeline("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
+每個 sweep／shot 重新建立所需狀態。`timeline_inc("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
 作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
 `range_hint=(lo, hi)` 可選，單位是整數 tProc cycles，表示作者保證的非負閉區間，不增加硬體 range check。
 沒有已知 bounds 且沒有 hint 時，時間入口依作者的非負契約使用下界 0，上界仍未知。
@@ -311,7 +311,7 @@ def _initialize(self, cfg):
 def _body(self, cfg):
     self.emit(self.drive)
     self.pulse(1, "native", t=0)  # Relative to the original reference.
-    self.sync()
+    self.delay_by_timeline()
     self.pulse(1, "native", t=0)  # Relative to the drive end.
     self.fork("default", into="drive")
     self.emit(self.drive, timeline="drive")
@@ -340,12 +340,12 @@ Index 是 `scan` 的 zero-based 點索引，可只宣告部分點，也可完全
 True 將各 case 結尾 join 回母 timeline。全靜態時取靜態 max，有 runtime 值時取精確逐點 max。
 True 需要每個 case 的結尾都能從 branch 入口狀態算出，不執行未選 case 的動作。
 False 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
-兩種都不推進 reference、不自動 sync，後續可在母 timeline 結尾繼續發射。
+兩種都不推進 reference、不自動 delay_by_timeline，後續可在母 timeline 結尾繼續發射。
 未使用的外部 long pulse 可以橫跨 Branch。
-Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
+Case 內的 native delay、delay_auto 與 delay_by_timeline 在 build 時報錯，等待改用 timeline_inc。
 Case 內可使用 `repeat(...)`。它的 body 同樣不得推進 reference，包括巢狀 Repeat 內的操作。
 Repeat 內放 branch 仍合法，兩種 align_timeline 都使用上述規則。
-Branch 區塊內、case 外的 emit、fork、join、delay_timeline 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
+Branch 區塊內、case 外的 emit、fork、join、timeline_inc 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
 隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
 沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
 跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
@@ -353,18 +353,18 @@ Branch 區塊內、case 外的 emit、fork、join、delay_timeline 等動作在 
 `repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
 `timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。
 只可使用母 timeline 與其局部 fork，離開後局部名字失效。
-Repeat 不在入口或回邊自動推進 reference。作者可在 body 明寫 `sync()`、原生 `delay`／`delay_auto` 或巢狀 Repeat。
+Repeat 不在入口或回邊自動推進 reference。作者可在 body 明寫 `delay_by_timeline()`、原生 `delay`／`delay_auto` 或巢狀 Repeat。
 Branch case 內仍禁止任何經 owner 推進 reference 的操作，包括 Repeat body 裡的操作。
 `n=0` 保留母 timeline，不執行或宣告 body 內容，也不自行同步入口。
 
 編譯器只按已錄製的 body 結構選 lowering，不分析定點，也不重播 preprocess。
-當 body 頂層最後一個操作是對循環 timeline 的 `sync()`，且入口結尾為常數 0，
+當 body 頂層最後一個操作是對循環 timeline 的 `delay_by_timeline()`，且入口結尾為常數 0，
 不攜帶循環尾端 register。固定圈長直接編成每圈的常數 `TIME inc_ref`。
 其他情況使用 s14 作循環時間指針，入口載入母 timeline 結尾，每圈推進到新的最晚結尾，離開時才捕獲尾端。
 簡單固定圈長 body 只留下事件與 s14 字面增量，不每圈搬運尾端 register。
 Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，保留 shot-local 原點 snapshot 供恢復。
-中途 sync、只在巢狀區塊末尾 sync、同步其他 timeline 或沒有 sync 都走指針路徑。
-若 body 以循環 timeline 的 sync 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 sync。
+中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步其他 timeline 或沒有 delay_by_timeline 都走指針路徑。
+若 body 以循環 timeline 的 delay_by_timeline 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 delay_by_timeline。
 編譯器不自行插入它。IR 依實際時間窗口決定展開份數，branch-address DMEM 成本維持原契約。
 
 `n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
@@ -381,8 +381,8 @@ Producer audit 仍只接受相符的初始化、回邊與重設寫入。
 作者明寫 reference 操作時，外部結尾逐圈按實際推進量 debit，再做 floor 0。
 固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時，各圈把實際 debit 寫入 storage。
 Branch 各 case 的結尾不同時，各 case 把自己的結尾寫入 selected-end register。
-離開 Branch 或 Repeat 後，可直接在外部 timeline 放 pulse、trigger、config 或使用 delay_timeline。
-後續事件從實際 remaining end 開始，不採範圍上界，也不要求先 sync、join 或 fork。
+離開 Branch 或 Repeat 後，可直接在外部 timeline 放 pulse、trigger、config 或使用 timeline_inc。
+後續事件從實際 remaining end 開始，不採範圍上界，也不要求先 delay_by_timeline、join 或 fork。
 事件沿用 shot 收尾等 consumer 已需要的 storage，透過 s14 放置，不另配事件時間 register。
 沒有後續事件時，不為可能的 placement 預配 register。每 shot／sweep 點仍重設狀態，data register 上限仍為 16。
 時間計算不配置 DMEM。Branch dispatch 的 jump-address table 保留。
@@ -392,27 +392,27 @@ Branch 各 case 的結尾不同時，各 case 把自己的結尾寫入 selected-
 
 ```python
 def _body(self, cfg):
-    self.sync()
+    self.delay_by_timeline()
     with self.repeat("pair", 2):
         self.fork("default", into="local")
         self.emit(self.drive, timeline="local", tag="repeated")
-        self.delay_timeline(0.05, timeline="local")
+        self.timeline_inc(0.05, timeline="local")
         self.join("local", into="default")
-        self.sync()
+        self.delay_by_timeline()
     # Parent default is zero. The local name has expired.
 ```
 
 Register 次數可改寫成 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`。
 `n_pair` 須先準備，執行值必須符合作者保證的範圍。Register 超限保留 QICK 原錯誤。
 
-ScanWith 先同步母 timeline，再載入 scalar、依序執行 children，每個 point 結尾明寫 sync。
+ScanWith 先同步母 timeline，再載入 scalar、依序執行 children，每個 point 結尾明寫 delay_by_timeline。
 同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
 `LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
 
 Module Branch lower 到原生 branch/case。Module Join 為各 sequence fork timeline，依作者順序發射，再 join 回母 timeline。
 各 sequence 從共同 origin 開始，不重排，與只記帳的 `prog.join` 不同。
 Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
-原生 delay、delay_auto、sync、register delay 與內含這些操作的 Repeat／ScanWith 在 build 時報錯。
+原生 delay、delay_auto、delay_by_timeline、register delay 與內含這些操作的 Repeat／ScanWith 在 build 時報錯。
 普通 Branch 只合併結尾，可以放進 Join。
 同 generator 的 physical-end 與全部 case、Repeat backedge guards 保留，不加 padding 或 rewind。
 
@@ -422,9 +422,9 @@ Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeli
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 ADC tail 沒有編譯期上界時，收尾同步也納入它的實際 runtime 結尾，取最大值推進 reference。
-無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `sync`，不因未知 ADC tail 而 build 報錯。
+無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `delay_by_timeline`，不因未知 ADC tail 而 build 報錯。
 作者負責未知時間的重疊與溢位；編譯器不要求補 hint，也不假造上界。
-`sync` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
+`delay_by_timeline` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
 已同步消耗的 ADC tail 剩餘量為 0。
 Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
 有限 ADC tail 保留既有常數上界與 slack 檢查，不因其他 ADC tail 未知而丟掉已知來源資訊。

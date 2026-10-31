@@ -559,7 +559,7 @@ class LoopTimelineExit(Macro):
                 )
             if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
                 raise ValueError(
-                    f"repeat: channel {ch} pulse overlap across backedge; use delay_timeline"
+                    f"repeat: channel {ch} pulse overlap across backedge; use timeline_inc"
                 )
 
     def translate(self, prog) -> None:

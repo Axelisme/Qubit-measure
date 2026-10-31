@@ -82,8 +82,8 @@ class BuilderBranchCases:
         Duplicate, non-integer and out-of-range
         indices raise ValueError at build. Calls after branch exit or build,
         and overlapping cases, raise ValueError immediately.
-        Nested branches are supported. Repeat in a case fails at build because
-        its entry/backedge advance reference; put Repeat outside the branch.
+        Nested branches and accumulating Repeat are supported. Repeat bodies
+        inside a case must also preserve reference, including nested Repeat.
         """
         return self._record_case(index)
 
@@ -144,7 +144,7 @@ class TimelineBuilder:
     def timeline(self, name: str) -> AbstractContextManager[None]:
         """Record a scoped default for omitted timeline arguments.
 
-        Applies to emit, pulse, trigger, delay_timeline, sync and
+        Applies to emit, pulse, trigger, timeline_inc, delay_by_timeline and
         the repeat and branch parents. Branch cases shadow this default.
         name must exist at replay (default or forked); errors surface at build.
         Explicit names win, nested scopes override and exit restores the prior
@@ -185,10 +185,11 @@ class TimelineBuilder:
         timeline=None selects the scope or default. Times use us. Only the parent
         and local forks are accessible; local names expire on exit. The loop
         accumulates its relative end without implicit reference advancement.
-        Explicit sync/delay/delay_auto are allowed outside branch cases and
-        reference-preserving groups. A final top-level sync of the loop timeline
-        with constant-zero entry avoids a tail register; nonzero entry warns
-        to sync before the loop. Nested/other/middle sync retains the accumulator.
+        Explicit delay_by_timeline/delay/delay_auto are allowed outside branch
+        cases and reference-preserving groups. A final top-level
+        delay_by_timeline of the loop timeline with constant-zero entry avoids
+        a tail register; nonzero entry warns to call delay_by_timeline before
+        the loop. Nested/other/middle delay_by_timeline retains the accumulator.
         name identifies the counter. n is a nonnegative integer or existing
         count register. Optional range_hint guarantees a closed nonnegative count
         range without hardware checks; fixed counts forbid hints. Zero discards
@@ -238,9 +239,10 @@ class TimelineBuilder:
         keeps the executed case end. Other timelines remain unchanged.
         Local fork names expire and unjoined local ends are discarded. True
         requires all ends to be reconstructible from branch-entry state.
-        Case delay/delay_auto/sync fail at build; use delay_timeline. Repeat in
-        a case fails at build; move it outside the branch. Branch inside Repeat
-        is supported. Unconditional actions in this context fail at build; move
+        Case delay/delay_auto/delay_by_timeline fail at build; use timeline_inc.
+        Repeat in a case may accumulate timeline ends, but its body must also
+        preserve reference, including nested Repeat. Branch inside Repeat is
+        supported. Unconditional actions in this context fail at build; move
         them before or after the with block. Unknown selectors, invalid indices,
         timing and native register-capacity errors propagate from the program.
         Calls after build raise ValueError. Close before build; the handle
@@ -365,7 +367,7 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.delay_auto(t, gens=gens, ros=ros, tag=tag))
 
-    def delay_timeline(
+    def timeline_inc(
         self,
         t: float | QickParam | str,
         *,
@@ -380,10 +382,10 @@ class TimelineBuilder:
         register name. range_hint optionally guarantees inclusive integer-cycle
         bounds for a register. Unbounded values use runtime maxima; overlap and
         overflow are author-owned. Invalid hints and unknown timelines fail
-        during build, as in TimelineProgramV2.delay_timeline.
+        during build, as in TimelineProgramV2.timeline_inc.
         """
         self._record(
-            lambda prog: prog.delay_timeline(
+            lambda prog: prog.timeline_inc(
                 t, timeline=timeline, tag=tag, range_hint=range_hint
             )
         )
@@ -410,12 +412,12 @@ class TimelineBuilder:
         """
         self._record(lambda prog: prog.join(*sources, into=into))
 
-    def sync(self, *, timeline: str | None = None) -> None:
+    def delay_by_timeline(self, *, timeline: str | None = None) -> None:
         """Record reference advance to the selected end; unknown names fail at build.
 
         None selects the scoped name, or default outside a scope.
         """
-        self._record(lambda prog: prog.sync(timeline=timeline))
+        self._record(lambda prog: prog.delay_by_timeline(timeline=timeline))
 
     def pulse(
         self,
