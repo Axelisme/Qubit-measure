@@ -1,5 +1,6 @@
 """Projective reads preserve shot histories through the program/source contract."""
 
+from tests.core._simulation import TIME_BASE, tick_array
 from collections.abc import Generator
 from dataclasses import replace
 
@@ -156,9 +157,9 @@ def test_preparation_rejects_equal_read_counts_with_different_template_events(
     request = env.soc.binding.rounds[0].acquire
     herald = request.templates[0]
     window = herald.readouts[0]
-    terminal_start = herald.events[-1].start_us[:, None]
+    terminal_start = herald.events[-1].start_ticks[:, None]
     terminal_window = replace(
-        window, trigger_us=terminal_start + np.array([[0.002, 0.004]])
+        window, trigger_ticks=tick_array(terminal_start + np.array([[0.002, 0.004]]))
     )
     terminal = replace(herald, events=(herald.events[-1],), readouts=(terminal_window,))
     herald = replace(herald, points=np.array([1], dtype=np.int64))
@@ -186,7 +187,7 @@ def test_two_projections_retain_complete_markov_outcome_histories(
     prepared = source.prepare(request, source.snapshot())
     readout = prepared.raw.readout
     facts = source.model_facts(source.snapshot())
-    plan = source.plan_template(source.snapshot(), request.templates[0])
+    plan = source.plan_template(source.snapshot(), request.templates[0], time_base=TIME_BASE)
     rate = facts.readout.rates_per_ns
     generator = rate - np.diag(rate.sum(axis=0))
     times = [event.end_ns[0] for event in plan.read_events]
@@ -223,7 +224,7 @@ def test_unobserved_terminal_keeps_terminal_state_counts_and_evolution(
     window = template.readouts[0]
     window = replace(
         window,
-        trigger_us=window.trigger_us[:, :1],
+        trigger_ticks=window.trigger_ticks[:, :1],
         frequency_mhz=window.frequency_mhz[:, :1],
         phase_deg=window.phase_deg[:, :1],
         generator_channels=window.generator_channels[:, :1],
@@ -252,7 +253,7 @@ def test_terminal_only_raw_statistics_and_traces_match_unprojected_inputs(
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0].acquire
     prepared = source.prepare(request, source.snapshot())
-    content = source.plan_template(source.snapshot(), request.templates[0]).readout
+    content = source.plan_template(source.snapshot(), request.templates[0], time_base=TIME_BASE).readout
     model = prepared.raw.batches[0][1].model
     local = local_readout_pulses(content.pulses, model.reference_frequency_ghz)
     baseline = adc.ReadoutBatch(
@@ -318,7 +319,7 @@ def test_program_herald_wait_terminal_matches_conditional_markov_prediction(
     facts = source.model_facts(source.snapshot())
     rate = facts.readout.rates_per_ns
     generator = rate - np.diag(rate.sum(axis=0))
-    plan = source.plan_template(source.snapshot(), request.acquire.templates[0])
+    plan = source.plan_template(source.snapshot(), request.acquire.templates[0], time_base=TIME_BASE)
     elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
     transition = expm(generator * elapsed).T
     weights = projection.weights.reshape(-1, 2)[0]

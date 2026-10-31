@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
+from zcu_tools.core.simulation import EventSlot, PulseEnvelope, ReadoutSlot, TimelineTemplate, TimeBase
 from zcu_tools.simulate.adc import (
     PiecewiseLinearEnvelope,
     ReadoutEvent,
@@ -195,11 +195,11 @@ def map_readout_events(
 
 
 def envelope_specs(
-    event: EventSlot, memo: dict[int, EnvelopeSpec]
+    event: EventSlot, memo: dict[int, EnvelopeSpec], *, time_base: TimeBase
 ) -> tuple[EnvelopeSpec, ...]:
     """Detach an EventSlot's candidate envelopes in their original order.
 
-    Convert local us to ns without resampling complex values; None means unity.
+    Convert local ticks through time_base to ns without resampling; None means unity.
     memo is a caller-owned, initially empty identity cache shared by every event
     of one live template. Keep all input envelopes alive while reusing it, do not
     modify cached specs, and discard it with that template. Returned immutable
@@ -215,7 +215,7 @@ def envelope_specs(
                 else EnvelopeSpec(
                     "sampled",
                     samples=np.array(envelope.values, dtype=np.complex128),
-                    sample_ns=np.array(envelope.sample_us) * 1000,
+                    sample_ns=time_base.ns(np.arange(len(envelope.values), dtype=np.int64) * envelope.sample_period_ticks),
                 )
             )
         specs.append(memo[key])
@@ -223,33 +223,31 @@ def envelope_specs(
 
 
 def drive_track(
-    event: EventSlot, port: str, memo: dict[int, EnvelopeSpec]
+    event: EventSlot, port: str, memo: dict[int, EnvelopeSpec], *, time_base: TimeBase
 ) -> DriveTrack:
     """Detach one QICK drive slot into an evolution track in ns/GHz/radians.
 
     event has the aligned per-point arrays defined by core.simulation.EventSlot
-    in us/MHz/degrees. port is a nonempty numeric SecularDrive name, not a
+    in ticks/MHz/degrees, interpreted with the request's time_base. port is a nonempty numeric SecularDrive name, not a
     generator index. memo follows envelope_specs' template-local lifetime.
     Absolute support endpoints round independently to nearest 2 ns, ties even.
-    Phase retains the common t=0 carrier origin, including phase_reference_us.
+    Phase retains the common t=0 carrier origin, including phase_reference_ticks.
     Signed gains and complex samples are unchanged; inactive rows remain masked.
     Returned arrays own read-only copies. No calibration or physics is applied.
     Invalid supports, shapes, sample values or indices raise ValueError through
     DriveTrack/EnvelopeSpec. Inputs are not modified.
     """
-    start = event.start_us * 1000
-    # Match the old numeric owner's absolute nearest-2-ns support, ties even.
-    quantized = 2 * np.rint(start / 2)
-    end = 2 * np.rint((start + event.duration_us * 1000) / 2)
+    quantized = time_base.ns(event.start_ticks, quantum_ns=2)
+    end = time_base.ns(event.start_ticks + event.duration_ticks, quantum_ns=2)
     return DriveTrack(
         port,
         quantized,
         end - quantized,
         event.frequency_mhz / 1000,
         np.deg2rad(event.phase_deg)
-        - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
+        - 2 * np.pi * event.frequency_mhz * (time_base.ns(event.phase_reference_ticks) / 1000),
         event.gain,
-        envelope_specs(event, memo),
+        envelope_specs(event, memo, time_base=time_base),
         event.envelope_index,
         event.active,
     )
@@ -259,6 +257,7 @@ def classify_readout(
     template: TimelineTemplate,
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
+    *, time_base: TimeBase,
 ) -> ReadoutPartition:
     """Partition readout blocks into terminal, projective and cavity drives.
 
@@ -282,27 +281,27 @@ def classify_readout(
     slots = tuple(event for event in template.events if event.gen_ch == drive.gen_ch)
     if not slots:
         raise ValueError("requires one terminal readout pulse per point")
-    latest = np.max([np.where(e.active, e.start_us, -np.inf) for e in slots], axis=0)
+    latest = np.max([np.where(e.active, e.start_ticks, -np.inf) for e in slots], axis=0)
     if not np.isfinite(latest).all():
         raise ValueError("requires one terminal readout pulse per point")
     terminals = []
     terminal_pulses: list[list[ReadoutPulse]] = [[] for _ in template.points]
     drives: list[list[ReadoutPulse]] = [[] for _ in template.points]
     for event in slots:
-        terminal = event.active & (event.start_us == latest)
+        terminal = event.active & (event.start_ticks == latest)
         earlier = event.active & ~terminal
         next_start = np.min(
             [
                 np.where(
-                    other.active & (other.start_us > event.start_us),
-                    other.start_us,
+                    other.active & (other.start_ticks > event.start_ticks),
+                    other.start_ticks,
                     np.inf,
                 )
                 for other in slots
             ],
             axis=0,
         )
-        if np.any(earlier & (event.start_us + event.duration_us > next_start)):
+        if np.any(earlier & (event.start_ticks + event.duration_ticks > next_start)):
             if drive.kind == "mux":
                 raise ValueError(
                     "mux tones require a common pulse start; blocks overlap"
@@ -310,32 +309,32 @@ def classify_readout(
             if np.any(
                 earlier
                 & (next_start == latest)
-                & (event.start_us + event.duration_us > latest)
+                & (event.start_ticks + event.duration_ticks > latest)
             ):
                 raise ValueError("cavity drive crosses terminal readout start")
             raise ValueError("readout pulse crosses next readout start")
         terminals.append(replace(event, active=terminal))
-        envelopes = list(envelope_specs(event, memo))
+        envelopes = list(event.envelopes)
         rows = np.column_stack(
             (
-                event.start_us,
-                event.duration_us,
+                event.start_ticks,
+                event.duration_ticks,
                 event.frequency_mhz,
-                event.phase_deg - 360 * event.frequency_mhz * event.phase_reference_us,
+                event.phase_deg - 360 * event.frequency_mhz * (time_base.ns(event.phase_reference_ticks) / 1000),
                 event.gain,
                 event.envelope_index,
             )
         )
         for index in np.flatnonzero(earlier):
-            drives[index].append(_readout_pulse(drive, rows[index], envelopes))
+            drives[index].append(_readout_pulse(drive, rows[index], envelopes, time_base))
         for index in np.flatnonzero(terminal):
-            terminal_pulses[index].append(_readout_pulse(drive, rows[index], envelopes))
+            terminal_pulses[index].append(_readout_pulse(drive, rows[index], envelopes, time_base))
     cavity_drives = []
     projective_reads = []
     for point, pulses in enumerate(
         local_readout_pulses(tuple(tuple(p) for p in drives), 0.0)
     ):
-        cavity, reads = _partition_point(template, drive, point, pulses)
+        cavity, reads = _partition_point(template, drive, point, pulses, time_base)
         cavity_drives.append(cavity)
         projective_reads.append(reads)
     _validate_topology(template, tuple(projective_reads))
@@ -376,7 +375,7 @@ def _validate_topology(
                 sum(t.channel == window.channel for t in read.triggers)
                 for read in reads
             )
-            layouts.append((*counts, window.trigger_us.shape[1] - sum(counts)))
+            layouts.append((*counts, window.trigger_ticks.shape[1] - sum(counts)))
         for point, layout in enumerate(layouts):
             for event, (actual, expected_grids) in enumerate(
                 zip(layout, layouts[0], strict=True)
@@ -394,16 +393,17 @@ def _partition_point(
     drive: ReadoutDrive,
     point: int,
     pulses: tuple[ReadoutPulse, ...],
+    time_base: TimeBase,
 ) -> tuple[tuple[ReadoutPulse, ...], tuple[ProjectiveRead, ...]]:
     first_start = min(
-        event.start_us[point]
+        event.start_ticks[point]
         for event in template.events
         if event.gen_ch == drive.gen_ch and event.active[point]
     )
     for window in template.readouts:
         if np.any(
             (window.generator_channels[point] == drive.gen_ch)
-            & (window.trigger_us[point] < first_start)
+            & (window.trigger_ticks[point] < first_start)
         ):
             raise ValueError(
                 "first ADC trigger must not precede terminal readout start"
@@ -413,13 +413,13 @@ def _partition_point(
     for start in sorted({pulse.start_ns for pulse in pulses}):
         block = tuple(pulse for pulse in pulses if pulse.start_ns == start)
         end = min(
-            event.start_us[point] * 1000
+            time_base.ns(event.start_ticks[point])
             for event in template.events
             if event.gen_ch == drive.gen_ch
             and event.active[point]
-            and event.start_us[point] * 1000 > start
+            and time_base.ns(event.start_ticks[point]) > start
         )
-        triggers = _block_triggers(template, drive.gen_ch, point, start, end)
+        triggers = _block_triggers(template, drive.gen_ch, point, start, end, time_base)
         if triggers:
             reads.append(ProjectiveRead(float(start), block, tuple(triggers)))
             triggered_starts.add(start)
@@ -430,17 +430,17 @@ def _partition_point(
 
 
 def _block_triggers(
-    template: TimelineTemplate, gen_ch: int, point: int, start: float, end: float
+    template: TimelineTemplate, gen_ch: int, point: int, start: float, end: float, time_base: TimeBase
 ) -> tuple[ReadoutTrigger, ...]:
     triggers = []
     for window in template.readouts:
-        for read, trigger in enumerate(window.trigger_us[point] * 1000):
+        for read, trigger in enumerate(time_base.ns(window.trigger_ticks[point])):
             if (
                 window.generator_channels[point, read] == gen_ch
                 and start <= trigger < end
             ):
                 last_sample = (
-                    trigger + (window.samples - 1) * 1000 / window.sample_rate_mhz
+                    time_base.ns(int(window.trigger_ticks[point, read]) + (window.samples - 1) * window.sample_period_ticks)
                 )
                 if last_sample >= end:
                     raise ValueError(
@@ -465,6 +465,7 @@ def logical_event_contents(
     drive: ReadoutDrive,
     window: ReadoutSlot,
     memo: dict[int, EnvelopeSpec],
+    *, time_base: TimeBase,
 ) -> tuple[ReadoutContents, ...]:
     """Return projective blocks followed by terminal, including unobserved blocks.
 
@@ -480,14 +481,14 @@ def logical_event_contents(
     deduplication and phases. Projective plans use point-local contents with
     identity inverse maps. No densities or ADC responses are constructed.
     """
-    partition = classify_readout(template, drive, memo)
+    partition = classify_readout(template, drive, memo, time_base=time_base)
     if not any(partition.projective_reads):
         return (
             readout_contents(
-                replace(template, events=partition.terminal_slots), drive, window, memo
+                replace(template, events=partition.terminal_slots), drive, window, memo, time_base=time_base
             ),
         )
-    observed = read_event_contents(template, drive, window, memo)
+    observed = read_event_contents(template, drive, window, memo, time_base=time_base)
     blocks = tuple(
         (*(read.pulses for read in reads), terminal)
         for reads, terminal in zip(
@@ -542,6 +543,7 @@ def read_event_contents(
     drive: ReadoutDrive,
     window: ReadoutSlot,
     memo: dict[int, EnvelopeSpec],
+    *, time_base: TimeBase,
 ) -> tuple[ReadoutContents, ...]:
     """Plan each ADC trigger with its own incident pulse block.
 
@@ -556,16 +558,16 @@ def read_event_contents(
     Missing pulse blocks, crossing blocks, invalid tone counts and wrong ADC
     routes raise ValueError. This function builds no physical model or samples.
     """
-    partition = classify_readout(template, drive, memo)
+    partition = classify_readout(template, drive, memo, time_base=time_base)
     terminal_start = np.max(
         [
-            np.where(e.active, e.start_us * 1000, -np.inf)
+            np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
             for e in partition.terminal_slots
         ],
         axis=0,
     )
     contents = []
-    for read in range(window.trigger_us.shape[1]):
+    for read in range(window.trigger_ticks.shape[1]):
         starts = terminal_start.copy()
         for point, projections in enumerate(partition.projective_reads):
             for projection in projections:
@@ -575,19 +577,19 @@ def read_event_contents(
                 ):
                     starts[point] = projection.start_ns
         events = tuple(
-            replace(e, active=e.active & (e.start_us * 1000 == starts))
+            replace(e, active=e.active & (time_base.ns(e.start_ticks) == starts))
             for e in template.events
             if e.gen_ch == drive.gen_ch
         )
         selected_window = replace(
             window,
-            trigger_us=window.trigger_us[:, read : read + 1],
+            trigger_ticks=window.trigger_ticks[:, read : read + 1],
             frequency_mhz=window.frequency_mhz[:, read : read + 1],
             phase_deg=window.phase_deg[:, read : read + 1],
             generator_channels=window.generator_channels[:, read : read + 1],
         )
         content = readout_contents(
-            replace(template, events=events), drive, selected_window, memo
+            replace(template, events=events), drive, selected_window, memo, time_base=time_base
         )
         contents.append(
             replace(content, read_indices=tuple((read,) for _ in content.grids))
@@ -602,6 +604,7 @@ def readout_contents(
     drive: ReadoutDrive,
     window: ReadoutSlot,
     memo: dict[int, EnvelopeSpec],
+    *, time_base: TimeBase,
 ) -> ReadoutContents:
     """Deduplicate terminal pulses and one receiver's grids by complete content.
 
@@ -610,7 +613,8 @@ def readout_contents(
     memo follows envelope_specs' lifetime contract. Signed gains and complex
     envelopes are preserved. Pulses use ns/GHz and common-origin radians; call
     local_readout_pulses once the ADC reference frequency is selected. Grids use
-    absolute ns/GHz/radians and dt=1000/window.sample_rate_mhz.
+    absolute ns/GHz/radians. time_base interprets all tick fields; grids combine
+    trigger and integer sample offsets before one ns conversion.
     Return owned arrays with sorted distinct content and a point-to-content map.
     Missing pulses, varying tone count, pulse mode with multiple tones, mux with
     more than eight tones or different starts, wrong ADC generator routes, empty
@@ -627,11 +631,11 @@ def readout_contents(
     tones = int(count[0])
     if tones > 8 or np.any(count != tones):
         raise ValueError("mux requires a fixed 1..8 tone count per point")
-    if not window.trigger_us.shape[1] or np.any(
+    if not window.trigger_ticks.shape[1] or np.any(
         window.generator_channels != drive.gen_ch
     ):
         raise ValueError("requires ADC timing and its bound readout generator")
-    fields = ("start_us", "duration_us", "frequency_mhz", "phase_deg", "gain")
+    fields = ("start_ticks", "duration_ticks", "frequency_mhz", "phase_deg", "gain")
     values = np.zeros((len(template.points), tones, 6))
     rows = np.arange(len(template.points))
     ranks = np.cumsum([e.active for e in slots], axis=0) - 1
@@ -642,20 +646,20 @@ def readout_contents(
         # Retain the program's common-origin phase until the model reference
         # frequency is known; ADC pulse-local conversion happens below.
         values[rows, rank, 3] -= np.where(
-            event.active, 360 * event.frequency_mhz * event.phase_reference_us, 0
+            event.active, 360 * event.frequency_mhz * (time_base.ns(event.phase_reference_ticks) / 1000), 0
         )
         values[rows, rank, 5] += np.where(
             event.active, event.envelope_index + len(envelopes), 0
         )
-        envelopes.extend(envelope_specs(event, memo))
+        envelopes.extend(event.envelopes)
     if np.any(values[:, :, 0] != values[:, :1, 0]):
         raise ValueError("mux tones require a common pulse start per point")
-    if np.any(window.trigger_us[:, 0] < values[:, 0, 0]):
+    if np.any(window.trigger_ticks[:, 0] < values[:, 0, 0]):
         raise ValueError("first ADC trigger must not precede terminal readout start")
     features = np.column_stack(
         (
             values.reshape(len(template.points), -1),
-            window.trigger_us,
+            window.trigger_ticks,
             window.frequency_mhz,
             window.phase_deg,
         )
@@ -665,20 +669,20 @@ def readout_contents(
     )
     pulses = []
     grids = []
-    dt = 1000 / window.sample_rate_mhz
+    offsets = np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks
     for index in representatives:
         pulses.append(
-            tuple(_readout_pulse(drive, row, envelopes) for row in values[index])
+            tuple(_readout_pulse(drive, row, envelopes, time_base) for row in values[index])
         )
         grids.append(
             tuple(
                 SampleGrid(
-                    trigger * 1000 + dt * np.arange(window.samples),
+                    time_base.ns(trigger + offsets),
                     frequency / 1000,
                     float(np.deg2rad(phase)),
                 )
                 for trigger, frequency, phase in zip(
-                    window.trigger_us[index],
+                    window.trigger_ticks[index],
                     window.frequency_mhz[index],
                     window.phase_deg[index],
                     strict=True,
@@ -686,33 +690,35 @@ def readout_contents(
             )
         )
     return ReadoutContents(
-        values[:, 0, 0] * 1000,
+        time_base.ns(values[:, 0, 0].astype(np.int64)),
         tuple(pulses),
         tuple(grids),
         inverse.astype(np.int64),
-        (tuple(range(window.trigger_us.shape[1])),) * len(grids),
+        (tuple(range(window.trigger_ticks.shape[1])),) * len(grids),
     )
 
 
 def _readout_pulse(
-    drive: ReadoutDrive, row: NDArray[np.float64], envelopes: list[EnvelopeSpec]
+    drive: ReadoutDrive, row: NDArray[np.float64],
+    envelopes: list[PulseEnvelope | None], time_base: TimeBase,
 ) -> ReadoutPulse:
     start, duration, freq, phase, gain, envelope_index = row
+    start_ticks, duration_ticks = int(start), int(duration)
     envelope = envelopes[int(envelope_index)]
     amplitude = complex(drive.input_per_gain * gain)
     callback = None
     corners = ()
-    if envelope.kind == "sampled":
-        if np.all(envelope.samples == envelope.samples[0]):
-            amplitude *= envelope.samples[0]
+    if envelope is not None:
+        samples = np.asarray(envelope.values, dtype=np.complex128)
+        if np.all(samples == samples[0]):
+            amplitude *= samples[0]
         else:
-            callback = PiecewiseLinearEnvelope(envelope.sample_ns, envelope.samples)
-            corners = tuple(
-                start * 1000 + t for t in envelope.sample_ns if 0 < t < duration * 1000
-            )
+            axis = np.arange(len(samples), dtype=np.int64) * envelope.sample_period_ticks
+            callback = PiecewiseLinearEnvelope(time_base.ns(axis), samples)
+            corners = tuple(time_base.ns(start_ticks + axis[(axis > 0) & (axis < duration_ticks)]))
     return ReadoutPulse(
-        start * 1000,
-        (start + duration) * 1000,
+        time_base.ns(start_ticks),
+        time_base.ns(start_ticks + duration_ticks),
         amplitude,
         freq / 1000,
         float(np.deg2rad(phase)),

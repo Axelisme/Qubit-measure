@@ -3,6 +3,7 @@
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
+from fractions import Fraction
 from hashlib import sha256
 from sys import getsizeof
 from typing import Generic, TypeVar
@@ -17,11 +18,10 @@ T = TypeVar("T")
 
 _ENVELOPE_FIELDS = fields(PulseEnvelope)
 _BUILTIN_ENVELOPE_LAYOUT = tuple(field.name for field in _ENVELOPE_FIELDS) == (
-    "sample_us",
+    "sample_period_ticks",
     "values",
 )
 _ENVELOPE_FIELD_BYTES = sum(getsizeof(field.name) for field in _ENVELOPE_FIELDS)
-_FLOAT_BYTES = getsizeof(0.0)
 _COMPLEX_BYTES = getsizeof(0j)
 
 
@@ -34,7 +34,7 @@ class EnvelopeEncoder:
     calls; zero disables residency. resident_bytes includes full envelope tuples,
     numeric objects, fingerprint bytes, entry metadata and the Python LRU container.
     Shared objects across entries are conservatively charged again. Exact builtin
-    PulseEnvelope records with builtin float/complex tuples use arithmetic charges
+    PulseEnvelope records with integer periods and builtin complex tuples use arithmetic charges
     per scalar and tuple occurrence, including shared scalars and empty tuples.
     This can overestimate ownership and evict earlier, but never underestimates
     the generic object walk. Other layouts/types retain generic accounting.
@@ -84,7 +84,7 @@ class EnvelopeEncoder:
 
         frame(type(envelope).__qualname__.encode())
         for values, dtype in (
-            (envelope.sample_us, np.float64),
+            (envelope.sample_period_ticks, np.int64),
             (envelope.values, np.complex128),
         ):
             array = np.asarray(values, dtype=dtype)
@@ -162,7 +162,7 @@ def preparation_key(
             frame(str(len(value)).encode())
             for child in value:
                 visit(child)
-        elif value is None or isinstance(value, (str, int, float, complex, bool)):
+        elif value is None or isinstance(value, (str, int, float, complex, bool, Fraction)):
             frame(repr(value).encode())
         else:
             raise ValueError(f"unsupported preparation content: {type(value).__name__}")
@@ -240,9 +240,7 @@ def _envelope_bytes(envelope: PulseEnvelope) -> int:
     if (
         not _BUILTIN_ENVELOPE_LAYOUT
         or type(envelope) is not PulseEnvelope
-        or type(envelope.sample_us) is not tuple
         or type(envelope.values) is not tuple
-        or not all(type(value) is float for value in envelope.sample_us)
         or not all(type(value) is complex for value in envelope.values)
     ):
         return _owned_bytes(envelope)
@@ -253,8 +251,7 @@ def _envelope_bytes(envelope: PulseEnvelope) -> int:
         getsizeof(envelope)
         + (getsizeof(vars(envelope)) if hasattr(envelope, "__dict__") else 0)
         + _ENVELOPE_FIELD_BYTES
-        + getsizeof(envelope.sample_us)
-        + len(envelope.sample_us) * _FLOAT_BYTES
+        + getsizeof(envelope.sample_period_ticks)
         + getsizeof(envelope.values)
         + len(envelope.values) * _COMPLEX_BYTES
     )

@@ -1,5 +1,6 @@
 """Acquire composition advances density and cavity memory at the public seam."""
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -52,10 +53,10 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
     base = template(tones=1)
     earlier = replace(
         base.events[-1],
-        start_us=np.zeros(2),
-        duration_us=np.array([0.002, 0.006]),
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.array([0.002, 0.006])),
         gain=np.array([0.3, 0.5]),
-        envelopes=(PulseEnvelope((0.0, 0.001, 0.006), (0j, 1j, 0.3)),)
+        envelopes=(PulseEnvelope(ticks(0.003), (0j, 1j, 0.3)),)
         if shaped
         else (None,),
     )
@@ -63,7 +64,7 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
     try:
         plan = plan_template(
             source.settings, snapshot(), driven, facts=source.model_facts(snapshot())
-        )
+        , time_base=TIME_BASE)
         spans = segment_spans(plan.batch)
         acquire = request(templates=(driven,))
         source.open_acquire(acquire).sample_round(snapshot(), 0)
@@ -157,16 +158,16 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
     base, readout = herald_template()
     # A second herald gives cavity memory a projected continuation boundary.
     terminal = tuple(
-        replace(event, start_us=event.start_us + 0.012) for event in base.events[-2:]
+        replace(event, start_ticks=event.start_ticks + ticks(0.012)) for event in base.events[-2:]
     )
     middle = tuple(
-        replace(event, duration_us=np.full(2, 0.002)) for event in base.events[-2:]
+        replace(event, duration_ticks=tick_array(np.full(2, 0.002))) for event in base.events[-2:]
     )
     windows = tuple(
         replace(
             window,
-            trigger_us=np.column_stack(
-                (window.trigger_us, window.trigger_us[:, -1] + 0.012)
+            trigger_ticks=np.column_stack(
+                (window.trigger_ticks, window.trigger_ticks[:, -1] + ticks(0.012))
             ),
             frequency_mhz=np.column_stack(
                 (window.frequency_mhz, window.frequency_mhz[:, -1])
@@ -182,7 +183,7 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
         base,
         events=(*base.events[:2], *middle, *terminal),
         readouts=windows,
-        duration_us=base.duration_us + 0.012,
+        duration_ticks=base.duration_ticks + ticks(0.012),
     )
     numeric = settings().with_telemetry(enabled=False)
     numeric = numeric.model_copy(
@@ -198,7 +199,7 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
     source = FTFSource(numeric, DeviceManager(), readout=readout, engine=engine)
     try:
         facts = source.model_facts(snapshot())
-        plan = plan_template(numeric, snapshot(), driven, readout=readout, facts=facts)
+        plan = plan_template(numeric, snapshot(), driven, readout=readout, facts=facts, time_base=TIME_BASE)
         source.open_acquire(request(templates=(driven,))).sample_round(snapshot(), 0)
         calls = [
             batches[0] for _, batches, _ in engine.calls if batches[0].points[0] == 0
@@ -250,8 +251,8 @@ def test_mixed_acquire_keeps_undriven_templates_on_the_single_evolve_path():
     base = template()
     earlier = replace(
         base.events[-1],
-        start_us=np.zeros(2),
-        duration_us=np.full(2, 0.002),
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.full(2, 0.002)),
         envelopes=(None,),
     )
     driven = replace(base, events=(earlier, *base.events))

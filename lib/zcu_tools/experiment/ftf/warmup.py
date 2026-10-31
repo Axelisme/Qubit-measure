@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    TimeBase,
     ChannelStatistics,
     ReadoutWindow,
     RoundStatistics,
@@ -373,10 +374,11 @@ def _statistics_copy() -> None:
         "integrated",
         (2, 4),
         1,
-        (ReadoutWindow(0, 0, 8, 100.0, (0.0,)),),
+        (ReadoutWindow(0, 0, 8, 1, (0,)),),
         0,
         0,
         "startup",
+        time_base=TimeBase.from_clocks((100.0,)),
         reps=4,
     )
     counts = np.array([[1, 3], [2, 2]], dtype=np.int64)

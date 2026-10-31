@@ -1,5 +1,6 @@
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
+from tests.core._simulation import TIME_BASE, tick_array
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -49,12 +50,12 @@ def delayed_readout_template():
     """Leave room for shaped controls and retain each ADC's readout offset."""
     base = template(tones=1)
     readout = base.events[-1]
-    shift = 0.140 - readout.start_us
+    shift = ticks(0.140) - readout.start_ticks
     return replace(
         base,
-        events=(*base.events[:-1], replace(readout, start_us=readout.start_us + shift)),
+        events=(*base.events[:-1], replace(readout, start_ticks=readout.start_ticks + shift)),
         readouts=tuple(
-            replace(window, trigger_us=window.trigger_us + shift[:, None])
+            replace(window, trigger_ticks=window.trigger_ticks + shift[:, None])
             for window in base.readouts
         ),
     )
@@ -70,17 +71,17 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires(
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
-        tuple(times),
+        1344,  # 1 ns on the synthetic clock.
         tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
     )
     drive = replace(
         drive,
-        start_us=np.zeros(2),
-        duration_us=np.full(2, 0.128),
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.full(2, 0.128)),
         gain=np.full(2, -0.002),
         envelopes=(waveform,),
     )
-    readout = replace(readout, start_us=np.full(2, 0.140))
+    readout = replace(readout, start_ticks=tick_array(np.full(2, 0.140)))
     acquire = request(templates=(replace(base, events=(drive, readout)),))
     histories, routes = [], []
     for clear in (False, True):
@@ -122,7 +123,7 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows(
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
-        tuple(times),
+        1344,  # 1 ns on the synthetic clock.
         tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
     )
     shaped = replace(
@@ -130,12 +131,12 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows(
         events=(
             replace(
                 drive,
-                start_us=np.zeros(2),
-                duration_us=np.full(2, 0.128),
+                start_ticks=tick_array(np.zeros(2)),
+                duration_ticks=tick_array(np.full(2, 0.128)),
                 gain=np.full(2, -0.002),
                 envelopes=(waveform,),
             ),
-            replace(readout, start_us=np.full(2, 0.140)),
+            replace(readout, start_ticks=tick_array(np.full(2, 0.140))),
         ),
     )
     small = request(templates=(shaped,))
@@ -193,7 +194,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
-        tuple(times),
+        1344,  # 1 ns on the synthetic clock.
         tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
     )
     acquire = request(
@@ -203,12 +204,12 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
                 events=(
                     replace(
                         drive,
-                        start_us=np.zeros(2),
-                        duration_us=np.full(2, 0.128),
+                        start_ticks=tick_array(np.zeros(2)),
+                        duration_ticks=tick_array(np.full(2, 0.128)),
                         gain=np.full(2, -0.002),
                         envelopes=(waveform,),
                     ),
-                    replace(readout, start_us=np.full(2, 0.140)),
+                    replace(readout, start_ticks=tick_array(np.full(2, 0.140))),
                 ),
             ),
         )
@@ -241,7 +242,7 @@ def test_repeated_content_does_not_inflate_source_amortization(
     drive, readout = base.events
     times = np.linspace(0.0, 0.128, 129)
     waveform = PulseEnvelope(
-        tuple(times),
+        1344,  # 1 ns on the synthetic clock.
         tuple(np.exp(-0.5 * ((times - 0.064) / 0.032) ** 2).astype(complex)),
     )
     acquire = request(
@@ -251,12 +252,12 @@ def test_repeated_content_does_not_inflate_source_amortization(
                 events=(
                     replace(
                         drive,
-                        start_us=np.zeros(2),
-                        duration_us=np.full(2, 0.128),
+                        start_ticks=tick_array(np.zeros(2)),
+                        duration_ticks=tick_array(np.full(2, 0.128)),
                         gain=np.full(2, -0.002),
                         envelopes=(waveform,),
                     ),
-                    replace(readout, start_us=np.full(2, 0.140)),
+                    replace(readout, start_ticks=tick_array(np.full(2, 0.140))),
                 ),
             ),
         )

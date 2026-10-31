@@ -1,5 +1,6 @@
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
+from tests.core._simulation import TIME_BASE, tick_tuple
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -65,7 +66,7 @@ def request_for(binding: SimulationBinding, sequence: int):
         "integrated",
         (8, 2),
         0,
-        (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000), tick_tuple((0.018,))),),
         binding.root_seed,
         sequence,
         binding.rng_version,
@@ -73,7 +74,7 @@ def request_for(binding: SimulationBinding, sequence: int):
         point_names=("sweep",),
         reps=8,
         templates=(compiled,),
-    )
+     time_base=TIME_BASE)
 
 
 @contextmanager

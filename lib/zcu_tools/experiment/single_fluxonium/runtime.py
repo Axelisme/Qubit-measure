@@ -16,6 +16,7 @@ from zcu_tools.core.simulation import (
     RoundRequest,
     RoundSignals,
     TimelineTemplate,
+    TimeBase,
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
@@ -132,14 +133,14 @@ def _validate_readout_layout(plans: tuple[SingleFluxoniumPlan, ...]) -> None:
 
 def _template_digest(template: TimelineTemplate) -> bytes:
     digest = sha256(b"single-fluxonium-template-v1")
-    for array in (template.points, template.duration_us):
+    for array in (template.points, template.duration_ticks):
         digest.update(repr((array.dtype.str, array.shape)).encode())
         digest.update(array.tobytes())
     for event in template.events:
-        digest.update(repr((event.gen_ch, event.phase_reference_us)).encode())
+        digest.update(repr((event.gen_ch, event.phase_reference_ticks)).encode())
         for array in (
-            event.start_us,
-            event.duration_us,
+            event.start_ticks,
+            event.duration_ticks,
             event.frequency_mhz,
             event.phase_deg,
             event.gain,
@@ -153,10 +154,10 @@ def _template_digest(template: TimelineTemplate) -> bytes:
         digest.update(repr(event.envelopes).encode())
     for window in template.readouts:
         digest.update(
-            repr((window.channel, window.samples, window.sample_rate_mhz)).encode()
+            repr((window.channel, window.samples, window.sample_period_ticks)).encode()
         )
         for array in (
-            window.trigger_us,
+            window.trigger_ticks,
             window.frequency_mhz,
             window.phase_deg,
             window.generator_channels,
@@ -386,11 +387,12 @@ class SingleFluxoniumSource:
         return self._facts
 
     def plan_template(
-        self, snapshot: EnvironmentSnapshot, template: TimelineTemplate
+        self, snapshot: EnvironmentSnapshot, template: TimelineTemplate, *, time_base: TimeBase
     ) -> SingleFluxoniumPlan:
         """Plan one complete template, reusing only its exact current content.
 
         Inputs/outputs and ValueError conditions follow template.plan_template.
+        time_base is the request's tick clock and participates in the cache key.
         The snapshot/settings/numeric key and SHA256 of every current array and
         waveform sample/time select one resident plan; borrowed arrays are reread
         on every lookup. No physical facts need to be built for planning alone.
@@ -404,12 +406,12 @@ class SingleFluxoniumSource:
         )
         if self._facts_key is not None and self._facts_key != generation:
             self._clear()
-        key = (*generation, _template_digest(template))
+        key = (*generation, time_base, _template_digest(template))
         if self._plan is None or self._plan_key != key:
             self._plan = None
             self._plan_key = None
             self._plan = plan_template(
-                self.settings, snapshot, template, readout_kind=self._readout_kind
+                self.settings, snapshot, template, time_base=time_base, readout_kind=self._readout_kind
             )
             self._plan_key = key
         return self._plan
@@ -471,6 +473,7 @@ class SingleFluxoniumSource:
                     template,
                     readout_kind=self._readout_kind,
                     charge_requirements=request.charge_requirements,
+                    time_base=request.time_base,
                 )
                 for template in request.templates
             )

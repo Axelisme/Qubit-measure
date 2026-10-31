@@ -1,5 +1,6 @@
 """FTF terminal-only sampling parity against explicit pre-projective inputs."""
 
+from tests.core._simulation import TIME_BASE, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -18,13 +19,13 @@ def test_terminal_only_plan_preserves_raw_statistics_and_decimated_values() -> N
     window = base.readouts[0]
     window = replace(
         window,
-        trigger_us=np.column_stack((window.trigger_us, window.trigger_us + 0.004)),
+        trigger_ticks=np.column_stack((window.trigger_ticks, window.trigger_ticks + ticks(0.004))),
         frequency_mhz=np.full((2, 2), 6000.0),
         phase_deg=np.full((2, 2), 45.0),
         generator_channels=np.zeros((2, 2), dtype=np.int64),
     )
     planned = (
-        plan_template(settings(), snapshot(), replace(base, readouts=(window,)))
+        plan_template(settings(), snapshot(), replace(base, readouts=(window,)), time_base=TIME_BASE)
         .readouts[0]
         .batch
     )

@@ -1,5 +1,6 @@
 """Readout classification and waveform contents at the shared planning seam."""
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -14,8 +15,8 @@ def pulse(start_us: float, duration_us: float = 0.004) -> EventSlot:
         0,
         "synthetic",
         (),
-        np.full(2, start_us),
-        np.full(2, duration_us),
+        tick_array(np.full(2, start_us)),
+        tick_array(np.full(2, duration_us)),
         np.full(2, 6000.0),
         np.full(2, 30.0),
         np.full(2, -0.2),
@@ -34,14 +35,14 @@ def template(
     window = ReadoutSlot(
         2,
         3,
-        1000.0,
-        np.tile(triggers, (2, 1)),
+        TIME_BASE.period_ticks(1000.0),
+        tick_array(np.tile(triggers, (2, 1))),
         np.full(shape, 5900.0),
         np.full(shape, 45.0),
         np.zeros(shape, dtype=np.int64),
     )
     return TimelineTemplate(
-        np.array([0, 1], dtype=np.int64), events, (window,), np.full(2, 0.050)
+        np.array([0, 1], dtype=np.int64), events, (window,), tick_array(np.full(2, 0.050))
     )
 
 
@@ -51,7 +52,7 @@ def test_logical_contents_keep_unobserved_terminal_and_group_repeated_triggers()
     base = template((pulse(0.010), pulse(0.030)), (0.011, 0.015))
     contents = readout_plan.logical_event_contents(
         base, readout_plan.ReadoutDrive(0, 2.0), base.readouts[0], {}
-    )
+    , time_base=TIME_BASE)
     assert len(contents) == 2
     for point in range(2):
         herald, terminal = (content.inverse[point] for content in contents)
@@ -67,20 +68,20 @@ def test_logical_contents_keep_unobserved_terminal_and_group_repeated_triggers()
 
 def test_event_contents_pair_each_trigger_with_its_own_point_local_pulse() -> None:
     first, second, terminal = pulse(0.010), pulse(0.020), pulse(0.030)
-    shifts = np.array([0.0, 0.002])
+    shifts = tick_array([0.0, 0.002])
     events = tuple(
-        replace(p, start_us=p.start_us + shifts) for p in (terminal, first, second)
+        replace(p, start_ticks=p.start_ticks + shifts) for p in (terminal, first, second)
     )
     base = template(events, (0.011, 0.021, 0.031))
     window = replace(
         base.readouts[0],
-        trigger_us=base.readouts[0].trigger_us + shifts[:, None],
+        trigger_ticks=base.readouts[0].trigger_ticks + shifts[:, None],
         frequency_mhz=np.tile([5800.0, 5900.0, 6000.0], (2, 1)),
         phase_deg=np.tile([0.0, 45.0, 90.0], (2, 1)),
     )
     contents = readout_plan.read_event_contents(
         replace(base, readouts=(window,)), readout_plan.ReadoutDrive(0, 2.0), window, {}
-    )
+    , time_base=TIME_BASE)
     assert len(contents) == 3
     for read, content in enumerate(contents):
         np.testing.assert_array_equal(content.end_ns, [10 + 10 * read, 12 + 10 * read])
@@ -107,7 +108,7 @@ def test_partition_separates_triggered_read_from_cavity_drive_and_terminal() -> 
     terminal, herald, cavity = pulse(0.030), pulse(0.010), pulse(0.0)
     plan = readout_plan.classify_readout(
         template((terminal, cavity, herald)), readout_plan.ReadoutDrive(0, 2.0), {}
-    )
+    , time_base=TIME_BASE)
     assert [slot.active.tolist() for slot in plan.terminal_slots] == [
         [True, True],
         [False, False],
@@ -133,11 +134,11 @@ def test_mux_block_projects_once_for_multiple_triggers_and_receivers() -> None:
     second_receiver = replace(
         base.readouts[0],
         channel=3,
-        trigger_us=np.tile([0.0115, 0.031, 0.032], (2, 1)),
+        trigger_ticks=tick_array(np.tile([0.0115, 0.031, 0.032], (2, 1))),
     )
     base = replace(base, readouts=(*base.readouts, second_receiver))
     drive = readout_plan.ReadoutDrive(0, 2.0, "mux")
-    plan = readout_plan.classify_readout(base, drive, {})
+    plan = readout_plan.classify_readout(base, drive, {}, time_base=TIME_BASE)
     assert tuple(map(len, plan.projective_reads)) == (1, 1)
     read = plan.projective_reads[0][0]
     assert [p.frequency_ghz for p in read.pulses] == [6.0, 6.1]
@@ -147,7 +148,7 @@ def test_mux_block_projects_once_for_multiple_triggers_and_receivers() -> None:
         (3, 0),
     ]
     assert plan.cavity_drives == ((), ())
-    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {})
+    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {}, time_base=TIME_BASE)
     assert [len(c.pulses[0]) for c in contents] == [2, 2, 1]
     assert [c.grids[0][0].times_ns[0] for c in contents] == [11, 12, 31]
 
@@ -157,7 +158,7 @@ def test_partition_uses_active_point_windows_not_slot_order() -> None:
     alternate = replace(herald, active=np.array([False, True]))
     herald = replace(herald, active=np.array([True, False]))
     base = template((terminal, alternate, herald))
-    plan = readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {})
+    plan = readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE)
     assert tuple(map(len, plan.projective_reads)) == (1, 1)
     assert plan.cavity_drives == ((), ())
     assert plan.projective_reads[1][0].start_ns == 10
@@ -176,12 +177,12 @@ def test_partition_rejects_point_with_different_logical_event_topology(
     base = template((pulse(0.010), pulse(0.030)), (0.011, 0.012, 0.031))
     window = replace(
         base.readouts[0],
-        trigger_us=np.array([[0.011, 0.012, 0.031], second_triggers]),
+        trigger_ticks=tick_array(np.array([[0.011, 0.012, 0.031], second_triggers])),
     )
     with pytest.raises(ValueError, match=rf"point 1.*{difference}"):
         readout_plan.classify_readout(
             replace(base, readouts=(window,)), readout_plan.ReadoutDrive(0, 1.0), {}
-        )
+        , time_base=TIME_BASE)
 
 
 def test_terminal_only_event_contents_preserve_late_triggers_and_deduplication() -> (
@@ -190,8 +191,8 @@ def test_terminal_only_event_contents_preserve_late_triggers_and_deduplication()
     base = template((pulse(0.030),), (0.031, 0.040))
     drive = readout_plan.ReadoutDrive(0, 2.0)
     window = base.readouts[0]
-    combined = readout_plan.readout_contents(base, drive, window, {})
-    separated = readout_plan.read_event_contents(base, drive, window, {})
+    combined = readout_plan.readout_contents(base, drive, window, {}, time_base=TIME_BASE)
+    separated = readout_plan.read_event_contents(base, drive, window, {}, time_base=TIME_BASE)
     assert len(combined.pulses) == 1
     np.testing.assert_array_equal(combined.inverse, [0, 0])
     for read, content in enumerate(separated):
@@ -211,14 +212,14 @@ def test_ringdown_trigger_belongs_to_previous_block_until_next_start(
         (pulse(0.030), pulse(0.010), pulse(0.020)), (trigger_us, 0.021, 0.031)
     )
     drive = readout_plan.ReadoutDrive(0, 1.0)
-    plan = readout_plan.classify_readout(base, drive, {})
+    plan = readout_plan.classify_readout(base, drive, {}, time_base=TIME_BASE)
     assert [[r.start_ns for r in point] for point in plan.projective_reads] == [
         [10, 20],
         [10, 20],
     ]
     assert plan.projective_reads[0][0].triggers[0].trigger_ns == trigger_us * 1000
     assert plan.cavity_drives == ((), ())
-    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {})
+    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {}, time_base=TIME_BASE)
     np.testing.assert_array_equal(contents[0].end_ns, [10, 10])
 
 
@@ -228,7 +229,7 @@ def test_nonterminal_samples_must_finish_strictly_before_next_block(trigger_us) 
         (pulse(0.030), pulse(0.010), pulse(0.020)), (trigger_us, 0.021, 0.031)
     )
     with pytest.raises(ValueError, match="last sample.*must precede") as rejection:
-        readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {})
+        readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE)
     message = str(rejection.value)
     assert "block start=10 ns" in message
     assert "ADC 2 trigger index=0" in message
@@ -238,13 +239,13 @@ def test_nonterminal_samples_must_finish_strictly_before_next_block(trigger_us) 
 def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> None:
     base = template((pulse(0.010), pulse(0.020), pulse(0.030)), (0.020, 0.030))
     drive = readout_plan.ReadoutDrive(0, 1.0)
-    plan = readout_plan.classify_readout(base, drive, {})
+    plan = readout_plan.classify_readout(base, drive, {}, time_base=TIME_BASE)
     assert [[r.start_ns for r in point] for point in plan.projective_reads] == [
         [20],
         [20],
     ]
     assert [[p.start_ns for p in point] for point in plan.cavity_drives] == [[10], [10]]
-    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {})
+    contents = readout_plan.read_event_contents(base, drive, base.readouts[0], {}, time_base=TIME_BASE)
     np.testing.assert_array_equal(contents[0].end_ns, [20, 20])
     np.testing.assert_array_equal(contents[1].end_ns, [30, 30])
 
@@ -252,7 +253,7 @@ def test_trigger_at_next_start_pairs_with_that_block_not_the_previous_one() -> N
 def test_trigger_before_any_incident_pulse_is_rejected_at_classification() -> None:
     base = template((pulse(0.010), pulse(0.030)), (0.009, 0.031))
     with pytest.raises(ValueError, match="trigger"):
-        readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {})
+        readout_plan.classify_readout(base, readout_plan.ReadoutDrive(0, 1.0), {}, time_base=TIME_BASE)
 
 
 @pytest.mark.parametrize("kind", ["pulse", "mux"])
@@ -260,7 +261,7 @@ def test_readout_block_may_end_at_next_start_but_must_not_cross_it(kind) -> None
     first, second, terminal = pulse(0.010, 0.010), pulse(0.020), pulse(0.030)
     base = template((terminal, second, first), (0.011, 0.021, 0.031))
     drive = readout_plan.ReadoutDrive(0, 2.0, kind)
-    plan = readout_plan.classify_readout(base, drive, {})
+    plan = readout_plan.classify_readout(base, drive, {}, time_base=TIME_BASE)
     assert [[r.start_ns for r in point] for point in plan.projective_reads] == [
         [10, 20],
         [10, 20],
@@ -272,9 +273,9 @@ def test_readout_block_may_end_at_next_start_but_must_not_cross_it(kind) -> None
                 events=(
                     terminal,
                     second,
-                    replace(first, duration_us=first.duration_us + 1e-12),
+                    replace(first, duration_ticks=first.duration_ticks + ticks(1e-12)),
                 ),
             ),
             drive,
             {},
-        )
+         time_base=TIME_BASE)

@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     TimelineTemplate,
+    TimeBase,
 )
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
@@ -215,6 +216,7 @@ def _timeline_batch(
     end_ns: NDArray[np.float64],
     path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
+    time_base: TimeBase,
 ) -> TimelineBatch:
     """Separate microwave and fast-flux slots using the round's DC projection."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
@@ -224,7 +226,7 @@ def _timeline_batch(
         if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
         if event.gen_ch in lines:
-            track = drive_track(event, lines[event.gen_ch].source, memo)
+            track = drive_track(event, lines[event.gen_ch].source, memo, time_base=time_base)
             flux_tracks.append(
                 FluxTrack(
                     track.port,
@@ -239,7 +241,7 @@ def _timeline_batch(
                 )
             )
         elif event.gen_ch in microwave:
-            drives.append(drive_track(event, microwave[event.gen_ch], memo))
+            drives.append(drive_track(event, microwave[event.gen_ch], memo, time_base=time_base))
         else:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
     flux = schedule(
@@ -311,10 +313,11 @@ def _projective_contents(
     template: TimelineTemplate,
     drive: ReadoutDrive,
     memo: dict[int, EnvelopeSpec],
+    time_base: TimeBase,
 ) -> tuple[tuple[ReadoutMapping, ...], float]:
     """Align actual trigger contents on a common chronological block axis."""
     channels = tuple(
-        logical_event_contents(template, drive, window, memo)
+        logical_event_contents(template, drive, window, memo, time_base=time_base)
         for window in template.readouts
     )
     reference = channels[0][-1].pulses[0][0].frequency_ghz
@@ -328,6 +331,7 @@ def plan_template(
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,
     *,
+    time_base: TimeBase,
     readout: FTFReadoutConfig | None = None,
     facts: FTFModelFacts | None = None,
 ) -> FTFTemplatePlan:
@@ -384,7 +388,7 @@ def plan_template(
         path.input_per_gain,
         "mux" if path.multiplexed else "pulse",
     )
-    partition = classify_readout(template, drive, memo)
+    partition = classify_readout(template, drive, memo, time_base=time_base)
     cavity_drives = partition.cavity_drives
     terminal_template = replace(template, events=partition.terminal_slots)
     for window in template.readouts:
@@ -392,18 +396,18 @@ def plan_template(
             raise ValueError(f"unbound FTF receiver {window.channel}")
     end_ns = np.max(
         [
-            np.where(e.active, e.start_us * 1000, -np.inf)
+            np.where(e.active, time_base.ns(e.start_ticks), -np.inf)
             for e in partition.terminal_slots
         ],
         axis=0,
     )
     if any(partition.projective_reads):
         event_contents, reference_frequency_ghz = _projective_contents(
-            template, drive, memo
+            template, drive, memo, time_base
         )
     else:
         contents = tuple(
-            readout_contents(terminal_template, drive, window, memo)
+            readout_contents(terminal_template, drive, window, memo, time_base=time_base)
             for window in template.readouts
         )
         reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
@@ -419,7 +423,7 @@ def plan_template(
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
         adc = receivers[window.channel]
-        dt = 1000 / window.sample_rate_mhz
+        dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
             adc.gain,
             float(np.deg2rad(adc.phase_deg)),
@@ -463,7 +467,7 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, path, memo),
+            _timeline_batch(settings, joint, template, end_ns, path, memo, time_base),
             cavity_drives,
             partition.projective_reads,
         ),

@@ -1,5 +1,6 @@
 """Plan-local immutable envelope sharing through the numeric planning seam."""
 
+from tests.core._simulation import TIME_BASE, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -14,8 +15,8 @@ pytestmark = pytest.mark.sim
 
 def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
     base = template(tones=3)
-    shared = PulseEnvelope((0.0, 0.001, 0.002), (0.2j, -0.4 + 0.1j, 0.5))
-    other = PulseEnvelope(shared.sample_us, (0.1j, -0.4 + 0.1j, 0.5))
+    shared = PulseEnvelope(ticks(0.001), (0.2j, -0.4 + 0.1j, 0.5))
+    other = PulseEnvelope(shared.sample_period_ticks, (0.1j, -0.4 + 0.1j, 0.5))
     controls = tuple(
         replace(
             event,
@@ -25,7 +26,7 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
         for event in base.events[:-1]
     )
     inputs = replace(base, events=(*controls, base.events[-1]))
-    plan = plan_template(settings(), snapshot(), inputs)
+    plan = plan_template(settings(), snapshot(), inputs, time_base=TIME_BASE)
     tracks = plan.batch.tracks
     for event, track in zip(controls, tracks, strict=True):
         np.testing.assert_array_equal(track.envelope_index, event.envelope_index)
@@ -34,13 +35,13 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
         np.testing.assert_array_equal(
             track.phase_rad,
             np.deg2rad(event.phase_deg)
-            - 2 * np.pi * event.frequency_mhz * event.phase_reference_us,
+            - 2 * np.pi * event.frequency_mhz * (TIME_BASE.ns(event.phase_reference_ticks) / 1000),
         )
         for index, value in ((0, shared), (2, shared), (3, other)):
             spec = track.envelopes[index]
             np.testing.assert_array_equal(spec.samples, value.values)
             np.testing.assert_array_equal(
-                spec.sample_ns, np.array(value.sample_us) * 1000
+                spec.sample_ns, TIME_BASE.ns(np.arange(len(value.values), dtype=np.int64) * value.sample_period_ticks)
             )
             assert not spec.samples.flags.writeable
             assert not spec.sample_ns.flags.writeable
@@ -53,7 +54,7 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
     with pytest.raises(ValueError, match="read-only"):
         tracks[0].envelopes[0].samples[0] = 9
     # Reusing the same input in another plan does not create resident reuse.
-    later = plan_template(settings(), snapshot(), inputs)
+    later = plan_template(settings(), snapshot(), inputs, time_base=TIME_BASE)
     assert later.batch.tracks[0].envelopes[0] is not tracks[0].envelopes[0]
     np.testing.assert_array_equal(
         later.batch.tracks[0].envelopes[0].samples, tracks[0].envelopes[0].samples

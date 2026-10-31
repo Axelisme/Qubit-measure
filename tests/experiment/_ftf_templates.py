@@ -1,5 +1,6 @@
 """Synthetic FTF template builders and result narrowing shared by composition tests."""
 
+from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -34,8 +35,8 @@ def template(*, tones: int = 0) -> TimelineTemplate:
             channel,
             "synthetic",
             (),
-            np.array(start, dtype=float),
-            np.full(2, duration),
+            tick_array(np.array(start, dtype=float)),
+            tick_array(np.full(2, duration)),
             np.full(2, frequency),
             np.full(2, phase),
             np.full(2, gain),
@@ -49,18 +50,18 @@ def template(*, tones: int = 0) -> TimelineTemplate:
         slot(2, [0.0, 0.002], 0.002, 250.0 + i * 100, 90.0, -0.2) for i in range(tones)
     )
     ro = slot(0, [0.008, 0.010], 0.020, 6000.0, 30.0, 0.1)
-    ro = replace(ro, envelopes=(PulseEnvelope((0.0, 0.020), (2j, 2j)),))
+    ro = replace(ro, envelopes=(PulseEnvelope(ticks(0.02), (2j, 2j)),))
     readout = ReadoutSlot(
         0,
         4,
-        1000.0,
-        np.array([[0.008], [0.010]]),
+        TIME_BASE.period_ticks(1000.0),
+        tick_array(np.array([[0.008], [0.010]])),
         np.full((2, 1), 6000.0),
         np.full((2, 1), 45.0),
         np.zeros((2, 1), dtype=np.int64),
     )
     return TimelineTemplate(
-        np.array([0, 1], dtype=np.int64), (*drives, ro), (readout,), np.full(2, 0.030)
+        np.array([0, 1], dtype=np.int64), (*drives, ro), (readout,), tick_array(np.full(2, 0.030))
     )
 
 
@@ -70,8 +71,8 @@ def herald_template() -> tuple[TimelineTemplate, FTFReadoutConfig]:
     terminal = replace(base.events[0], gen_ch=1)
     herald = replace(
         terminal,
-        start_us=np.array([0.0, 0.002]),
-        duration_us=np.full(2, 0.002),
+        start_ticks=tick_array(np.array([0.0, 0.002])),
+        duration_ticks=tick_array(np.full(2, 0.002)),
         frequency_mhz=np.full(2, 5900.0),
         gain=np.full(2, 0.3),
     )
@@ -79,7 +80,7 @@ def herald_template() -> tuple[TimelineTemplate, FTFReadoutConfig]:
     both = replace(
         base.readouts[0],
         channel=4,
-        trigger_us=np.array([[0.003, 0.008], [0.005, 0.010]]),
+        trigger_ticks=tick_array(np.array([[0.003, 0.008], [0.005, 0.010]])),
         frequency_mhz=np.tile([5900.0, 6000.0], (2, 1)),
         phase_deg=np.tile([10.0, 45.0], (2, 1)),
         generator_channels=np.ones((2, 2), dtype=np.int64),
@@ -136,7 +137,7 @@ def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireR
         mode,
         (3, 2),
         0,
-        (ReadoutWindow(0, 0, 4, 1000.0, (0.008,)),),
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), tick_tuple((0.008,))),),
         123,
         7,
         f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
@@ -144,7 +145,7 @@ def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireR
         point_names=("sweep",),
         reps=3,
         templates=(template(),) if templates is None else templates,
-    )
+     time_base=TIME_BASE)
 
 
 def expect_statistics(result: IntegratedRound | RoundSignals) -> RoundStatistics:

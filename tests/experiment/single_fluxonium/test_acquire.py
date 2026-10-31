@@ -4,6 +4,7 @@ Small retained spaces isolate composition. Production-sized cost is measured by
 an author probe, not by weakening the environment defaults in these tests.
 """
 
+from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
 from dataclasses import replace
 from pathlib import Path
 
@@ -76,26 +77,26 @@ def request_for(
         pulses.append(slot(2, 32, 8, frequency_mhz=0.0, phase_deg=0.0, gain=0.1))
     readout = replace(
         slot(0, 40, 24, frequency_mhz=7000.0, phase_deg=0.0, gain=0.1),
-        start_us=ends / 1000,
+        start_ticks=tick_array(ends / 1000),
     )
     pulses.append(readout)
     window = ReadoutSlot(
         0,
         8,
-        1000,
-        ends[:, None] / 1000 + 0.002,
+        TIME_BASE.period_ticks(1000),
+        tick_array(ends[:, None] / 1000 + 0.002),
         np.full((2, 1), 7000.0),
         np.zeros((2, 1)),
         np.zeros((2, 1), dtype=np.int64),
     )
     compiled = TimelineTemplate(
-        np.array([0, 1], dtype=np.int64), tuple(pulses), (window,), (ends + 24) / 1000
+        np.array([0, 1], dtype=np.int64), tuple(pulses), (window,), tick_array((ends + 24) / 1000)
     )
     return AcquireRequest(
         mode,
         (reps, 2),
         0,
-        (ReadoutWindow(0, 0, 8, 1000, (0.042,)),),
+        (ReadoutWindow(0, 0, 8, TIME_BASE.period_ticks(1000), tick_tuple((0.042,))),),
         123,
         0,
         f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
@@ -103,7 +104,7 @@ def request_for(
         point_names=("sweep",),
         reps=reps,
         templates=(compiled,),
-    )
+     time_base=TIME_BASE)
 
 
 def expect_integrated(result):
@@ -121,7 +122,7 @@ def independent_populations(source, request, point):
     rho0 = facts.source.initial_density
     charge = model.drives[0]
     template = request.templates[0]
-    end = template.events[-1].start_us[point] * 1000
+    end = request.time_base.ns(template.events[-1].start_ticks[point])
     boundaries = sorted(
         {
             0.0,
@@ -131,8 +132,8 @@ def independent_populations(source, request, point):
                 for event in template.events
                 if event.gen_ch != 0
                 for value in (
-                    event.start_us[point] * 1000,
-                    (event.start_us[point] + event.duration_us[point]) * 1000,
+                    request.time_base.ns(event.start_ticks[point]),
+                    request.time_base.ns(event.start_ticks[point] + event.duration_ticks[point]),
                 )
                 if 0 < value < end
             ),
@@ -144,9 +145,9 @@ def independent_populations(source, request, point):
             event
             for event in template.events
             if event.gen_ch != 0
-            and event.start_us[point] * 1000
+            and request.time_base.ns(event.start_ticks[point])
             <= (start + stop) / 2
-            < (event.start_us[point] + event.duration_us[point]) * 1000
+            < request.time_base.ns(event.start_ticks[point] + event.duration_ticks[point])
         ]
         flux = facts.model.dc_flux + sum(
             event.gain[point] * source.settings.flux_line.flux_phi0_per_gain
@@ -552,7 +553,7 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     replay = single_replay if target == "single" else ftf_replay
     fixed = ReplayAcquire(
         settings=wrong,
-        request=AcquireRequest("integrated", (1,), 0, (), 123, 0, "test"),
+        request=AcquireRequest("integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE),
         versions=replay.replay_versions(),
     )
     path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
@@ -678,20 +679,20 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
             "inactive",
             [
                 [972.5535136297327, -0.23690658344665044],
-                [972.5616134942782, -0.30040715262673],
+                [972.5616134942782, -0.30040715262664125],
             ],
         ),
         (
             "mixed",
             [
                 [972.5535136297327, -0.23690658344665044],
-                [972.5616134942782, -0.30040715262673],
+                [972.5616134942782, -0.30040715262664125],
             ],
         ),
-        ("active", [[972.5755645388051, -0.22000655695600715]]),
-        ("delayed", [[972.5752852698197, -0.18828188213509472]]),
-        ("distorted", [[972.5755645388051, -0.22000655695600715]]),
-        ("tail", [[972.5423259988822, -0.26112572853973454]]),
+        ("active", [[972.5755645388051, -0.22000655695588697]]),
+        ("delayed", [[972.5752852698197, -0.18828188213495886]]),
+        ("distorted", [[972.5755645388051, -0.22000655695588697]]),
+        ("tail", [[972.5423259988822, -0.2611257285396458]]),
     ],
 )
 def test_fixed_seed_acquire_preserves_flux_controls(case, expected):

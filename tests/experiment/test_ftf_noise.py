@@ -1,5 +1,6 @@
 """Receiver PSD conversion and public rounded ADC noise, independent of truth."""
 
+from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import (
@@ -44,16 +45,16 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
         }
     )
     window = ReadoutWindow(
-        0, 0, 8, 100.0, (0.1, 0.12), (6000.0, 6100.0), (0.0, 90.0), (0, 0)
+        0, 0, 8, TIME_BASE.period_ticks(100.0), tick_tuple((0.1, 0.12)), (6000.0, 6100.0), (0.0, 90.0), (0, 0)
     )
     timeline = PointTimeline(
-        (), (PulseEvent(0, 0.1, 0.08, 6000.0, 0.0, 0.1),), (window,), 0.2
-    )
+        (), (PulseEvent(0, ticks(0.1), ticks(0.08), 6000.0, 0.0, 0.1),), (window,), ticks(0.2)
+    , time_base=TIME_BASE)
     plan = plan_template(
         settings,
         EnvironmentSnapshot("ftf-v2", "test", (("bias", 0.2),)),
         single_point_template(timeline),
-    )
+     time_base=TIME_BASE)
     np.testing.assert_allclose(
         plan.readouts[0].batch.model.receiver.noise_covariance,
         [[1.0, 0.2], [0.2, 2.0]],
@@ -107,7 +108,7 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
             raise AssertionError("completed simulation retains its numeric request")
         plan = plan_template(
             settings, env.soc.binding.rounds[0].snapshot, request.templates[0]
-        )
+        , time_base=TIME_BASE)
         readout_event = plan.readouts[0].batch.events[0][0]
         response = ADC(plan.readouts[0].batch.model, rtol=1e-8, atol=1e-10).response(
             readout_event.pulses, readout_event.grids[0]
@@ -170,7 +171,7 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
         request = env.soc.binding.last_request
         if request is None:
             raise AssertionError("completed simulation retains its numeric request")
-        rate = request.materialize_point(0).readouts[0].sample_rate_mhz
+        rate = 1000 / request.time_base.ns(request.materialize_point(0).readouts[0].sample_period_ticks)
         assert len(values) >= 4096
         np.testing.assert_allclose(values.mean(axis=0), [10.0, -20.0], atol=0.7)
         # Integer ADC rounding contributes <=1/12 to each diagonal, negligible

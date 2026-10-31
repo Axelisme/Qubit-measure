@@ -1,5 +1,6 @@
 """Author-configured mux planning and FTF joint shots, independent of YAML shape."""
 
+from tests.core._simulation import TIME_BASE, ticks
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -86,7 +87,7 @@ def test_planner_applies_optional_background_to_every_receiver(path):
         snapshot(),
         template() if path == "pulse" else mux_template(),
         readout=config,
-    )
+     time_base=TIME_BASE)
     rough = BackgroundRoughness(0.02, 50.0, 82)
     # At 6 GHz: wave=1+0.2j, edge=-10 dB, plus the fixed rough field.
     expected = (1 + 0.2j) * 10**-0.5 * rough.factor(6.0)
@@ -97,7 +98,7 @@ def test_planner_applies_optional_background_to_every_receiver(path):
 def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():
     plan = ftf_module.plan_template(
         settings(), snapshot(), mux_template(), readout=configuration()
-    )
+    , time_base=TIME_BASE)
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
     for item, samples, gain in zip(plan.readouts, (4, 3), (1000, 1100), strict=True):
@@ -121,15 +122,15 @@ def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
             snapshot(),
             replace(base, readouts=(unbound,)),
             readout=configuration(),
-        )
-    delayed = replace(base.events[1], start_us=base.events[1].start_us + 0.001)
+         time_base=TIME_BASE)
+    delayed = replace(base.events[1], start_ticks=base.events[1].start_ticks + ticks(0.001))
     with pytest.raises(ValueError, match="common.*start|same.*start"):
         ftf_module.plan_template(
             settings(),
             snapshot(),
             replace(base, events=(base.events[0], delayed)),
             readout=configuration(),
-        )
+         time_base=TIME_BASE)
 
 
 def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
@@ -141,7 +142,7 @@ def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
         readouts=(*pulse.readouts, *mux.readouts),
     )
     with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
-        ftf_module.plan_template(settings(), snapshot(), mixed, readout=configuration())
+        ftf_module.plan_template(settings(), snapshot(), mixed, readout=configuration(), time_base=TIME_BASE)
 
 
 @pytest.mark.parametrize("split_templates", [False, True])
@@ -239,7 +240,7 @@ def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping
             first, second = (ch.iq for ch in result.channels)
         assert channel_order == (4, 1)
         np.testing.assert_array_equal(first, second)
-        plan = ftf_module.plan_template(numeric, snapshot(), content, readout=config)
+        plan = ftf_module.plan_template(numeric, snapshot(), content, readout=config, time_base=TIME_BASE)
         batch = plan.readouts[0].batch
         if jumping:
             # A fixed conditional centre or shared initial states alone cannot

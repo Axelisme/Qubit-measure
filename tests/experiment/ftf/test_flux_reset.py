@@ -4,6 +4,7 @@ These two-state checks validate existing flux wiring, not basis convergence or
 nonadiabatic accuracy for a physical device. No production behavior is added.
 """
 
+from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -82,27 +83,21 @@ def reset_template(
     """
     ramp_ns = 8.0
     end_ns = 2 * ramp_ns + hold_ns
-    times = np.unique(
-        np.r_[
-            np.arange(0, ramp_ns + 1, 2),
-            ramp_ns + hold_ns,
-            np.arange(ramp_ns + hold_ns, end_ns + 1, 2),
-        ]
-    )
+    times = np.arange(0, end_ns + 1, 2)
     ramp_fraction = np.minimum(np.minimum(times, end_ns - times) / ramp_ns, 1)
     values = (1 - np.cos(np.pi * ramp_fraction)) / 2
     envelope = (
         None
         if sudden
-        else PulseEnvelope(tuple(times / 1000), tuple(values.astype(complex)))
+        else PulseEnvelope(2688, tuple(values.astype(complex)))
     )
     end_us = end_ns / 1000
-    flux = PulseEvent(4, 0.0, end_us, 0.0, 0.0, -0.1, envelope)
+    flux = PulseEvent(4, ticks(0.0), ticks(end_us), 0.0, 0.0, -0.1, envelope)
     readout_us = end_us + settling_ns / 1000
-    readout = PulseEvent(0, readout_us, 0.008, 6000.0, 0.0, 0.1)
-    window = ReadoutWindow(0, 0, 4, 1000.0, (readout_us,), (6000.0,), (0.0,))
+    readout = PulseEvent(0, ticks(readout_us), ticks(0.008), 6000.0, 0.0, 0.1)
+    window = ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), tick_tuple((readout_us,)), (6000.0,), (0.0,))
     return single_point_template(
-        PointTimeline((), (flux, readout), (window,), readout_us + 0.008)
+        PointTimeline((), (flux, readout), (window,), ticks(readout_us + 0.008), time_base=TIME_BASE)
     )
 
 
@@ -119,7 +114,7 @@ def evolve_reset(
         snapshot(),
         reset_template(hold_ns, sudden=sudden),
         facts=facts,
-    )
+     time_base=TIME_BASE)
     engine = Engine(1)
     try:
         return engine.evolve(plan.source, (plan.batch,)).densities[0]
@@ -175,7 +170,7 @@ def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) 
         snapshot(),
         reset_template(hold_ns, settling_ns=8.0),
         facts=facts,
-    )
+     time_base=TIME_BASE)
     # The delayed return must finish before the DC readout observation.
     waveform = plan.batch.flux_waveform
     assert waveform is not None
