@@ -32,6 +32,7 @@ from ._timeline_runtime import (
     native_event_expression,
     optional_time_bounds,
     projected_bounds,
+    runtime_expression,
     source_expression,
     time_bounds,
     time_expression,
@@ -540,12 +541,9 @@ class TimelineBook:
                         consumed.add(ch)
                 if not isinstance(remaining, RuntimeEnd):
                     self.native_expressions[generator, ch] = native_event_expression(self.math.prog, remaining)
-                limits = optional_time_bounds(self.math.prog, remaining)
-                if limits is None:
-                    continue
                 self.native_timestamp(
                     self.math.prog,
-                    projected_bounds(self.math.prog, remaining).maximum,
+                    remaining,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -582,12 +580,20 @@ class TimelineBook:
     def native_timestamp(
         self,
         prog,
-        value: float | QickParam,
+        value: Time,
         *,
         gen_ch: int | None = None,
         ro_ch: int | None = None,
     ) -> None:
-        """Project a compiler bound without recording a new hardware event."""
+        """Project a finite bound without claiming an unbounded hardware time.
+
+        Runtime channel maps retain exact storage when no finite native
+        timestamp can be projected. This does not record a new event.
+        """
+        if isinstance(value, RuntimeEnd):
+            if value.maximum is None or unbounded_time(runtime_expression(value)):
+                return
+            value = projected_bounds(prog, value).maximum
         previous = self.native_only
         self.native_only = True
         try:

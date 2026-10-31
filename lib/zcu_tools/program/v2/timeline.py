@@ -63,14 +63,12 @@ def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None)
         if range_hint is None:
             return 0
         if (
-            not isinstance(range_hint, tuple)
+            type(range_hint) is not tuple
             or len(range_hint) != 2
             or any(type(value) is not int or value < 0 for value in range_hint)
             or range_hint[0] > range_hint[1]
         ):
             raise ValueError("register repeat requires a valid nonnegative range_hint")
-        if n == name:
-            raise ValueError("repeat n must differ from its counter register name")
         return range_hint[0]
     if type(n) is not int or n < 0:
         raise ValueError("repeat n must be a nonnegative integer or register name")

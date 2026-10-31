@@ -431,16 +431,7 @@ class TimelineRepeatExit(TimelineSync):
         frame = self.book.repeats.pop()
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
-        for ch, guard in frame.pulse_guards.items():
-            if self.maximum is None:
-                guard.unbounded = True
-                if self.book.repeats:
-                    self.book.repeats[-1].pulse_guards[ch].then(guard)
-                continue
-            repeated = guard.repeated(self.count, self.maximum)
-            repeated.require((frame.native_gens[ch],), repeated.limits)
-            if self.book.repeats:
-                self.book.repeats[-1].pulse_guards[ch].then(repeated)
+        self._check_pulse_guards(frame)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(
@@ -507,6 +498,17 @@ class TimelineRepeatExit(TimelineSync):
             axis=self.axis,
         )
 
+    def _check_pulse_guards(self, frame: RepeatFrame) -> None:
+        """Validate bounded backedges and propagate author-owned unknown segments."""
+        for ch, guard in frame.pulse_guards.items():
+            if self.maximum is None:
+                repeated = _PulseGuard(ch, unbounded=True)
+            else:
+                repeated = guard.repeated(self.count, self.maximum)
+                repeated.require((frame.native_gens[ch],), repeated.limits)
+            if self.book.repeats:
+                self.book.repeats[-1].pulse_guards[ch].then(repeated)
+
     def _restore_native(self, prog, frame: RepeatFrame, *, variable: bool) -> None:
         for tails, initial, current, written, generator in (
             (
@@ -549,12 +551,9 @@ class TimelineRepeatExit(TimelineSync):
                         else:
                             current.pop(ch, None)
             for ch, end in current.items():
-                limits = optional_time_bounds(prog, end)
-                if limits is None:
-                    continue
                 self.book.native_timestamp(
                     prog,
-                    limits[1],
+                    end,
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
@@ -1132,12 +1131,9 @@ class TimelineBranch(Macro):
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
                     self.book.ends[name] = replace(end, covers=(*end.covers, value))
-            limits = optional_time_bounds(prog, value)
-            if limits is None:
-                continue
             self.book.native_timestamp(
                 prog,
-                limits[1],
+                value,
                 gen_ch=ch if generator else None,
                 ro_ch=None if generator else ch,
             )
