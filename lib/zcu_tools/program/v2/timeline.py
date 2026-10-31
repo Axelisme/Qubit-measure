@@ -709,7 +709,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def branch(self, *, by: str) -> Generator[BranchCases]:
         """Select one case per sweep point without padding paths to equal duration.
 
-        by is an existing sweep loop name. Provide exactly one case() per point.
+        by is an existing sweep loop name. Use case(index) for zero-based points,
+        in any order. Omitted points execute no actions and add no duration.
         Each case closes only timelines it uses. Different remaining ends become
         wait-only; join/fork derive ordinary targets, while sync consumes them.
         Forked names are case-local, even when every case uses the same spelling.
