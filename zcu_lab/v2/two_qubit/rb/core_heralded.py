@@ -158,19 +158,19 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         )
         matrix = herald_probabilities(data.sums)
         aggregate = herald_probabilities(np.nansum(data.sums, axis=(1, 3)))
-        fig, axes = plots.subplots("herald", nrows=2, figsize=(10, 8))
         for arm, label in enumerate(("Reference", "CZ interleaved")):
+            fig, ax = plots.subplots(f"herald_{arm}", figsize=(10, 6))
             for f1 in range(3):
                 for f2 in range(3):
                     classes = ("g", "e", "other")
-                    axes[arm].plot(
+                    ax.plot(
                         data.depths, aggregate[:, arm, f1, f2], "o-",
                         label=f"{classes[f1]},{classes[f2]}",
                     )
-            axes[arm].set(
+            ax.set(
                 xlabel="Random Clifford depth", ylabel="Herald probability",
                 title=f"{label}: (g,g) is pass fraction, not purity",
             )
-            axes[arm].legend()
-        fig.tight_layout()
+            ax.legend()
+            fig.tight_layout()
         return RBHeraldedAnalysis(terminal, matrix, matrix[..., 0, 0])
