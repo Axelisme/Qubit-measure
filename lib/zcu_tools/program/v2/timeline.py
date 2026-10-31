@@ -122,7 +122,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._timeline_book = TimelineBook()
         self._time_bounds = ProducerBounds()
         self._time_origin: Macro | None = None
-        self._timing_table_owner = "native timeline"
         self._timeline_register_pool: list[str] = []
         self._timeline_math_active = False
         self._declared_modules: list[Module] = []

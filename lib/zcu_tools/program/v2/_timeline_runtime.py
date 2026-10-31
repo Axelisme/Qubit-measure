@@ -43,8 +43,8 @@ def align_end(prog, value: float | QickParam) -> "Time":
     """Ceil a resolved aggregate in us at every native sweep point.
 
     Call only at an aggregate or placement boundary during preprocessing.
-    Scalars and exact integer-affine sweeps remain static. Other point grids
-    become a certified dmem lookup at this operation, without advancing reference.
+    Scalars and exact integer-affine sweeps remain static. A non-affine native
+    length grid requires runtime cross-grid conversion and raises ValueError.
     """
 
     cycles = value * get_fclk(prog)
@@ -403,8 +403,8 @@ class RuntimeMath(TimedMacro):
     ) -> RuntimeEnd:
         """Materialize exact cycle algebra using captured branch-entry inputs.
 
-        Known point grids use the existing timing-table owner. Unknown terms
-        read their immutable entry snapshots, never path-local scratch storage.
+        Integer producer algebra uses native axis registers and captured entry
+        snapshots, never an automatically allocated point table or stale storage.
         captured_ends are immutable incoming timeline values. Reuse their cycle
         algebra before reading source variables, which may have been overwritten
         since those ends were computed. Other variables must be known on the

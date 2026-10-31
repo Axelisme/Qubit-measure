@@ -597,9 +597,7 @@ class ModuleEmission(TimedMacro):
 
     def preprocess(self, prog) -> None:
         """Collect actual ends at a common origin; an advance adds post then rounds."""
-        previous_owner = prog._timing_table_owner
         previous_guards = prog._timeline_book.reference_guards
-        prog._timing_table_owner = self.emission_name
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
             self.finishers = []
@@ -631,7 +629,6 @@ class ModuleEmission(TimedMacro):
                 finisher.preprocess(prog)
                 self.finishers.append(finisher)
         finally:
-            prog._timing_table_owner = previous_owner
             prog._timeline_book.reference_guards = previous_guards
 
     def translate(self, prog) -> None:
