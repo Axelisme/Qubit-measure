@@ -277,13 +277,13 @@ class TimelineAdvance(TimedMacro):
             physical_offsets = tuple(event.origin + offset for offset in event.offsets)
             completed_offsets = tuple(event.origin + offset for offset in offsets)
         if isinstance(event.origin, RuntimeEnd):
-            selected = self.book.math.selected_end(event.selector, completed_offsets)
+            selected = self.book.math.selected_end(event.selector, completed_offsets, native=event.native)
             selected_result = self.book.math.add(
                 event.origin, selected, target=selected.register
             )
         else:
             selected_result = self.book.math.selected_end(
-                event.selector, completed_offsets
+                event.selector, completed_offsets, native=event.native
             )
         debt = self.book.math.coverage_debt(physical_offsets, completed_offsets)
         if debt == 0:

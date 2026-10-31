@@ -365,6 +365,7 @@ class SelectedEventEnd:
     offsets: tuple[float | QickParam, ...]
     posts: tuple[float | QickParam, ...]
     rounded: tuple[Time, ...] = ()
+    native: tuple[NativeLength, ...] = ()
 
 
 def optional_time_bounds(prog, value: Time) -> tuple[float, float] | None:
@@ -786,6 +787,7 @@ class RuntimeMath(TimedMacro):
         values: tuple[float | QickParam, ...],
         *,
         selector_expression: TimeExpression | None = None,
+        native: tuple[NativeLength, ...] = (),
     ) -> RuntimeEnd:
         """Select statically ceiled candidate offsets without allocating time data.
 
@@ -794,14 +796,19 @@ class RuntimeMath(TimedMacro):
         selector chooses one candidate at runtime; unknown cross-grid expressions
         are rejected by align_end rather than replaced by an upper bound.
         """
-        candidates = tuple(align_end(self.prog, value) for value in values)
+        candidates = tuple(
+            align_end(self.prog, value, native[index] if native else None)
+            for index, value in enumerate(values)
+        )
         limits = [time_bounds(self.prog, value) for value in candidates]
         lower = min(round(lo * get_fclk(self.prog)) for lo, _ in limits)
         upper = max(round(hi * get_fclk(self.prog)) for _, hi in limits)
         self.check(lower, upper)
         operands: list[int | str] = []
         for value in candidates:
-            if isinstance(value, QickParam) and value.is_sweep():
+            if isinstance(value, RuntimeEnd):
+                operands.append(value.register)
+            elif isinstance(value, QickParam) and value.is_sweep():
                 operands.append(self.cycles(value).register)
             else:
                 scalar = value.start if isinstance(value, QickParam) else value
