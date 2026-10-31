@@ -131,6 +131,8 @@ def test_variable_repeat_forbids_reference_owner_advances(operation):
             if operation == "nested-true":
                 with prog.repeat("inner", 2, advance_ref=True):
                     prog.delay_timeline(1 / 430.08)
+            elif operation == "delay":
+                prog.delay(0)
             else:
                 getattr(prog, operation)()
 

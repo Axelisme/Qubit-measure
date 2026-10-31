@@ -75,7 +75,7 @@ class TimelineFork(Macro):
         end = self.book.end(self.source)
         if len(set(self.targets)) != len(self.targets) or any(
             name in self.book.ends
-            or any(name in frame.external for frame in self.book.repeats)
+            or any(name in frame.external for frame in [*self.book.repeats, *self.book.loop_timelines])
             for name in self.targets
         ):
             raise ValueError("fork requires new, distinct timeline names")
@@ -165,6 +165,8 @@ class TimelineBoundary(Macro):
             self.book.shell_wait_bound = None
             self.book.waiting.clear()
             self.book.repeats.clear()
+            self.book.loop_timelines.clear()
+            self.book.case_path.clear()
             self.book.native_only = False
             self.book.reference_guards = 0
             self.book.runtime_gens.clear()
