@@ -851,9 +851,7 @@ class RuntimeMath(TimedMacro):
             else (*captured_ends, *inputs.values())
         )
         bindings = {runtime_expression(value): value for value in captured}
-        plan = plan_time_choice(
-            expressions, maximum=maximum, captured=tuple(bindings)
-        )
+        plan = plan_time_choice(expressions, maximum=maximum, captured=tuple(bindings))
         # A max is no earlier than any operand, so each operand's debt remains
         # sufficient after the join. A min cannot inherit that guarantee.
         deferred = (
