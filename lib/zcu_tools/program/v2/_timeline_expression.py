@@ -287,7 +287,10 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
             or (
                 variable.producer.points is None
                 and not variable.producer.rounding_remainder
-                and (len(variable.producer.axes) != 1 or not isinstance(variable.bounds.source, str))
+                and (
+                    len(variable.producer.axes) != 1
+                    or not isinstance(variable.bounds.source, str)
+                )
             )
         ):
             return None
