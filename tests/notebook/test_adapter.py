@@ -14,7 +14,6 @@ from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment import AcquisitionEvidence, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -288,7 +287,7 @@ def test_run_requires_device_manager_before_starting_operation() -> None:
     assert adapter.last_run is None
 
 
-@pytest.mark.parametrize("failure", ["core", "finish", "signal-failed"])
+@pytest.mark.parametrize("failure", ["core", "finish"])
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
@@ -302,18 +301,9 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     previous_analysis_presentation = adapter.analysis_presentation
     core.fail_run = failure == "core"
     host.fail_present = failure == "finish"
-    if failure.startswith("signal-"):
-        core.signal_outcome = "failed"
     cfg = _Cfg(scale=9.0)
-    error_type = ScheduleOutcomeError if failure.startswith("signal-") else ValueError
-
-    with pytest.raises(error_type, match="failed") as raised:
+    with pytest.raises(ValueError, match="failed"):
         adapter.run(cfg)
-
-    if isinstance(raised.value, ScheduleOutcomeError):
-        assert raised.value.status == core.signal_outcome
-        assert isinstance(raised.value.__cause__, OSError)
-        assert str(raised.value.__cause__) == "Device unavailable"
 
     assert cfg.scale == 9.0
     assert adapter.last_run is previous_run
@@ -328,22 +318,27 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )
 
 
-@pytest.mark.parametrize("outcome", ["stopped", "interrupted"])
-def test_stopped_partial_run_is_committed(outcome: str) -> None:
+@pytest.mark.parametrize("outcome", ["stopped", "interrupted", "failed"])
+def test_core_stop_facts_do_not_override_returned_record(outcome: str) -> None:
     core = _Core()
     host = _Host()
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
     previous = adapter.run(_Cfg(scale=5.0))
-    core.signal_outcome = "stopped" if outcome == "stopped" else "interrupted"
+    if outcome == "stopped":
+        core.signal_outcome = "stopped"
+    elif outcome == "interrupted":
+        core.signal_outcome = "interrupted"
+    else:
+        core.signal_outcome = "failed"
 
     partial = adapter.run(_Cfg(scale=9.0))
 
     assert partial is adapter.last_run
     assert partial is not previous
     assert partial.result == 9.0
-    assert adapter.acquisition_for(partial).completion == "stopped"
+    assert adapter.acquisition_for(partial).completion == "complete"
     assert core.contexts[-1].scope.stop.is_set()
     assert host.released == []
 
