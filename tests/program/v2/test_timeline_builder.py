@@ -689,7 +689,11 @@ def test_static_mux_mismatches_name_both_objects_and_resource_field(field):
         cfg = cfg.with_updates(ro_length=0.3)
         diagnostic = "ro_length"
     else:
-        tone = cfg.tones[0].with_updates(**{field: 1080 if field == "freq" else 0.2})
+        tone = (
+            cfg.tones[0].with_updates(freq=1080)
+            if field == "freq"
+            else cfg.tones[0].with_updates(gain=0.2)
+        )
         cfg = cfg.with_updates(tones=[tone])
         diagnostic = "mux_freqs" if field == "freq" else "mux_gains"
     second = cfg.build("second")
