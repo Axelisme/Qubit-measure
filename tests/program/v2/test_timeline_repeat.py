@@ -99,16 +99,14 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
     def body(prog):
         prog.delay_timeline(14 / 430.08)
         with prog.branch(by="scan", align_timeline=align) as cases:
-            with cases.case(0):
-                with (
-                    prog.repeat("outer", outer, advance_ref=False)
-                    if outer > 1
-                    else nullcontext()
-                ):
-                    with prog.repeat(
-                        "inner", count, advance_ref=False, range_hint=hint
-                    ):
-                        prog.pulse(0, "p0")
+            with (
+                cases.case(0), prog.repeat("outer", outer, advance_ref=False)
+                if outer > 1
+                else nullcontext(), prog.repeat(
+                "inner", count, advance_ref=False, range_hint=hint
+            )
+            ):
+                prog.pulse(0, "p0")
             with cases.case(1):
                 prog.delay_timeline(28 / 430.08)
         prog.pulse(1, "p1", timeline="default")
@@ -128,19 +126,17 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
 @pytest.mark.parametrize("overlap", ["parallel", "backedge", "nested"])
 def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
     def body(prog):
-        with prog.repeat("outer", 2, advance_ref=False):
-            with (
-                prog.repeat("inner", 2, advance_ref=False)
-                if overlap == "nested"
-                else nullcontext()
-            ):
-                prog.fork("default", into="local")
-                prog.pulse(0, "p0")
-                if overlap == "parallel":
-                    prog.pulse(0, "p0", timeline="local")
-                else:
-                    # Raw native timing can leave a tail beyond the managed end.
-                    prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+        with (
+            prog.repeat("outer", 2, advance_ref=False),
+            prog.repeat("inner", 2, advance_ref=False) if overlap == "nested" else nullcontext(),
+        ):
+            prog.fork("default", into="local")
+            prog.pulse(0, "p0")
+            if overlap == "parallel":
+                prog.pulse(0, "p0", timeline="local")
+            else:
+                # Raw native timing can leave a tail beyond the managed end.
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
         _program(body)
@@ -152,12 +148,14 @@ def test_branch_inside_variable_repeat_retains_iteration_origin(align):
         prog.add_loop("scan", 2)
 
     def body(prog):
-        with prog.repeat("r", 2, advance_ref=False):
-            with prog.branch(by="scan", align_timeline=align) as cases:
-                for index in range(2):
-                    with cases.case(index):
-                        prog.pulse(0, "p0")
-                        prog.delay_timeline((5 + 5 * index) / 430.08)
+        with (
+            prog.repeat("r", 2, advance_ref=False),
+            prog.branch(by="scan", align_timeline=align) as cases,
+        ):
+            for index in range(2):
+                with cases.case(index):
+                    prog.pulse(0, "p0")
+                    prog.delay_timeline((5 + 5 * index) / 430.08)
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize))

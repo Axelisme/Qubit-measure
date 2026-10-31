@@ -155,7 +155,8 @@ class Branch(Module):
     in order on each implicit case timeline. align_timeline=True joins case ends
     into the emission parent, using static max or exact runtime pointwise max. Reference does
     not advance and no wait is inserted. Later emissions resume at the joined
-    end. Reference-moving children and case-local Repeat fail at build.
+    end. Reference-moving children, including advance_ref=True repeats, fail at
+    build. Reference-preserving repeat scopes are allowed.
     Measurement feedback is not supported.
 
     Legacy init/run selection uses a dispatch-table island:
@@ -200,7 +201,7 @@ class Branch(Module):
 
         Preserve empty cases and child order. Use align_timeline=True to join
         all implicit case ends into the parent, without advancing reference. Native
-        reference-moving children and case-local Repeat raise ValueError.
+        reference-moving children and advance_ref=True repeats raise ValueError.
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """

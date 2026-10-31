@@ -120,12 +120,11 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
         p.pulse(0, "p", t=0, tag="carrier")
         p.trigger([0], t=0)
         with p.branch(by="scan", align_timeline=align) as cases:
-            with cases.case(0):
-                with (
-                    p.repeat("outer", 2, advance_ref=False),
-                    p.repeat("inner", 2, advance_ref=False),
-                ):
-                    p.pulse(1, "drive", tag="repeated")
+            with (
+                cases.case(0), p.repeat("outer", 2, advance_ref=False),
+                p.repeat("inner", 2, advance_ref=False),
+            ):
+                p.pulse(1, "drive", tag="repeated")
             with cases.case(1):
                 p.delay_timeline(43 / 430.08)
         p.pulse(1, "drive", timeline="default", tag="final")

@@ -801,8 +801,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         exit; unjoined local ends are discarded, not merged into their ancestor.
         True requires every end to be reconstructible from branch-entry state.
         Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
-        Repeat in a case raises ValueError; move it outside this branch. Branch
-        inside Repeat is supported. Unconditional actions inside this context
+        Repeat with advance_ref=True in a case raises ValueError; use False
+        or move it outside this branch. Branch inside Repeat is supported. Unconditional actions inside this context
         raise ValueError; put them before or after the with block.
         Duplicate, non-integer/out-of-range indices and measurement selectors
         raise ValueError. Register exhaustion propagates QICK errors unchanged.
@@ -844,28 +844,35 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         name: str,
         n: int | str,
         *,
+        advance_ref: bool,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
-        advance_ref: bool,
     ) -> Generator[None]:
         """Repeat a body n times on parent timeline (times remain in us).
 
-        None selects the scoped name, or default outside a scope.
-        Entry syncs the parent. Each iteration closes parent and local ends;
-        exit discards local names and leaves parent zero. Fixed counts exactly
-        rebase outer ends. Unknown counts or case advances debit outer ends on
-        the actual executed path. Nonzero outer ends remain wait-only; join/fork
-        establish placement targets and full consumption restores placement. Only
-        parent and locally forked names may be used inside. name is
-        the native loop/counter name. n is a nonnegative integer or existing
-        register name. Register counts optionally accept an author-guaranteed
-        closed nonnegative integer range_hint; integer counts forbid it. An
-        unhinted count uses runtime debits without a backedge overlap proof. No
-        hardware range check is added. Invalid counts/ranges raise ValueError;
-        unknown/inaccessible names fail during compile. Zero counts still sync
-        the parent but discard body operations. Register-valued timeline delays
-        and differing Branch advances are supported. Native delay_reg_auto inside
-        the body raises ValueError; it is not a timeline duration operation.
+        advance_ref is a required bool. False initializes a shot-local cycle
+        accumulator at the parent end and shadows the default with that loop
+        timeline. Each iteration stores the maximum parent/local end; exit
+        restores the parent at the accumulated end and expires local names.
+        Reference and other outer ends stay unchanged. False may nest in False
+        or branch cases. Its whole body rejects sync, native delay/delay_auto
+        and inner True repeats; use delay_timeline or choose True instead.
+
+        True syncs the parent on entry and closes parent/local ends by advancing
+        reference each iteration. Exit leaves parent zero and rebases outer ends.
+        Runtime counts/path advances leave nonzero outer ends wait-only; use
+        join/fork for placement or fully consume them. True in a case fails.
+        Zero counts discard body operations; only True syncs their entry.
+
+        timeline=None selects the current scope, or default. Only parent and
+        locally forked names are accessible inside either mode. name identifies
+        the native counter. n is a nonnegative integer or existing count register,
+        distinct from name. Optional range_hint=(minimum, maximum) guarantees a
+        closed nonnegative integer count range without hardware checks. Integer
+        counts forbid hints. Unhinted register counts skip backedge proofs.
+        Invalid bool/count/range or inaccessible names raise ValueError at build.
+        Register exhaustion propagates QICK errors. Time parameters use us;
+        runtime-only loop event getters raise RuntimeError, never return bounds.
         """
         if type(advance_ref) is not bool:
             raise ValueError("advance_ref must be a bool")

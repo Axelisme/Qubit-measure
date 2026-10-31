@@ -790,7 +790,7 @@ with builder.timeline("drive"):
         builder.delay_timeline(0.2)
 
     builder.delay_timeline(0.05)  # Restores drive after the nested scope.
-    with builder.repeat("pairs", 2):
+    with builder.repeat("pairs", 2, advance_ref=True):
         builder.emit(drive)
 
 builder.join("drive", "other", into="default")
@@ -816,7 +816,8 @@ True 需要每個 case 的結尾能從 branch 入口狀態算出。
 `align_timeline=False` 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
 兩種都不推進共用 reference、不自動 sync，後續可在母 timeline 繼續發射。
 Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
-Case 內 Repeat 也在 build 時報錯，須移到 branch 外。Repeat 內放 branch 仍合法。
+Case 內可使用 `repeat(..., advance_ref=False)`。`advance_ref=True` 在 case 內 build 報錯，須移到 branch 外。
+Repeat 內放 branch 仍合法。
 Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 delay_timeline 寫在 with 區塊前或後。
 隱式 case 名字與局部 fork 名字在 case 結束後失效。
 沒有 join 回 case timeline 的局部結尾直接丟棄，不合回祖先，也不報錯。
@@ -841,7 +842,18 @@ builder.join("f1", "f2", into="default")
 builder.emit(readout, tag="terminal")
 ```
 
-Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
+`repeat(name, n, *, advance_ref, timeline=None, range_hint=None)` 必須明寫 bool `advance_ref`。
+兩種模式內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。離開後局部名字失效。
+`advance_ref=False` 以母 timeline 結尾初始化 shot-local cycle 累加器，並用迴圈 timeline 屏蔽預設名字。
+每圈把本圈最晚結尾存回累加器。離開時母 timeline 保留累積結尾，reference 與外部 timeline 不動。
+False 可以放進 branch case，也可巢狀 False。整個 body 禁止顯式 sync、原生 delay／delay_auto 或 inner True。
+等待請用 delay_timeline。需要推進 reference 時，改選 True，並移到 case 與 False 範圍外。
+`advance_ref=True` 先同步母 timeline，每圈結尾推進 reference，離開時母 timeline 為零。
+它保留外部結尾扣除與 wait-only 規則，不能放進 branch case。
+`n` 是非負整數或既有 count register 名字。Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
+省略 hint 時，回邊不證明同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
+False 的累加器在每 shot 內初始化。Register 用量仍由作者負責，超限保留 QICK 錯誤。
+False 迴圈內的事件時間 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
 它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。

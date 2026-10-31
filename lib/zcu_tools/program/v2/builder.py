@@ -177,21 +177,25 @@ class TimelineBuilder:
         name: str,
         n: int | str,
         *,
+        advance_ref: bool,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
-        advance_ref: bool,
     ) -> AbstractContextManager[None]:
         """Record a repeated body; replay program-owned timing rules at build.
 
-        None timeline selects the scoped name, or default outside a scope.
-        name names the counter. n is a nonnegative integer or an existing
-        register name. Register counts optionally accept a guaranteed closed
-        nonnegative integer range_hint; fixed counts forbid it. Entry syncs timeline, each
-        iteration closes parent/local ends, and exit expires local names. Only
-        parent and local timelines may be used inside. Zero still syncs entry
-        but discards body operations. Invalid counts, ranges and timeline uses
-        fail at build with the program error. Recording after build raises
-        ValueError. Close all recording contexts before build.
+        advance_ref is a required bool. False shadows the default with a
+        shot-local accumulating timeline and preserves reference throughout the
+        body. It permits branch cases and nested False, but rejects sync, native
+        delay/delay_auto and inner True. True advances reference on entry and
+        each iteration, leaving parent zero; it is forbidden in cases.
+        timeline=None selects the scope, or default. Only parent/local forks are
+        accessible; local names expire at exit. Time parameters remain in us.
+        name identifies the counter. n is a nonnegative integer or existing
+        register name. Register counts accept an optional guaranteed closed
+        nonnegative integer range_hint; fixed counts forbid it. Zero discards
+        the body; only True syncs entry. Invalid bool/count/range/timeline uses
+        fail at build. QICK register exhaustion propagates. Recording after build
+        raises ValueError. Close all recording contexts before build.
         """
         self._ensure_recording()
         return self._repeat(name, n, timeline, range_hint, advance_ref=advance_ref)

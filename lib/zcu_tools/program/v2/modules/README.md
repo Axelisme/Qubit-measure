@@ -56,7 +56,8 @@ PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用
 Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(index)`，None 是空 case。
 Lowering 把 emission 的 timeline 傳為 branch 母 timeline，每個 case 用自己的隱式 timeline 發射 children。
 Lowering 選擇 align_timeline=True，將各 case 結尾併回母 timeline，靜態取 max，runtime 取精確逐點 max。
-Branch 只改結尾、不推進 reference，case 內的 native reference 操作與 Repeat 在 build 時報錯。
+Branch 只改結尾、不推進 reference。Case 內的 native reference 操作與 `repeat(..., advance_ref=True)` 在 build 時報錯。
+`repeat(..., advance_ref=False)` 使用累加 timeline，可以放在 case 內，也可以巢狀 False。其整個 body 不得推進 reference。
 後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
 Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
 它保留 sequence 及內部 Module 的作者次序，不重排。
