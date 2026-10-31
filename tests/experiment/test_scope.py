@@ -15,6 +15,37 @@ if TYPE_CHECKING:
     from zcu_tools.experiment.scope import RootKind
 
 
+@pytest.mark.parametrize("callback_raises", [False, True])
+def test_cancel_notifies_selected_scope_before_setting_stop(callback_raises: bool) -> None:
+    root = experiment.Scope("run")
+    observed: list[tuple[Scope, bool]] = []
+    cause = OSError("recording failed")
+
+    def record(target: Scope) -> None:
+        observed.append((target, target.cancelled))
+        if callback_raises:
+            raise cause
+
+    with root.child("selected") as selected:
+        if callback_raises:
+            with pytest.raises(OSError) as caught:
+                root.cancel("selected", on_cancel=record)
+            assert caught.value is cause
+        else:
+            assert root.cancel("selected", on_cancel=record).cancelled
+        assert observed == [(selected, False)]
+        assert selected.cancelled is not callback_raises
+
+
+def test_cancel_refusal_does_not_notify_a_target() -> None:
+    root = experiment.Scope("run")
+    observed: list[Scope] = []
+    with root.child("same"), root.child("same"):
+        assert not root.cancel("same", on_cancel=observed.append).cancelled
+        assert not root.cancel("missing", on_cancel=observed.append).cancelled
+        assert observed == []
+
+
 def test_stop_reason_follows_scope_cancellation_and_late_children() -> None:
     root = experiment.Scope("run")
     assert root.stop.reason is None

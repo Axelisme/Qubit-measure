@@ -105,6 +105,23 @@ def test_stale_segment_and_expected_refuse_current_acquire_without_stopping_pare
     host.run(script())
 
 
+def test_cancel_unrelated_sibling_does_not_mark_active_operation() -> None:
+    host = ScriptHost(Scope("workflow", name="test"))
+    completions: list[CallResult[None]] = []
+
+    async def script() -> None:
+        with host.root.child("left") as left, host.root.child("right") as right:
+            def work(ctx: CallContext) -> None:
+                assert host.cancel("right").cancelled
+                assert right.cancelled
+                assert not ctx.scope.cancelled
+
+            completions.append(await host.call(work, scope=left))
+
+    host.run(script())
+    assert not completions[0].stop_requested
+
+
 def test_idle_parent_cancel_is_inherited_only_by_its_later_operations() -> None:
     host = ScriptHost(Scope("workflow", name="test"))
     completions: list[CallResult[bool]] = []
