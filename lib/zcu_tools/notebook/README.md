@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-31（原生 artist 更新）
+**Last updated:** 2026-10-31（SIGINT 合作停止）
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -25,6 +25,10 @@ saved = exp.save(destination, unique=True)
 Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.PostOptions(...)`。Options 由核心實驗類別提供。
 
 每次包裝產生獨立的 `NotebookExperiment[CoreT]` 與 records。建構只綁定呼叫端提供的環境；裝置操作在 Run 或明確命令時執行。Run 需要 soc、soccfg 與 manager，無裝置時明確提供空 DeviceManager。每次 run 從綁定的 manager 取得一次 driver mapping，該次執行固定使用；同一 manager 的 registry 更新在下一次 run 生效。重新賦值 Notebook 變數不會重綁入口，換用另一組環境時由 caller 重建。
+
+在 main thread 執行 `core.run` 期間，Notebook 暫時接管 SIGINT。第一次中斷以帶 reason 的 StopSignal 請求停止，並啟動計時器。作者迴圈看到 stop 後可回傳已取得的資料。第二次中斷或計時器到期會拋出 KeyboardInterrupt。`NotebookAdapter(interrupt_timeout=10.0)` 的具名參數設定等待秒數，必須是正的有限值，否則建構時拋 ValueError。直接建立 NotebookExperiment 時也可提供同一參數。離開 core.run 時先取消並排空計時器，再還原先前的 SIGINT handler。非 main thread 執行不接管 signal。
+
+Core 正常回傳就發布 RunRecord。StopSignal 只表達停止請求，不攜帶錯誤或資料完整度。Completion 只有在 adapter 於本次 run 送過停止請求時才記 stopped，否則記 complete。逃出 core.run 的例外原樣傳出，不發布當次 record，並保留上一筆 record 與 acquisition evidence。
 
 `NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；`Experiment[Result, Cfg]` 宣告核心契約。包裝層將 `core.AXES_SPEC` 交給外部 `save_labber`；cfg 要求與禁止覆寫由 persistence 函式守住。
 
@@ -113,9 +117,9 @@ Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。�
 
 Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各讀一次 get_info 作為 snapshot。這一步只讀不寫。任一台失敗拒絕 Run，不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。保存沿 RunMetadata.device_snapshot 到既有 data.h5 `/device`，Save 不重讀硬體或取下一輪值。
 
-`acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，正常返回且 scope.stop 錯誤檢查通過後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Schedule 會接住 scope 內的一次 KeyboardInterrupt，保留 buffer 與 interrupted signal。Notebook 將這種正常返回發布為 stopped record，已完成點與其餘 NaN 可沿 save_run 保存。Adapter 不另加 cancellation 入口。Completion 依 `scope.stop.partial_result` 判定，子 scope 取消即使不設 root event，仍標為 stopped。
+`acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，core 正常回傳後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Completion 依 adapter 本次是否送過停止請求記為 stopped 或 complete，不讀 core 或子 scope 的完成事實。子 scope 取消不會自動將 Notebook record 標為 stopped。
 
-NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 在提交前檢查 scope.stop 的失敗原因，completion 讀取 partial_result，不只讀根的取消 bit。Failed 仍拋錯，interrupted 視為使用者停止，與無錯誤的 stopped partial 一樣可提交。Schedule 外的 KeyboardInterrupt（例如實驗 helper 的儀器操作）直接傳播，保留舊成果。GUI／MCP 的 raise_if_error 政策不變。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
+NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 的發布只看 core 正常回傳或拋錯，不判斷資料完整度，也不讀作者工具的 outcome。逃出 core 的 KeyboardInterrupt 也原樣傳播，不發布當次 record。SIGINT handler、首次中斷的停止請求與逾時契約見[共用實驗入口](#共用實驗入口)。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。

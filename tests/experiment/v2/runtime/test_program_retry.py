@@ -9,7 +9,7 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
@@ -148,7 +148,6 @@ def test_repeated_shot_overrun_exhausts_explicit_retry_and_discards_failed_data(
 
     assert sched.outcome.status == "failed"
     assert sched.outcome.exception is caught.value
-    assert sched.stop.error is not None
     assert np.isnan(buffer.array)
 
 
@@ -170,8 +169,6 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
         )
         assert sched.outcome.status == "completed"
         assert run_stop.is_set() is False
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
@@ -256,8 +253,6 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
         assert sched.outcome.reason is None
         assert sched.outcome.exception is None
         assert not run_stop.is_set()
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     assert produced_rounds == [1]
@@ -302,7 +297,7 @@ def test_build_and_acquire_retries_acquire_on_the_same_program(
     assert "attempt 2" in warnings[0].message
 
 
-def test_build_and_acquire_retry_clears_shared_failure_cause():
+def test_build_and_acquire_retry_recovers_after_transient_failure():
     result = None
     FlakyBuildProgram.instances.clear()
     run_stop = StopSignal()
@@ -319,33 +314,59 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
             )
         )
         assert sched.outcome.status == "completed"
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     np.testing.assert_allclose(result, np.array([4.0]))
 
 
-def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retrying():
+def test_build_and_acquire_propagates_keyboard_interrupt_without_retrying():
     InterruptingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
-        result = (
+    with (
+        pytest.raises(KeyboardInterrupt),
+        Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched,
+    ):
+        (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
             )
         )
-        assert sched.is_stop() is True
-        assert sched.outcome.status == "interrupted"
-        assert isinstance(sched.outcome.exception, KeyboardInterrupt)
-        np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
 
     assert len(InterruptingProgram.instances) == 1
     assert InterruptingProgram.instances[0].acquire_count == 1
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+
+
+@pytest.mark.parametrize("phase", ["producer", "converter"])
+def test_run_acquire_propagates_same_interrupt_without_retry(phase: str) -> None:
+    interrupt = KeyboardInterrupt("acquisition interrupted")
+    attempts = 0
+
+    class Program:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
+            nonlocal attempts
+            attempts += 1
+            if phase == "producer":
+                raise interrupt
+            return [np.array([[[1.0, 0.0]]])]
+
+    def convert(_raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        raise interrupt
+
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        Schedule(_cfg(), SignalBuffer((1,)), scope=Scope("run")) as sched,
+    ):
+        sched.run_acquire(
+            Program(), object(), options=RunOptions(retry=3, converter=convert)
+        )
+    assert caught.value is interrupt
+    assert attempts == 1
 
 
 def test_build_and_acquire_first_round_stop_returns_nan_partial(
@@ -371,7 +392,6 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial(
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
     assert sched.outcome.exception is None
-    assert sched.stop.error is None
 
 
 def test_build_and_acquire_raises_after_retry_exhaustion_and_retains_buffer():
@@ -398,7 +418,7 @@ def test_build_and_acquire_raises_after_retry_exhaustion_and_retains_buffer():
     assert AlwaysFailingProgram.instances[0].acquire_count == 2
 
 
-def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
+def test_build_and_acquire_keeps_failed_outcome_local_to_schedule():
     AlwaysFailingProgram.instances.clear()
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
@@ -418,15 +438,7 @@ def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
         )
     assert sched.outcome.status == "failed"
     assert sched.outcome.exception is caught.value
-    assert sched.stop.error is not None
-    assert sched.stop.error.status == "failed"
 
-    with pytest.raises(
-        ScheduleOutcomeError, match="RuntimeError: permanent failure"
-    ) as exc_info:
-        run_stop.raise_if_error()
-
-    assert exc_info.value.exception is sched.outcome.exception
     assert not run_stop.is_set()
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
 
@@ -484,6 +496,5 @@ def test_build_and_acquire_raises_without_retry_when_stop_set_after_failed_attem
     assert sched.outcome.exception is cause
     assert sched.outcome.status == "stopped"
     assert sched.outcome.reason == "stop requested"
-    assert stop.error is None
     assert attempts == [1]
     np.testing.assert_allclose(signals_buffer.array, np.array([1.0]))

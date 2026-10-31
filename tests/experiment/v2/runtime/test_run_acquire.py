@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable, Iterator
+from contextlib import nullcontext
 from functools import partial
 from typing import Unpack
 
@@ -397,6 +398,7 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
     monkeypatch.setattr(soc, "poll_data", _policy_poll(program, root, ending))
     result = buffer.array
     with (
+        pytest.raises(KeyboardInterrupt) if ending == "interrupt" else nullcontext(),
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule({}, buffer, scope=root) as schedule,
     ):
@@ -411,7 +413,6 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
         expected_status = {
             "external_stop": "stopped",
             "before_data": "stopped",
-            "interrupt": "interrupted",
         }.get(ending, "completed")
         assert schedule.outcome.status == expected_status
         if ending == "data_stop":
@@ -532,7 +533,6 @@ def test_run_callback_failure_propagates_without_retry_or_failed_outcome(
     assert caught.value is cause
     assert calls == 1
     assert schedule.outcome.status == "completed"
-    assert root.stop.error is None
 
 
 def test_run_accepts_acquire_only_program_and_forwards_native_keywords() -> None:

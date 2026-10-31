@@ -1,7 +1,6 @@
 """Recording experiment core shared by Notebook adapter and widget-host tests."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.base import Experiment
@@ -26,14 +25,14 @@ class Options:
 class RecordingCore(Experiment[float, Cfg]):
     """Record run contexts; flags inject producer failures.
 
-    signal_outcome selects stopped, failed, interrupted, or ordinary success
-    (None). This core has no persistence mapping.
+    request_stop asks the run to stop before returning normally. This core has
+    no persistence mapping.
     """
 
     def __init__(self) -> None:
         self.fail_analysis = False
         self.fail_run = False
-        self.signal_outcome: Literal["stopped", "failed", "interrupted"] | None = None
+        self.request_stop = False
         self.contexts: list[RunContext] = []
 
     def run(self, config: Cfg, *, context: RunContext) -> float:
@@ -45,12 +44,8 @@ class RecordingCore(Experiment[float, Cfg]):
         config.scale = 99.0
         if self.fail_run:
             raise ValueError("Run failed after creating a diagnostic figure")
-        if self.signal_outcome == "stopped":
+        if self.request_stop:
             context.scope.stop.set()
-        elif self.signal_outcome is not None:
-            context.scope.stop.set_error(
-                self.signal_outcome, "Acquisition failed", OSError("Device unavailable")
-            )
         return result
 
     def analyze(

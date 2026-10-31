@@ -8,7 +8,7 @@ from typing import Generic, TypeVar
 
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.remote.param_spec import ParamSpec
-from zcu_tools.gui.session.ports import OwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundError, OwnerScheduler
 
 from .session import Session
 
@@ -17,7 +17,8 @@ P = TypeVar("P")
 R = TypeVar("R")
 
 BackgroundSubmitter = Callable[
-    [Callable[[], object], Callable[[object], None], Callable[[Exception], None]], None
+    [Callable[[], object], Callable[[object], None], Callable[[BackgroundError], None]],
+    None,
 ]
 
 
@@ -127,12 +128,13 @@ class PluginDefinition(Generic[S, R]):
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Submit compute to the bound runner with owner-loop completion callbacks.
 
         compute returns the value supplied to on_done; on_error receives compute
-        failures. Raise FailedPreconditionError before submission if unbound.
+        Exception or KeyboardInterrupt unchanged on the owner thread.
+        Raise FailedPreconditionError before submission if unbound.
         Execution, cancellation and callback isolation belong to the runner.
         """
         if self._background is None:

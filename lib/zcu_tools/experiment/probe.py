@@ -235,7 +235,6 @@ def _acquire(
         devices = capture_device_snapshot(context.devices)
         started = datetime.now(timezone.utc)
         result = experiment.run(cfg.model_copy(deep=True), context=context)
-        scope.stop.raise_if_error()
         finished = datetime.now(timezone.utc)
         spec = experiment.AXES_SPEC
         if spec is None:

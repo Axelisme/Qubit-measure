@@ -77,7 +77,6 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         commit=lambda scope, record: pytest.fail("This script does not commit"),
         boundary=lambda: at_boundary.set() if facts else None,
         stopping=lambda: False,
-        experiment_failed=lambda name, reason, error: pytest.fail(reason),
         question=lambda phase: pytest.fail("This script does not ask"),
         next_attempt=lambda scope: (1, len(facts) + 1),
         operation_finished=lambda scope, operation: facts.append(operation),
@@ -105,14 +104,14 @@ def test_natural_completion_waits_for_resume_without_retry_or_stopping_next_call
         try:
             iteration = next(iterations)
             first = completed(await iteration.call(acquire))
-            assert not first.partial_result
+            assert not first.stop_requested
             assert first.facts is facts[0]
-            assert first.facts.stopped is first.partial_result
+            assert first.facts.stopped is first.stop_requested
             deliveries.append(first.value)
             second = completed(await iteration.call(acquire))
-            assert not second.partial_result
+            assert not second.stop_requested
             assert second.facts is facts[1]
-            assert second.facts.stopped is second.partial_result
+            assert second.facts.stopped is second.stop_requested
             deliveries.append(second.value)
         finally:
             iterations.close()

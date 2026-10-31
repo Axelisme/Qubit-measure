@@ -92,22 +92,6 @@ def describe_error(error: BaseException) -> ErrorInfo:
 
 
 @dataclass(frozen=True)
-class ExperimentFailed:
-    """Recoverable acquire failure without partial Result data.
-
-    call_seq identifies the commit scope. run_no counts experiment requests in
-    that scope. experiment names the callback. reason/error retain its cause.
-    """
-
-    call_seq: int
-    run_no: int
-    experiment: str
-    reason: str
-    error: ErrorInfo
-    kind: Literal["experiment_failed"] = field(default="experiment_failed", init=False)
-
-
-@dataclass(frozen=True)
 class TunablesChanged:
     """Whole-model update: actor, consecutive revisions and complete new JSON."""
 
@@ -181,7 +165,6 @@ type JournalPayload = (
     | OperationFinished
     | QuestionAnswered
     | DeviceSetup
-    | ExperimentFailed
     | TunablesChanged
     | PauseRequested
     | StopRequested

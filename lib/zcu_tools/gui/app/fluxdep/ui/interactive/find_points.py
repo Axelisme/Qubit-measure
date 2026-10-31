@@ -28,6 +28,7 @@ from zcu_tools.analysis.fluxdep.twotone import (
 from zcu_tools.gui.app.fluxdep.interactive import TwoTonePickContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.twotone import TwoTonePickPlot
 
@@ -39,7 +40,7 @@ TwoTonePreviewSubmitter = Callable[
     [
         Callable[[], TwoTonePickView],
         Callable[[TwoTonePickView], None],
-        Callable[[Exception], None],
+        Callable[[BackgroundError], None],
     ],
     None,
 ]
@@ -385,7 +386,7 @@ class FindPointsWidget(InteractiveMplWidget):
         self,
         compute: Callable[[], TwoTonePickView],
         on_done: Callable[[TwoTonePickView], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._runner is None:
             raise RuntimeError("owned TwoTone preview runner is unavailable")
@@ -411,7 +412,7 @@ class FindPointsWidget(InteractiveMplWidget):
                 f"Mask added: {view.mask_added}, removed: {view.mask_removed}"
             )
 
-        def error(exc: Exception) -> None:
+        def error(exc: BackgroundError) -> None:
             if generation != self._generation or not self._input_open():
                 return
             self._view = None

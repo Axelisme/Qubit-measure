@@ -450,8 +450,8 @@ Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/s
 `SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
 Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
 Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
-Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。RunContext 的
-`context.scope.stop.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
+Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。
+Acquisition 例外直接傳出。作者決定回傳資料是否足夠分析，不從 StopSignal 判斷資料完整度。
 Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
 Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。
 
@@ -823,9 +823,11 @@ Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_a
 Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
 Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後續 host loop。
 外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
-失敗或中斷可能留下 partial data，回傳後仍須檢查本次 `context.scope.stop.raise_if_error()`。
+一般 acquisition 失敗在 retry 耗盡後原樣傳出，KeyboardInterrupt 直接傳出。Buffer 可能仍有資料，作者自行決定是否攔截並回傳。
+`RunOptions(on_stop=callback)` 在本次 acquire 因外部停止而正常返回時通知作者，純 data stop 不通知。
+Callback 不收參數，在 acquire scope 與 progress 清理後、ndarray 返回前同步呼叫一次；callback 例外原樣傳出且不 retry。
 
-`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 至少重試一次，並先還原取數前的 slot。
+`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 同樣使用這個預算，並先還原取數前的 slot。
 外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
 `progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
 `rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
@@ -943,7 +945,11 @@ distinct depths 時分析明確失敗。
 
 ## 外部中斷支援（cancel_flag）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.scope.stop` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
+Schedule 的 builder 與 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` 傳給 program。它觀察目前 acquire scope 的外部停止，包含 Schedule 祖先的停止請求。Data-driven early stop 只停止目前 acquire，不改 Schedule outcome。
+
+取消 acquire 子層時，runner 保留 completed rounds，首輪前取消則保留 NaN。Schedule 自己未停止時，其 outcome 仍是 completed，下一次 acquire 可繼續。取消 Schedule 本身才記 stopped。作者需要知道本次 acquire 是否被取消時，傳 `AcquireOptions(on_stop=callback)` 或 `RunOptions(on_stop=callback)`。這個通知不交給前端，也不寫回 StopSignal。
+
+Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 retry、不轉 outcome；converter 與 update 錯誤也直接傳出。Schedule 的作者 outcome 保留 completed、stopped 或 failed，但不代表資料可用性。GUI 與 Notebook 只依 core 回傳或拋錯發布結果，不解析 buffer 或 outcome。
 
 - `AcquireOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(options=AcquireOptions(stop_condition=...))`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。

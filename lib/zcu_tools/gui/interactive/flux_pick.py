@@ -21,6 +21,7 @@ from zcu_tools.gui.interactive.plugin import Action, Command, PluginDefinition
 from zcu_tools.gui.interactive.session import Session
 from zcu_tools.gui.remote.errors import RemoteError
 from zcu_tools.gui.remote.param_spec import JsonType, ParamSpec, validate_params
+from zcu_tools.gui.session.ports import BackgroundError
 
 R = TypeVar("R")
 logger = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ class SharedFluxPickPlugin(PluginDefinition[FluxPickState, R], Generic[R]):
         object.__setattr__(self, "_alignment_error", None)
         self._notify_alignment()
 
-        def settle(error: Exception | None = None) -> None:
+        def settle(error: BackgroundError | None = None) -> None:
             object.__setattr__(self, "_alignment_busy", False)
             object.__setattr__(self, "_alignment_error", str(error) if error else None)
             if error is not None:

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import _thread
+import signal
+import threading
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from types import FrameType, TracebackType
+from typing import Any, Generic, Self, TypeVar
 
 from matplotlib.figure import Figure
 
@@ -27,6 +32,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_labber
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -38,12 +44,74 @@ ResultT = TypeVar("ResultT")
 OptionsT = TypeVar("OptionsT")
 
 
+def _validate_interrupt_timeout(seconds: float) -> None:
+    if not isfinite(seconds) or seconds <= 0:
+        raise ValueError("interrupt_timeout must be finite and positive (seconds)")
+
+
+class _RunInterrupts:
+    """Own the temporary main-thread handler and the frontend stop-request fact."""
+
+    def __init__(self, stop: StopSignal, timeout: float) -> None:
+        self.stop_requested = False
+        self._stop = stop
+        self._timeout = timeout
+        self._previous = signal.getsignal(signal.SIGINT)
+        self._main_thread = threading.current_thread() is threading.main_thread()
+        self._thread_id = threading.get_ident()
+        self._active = False
+        self._timer: threading.Timer | None = None
+
+    def __enter__(self) -> Self:
+        if self._main_thread:
+            self._active = True
+            signal.signal(signal.SIGINT, self._handle)
+        return self
+
+    def _handle(self, _signum: int, _frame: FrameType | None) -> None:
+        if not self._active:
+            return
+        if self.stop_requested:
+            raise KeyboardInterrupt
+        self.stop_requested = True
+        self._stop.set(reason="Notebook SIGINT")
+        self._timer = threading.Timer(self._timeout, self._interrupt_main)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _interrupt_main(self) -> None:
+        if self._active:
+            if hasattr(signal, "pthread_kill"):
+                # Target the main thread to interrupt blocking POSIX C calls.
+                signal.pthread_kill(self._thread_id, signal.SIGINT)
+            else:
+                _thread.interrupt_main()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._active = False
+        try:
+            if self._timer is not None:
+                self._timer.cancel()
+                # Drain an already-running callback before returning the handler.
+                self._timer.join()
+        finally:
+            if self._main_thread:
+                signal.signal(signal.SIGINT, self._previous)
+
+
 class NotebookAdapter:
     """Bind an environment once, then wrap independent experiment instances.
 
     Construction only retains references. Each run takes one current driver
     mapping from the bound manager; it does not refresh cfg or reconnect devices.
     Reassigning a caller's variables does not rebind this environment.
+    interrupt_timeout is the positive, finite SIGINT grace period in seconds
+    (default 10.0). Invalid values raise ValueError at construction.
     """
 
     def __init__(
@@ -53,7 +121,10 @@ class NotebookAdapter:
         soccfg: Any = None,
         device_manager: DeviceManager | None = None,
         host: PlotHost | None = None,
+        interrupt_timeout: float = 10.0,
     ) -> None:
+        _validate_interrupt_timeout(interrupt_timeout)
+        self._interrupt_timeout = interrupt_timeout
         self._soc = soc
         self._soccfg = soccfg
         self._device_manager = device_manager
@@ -66,6 +137,7 @@ class NotebookAdapter:
             soccfg=self._soccfg,
             device_manager=self._device_manager,
             host=self._host,
+            interrupt_timeout=self._interrupt_timeout,
         )
 
 
@@ -76,6 +148,8 @@ class NotebookExperiment(Generic[CoreT]):
     Load and analysis work without hardware. Run requires handles and a manager
     before starting an operation. Run and analyze own fresh plots; retaining a
     prior record does not let later operations close its figures.
+    interrupt_timeout is the positive, finite SIGINT grace period in seconds
+    (default 10.0); invalid values raise ValueError at construction.
     """
 
     def __init__(
@@ -86,7 +160,10 @@ class NotebookExperiment(Generic[CoreT]):
         soccfg: Any = None,
         device_manager: DeviceManager | None = None,
         host: PlotHost | None = None,
+        interrupt_timeout: float = 10.0,
     ) -> None:
+        _validate_interrupt_timeout(interrupt_timeout)
+        self._interrupt_timeout = interrupt_timeout
         self._core = experiment
         self._soc = soc
         self._soccfg = soccfg
@@ -141,12 +218,15 @@ class NotebookExperiment(Generic[CoreT]):
         caller). Propagate any read error before writes/acquisition; no cached
         fallback. Retain that pre-Run snapshot unchanged through sweeps and Save.
         Capture software-only provenance before acquisition; propagate errors.
-        Time core.run and its error check in UTC, excluding plot finalization.
-        Normal stopped or interrupted returns publish stopped evidence and a
-        saveable record. Failed signals and exceptions escaping core.run raise.
-        This includes KeyboardInterrupt before a Schedule scope (device setup)
-        or after it. Any acquisition or presentation failure
-        retains the previous record, analysis and acquisition evidence.
+        Time core.run in UTC, excluding plot finalization. On the main thread,
+        temporarily handle SIGINT during core.run: the first interrupt requests
+        stop with a reason, the second or interrupt_timeout deadline raises
+        KeyboardInterrupt. Cancel the timer before restoring the prior handler.
+        Worker-thread runs leave signal handling unchanged. Publish every normal
+        return; completion is stopped only if this adapter sent a stop request.
+        Propagate all escaping exceptions unchanged, including KeyboardInterrupt.
+        Any acquisition or presentation failure retains the previous record,
+        analysis and acquisition evidence.
         """
         if self._soc is None or self._soccfg is None:
             raise ValueError("Run requires both soc and soccfg handles")
@@ -173,18 +253,16 @@ class NotebookExperiment(Generic[CoreT]):
             )
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
-            result = self._core.run(working_cfg, context=context)
-            error = context.scope.stop.error
-            if error is not None and error.status != "interrupted":
-                context.scope.stop.raise_if_error()
+            with _RunInterrupts(
+                context.scope.stop, self._interrupt_timeout
+            ) as interrupts:
+                result = self._core.run(working_cfg, context=context)
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
                 run_id=run_id,
                 started_at=started_at,
                 finished_at=finished_at,
-                completion=(
-                    "stopped" if context.scope.stop.partial_result else "complete"
-                ),
+                completion=("stopped" if interrupts.stop_requested else "complete"),
                 provenance=provenance,
                 device_snapshot=device_snapshot,
             )
