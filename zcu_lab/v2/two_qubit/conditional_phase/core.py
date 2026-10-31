@@ -89,7 +89,10 @@ class ConditionalPhaseCfg(ConfigBase):
             description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
         ),
     ]
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", description="Optional reset before each shot.")] = None
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot."),
+    ] = None
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -156,7 +159,6 @@ class ConditionalPhaseCfg(ConfigBase):
         return self
 
 
-
 @dataclass(frozen=True)
 class ConditionalPhaseResult:
     """Summed counts with branch × quadrature × n × frequency leading axes.
@@ -187,7 +189,11 @@ class ConditionalPhasePoint:
 
 
 def build_program(
-    cfg: ConditionalPhaseCfg, soccfg: QickConfig, point: ConditionalPhasePoint, *, heralded: bool
+    cfg: ConditionalPhaseCfg,
+    soccfg: QickConfig,
+    point: ConditionalPhasePoint,
+    *,
+    heralded: bool,
 ) -> TimelineProgramV2:
     """Compile optional reset → optional herald → preparation → CZ train → projection → terminal.
 
@@ -203,17 +209,29 @@ def build_program(
     target = cfg.x90_f1 if cfg.target == "f1" else cfg.x90_f2
     spectator = cfg.x180_f2 if cfg.target == "f1" else cfg.x180_f1
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
     if point.branch:
         builder.emit(Pulse("spectator", spectator))
     builder.emit(Pulse("prepare_target", target))
     for gate in range(point.gate_count):
-        builder.emit(dual_line_drive(
-            cfg.drive, frequency=point.frequency, name=f"cz_{gate}",
-        ))
-    builder.emit(Pulse("projection", target.with_updates(phase=target.phase + 90 * point.quadrature)))
+        builder.emit(
+            dual_line_drive(
+                cfg.drive,
+                frequency=point.frequency,
+                name=f"cz_{gate}",
+            )
+        )
+    builder.emit(
+        Pulse(
+            "projection",
+            target.with_updates(phase=target.phase + 90 * point.quadrature),
+        )
+    )
     builder.emit(readout, tag="terminal")
     return builder.build()
 
@@ -230,7 +248,9 @@ def acquire_counts(
     validate_classifiers(config.readout, config.roles)
     frequencies = sweep2array(config.frequency)
     viewer = live_line(
-        context.plots, "measurement", "Common CZ frequency (MHz)",
+        context.plots,
+        "measurement",
+        "Common CZ frequency (MHz)",
         "Target sigma" + (" | herald (g,g)" if heralded else ""),
         num_lines=4 * len(config.gate_counts),
     )
@@ -239,25 +259,40 @@ def acquire_counts(
         counts = terminal_counts(sums, heralded=heralded)
         values = sigma(counts, config.target).reshape(-1, len(frequencies))
         viewer.update(frequencies, values)
-    shape = (2, 2, len(config.gate_counts), len(frequencies)) + ((3, 3, 3, 3) if heralded else (3, 3))
+
+    shape = (2, 2, len(config.gate_counts), len(frequencies)) + (
+        (3, 3, 3, 3) if heralded else (3, 3)
+    )
     buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
     with Schedule(config, buffer, scope=context.scope) as sched:
         for branch, branch_step in sched.scan("branch", [0, 1]):
             for quadrature, projection_step in branch_step.scan("quadrature", [0, 1]):
-                for n, count_step in projection_step.scan("gate_count", sched.cfg.gate_counts):
-                    for frequency, step in count_step.scan("frequency", frequencies.tolist()):
+                for n, count_step in projection_step.scan(
+                    "gate_count", sched.cfg.gate_counts
+                ):
+                    for frequency, step in count_step.scan(
+                        "frequency", frequencies.tolist()
+                    ):
                         point = ConditionalPhasePoint(branch, quadrature, n, frequency)
-                        prog = build_program(step.cfg, context.soccfg, point, heralded=heralded)
+                        prog = build_program(
+                            step.cfg, context.soccfg, point, heralded=heralded
+                        )
                         step.run_acquire_summed(
-                            prog, context.soc,
-                            processor=shot_sums(prog, readout_axes(step.cfg.roles, heralded=heralded)),
-                            rounds=step.cfg.rounds, options=RunOptions(),
+                            prog,
+                            context.soc,
+                            processor=shot_sums(
+                                prog, readout_axes(step.cfg.roles, heralded=heralded)
+                            ),
+                            rounds=step.cfg.rounds,
+                            options=RunOptions(),
                         )
     buffer.trigger_update(flush=True)
     return buffer.array
 
 
-def restore_result(data: GroupedLoadData[ConditionalPhaseCfg]) -> ConditionalPhaseResult:
+def restore_result(
+    data: GroupedLoadData[ConditionalPhaseCfg],
+) -> ConditionalPhaseResult:
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
     return ConditionalPhaseResult(
@@ -272,19 +307,41 @@ def restore_result(data: GroupedLoadData[ConditionalPhaseCfg]) -> ConditionalPha
 class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg]):
     """Independent classified conditional phase experiment."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[ConditionalPhaseResult, ConditionalPhaseCfg]] = GroupedAxesSpec(
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConditionalPhaseResult, ConditionalPhaseCfg]
+    ] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
                 axes=(
                     VariableAxisSpec.generated_arange("terminal_f2", ""),
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec("Common CZ frequency", "Hz", field_name="frequencies", dtype=np.float64, scale=1e6),
-                        VariableAxisSpec("CZ gate count", "", field_name="gate_counts", dtype=np.int64),
-                        VariableAxisSpec("Projection X or Y", "", field_name="quadratures", dtype=np.int64),
-                        VariableAxisSpec("Spectator I or Xπ", "", field_name="branches", dtype=np.int64),
+                    VariableAxisSpec(
+                        "Common CZ frequency",
+                        "Hz",
+                        field_name="frequencies",
+                        dtype=np.float64,
+                        scale=1e6,
+                    ),
+                    VariableAxisSpec(
+                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        "Projection X or Y",
+                        "",
+                        field_name="quadratures",
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        "Spectator I or Xπ", "", field_name="branches", dtype=np.int64
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Joint class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Joint class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
         result_type=ConditionalPhaseResult,
@@ -294,7 +351,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         result_builder=restore_result,
     )
 
-    def run(self, config: ConditionalPhaseCfg, *, context: RunContext) -> ConditionalPhaseResult:
+    def run(
+        self, config: ConditionalPhaseCfg, *, context: RunContext
+    ) -> ConditionalPhaseResult:
         """Acquire optional reset and the original sequence; save summed counts."""
         return ConditionalPhaseResult(
             np.arange(2, dtype=np.int64),
@@ -305,8 +364,11 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
 
     def analyze(
-        self, source: RunRecord[ConditionalPhaseCfg, ConditionalPhaseResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[ConditionalPhaseCfg, ConditionalPhaseResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> ConditionalPhaseAnalysis:
         """Analyze saved cfg and classified quadratures; never read current Form."""
         del options

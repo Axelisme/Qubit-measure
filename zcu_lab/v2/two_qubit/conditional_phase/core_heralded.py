@@ -53,10 +53,14 @@ def restore_result(
     )
 
 
-class ConditionalPhaseHeraldedExp(Experiment[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]):
+class ConditionalPhaseHeraldedExp(
+    Experiment[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]
+):
     """Analyze classified X/Y projections conditioned on herald (g,g)."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]] = GroupedAxesSpec(
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]
+    ] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
@@ -65,12 +69,32 @@ class ConditionalPhaseHeraldedExp(Experiment[ConditionalPhaseHeraldedResult, Con
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
                     VariableAxisSpec.generated_arange("herald_f2", ""),
                     VariableAxisSpec.generated_arange("herald_f1", ""),
-                        VariableAxisSpec("Common CZ frequency", "Hz", field_name="frequencies", dtype=np.float64, scale=1e6),
-                        VariableAxisSpec("CZ gate count", "", field_name="gate_counts", dtype=np.int64),
-                        VariableAxisSpec("Projection X or Y", "", field_name="quadratures", dtype=np.int64),
-                        VariableAxisSpec("Spectator I or Xπ", "", field_name="branches", dtype=np.int64),
+                    VariableAxisSpec(
+                        "Common CZ frequency",
+                        "Hz",
+                        field_name="frequencies",
+                        dtype=np.float64,
+                        scale=1e6,
+                    ),
+                    VariableAxisSpec(
+                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        "Projection X or Y",
+                        "",
+                        field_name="quadratures",
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        "Spectator I or Xπ", "", field_name="branches", dtype=np.int64
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Herald and terminal class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Herald and terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
         result_type=ConditionalPhaseHeraldedResult,
@@ -79,7 +103,9 @@ class ConditionalPhaseHeraldedExp(Experiment[ConditionalPhaseHeraldedResult, Con
         result_builder=restore_result,
     )
 
-    def run(self, config: ConditionalPhaseHeraldedCfg, *, context: RunContext) -> ConditionalPhaseHeraldedResult:
+    def run(
+        self, config: ConditionalPhaseHeraldedCfg, *, context: RunContext
+    ) -> ConditionalPhaseHeraldedResult:
         """Acquire optional reset → herald → original sequence → terminal sums."""
         return ConditionalPhaseHeraldedResult(
             np.arange(2, dtype=np.int64),
@@ -90,8 +116,11 @@ class ConditionalPhaseHeraldedExp(Experiment[ConditionalPhaseHeraldedResult, Con
         )
 
     def analyze(
-        self, source: RunRecord[ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> ConditionalPhaseAnalysis:
         """Use herald (g,g) terminal counts; also show all nine herald fractions."""
         del options

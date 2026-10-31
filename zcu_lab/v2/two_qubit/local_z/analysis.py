@@ -73,8 +73,10 @@ def analyze_local_z(
     acquired = counts.sum(axis=(-2, -1))
     quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
     targets = tuple(
-        tuple(count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
-              for n in range(len(cfg.gate_counts)))
+        tuple(
+            count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
+            for n in range(len(cfg.gate_counts))
+        )
         for t in range(2)
     )
     fits = tuple(
@@ -82,7 +84,11 @@ def analyze_local_z(
         for points in targets
     )
     answer = LocalZAnalysis(
-        targets, quadratures, acquired, tuple(cfg.gate_counts), fits,
+        targets,
+        quadratures,
+        acquired,
+        tuple(cfg.gate_counts),
+        fits,
         herald_probabilities(data.sums) if heralded else None,
         herald_probabilities(data.sums)[..., 0, 0] if heralded else None,
     )
@@ -210,19 +216,26 @@ def _plot_analysis(cfg: LocalZCfg, answer: LocalZAnalysis, *, plots: Plots) -> N
     fig, axes = plots.subplots("quadratures", figsize=(10, 5))
     for t in range(2):
         for q, projection in enumerate(("X", "Y")):
-            axes.plot(answer.gate_counts, answer.quadratures[t, q], ".-",
-                      label=f"F{t + 1} {projection}")
+            axes.plot(
+                answer.gate_counts,
+                answer.quadratures[t, q],
+                ".-",
+                label=f"F{t + 1} {projection}",
+            )
     axes.set(xlabel="CZ gate count", ylabel="Target sigma")
     axes.legend()
 
     if answer.herald_matrix is not None:
         fig, axes = plots.subplots("herald", figsize=(12, 5))
         matrix = answer.herald_matrix.reshape(-1, 9)
-        image = axes.imshow(np.ma.masked_invalid(matrix), vmin=0, vmax=1,
-                            cmap="Blues", aspect="auto")
+        image = axes.imshow(
+            np.ma.masked_invalid(matrix), vmin=0, vmax=1, cmap="Blues", aspect="auto"
+        )
         axes.set(
             xticks=range(9),
-            xticklabels=[f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")],
+            xticklabels=[
+                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
+            ],
             xlabel="Herald class (F1, F2)",
             ylabel="Scan row (target, projection, n)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",

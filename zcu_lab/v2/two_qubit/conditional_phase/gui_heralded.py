@@ -26,7 +26,9 @@ from .core_heralded import (
 )
 from .form import phase_form
 
-ConditionalPhaseHeraldedRun: TypeAlias = RunRecord[ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult]
+ConditionalPhaseHeraldedRun: TypeAlias = RunRecord[
+    ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult
+]
 
 
 def make_form(ctx: FormContext) -> Form[ConditionalPhaseHeraldedCfg]:
@@ -80,7 +82,9 @@ def run(
     cfg: ConditionalPhaseHeraldedCfg, *, context: RunContext
 ) -> RunRecord[ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult]:
     """Run the experiment and retain its actual configuration."""
-    return RunRecord(cfg=cfg, result=ConditionalPhaseHeraldedExp().run(cfg, context=context))
+    return RunRecord(
+        cfg=cfg, result=ConditionalPhaseHeraldedExp().run(cfg, context=context)
+    )
 
 
 DEFINITION = Adapter(

@@ -43,7 +43,11 @@ class ConditionalPhaseAnalysis:
 
 
 def analyze_phase(
-    cfg: ConditionalPhaseCfg, data: ConditionalPhaseResult, *, plots: Plots, heralded: bool = False
+    cfg: ConditionalPhaseCfg,
+    data: ConditionalPhaseResult,
+    *,
+    plots: Plots,
+    heralded: bool = False,
 ) -> ConditionalPhaseAnalysis:
     """Derive classified X/Y sigma and phase using saved cfg and count axes.
 
@@ -107,7 +111,10 @@ def _source_quadratures(
     """Validate saved scan axes and select terminal counts without averaging."""
     frequencies = sweep2array(cfg.frequency)
     if data.frequencies.shape != frequencies.shape or not np.allclose(
-        data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0,
+        data.frequencies,
+        frequencies,
+        rtol=8 * np.finfo(float).eps,
+        atol=0,
     ):
         raise ValueError("Conditional phase count axes must match saved cfg")
     for actual, expected in (
@@ -117,7 +124,9 @@ def _source_quadratures(
     ):
         if not np.array_equal(actual, expected):
             raise ValueError("ConditionalPhase count axes must match saved cfg")
-    shape = (2, 2, len(cfg.gate_counts), len(frequencies)) + ((3, 3, 3, 3) if heralded else (3, 3))
+    shape = (2, 2, len(cfg.gate_counts), len(frequencies)) + (
+        (3, 3, 3, 3) if heralded else (3, 3)
+    )
     if data.sums.shape != shape:
         raise ValueError(f"Expected summed count shape {shape}, got {data.sums.shape}")
     return terminal_counts(data.sums, heralded=heralded)
@@ -177,19 +186,26 @@ def _plot_phase(
     for b, branch in enumerate(("I", "Xπ")):
         for q, projection in enumerate(("X", "Y")):
             for n, count in enumerate(data.gate_counts):
-                axes.plot(data.frequencies, answer.quadratures[b, q, n], ".-",
-                          label=f"{branch} {projection} n={count}")
+                axes.plot(
+                    data.frequencies,
+                    answer.quadratures[b, q, n],
+                    ".-",
+                    label=f"{branch} {projection} n={count}",
+                )
     axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
     axes.legend(fontsize="small", ncols=3)
 
     if answer.herald_matrix is not None:
         fig, axes = plots.subplots("herald", figsize=(12, 5))
         matrix = answer.herald_matrix.reshape(-1, 9)
-        image = axes.imshow(np.ma.masked_invalid(matrix), vmin=0, vmax=1,
-                            cmap="Blues", aspect="auto")
+        image = axes.imshow(
+            np.ma.masked_invalid(matrix), vmin=0, vmax=1, cmap="Blues", aspect="auto"
+        )
         axes.set(
             xticks=range(9),
-            xticklabels=[f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")],
+            xticklabels=[
+                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
+            ],
             xlabel="Herald class (F1, F2)",
             ylabel="Scan row (branch, projection, n, frequency)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",

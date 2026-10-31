@@ -29,7 +29,9 @@ def make_form(ctx: FormContext) -> Form[LocalZHeraldedCfg]:
     return phase_form(ctx, LocalZHeraldedCfg)
 
 
-def _analyze(req: AnalyzeRequest[LocalZHeraldedRun, None], *, plots: Plots) -> LocalZAnalysis:
+def _analyze(
+    req: AnalyzeRequest[LocalZHeraldedRun, None], *, plots: Plots
+) -> LocalZAnalysis:
     """Fit only saved cfg/counts, never current Form, aliases or library."""
     return LocalZHeraldedExp().analyze(req.run_result, None, plots=plots)
 
@@ -73,7 +75,9 @@ def _get_writeback_items(
     ]
 
 
-def run(cfg: LocalZHeraldedCfg, *, context: RunContext) -> RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult]:
+def run(
+    cfg: LocalZHeraldedCfg, *, context: RunContext
+) -> RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult]:
     """Run the experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=LocalZHeraldedExp().run(cfg, context=context))
 

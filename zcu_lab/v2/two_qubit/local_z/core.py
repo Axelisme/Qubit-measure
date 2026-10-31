@@ -74,7 +74,10 @@ class LocalZCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset", description="Optional reset before each shot.")] = None
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot."),
+    ] = None
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -125,7 +128,6 @@ class LocalZCfg(ConfigBase):
         return self
 
 
-
 @dataclass(frozen=True)
 class LocalZResult:
     """Summed counts with target × quadrature × n leading axes.
@@ -169,15 +171,27 @@ def build_program(
         raise ValueError("gate_count must be in the configured scan")
     target = cfg.x90_f1 if point.target == "f1" else cfg.x90_f2
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
     builder.emit(Pulse("prepare_target", target))
     for gate in range(point.gate_count):
-        builder.emit(dual_line_drive(
-            cfg.drive, frequency=float(cfg.drive.f1.freq), name=f"cz_{gate}",
-        ))
-    builder.emit(Pulse("projection", target.with_updates(phase=target.phase + 90 * point.quadrature)))
+        builder.emit(
+            dual_line_drive(
+                cfg.drive,
+                frequency=float(cfg.drive.f1.freq),
+                name=f"cz_{gate}",
+            )
+        )
+    builder.emit(
+        Pulse(
+            "projection",
+            target.with_updates(phase=target.phase + 90 * point.quadrature),
+        )
+    )
     builder.emit(readout, tag="terminal")
     return builder.build()
 
@@ -193,7 +207,9 @@ def acquire_counts(
     """
     validate_classifiers(config.readout, config.roles)
     viewer = live_line(
-        context.plots, "measurement", "CZ gate count",
+        context.plots,
+        "measurement",
+        "CZ gate count",
         "Target sigma" + (" | herald (g,g)" if heralded else ""),
         num_lines=4,
     )
@@ -202,19 +218,28 @@ def acquire_counts(
         counts = terminal_counts(sums, heralded=heralded)
         values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
         viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
+
     shape = (2, 2, len(config.gate_counts)) + ((3, 3, 3, 3) if heralded else (3, 3))
     buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
     with Schedule(config, buffer, scope=context.scope) as sched:
         targets: list[Literal["f1", "f2"]] = ["f1", "f2"]
         for target, target_step in sched.scan("target", targets):
             for quadrature, projection_step in target_step.scan("quadrature", [0, 1]):
-                for n, step in projection_step.scan("gate_count", sched.cfg.gate_counts):
+                for n, step in projection_step.scan(
+                    "gate_count", sched.cfg.gate_counts
+                ):
                     point = LocalZPoint(target, quadrature, n)
-                    prog = build_program(step.cfg, context.soccfg, point, heralded=heralded)
+                    prog = build_program(
+                        step.cfg, context.soccfg, point, heralded=heralded
+                    )
                     step.run_acquire_summed(
-                        prog, context.soc,
-                        processor=shot_sums(prog, readout_axes(step.cfg.roles, heralded=heralded)),
-                        rounds=step.cfg.rounds, options=RunOptions(),
+                        prog,
+                        context.soc,
+                        processor=shot_sums(
+                            prog, readout_axes(step.cfg.roles, heralded=heralded)
+                        ),
+                        rounds=step.cfg.rounds,
+                        options=RunOptions(),
                     )
     buffer.trigger_update(flush=True)
     return buffer.array
@@ -241,11 +266,25 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 axes=(
                     VariableAxisSpec.generated_arange("terminal_f2", ""),
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec("CZ gate count", "", field_name="gate_counts", dtype=np.int64),
-                        VariableAxisSpec("Projection X or Y", "", field_name="quadratures", dtype=np.int64),
-                        VariableAxisSpec("Target F1 or F2", "", field_name="targets", dtype=np.int64),
+                    VariableAxisSpec(
+                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        "Projection X or Y",
+                        "",
+                        field_name="quadratures",
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        "Target F1 or F2", "", field_name="targets", dtype=np.int64
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Joint class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Joint class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
         result_type=LocalZResult,
@@ -265,8 +304,11 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         )
 
     def analyze(
-        self, source: RunRecord[LocalZCfg, LocalZResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[LocalZCfg, LocalZResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> LocalZAnalysis:
         """Analyze saved cfg and classified quadratures; never read current Form."""
         del options

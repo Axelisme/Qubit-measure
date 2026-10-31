@@ -54,29 +54,50 @@ def restore_result(
 class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
     """Analyze classified X/Y projections conditioned on herald (g,g)."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[LocalZHeraldedResult, LocalZHeraldedCfg]] = GroupedAxesSpec(
-        variables=(
-            VariableSpec(
-                variable="sums",
-                axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
-                        VariableAxisSpec("CZ gate count", "", field_name="gate_counts", dtype=np.int64),
-                        VariableAxisSpec("Projection X or Y", "", field_name="quadratures", dtype=np.int64),
-                        VariableAxisSpec("Target F1 or F2", "", field_name="targets", dtype=np.int64),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[LocalZHeraldedResult, LocalZHeraldedCfg]] = (
+        GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    variable="sums",
+                    axes=(
+                        VariableAxisSpec.generated_arange("terminal_f2", ""),
+                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec.generated_arange("herald_f2", ""),
+                        VariableAxisSpec.generated_arange("herald_f1", ""),
+                        VariableAxisSpec(
+                            "CZ gate count",
+                            "",
+                            field_name="gate_counts",
+                            dtype=np.int64,
+                        ),
+                        VariableAxisSpec(
+                            "Projection X or Y",
+                            "",
+                            field_name="quadratures",
+                            dtype=np.int64,
+                        ),
+                        VariableAxisSpec(
+                            "Target F1 or F2", "", field_name="targets", dtype=np.int64
+                        ),
+                    ),
+                    z=VariableZSpec(
+                        field_name="sums",
+                        label="Herald and terminal class counts",
+                        unit="",
+                        dtype=np.float64,
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Herald and terminal class counts", unit="", dtype=np.float64),
             ),
-        ),
-        result_type=LocalZHeraldedResult,
-        cfg_type=LocalZHeraldedCfg,
-        tag="two_qubit/local_z_heralded",
-        result_builder=restore_result,
+            result_type=LocalZHeraldedResult,
+            cfg_type=LocalZHeraldedCfg,
+            tag="two_qubit/local_z_heralded",
+            result_builder=restore_result,
+        )
     )
 
-    def run(self, config: LocalZHeraldedCfg, *, context: RunContext) -> LocalZHeraldedResult:
+    def run(
+        self, config: LocalZHeraldedCfg, *, context: RunContext
+    ) -> LocalZHeraldedResult:
         """Acquire optional reset → herald → original sequence → terminal sums."""
         return LocalZHeraldedResult(
             np.arange(2, dtype=np.int64),
@@ -86,8 +107,11 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         )
 
     def analyze(
-        self, source: RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> LocalZAnalysis:
         """Use herald (g,g) terminal counts; also show all nine herald fractions."""
         del options
