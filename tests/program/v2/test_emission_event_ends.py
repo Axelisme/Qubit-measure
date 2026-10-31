@@ -363,6 +363,14 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(cloc
         assert shifts == []
 
 
+def test_runtime_cross_grid_product_overflow_fails_at_build():
+    # Native waveform words fit 16 bits, and the final end fits signed32.
+    # Only the required fixed-point product overflows, before ASR8.
+    pulse = Pulse("large", _pulse_cfg(length=QickSweep1D("scan", 25000, 25002), pre=0, post=0))
+    with pytest.raises(ValueError, match="overflow signed 32-bit"):
+        _program([pulse], lambda p: p.emit(pulse), lambda p: p.add_loop("scan", 3), fabric_clock=1)
+
+
 def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
     selector = LoadValue("selector", [0, 1], "choice", "selected")
     playback = ComputedPulse(
