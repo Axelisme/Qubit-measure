@@ -700,6 +700,28 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
     assert shell_wait(prog) == max(remaining) == 30
 
 
+@pytest.mark.filterwarnings("error")
+def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
+    """Opposing two-point sweeps both end at 40, leaving 30 ADC cycles."""
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("i", 2)
+            self.add_loop("j", 2)
+            self.declare_readout(0, length=50 / 307.2)
+
+        def _body(self, cfg):
+            self.trigger(ros=[0], t=0, width=1 / 430.08)
+            self.fork("default", into=["right", "extra"])
+            self.delay_timeline(QickSweep1D("i", 0, 40 / 430.08))
+            self.delay_timeline(QickSweep1D("i", 40 / 430.08, 0), timeline="right")
+            self.delay_timeline(QickSweep1D("j", 0, 10 / 430.08), timeline="extra")
+            self.join("right", "extra", into="default")
+
+    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    assert shell_wait(prog) == 30
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [40] * 4
+
+
 @dataclass(frozen=True)
 class WaitRecipe:
     """Reproducible public program inputs; all delays/tails are tProc cycles.
