@@ -498,9 +498,11 @@ class RuntimeMath(TimedMacro):
     def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
         """Multiply by a nonnegative integer with checked CSD shifts/adds."""
         digits = _csd(factor)
-        result = self.cycles(0.0)
-        previous = digits[-1][0] if digits else 0
-        for exponent, sign in reversed(digits):
+        if not digits:
+            return self.cycles(0.0)
+        result = self.snapshot(value)
+        previous = digits[-1][0]
+        for exponent, sign in reversed(digits[:-1]):
             shift = previous - exponent
             while shift:
                 amount = min(15, shift)
@@ -510,7 +512,9 @@ class RuntimeMath(TimedMacro):
                                  limits=(result.minimum << amount, result.maximum << amount),
                                  target=result.register)
                 shift -= amount
-            result = self.add(result, value) if sign > 0 else self.subtract(result, value)
+            result = self.op(result, "+" if sign > 0 else "-", value,
+                             limits=self._sum_limits(result, value, subtract=sign < 0),
+                             target=result.register)
             previous = exponent
         while previous:
             amount = min(15, previous)
