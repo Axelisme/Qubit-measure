@@ -154,7 +154,7 @@ def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
             result = await iteration.call(acquire)
             assert isinstance(result, w.Completed)
             delivered.append(result.value)
-            assert not result.partial_result
+            assert not result.stop_requested
         finally:
             iterations.close()
 

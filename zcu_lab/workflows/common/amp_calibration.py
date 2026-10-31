@@ -215,7 +215,7 @@ async def calibrate_amp_rabi(
             identity=scope.identity,
         )
         amp = replace(amp, file="amp-rabi.h5")
-        if outcome.partial_result:
+        if outcome.stop_requested:
             amp = replace(amp, status="rejected", reason="stopped")
         else:
             amp, trace = _analyze_completed(outcome.value.result, amp, settings, guess)

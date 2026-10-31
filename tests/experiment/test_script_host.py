@@ -52,87 +52,7 @@ def test_stop_tree_inherits_stop_and_releases_completed_scopes() -> None:
     assert not child.is_set(), "Released operation scopes must be detached"
 
 
-def test_child_error_stops_only_its_scope_and_preserves_first_error() -> None:
-    root = StopSignal()
-    iteration = root.child()
-    operation = iteration.child()
-    sibling = iteration.child()
-    descendant = operation.child().child()
-    cause = ValueError("bad point")
 
-    operation.set_error("failed", "acquire failed", cause)
-    first_error = operation.error
-    operation.set_error("interrupted", "later interruption", None)
-
-    assert operation.is_set()
-    assert descendant.is_set()
-    assert descendant.error is None
-    assert operation.error is first_error
-    with pytest.raises(ScheduleOutcomeError, match="acquire failed") as raised:
-        operation.raise_if_error()
-    assert raised.value is first_error
-    assert raised.value.status == "failed"
-    assert raised.value.exception is cause
-    assert raised.value.__cause__ is cause
-    inherited = operation.child()
-    assert inherited.is_set()
-    assert inherited.error is first_error
-
-    next_sibling = iteration.child()
-    for unaffected in (root, iteration, sibling, next_sibling):
-        assert not unaffected.is_set()
-        assert unaffected.error is None
-        unaffected.raise_if_error()
-
-
-def test_release_hands_first_error_up_without_stop_and_stops_at_operation() -> None:
-    root = StopSignal()
-    iteration = root.child(boundary=False)
-    operation = iteration.child()
-    schedule = operation.child(boundary=False)
-    acquire = schedule.child(boundary=False)
-    later = schedule.child(boundary=False)
-    cause = OSError("acquire disconnected")
-    acquire.set_error("failed", "first failure", cause)
-    first = acquire.error
-    assert schedule.error is None
-    acquire.release()
-    assert schedule.error is first
-    assert not schedule.is_set()
-    later.set_error("failed", "second failure", ValueError("later"))
-    later.release()
-    assert schedule.error is first
-    schedule.release()
-    assert operation.error is first
-    assert not operation.is_set()
-    with pytest.raises(ScheduleOutcomeError, match="first failure") as caught:
-        operation.raise_if_error()
-    assert caught.value.__cause__ is cause
-    operation.release()
-    assert iteration.error is None
-    assert not iteration.is_set()
-    next_operation = iteration.child()
-    assert next_operation.error is None
-    assert not next_operation.is_set()
-
-
-def test_release_delivers_partial_without_stopping_parent_or_next_operation() -> None:
-    iteration = StopSignal()
-    operation = iteration.child()
-    assert getattr(operation, "partial_result", None) is False
-    schedule = operation.child(boundary=False)
-    acquire = schedule.child(boundary=False)
-    acquire.set()
-    assert not schedule.partial_result
-    acquire.release()
-    assert schedule.partial_result
-    assert not schedule.is_set()
-    schedule.release()
-    assert operation.partial_result
-    assert not operation.is_set()
-    operation.release()
-    assert not iteration.partial_result
-    assert not iteration.child().partial_result
 
 
 def test_host_labels_calls_under_explicit_iteration_lifetimes() -> None:
@@ -310,7 +230,7 @@ def test_pause_stops_only_operation_and_gate_retains_iteration_until_resume() ->
         finally:
             if not future.done():
                 host.close()
-    assert [(item.result, item.epoch, item.partial_result) for item in attempts] == [
+    assert [(item.result, item.epoch, item.stop_requested) for item in attempts] == [
         (11, 0, True),
         (False, 2, False),
     ]
@@ -340,7 +260,7 @@ def test_natural_completion_snapshot_is_not_retroactively_stopped_by_pause() -> 
         finally:
             if not future.done():
                 host.close()
-    assert [(item.result, item.epoch, item.partial_result) for item in completions] == [
+    assert [(item.result, item.epoch, item.stop_requested) for item in completions] == [
         (19, 0, False)
     ]
 

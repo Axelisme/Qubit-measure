@@ -27,7 +27,6 @@ from zcu_tools.progress_bar import BaseProgressBar
 
 from .models import (
     Completed,
-    Failed,
     MissingCapability,
     OperationFacts,
     OperationKind,
@@ -55,12 +54,6 @@ class _Attempt:
     device_snapshot: Mapping[str, JsonObject] | None = None
     stopped: bool = False
     name: str | None = None
-
-
-@dataclass(frozen=True)
-class _Value[T]:
-    # Distinguish arbitrary raw values (including Failed) from acquire failure.
-    value: T
 
 
 class Displays:
@@ -127,15 +120,14 @@ class EnvHooks:
     original control I/O error. stopping reads explicit cancellation; question
     marks Ask suspension/return. next_attempt returns the nearest iteration's
     birth number (zero outside iterations) and its actual attempt number, including retries;
-    operation_finished persists their facts. experiment_failed retains acquire
-    causes; device_setup retains the requested full typed settings.
+    operation_finished persists their facts; device_setup retains the requested
+    full typed settings.
     """
 
     directory: Callable[[Scope], Path]
     commit: Callable[[Scope, BaseModel], None]
     boundary: Callable[[], None]
     stopping: Callable[[], bool]
-    experiment_failed: Callable[[str, str, BaseException], None]
     question: Callable[[Literal["waiting", "answered"]], None]
     next_attempt: Callable[[Scope], tuple[int, int]]
     operation_finished: Callable[[Scope, OperationFacts], None]
@@ -215,14 +207,13 @@ class WorkflowEnv[C](Scope):
 
     async def execute_call[T](
         self, scope: Scope, fn: Callable[[CallContext], T], *, name: str | None = None
-    ) -> Completed[T] | Failed:
-        """Run fn(ctx) in the executor and deliver its value or acquire failure.
+    ) -> Completed[T]:
+        """Run fn(ctx) in the executor and deliver its unchanged value.
 
         ctx is the host CallContext: explicit operation scope and starting epoch.
         Use closures for other capabilities. Child-cancelled work starts with its
         stopped token and cooperatively returns a partial/empty value.
-        Arbitrary exceptions propagate into the author. A captured Schedule
-        acquire failure returns Failed without partial data. Pause keeps this
+        Every exception propagates unchanged into the author. Pause keeps this
         await pending: interrupted attempts restart with the same callable;
         naturally completed attempts wait for Resume without being repeated.
         Root stop raises ordinary ScriptCancelled before new work or after drain.
@@ -240,16 +231,16 @@ class WorkflowEnv[C](Scope):
         fn: Callable[[CallContext, _Attempt], T],
         *,
         name: str | None = None,
-    ) -> Completed[T] | Failed:
+    ) -> Completed[T]:
         while True:
             attempts: list[_Attempt] = []
 
             def invoke(
                 ctx: CallContext, attempts: list[_Attempt] = attempts
-            ) -> _Value[T] | Failed:
+            ) -> T:
                 return self._invoke(scope, fn, attempts, ctx)
 
-            completions: list[CallResult[_Value[T] | Failed]] = []
+            completions: list[CallResult[T]] = []
             cancelled: ScriptCancelled | None = None
             self._hooks.boundary()
             try:
@@ -272,7 +263,7 @@ class WorkflowEnv[C](Scope):
                     )
                 raise
             attempt = attempts[0]
-            # Descendant partial completion does not set the operation stop bit.
+            # Descendant cancellation does not set the operation stop bit.
             # Use the atomic host snapshot, never a later control-state read.
             attempt.stopped = result.stopped
             discard = (
@@ -291,31 +282,21 @@ class WorkflowEnv[C](Scope):
                 raise ScriptCancelled()
             if discard:
                 continue
-            if isinstance(result.result, Failed):
-                return result.result
-            return Completed(result.result.value, result.partial_result, facts)
+            return Completed(result.result, result.stop_requested, facts)
 
     def _complete_attempt[T](
         self,
         scope: Scope,
         kind: OperationKind,
         attempt: _Attempt,
-        result: CallResult[_Value[T] | Failed],
+        result: CallResult[T],
         *,
         discard: bool,
     ) -> OperationFacts:
         """Classify the immutable completion snapshot before any cancel exception."""
-        if isinstance(result.result, Failed):
-            return self._record_attempt(
-                scope, kind, attempt, "failed", result.result.reason
-            )
         if discard:
             return self._record_attempt(
                 scope, kind, attempt, "discarded", "Pause interrupted this attempt"
-            )
-        if result.partial_result:
-            return self._record_attempt(
-                scope, kind, attempt, "partial", "Operation or descendant was stopped"
             )
         return self._record_attempt(scope, kind, attempt, "completed")
 
@@ -325,17 +306,13 @@ class WorkflowEnv[C](Scope):
         fn: Callable[[CallContext, _Attempt], T],
         attempts: list[_Attempt],
         ctx: CallContext,
-    ) -> _Value[T] | Failed:
+    ) -> T:
         started = self._ports.clock.now()
         iteration, number = self._hooks.next_attempt(scope)
         attempt = _Attempt(iteration, number, started, started, name=ctx.scope.name)
         attempts.append(attempt)
         try:
-            value = fn(ctx, attempt)
-            error = ctx.scope.stop.error
-            if error is not None and error.status == "failed":
-                return Failed(error.reason)
-            return _Value(value)
+            return fn(ctx, attempt)
         finally:
             attempt.stopped = ctx.scope.stop.is_set()
             attempt.finished_at = self._ports.clock.now()
@@ -370,7 +347,7 @@ class WorkflowEnv[C](Scope):
         cfg: Cfg,
         *,
         name: str | None = None,
-    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
+    ) -> Completed[RunRecord[Cfg, Result]]:
         """Run a core callable with a copied configuration, without saving it.
 
         experiment accepts (cfg, *, context: RunContext), including a bound
@@ -382,7 +359,7 @@ class WorkflowEnv[C](Scope):
         callback-return cfg and result. Completed.facts carries the same
         OperationFacts as journal/commit, including the pre-call device snapshot,
         nearest iteration birth number, attempt and stopped bit.
-        Schedule acquire failure returns Failed; other exceptions propagate.
+        Every core exception propagates unchanged into the author.
         Child cancellation delivers a partial/empty record. Root stop raises
         ScriptCancelled after completion recording. Pause retries the captured cfg
         with a new plot collection. Each attempt finishes before delivery or
@@ -408,15 +385,6 @@ class WorkflowEnv[C](Scope):
                 attempt.device_snapshot = capture_device_snapshot(context.devices)
                 current = deepcopy(captured)
                 result = experiment(current, context=context)
-                error = context.scope.stop.error
-                if error is not None and error.status != "failed":
-                    raise error from error.exception
-                if error is not None:
-                    self._hooks.experiment_failed(
-                        getattr(experiment, "__qualname__", type(experiment).__name__),
-                        error.reason,
-                        error.exception or error,
-                    )
             except BaseException as error:
                 try:
                     plots.finish()
@@ -439,7 +407,7 @@ class WorkflowEnv[C](Scope):
 
     async def execute_setup(
         self, scope: Scope, name: str, cfg: BaseDeviceInfo
-    ) -> Completed[None] | Failed:
+    ) -> Completed[None]:
         """Apply a captured full settings model with cooperative operation stop.
 
         The device owner revalidates fields and enforces limits. Errors propagate
@@ -458,7 +426,7 @@ class WorkflowEnv[C](Scope):
 
     async def execute_wait(
         self, scope: Scope, target: datetime
-    ) -> Completed[None] | Failed:
+    ) -> Completed[None]:
         """Wait for an aware deadline through call; Stop cooperatively returns.
 
         A naive deadline raises ValueError. A past target returns immediately.

@@ -82,7 +82,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if outcome.partial_result:
+    if outcome.stop_requested:
         return SavedAcquisition(
             status="partial", file=output.filename, reason="stopped"
         )

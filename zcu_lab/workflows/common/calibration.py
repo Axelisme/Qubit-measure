@@ -397,7 +397,7 @@ async def calibrate_len_rabi(
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if outcome.partial_result:
+    if outcome.stop_requested:
         return RabiStageResult(
             record=replace(
                 diagnostics, status="rejected", reason="stopped", file="rabi.h5"
@@ -649,7 +649,7 @@ async def calibrate_readout(
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if outcome.partial_result:
+    if outcome.stop_requested:
         return ReadoutResult(
             "rejected", "stopped", None, None, "readout.h5", tuple(gain_clamped)
         )

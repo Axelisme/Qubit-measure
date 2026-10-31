@@ -69,7 +69,7 @@ def test_descendant_cancellation_is_saved_as_stopped(tmp_path: Path) -> None:
         stopped=False,
     )
     record = workflows.record_with_metadata(
-        workflows.Completed(source, partial_result=True, facts=facts),
+        workflows.Completed(source, stop_requested=True, facts=facts),
         identity=workflows.RunIdentity(
             "0123456789abcdef0123456789abcdef", history.provenance
         ),

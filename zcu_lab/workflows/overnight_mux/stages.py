@@ -240,7 +240,7 @@ async def measure_mux_t1(
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if record.partial_result:
+    if record.stop_requested:
         return MuxT1StageResult(
             file="t1.h5",
             qubits=tuple(
@@ -357,7 +357,7 @@ async def measure_mux_echo(
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if record.partial_result:
+    if record.stop_requested:
         return MuxEchoStageResult(
             file="t2echo.h5",
             qubits=tuple(
