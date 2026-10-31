@@ -50,10 +50,11 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
         env.devices.close_all_devices()
 
 
-def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
+@pytest.mark.parametrize("advance_ref", [False, True])
+def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(advance_ref):
     def body(p):
         p.trigger([0], t=0)
-        with p.repeat("outer", 2, advance_ref=True), p.repeat("inner", 2, advance_ref=True):
+        with p.repeat("outer", 2, advance_ref=advance_ref), p.repeat("inner", 2, advance_ref=advance_ref):
             p.pulse(0, "p", timeline="default", tag="repeated")
 
     prog, env = program(body, trigger_time=None)
@@ -73,7 +74,8 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
     assert result.readouts[0].trigger_us == (0,)
 
 
-def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
+@pytest.mark.parametrize("advance_ref", [False, True])
+def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(advance_ref):
     loader = LoadValue("counts", [0, 1, 2], "scan", "count")
 
     def initialize(p):
@@ -83,9 +85,9 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
     def body(p):
         p.trigger([0], t=0)
         p.emit(loader)
-        with p.repeat("inner", "count", advance_ref=True, range_hint=(0, 2)):
+        with p.repeat("inner", "count", advance_ref=advance_ref, range_hint=(0, 2)):
             p.pulse(0, "p", timeline="default", tag="repeated")
-        p.pulse(0, "p", tag="final")
+        p.pulse(0, "p", timeline="default", tag="final")
 
     # Counts 0..2 leave 86 cycles of shell WAIT slack; allow that exact budget.
     prog, env = program(body, initialize, trigger_time=None, relax_delay=0.2)
@@ -100,6 +102,34 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
         assert [e.iterations for e in events[:-1]] == [
             (("inner", i),) for i in range(index)
         ]
+
+
+@pytest.mark.parametrize("align", [False, True])
+def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
+    def initialize(p):
+        p.add_loop("scan", 2)
+        p.declare_gen(1, nqz=1)
+        p.add_pulse(1, "drive", style="const", freq=80, phase=0, gain=0.2, length=0.1)
+
+    def body(p):
+        p.pulse(0, "p", t=0, tag="carrier")
+        p.trigger([0], t=0)
+        with p.branch(by="scan", align_timeline=align) as cases:
+            with cases.case(0):
+                with p.repeat("outer", 2, advance_ref=False), p.repeat("inner", 2, advance_ref=False):
+                    p.pulse(1, "drive", tag="repeated")
+            with cases.case(1):
+                p.delay_timeline(43 / 430.08)
+        p.pulse(1, "drive", timeline="default", tag="final")
+
+    prog, env = program(body, initialize, trigger_time=None)
+    result = request(prog, env)
+    for index in range(2):
+        events = [e for e in result.materialize_point(index).events if e.source != "carrier"]
+        expected = [0, 43, 86, 129, 172] if index == 0 else [172 if align else 43]
+        assert [e.start_us * 430.08 for e in events] == pytest.approx(expected)
+        assert [e.iterations for e in events[:-1]] == ([(("outer", o), ("inner", i)) for o in range(2) for i in range(2)] if index == 0 else [])
+    assert result.reps == 2
 
 
 def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
