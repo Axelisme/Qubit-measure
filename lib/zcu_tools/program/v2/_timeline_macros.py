@@ -460,10 +460,19 @@ class TimelineSync(Delay):
                 [0.0, *(self.book.end(name) for name in self.sources)]
             )
         if isinstance(self.t, RuntimeEnd):
+            # Split a nonnegative register + literal advance at translation;
+            # closure consumes the value without allocating storage or touching s14.
+            self.literal_advance = (
+                self.t.offset
+                if self.t.offset > 0
+                and self.t.minimum is not None
+                and self.t.minimum >= self.t.offset
+                else 0
+            )
             self.t_regs["t"] = (
-                self.book.math.event_time(self.t, 0.0).register
-                if self.t.offset
-                else self.t.register
+                self.t.register
+                if self.literal_advance
+                else self.book.math.cycles(self.t).register
             )
             self.book.native_only = True
             try:
@@ -474,6 +483,18 @@ class TimelineSync(Delay):
             self.book.decrement(self.t)
         else:
             super().preprocess(prog)
+
+    def expand(self, prog) -> list[Macro]:
+        """Advance by the stored base and any nonnegative literal displacement."""
+        operations = super().expand(prog)
+        if isinstance(self.t, RuntimeEnd) and self.literal_advance:
+            operations.append(
+                AsmInst(
+                    inst={"CMD": "TIME", "C_OP": "inc_ref", "LIT": f"#{self.literal_advance}"},
+                    addr_inc=1,
+                )
+            )
+        return operations
 
 
 class TimelineRepeatEnter(Macro):
