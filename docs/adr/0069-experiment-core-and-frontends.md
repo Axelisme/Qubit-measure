@@ -37,11 +37,17 @@ load_run_with_metadata(source: Path, *, spec) -> RunRecord
 restore_run(stored: Container, *, spec) -> RestoredRun[RunRecord]
 ```
 
-直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。`Experiment` 的分析方法只提供簽名並 raise `NotImplementedError`，不強制實作 analyze，也不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
+直接呼叫 core.run 不自動建立 record，也不保存 last state。共用 Notebook 包裝層建立 RunRecord，同步分析成功後建立 AnalysisRecord。前端只根據 core.run 的返回或拋錯決定是否發布：正常返回就發布，拋錯就交付原錯誤、將 operation 標 failed，不發布新 record，也不取代上一筆成功 record。
+
+前端不尋找 Schedule、不讀它的 root buffer，也不從任意 core 失敗中合成 failed record。作者若要攔截錯誤、保存累積資料或定義 partial 結果，必須在 core 內明確處理。這使前端不必知道作者用了哪種 scheduler、buffer 或 Result 形狀。2026-10-31，使用者裁定：「對框架來說core run就是黑盒子，只是接收context然後回傳result的函數，內部要怎麼註冊buffer與怎麼攔截報錯都是作者的自由，scheduler只是一個給作者用的工具，框架不知道scheduler，stop_signal只是一個框架表達盡快結束並回傳result的訊號通道，在這個模型下，框架沒有partial的認知，更別說buffer要求與result格式對齊了，所有錯誤攔截與partial語意都由作者維護與負責，可以有工具與慣例」。
+
+Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分析工具各自負責。`Experiment` 的分析方法只提供簽名並 raise `NotImplementedError`，不強制實作 analyze，也不探測新舊簽名，也不建立互動 capability registry 或通用 callback framework。
 
 RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與顯式 scope，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
 
-每次 run 建立新的 context、Plots 與 Scope，硬體 handles 可以重用，停止與錯誤狀態不能沿用。GUI 與 Notebook 建 run 根，workflow 使用作者明填 parent 下的 operation child。Schedule(scope=..., name=None) 在入口建立 schedule child，每次 acquire 建 acquire child，離開時 release。Driver、clock 與 program builder 只接 scope.stop，不反向依賴 Scope。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。Retry、partial result 與 raise_if_error 仍由原 owner 負責，不引入另一個 runner。Progress bar 暫留環境注入。
+每次 run 建立新的 context、Plots 與 Scope，硬體 handles 可以重用，停止請求不能沿用。GUI 與 Notebook 建 run 根，workflow 使用作者明填 parent 下的 operation child。Schedule(scope=..., name=None) 在入口建立 schedule child，每次 acquire 建 acquire child，離開時 release。Driver、clock 與 program builder 只接 scope.stop，不反向依賴 Scope。
+
+StopSignal 只承載停止請求與不解析的自由文字 reason，release 只解除父子關係，不上交 partial 或 error。Schedule 的 outcome 與資料累積屬於作者工具，不寫回框架。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。Runtime 可向作者交付本次 acquire 的合作停止狀態，但不把它當成前端的完成事實，也不污染下次 acquire。Retry 留在取數 owner，partial 結果由作者定義，不引入另一個 runner。Progress bar 暫留環境注入。
 
 Scope 是 experiment 的共用控制與生命週期契約。作者看 scope.cancelled，底層只借 stop bit。Kind/name 路徑、fork status、selector 歧義與根 ScriptCancelled 的出口規則見 [[0075]]。2026-10-22 使用者要求「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」。Host 與 caller 都不得以 latest child 或 callable 反射補 parent/name。Workflow 根及所有 child 具有相同 conveniences；scope.dir 鏡射 scope 路徑，scope.commit 每個 scope 只能一次，commit 當下保存 record 快照。Reader 走目錄樹並按 commit 序號排序。
 
@@ -59,11 +65,13 @@ GUI 插件自行定義 typed 成功輸出的欄位。插件決定是否輸出選
 
 ### Notebook 中斷與部分結果
 
-Schedule 在自己的 with 保護區域接住 KeyboardInterrupt，將該 scope 的 StopSignal 記為 interrupted，保留 buffer 內已完成的資料，讓實驗在離開 scope 後組成 partial result。Notebook 共用包裝層將正常返回的 interrupted 視為 stopped，發布可保存的 RunRecord，而非丟棄這次資料。Failed signal 與逃出 core.run 的例外仍失敗，不取代上一筆成功 record。
+NotebookAdapter 在 main thread 執行 core.run 期間替換 SIGINT handler。第一次中斷設定 stop 與 reason，並啟動計時器。Core 在期限內正常返回就取消計時器並照常發布；到期或真的收到第二次中斷時，handler 拋 KeyboardInterrupt，不發布 record。Schedule 與 AcquisitionRunner 不吞 KeyboardInterrupt，作者自行決定如何組成可返回的資料。
 
-這個責任放在 Schedule 與 Notebook 包裝層，不要求每個實驗各包一層 try/catch，也不加 stop widget、背景 thread 或事件 pump。保護區域外的中斷、重複中斷及收尾例外不保證產生 partial record，細節由 Schedule／Notebook 公開契約維護。
+Adapter 的 interrupt_timeout 是正有限秒數，預設10秒，非法值在入口拒絕。POSIX 由 timer 經 signal.pthread_kill 向 main thread 送 SIGINT，可打斷其阻塞中的 C 呼叫；沒有 pthread_kill 時使用 _thread.interrupt_main，可能要等阻塞呼叫返回。Finally 先取消並 join timer，再還原 handler，避免遲到的 signal 中斷下一段工作。非 main thread 不替換 handler。
 
-原裁決日期未記錄，使用者於 2026-10-16 map 結案時確認沿用，原話「都採用建議」。原裁決原話為「但我不想要每個實驗都包一層try/catch，Schedule用with大概也很難攔截吧？」。
+2026-10-31，使用者說明：「notebook只會發出一次ctrl-c，後續按中斷不會重發，而且太久沒結束會彈窗警告，我的想法是adapter在第一次按就設定stop以及一個計時器，超時就raise」，並以「10秒」確認預設期限。這取代 Schedule 攔截 KeyboardInterrupt 再讓前端判定 partial 的舊契約。
+
+前端的 stop_requested 只表示這次 run 期間送過停止請求，不判斷 Result 完整性。RunMetadata.completion 的 complete／stopped／unknown 及開跑暫時值 partial 保持不變；stopped 改表示上述停止事實。GUI、workflow 與 recipe 的歸屬及終局規則見 [[0075]]、[[0062]]、[[0066]]。
 
 ### Experiment tag 與 adapter
 
@@ -162,7 +170,7 @@ FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 r
 
 ### G2：圖形生命週期
 
-停止 producer、最後有效 refresh、保留 Figure 與釋放呈現資源分開處理。取消請求不立即銷毀圖，既有 partial 正常返回仍可呈現最後資料。新操作不關閉使用者持有的舊圖。
+停止 producer、最後有效 refresh、保留 Figure 與釋放呈現資源分開處理。取消請求不立即銷毀圖。作者組成的結果正常返回後仍可呈現最後資料，前端不判斷它是否為 partial。新操作不關閉使用者持有的舊圖。
 
 Notebook backend adapter 處理顯示與 close，避免 cell 結束重複顯示，並提供明確釋放呈現資源的方式。close 對 widget 與保存的影響需依 backend 核對，不使用全域 close("all") 清理別人的圖。外部 Figure 的 adopt 不能撤回已發生的顯示副作用。
 
