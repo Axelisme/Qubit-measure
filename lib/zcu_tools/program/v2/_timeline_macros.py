@@ -19,6 +19,7 @@ from qick.asm_v2 import (
     Macro,
     OpenLoop,
     QickParam,
+    QickProgramV2,
     TimedMacro,
     Wait,
     WriteReg,
@@ -485,8 +486,8 @@ class TimelineSync(Delay):
         else:
             super().preprocess(prog)
 
-    def expand(self, prog) -> list[AsmInst]:
-        """Advance by the stored base and any nonnegative literal displacement."""
+    def expand(self, prog: QickProgramV2) -> list[AsmInst]:
+        """Return native reference advances for the preprocessed QICK program."""
         operations = super().expand(prog)
         if isinstance(self.t, RuntimeEnd) and self.literal_advance:
             operations.append(

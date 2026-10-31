@@ -154,7 +154,7 @@ class DeferredCoverage:
 
 @dataclass(frozen=True)
 class _CycleStorage:
-    """An immutable runtime operand: register name plus literal cycle offset."""
+    """A QICK register name or alias and its signed literal cycle displacement."""
 
     register: str
     offset: int = 0
@@ -172,8 +172,9 @@ class RuntimeEnd:
     this value. deferred records physical boundaries covered after an additional
     nonnegative advance; negative operations and reference debits drop it.
 
-    Constructor endpoints only seed a fresh independent source when expression
-    is omitted. Equal endpoints seed a constant. An explicit expression is
+    storage accepts a QICK register name for a zero-offset operand, or an
+    existing storage/displacement pair. Constructor endpoints only seed a fresh
+    independent source when expression is omitted. Equal endpoints seed a constant. An explicit expression is
     authoritative; copying a value must retain it rather than a register name.
     Final ends must be nonnegative; arithmetic intermediates may be signed32.
     """
