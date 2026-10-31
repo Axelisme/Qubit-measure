@@ -215,11 +215,11 @@ def _timeline_batch(
     template: TimelineTemplate,
     end_ns: NDArray[np.float64],
     path: _ReadoutPath,
-    memo: dict[int, EnvelopeSpec],
     *,
     time_base: TimeBase,
 ) -> TimelineBatch:
     """Separate microwave and fast-flux slots using the round's DC projection."""
+    memo: dict[int, EnvelopeSpec] = {}
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
     lines = _flux_lines(settings)
     drives, flux_tracks = [], []
@@ -475,7 +475,7 @@ def plan_template(
         source,
         _cavity_batch(
             _timeline_batch(
-                settings, joint, template, end_ns, path, memo, time_base=time_base
+                settings, joint, template, end_ns, path, time_base=time_base
             ),
             cavity_drives,
             partition.projective_reads,
