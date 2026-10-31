@@ -182,7 +182,8 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(
                     Pulse("probe_pulse", cfg.probe_pulse, gain=gain, freq=freq)

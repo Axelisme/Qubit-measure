@@ -92,7 +92,8 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                 initial_delay=cfg.initial_delay,
                 relax_delay=cfg.relax_delay,
             )
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse))
             builder.emit(Readout("readout", cfg.readout))

@@ -338,7 +338,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 )
                 builder.add_loop("ge", 2)
                 builder.add_loop("delay", len(lengths))
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.sync()
                 with builder.branch(by="ge", align_timeline=False) as cases:
                     with cases.case(1):

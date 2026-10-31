@@ -236,7 +236,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.fork("default", into="stark")
                 builder.emit(

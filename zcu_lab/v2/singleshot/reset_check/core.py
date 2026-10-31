@@ -184,7 +184,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             rabi_pulse = Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain)
             tested_reset = Reset("tested_reset", cfg.tested_reset)
             builder.add_loop("reset_sel", 3)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(rabi_pulse)
             builder.sync()
             with builder.branch(by="reset_sel", align_timeline=False) as cases:

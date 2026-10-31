@@ -167,7 +167,8 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             freq = builder.add_sweep("freq", freq_sweep)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse, freq=freq))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse))

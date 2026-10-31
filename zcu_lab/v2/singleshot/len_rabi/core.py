@@ -166,7 +166,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                     initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
                 builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()

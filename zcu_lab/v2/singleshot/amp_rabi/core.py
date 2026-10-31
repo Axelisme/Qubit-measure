@@ -206,7 +206,8 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             gain = builder.add_sweep("gain", cfg.gain)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()

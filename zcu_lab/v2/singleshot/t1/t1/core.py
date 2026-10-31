@@ -115,7 +115,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     )
 
     def _live_update(self, plots: Plots, lengths: NDArray[np.float64]):
-        figure, axes = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
+        figure, _ = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
+        axes = figure.axes
         lines = [live_line(ax, num_lines=3) for ax in axes]
         for ax in axes:
             ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
@@ -159,7 +160,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             )
             delay = builder.add_sweep("delay", cfg.delay)
             builder.add_loop("ge", 2)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.sync()
             with builder.branch(by="ge", align_timeline=False) as cases:
                 with cases.case(1):
@@ -199,7 +201,8 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                     auto_compress=False,
                 )
             )
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.sync()
             with builder.branch(by="ge", align_timeline=False) as cases:
                 with cases.case(1):

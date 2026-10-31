@@ -162,7 +162,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             gain = builder.add_sweep("gain", gain_sweep)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
             builder.emit(Readout("readout", cfg.readout))
