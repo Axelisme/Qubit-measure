@@ -158,6 +158,8 @@ class _AwaitChecker(ast.NodeVisitor):
         resolved = _imported_target(name, self.bindings)
         if _forbidden(resolved):
             return False
+        if resolved == "zcu_tools.experiment.run_core.run_core":
+            return True
         head, separator, _rest = name.partition(".")
         if separator and head in _RECEIVERS:
             return True
@@ -173,7 +175,8 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """Check repo-relative Python sources beneath zcu_lab using one uniform rule.
 
     Every async function is checked, whether decorated, called or unused. Await
-    accepts env/tab/session/scope/iteration calls or statically resolved lab function definitions,
+    accepts env/tab/session/scope/iteration calls, the exact lib run_core adapter
+    (zcu_tools.experiment.run_core.run_core), or statically resolved lab function definitions,
     whether defined with def or async def, including names re-exported by lab imports. Within async functions, direct asyncio
     calls and create_task/gather/wait_for/TaskGroup are rejected even without await.
     Other async contexts and iterators are not banned.
