@@ -126,16 +126,27 @@ def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
 
 
 @pytest.mark.parametrize(
-    ("companion_mhz", "retained"),
-    [(6009.599, 2), (6009.601, 1), (6080.0, 1)],
+    ("carrier_mhz", "companion_mhz", "retained"),
+    [
+        (6000.0, 6009.599, 2),
+        (6000.0, 6009.601, 1),
+        (6000.0, 6080.0, 1),
+        (7190.0, 7195.0, 2),
+        (7190.0, 7080.0, 1),
+        (2450.0, 2458.0, 2),
+    ],
 )
-def test_mux_channel_passband_keeps_only_in_channel_carriers(companion_mhz, retained):
+def test_mux_channel_passband_keeps_only_in_channel_carriers(
+    carrier_mhz, companion_mhz, retained
+):
     base = mux_template()
+    carrier = replace(base.events[0], frequency_mhz=np.full(2, carrier_mhz))
     companion = replace(base.events[1], frequency_mhz=np.full(2, companion_mhz))
+    window = replace(base.readouts[0], frequency_mhz=np.full((2, 1), carrier_mhz))
     plan = ftf_module.plan_template(
         settings(),
         snapshot(),
-        replace(base, events=(base.events[0], companion)),
+        replace(base, events=(carrier, companion), readouts=(window,)),
         readout=configuration(),
         time_base=TIME_BASE,
     )
