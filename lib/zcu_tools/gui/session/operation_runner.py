@@ -35,7 +35,7 @@ from zcu_tools.gui.session.operation_handles import (
     OperationHandles,
     OperationOutcome,
 )
-from zcu_tools.gui.session.ports import BackgroundExecutor, ExclusionGate, ProgressHub
+from zcu_tools.gui.session.ports import BackgroundError, BackgroundExecutor, ExclusionGate, ProgressHub
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class BgResult:
 
     ok: bool
     result: Any
-    error: Exception | None
+    error: BackgroundError | None
 
 
 # Injected by runner into each on_terminal call; policy must call it exactly once

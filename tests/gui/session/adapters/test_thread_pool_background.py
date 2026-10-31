@@ -85,6 +85,28 @@ def test_delivers_exact_error_on_owner_thread(make_executor, run_in_pool: bool) 
     assert executor.quiesce(30)
 
 
+@pytest.mark.parametrize("run_in_pool", [True, False])
+def test_keyboard_interrupt_is_delivered_unchanged_and_drained(make_executor, run_in_pool: bool) -> None:
+    scheduler = ManualOwnerScheduler()
+    executor = make_executor(scheduler)
+    error = KeyboardInterrupt("core interrupted")
+    delivered: list[tuple[BaseException, int]] = []
+
+    def work() -> None:
+        raise error
+
+    executor.submit(
+        work, run_in_pool=run_in_pool,
+        on_done=lambda value: pytest.fail(f"unexpected result: {value}"),
+        on_error=lambda exc: delivered.append((exc, threading.get_ident())),
+    )
+    _pump_until(scheduler, lambda: bool(delivered))
+    assert len(delivered) == 1
+    assert delivered[0][0] is error
+    assert delivered[0][1] == threading.get_ident()
+    assert executor.quiesce(30)
+
+
 def test_quiesce_waits_for_worker_and_delivery_ack(make_executor, monkeypatch) -> None:
     scheduler = RecordingOwner()
     executor = make_executor(scheduler)

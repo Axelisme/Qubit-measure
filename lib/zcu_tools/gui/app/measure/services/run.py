@@ -33,6 +33,7 @@ from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.operation_runner import (
     BgResult,
     ExclusionRequest,
@@ -266,7 +267,7 @@ class RunService:
         self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="cancelled"))
 
     def _run_failed(
-        self, op: _RunOperation, error: Exception, settle: SettleFn
+        self, op: _RunOperation, error: BackgroundError, settle: SettleFn
     ) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", op.tab_id, error)
         pane = self._state.get_tab(op.tab_id).run

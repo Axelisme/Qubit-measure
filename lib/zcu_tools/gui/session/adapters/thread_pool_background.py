@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, OwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError, OwnerScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class ThreadPoolBackgroundExecutor:
         work: Callable[[], Any],
         *,
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
         run_in_pool: bool = True,
     ) -> None:
         """Schedule work and deliver its outcome through the injected owner.
@@ -122,12 +122,12 @@ class ThreadPoolBackgroundExecutor:
         self,
         future: Future[Any],
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         terminal_callback: Callable[[], None]
         try:
             result = future.result()
-        except Exception as exc:  # delivered to owner callback
+        except (Exception, KeyboardInterrupt) as exc:  # delivered to owner callback
             logger.error("background worker failed", exc_info=exc)
             error = exc
 
