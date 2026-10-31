@@ -18,6 +18,7 @@ from zcu_tools.program.v2.modules.readout import (
     Readout,
 )
 from zcu_tools.program.v2.modules.reset import (
+    AbsResetCfg,
     BathReset,
     BathResetCfg,
     PulseReset,
@@ -32,6 +33,18 @@ from zcu_tools.program.v2.utils import is_qick_param
 from tests.program.v2._mux_support import native_mux
 
 ProgramKind = Literal["native", "builder", "legacy"]
+
+
+def _reset_module(cfg: AbsResetCfg, overrides: dict[str, float | QickParam | None], use_factory: bool):
+    if use_factory:
+        return Reset("reset", cfg, **overrides)
+    if isinstance(cfg, PulseResetCfg):
+        return PulseReset("reset", cfg, **overrides)
+    if isinstance(cfg, TwoPulseResetCfg):
+        return TwoPulseReset("reset", cfg, **overrides)
+    if isinstance(cfg, BathResetCfg):
+        return BathReset("reset", cfg, **overrides)
+    raise TypeError(f"Unsupported reset fixture: {type(cfg).__name__}")
 
 
 def _compile(kind: ProgramKind, modules: Sequence[Module], swept: bool):
@@ -98,7 +111,12 @@ def test_pulse_overrides_match_set_param_without_mutating_cfg(
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    actual = _compile(kind, [Pulse("drive", cfg, **{knob: value})], swept)
+    actual = _compile(kind, [Pulse("drive", cfg,
+        freq=value if knob == "freq" else None,
+        gain=value if knob == "gain" else None,
+        phase=value if knob == "phase" else None,
+        length=value if knob == "length" else None,
+    )], swept)
     expected = _compile(kind, [Pulse("drive", equivalent)], swept)
     _assert_same_compile(actual, expected)
     assert cfg.model_dump() == original
@@ -202,19 +220,14 @@ def test_reset_overrides_match_set_param_without_mutating_cfg(
 ):
     if variant == "pulse":
         cfg = PulseResetCfg(pulse_cfg=_pulse_cfg())
-        ctor = PulseReset
     elif variant == "two":
         cfg = TwoPulseResetCfg(pulse1_cfg=_pulse_cfg(), pulse2_cfg=_pulse_cfg(1))
-        ctor = TwoPulseReset
     else:
         cfg = BathResetCfg(
             cavity_tone_cfg=_pulse_cfg(),
             qubit_tone_cfg=_pulse_cfg(1),
             pi2_cfg=_pulse_cfg(2),
         )
-        ctor = BathReset
-    if use_factory:
-        ctor = Reset
     original = cfg.model_dump()
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
@@ -234,8 +247,8 @@ def test_reset_overrides_match_set_param_without_mutating_cfg(
     }
     overrides: dict[str, float | QickParam | None] = dict.fromkeys(names[variant])
     overrides[knob] = value
-    actual = _compile(kind, [ctor("reset", cfg, **overrides)], swept)
-    expected = _compile(kind, [ctor("reset", equivalent)], swept)
+    actual = _compile(kind, [_reset_module(cfg, overrides, use_factory)], swept)
+    expected = _compile(kind, [equivalent.build("reset")], swept)
     _assert_same_compile(actual, expected)
     assert cfg.model_dump() == original
 
@@ -260,7 +273,7 @@ def test_unsupported_waveform_length_sweep_is_rejected_without_mutation(family):
     pulse_cfg = _pulse_cfg()
     pulse_cfg.waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
     if family == "pulse":
-        cfg, ctor = pulse_cfg, Pulse
+        cfg = pulse_cfg
     elif family.startswith("readout"):
         cfg = PulseReadoutCfg(
             gen_ch=0,
@@ -271,13 +284,22 @@ def test_unsupported_waveform_length_sweep_is_rejected_without_mutation(family):
             ro_ch=0,
             ro_length=0.2,
         )
-        ctor = Readout if family.endswith("factory") else PulseReadout
     else:
         cfg = PulseResetCfg(pulse_cfg=pulse_cfg)
-        ctor = Reset if family.endswith("factory") else PulseReset
     original = cfg.model_dump()
     with pytest.raises(
         ValueError, match="Gauss waveform length must not be a QickParam"
     ):
-        ctor("module", cfg, length=QickSweep1D("point", 0.1, 0.3))
+        length = QickSweep1D("point", 0.1, 0.3)
+        if isinstance(cfg, PulseCfg):
+            Pulse("module", cfg, length=length)
+        elif isinstance(cfg, PulseReadoutCfg):
+            if family.endswith("factory"):
+                Readout("module", cfg, length=length)
+            else:
+                PulseReadout("module", cfg, length=length)
+        elif family.endswith("factory"):
+            Reset("module", cfg, length=length)
+        else:
+            PulseReset("module", cfg, length=length)
     assert cfg.model_dump() == original
