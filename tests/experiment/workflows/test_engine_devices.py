@@ -8,6 +8,7 @@ from typing import Self
 import pytest
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Engine, EnginePorts, Live, WorkflowEnv
 
@@ -41,18 +42,21 @@ class SnapshotDriver(FakeDevice):
         return super().get_info()
 
 
-def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
+def test_run_core_copies_cfg_and_records_pre_call_driver_values(rig: Rig) -> None:
     selected, unused = SnapshotDriver(), SnapshotDriver()
     selected.set_value(0.1)
     unused.set_value(0.2)
     rig.devices.drivers.update(flux=selected, unused=unused)
     callbacks: list[int] = []
+    original = Cfg(dev={"flux": "flux"})
+    records = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         assert (selected.reads, unused.reads) == (len(callbacks) + 1,) * 2
         assert context.devices == {"flux": selected, "unused": unused}
         selected.set_value(0.9)
         unused.set_value(0.8)
+        cfg.nested.append(3)
         callbacks.append(1)
         return 1
 
@@ -61,7 +65,7 @@ def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
         try:
             iteration = next(iterations)
             for _ in range(2):
-                completed(await iteration.run(acquire, Cfg(dev={"flux": "flux"})))
+                records.append((await run_core(iteration, acquire, original)).value)
             iteration.commit(Point(value=2))
             iteration = next(iterations)
         finally:
@@ -82,11 +86,13 @@ def test_each_env_run_reads_all_drivers_before_core_callback(rig: Rig) -> None:
         if event["kind"] == "operation_finished"
     ]
     assert journal_operations == operations
-    assert [operation["kind"] for operation in operations] == ["run", "run"]
-    assert operations[0]["device_snapshot"]["flux"]["value"] == 0.1
-    assert operations[0]["device_snapshot"]["unused"]["value"] == 0.2
-    assert operations[1]["device_snapshot"]["flux"]["value"] == 0.9
-    assert operations[1]["device_snapshot"]["unused"]["value"] == 0.8
+    assert [operation["kind"] for operation in operations] == ["call", "call"]
+    assert original.nested == [2]
+    assert records[0].cfg == records[1].cfg == Cfg(dev={"flux": "flux"}, nested=[2, 3])
+    assert records[0].metadata["device_snapshot"]["flux"]["value"] == 0.1
+    assert records[0].metadata["device_snapshot"]["unused"]["value"] == 0.2
+    assert records[1].metadata["device_snapshot"]["flux"]["value"] == 0.9
+    assert records[1].metadata["device_snapshot"]["unused"]["value"] == 0.8
 
 
 def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
