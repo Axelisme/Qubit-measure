@@ -46,6 +46,10 @@ class CycleAxis:
     Loop names identify correlated domains. Each unknown write/error gets a
     fresh object ID, even with a range hint. None is an unavailable endpoint.
     values is one-dimensional; no Cartesian proof grids are stored.
+    order is a nonnegative process-local creation index, assigned once and
+    immutable for this axis's lifetime. sort_key uses it for independent axes
+    instead of formatting expressions or comparing memory addresses. Named
+    correlated axes sort by identity, not order; order has no timing meaning.
     """
 
     name: str

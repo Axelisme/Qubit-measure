@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-31，fork／join 與 readout acquisition
+**Last updated:** 2026-11-01，s14 runtime event time
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 

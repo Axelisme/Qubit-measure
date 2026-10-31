@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-30，resolved loop sweep and table definitions
+**Last updated:** 2026-11-01，s14 output offsets and scheduling windows
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 

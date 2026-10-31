@@ -514,7 +514,20 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
 
 
 class EventTime(Macro):
-    """Write an event offset directly, reusing only a proven current s14 value."""
+    """Write one runtime event time to the transient s14 output register.
+
+    base names a captured runtime origin in integer tProc cycles. offset is an
+    integer tProc-cycle displacement or a RuntimeEnd holding that displacement.
+    expression proves the same base + offset event time in relative tProc
+    cycles; it is compile-time provenance, not another runtime calculation.
+
+    Translation compares expression with TimelineBook.output_time. A proven
+    constant difference updates s14 by that amount, or emits nothing for zero;
+    otherwise it loads base + offset. It then caches expression as output_time.
+    Native/raw s14 writes and branch flow invalidate that cache. Timeline event
+    self-copies leave it valid. s14 does not own persistent timeline storage:
+    consumers must capture ends before a later operation can overwrite it.
+    """
 
     def __repr__(self) -> str:
         # QICK eagerly formats macros even when debug logging is disabled.

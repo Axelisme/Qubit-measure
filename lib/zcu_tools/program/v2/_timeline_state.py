@@ -331,6 +331,12 @@ class LoopTimelineFrame:
     for the backedge proof, in relative integer cycles. advance is cumulative
     reference movement in cycles; debits retain its execution-position plans.
     written_channels distinguishes generated tails from untouched outer tails.
+    body_math starts empty and retains the prepared RuntimeMath plans emitted
+    in this frame's body, in preparation order. Loop exit may rewrite these plans
+    to s14-only pointer updates when their event offsets and duration are proven
+    constant. recording starts False and becomes True at the body boundary,
+    after the iteration-origin capture. Only the active innermost frame records
+    plans; popping the frame at exit ends recording before exit plans prepare.
     """
 
     parent: str

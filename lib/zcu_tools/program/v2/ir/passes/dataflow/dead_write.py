@@ -23,7 +23,10 @@ QICK Hardware Notes
 -------------------
 - Volatile registers (s0–s14) have hardware side effects on every write
   (s14 is the output offset; TIME updates a separate reference clock).
-  Their writes are NEVER eliminated regardless of liveness.
+  Their writes are retained regardless of liveness, except for unconditional
+  pure ``REG_WR r op -op(r)`` self-copies with no UF or other effects. The
+  ``RegWriteInst.is_pure_self_copy`` predicate defines this exception, including
+  s14. All other volatile writes remain protected.
 - The ``-uf`` flag on a RegWriteInst updates the condition-flag register as a
   side effect of the ALU operation.  Such instructions are treated as barriers:
   all pending shadow tracking is cleared because the flag state affects
@@ -45,9 +48,9 @@ Tracking uses canonical register names. Instructions with multiple destinations
 (like ``r_wave`` expanding to ``{w0, …, w5}``) are tracked precisely: the
 instruction is only marked dead if *all* of its destinations are shadowed by
 subsequent writes before any intervening reads. If any destination is read,
-the entire instruction is marked live. Hardware side-effects (volatile
-registers, status flag updates, or wave memory reads) always protect an
-instruction from elimination.
+the entire instruction is marked live. Except for the pure self-copy rule
+above, hardware side-effects from volatile writes, status flag updates or wave
+memory reads protect an instruction from elimination.
 """
 
 from __future__ import annotations
@@ -93,7 +96,11 @@ def _shadow_pending_writes(
 
 
 class DeadWriteEliminationPass(BlockChunkPass):
-    """Remove overwritten register writes in free BasicBlockNode chunks."""
+    """Remove overwritten writes and effect-free self-copies in free chunks.
+
+    Pure unconditional copies may be removed even for volatile registers.
+    Other volatile writes, conditional writes and flag effects remain protected.
+    """
 
     def _process_block(self, block: BasicBlockNode) -> bool:
         if block.disable_opt:
