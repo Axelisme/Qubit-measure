@@ -32,7 +32,9 @@ def stop_window(
 ) -> Iterator[tuple[MainWindow, bool]]:
     fails = bool(request.param)
 
-    def acquire(cfg: SampleCfg, *, context: RunContext) -> RunRecord[SampleCfg, SampleResult]:
+    def acquire(
+        cfg: SampleCfg, *, context: RunContext
+    ) -> RunRecord[SampleCfg, SampleResult]:
         context.scope.stop.event.wait()
         if fails:
             raise RuntimeError("Synthetic core failed after Stop")
@@ -99,6 +101,8 @@ def test_run_stop_displays_returned_result_or_original_core_error(
         )
         assert not driver.observe("Analyze").enabled
     else:
-        qt_until(lambda: driver.observe("Analyze").enabled, label="returned result available")
+        qt_until(
+            lambda: driver.observe("Analyze").enabled, label="returned result available"
+        )
         assert not driver.dialogs()
     driver.screenshot(tmp_path / "04-terminal.png")

@@ -407,7 +407,9 @@ class RunService:
                 result = adapter.run(cfg, context=context)
             # Metadata fixes the requests observed before acquisition returned.
             with operation.request_lock:
-                completion = "stopped" if operation.stop_requested.is_set() else "complete"
+                completion = (
+                    "stopped" if operation.stop_requested.is_set() else "complete"
+                )
             finished_at = datetime.now(UTC)
             if metadata is not None:
                 metadata = metadata.model_copy(

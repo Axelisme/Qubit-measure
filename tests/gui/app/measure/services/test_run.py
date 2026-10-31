@@ -632,7 +632,9 @@ def test_frontend_stop_preserves_core_return_or_failure(requested: bool, fails: 
     background.run_work()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == ("failed" if fails else "cancelled" if requested else "finished")
+    assert outcome.status == (
+        "failed" if fails else "cancelled" if requested else "finished"
+    )
     pane = state.get_tab(tab_id).run
     assert pane.result is (None if fails else record)
     assert pane.stop_requested is requested
