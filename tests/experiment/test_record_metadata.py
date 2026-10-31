@@ -182,7 +182,7 @@ def test_readonly_snapshot_roles_serialize_without_warnings() -> None:
 
 
 def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
-    metadata = historical_metadata()
+    metadata = historical_metadata().model_dump(mode="json")
     cfg = ConfigBase()
     result = Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j]))
     record = experiment.RunRecord(cfg, result, metadata=metadata)
@@ -191,8 +191,8 @@ def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     assert record.metadata is not metadata
     assert record.cfg is not cfg
     assert record.result is result
-    assert record.metadata.snapshot.roles == {"qubit": "Q1"}
-    assert record.metadata.snapshot is not metadata.snapshot
+    assert record.metadata["snapshot"] == metadata["snapshot"]
+    assert record.metadata["snapshot"] is not metadata["snapshot"]
 
 
 @pytest.mark.parametrize(
@@ -209,7 +209,7 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     record = experiment.RunRecord(
         ConfigBase(),
         Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j])),
-        metadata=metadata,
+        metadata=metadata.model_dump(mode="json"),
     )
     path = tmp_path / "run.h5"
     experiment.save_run(record, path, spec=declaration())
@@ -224,14 +224,14 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     np.testing.assert_allclose(container.vars["signal"].values, [0.001j, 0.002j])
     restored = experiment.load_run_with_metadata(path, spec=declaration())
     assert restored.metadata is not None
-    assert restored.metadata.project() == metadata
+    assert experiment.RunMetadata.model_validate(restored.metadata) == metadata
     assert restored.cfg == record.cfg
     np.testing.assert_allclose(restored.result.values, record.result.values)
     restored_metadata = experiment.restore_run(
         container, spec=declaration()
     ).record.metadata
     assert restored_metadata is not None
-    assert restored_metadata.project() == metadata
+    assert experiment.RunMetadata.model_validate(restored_metadata) == metadata
 
 
 @pytest.mark.parametrize("legacy_value", [[], [{"requested_rounds": 10}], "legacy"])
@@ -240,7 +240,7 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
 ) -> None:
     metadata = historical_metadata()
     record = experiment.RunRecord(
-        ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=metadata
+        ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=metadata.model_dump(mode="json")
     )
     path = tmp_path / "shot-time.h5"
     experiment.save_run(record, path, spec=declaration())
@@ -257,7 +257,7 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
     before = path.read_bytes()
     restored = experiment.load_run_with_metadata(path, spec=declaration())
     assert restored.metadata is not None
-    assert restored.metadata.project() == metadata
+    assert experiment.RunMetadata.model_validate(restored.metadata) == metadata
     assert read_run_metadata(path) == metadata
     assert path.read_bytes() == before
     resaved = tmp_path / "resaved.h5"
@@ -286,7 +286,7 @@ def test_native_save_requires_record_metadata(tmp_path: Path) -> None:
         ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
     )
-    assert record.metadata is None
+    assert record.metadata == {}
     with pytest.raises(ValueError, match="metadata"):
         experiment.save_run(record, tmp_path / "missing.h5", spec=declaration())
     assert list(tmp_path.iterdir()) == []
@@ -302,7 +302,7 @@ def test_native_load_defers_unused_metadata_but_use_projection_and_save_reject(
     record = experiment.RunRecord(
         ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
-        metadata=metadata,
+        metadata=metadata.model_dump(mode="json"),
     )
     path = tmp_path / "invalid-metadata.h5"
     experiment.save_run(record, path, spec=declaration())
@@ -316,9 +316,9 @@ def test_native_load_defers_unused_metadata_but_use_projection_and_save_reject(
     restored = experiment.load_run_with_metadata(path, spec=declaration())
     np.testing.assert_allclose(restored.result.values, [1j])
     assert restored.metadata is not None
-    assert restored.metadata.experiment == "test/metadata"
+    assert metadata_owner.RunMetadataContent(restored.metadata).experiment == "test/metadata"
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
-        getattr(restored.metadata, defect)
+        getattr(metadata_owner.RunMetadataContent(restored.metadata), defect)
     with pytest.raises(ValueError, match="metadata") as caught:
         read_run_metadata(path)
     assert str(path) in str(caught.value)
@@ -342,7 +342,7 @@ def test_native_save_validates_unchecked_metadata_updates(
     record = experiment.RunRecord(
         ConfigBase(),
         Signal(np.array([4000.0]), np.array([1j])),
-        metadata=metadata,
+        metadata=metadata.model_dump(mode="json"),
     )
     with pytest.raises(ValueError, match="metadata|completion"):
         experiment.save_run(record, tmp_path / "invalid.h5", spec=declaration())
