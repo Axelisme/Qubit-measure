@@ -21,6 +21,7 @@ from zcu_tools.program.acquisition import (
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_fakes import (
+    FakeModule,
     RecordingProgressBar,
     recording_pbar_factory,
 )
@@ -157,6 +158,52 @@ def run_entry(
         else sched.run_acquire
     )
     return method(producer, object(), rounds=2, options=direct)
+
+
+@pytest.mark.parametrize("decimated", [False, True])
+@pytest.mark.parametrize("callback_fails", [False, True])
+def test_pre_stopped_build_shortcut_notifies_once_without_build_or_retry(
+    decimated: bool, callback_fails: bool
+) -> None:
+    builds: list[object] = []
+    observed: list[bool] = []
+    cause = ValueError("stop observer failed")
+
+    def factory(soccfg: object, **kwargs: Any) -> Producer:
+        builds.append(soccfg)
+        return Producer(root, "complete")
+
+    def on_stop() -> None:
+        observed.append(True)
+        if callback_fails:
+            raise cause
+
+    options = AcquireOptions(retry=2, on_stop=on_stop)
+    root = Scope("run")
+    buffer = SignalBuffer((1,), dtype=np.float64)
+    buffer.set(np.array([19.0]))
+    with Schedule({}, buffer, scope=root) as sched:
+        builder = sched.prog_builder(object(), object(), program_cls=factory).add(
+            FakeModule("readout")
+        )
+        run = builder.build_and_acquire_decimated if decimated else builder.build_and_acquire
+        sched.set_stop()
+        if callback_fails:
+            with pytest.raises(ValueError, match="stop observer failed") as caught:
+                run(options=options)
+            assert caught.value is cause
+        else:
+            np.testing.assert_array_equal(run(options=options), [19.0])
+        assert observed == [True]
+        assert builds == []
+        np.testing.assert_array_equal(buffer.data, [19.0])
+        assert sched.outcome.status == "stopped"
+    # Reusing the options on a fresh run must not replay a previous stop.
+    with Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
+        result = run_entry("builder", sched, Producer(root, "complete"), options)
+        np.testing.assert_array_equal(result, [7.0])
+        assert observed == [True]
+        assert sched.outcome.status == "completed"
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
