@@ -103,7 +103,13 @@ def make_form(ctx: FormContext) -> Form[FreqInput]:
         FreqInput,
         # The union selector replaces core sampling_mode/homophasal after the sweep.
         field_order=(
-            "reset", "readout", "freq", "sampling", "reps", "rounds", "relax_delay",
+            "reset",
+            "readout",
+            "freq",
+            "sampling",
+            "reps",
+            "rounds",
+            "relax_delay",
         ),
         tree=initial_spectrum_tree(ctx),
     ).with_seed_metadata(pulse_readout_seed_metadata(gain=0.05))
