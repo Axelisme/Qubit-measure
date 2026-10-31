@@ -41,7 +41,7 @@ from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
-T_Cfg = TypeVar("T_Cfg")
+T_Cfg = TypeVar("T_Cfg", default=None)
 T_ChildCfg = TypeVar("T_ChildCfg")
 T_Env = TypeVar("T_Env", default=dict[str, Any])
 
@@ -145,11 +145,15 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     scope is the explicit parent. Entry attaches one schedule child, optionally
     labeled by name; exit releases it. Acquisition attaches its own child under
     that schedule. Buffer cfg/environment behavior is independent of scope names.
+    init_cfg is optional: None leaves cfg unset on this scope and its children.
+    A supplied cfg is deep-copied; existing positional cfg calls remain valid.
+    For cfg-free acquisition use Schedule(None, buffer, scope=...) or create a
+    root SignalBuffer with buffer(shape) inside Schedule(scope=...).
     """
 
     def __init__(
         self,
-        init_cfg: T_Cfg,
+        init_cfg: T_Cfg | None = None,
         *buffers: BufferProtocol,
         env: T_Env | None = None,
         scope: Scope,
@@ -222,6 +226,29 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
             raise ValueError("register_buffer requires at least one SignalBuffer")
         self._ensure_single_root_buffer_count(len(self._buffers) + len(buffers))
         self._buffers.extend(buffers)
+
+    def buffer(
+        self,
+        shape: int | Sequence[int],
+        *,
+        dtype: DTypeLike = np.complex128,
+        on_update: Callable[[NDArray[Any]], None] | None = None,
+        update_interval: float | None = 0.1,
+    ) -> SignalBuffer:
+        """Create and register the sole root acquisition buffer in this scope.
+
+        shape gives the array dimensions; dtype defaults to complex128. Slots
+        start at NaN. on_update receives the full live array, throttled by
+        update_interval seconds (None disables throttling). Return the buffer.
+        An inactive scope raises RuntimeError; an existing root buffer raises
+        ValueError. SignalBuffer propagates invalid shape/dtype errors.
+        """
+        self.ensure_active()
+        buffer = SignalBuffer(
+            shape, dtype=dtype, on_update=on_update, update_interval=update_interval
+        )
+        self.register_buffer(buffer)
+        return buffer
 
     def trigger_update(self, *, flush: bool = False) -> None:
         self.trigger_update_for(self, flush=flush)
@@ -759,7 +786,7 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
     name: str
     index: Hashable
     value: T_Value
-    cfg: T_Cfg
+    cfg: T_Cfg | None
     path: tuple[Hashable, ...]
 
     @property
