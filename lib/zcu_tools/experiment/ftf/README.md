@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-31, integer request clocks
+**Last updated:** 2026-10-31, mux PFB channel selection
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -306,8 +306,16 @@ is the first carrier; that carrier's phase stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
 ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
-shift. With multiple nonzero carriers, finite-window cross-tone leakage can
-still depend on the readout start. Pulse supports use absolute nearest-2-ns rounding, ties even.
+shift. Mux ADCs select incident carriers by the fixed profile's PFB channel
+before demodulation. The profile determines Nyquist folding, channel spacing and
+offset; its PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz passband.
+Different-channel carriers are excluded, including when only one carrier is
+incident. If an observed event has no in-channel carrier, planning raises
+`ValueError` naming the ADC, demodulation frequencies and PFB channel.
+An addressed single carrier retains its previous output bits. Carriers
+in the same channel still superpose, so their finite-window leakage can depend
+on readout start. This ideal selection does not model FIR response, filter
+transients or anti-alias filtering. Pulse supports use absolute nearest-2-ns rounding, ties even.
 The model owner supplies a round-DC `ModelSource`. Charge and small-signal flux
 controls evolve every template to readout start. Each drive line selects full charge n or the derivative of the existing
 fixed-coordinate Hamiltonian at that round's DC point. Omitted operator means
@@ -501,8 +509,13 @@ report-only maximum trace error. Raw evolution densities remain unchanged.
 It ignores drive-line controls at or after the terminal readout start. Earlier
 control portions, including controls after a herald, still evolve normally. Pulse readout requires exactly one active terminal incident pulse per
 point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
-a common pulse start. Every ADC observes the total shared-line field through its
-own demodulation, calibration, delay and sample grid. The physical resonator pair
+a common pulse start. Each mux ADC observes only the shared-line carriers in its
+PFB channel through its own demodulation, calibration, delay and sample grid.
+The rotating reference is chosen from the first terminal carrier before selection
+and stays common to every ADC. Logical events select independently when an ADC
+retunes between reads. Multiple grids within one event must address the same PFB
+channel; planning raises `ValueError` if they span different channels.
+The physical resonator pair
 is unchanged; tones are not assigned to individual resonators. Controls evolve
 to the common terminal readout start only. Multiple terminal readout blocks are
 not supported.
