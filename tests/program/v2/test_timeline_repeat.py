@@ -124,6 +124,43 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
         _program(body)
 
 
+@pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto", "nested-true"])
+def test_variable_repeat_forbids_reference_owner_advances(operation):
+    def body(prog):
+        with prog.repeat("r", 2, advance_ref=False):
+            if operation == "nested-true":
+                with prog.repeat("inner", 2, advance_ref=True):
+                    prog.delay_timeline(1 / 430.08)
+            else:
+                getattr(prog, operation)()
+
+    with pytest.raises(ValueError, match="delay_timeline.*advance_ref=True"):
+        _program(body)
+
+
+@pytest.mark.parametrize("advance_ref", [False, True])
+def test_repeat_modes_preserve_swept_parent_and_cross_loop_long_pulse(advance_ref):
+    def initialize(prog):
+        prog.add_loop("scan", 3)
+        prog.add_pulse(1, "flux", style="const", freq=1000, phase=0, gain=0.5, length=125 / 384)
+
+    def body(prog):
+        prog.fork("default", into=["drive", "external"])
+        prog.pulse(1, "flux", timeline="external")
+        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="drive")
+        with prog.timeline("drive"):
+            with prog.repeat("r", 2, advance_ref=advance_ref):
+                prog.pulse(0, "p0", timeline="drive")
+                prog.delay_timeline(7 / 430.08)
+            prog.pulse(0, "p0", timeline="drive")
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    shots = _shots(_program(body, initialize, reps=2))
+    assert [_waves(s) for s in shots] == [[0, t, t + 35, t + 70, 140] for t in [20, 30, 40]] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 6
+
+
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -986,10 +1023,11 @@ def test_repeat_guard_protects_module_emission_after_native_tail():
         _program(body, initialize)
 
 
-def test_repeat_cannot_shadow_an_existing_external_name():
+@pytest.mark.parametrize("advance_ref", [False, True])
+def test_repeat_cannot_shadow_an_existing_external_name(advance_ref):
     def body(prog):
         prog.fork("default", into="external")
-        with prog.repeat("r", 2, advance_ref=True):
+        with prog.repeat("r", 2, advance_ref=advance_ref):
             prog.fork("default", into="external")
 
     with pytest.raises(ValueError, match="new.*timeline"):
