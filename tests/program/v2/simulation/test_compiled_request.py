@@ -104,7 +104,8 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
             (event_a.gain, event_b.gain),
         ):
             np.testing.assert_array_equal(left.view(np.uint64), right.view(np.uint64))
-        envelope_a, envelope_b = event_a.envelopes[0], event_b.envelopes[0]
+        envelope_a = event_a.envelopes[int(event_a.envelope_index[0])]
+        envelope_b = event_b.envelopes[int(event_b.envelope_index[0])]
         assert envelope_a is not None and envelope_b is not None
         np.testing.assert_array_equal(
             original.time_base.ns(np.arange(len(envelope_a.values), dtype=np.int64) * envelope_a.sample_period_ticks).view(np.uint64),
