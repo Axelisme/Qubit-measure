@@ -211,7 +211,6 @@ def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquir
     assert not root.stop.is_set()
 
 
-
 @pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
 def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
     root = Scope("run")
@@ -225,14 +224,21 @@ def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
 
             def run() -> NDArray[np.float64]:
                 return sched.run_acquire_summed(
-                    producer, object(), processor=lambda iq: iq[0],
-                    rounds=2, options=sums_options,
+                    producer,
+                    object(),
+                    processor=lambda iq: iq[0],
+                    rounds=2,
+                    options=sums_options,
                 )
         else:
             iq_options: RunOptions[list[NDArray[np.float64]]] = RunOptions(
                 converter=lambda raw: raw[0], on_stop=lambda: observed.append(True)
             )
-            method = sched.run_acquire_decimated if mode == "decimated" else sched.run_acquire
+            method = (
+                sched.run_acquire_decimated
+                if mode == "decimated"
+                else sched.run_acquire
+            )
 
             def run() -> NDArray[np.float64]:
                 return method(producer, object(), rounds=2, options=iq_options)
