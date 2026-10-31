@@ -866,7 +866,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
     ) -> None:
-        """Send an instantaneous config at timeline end+t us, or native t if omitted.
+        """Send an instantaneous config at native t or timeline end+t us.
 
         None uses the scoped name, or native reference timing outside a scope.
         Native args are t=0, tag=None. A timeline end becomes the scheduled config

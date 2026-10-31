@@ -58,9 +58,7 @@ class _TimedOperation(v2.Module):
                 0, "ro", freq_reg="runtime_word", t=t, **self.placement
             )
         elif self.operation == "pulse_from_regs":
-            prog.pulse_from_regs(
-                0, "p", gain_reg="runtime_word", t=t, **self.placement
-            )
+            prog.pulse_from_regs(0, "p", gain_reg="runtime_word", t=t, **self.placement)
         else:
             relation = self.loader.lower_selected(prog)
             selection = SelectedPlayback(
@@ -70,9 +68,7 @@ class _TimedOperation(v2.Module):
                 relation,
             )
             if self.operation == "pulse_by_reg":
-                prog.pulse_by_reg(
-                    0, "word", t=t, selection=selection, **self.placement
-                )
+                prog.pulse_by_reg(0, "word", t=t, selection=selection, **self.placement)
             else:
                 prog.pulse_from_length_reg(
                     0,
@@ -140,7 +136,9 @@ def _compile_operation(frontend: str, operation: str, context: str):
         "pulse_from_length_reg",
     ],
 )
-@pytest.mark.parametrize("context", ["omitted", "none", "explicit", "outside", "nested", "restored"])
+@pytest.mark.parametrize(
+    "context", ["omitted", "none", "explicit", "outside", "nested", "restored"]
+)
 def test_timed_entry_points_select_scope_and_preserve_native_placement(
     frontend, operation, context
 ):
