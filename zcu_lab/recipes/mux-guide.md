@@ -181,8 +181,12 @@ only; it never writes component offset.
 
 The report retains completed Q rows in participant order, original index, Q,
 native flux_half/flux_integer/flux_period and per-Q writeback_applied.
-Expected analysis failure stops later analyses, returns analysis_failure and
-keeps earlier rows. Other failures propagate. Save runs once in the finalizer
+Fitting exceptions propagate to the author, who decides whether to catch them.
+An uncaught exception fails the recipe; the framework does not classify its cause.
+Descendant analysis cancellation without a result still returns
+`AnalysisResult.result=None`. That branch stops later analyses, reports the
+cancellation reason in analysis_failure and keeps earlier rows.
+Save runs once in the finalizer
 after acquisition returns, including analysis or writeback errors. Repeated
 Primary analysis replaces the previous pane, so Save contains raw maps and the
 owner's current completed artifacts, not a promise of one saved pane per Q.
