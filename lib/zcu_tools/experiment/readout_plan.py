@@ -205,21 +205,29 @@ def envelope_specs(
     modify cached specs, and discard it with that template. Returned immutable
     EnvelopeSpec values own their sample arrays. Invalid samples raise ValueError.
     """
-    specs = []
-    for envelope in event.envelopes:
-        key = id(envelope)
-        if key not in memo:
-            memo[key] = (
-                EnvelopeSpec("constant")
-                if envelope is None
-                else EnvelopeSpec(
-                    "sampled",
-                    samples=np.array(envelope.values, dtype=np.complex128),
-                    sample_ns=time_base.ns(np.arange(len(envelope.values), dtype=np.int64) * envelope.sample_period_ticks),
-                )
+    return tuple(_envelope_spec(envelope, memo, time_base) for envelope in event.envelopes)
+
+
+def _envelope_spec(
+    envelope: PulseEnvelope | None,
+    memo: dict[int, EnvelopeSpec],
+    time_base: TimeBase,
+) -> EnvelopeSpec:
+    key = id(envelope)
+    if key not in memo:
+        memo[key] = (
+            EnvelopeSpec("constant")
+            if envelope is None
+            else EnvelopeSpec(
+                "sampled",
+                samples=np.array(envelope.values, dtype=np.complex128),
+                sample_ns=time_base.ns(
+                    np.arange(len(envelope.values), dtype=np.int64)
+                    * envelope.sample_period_ticks
+                ),
             )
-        specs.append(memo[key])
-    return tuple(specs)
+        )
+    return memo[key]
 
 
 def drive_track(
@@ -326,9 +334,9 @@ def classify_readout(
             )
         )
         for index in np.flatnonzero(earlier):
-            drives[index].append(_readout_pulse(drive, rows[index], envelopes, time_base))
+            drives[index].append(_readout_pulse(drive, rows[index], envelopes, time_base, memo))
         for index in np.flatnonzero(terminal):
-            terminal_pulses[index].append(_readout_pulse(drive, rows[index], envelopes, time_base))
+            terminal_pulses[index].append(_readout_pulse(drive, rows[index], envelopes, time_base, memo))
     cavity_drives = []
     projective_reads = []
     for point, pulses in enumerate(
@@ -672,7 +680,7 @@ def readout_contents(
     offsets = np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks
     for index in representatives:
         pulses.append(
-            tuple(_readout_pulse(drive, row, envelopes, time_base) for row in values[index])
+            tuple(_readout_pulse(drive, row, envelopes, time_base, memo) for row in values[index])
         )
         grids.append(
             tuple(
@@ -701,6 +709,7 @@ def readout_contents(
 def _readout_pulse(
     drive: ReadoutDrive, row: NDArray[np.float64],
     envelopes: list[PulseEnvelope | None], time_base: TimeBase,
+    memo: dict[int, EnvelopeSpec],
 ) -> ReadoutPulse:
     start, duration, freq, phase, gain, envelope_index = row
     start_ticks, duration_ticks = int(start), int(duration)
@@ -709,12 +718,13 @@ def _readout_pulse(
     callback = None
     corners = ()
     if envelope is not None:
-        samples = np.asarray(envelope.values, dtype=np.complex128)
+        spec = _envelope_spec(envelope, memo, time_base)
+        samples = spec.samples
         if np.all(samples == samples[0]):
             amplitude *= samples[0]
         else:
             axis = np.arange(len(samples), dtype=np.int64) * envelope.sample_period_ticks
-            callback = PiecewiseLinearEnvelope(time_base.ns(axis), samples)
+            callback = PiecewiseLinearEnvelope(spec.sample_ns, samples)
             corners = tuple(time_base.ns(start_ticks + axis[(axis > 0) & (axis < duration_ticks)]))
     return ReadoutPulse(
         time_base.ns(start_ticks),

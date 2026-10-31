@@ -216,7 +216,7 @@ def _timeline_batch(
     end_ns: NDArray[np.float64],
     path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
-    time_base: TimeBase,
+    *, time_base: TimeBase,
 ) -> TimelineBatch:
     """Separate microwave and fast-flux slots using the round's DC projection."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
@@ -338,7 +338,7 @@ def plan_template(
     """Convert one C1 template to C3 evolution and C6 readout inputs.
 
     settings is the immutable FTF resource, snapshot supplies live fixed-unit DC
-    values, and template has point arrays in us/MHz/degrees. Support rounds to
+    values, and template has point arrays in ticks/MHz/degrees, interpreted with time_base. Support rounds to
     nearest 2 ns, ties even, without changing the common carrier origin. The
     latest active readout-generator block per point ends evolution. Earlier
     readout blocks with their own triggers are projective reads; untriggered
@@ -467,7 +467,7 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, path, memo, time_base),
+            _timeline_batch(settings, joint, template, end_ns, path, memo, time_base=time_base),
             cavity_drives,
             partition.projective_reads,
         ),
