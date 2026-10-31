@@ -18,7 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
@@ -26,14 +26,12 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    Delay,
-    ModularProgramV2,
+    TimelineBuilder,
     Pulse,
     Reset,
     SweepCfg,
     shot_sums,
     split_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -69,6 +67,12 @@ class HeraldingT2EchoCfg(ConfigBase):
     owner validates repetitions, rounds and classifier before taking shots.
     """
 
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    detune: float = 0.0
     reps: Annotated[int, FieldMeta(label="Reps")] = 1000
     rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
     acquire_retry: Annotated[int, FieldMeta(label="Acquire retry")] = Field(
@@ -80,12 +84,6 @@ class HeraldingT2EchoCfg(ConfigBase):
     relax_delay: Annotated[
         float, FieldMeta(label="Relax delay", unit="us", decimals=3)
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-    detune: float = 0.0
 
 
 def restore_result(data: GroupedLoadData[HeraldingT2EchoCfg]) -> HeraldingT2EchoResult:
@@ -109,7 +107,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                     axes=(
                         VariableAxisSpec.generated_arange("components", ""),
                         VariableAxisSpec.generated_arange("herald_states", ""),
-                        VariableAxisSpec("Time", "s", field_name="times", scale=1e-6),
+                        VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6),
                     ),
                     z=VariableZSpec(
                         field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -118,6 +116,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             ),
             result_type=HeraldingT2EchoResult,
             cfg_type=HeraldingT2EchoCfg,
+            cfg_schema_version="2.0",
             tag="heralding/t2echo",
             result_builder=restore_result,
         )
@@ -142,68 +141,54 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             )
         cfg = deepcopy(cfg)
         soccfg = context.soccfg
-        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg, "scaler": 0.5})
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg, "scaler": 0.5})
         true_detune = actual_detune(
-            cfg.length,
+            cfg.delay,
             detune=cfg.detune,
             gen_ch=cfg.pi2_pulse.ch,
             soccfg=soccfg,
             time_scaler=0.5,
         )
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Time (us)",
-            "Amplitude",
-            title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude", title=f"Heralded T2 Echo (detune={true_detune:.3f}MHz)")
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, t2echo_signal2real(split_sums(data)[1][..., 0]))
+
+        fig.show()
         buffer = SignalBuffer(
             (len(lengths), 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                lengths, t2echo_signal2real(split_sums(data)[1][..., 0])
-            ),
+            on_update=update,
         )
 
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            length_param = sweep2param("length", cfg.length)
-            herald_readout = PulseReadout("herald", cfg.readout)
-            signal_readout = PulseReadout("signal", cfg.readout)
-
-            # Unique readout names resolve the herald and signal shot-sum axes.
-            prog = ModularProgramV2(
-                soccfg,
-                modules=[
-                    Reset("reset", cfg.reset),
-                    herald_readout,
-                    Pulse("pi2_pulse1", cfg.pi2_pulse),
-                    Delay("t2e_delay1", delay=0.5 * length_param),
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    Delay("t2e_delay2", delay=0.5 * length_param),
-                    Pulse(
-                        "pi2_pulse2",
-                        cfg.pi2_pulse.with_updates(
-                            phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length_param
-                        ),
-                    ),
-                    signal_readout,
-                ],
-                sweep=[("length", cfg.length)],
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
+        with Schedule(None, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            delay = builder.add_sweep("delay", cfg.delay)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
+            builder.delay_timeline(0.5 * delay)
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.delay_timeline(0.5 * delay)
+            builder.emit(
+                Pulse("pi2_pulse", cfg.pi2_pulse,
+                      phase=cfg.pi2_pulse.phase + 360 * cfg.detune * delay)
             )
-            builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_summed(
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
                 prog,
+                context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                sums2signal_fn=np.copy,
-                options=AcquireOptions(
+                options=RunOptions(
+                    converter=np.copy,
                     retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
-                        buffer.at(),
-                        cfg.earlystop_snr,
+                        buffer.at(), cfg.earlystop_snr,
                         lambda data: t2echo_signal2real(split_sums(data)[1][..., 0]),
                     ),
                 ),

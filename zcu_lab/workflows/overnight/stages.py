@@ -1,6 +1,7 @@
 """Build overnight experiments from fixed pulses, settings and lifetime guesses."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from zcu_tools.experiment.scope import Scope
@@ -48,7 +49,7 @@ class T1Settings(FitSettings):
 
     reps/rounds are native acquisition averages. acquire_retry counts transient
     retries; earlystop_snr is a completed-round threshold, or None to disable.
-    uniform selects linear delays, otherwise the core concentrates the same
+    sampling=linear selects linear delays, sampling=decay lets the core concentrates the same
     window. sweep_factor times guess_us gives its endpoint. relax_factor times
     guess_us gives relaxation, floored at relax_min_us. Delays are in us.
     """
@@ -57,7 +58,7 @@ class T1Settings(FitSettings):
     rounds: int
     acquire_retry: int
     earlystop_snr: float | None
-    uniform: bool
+    sampling: Literal["linear", "decay"]
     sweep_factor: float
     relax_factor: float
     relax_min_us: float
@@ -199,7 +200,7 @@ async def measure_t1(
     """
     stop = settings.sweep_factor * guess_us
     cfg = T1Cfg(
-        uniform=settings.uniform,
+        sampling=settings.sampling,
         reps=settings.reps,
         rounds=settings.rounds,
         acquire_retry=settings.acquire_retry,
@@ -207,7 +208,7 @@ async def measure_t1(
         relax_delay=max(settings.relax_min_us, settings.relax_factor * guess_us),
         pi_pulse=pulses.pi,
         readout=pulses.readout,
-        length=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+        delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
     acquisition = await acquire_saved(
         scope,
@@ -276,7 +277,7 @@ async def measure_echo(
             gain=clamp_gain(pulses.pi.gain / 2, "echo.pi2", gain_clamped)
         ),
         readout=pulses.readout,
-        length=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+        delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
     acquisition = await acquire_saved(
         scope,

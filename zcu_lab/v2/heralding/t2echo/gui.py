@@ -89,13 +89,13 @@ def run(
     """
     if inp.detune_ratio == 0.0:
         detune = 0.0
-    elif inp.length.step == 0.0:
+    elif inp.delay.step == 0.0:
         raise ValueError(
             "cannot apply a nonzero detune_ratio on a degenerate "
-            "length sweep (expts < 2, step == 0)"
+            "delay sweep (expts < 2, step == 0)"
         )
     else:
-        detune = inp.detune_ratio / inp.length.step
+        detune = inp.detune_ratio / inp.delay.step
     cfg = HeraldingT2EchoCfg(
         reps=inp.reps,
         rounds=inp.rounds,
@@ -106,7 +106,7 @@ def run(
         pi2_pulse=inp.pi2_pulse,
         pi_pulse=inp.pi_pulse,
         readout=inp.readout,
-        length=inp.length,
+        delay=inp.delay,
         detune=detune,
     )
     result = HeraldingT2EchoExp().run(cfg, context=context)

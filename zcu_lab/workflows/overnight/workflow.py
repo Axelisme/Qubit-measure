@@ -82,7 +82,7 @@ class OvernightPlan(BaseModel):
 class OvernightTunables(BaseModel):
     """Set fixed delay grids, T1-based relaxation, averaging and fit acceptance.
 
-    uniform selects the native T1 linear delay sweep; False concentrates delays
+    sampling=linear selects the native T1 linear delay sweep; sampling=decay concentrates delays
     within the same start/stop window around the decay. Echo is unchanged.
     reps/rounds are native acquisition averages, not outer monitoring rounds.
     t1_guess_us/t2_guess_us are positive delay estimates in microseconds.
@@ -98,7 +98,7 @@ class OvernightTunables(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-    uniform: bool = Field(default=True, description="Uniform (linear) sweep for T1")
+    sampling: Literal["linear", "decay"] = Field(default="linear", description="T1 delay sampling")
     reps: int = Field(default=1000, ge=1, description="Native averages per acquisition")
     rounds: int = Field(default=10, ge=1, description="Native acquisition rounds")
     t1_guess_us: float = Field(
@@ -201,7 +201,7 @@ class OvernightPoint(BaseModel):
 def _t1_settings(current: OvernightTunables) -> T1Settings:
     """Copy this stage's settings from one captured tunables revision."""
     return T1Settings(
-        uniform=current.uniform,
+        sampling=current.sampling,
         reps=current.reps,
         rounds=current.rounds,
         acquire_retry=current.t1_acquire_retry,

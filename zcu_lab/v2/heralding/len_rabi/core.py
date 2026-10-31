@@ -6,7 +6,8 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import FieldMeta
+from pydantic import Field
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -17,7 +18,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
@@ -25,12 +26,13 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    ModularProgramV2,
+    TimelineBuilder,
+    TimelineProgramV2,
     Pulse,
     Reset,
+    SweepCfg,
     shot_sums,
     split_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -38,7 +40,6 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.twotone.rabi.len_rabi.core import (
     LenRabiAnalysis,
     LenRabiAnalyzeOptions,
-    LenRabiCfg,
     LenRabiExp,
     LenRabiResult,
     rabi_signal2real,
@@ -57,10 +58,44 @@ class HeraldingLenRabiResult:
     sums: NDArray[np.float64]
 
 
-class HeraldingLenRabiCfg(LenRabiCfg):
-    """Length Rabi settings restricted to a calibrated single pulse readout."""
+class HeraldingLenRabiCfg(ConfigBase):
+    """Length Rabi controls with a calibrated pulse readout."""
 
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    acquire_retry: Annotated[
+        int,
+        FieldMeta(
+            label="Acquire retry",
+            description="Retries after a transient acquisition failure.",
+        ),
+    ] = Field(default=0, ge=0)
+    earlystop_snr: Annotated[
+        float | None,
+        FieldMeta(
+            label="Early-stop SNR",
+            description="Stop averaging after a completed round reaches this SNR; None disables.",
+        ),
+    ] = Field(default=None, gt=0)
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 def restore_result(
@@ -91,7 +126,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 axes=(
                     VariableAxisSpec.generated_arange("components", ""),
                     VariableAxisSpec.generated_arange("herald_states", ""),
-                    VariableAxisSpec("Length", "s", field_name="lengths", scale=1e-6),
+                    VariableAxisSpec(label="Length", unit="s", field_name="lengths", scale=1e-6),
                 ),
                 z=VariableZSpec(
                     field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -129,104 +164,110 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 "Heralding requires a circle classifier with g/e/other; run GE Post"
             )
         cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
         lengths = sweep2array(
-            cfg.length, "time", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
+            cfg.length, "time", {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
-        hardware_sweep = cfg.qub_pulse.waveform.style in ["const", "flat_top"]
-        if not hardware_sweep:
-            lengths = np.unique(lengths)
+        if cfg.qub_pulse.waveform.style in ("const", "flat_top"):
+            return self._run_hardware(cfg, lengths, context=context)
+        return self._run_host(cfg, np.unique(lengths), context=context)
 
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
+    def _run_hardware(
+        self, cfg: HeraldingLenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
+    ) -> HeraldingLenRabiResult:
+        """Sweep editable const/flat-top length on the FPGA, summing rounds."""
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Signal")
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, rabi_signal2real(split_sums(data)[1][..., 0]))
+
+        fig.show()
         buffer = SignalBuffer(
-            (len(lengths), 3, 3),
-            dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                lengths, rabi_signal2real(split_sums(data)[1][..., 0])
-            ),
+            (len(lengths), 3, 3), dtype=np.float64,
+            on_update=update,
         )
         check_snr = snr_checker(
-            buffer.at(),
-            cfg.earlystop_snr,
+            buffer.at(), cfg.earlystop_snr,
             lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
         )
-        acquisition_buffer = (
-            buffer
-            if hardware_sweep
-            else SignalBuffer((cfg.rounds, len(lengths), 3, 3), dtype=np.float64)
-        )
-        with Schedule(cfg, acquisition_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            if hardware_sweep:
-                # Reset -> herald -> optional init -> swept drive -> signal.
-                cfg.qub_pulse.set_param("length", sweep2param("length", cfg.length))
-                herald_readout = PulseReadout("herald", cfg.readout)
-                prog = ModularProgramV2(
-                    soccfg,
-                    modules=[
-                        Reset("reset", cfg.reset),
-                        herald_readout,
-                        Pulse("init_pulse", cfg.init_pulse),
-                        Pulse("qubit_pulse", cfg.qub_pulse),
-                        PulseReadout("signal", cfg.readout),
-                    ],
-                    sweep=[("length", cfg.length)],
-                    reps=cfg.reps,
-                    relax_delay=cfg.relax_delay,
-                )
-                sched.prog_builder(soc, soccfg).run_program_summed(
-                    prog,
-                    rounds=cfg.rounds,
-                    processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                    sums2signal_fn=np.copy,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry, stop_condition=check_snr
-                    ),
-                )
-            else:
-                # Each host round scans all lengths before checking curve SNR.
-                programs: dict[float, ModularProgramV2] = {}
-                for _, rep in sched.repeat("round", cfg.rounds):
-                    for index, step in rep.scan("length", list(range(len(lengths)))):
-                        length = float(lengths[index])
-                        if length not in programs:
-                            step.cfg.qub_pulse.set_param("length", length)
-                            herald_readout = PulseReadout("herald", step.cfg.readout)
-                            prog = ModularProgramV2(
-                                soccfg,
-                                modules=[
-                                    Reset("reset", step.cfg.reset),
-                                    herald_readout,
-                                    Pulse("init_pulse", step.cfg.init_pulse),
-                                    Pulse("qubit_pulse", step.cfg.qub_pulse),
-                                    PulseReadout("signal", step.cfg.readout),
-                                ],
-                                reps=step.cfg.reps,
-                                relax_delay=step.cfg.relax_delay,
-                            )
-                            programs[length] = prog
-                        prog = programs[length]
 
-                        try:
-                            step.prog_builder(soc, soccfg).run_program_summed(
-                                prog,
-                                rounds=1,
-                                processor=shot_sums(
-                                    prog, [Classify("herald"), IQ("signal")]
-                                ),
-                                sums2signal_fn=np.copy,
-                                options=AcquireOptions(retry=cfg.acquire_retry),
-                            )
-                        finally:
-                            segments = acquisition_buffer.array
-                            completed = np.any(np.isfinite(segments), axis=0)
-                            combined = np.nansum(segments, axis=0)
-                            buffer.set(np.where(completed, combined, np.nan))
-                    if check_snr():
-                        break
-                viewer.update(
-                    lengths, rabi_signal2real(split_sums(buffer.array)[1][..., 0])
-                )
+        with Schedule(None, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            length = builder.add_sweep("length", cfg.length)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
+                prog, context.soc, rounds=cfg.rounds,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                options=RunOptions(
+                    converter=np.copy, retry=cfg.acquire_retry, stop_condition=check_snr
+                ),
+            )
+        return HeraldingLenRabiResult(lengths, buffer.array)
+
+    def _run_host(
+        self, cfg: HeraldingLenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
+    ) -> HeraldingLenRabiResult:
+        """Scan editable waveforms round-major, caching each length's program."""
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Signal")
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, rabi_signal2real(split_sums(data)[1][..., 0]))
+
+        fig.show()
+        buffer = SignalBuffer(
+            (len(lengths), 3, 3), dtype=np.float64,
+            on_update=update,
+        )
+        check_snr = snr_checker(
+            buffer.at(), cfg.earlystop_snr,
+            lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
+        )
+
+        acquisition_buffer = SignalBuffer(
+            (cfg.rounds, len(lengths), 3, 3), dtype=np.float64
+        )
+        with Schedule(None, acquisition_buffer, scope=context.scope) as sched:
+            programs: dict[float, TimelineProgramV2] = {}
+            for _, rep in sched.repeat("round", cfg.rounds):
+                for index, step in rep.scan("length", list(range(len(lengths)))):
+                    length = float(lengths[index])
+                    if length not in programs:
+                        builder = TimelineBuilder(
+                            context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                        )
+                        builder.emit(Reset("reset", cfg.reset))
+                        builder.emit(PulseReadout("herald", cfg.readout))
+                        builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                        builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
+                        builder.emit(PulseReadout("signal", cfg.readout))
+                        programs[length] = builder.build()
+                    prog = programs[length]
+                    try:
+                        step.run_acquire_summed(
+                            prog, context.soc, rounds=1,
+                            processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                            options=RunOptions(converter=np.copy, retry=cfg.acquire_retry),
+                        )
+                    finally:
+                        segments = acquisition_buffer.array
+                        completed = np.any(np.isfinite(segments), axis=0)
+                        combined = np.nansum(segments, axis=0)
+                        buffer.set(np.where(completed, combined, np.nan))
+                if check_snr():
+                    break
+            update(buffer.array)
         return HeraldingLenRabiResult(lengths, buffer.array)
 
     def analyze(

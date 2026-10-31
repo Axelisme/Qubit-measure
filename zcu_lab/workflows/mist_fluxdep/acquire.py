@@ -3,14 +3,14 @@
 from copy import deepcopy
 
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
     Pulse,
     Readout,
     Reset,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.mist.power_dep.single_trace.core import PowerDepCfg, PowerDepResult
@@ -35,27 +35,28 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
     gains = sweep2array(
         cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
     )
-    plot = live_line(context.plots, "mist/gain", "MIST gain (a.u.)", "MIST")
+    fig, ax = context.plots.subplots(num="mist/gain")
+    ax.set(xlabel="MIST gain (a.u.)", ylabel="MIST")
+    plot = live_line(ax)
+
+    @context.plots.on_plot_thread
+    def update(samples):
+        return plot.set(gains, mist_signal2real(samples))
+
+    fig.show()
     buffer = SignalBuffer(
         (len(gains),),
-        on_update=lambda samples: plot.update(gains, mist_signal2real(samples)),
+        on_update=update,
     )
-    with Schedule(cfg, buffer, scope=context.scope) as sched:
-        gain_sweep = sched.cfg.gain
-        sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", gain_sweep))
-        (
-            sched.prog_builder(
-                soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-            )
-            .add(
-                Reset("reset", sched.cfg.reset),
-                Pulse("pi_pulse", sched.cfg.init_pulse),
-                Pulse("mist_pulse", sched.cfg.probe_pulse),
-                Readout("readout", sched.cfg.readout),
-            )
-            .declare_sweep("gain", gain_sweep)
-            .build_and_acquire(
-                rounds=cfg.rounds, options=AcquireOptions(retry=cfg.acquire_retry)
-            )
+    with Schedule(None, buffer, scope=context.scope) as sched:
+        builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+        gain = builder.add_sweep("gain", cfg.gain)
+        builder.emit(Reset("reset", cfg.reset))
+        builder.emit(Pulse("init_pulse", cfg.init_pulse))
+        builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
+        builder.emit(Readout("readout", cfg.readout))
+        sched.run_acquire(
+            builder.build(), soc, rounds=cfg.rounds,
+            options=RunOptions(retry=cfg.acquire_retry),
         )
     return PowerDepResult(gains, buffer.array)

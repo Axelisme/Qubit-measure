@@ -17,6 +17,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -24,12 +25,11 @@ from zcu_tools.program.v2 import (
     IQ,
     Classify,
     GainSweep,
-    ModularProgramV2,
+    TimelineBuilder,
     Pulse,
     Reset,
     shot_sums,
     split_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -57,16 +57,16 @@ class HeraldingAmpRabiResult:
 class HeraldingAmpRabiCfg(ConfigBase):
     """Fixed-duration drive gain sweep with one calibrated pulse readout."""
 
-    reps: Annotated[int, FieldMeta(label="Reps")] = 1000
-    rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
-    relax_delay: Annotated[
-        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    reps: Annotated[int, FieldMeta(label="Reps")] = 1000
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
+    relax_delay: Annotated[
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+    ] = 1.0
 
 
 def restore_result(
@@ -97,7 +97,7 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
                 axes=(
                     VariableAxisSpec.generated_arange("components", ""),
                     VariableAxisSpec.generated_arange("herald_states", ""),
-                    VariableAxisSpec("Gain", "", field_name="amps"),
+                    VariableAxisSpec(label="Gain", unit="", field_name="amps"),
                 ),
                 z=VariableZSpec(
                     field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -132,42 +132,38 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         gains = sweep2array(
             cfg.gain, "gain", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
-        viewer = live_line(
-            context.plots, "measurement", "Pulse gain", "IQ magnitude (a.u.)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain", ylabel="IQ magnitude (a.u.)")
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(gains, np.abs(split_sums(data)[1][..., 0]))
+
+        fig.show()
         buffer = SignalBuffer(
             (len(gains), 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                gains, np.abs(split_sums(data)[1][..., 0])
-            ),
+            on_update=update,
         )
 
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            cfg.qub_pulse.set_param("gain", sweep2param("gain", cfg.gain))
-            herald_readout = PulseReadout("herald", cfg.readout)
-            signal_readout = PulseReadout("signal", cfg.readout)
-            # Unique readout names resolve the herald and signal shot-sum axes.
-            prog = ModularProgramV2(
-                soccfg,
-                modules=[
-                    Reset("reset", cfg.reset),
-                    herald_readout,
-                    Pulse("init_pulse", cfg.init_pulse),
-                    Pulse("qubit_pulse", cfg.qub_pulse),
-                    signal_readout,
-                ],
-                sweep=[("gain", cfg.gain)],
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
-            )
-            builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_summed(
+        with Schedule(None, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            gain = builder.add_sweep("gain", cfg.gain)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain))
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
                 prog,
+                context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                sums2signal_fn=np.copy,
+                options=RunOptions(
+                    converter=np.copy,
+                ),
             )
 
         return HeraldingAmpRabiResult(gains, buffer.array)
