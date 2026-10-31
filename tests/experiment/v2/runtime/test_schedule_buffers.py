@@ -87,7 +87,9 @@ def test_schedule_array_writes_reject_shape_mismatch_without_update(
 
 @pytest.mark.parametrize("use_step", [False, True], ids=["root", "child"])
 @pytest.mark.parametrize("scalar", [False, True], ids=["array", "scalar"])
-def test_schedule_array_writes_accept_exact_shapes(use_step: bool, scalar: bool) -> None:
+def test_schedule_array_writes_accept_exact_shapes(
+    use_step: bool, scalar: bool
+) -> None:
     storage = np.full(() if scalar else (2,), np.nan)
     buffer = RootUpdateRecordingBuffer([{"signals": storage}] if use_step else storage)
     value = 7.0 if scalar else np.array([7.0, 8.0])
