@@ -167,15 +167,15 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
 
 ## Stop 與 Retry
 
-- `Scope` 擁有具名父子鏈與選擇器，`StopSignal` 擁有向下停止與完成事實。Caller 每次 run 建立根 Scope，
+- `Scope` 擁有具名父子鏈與選擇器，`StopSignal` 只擁有向下停止請求與不解析的 reason。Caller 每次 run 建立根 Scope，
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
-- Child release 將第一個 error 與 partial 完成事實交到父 token，不設父 event。交付在 operation 層截止。GUI 的 run root 收到 Schedule error 後仍可用 `raise_if_error()` 轉成 failure。已完成 child 從 active tree 移除，不隨 run 長度累積。
+- Child release 只解除父子關係，不上交停止、資料完整度或錯誤。已完成 child 從 active tree 移除，不隨 run 長度累積。
 - `Schedule.__exit__` 與 AcquisitionRunner 都不接住 `KeyboardInterrupt`。Scan/repeat body、producer 與 converter 的中斷原樣傳出，不 retry，也不轉成 interrupted outcome。已寫入的 buffer 資料保留，但 caller 必須自己決定是否攔截例外並回傳。Notebook 的 SIGINT 合作停止與時限由 [Notebook adapter](../../../notebook/README.md#共用實驗入口) 擁有。
 - `Schedule` 的 scan/repeat 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   composite `cancel_flag` 傳給 program acquire：它讀取 acquire child 的 external
-  stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome` 或 partial 完成事實。
-  `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
-  仍使用 `clear_stop()` 清除 stop flag 與 transient error cause。
+  stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome`。
+  `StopSignal` 對外提供 external cancel flag contract：`is_set()` / `set()`；
+  `clear_stop()` 只清本 token 的 event，保留 reason，不清子孫。
 - `ProgramBuilder` 的 data-driven early stop 走 `AcquireOptions(stop_condition=...)`：internal
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
@@ -192,9 +192,12 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
 - `StopSignal.set(reason=None)` 保存並向下轉交不解析的停止文字，`reason` 屬性供作者讀取。`Scope.cancel(selector, reason=None)` 將文字傳給選中的 subtree。
-- 既有 `StopSignal` error API 仍攜帶第一個 `failed` cause。Schedule 結束時將 cause 交給 RunContext 的 token，供 caller 診斷。
-  一般 producer failure 直接傳播，不等 consumer 呼叫 `raise_if_error()`，也不轉成 workflow 的 `Failed` 回傳值。
-  Notebook 不發布失敗當次的 record。GUI 將例外交給既有 operation failure 收尾。`stopped` 不記錄 error cause。
+- 一般 producer failure 直接傳播，不轉成 workflow 的 `Failed` 回傳值。錯誤原因只保留在作者工具的 Schedule outcome，不寫入 StopSignal。
+  Notebook 不發布失敗當次的 record。GUI 將例外交給 operation failure 收尾。
+- `AcquireOptions.on_stop` 與 `RunOptions.on_stop` 是選用的無參數作者 callback。單次 acquire 因外部停止而合作返回時呼叫一次，包含起跑前已停止與首輪前取消。
+  Callback 在 acquire scope release、progress cleanup 後同步執行，早於 ndarray 返回。純 data stop、producer／converter／update 例外與 KeyboardInterrupt 不呼叫。
+  Callback 自己的例外原樣傳出，不 retry、不改 Schedule outcome。停止觀察只存於該次呼叫，不污染重用 options 的下一次 acquire，也不交給前端。
+  Acquire-only cancel 不改 Schedule outcome 或父 stop；作者可用 callback 記自己的分類，不能用父 stop 判斷 acquire 是否被取消。
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry。
 - 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。

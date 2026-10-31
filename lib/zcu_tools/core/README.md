@@ -1,12 +1,12 @@
 # zcu_tools.core — shared stateless contracts
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。跨模組共用的無狀態資料與格式契約。
 
 `core` 提供 resources 與 program 共用的無狀態契約。Repo 內只依賴 utils，不持有 GUI、資源 scope 或硬體。
 
-- `script_protocol` 定義 Question／Answer 與 recipe 使用的 OperationStatus。Question 共用 answer model 推導、wire 驗證與 evidence-dependent validation。Recipe 與 workflow 共用 async host，由 host 持有 Future 與控制狀態。Recipe 的 Analyze／Ask 公開 await 回非 Optional，無結果取消由便利層的普通 RecipeCancelled 表達。Workflow 的 Completed／Failed 與 OperationFacts 由 experiment.workflows 擁有，合作中止以 partial_result 表示。
+- `script_protocol` 定義 Question／Answer 與 recipe 使用的 OperationStatus。Question 共用 answer model 推導、wire 驗證與 evidence-dependent validation。Recipe 與 workflow 共用 async host，由 host 持有 Future 與控制狀態。Recipe 的 Analyze／Ask 公開 await 回非 Optional，無結果取消由便利層的普通 RecipeCancelled 表達。Workflow 使用的 Completed、作者分析用 Failed 與 OperationFacts 由 experiment.operations 擁有。Completed.stop_requested 記錄本次 operation 的停止請求，不判斷資料完整度；core 例外原樣傳出。
 - `complex_codec` 擁有唯一 `{"__complex__": [re, im]}` scalar 格式，供 GUI 與 resources 共用。Schema 決定有限值限制，expression 決定數值語意。Resources view 將 scalar tag 讀為 native complex，手動 scalar 寫入編回 tag。Snapshot、document_value、document_fields 與 ParameterContext 等 non-view 路徑保留 raw tag。
 - `element.ElementIdentity` 是 captured actual、estimate 與 writeback candidate 共用的原始 list index／同次 name。它只作報告標識，不解析 alias、participants 或寫入目的地。
 - `numeric_scalar.normalize_numpy_scalar` 將單一 numpy floating／integer scalar 投影為 Python float／int，供 AnalysisDocument 與 AcceptedWrite 共用。它不遞迴；finite 與 strict JSON 驗證留在各邊界。

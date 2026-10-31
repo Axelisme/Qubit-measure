@@ -231,7 +231,9 @@ class AcquisitionRunner:
         and final raw payload to the slot shape. options selects retry, progress
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
-        Cancellation records the Schedule outcome and returns partial data.
+        External cancellation returns partial data; only cancellation of the
+        Schedule itself records its stopped outcome. options.on_stop observes
+        cancellation after scope release and progress cleanup.
         KeyboardInterrupt propagates unchanged without retry. Producer failures
         use the explicit retry budget, including zero
         retries, then propagate unchanged. A concurrent stop prevents retry but

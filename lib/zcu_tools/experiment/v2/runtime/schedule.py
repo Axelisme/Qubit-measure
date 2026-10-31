@@ -194,8 +194,8 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         Callback errors propagate, but the scope still closes. Skip the flush
         when the body raises so a callback cannot replace the body exception.
         Propagate every body exception unchanged, including KeyboardInterrupt.
-        Release the child token on every exit, handing completion facts to its
-        parent without setting the parent event.
+        Release the child token on every exit, detaching it without changing
+        the parent or reporting completion facts.
         """
         try:
             if exc is None:
@@ -429,7 +429,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         """Reset a failed outcome and stop bit if another attempt remains.
 
         attempt is the zero-based failed attempt and retry is the allowed retry
-        count. Return False without resetting stopped/interrupted outcomes or an
+        count. Return False without resetting stopped outcomes or an
         exhausted budget. The builder checks external stop before marking failed.
         Partial buffer data is retained for the next attempt.
         """

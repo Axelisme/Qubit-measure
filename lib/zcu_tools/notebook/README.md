@@ -28,7 +28,7 @@ Caller 從實驗類別建立 options，例如 `T1Exp.Options(...)` 或 `GE_Exp.P
 
 在 main thread 執行 `core.run` 期間，Notebook 暫時接管 SIGINT。第一次中斷以帶 reason 的 StopSignal 請求停止，並啟動計時器。作者迴圈看到 stop 後可回傳已取得的資料。第二次中斷或計時器到期會拋出 KeyboardInterrupt。`NotebookAdapter(interrupt_timeout=10.0)` 的具名參數設定等待秒數，必須是正的有限值，否則建構時拋 ValueError。直接建立 NotebookExperiment 時也可提供同一參數。離開 core.run 時先取消並排空計時器，再還原先前的 SIGINT handler。非 main thread 執行不接管 signal。
 
-Core 正常回傳就發布 RunRecord，不解析 StopSignal 的 error 或 partial facts。Completion 只有在 adapter 於本次 run 送過停止請求時才記 stopped，否則記 complete。逃出 core.run 的例外原樣傳出，不發布當次 record，並保留上一筆 record 與 acquisition evidence。
+Core 正常回傳就發布 RunRecord。StopSignal 只表達停止請求，不攜帶錯誤或資料完整度。Completion 只有在 adapter 於本次 run 送過停止請求時才記 stopped，否則記 complete。逃出 core.run 的例外原樣傳出，不發布當次 record，並保留上一筆 record 與 acquisition evidence。
 
 `NotebookAdapter()(core)` 可離線 load／analyze。同步 analyze 的 options 仍必傳，只有 source 可以省略。`analyze(options, *, source=None)` 與 `save(destination, *, source=None, ...)` 預設最近成功 run／load 的 last_run，沒有 record 就拒絕。處理歷史資料時顯式傳 source；分析歷史來源不改 last_run，也不改下一次 save 的預設來源。Save 只處理本機路徑，unique=True 才選新檔名並回傳實際 Path；`Experiment[Result, Cfg]` 宣告核心契約。包裝層將 `core.AXES_SPEC` 交給外部 `save_labber`；cfg 要求與禁止覆寫由 persistence 函式守住。
 

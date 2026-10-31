@@ -96,7 +96,7 @@ Stage 遇到 unexpected exception 不回傳部分結果，point 只保留主迴�
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
 在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。
-完整收集式範例與 Failed 指引見 [教學](../tutorial/05-workflow.md)。
+完整收集式範例、例外恢復與作者分析 Failed 指引見 [教學](../tutorial/05-workflow.md)。
 
 `iteration.dir` 第一次使用才建立目錄。Nested child 在該目錄下鏡射 label 與 sequence。
 `scope.commit(record)` 寫該 scope 的 record.json，第二次提交會 raise。

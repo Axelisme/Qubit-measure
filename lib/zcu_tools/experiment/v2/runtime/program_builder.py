@@ -170,8 +170,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
 
     All acquire methods write each converted completed round before checking
     stop_condition, then write the final converted result. Data-driven stop is
-    acquire-local; external stop and interrupt return the slot's partial live
-    array (unwritten slots stay NaN) and record the Schedule outcome. Producer
+    acquire-local. External cancellation returns the slot's partial live array
+    (unwritten slots stay NaN); cancellation of the Schedule itself also records
+    its stopped outcome. KeyboardInterrupt propagates unchanged. on_stop observes
+    external cancellation after scope/progress cleanup as defined by AcquireOptions.
+    Producer
     failures propagate unchanged after the explicit retry budget is exhausted;
     concurrent cancellation prevents retry but does not suppress a failure.
     Progress bars close before return or propagation.
