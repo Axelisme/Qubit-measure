@@ -232,23 +232,6 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeli
     assert [s.body_end_cycle - s.start_cycle for s in result] == [max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1)) for row, start in zip(expected, starts, strict=True)]
 
 
-def test_branch_discards_unjoined_local_end_before_next_pulse() -> None:
-    def body(prog: TimelineProgramV2) -> None:
-        prog.fork("default", into="p")
-        with prog.branch(by="scan", align_timeline=True) as branch:
-            with branch.case(1):
-                prog.delay_timeline(20 / 430.08, timeline="p")
-                prog.fork("p", into="local")
-                prog.delay_timeline(80 / 430.08, timeline="local")
-        prog.pulse(0, "p0", timeline="p")
-
-    result = shots(program(body))
-    # Only p's case ends 0/20/0 participate; the unjoined local end 100 expires.
-    assert [waves(shot) for shot in result] == [[20]] * 3
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [48] * 3
-
-
-
 @pytest.mark.parametrize("explicit_join", [False, True])
 @pytest.mark.parametrize("align_timeline", [True, False])
 def test_branch_local_forks_are_discarded_unless_explicitly_joined(explicit_join, align_timeline):
@@ -579,11 +562,12 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
 
 @pytest.mark.parametrize("align_timeline", [True, False])
 @pytest.mark.parametrize("overwrite_before_branch", [False, True])
-def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline, overwrite_before_branch):
+@pytest.mark.parametrize("external_cycles", [100, 2])
+def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline, overwrite_before_branch, external_cycles):
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")
-        prog.delay_timeline(100 / 430.08, timeline="external")
+        prog.delay_timeline(external_cycles / 430.08, timeline="external")
         with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(1 / 430.08)
         prog.fork("external", into="working")
@@ -598,8 +582,12 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline
         prog.pulse(0, "p0", timeline="working")
 
     result = shots(program(body))
-    # Repeat advanced 3. Working still ends at absolute 100 at branch entry.
-    assert [waves(s) for s in result] == ([[115]] * 3 if align_timeline else [[105], [100], [115]])
+    # Repeat advances 3. External100 leaves97; external2 floors to0.
+    if external_cycles == 100:
+        expected = [[115]] * 3 if align_timeline else [[105], [100], [115]]
+    else:
+        expected = [[18]] * 3 if align_timeline else [[8], [3], [18]]
+    assert [waves(s) for s in result] == expected
 
 
 class OverwriteTime(Macro):
