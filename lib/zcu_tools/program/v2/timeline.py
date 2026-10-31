@@ -123,6 +123,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._building_body = False
         self._timeline_default: str | None = None
         self._branch_serial = 0
+        self._branch_cases: list[BranchCases] = []
         self._emission_serial = 0
         self._emission_scope: tuple[int, int] | None = None
         super().__init__(*args, **kwargs)
@@ -723,7 +724,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         cases = BranchCases(self)
         name = f"_timeline_branch_{self._branch_serial}"
         self._branch_serial += 1
-        yield cases
+        start = len(self.macro_list)
+        self._branch_cases.append(cases)
+        try:
+            yield cases
+        finally:
+            self._branch_cases.pop()
+        if len(self.macro_list) != start:
+            raise ValueError("move unconditional branch actions before or after the with block")
         self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name, align_timeline=align_timeline))
 
     @contextmanager
@@ -753,6 +761,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         and differing Branch advances are supported. Native delay_reg_auto inside
         the body raises ValueError; it is not a timeline duration operation.
         """
+        if any(cases.active for cases in self._branch_cases):
+            raise ValueError("move Repeat outside the branch: its entry and backedge advance reference")
         selected = timeline if timeline is not None else self._timeline_default
         timeline = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)

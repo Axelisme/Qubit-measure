@@ -969,6 +969,8 @@ class TimelineBranch(Macro):
     def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
+            if isinstance(macro.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)):
+                raise ValueError("branch cases cannot advance reference; use delay_timeline instead")
             macro.preprocess(prog)
         return prepared
 
