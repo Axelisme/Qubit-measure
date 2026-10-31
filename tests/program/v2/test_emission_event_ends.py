@@ -327,9 +327,23 @@ def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
         prog.emit(pulse)
         prog.emit(tail)
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([pulse, tail], body, lambda prog: prog.add_loop("scan", 3))
+    prog = _program([pulse, tail], body, lambda prog: prog.add_loop("scan", 3))
+    # QICK resolves 39,77,115 generator clocks. At clock ratio28/25,
+    # W=287 gives ceil(n*287/256)=44,87,129, not affine44,87,130.
+    assert prog.get_pulse_param("drive", "total_length", as_array=True) * 384 == (
+        pytest.approx([39, 77, 115])
+    )
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [[0, 44], [0, 87], [0, 129]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        88,
+        131,
+        173,
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [97, 140, 182] * 2
+    assert prog.compile_datamem() is None
+    prog.compile()
+    assert shots(prog) == result
 
 
 @pytest.mark.parametrize("descending", [False, True])
@@ -347,9 +361,18 @@ def test_nonaffine_post_and_repeated_emissions_keep_exact_same_channel_spacing(
         prog.emit(pulse)
         prog.emit(pulse)
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
+    prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
+    # Ends43.68,86.24,128.8 plus scalar.086016 or swept.086016/.136016/.186016.
+    # Descending playback reverses these ends, not the increasing post.
+    ends = [129, 87, 44] if descending else [44, 87, 129]
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [[0, end] for end in ends] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * end for end in ends
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * end + 9 for end in ends
+    ] * 2
 
 
 def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
@@ -370,9 +393,21 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
         with prog.repeat("outer", 2), prog.repeat("inner", 2):
             prog.emit(pulse)
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([pulse], body, initialize)
+    prog = _program([pulse], body, initialize)
+    # Generator grids39/40/41,77/78/79,115/116/117 at ratio28/25.
+    # Each native sweep point executes four k=8 local bodies, not four
+    # advances of a shared sequential dmem cursor.
+    ends = [44, 45, 46, 87, 88, 89, 129, 130, 132]
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [
+        [0, end, 2 * end, 3 * end] for end in ends
+    ] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        4 * end for end in ends
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        4 * end + 9 for end in ends
+    ] * 2
 
 
 @pytest.mark.parametrize("swept_post", [False, True])
@@ -446,9 +481,16 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
         prog.join("drive", "other", into="default")
         prog.emit(tail)
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([pulse, tail, loader], body, lambda prog: prog.add_loop("scan", 3))
+    prog = _program([pulse, tail, loader], body, lambda prog: prog.add_loop("scan", 3))
+    result = shots(prog)
+    # max(0,44/87/129-50) versus max(0,60/20/100-50) is10/37/79.
+    assert [waves(shot) for shot in result] == [[0, 60], [0, 87], [0, 129]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        104,
+        131,
+        173,
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [113, 140, 182] * 2
 
 
 def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
@@ -521,9 +563,20 @@ def test_crossing_fractional_generator_and_adc_ends_add_post_before_ceil():
         prog.emit(readout)
         prog.emit(tail)
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
+    result = shots(
         _program([readout, tail], body, lambda prog: prog.add_loop("scan", 3))
+    )
+    # ADC61 clocks gives85.4 tProc cycles. Generator44.8/87.36/129.92
+    # crosses that end. Add post.086016 before rounding:86/88/131.
+    # Premature conversion of this sweep rounds start45 and step42;
+    # adding post to that integer max instead gives130 at the last point.
+    assert [waves(shot) for shot in result] == [[0, 0, 86], [0, 0, 88], [0, 0, 131]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        130,
+        132,
+        175,
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [139, 141, 184] * 2
 
 
 @pytest.mark.parametrize("kind", ["two", "bath"])
@@ -542,13 +595,20 @@ def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
         )
     ).build("reset")
 
-    # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program(
-            [reset],
-            lambda prog: prog.emit(reset),
-            lambda prog: prog.add_loop("scan", 3),
-        )
+    prog = _program(
+        [reset], lambda prog: prog.emit(reset), lambda prog: prog.add_loop("scan", 3)
+    )
+    result = shots(prog)
+    # Cavity ends43.68/86.24/128.8 plus.086016 =>44/87/129.
+    # Qubit ends86.24+.086016 =>87. Pi2 placement is the ceiled
+    # cavity boundary; length22.4+.086016 adds23, once per placement.
+    cycles = [[0, 0]] * 3 if kind == "two" else [[0, 0, end] for end in [44, 87, 129]]
+    ends = [87, 87, 129] if kind == "two" else [87, 110, 152]
+    assert [waves(shot) for shot in result] == cycles * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        end + 9 for end in ends
+    ] * 2
 
 
 @pytest.mark.parametrize("origin", [0, 40])
