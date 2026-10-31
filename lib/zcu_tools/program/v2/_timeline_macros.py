@@ -389,6 +389,25 @@ class TimelineAdvance(TimedMacro):
 
 
 class TimelineSync(Delay):
+    """Advance reference to a selected end and debit the tracked remaining ends.
+
+    Args:
+        book: The program's TimelineBook, which supplies relative ends and
+            records their remaining times after reference advances.
+        timeline: A declared timeline name to select its end, or None to select
+            the maximum of all timeline ends via book.maximum().
+        sources: None keeps the timeline selection. A tuple of declared names
+            instead selects their maximum with zero, replacing that selection
+            rather than adding to it; an empty tuple selects zero. The initial
+            timeline selection is still resolved before this override.
+        close_adc: False leaves ADC selection unchanged. True lets the existing
+            all-timeline shot closure include actual ADC ends with no compile-time
+            upper bound. It only affects book.maximum() when timeline is None;
+            sources, when supplied, still overrides the selected end. This flag
+            is for shot closure, not ordinary author sync. Finite ADC tails keep
+            the constant shell WAIT and its slack checks.
+    """
+
     def __init__(
         self,
         book: TimelineBook,

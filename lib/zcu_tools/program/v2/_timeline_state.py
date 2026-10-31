@@ -791,11 +791,18 @@ class TimelineBook:
             warnings.warn(message, UserWarning, stacklevel=2)
 
     def maximum(self, *, close_adc: bool = False) -> Time:
-        """Join timeline ends, consuming unbounded ADC tails at shot closure.
+        """Return the maximum selected relative end as a Time value.
 
-        Finite ADC tails retain the constant shell WAIT and its slack proof.
-        Unknown tails must advance reference by their actual runtime maximum,
-        since no constant WAIT can cover them without inventing an upper bound.
+        With close_adc=False, select only the current timeline ends. With
+        close_adc=True, also select actual native ADC ends whose expressions
+        have no compile-time upper bound. True is only for the existing
+        all-timeline shot closure; finite ADC tails stay on the constant shell
+        WAIT and slack-proof path rather than being added as extra candidates.
+
+        Return a float or QickParam when the maximum is statically representable,
+        otherwise a RuntimeEnd for the actual runtime maximum. An empty selection
+        returns zero. This method does not advance reference or debit ends; the
+        caller consumes the returned end when synchronizing.
         """
         values = list(self.ends.values())
         if close_adc:
