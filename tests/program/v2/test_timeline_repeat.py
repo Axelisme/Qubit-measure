@@ -86,6 +86,41 @@ def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
     assert sum(i["CMD"] == "WPORT_WR" for i in prog.prog_list) < 33
 
 
+@pytest.mark.parametrize("branch_after", [False, True])
+@pytest.mark.parametrize("actual", [0, 3, 8])
+@pytest.mark.parametrize("hint", [None, (0, 8)])
+def test_external_timeline_places_at_actual_end_after_runtime_control(
+    branch_after, actual, hint
+):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=hint):
+            prog.delay_timeline(15 / 430.08)
+            prog.sync()
+        if branch_after:
+            with prog.branch(
+                by="scan", align_timeline=False, timeline="external"
+            ) as branch:
+                with branch.case(0):
+                    prog.delay_timeline(5 / 430.08)
+                with branch.case(2):
+                    prog.delay_timeline(15 / 430.08)
+        prog.pulse(1, "p1", timeline="external")
+
+    result = _shots(_program(body, initialize, reps=2))
+    origin = max(100, actual * 15)
+    offsets = [5, 0, 15] if branch_after else [0, 0, 0]
+    assert [_waves(shot) for shot in result] == [[origin + t] for t in offsets] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        origin + t + 28 for t in offsets
+    ] * 2
+
+
 def test_repeat_fixed_point_matches_explicit_native_reference_loop():
     def body(prog):
         with prog.repeat("r", 2):
