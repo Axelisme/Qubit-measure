@@ -252,7 +252,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 )
                 for _ in range(n):
                     builder.emit(drive)
-                builder.sync()  # finish the common train before target projection
+                builder.delay_by_timeline()  # finish the common train before target projection
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):
                         builder.emit(projection_f1)

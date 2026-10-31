@@ -46,7 +46,7 @@ def branch_program(
                         if late_initialization:
                             self.write_reg(loader.idx_reg, index)
             if time_consumer:
-                self.delay_timeline("duration")
+                self.timeline_inc("duration")
             if unregistered == "after":
                 self.append_macro(UnregisteredIndexWrite())
 

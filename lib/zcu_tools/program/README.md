@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-31，fork／join 與 readout acquisition
+**Last updated:** 2026-11-01，s14 runtime event time
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -141,6 +141,13 @@ shots.
 - 想改「accumulated 輸出格式」：看 `ImproveAcquireMixin._process_accumulated()` 與 `AcquireMixin._average_buf()`。
 - 想改「時間軸或原始資料格式」：看 `AcquireMixin.get_time_axis()`、`get_raw()`。
 - 想改「執行控制（early stop）」：看 `EarlyStopMixin.acquire()` 的 `cancel_flag` 參數與 `finish_round()`。
+
+## Runtime event time
+
+Timeline runtime 事件直接用 s14 保存輸出 offset，不另配事件時間 data register。
+Pulse、ConfigReadout、Trigger 在 preprocess 後以 `t_regs['t'] = 's_out_time'` 交回 QICK expand。
+同基準的下一事件只加差值。原生 macro／raw 寫 s14 或 branch 合流後會重新載入基準。
+一般 Repeat 用 s14 作時間指針。TIME 更新獨立的 reference clock，不讀寫 s14。
 
 ## QICK ASM dict 注意事項
 

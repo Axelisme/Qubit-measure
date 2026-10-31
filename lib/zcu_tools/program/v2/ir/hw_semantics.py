@@ -7,7 +7,7 @@ Pure constants and predicates — must not import any IR module to avoid cycles.
 from __future__ import annotations
 
 TIMED_BASE_REG = (
-    "s14"  # implicit base for WPORT/WMEM/DPORT/TRIG; written by TIME inc_ref/set_ref
+    "s14"  # implicit output offset for WPORT/WMEM/DPORT/TRIG; TIME is independent
 )
 USR_TIME_REG = "s11"  # read by WAIT time / TIME updt
 STATUS_REG = "s10"  # read by WAIT port_dt / div_rdy / div_dt / qpa_*

@@ -30,11 +30,11 @@ def compile_lookup(
             if before_body is not None:
                 before_body()
             self.fork("default", into="lookup")
-            self.delay_timeline(13 / 430.08, timeline="lookup")
+            self.timeline_inc(13 / 430.08, timeline="lookup")
             for index in range(len(loader.values)) if indices is None else indices:
                 self.write_reg("index", index)
                 self.emit(loader, timeline="lookup")
-                self.sync()  # Lookup must not accidentally advance default either.
+                self.delay_by_timeline()  # Lookup must not accidentally advance default either.
                 # Native register consumer: no address reconstruction or decoder.
                 self.write_reg("output", "value")
                 self.asm_inst(
@@ -194,7 +194,7 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
 
         def _body(self, cfg):
             self.write_reg("value", 29)
-            self.delay_timeline(13 / 430.08)
+            self.timeline_inc(13 / 430.08)
             self.emit(loader)
             self.write_reg("output", "value")
             self.asm_inst(
