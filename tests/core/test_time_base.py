@@ -70,15 +70,23 @@ def test_ns_rejects_values_past_the_exact_numerator_boundary(
     for tick in (-limit, limit):
         expected = float(Fraction(tick * 1000) / frequency)
         assert time_base.ns(tick).hex() == expected.hex()
-        assert time_base.ticks(Fraction(tick) / frequency) == tick
     for tick in (-limit - 1, limit + 1, -(2**63), 2**63):
         with pytest.raises(OverflowError):
             time_base.ns(tick)
-        with pytest.raises(OverflowError):
-            time_base.ticks(Fraction(tick) / frequency)
     for tick in (-limit - 1, limit + 1, -(2**63)):
         with pytest.raises(OverflowError):
             time_base.ns(np.array([[0, tick]], dtype=np.int64))
+
+
+@pytest.mark.parametrize("frequency", [Fraction(43008), Fraction(3, 2)])
+def test_fixture_ticks_obey_the_same_exact_range(frequency: Fraction) -> None:
+    time_base = simulation.TimeBase(frequency)
+    limit = 2**53 // (1000 * frequency.denominator)
+    for tick in (-limit, limit):
+        assert time_base.ticks(Fraction(tick) / frequency) == tick
+    for tick in (-limit - 1, limit + 1, -(2**63), 2**63):
+        with pytest.raises(OverflowError):
+            time_base.ticks(Fraction(tick) / frequency)
 
 
 @pytest.mark.parametrize("clock", [0.0, -1.0, float("inf"), float("nan")])
