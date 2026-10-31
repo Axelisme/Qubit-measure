@@ -1,3 +1,4 @@
+# tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
 from collections.abc import Generator, Mapping, Sequence

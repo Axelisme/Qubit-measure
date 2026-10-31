@@ -1,3 +1,4 @@
+# tolerated(file-size): Builder recording and replay share native compile fixtures.
 """Builder recording and native-program compilation share a public contract.
 
 The handwritten parity oracle remains until TimelineProgramV2 author hooks are

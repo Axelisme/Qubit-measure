@@ -1,3 +1,4 @@
+# tolerated(file-size): Readout families share ADC routes, pulse templates, and acquisition contracts.
 from __future__ import annotations
 
 from abc import abstractmethod
