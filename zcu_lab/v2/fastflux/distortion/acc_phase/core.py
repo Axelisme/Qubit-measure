@@ -185,7 +185,9 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             mean_topdetune
         )
 
-        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
+        )
         ax1, ax2 = fig.axes
         ax1.imshow(
             real_signals.T,

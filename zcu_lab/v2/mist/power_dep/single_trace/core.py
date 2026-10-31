@@ -130,7 +130,10 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(
-                prog, soc, rounds=cfg.rounds, options=RunOptions(retry=cfg.acquire_retry)
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(retry=cfg.acquire_retry),
             )
 
         # 4. Preserve complex IQ so analysis can choose its own reference.

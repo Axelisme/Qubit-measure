@@ -153,9 +153,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             builder.join("flux", "probe", "readout_wait", into="default")
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
-                prog, soc, rounds=cfg.rounds
-            )
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return FreqResult(lengths, freqs, signals_buffer.array)
 

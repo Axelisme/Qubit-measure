@@ -12,7 +12,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 
 from zcu_lab.v2.support import live_heatmap
 
@@ -128,9 +135,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse, freq=freq, gain=gain))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
-                prog, soc, rounds=cfg.rounds
-            )
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         # 4. Preserve complex IQ; the baseline-subtracted magnitude is a view.
         return DriveFreqResult(gains=gains, freqs=freqs, signals=signals_buffer.array)

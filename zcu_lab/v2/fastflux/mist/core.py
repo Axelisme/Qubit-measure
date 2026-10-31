@@ -138,14 +138,16 @@ class MistExp(Experiment[MistResult, MistCfg]):
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.fork("default", into=["flux", "mist"])
-            builder.emit(Pulse("flux_pulse", cfg.flux_pulse, gain=flux_gain), timeline="flux")
-            builder.emit(Pulse("mist_pulse", cfg.mist_pulse, gain=mist_gain), timeline="mist")
+            builder.emit(
+                Pulse("flux_pulse", cfg.flux_pulse, gain=flux_gain), timeline="flux"
+            )
+            builder.emit(
+                Pulse("mist_pulse", cfg.mist_pulse, gain=mist_gain), timeline="mist"
+            )
             builder.join("flux", "mist", into="default")
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
-                prog, soc, rounds=cfg.rounds
-            )
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return MistResult(flux_gains, mist_gains, signals_buffer.array)
 

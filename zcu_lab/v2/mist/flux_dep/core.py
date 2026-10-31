@@ -12,7 +12,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 from zcu_tools.simulate import value2flux
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -162,9 +169,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                 builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-                step.run_acquire(
-                    prog, soc, rounds=cfg.rounds
-                )
+                step.run_acquire(prog, soc, rounds=cfg.rounds)
 
         # 4. Preserve raw complex response; baseline subtraction is display-only.
         return FluxDepResult(values=values, gains=gains, signals=signals_buffer.array)

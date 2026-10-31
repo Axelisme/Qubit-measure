@@ -125,7 +125,9 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             builder.emit(Pulse("flux_pulse", cfg.flux_pulse), timeline="flux")
             builder.delay_timeline(length, timeline="pair")
             builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse), timeline="pair")
-            builder.emit(Pulse("pi2_pulse2", cfg.pi2_pulse, phase=phase), timeline="pair")
+            builder.emit(
+                Pulse("pi2_pulse2", cfg.pi2_pulse, phase=phase), timeline="pair"
+            )
             builder.delay_timeline(cfg.readout_t, timeline="readout_wait")
             builder.join("flux", "pair", "readout_wait", into="default")
             builder.emit(Readout("readout", cfg.readout))
@@ -187,7 +189,9 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             mean_topdetune
         )
 
-        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True
+        )
         ax1, ax2 = fig.axes
         ax1.imshow(
             real_signals.T,

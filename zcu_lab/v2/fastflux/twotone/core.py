@@ -120,14 +120,14 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.fork("default", into=["flux", "probe"])
-            builder.emit(Pulse("flux_pulse", cfg.flux_pulse, gain=gain), timeline="flux")
+            builder.emit(
+                Pulse("flux_pulse", cfg.flux_pulse, gain=gain), timeline="flux"
+            )
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq), timeline="probe")
             builder.join("flux", "probe", into="default")
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
-                prog, soc, rounds=cfg.rounds
-            )
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return TwoToneResult(gains, freqs, signals_buffer.array)
 
