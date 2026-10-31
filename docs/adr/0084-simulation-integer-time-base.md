@@ -14,7 +14,7 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 2026-10-31，使用者提出「我傾向根除的解決方案」，並選擇「2b」。採用第一階段的公共整數時基 request。第二階段的物理建模留待後議。
 
-`core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取 tProc、各 generator fabric、ADC output 與 envelope sample clocks，再交給 TimeBase。Core 不讀 soccfg，也不 import driver。
+`core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。Core 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格不變性已納入驗證，物理 IQ 不變性待 consumer 遷移後驗收。
 
 TimeBase 已提供建立時基、格點檢查與 scalar／array 換算。Request schema 與 compiled frontend 已使用整數時間。Consumer 與 replay 仍待遷移，本篇不表示整條遷移已完成。
 

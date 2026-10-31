@@ -231,7 +231,10 @@ or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set(
 query, not a callback. Every request time is an integer tick in its required
 `TimeBase`. Array times use int64 without changing point/read shapes. Frequency
 is MHz, phase is degrees and gain is normalized DAC amplitude. The builder gathers
-tProc, generator fabric, ADC output and envelope sample clocks from soccfg.
+tProc, declared generator fabric/envelope and declared ADC output clocks from
+soccfg. Undeclared channels do not participate. TimeBase belongs to the request;
+adding a declared heterogeneous clock may change tick units, but must preserve
+the original channel's physical time grids and output.
 Start, duration, trigger, phase origin and sample periods remain integers through
 serialization, FIFO admission, window overlap and body-end accounting. Relax delay
 uses QICK's compiled tProc-cycle rounding before mapping to the common clock. The frontend accepts supported instruction effects

@@ -55,6 +55,76 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert env.soc.binding.last_request is None
 
 
+def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
+    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    env.soccfg["gens"][1]["f_fabric"] = 512.0
+
+    def build(extra):
+        class Program(TimelineProgramV2):
+            def _initialize(self, cfg):
+                self.declare_gen(0, nqz=1)
+                if extra:
+                    self.declare_gen(1, nqz=1)
+                self.add_envelope(0, "shape", idata=np.full(48, -8191.0))
+                self.add_pulse(
+                    0, "p", style="arb", envelope="shape",
+                    freq=100, phase=30, gain=-0.25,
+                )
+                self.declare_readout(0, length=0.2)
+                self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
+
+            def _body(self, cfg):
+                self.send_readoutconfig(0, "ro", t=0)
+                self.pulse(0, "p", t=0.1)
+                self.trigger([0], t=0.1)
+
+        prog = Program(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+        return request(prog, env)
+
+    try:
+        original, expanded = build(False), build(True)
+        assert original.time_base.ticks_per_us == 43008
+        assert expanded.time_base.ticks_per_us == 172032
+        a, b = original.templates[0], expanded.templates[0]
+        (event_a,), (event_b,) = a.events, b.events
+        assert event_a.gen_ch == event_b.gen_ch == 0
+        assert event_a.start_ticks.tolist() == [4300]
+        for left, right in (
+            (event_a.start_ticks, event_b.start_ticks),
+            (event_a.start_ticks + event_a.duration_ticks, event_b.start_ticks + event_b.duration_ticks),
+            (a.duration_ticks, b.duration_ticks),
+        ):
+            np.testing.assert_array_equal(
+                original.time_base.ns(left).view(np.uint64),
+                expanded.time_base.ns(right).view(np.uint64),
+            )
+        for left, right in (
+            (event_a.frequency_mhz, event_b.frequency_mhz),
+            (event_a.phase_deg, event_b.phase_deg),
+            (event_a.gain, event_b.gain),
+        ):
+            np.testing.assert_array_equal(left.view(np.uint64), right.view(np.uint64))
+        envelope_a, envelope_b = event_a.envelopes[0], event_b.envelopes[0]
+        assert envelope_a is not None and envelope_b is not None
+        np.testing.assert_array_equal(
+            original.time_base.ns(np.arange(len(envelope_a.values), dtype=np.int64) * envelope_a.sample_period_ticks).view(np.uint64),
+            expanded.time_base.ns(np.arange(len(envelope_b.values), dtype=np.int64) * envelope_b.sample_period_ticks).view(np.uint64),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(envelope_a.values).view(np.uint64),
+            np.asarray(envelope_b.values).view(np.uint64),
+        )
+        ro_a, ro_b = a.readouts[0], b.readouts[0]
+        np.testing.assert_array_equal(
+            original.time_base.ns(ro_a.trigger_ticks[..., None] + np.arange(ro_a.samples, dtype=np.int64) * ro_a.sample_period_ticks).view(np.uint64),
+            expanded.time_base.ns(ro_b.trigger_ticks[..., None] + np.arange(ro_b.samples, dtype=np.int64) * ro_b.sample_period_ticks).view(np.uint64),
+        )
+        np.testing.assert_array_equal(ro_a.frequency_mhz.view(np.uint64), ro_b.frequency_mhz.view(np.uint64))
+        np.testing.assert_array_equal(ro_a.phase_deg.view(np.uint64), ro_b.phase_deg.view(np.uint64))
+    finally:
+        env.devices.close_all_devices()
+
+
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_compiled_request_preserves_call_local_charge_requirements(mode):
     prog, env = program(lambda p: p.pulse(0, "p"))
