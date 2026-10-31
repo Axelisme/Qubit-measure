@@ -27,9 +27,13 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyHeraldedCfg]:
     return spectroscopy_form(ctx, SpectroscopyHeraldedCfg)
 
 
-def run(cfg: SpectroscopyHeraldedCfg, *, context: RunContext) -> SpectroscopyHeraldedRun:
+def run(
+    cfg: SpectroscopyHeraldedCfg, *, context: RunContext
+) -> SpectroscopyHeraldedRun:
     """Run and retain the actual acquisition configuration."""
-    return RunRecord(cfg=cfg, result=SpectroscopyHeraldedExp().run(cfg, context=context))
+    return RunRecord(
+        cfg=cfg, result=SpectroscopyHeraldedExp().run(cfg, context=context)
+    )
 
 
 def _analyze(

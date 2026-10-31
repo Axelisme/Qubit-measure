@@ -42,21 +42,29 @@ def analyze_spectra(
     Whole unmeasured points are NaN. Negative or nonfinite acquired counts fail.
     """
     if cfg is None:
-        raise ValueError("Spectroscopy analysis requires saved cfg; current Form/library is not a substitute")
+        raise ValueError(
+            "Spectroscopy analysis requires saved cfg; current Form/library is not a substitute"
+        )
     dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
     frequencies = sweep2array(cfg.frequency)
     if (
         not np.array_equal(data.dc_values, dc)
         or data.frequencies.shape != frequencies.shape
-        or not np.allclose(data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0)
+        or not np.allclose(
+            data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+        )
         or not np.array_equal(data.branches, np.arange(4))
         or data.sums.shape != (len(dc), 4, len(frequencies), 3, 3)
     ):
-        raise ValueError("Spectroscopy axes/shape must match saved cfg: (DC,4,frequency,3,3)")
+        raise ValueError(
+            "Spectroscopy axes/shape must match saved cfg: (DC,4,frequency,3,3)"
+        )
     finite = np.all(np.isfinite(data.sums) & (data.sums >= 0), axis=(-2, -1))
     missing = np.all(np.isnan(data.sums), axis=(-2, -1))
     if not np.all(finite | missing):
-        raise ValueError("Spectroscopy contains invalid counts or a partially missing point")
+        raise ValueError(
+            "Spectroscopy contains invalid counts or a partially missing point"
+        )
     counts = data.sums.sum(axis=(-2, -1))
     excitation = np.stack(
         [marginal_probabilities(data.sums, target)[..., 1] for target in ("f1", "f2")],
@@ -70,40 +78,67 @@ def analyze_spectra(
 
 
 def _plot_spectra(
-    cfg: SpectroscopyCfg, data: SpectroscopyResult, answer: SpectroscopyAnalysis, *, plots: Plots
+    cfg: SpectroscopyCfg,
+    data: SpectroscopyResult,
+    answer: SpectroscopyAnalysis,
+    *,
+    plots: Plots,
 ) -> None:
     contrast = "on" if cfg.contrast else "off"
-    dc_label = "DC inactive" if cfg.dc_device is None else f"{cfg.dc_device} ({cfg.dc_unit})"
+    dc_label = (
+        "DC inactive" if cfg.dc_device is None else f"{cfg.dc_device} ({cfg.dc_unit})"
+    )
     for target, role in enumerate(("F1", "F2")):
         title = f"{role} excitation · double Xπ contrast {contrast}"
         fig, _ = plots.subplots(
-            f"spectra_{role.lower()}", nrows=2, ncols=2, figsize=(11, 7),
-            squeeze=False, layout="constrained",
+            f"spectra_{role.lower()}",
+            nrows=2,
+            ncols=2,
+            figsize=(11, 7),
+            squeeze=False,
+            layout="constrained",
         )
         fig.suptitle(title)
         for branch, ax in enumerate(fig.axes):
             for d, dc in enumerate(data.dc_values):
-                label = "DC inactive" if cfg.dc_device is None else f"{dc:g} {cfg.dc_unit}"
-                ax.plot(data.frequencies, answer.excitation[d, branch, :, target], label=label)
+                label = (
+                    "DC inactive" if cfg.dc_device is None else f"{dc:g} {cfg.dc_unit}"
+                )
+                ax.plot(
+                    data.frequencies,
+                    answer.excitation[d, branch, :, target],
+                    label=label,
+                )
             ax.set(
                 title=f"B{branch:02b} · nominal preparation",
-                xlabel="Common probe frequency (MHz)", ylabel=f"{role} P_e", ylim=(0, 1),
+                xlabel="Common probe frequency (MHz)",
+                ylabel=f"{role} P_e",
+                ylim=(0, 1),
             )
             ax.legend(fontsize="small")
         if cfg.dc_device is None:
             continue
         fig, _ = plots.subplots(
-            f"map_{role.lower()}", nrows=2, ncols=2, figsize=(11, 7),
-            squeeze=False, layout="constrained",
+            f"map_{role.lower()}",
+            nrows=2,
+            ncols=2,
+            figsize=(11, 7),
+            squeeze=False,
+            layout="constrained",
         )
         fig.suptitle(title)
         for branch, ax in enumerate(fig.axes):
             image = ax.pcolormesh(
-                data.frequencies, data.dc_values, answer.excitation[:, branch, :, target],
-                shading="nearest", vmin=0, vmax=1,
+                data.frequencies,
+                data.dc_values,
+                answer.excitation[:, branch, :, target],
+                shading="nearest",
+                vmin=0,
+                vmax=1,
             )
             fig.colorbar(image, ax=ax, label=f"{role} P_e")
             ax.set(
                 title=f"B{branch:02b} · nominal preparation",
-                xlabel="Common probe frequency (MHz)", ylabel=dc_label,
+                xlabel="Common probe frequency (MHz)",
+                ylabel=dc_label,
             )
