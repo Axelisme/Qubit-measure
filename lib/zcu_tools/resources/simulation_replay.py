@@ -69,7 +69,7 @@ def _array_json(value: object) -> object:
     """Convert only ndarrays; JSON dictionaries go to the typed wire validator."""
     if isinstance(value, np.ndarray):
         return _ArrayJSON(
-            dtype=value.dtype.name, shape=value.shape, values=tuple(value.flat)
+            dtype=value.dtype.name, shape=value.shape, values=tuple(value.ravel().tolist())
         )
     return value
 
@@ -79,6 +79,8 @@ def _float_array(value: _ArrayJSON) -> NDArray[np.float64]:
 
 
 def _int_array(value: _ArrayJSON) -> NDArray[np.int64]:
+    if any(type(v) is not int or not -(2**63) <= v < 2**63 for v in value.values):
+        raise ValueError("int64 replay arrays require in-range integer values")
     return value.array(np.dtype(np.int64))
 
 
@@ -182,8 +184,8 @@ class _TemplateJSON(_NumericJSON):
 class _TimeBaseJSON(_NumericJSON):
     """Schema-owned rational MHz clock; no Fraction-specific wire encoding."""
 
-    num: int = Field(gt=0)
-    den: int = Field(gt=0)
+    num: int = Field(gt=0, strict=True)
+    den: int = Field(gt=0, strict=True)
 
     def record(self) -> TimeBase:
         return TimeBase(Fraction(self.num, self.den))
