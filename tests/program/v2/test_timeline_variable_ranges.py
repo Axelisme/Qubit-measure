@@ -75,10 +75,13 @@ def test_three_way_join_prunes_partial_dominance_and_reconstructs_shared_length_
     ]
     assert sum(inst.get("IF") == "S" for inst in prog.prog_list) == 1
     # Only the shared 4*i is rebuilt as a native sweep register.
-    assert sum(
-        register.init is not None and register.init.spans == {"i": 196}
-        for register in prog.reg_dict.values()
-    ) == 1
+    assert (
+        sum(
+            register.init is not None and register.init.spans == {"i": 196}
+            for register in prog.reg_dict.values()
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize("extra", [False, True])
@@ -102,11 +105,12 @@ def test_join_eliminates_every_provably_dominated_candidate(extra):
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        7 + 2 * length
-        for length in range(60, 257, 4)
-        for _ in range(3 if extra else 2)
+        7 + 2 * length for length in range(60, 257, 4) for _ in range(3 if extra else 2)
     ]
-    assert not any(inst.get("CMD") == "REG_WR" and inst.get("IF") in ("S", "NS") for inst in prog.prog_list)
+    assert not any(
+        inst.get("CMD") == "REG_WR" and inst.get("IF") in ("S", "NS")
+        for inst in prog.prog_list
+    )
 
 
 def test_join_compares_negative_residuals_with_a_proven_signed32_difference():
@@ -121,18 +125,32 @@ def test_join_compares_negative_residuals_with_a_proven_signed32_difference():
             right = QickSweep1D("j", 0, 500_000_000 / 430.08)
             with self.branch(by="case", align_timeline=True) as branch:
                 for index, duration in enumerate(
-                    [2 * left, 2 * right, left + right, left + right + 1 / 430.08, left + right + 2 / 430.08]
+                    [
+                        2 * left,
+                        2 * right,
+                        left + right,
+                        left + right + 1 / 430.08,
+                        left + right + 2 / 430.08,
+                    ]
                 ):
                     with branch.case(index):
                         self.delay_timeline(duration)
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        end for end in (2, 1_000_000_000, 1_000_000_000, 1_000_000_002) for _ in range(5)
+        end
+        for end in (2, 1_000_000_000, 1_000_000_000, 1_000_000_002)
+        for _ in range(5)
     ]
     # S=L+M leaves L-M and M-L, with negative legal values. Their difference
     # stays in [-1e9, 1e9], so two flag comparisons are safe without a mask.
-    assert sum(inst.get("CMD") == "REG_WR" and inst.get("IF") == "S" for inst in prog.prog_list) == 2
+    assert (
+        sum(
+            inst.get("CMD") == "REG_WR" and inst.get("IF") == "S"
+            for inst in prog.prog_list
+        )
+        == 2
+    )
     assert not any("^" in str(inst.get("OP", "")) for inst in prog.prog_list)
 
 
@@ -161,7 +179,10 @@ def test_author_register_does_not_inherit_loop_correlation(hint):
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
-    assert any(inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", "")) for inst in prog.prog_list)
+    assert any(
+        inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", ""))
+        for inst in prog.prog_list
+    )
     with pytest.raises(RuntimeError, match="runtime"):
         prog.get_time_param("author", "t")
     result = shots(prog)
@@ -193,7 +214,10 @@ def test_measurement_selected_table_is_independent_of_loop_time():
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
-    assert any(inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", "")) for inst in prog.prog_list)
+    assert any(
+        inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", ""))
+        for inst in prog.prog_list
+    )
     with pytest.raises(RuntimeError, match="runtime"):
         prog.get_time_param("selected", "t")
 

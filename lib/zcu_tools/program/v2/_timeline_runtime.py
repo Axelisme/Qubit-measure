@@ -23,8 +23,8 @@ from ._timeline_expression import (
     expression_axes,
     expression_limits,
     known_time_point,
-    point_time,
     plan_time_choice,
+    point_time,
     projected_expression_bounds,
     scale_time,
     select_time,
@@ -676,10 +676,14 @@ class RuntimeMath(TimedMacro):
         if isinstance(expression, TimeAbs):
             operation = expression.runtime
             if operation.kind in ("max", "min"):
-                return self.cycles(self.join(
-                    operation.operands, inputs, captured_ends,
-                    maximum=operation.kind == "max",
-                ))
+                return self.cycles(
+                    self.join(
+                        operation.operands,
+                        inputs,
+                        captured_ends,
+                        maximum=operation.kind == "max",
+                    )
+                )
             values = [
                 self.reconstruct(item, inputs, captured_ends)
                 for item in operation.operands
@@ -836,7 +840,9 @@ class RuntimeMath(TimedMacro):
         if not values:
             raise ValueError("time choice requires at least one value")
         expressions = tuple(
-            value if isinstance(value, (TimeVariable, TimeAbs)) else time_expression(self.prog, value)
+            value
+            if isinstance(value, (TimeVariable, TimeAbs))
+            else time_expression(self.prog, value)
             for value in values
         )
         captured = (
@@ -851,7 +857,11 @@ class RuntimeMath(TimedMacro):
         if len(residuals) == 1:
             selected = substitute_time(add_time(common, residuals[0]), atoms)
             for value, expression in zip(values, expressions, strict=True):
-                if not isinstance(value, (TimeVariable, TimeAbs)) and (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
+                if (
+                    not isinstance(value, (TimeVariable, TimeAbs))
+                    and (inputs is None or not isinstance(value, RuntimeEnd))
+                    and difference_limits(selected, expression) == (0, 0)
+                ):
                     return value
         sources = {} if inputs is None else inputs.copy()
         for axis, expression in atoms.items():
@@ -867,12 +877,19 @@ class RuntimeMath(TimedMacro):
             result = self._select(result, operand, maximum=maximum, target=destination)
         result = self.add(shared, result, target=destination)
         proof = choose_time(*expressions, maximum=maximum)
-        covers = tuple(
-            item
-            for value in values
-            if not isinstance(value, (TimeVariable, TimeAbs))
-            for item in (value, *(value.covers if isinstance(value, RuntimeEnd) else ()))
-        ) if maximum else ()
+        covers = (
+            tuple(
+                item
+                for value in values
+                if not isinstance(value, (TimeVariable, TimeAbs))
+                for item in (
+                    value,
+                    *(value.covers if isinstance(value, RuntimeEnd) else ()),
+                )
+            )
+            if maximum
+            else ()
+        )
         return replace(result, expression=proof, covers=covers)
 
     def source(
@@ -1200,7 +1217,9 @@ class RuntimeMath(TimedMacro):
 
     def covers(self, end: Time, previous: Time) -> bool:
         """Prove coverage with exact identities or the common source-range rule."""
-        if end is previous or (isinstance(end, RuntimeEnd) and any(item is previous for item in end.covers)):
+        if end is previous or (
+            isinstance(end, RuntimeEnd) and any(item is previous for item in end.covers)
+        ):
             return True
         lower, _ = difference_limits(
             time_expression(self.prog, end), time_expression(self.prog, previous)
@@ -1269,8 +1288,14 @@ class RuntimeMath(TimedMacro):
     def _select(
         self, left: RuntimeEnd, right: RuntimeEnd, *, maximum: bool, target: str | None
     ) -> RuntimeEnd:
-        lower, upper = difference_limits(runtime_expression(left), runtime_expression(right))
-        safe = lower is not None and upper is not None and -(2**31) <= lower <= upper <= LIMIT
+        lower, upper = difference_limits(
+            runtime_expression(left), runtime_expression(right)
+        )
+        safe = (
+            lower is not None
+            and upper is not None
+            and -(2**31) <= lower <= upper <= LIMIT
+        )
         if not safe:
             return self._masked_select(left, right, maximum=maximum, target=target)
         destination = self.allocate() if target is None else target
@@ -1300,9 +1325,12 @@ class RuntimeMath(TimedMacro):
                 addr_inc=1,
             )
         )
-        return RuntimeEnd(destination, expression=choose_time(
-            runtime_expression(left), runtime_expression(right), maximum=maximum
-        ))
+        return RuntimeEnd(
+            destination,
+            expression=choose_time(
+                runtime_expression(left), runtime_expression(right), maximum=maximum
+            ),
+        )
 
     @staticmethod
     def _sum_limits(
@@ -1331,10 +1359,17 @@ class RuntimeMath(TimedMacro):
 
         def emit(dst: str, a: str, operator: str, b: str | int) -> None:
             rhs = f"#{b}" if isinstance(b, int) else self.prog._get_reg(b)
-            self.operations.append(AsmInst(inst={
-                "CMD": "REG_WR", "DST": self.prog._get_reg(dst), "SRC": "op",
-                "OP": f"{self.prog._get_reg(a)} {operator} {rhs}",
-            }, addr_inc=1))
+            self.operations.append(
+                AsmInst(
+                    inst={
+                        "CMD": "REG_WR",
+                        "DST": self.prog._get_reg(dst),
+                        "SRC": "op",
+                        "OP": f"{self.prog._get_reg(a)} {operator} {rhs}",
+                    },
+                    addr_inc=1,
+                )
+            )
 
         emit(delta, x, "-", y)
         emit(signs, x, "^", y)
@@ -1349,9 +1384,12 @@ class RuntimeMath(TimedMacro):
         emit(delta, x, "^", y)
         emit(delta, delta, "AND", mask)
         emit(destination, x, "^", delta)
-        return RuntimeEnd(destination, expression=choose_time(
-            runtime_expression(left), runtime_expression(right), maximum=maximum
-        ))
+        return RuntimeEnd(
+            destination,
+            expression=choose_time(
+                runtime_expression(left), runtime_expression(right), maximum=maximum
+            ),
+        )
 
     def floor(self, end: Time, advance: Time) -> Time:
         key = (id(end), id(advance))

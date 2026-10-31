@@ -100,7 +100,10 @@ class TimelineJoin(Macro):
     def preprocess(self, prog) -> None:
         super().preprocess(prog)
         end = self.book.math.join(
-            [self.book.end(self.into), *(self.book.end(source) for source in self.sources)]
+            [
+                self.book.end(self.into),
+                *(self.book.end(source) for source in self.sources),
+            ]
         )
         self.book.ends[self.into] = end
         self.book.waiting.discard(self.into)

@@ -93,9 +93,7 @@ def author_time_source(name: str, value: TimeExpression) -> TimeExpression:
     lo, hi = expression_limits(value)
     if lo is not None or hi is not None:
         return value
-    axis = cycle_axis(
-        name, 0, None, CycleProducer(reconstruction=value)
-    )
+    axis = cycle_axis(name, 0, None, CycleProducer(reconstruction=value))
     return TimeVariable(terms=((axis, 1),))
 
 
@@ -966,9 +964,13 @@ class _ChoiceRecipes:
         if isinstance(value, TimeAbs):
             recipe = value.runtime
             if recipe.kind == "add":
-                return _linear_add(self.linear(recipe.operands[0]), self.linear(recipe.operands[1]))
+                return _linear_add(
+                    self.linear(recipe.operands[0]), self.linear(recipe.operands[1])
+                )
             if recipe.kind == "scale" and recipe.coefficient == int(recipe.coefficient):
-                return _linear_scale(self.linear(recipe.operands[0]), recipe.coefficient)
+                return _linear_scale(
+                    self.linear(recipe.operands[0]), recipe.coefficient
+                )
             return self.atom(value)
         result = TimeVariable(value.constant)
         for axis, coefficient in value.terms:
@@ -978,7 +980,9 @@ class _ChoiceRecipes:
                 self.atom(source)
                 if source in self.captured
                 else self.linear(recipe)
-                if axis.values is not None and recipe is not None and _integer_recipe(recipe)
+                if axis.values is not None
+                and recipe is not None
+                and _integer_recipe(recipe)
                 else source
             )
             result = _linear_add(result, _linear_scale(term, coefficient))
@@ -992,9 +996,19 @@ class _ChoiceRecipes:
             lo, hi = expression_limits(delta)
             if lo is not None and lo == hi:
                 return [_linear_add(self.atom(entry), TimeVariable(lo))]
-        if isinstance(value, TimeAbs) and value.runtime.kind == ("max" if self.maximum else "min"):
-            return [item for operand in value.runtime.operands for item in self.candidates(operand)]
-        if isinstance(value, TimeVariable) and value.constant == 0 and len(value.terms) == 1:
+        if isinstance(value, TimeAbs) and value.runtime.kind == (
+            "max" if self.maximum else "min"
+        ):
+            return [
+                item
+                for operand in value.runtime.operands
+                for item in self.candidates(operand)
+            ]
+        if (
+            isinstance(value, TimeVariable)
+            and value.constant == 0
+            and len(value.terms) == 1
+        ):
             axis, coefficient = value.terms[0]
             recipe = axis.producer.reconstruction
             if coefficient == 1 and recipe is not None:
@@ -1038,7 +1052,9 @@ def plan_time_choice(
             if index == other:
                 continue
             lo, hi = difference_limits(proof, proofs[index])
-            better = lo is not None and lo >= 0 if maximum else hi is not None and hi <= 0
+            better = (
+                lo is not None and lo >= 0 if maximum else hi is not None and hi <= 0
+            )
             equal = lo == hi == 0
             if better and (not equal or other < index):
                 dominated = True

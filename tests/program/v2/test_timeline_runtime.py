@@ -74,7 +74,9 @@ def test_crossing_join_uses_three_instruction_flag_selection():
         prog.join("other", into="default")
 
     prog = program(body, points=41)
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] * 21 + list(range(104, 181, 4))
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] * 21 + list(
+        range(104, 181, 4)
+    )
     selections = [
         (index, inst)
         for index, inst in enumerate(prog.prog_list)
@@ -83,14 +85,18 @@ def test_crossing_join_uses_three_instruction_flag_selection():
     assert len(selections) == 1
     index, selection = selections[0]
     assert [inst["CMD"] for inst in prog.prog_list[index - 2 : index + 1]] == [
-        "TEST", "REG_WR", "REG_WR"
+        "TEST",
+        "REG_WR",
+        "REG_WR",
     ]
     changed = [dict(inst) for inst in prog.prog_list]
     changed[index] = {**selection, "IF": "NS"}
     inverted = ir.analyze_timing(
         ir.CompiledTimingInput(changed, prog.labels, prog.timing_layout)
     ).shots
-    assert [s.body_end_cycle - s.start_cycle for s in inverted] == list(range(20, 100, 4)) + [100] * 21
+    assert [s.body_end_cycle - s.start_cycle for s in inverted] == list(
+        range(20, 100, 4)
+    ) + [100] * 21
 
 
 @pytest.mark.parametrize("candidate_count", [2, 3, 4])
@@ -115,7 +121,9 @@ def test_k_way_join_has_one_copy_and_two_instructions_per_comparison(candidate_c
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] + [180] * (
         2 ** (candidate_count - 1) - 1
     )
-    writes = [index for index, inst in enumerate(prog.prog_list) if inst.get("IF") == "S"]
+    writes = [
+        index for index, inst in enumerate(prog.prog_list) if inst.get("IF") == "S"
+    ]
     assert len(writes) == candidate_count - 1
     selection = prog.prog_list[writes[0] - 2 : writes[-1] + 1]
     assert [inst["CMD"] for inst in selection] == ["TEST", "REG_WR", "REG_WR"] + [
@@ -132,7 +140,9 @@ def test_unhinted_author_time_uses_nonnegative_contract_without_runtime_floor():
     prog = program(body)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 26, 42]
     assert not any("^" in str(inst.get("OP", "")) for inst in prog.prog_list)
-    assert not any(inst.get("CMD") == "REG_WR" and inst.get("IF") == "S" for inst in prog.prog_list)
+    assert not any(
+        inst.get("CMD") == "REG_WR" and inst.get("IF") == "S" for inst in prog.prog_list
+    )
 
 
 def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficients():
@@ -153,7 +163,11 @@ def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficien
 
     prog = program(body)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [30, 57, 89]
-    masks = [index for index, inst in enumerate(prog.prog_list) if "^" in str(inst.get("OP", ""))]
+    masks = [
+        index
+        for index, inst in enumerate(prog.prog_list)
+        if "^" in str(inst.get("OP", ""))
+    ]
     # Unknown signed differences use a mask. The shared author value is added
     # once after selection, not separately rebuilt into both candidates.
     assert masks
@@ -166,8 +180,12 @@ def rebased_runtime_end_program():
     def body(prog):
         prog.emit(loader)
         prog.fork("default", into=["a", "b", "c"])
-        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a")
-        prog.delay_timeline(QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b")
+        prog.delay_timeline(
+            QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a"
+        )
+        prog.delay_timeline(
+            QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b"
+        )
         prog.delay_timeline("c_duration", timeline="c")
         prog.join("a", "b", into="default")
         prog.sync(timeline="default")
@@ -179,7 +197,11 @@ def rebased_runtime_end_program():
 def test_sync_rebases_unjoined_runtime_end_after_crossing_join():
     result = shots(rebased_runtime_end_program())
     assert [waves(shot) for shot in result] == [[200], [100], [220]]
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [228, 128, 248]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        228,
+        128,
+        248,
+    ]
 
 
 class AllocateTime(Macro):
