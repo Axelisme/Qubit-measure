@@ -843,12 +843,8 @@ class RuntimeMath(TimedMacro):
         for axis, expression in atoms.items():
             if expression in bindings:
                 sources[axis] = bindings[expression]
-        # Bind every shared producer once for common and residual reconstruction.
-        for axis, _ in common.terms:
-            if axis not in sources:
-                sources[axis] = self.reconstruct(TimeVariable(terms=((axis, 1),)), sources)
         shared = self.reconstruct(common, sources)
-        operands = [self.reconstruct(value, sources) for value in residuals]
+        operands = [self.reconstruct(value, sources, (shared,)) for value in residuals]
         result = operands[0]
         destination = target
         if len(operands) > 1:
