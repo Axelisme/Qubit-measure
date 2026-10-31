@@ -1,15 +1,17 @@
 """env.run isolates core plotting lifetimes without clearing workflow trends."""
 
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from pydantic import TypeAdapter
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
-from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
+from zcu_tools.experiment.workflows import Completed, Live, OperationFacts, WorkflowEnv
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -23,6 +25,7 @@ from ._engine_fakes import (
     Tunables,
     completed,
 )
+from ._engine_ports import START, ManualClock
 
 
 def test_call_injects_resources_and_finishes_its_operation_plots(
@@ -73,6 +76,62 @@ class Presentation(NonPresentingHost):
 
     def release(self, figure: Figure) -> None:
         self.released.append(figure)
+
+
+def test_release_failure_records_stopped_attempt_at_actual_finish(
+    tmp_path: Path,
+) -> None:
+    clock = ManualClock()
+    finished_at = START + timedelta(seconds=3)
+    release_error = OSError("previous presentation release failed")
+
+    class FailingReleaseHost(NonPresentingHost):
+        fail = True
+
+        def release(self, figure: Figure) -> None:
+            if self.fail:
+                clock.value = finished_at
+                raise release_error
+
+    host = FailingReleaseHost()
+    rig = Rig(tmp_path, clock=clock, plot_host=host)
+
+    def present(ctx: CallContext) -> None:
+        assert ctx.plots is not None
+        ctx.plots.subplots("measurement")
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        iterations = env.iterations()
+        try:
+            iteration = next(iterations)
+            await iteration.call(present)
+            assert iteration.cancel("iteration").cancelled
+            with pytest.raises(ExceptionGroup) as raised:
+                await iteration.call(lambda ctx: None, name="blocked")
+            assert raised.value.exceptions == (release_error,)
+        finally:
+            iterations.close()
+
+    try:
+        rig.start(script)
+        final = rig.engine.execute("run")
+        assert final.lifecycle == "done", final.reason
+        operations = [
+            event["operation"]
+            for event in rig.events()
+            if event["kind"] == "operation_finished"
+        ]
+        assert len(operations) == 2
+        facts = TypeAdapter(OperationFacts).validate_python(operations[-1])
+        assert (facts.kind, facts.name, facts.outcome) == ("call", "blocked", "raised")
+        assert (facts.stopped, facts.started_at, facts.finished_at) == (
+            True,
+            START,
+            finished_at,
+        )
+    finally:
+        host.fail = False
+        rig.close()
 
 
 def test_consecutive_core_operations_keep_workflow_plots_across_commits(
