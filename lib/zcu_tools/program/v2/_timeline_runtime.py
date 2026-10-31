@@ -551,9 +551,9 @@ class RuntimeMath(TimedMacro):
         Native sweep offsets retain their QICK time registers.
         """
         operand = self.cycles(offset) if isinstance(offset, QickParam) and offset.is_sweep() else round((offset.start if isinstance(offset, QickParam) else offset) * get_fclk(self.prog))
-        expression = add_time(runtime_expression(base), runtime_expression(operand) if isinstance(operand, RuntimeEnd) else TimeVariable(operand))
-        self.operations.append(_EventTime(base, operand, expression))
-        return RuntimeEnd("s_out_time", expression=expression)
+        result = self.op(base, "+", operand, limits=self._sum_limits(base, operand), target="s_out_time")
+        self.operations[-1] = _EventTime(base, operand, result.expression)
+        return result
 
     def native_end(
         self, aggregate: float | QickParam, native: NativeLength
