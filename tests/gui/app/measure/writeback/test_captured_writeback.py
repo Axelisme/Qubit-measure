@@ -475,19 +475,13 @@ def test_analysis_draft_uses_start_run_identity(
             tab.run.result = replace(require_record(tab.run), metadata={})
             if source == "context_free":
                 tab.run.parameters = None
-        elif source == "identity_only":
-            tab.run.result = replace(
-                require_record(tab.run),
-                metadata={"run_id": native.metadata.run_id, "completion": "unused-invalid"},
-            )
-        elif source == "experiment_only":
-            tab.run.result = replace(
-                require_record(tab.run), metadata={"experiment": "test/custom", "device_snapshot": {}}
-            )
-        elif source == "device_only":
-            tab.run.result = replace(
-                require_record(tab.run), metadata={"device_snapshot": {"bias": {"value": 0.25}}}
-            )
+        elif source in ("identity_only", "experiment_only", "device_only"):
+            partial: dict[str, JsonObject] = {
+                "identity_only": {"run_id": native.metadata.run_id, "completion": "unused-invalid"},
+                "experiment_only": {"experiment": "test/custom", "device_snapshot": {}},
+                "device_only": {"device_snapshot": {"bias": {"value": 0.25}}},
+            }
+            tab.run.result = replace(require_record(tab.run), metadata=partial[source])
         captured = tab.run.parameters
         expected = native.metadata.run_id if source in ("run", "load", "identity_only") else None
         expected_experiment = (

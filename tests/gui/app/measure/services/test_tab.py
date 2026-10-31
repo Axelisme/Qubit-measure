@@ -105,6 +105,7 @@ def test_tab_snapshot_is_single_pure_render_model(
     snapshot = service.get_snapshot("tab")
 
     assert snapshot.tab_id == "tab"
+    assert snapshot.run is not None
     assert snapshot.run.acquisition_run_id == expected_run_id
     assert snapshot.interaction is not None  # render path fills every live field
     assert snapshot.interaction.has_run_result is True

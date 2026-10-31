@@ -692,7 +692,6 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == first.outputs[0].output.path
     assert second.outputs[1].output.path != first.outputs[1].output.path
-    metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
     assert len(session.entry.ledger.events()) == 2
 
 
@@ -896,7 +895,6 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert [output.status for output in data.members[0].outputs] == ["failed", "failed"]
     assert data.members[0].outputs[1].path == second.outputs[1].output.path
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
-    metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     commit_run(session.state, "tab", RunPaneState())
     assert session.state.get_tab("tab").run.confirmed_run_id is None

@@ -861,24 +861,11 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
-        commit_run(
-            session.state,
-            "tab",
-            RunPaneState(
-                result=replace(
-                    require_record(tab.run),
-                    metadata=session.metadata.model_copy(
-                        update={"experiment": "test/different"}
-                    ).model_dump(mode="json"),
-                ),
-                storage=None
-                if tab.run.parameters is None
-                else tab.run.parameters.storage,
-                parameters=tab.run.parameters,
-            ),
-        )
         session.save()
         path = session.native_data_path
+        stored = load(path)
+        stored.docs["metadata"]["experiment"] = "test/different"
+        save(path, stored, replace=True)
         old_run = tab.run
         service = LoadService(
             session.state, plan_layout=session.save_service.plan_layout
