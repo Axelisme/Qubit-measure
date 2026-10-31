@@ -707,15 +707,13 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     @contextmanager
     def branch(self, *, by: str) -> Generator[BranchCases]:
-        """Select indexed cases and merge static ends without moving reference.
+        """Select one case per sweep point without padding paths to equal duration.
 
-        by is an existing sweep loop name. Use case(index) for zero-based points,
-        in any order. Omitted points execute no actions. Duplicate, non-integer
-        or out-of-range indices raise ValueError.
-        Each used timeline resumes at the static maximum of its case ends.
-        Unjoined local fork ends merge along their lineage into the incoming
-        ancestor, not other timelines. Explicit joins keep their destination.
-        Forked names expire at case exit, even when every case uses the same name.
+        by is an existing sweep loop name. Provide exactly one case() per point.
+        Each case closes only timelines it uses. Different remaining ends become
+        wait-only; join/fork derive ordinary targets, while sync consumes them.
+        Forked names are case-local, even when every case uses the same spelling.
+        Their ends join the case closing maximum and names expire at its exit.
         Measurement selectors raise ValueError. Call only while building _body.
         """
         if not self._building_body:
