@@ -193,16 +193,11 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         stop. Other BufferProtocol implementations keep caller-owned flushing.
         Callback errors propagate, but the scope still closes. Skip the flush
         when the body raises so a callback cannot replace the body exception.
-        Suppress KeyboardInterrupt and record interrupted on this scope's stop
-        signal, preserving buffered data for the caller's partial-result return.
+        Propagate every body exception unchanged, including KeyboardInterrupt.
         Release the child token on every exit, handing completion facts to its
-        parent without setting the parent event. Other exceptions propagate.
+        parent without setting the parent event.
         """
         try:
-            if isinstance(exc, KeyboardInterrupt):
-                # Let the caller return buffered partial data after a Notebook stop.
-                self.mark_interrupted(exc)
-                return True
             if exc is None:
                 for buffer in self._buffers:
                     if isinstance(buffer, SignalBuffer):
