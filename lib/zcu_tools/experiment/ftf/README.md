@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-31, mux PFB channel selection
+**Last updated:** 2026-10-31, empty mux channel receiver noise
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -511,6 +511,9 @@ control portions, including controls after a herald, still evolve normally. Puls
 point, including mutually exclusive slots. Mux readout permits 1..8 coherent incident tones with
 a common pulse start. Each mux ADC observes only the shared-line carriers in its
 PFB channel through its own demodulation, calibration, delay and sample grid.
+An observed channel with no in-channel carrier still emits its read columns.
+Its empty pulse event produces the existing receiver background offset and noise,
+without CTMC or cavity propagation. No new noise parameters are introduced.
 The rotating reference is chosen from the first terminal carrier before selection
 and stays common to every ADC. Logical events select independently when an ADC
 retunes between reads. Multiple grids within one event must address the same PFB
