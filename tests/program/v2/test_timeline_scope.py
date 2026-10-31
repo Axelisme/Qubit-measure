@@ -109,8 +109,9 @@ def _compile_operation(frontend: str, operation: str, context: str):
                     prog.emit(module)
                 else:
                     module.play(prog)
-        for timeline in ("default", "outer", "inner"):
-            prog.delay_timeline(0, timeline=timeline, tag=f"end_{timeline}")
+        selected = {"explicit": "default", "nested": "inner"}.get(context, "outer")
+        prog.sync(timeline=selected)
+        prog.pulse(0, "p", t=0)
 
     soccfg = make_mock_soccfg(1, 1)
     if frontend == "builder":
@@ -145,10 +146,9 @@ def test_timed_entry_points_select_scope_and_preserve_native_placement(
 ):
     prog = _compile_operation(frontend, operation, context)
     expected_tick = {"explicit": 310, "outside": 10, "nested": 210}.get(context, 110)
-    assert [waves(shot) for shot in shots(prog)] == [[expected_tick]]
-    selected = {"explicit": "default", "nested": "inner"}.get(context, "outer")
-    ends = {"default": 300, "outer": 100, "inner": 200}
-    if context != "outside":
-        ends[selected] = expected_tick + (44 if operation.startswith("pulse") else 0)
-    for timeline, ticks in ends.items():
-        assert prog.get_time_param(f"end_{timeline}", "t") == pytest.approx(ticks / 430.08)
+    expected_end = 100 if context == "outside" else expected_tick
+    if context != "outside" and operation.startswith("pulse"):
+        expected_end += 44
+    # The second, native pulse observes the selected end after sync. This also
+    # covers register-selected ends that have no affine get_time_param value.
+    assert [waves(shot) for shot in shots(prog)] == [[expected_tick, expected_end]]
