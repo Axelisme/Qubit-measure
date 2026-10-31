@@ -1,90 +1,91 @@
-"""Thermal four-branch, two-charge-line higher-level spectroscopy."""
+"""Four-branch two-line spectroscopy with acquisition-side joint counts."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, SweepCfg
+from zcu_tools.program.v2 import (
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
 
 from .._drive import DualLineCfg, dual_line_drive
-from .._readout import JointRoles, collect_joint_shots
+from .._readout import JointRoles
+from .._sums import (
+    marginal_probabilities,
+    readout_axes,
+    terminal_counts,
+    validate_classifiers,
+)
+from .._timeline import emit_readout_prefix
 from .analysis import SpectroscopyAnalysis, analyze_spectra
 
 BRANCH_LABELS = ("00", "01", "10", "11")
 
 
 class SpectroscopyCfg(ConfigBase):
-    """B00/01/10/11 → dual weak probe → optional Xπ⊗Xπ → full mux.
+    """Optional reset → B00/01/10/11 → dual probe → optional double Xπ → mux.
 
-    roles contains fixed captured component/tone identities. drive contains two
-    ordinary scalar charge pulses with explicit waveforms. frequency is the common
-    MHz host scan; drive's saved base frequency is replaced only on program copies.
-    contrast applies both calibrated Xπ pulses after the probe when True, neither
-    when False. No heralding or shot selection occurs. dc_device=None leaves all
-    sources untouched; otherwise the direct device name is swept in dc_unit at
-    dc_values, without conversion, compensation or automatic restoration.
-    reps/rounds retain all shots in round-major order, not averaged IQ.
+    Frequency is a common MHz host scan; pulses carry explicit waveforms,
+    gains and phases (degrees), with timing in us. contrast applies both Xπ
+    pulses after the probe. F1/F2 require circle classifiers with GE Post radii.
+    rounds accumulate counts at acquisition, not on a host round axis.
+    dc_device=None leaves all sources untouched and uses the sentinel axis [0].
+    Otherwise sweep the named source in dc_unit, without compensation or restore.
     """
 
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
     relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
     ] = 1.0
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
+    ] = None
     x180_f1: Annotated[
         Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
+        FieldMeta(label="F1 Xπ", description="Calibrated F1 preparation pulse."),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 calibrated x180 pulse slot。先做 amplitude／length Rabi，再確認 frequency MHz、gain a.u. within [-1, 1] 與 duration us。",
-        ),
+        FieldMeta(label="F2 Xπ", description="Calibrated F2 preparation pulse."),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
             label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
+            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
         ),
     ]
     roles: JointRoles
@@ -92,7 +93,7 @@ class SpectroscopyCfg(ConfigBase):
         DualLineCfg,
         FieldMeta(
             label="Dual-line drive",
-            description="填入 F1/F2 charge-line pulses。首次範圍由操作者確認；已有校準時可沿用 coupler 的 cz_f1／cz_f2 slots，不假設它們適合作 weak probes。",
+            description="Two charge-line weak probe pulses; confirm gains and durations before Run.",
         ),
     ]
     frequency: Annotated[
@@ -100,7 +101,7 @@ class SpectroscopyCfg(ConfigBase):
         FieldMeta(
             unit="MHz",
             label="Frequency",
-            description="填入 common probe frequency 起訖值，單位 MHz。先用 twotone frequency 定位 F1/F2，再由操作者確認高能階掃描範圍。",
+            description="Common probe frequency scan on both charge lines.",
         ),
     ]
     contrast: Annotated[bool, FieldMeta(label="Double Xπ contrast")] = True
@@ -118,8 +119,8 @@ class SpectroscopyCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Require full tones, each probe on its preparation line, and finite axes."""
-        self.roles.validate_readout(self.readout)
+        """Require calibrated role tones, matched probe lines and finite scans."""
+        validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each probe must use its role's calibrated Xπ generator")
         if not np.all(np.isfinite(sweep2array(self.frequency))):
@@ -134,135 +135,184 @@ class SpectroscopyCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class SpectroscopyResult:
-    """Raw complex IQ (D,4,F,rounds*reps,N) with all same-shot full tones.
+    """Raw float64 sums (DC,4,frequency,3,3), ordered terminal F1/F2 g/e/other.
 
-    dc_values are device-native coordinates, or [0] as an inactive sentinel only
-    when cfg.dc_device=None. branches=[0,1,2,3] label B00/01/10/11, frequencies
-    are the common requested MHz coordinates. shot_indices=[0..rounds*reps-1]
-    are round-major; tone_indices=[0..N-1] retain original program tone order.
-    Acquired round slots are finite ADC units/sample from collect_raw_iq.
-    Cancelled unacquired whole rounds remain complex NaN, never valid samples.
+    DC coordinates are device-native, or [0] when inactive. Frequencies are MHz.
+    branches=[0,1,2,3] labels nominal B00/01/10/11, F1 first. Unmeasured points
+    remain NaN; completed acquisition rounds survive cancellation.
     """
 
     dc_values: NDArray[np.float64]
     branches: NDArray[np.int64]
     frequencies: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]
+
+
+def build_program(
+    cfg: SpectroscopyCfg,
+    soccfg: QickConfig,
+    branch: int,
+    frequency: float,
+    *,
+    heralded: bool,
+) -> TimelineProgramV2:
+    """Compile fresh reset/herald, nominal preparation, parallel probe and readout.
+
+    branch is 0..3. contrast adds F1 then F2 Xπ after the probe. Herald and
+    terminal reuse the same mux object; its post_delay supplies the herald gap.
+    No acquisition occurs and input pulses are unchanged.
+    """
+    if branch not in range(4):
+        raise ValueError("branch must be in 0..3")
+    validate_classifiers(cfg.readout, cfg.roles)
+    builder = TimelineBuilder(
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
+    )
+    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    if branch & 2:
+        builder.emit(Pulse("prepare_f1", cfg.x180_f1))
+    if branch & 1:
+        builder.emit(Pulse("prepare_f2", cfg.x180_f2))
+    builder.emit(dual_line_drive(cfg.drive, frequency=frequency, name="probe"))
+    if cfg.contrast:
+        builder.emit(Pulse("contrast_f1", cfg.x180_f1))
+        builder.emit(Pulse("contrast_f2", cfg.x180_f2))
+    builder.emit(readout, tag="terminal")
+    return builder.build()
+
+
+def acquire_counts(
+    config: SpectroscopyCfg, *, context: RunContext, heralded: bool
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Share DC/branch/frequency acquisition; return DC, MHz and unchanged sums.
+
+    Optional named DC is left at its last setting. Rounds accumulate in the
+    acquisition backend. Live curves show F1/F2 P_e by DC and branch, selecting
+    herald (g,g) only for display in the heralded version.
+    """
+    validate_classifiers(config.readout, config.roles)
+    frequencies = sweep2array(config.frequency)
+    dc_values = (
+        np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
+    )
+    viewers = {
+        (d, branch): live_line(
+            context.plots,
+            f"measurement_dc_{d}_branch_{branch}",
+            "Common probe frequency (MHz)",
+            "P_e (F1 line 1, F2 line 2)",
+            title=f"B{branch:02b} · DC {dc:g}"
+            + (" · herald (g,g)" if heralded else ""),
+            num_lines=2,
+        )
+        for d, dc in enumerate(dc_values)
+        for branch in range(4)
+    }
+
+    def update_view(sums: NDArray[np.float64]) -> None:
+        counts = terminal_counts(sums, heralded=heralded)
+        f1 = marginal_probabilities(counts, "f1")[..., 1]
+        f2 = marginal_probabilities(counts, "f2")[..., 1]
+        for (d, branch), viewer in viewers.items():
+            viewer.update(frequencies, np.stack((f1[d, branch], f2[d, branch])))
+
+    classes = (3, 3, 3, 3) if heralded else (3, 3)
+    buffer = SignalBuffer(
+        (len(dc_values), 4, len(frequencies), *classes),
+        dtype=np.float64,
+        on_update=update_view,
+    )
+    with Schedule(config, buffer, scope=context.scope) as sched:
+        for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
+            if dc_step.cfg.dc_device is not None:
+                set_flux(
+                    context.devices[dc_step.cfg.dc_device],
+                    dc_value,
+                    unit=dc_step.cfg.dc_unit,
+                    stop=context.scope.stop,
+                )
+            for branch, branch_step in dc_step.scan("branch", list(range(4))):
+                for frequency, step in branch_step.scan(
+                    "frequency", frequencies.tolist()
+                ):
+                    prog = build_program(
+                        step.cfg, context.soccfg, branch, frequency, heralded=heralded
+                    )
+                    step.run_acquire_summed(
+                        prog,
+                        context.soc,
+                        processor=shot_sums(
+                            prog, readout_axes(step.cfg.roles, heralded=heralded)
+                        ),
+                        rounds=step.cfg.rounds,
+                        options=RunOptions(),
+                    )
+    return dc_values, frequencies, buffer.array
+
+
+def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
+    """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
+    sums = data.variable("sums")
+    return SpectroscopyResult(
+        dc_values=sums.axes[4],
+        branches=sums.axes[3].astype(np.int64),
+        frequencies=sums.axes[2],
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
-    """Stateless thermal spectroscopy, diagnostic analysis and native persistence."""
+    """Measure F1/F2 excitation versus common probe frequency in four branches."""
 
-    AXES_SPEC: ClassVar[AxesSpec[SpectroscopyResult, SpectroscopyCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-            AxesSpec.Axis("frequencies", "Probe frequency", "Hz", 1e6),
-            AxesSpec.Axis("branches", "Nominal branch", "", dtype=np.int64),
-            AxesSpec.Axis(
-                "dc_values", "DC source value (inactive if dc_device=null)", "a.u."
+    AXES_SPEC: ClassVar[GroupedAxesSpec[SpectroscopyResult, SpectroscopyCfg]] = (
+        GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    variable="sums",
+                    axes=(
+                        VariableAxisSpec.generated_arange("terminal_f2", ""),
+                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec(
+                            "Probe frequency", "Hz", field_name="frequencies", scale=1e6
+                        ),
+                        VariableAxisSpec(
+                            "Nominal branch", "", field_name="branches", dtype=np.int64
+                        ),
+                        VariableAxisSpec(
+                            "DC source value (inactive if dc_device=null)",
+                            "a.u.",
+                            field_name="dc_values",
+                        ),
+                    ),
+                    z=VariableZSpec(
+                        field_name="sums",
+                        label="Joint class counts",
+                        unit="",
+                        dtype=np.float64,
+                    ),
+                ),
             ),
-        ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
-        result_type=SpectroscopyResult,
-        cfg_type=SpectroscopyCfg,
-        cfg_schema_version="3.0",
-        tag="two_qubit/conditional_spectroscopy",
+            result_type=SpectroscopyResult,
+            cfg_type=SpectroscopyCfg,
+            cfg_schema_version="4.0",
+            tag="two_qubit/conditional_spectroscopy",
+            result_builder=restore_result,
+        )
     )
 
     def run(
         self, config: SpectroscopyCfg, *, context: RunContext
     ) -> SpectroscopyResult:
-        """Acquire DC/nominal branch/frequency/host-round slots using full mux.
+        """Acquire optional reset → nominal branch → probe → contrast → terminal.
 
-        Only external acquisition and the optional named DC device have effects.
-        Never mutate caller cfg, read library/aliases, save or propose calibration.
-        Schedule preserves completed rounds on cancel; missing slots remain NaN.
-        The operation owner must check context.scope.stop.raise_if_error() so
-        invalid acquired IQ or transport failures cannot masquerade as cancellation.
+        Return raw counts, not IQ or proportions. Check the operation stop signal
+        for acquisition errors; unmeasured points remain NaN after cancellation.
         """
-        cfg = config.model_copy(deep=True, update={"rounds": 1})
-        frequencies = sweep2array(cfg.frequency)
-        dc_values = (
-            np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
-        )
-        ntones = len(cfg.readout.tones)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Common probe frequency (MHz)",
-            "Completed shots (all DC/branches)",
-            num_lines=1,
-        )
-
-        def update_view(raw: NDArray[np.complex128]) -> None:
-            acquired = np.all(np.isfinite(raw), axis=-1).sum(axis=(0, 1, 3, 4))
-            viewer.update(frequencies, acquired)
-
-        buffer = SignalBuffer(
-            (len(dc_values), 4, len(frequencies), config.rounds, cfg.reps, ntones),
-            on_update=update_view,
-        )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
-                if cfg.dc_device is not None:
-                    set_flux(
-                        context.devices[cfg.dc_device],
-                        dc_value,
-                        unit=cfg.dc_unit,
-                        stop=context.scope.stop,
-                    )
-                for branch, branch_step in dc_step.scan("branch", [0, 1, 2, 3]):
-                    for frequency, step in branch_step.scan(
-                        "frequency", frequencies.tolist()
-                    ):
-                        builder = step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=step.cfg.reps,
-                            initial_delay=step.cfg.initial_delay,
-                            relax_delay=step.cfg.relax_delay,
-                        )
-                        m = cfg
-                        if branch & 2:
-                            builder.add_pulse("prepare_f1", m.x180_f1)
-                        if branch & 1:
-                            builder.add_pulse("prepare_f2", m.x180_f2)
-                        builder.add(
-                            dual_line_drive(
-                                cfg.drive, frequency=frequency, name="probe"
-                            )
-                        )
-                        if cfg.contrast:
-                            builder.add_pulse("contrast_f1", m.x180_f1)
-                            builder.add_pulse("contrast_f2", m.x180_f2)
-                        builder.add(MuxReadout("readout", m.readout))
-                        prog = builder.build()
-                        for _, round_step in step.repeat("round", config.rounds):
-                            _ = round_step.prog_builder(
-                                context.soc,
-                                context.soccfg,
-                                reps=round_step.cfg.reps,
-                                initial_delay=round_step.cfg.initial_delay,
-                                relax_delay=round_step.cfg.relax_delay,
-                            ).run_program(
-                                prog,
-                                raw2signal_fn=partial(collect_joint_shots, prog),
-                                rounds=round_step.cfg.rounds,
-                            )
-        buffer.trigger_update(flush=True)
-        return SpectroscopyResult(
-            dc_values,
-            np.arange(4, dtype=np.int64),
-            frequencies,
-            np.arange(config.rounds * cfg.reps, dtype=np.int64),
-            np.arange(ntones, dtype=np.int64),
-            buffer.array.reshape(
-                len(dc_values), 4, len(frequencies), config.rounds * cfg.reps, ntones
-            ),
-        )
+        dc, frequencies, sums = acquire_counts(config, context=context, heralded=False)
+        return SpectroscopyResult(dc, np.arange(4, dtype=np.int64), frequencies, sums)
 
     def analyze(
         self,
@@ -271,12 +321,12 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         *,
         plots: Plots,
     ) -> SpectroscopyAnalysis:
-        """Plot all-tone mean IQ for complete branches from saved cfg/raw only.
-
-        Each DC/branch requires every frequency and requested round. Incomplete
-        branches report counts/reasons, not spectra from a biased partial scan.
-        No peak naming, Hamiltonian fit, population inversion or writeback occurs.
-        Missing saved cfg and malformed/nonfinite acquired raw raise ValueError.
-        """
+        """Plot count-derived F1/F2 P_e with other retained in the denominator."""
         del options
-        return analyze_spectra(source, plots=plots)
+        data = source.result
+        return analyze_spectra(
+            source.cfg,
+            data,
+            acquired_shots=data.sums.sum(axis=(-2, -1)),
+            plots=plots,
+        )

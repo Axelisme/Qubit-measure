@@ -1,186 +1,183 @@
-"""Thermal B11 relative-phase × duration experiment."""
+"""Relative F2 minus F1 phase scan in degrees at fixed common frequency."""
 
-from functools import partial
+from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_line
-
-from .._drive import DualLineCfg, dual_line_drive
+from .._drive import DualLineCfg
 from .._rabi_analysis import joint_return, plot_return_data
-from .._rabi_scan import DurationScanCfg, RabiScanResult
-from .._readout import collect_joint_shots
+from .._rabi_scan import DurationScanCfg, RabiScanResult, acquire_counts
 from .analysis import ConstructivePhaseAnalysis, analyze_constructive_phase
 
 
 class ConstructivePhaseCfg(DurationScanCfg):
     """Relative F2 minus F1 phase scan in degrees at fixed common frequency.
 
-    Each point replaces F2.phase with F1.phase + relative_phase. Signed gains,
-    their ratio, waveform styles and delays remain unchanged. No parasitic
-    cancellation, amplitude-ratio search or heralding is performed.
+    Each coordinate sets F2.phase to F1.phase plus the requested phase. Signed gains and source waveforms remain fixed.
+    Optional reset precedes preparation. F1/F2 classifiers require GE Post radii.
     """
 
     relative_phase: Annotated[
         SweepCfg,
         FieldMeta(
             unit="deg",
-            label="Relative phase",
-            description="填入 F2 相對 F1 的 phase 起訖值，單位 deg。先以 chevron 選定 frequency 與 duration，再確認相位掃描範圍。",
+            label="F2 relative to F1 phase",
+            description="Set the f2 relative to f1 phase sweep endpoints in deg; review the scan window before Run.",
         ),
     ]
 
     @model_validator(mode="after")
-    def validate_phase(self) -> Self:
-        """Require finite requested relative phases."""
+    def validate_coordinate(self) -> Self:
+        """Require finite requested relative_phase coordinates."""
         if not np.all(np.isfinite(sweep2array(self.relative_phase))):
-            raise ValueError("Relative phases must be finite")
+            raise ValueError("F2 relative to F1 phase coordinates must be finite")
         return self
 
 
-class ConstructivePhaseExp(Experiment[RabiScanResult, ConstructivePhaseCfg]):
-    """Stateless relative-phase acquisition and native persistence."""
+@dataclass(frozen=True)
+class ConstructivePhaseResult(RabiScanResult):
+    """F2 relative to F1 phase coordinates, durations in us and (Nc,Nd,3,3) counts.
 
-    AXES_SPEC: ClassVar[AxesSpec[RabiScanResult, ConstructivePhaseCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-            AxesSpec.Axis("durations", "Drive duration", "s", 1e-6),
-            AxesSpec.Axis("coordinates", "F2 relative to F1 phase", "deg"),
+    Terminal class axes are F1/F2, each g/e/other. Unmeasured points are NaN.
+    Counts are float64 totals, not normalized probabilities.
+    """
+
+
+def acquire_scan(
+    config: ConstructivePhaseCfg, *, context: RunContext, heralded: bool
+) -> RabiScanResult:
+    """Acquire this scan with optional herald; no input mutation or host round loop.
+
+    Coordinate transforms preserve signed gains, timing and source waveforms.
+    The shared duration sequence prepares B11, drives both lines, applies double
+    Xπ contrast and emits terminal readout. Check context.scope.stop for errors.
+    """
+    coordinates = sweep2array(config.relative_phase)
+    drives = [
+        DualLineCfg(
+            f1=config.drive.f1.model_copy(deep=True),
+            f2=config.drive.f2.with_updates(
+                phase=float(config.drive.f1.phase) + coordinate
+            ),
+        )
+        for coordinate in coordinates
+    ]
+    return acquire_counts(
+        config, coordinates, drives, context=context, heralded=heralded
+    )
+
+
+def analyze_scan(
+    cfg: ConstructivePhaseCfg, result: RabiScanResult, *, plots: Plots, heralded: bool
+) -> ConstructivePhaseAnalysis:
+    """Analyze count-derived P00 and the constructive rate² maximum.
+
+    Heralded input selects herald (g,g) and additionally plots its nine-class
+    distribution. Other remains in the terminal denominator. Empty traces are
+    unresolved. Saved cfg determines axes; the current Form/library is unused.
+    """
+    answer = joint_return(
+        cfg, result, sweep2array(cfg.relative_phase), heralded=heralded
+    )
+    plot_return_data(
+        result,
+        answer,
+        coordinate_label="F2 relative to F1 phase (deg)",
+        map_name="interference",
+        plots=plots,
+    )
+    return analyze_constructive_phase(result, answer, plots=plots)
+
+
+def restore_result(
+    data: GroupedLoadData[ConstructivePhaseCfg],
+) -> ConstructivePhaseResult:
+    """Restore summed counts; old raw-IQ files without sums raise ValueError."""
+    sums = data.variable("sums")
+    return ConstructivePhaseResult(
+        coordinates=sums.axes[3], durations=sums.axes[2], sums=sums.z.astype(np.float64)
+    )
+
+
+class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhaseCfg]):
+    """Acquire and persist the ordinary constructive_phase count scan."""
+
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConstructivePhaseResult, ConstructivePhaseCfg]
+    ] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("terminal_f2", ""),
+                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec(
+                        "Drive duration", "s", field_name="durations", scale=1e-6
+                    ),
+                    VariableAxisSpec(
+                        "F2 relative to F1 phase",
+                        "deg",
+                        field_name="coordinates",
+                        scale=1.0,
+                    ),
+                ),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
+            ),
         ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
-        result_type=RabiScanResult,
+        result_type=ConstructivePhaseResult,
         cfg_type=ConstructivePhaseCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="two_qubit/constructive_phase",
+        result_builder=restore_result,
     )
 
     def run(
         self, config: ConstructivePhaseCfg, *, context: RunContext
-    ) -> RabiScanResult:
-        """Acquire B11 → dual drive → double Xπ → mux for phase/duration/round.
+    ) -> ConstructivePhaseResult:
+        """Acquire optional reset → B11 → dual drive → double Xπ → terminal.
 
-        Preserve all raw shots and full tones, including partial cancellation.
-        Caller must check context.scope.stop.raise_if_error(). No input mutation.
+        Return unchanged counts, including completed rounds on cancellation.
+        Rounds accumulate at acquisition. Check context.scope.stop for errors.
         """
-        phases = sweep2array(config.relative_phase)
-        drives = [
-            DualLineCfg(
-                f1=config.drive.f1.model_copy(deep=True),
-                f2=config.drive.f2.with_updates(
-                    phase=float(config.drive.f1.phase) + phase
-                ),
-            )
-            for phase in phases
-        ]
-        if not np.all(np.isfinite(phases)):
-            raise ValueError("Each finite coordinate requires one explicit drive pair")
-        cfg = config.model_copy(deep=True, update={"rounds": 1})
-        durations = sweep2array(cfg.duration)
-        ntones = len(cfg.readout.tones)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Completed shots (all coordinates)",
-            num_lines=1,
-        )
-
-        def update_view(raw: NDArray[np.complex128]) -> None:
-            viewer.update(
-                durations, np.all(np.isfinite(raw), axis=-1).sum(axis=(0, 2, 3))
-            )
-
-        buffer = SignalBuffer(
-            (len(drives), len(durations), config.rounds, cfg.reps, ntones),
-            on_update=update_view,
-        )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            for index, step in sched.scan("coordinate", list(range(len(drives)))):
-                for duration, duration_step in step.scan(
-                    "duration", durations.tolist()
-                ):
-                    drive = drives[index].model_copy(deep=True)
-                    for pulse in (drive.f1, drive.f2):
-                        pulse.set_param("length", duration)
-                    builder = duration_step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=duration_step.cfg.reps,
-                        initial_delay=duration_step.cfg.initial_delay,
-                        relax_delay=duration_step.cfg.relax_delay,
-                    )
-                    builder.add_pulse("prepare_f1", cfg.x180_f1)
-                    builder.add_pulse("prepare_f2", cfg.x180_f2)
-                    builder.add(dual_line_drive(drive, frequency=float(drive.f1.freq)))
-                    builder.add_pulse("contrast_f1", cfg.x180_f1)
-                    builder.add_pulse("contrast_f2", cfg.x180_f2)
-                    builder.add(MuxReadout("readout", cfg.readout))
-                    prog = builder.build()
-                    for _, round_step in duration_step.repeat("round", config.rounds):
-                        _ = round_step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=round_step.cfg.reps,
-                            initial_delay=round_step.cfg.initial_delay,
-                            relax_delay=round_step.cfg.relax_delay,
-                        ).run_program(
-                            prog,
-                            raw2signal_fn=partial(collect_joint_shots, prog),
-                            rounds=round_step.cfg.rounds,
-                        )
-        buffer.trigger_update(flush=True)
-        return RabiScanResult(
-            phases,
-            durations,
-            np.arange(config.rounds * cfg.reps, dtype=np.int64),
-            np.arange(ntones, dtype=np.int64),
-            buffer.array.reshape(
-                len(drives), len(durations), config.rounds * cfg.reps, ntones
-            ),
-        )
+        data = acquire_scan(config, context=context, heralded=False)
+        return ConstructivePhaseResult(data.coordinates, data.durations, data.sums)
 
     def analyze(
         self,
-        source: RunRecord[ConstructivePhaseCfg, RabiScanResult],
+        source: RunRecord[ConstructivePhaseCfg, ConstructivePhaseResult],
         options: None,
         *,
         plots: Plots,
     ) -> ConstructivePhaseAnalysis:
-        """Classify complete points and plot return using saved cfg only.
+        """Use saved count axes and cfg to plot return and fit eligible traces.
 
-        Fit complete duration traces with the undamped cosine, excluding rates
-        below 1/saved duration span. Fit rate²=A+B cosφ+C sinφ and return the
-        maximum-rate relative phase, or a reason for unresolved/degenerate fits.
-        No contrast/sigma, frequency/sigma or residual quality gate is applied.
-        Missing source cfg, invalid raw or malformed axes raise ValueError.
-        Incomplete points keep raw but are not classified or replaced by zero.
+        Missing cfg or mismatched axes raises ValueError. Failed fits report a
+        reason, not zero rates. No IQ classification or automatic write occurs.
         """
         del options
         if source.cfg is None:
             raise ValueError(
                 "Rabi analysis requires saved cfg; current Form/library is not a substitute"
             )
-        answer = joint_return(
-            source.cfg, source.result, sweep2array(source.cfg.relative_phase)
-        )
-        plot_return_data(
-            source.result,
-            answer,
-            coordinate_label="F2 relative to F1 phase (deg)",
-            map_name="interference",
-            plots=plots,
-        )
-        return analyze_constructive_phase(source.result, answer, plots=plots)
+        return analyze_scan(source.cfg, source.result, plots=plots, heralded=False)

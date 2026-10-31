@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 
-from .._phase import QuadraturePhase, quadrature_phase, wrap_phase
+from .._phase import QuadraturePhase, count_phase, wrap_phase
+from .._sums import herald_probabilities, sigma, terminal_counts
 from .crossing import PhaseCrossings, phase_crossings
 
 if TYPE_CHECKING:
@@ -20,52 +20,47 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ConditionalPhaseAnalysis:
-    """Branch/n/frequency phase results and Xπ-minus-I conditional phase (degrees).
+    """Branch/n/frequency classified phase and Xπ-minus-I phase in degrees.
 
-    phases has shape (2,Nn,Nf), conditional_deg has (Nn,Nf), absent angles are
-    NaN with reasons. mean_iq retains all tones, shape (2,2,Nn,Nf,Ntones).
-    acquired_shots retains counts per independent projection, shape (2,2,Nn,Nf).
-    gate_counts/frequencies_mhz identify those coordinates. crossings stores every
-    n's in-window π intersections; frequency_mhz selects only the unique n=1
-    result, otherwise None with frequency_reason. No frequency uncertainty model
-    or multi-n consistency gate is implied.
+    phases is (2,Nn,Nf); conditional_deg is (Nn,Nf). quadratures is
+    (2,2,Nn,Nf) sigma, and acquired_shots is each projection's terminal total.
+    crossings retains each n's in-window π intersections; frequency_mhz selects
+    only a unique n=1 crossing. herald_matrix is the full herald distribution
+    or None for ordinary acquisition; pass_fraction is its (g,g) cell.
     """
 
     phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]
     conditional_deg: NDArray[np.float64]
-    mean_iq: NDArray[np.complex128]
-    acquired_shots: NDArray[np.int64]
+    quadratures: NDArray[np.float64]
+    acquired_shots: NDArray[np.float64]
     gate_counts: tuple[int, ...]
     frequencies_mhz: tuple[float, ...]
     crossings: tuple[PhaseCrossings, ...]
     frequency_mhz: float | None
     frequency_reason: str | None
+    herald_matrix: NDArray[np.float64] | None = None
+    pass_fraction: NDArray[np.float64] | None = None
 
 
 def analyze_phase(
-    source: RunRecord[ConditionalPhaseCfg, ConditionalPhaseResult], *, plots: Plots
+    cfg: ConditionalPhaseCfg,
+    data: ConditionalPhaseResult,
+    *,
+    plots: Plots,
+    heralded: bool = False,
 ) -> ConditionalPhaseAnalysis:
-    """Validate raw against saved cfg and analyze only complete X/Y round pairs.
+    """Derive classified X/Y sigma and phase using saved cfg and count axes.
 
-    Missing quadrature/branch or calibration gives a reason, not an inferred phase.
-    Frequency axes allow only SI conversion roundoff; other axes match exactly.
-    Any partly missing round or nonfinite acquired value raises ValueError.
-    Thermal mixture and weak contrast remain in the result; no shots are removed.
+    Each projection uses all acquired counts, including other in its denominator.
+    Missing/empty projections and zero contrast retain a reason, not a phase.
+    Heralded analysis selects herald (g,g) terminal counts and plots all nine
+    herald fractions. No IQ projection, shot reclassification or purity correction
+    is applied. Only unique n=1 crossings select common CZ frequency.
     """
-    cfg, data = source.cfg, source.result
-    if cfg is None:
-        raise ValueError(
-            "Phase analysis requires saved source cfg, not current Form/library"
-        )
-    mean, counts, complete = _source_quadratures(cfg, data)
+    counts = _source_quadratures(cfg, data, heralded=heralded)
+    acquired = counts.sum(axis=(-2, -1))
+    quadratures = sigma(counts, cfg.target)
     nn, nf = len(cfg.gate_counts), len(data.frequencies)
-    tone = cfg.roles.f1_tone if cfg.target == "f1" else cfg.roles.f2_tone
-    calibration_reason = None
-    try:
-        centers = cfg.f1_centers if cfg.target == "f1" else cfg.f2_centers
-    except ValueError as exc:
-        centers = None
-        calibration_reason = str(exc)
     branches: list[tuple[tuple[QuadraturePhase, ...], ...]] = []
     conditional = np.full((nn, nf), np.nan)
     for b in range(2):
@@ -73,18 +68,9 @@ def analyze_phase(
         for n in range(nn):
             points: list[QuadraturePhase] = []
             for f in range(nf):
-                if not np.all(complete[b, :, n, f]):
-                    point = QuadraturePhase(
-                        np.nan, None, "Missing complete X/Y projection rounds"
-                    )
-                elif centers is None:
-                    point = QuadraturePhase(np.nan, None, calibration_reason)
-                else:
-                    point = quadrature_phase(
-                        data.signals[b, 0, n, f, :, tone],
-                        data.signals[b, 1, n, f, :, tone],
-                        centers,
-                    )
+                point = count_phase(
+                    float(quadratures[b, 0, n, f]), float(quadratures[b, 1, n, f])
+                )
                 points.append(point)
             trains.append(tuple(points))
         branches.append(tuple(trains))
@@ -105,61 +91,45 @@ def analyze_phase(
     answer = ConditionalPhaseAnalysis(
         tuple(branches),
         conditional,
-        mean,
-        counts,
+        quadratures,
+        acquired,
         tuple(cfg.gate_counts),
         tuple(float(f) for f in data.frequencies),
         crossings,
         selected.frequencies_mhz[0] if selected.reason is None else None,
         selected.reason,
+        herald_probabilities(data.sums) if heralded else None,
+        herald_probabilities(data.sums)[..., 0, 0] if heralded else None,
     )
     _plot_phase(cfg, data, answer, plots=plots)
     return answer
 
 
 def _source_quadratures(
-    cfg: ConditionalPhaseCfg,
-    data: ConditionalPhaseResult,
-) -> tuple[NDArray[np.complex128], NDArray[np.int64], NDArray[np.bool_]]:
-    """Validate saved raw axes/whole-round sentinels and average complete projections."""
+    cfg: ConditionalPhaseCfg, data: ConditionalPhaseResult, *, heralded: bool
+) -> NDArray[np.float64]:
+    """Validate saved scan axes and select terminal counts without averaging."""
     frequencies = sweep2array(cfg.frequency)
-    nf, nn, nt, ns = (
-        len(frequencies),
-        len(cfg.gate_counts),
-        len(cfg.readout.tones),
-        cfg.rounds * cfg.reps,
-    )
     if data.frequencies.shape != frequencies.shape or not np.allclose(
-        data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+        data.frequencies,
+        frequencies,
+        rtol=8 * np.finfo(float).eps,
+        atol=0,
     ):
-        raise ValueError("Conditional phase raw axes must match saved cfg")
+        raise ValueError("Conditional phase count axes must match saved cfg")
     for actual, expected in (
         (data.branches, np.arange(2)),
         (data.quadratures, np.arange(2)),
         (data.gate_counts, np.array(cfg.gate_counts)),
-        (data.shot_indices, np.arange(ns)),
-        (data.tone_indices, np.arange(nt)),
     ):
         if not np.array_equal(actual, expected):
-            raise ValueError("Conditional phase raw axes must match saved cfg")
-    if data.signals.shape != (2, 2, nn, nf, ns, nt):
-        raise ValueError(
-            "Expected raw shape (branch,quadrature,n,frequency,rounds*reps,full tones)"
-        )
-    rounds = data.signals.reshape(2, 2, nn, nf, cfg.rounds, cfg.reps, nt)
-    acquired = np.all(np.isfinite(rounds), axis=(-2, -1))
-    missing = np.all(
-        np.isnan(rounds) & ~np.isinf(rounds.real) & ~np.isinf(rounds.imag),
-        axis=(-2, -1),
+            raise ValueError("ConditionalPhase count axes must match saved cfg")
+    shape = (2, 2, len(cfg.gate_counts), len(frequencies)) + (
+        (3, 3, 3, 3) if heralded else (3, 3)
     )
-    if not np.all(acquired | missing):
-        raise ValueError("Nonfinite acquired IQ or partially missing round")
-    complete = np.all(acquired, axis=-1)
-    counts = acquired.sum(axis=-1, dtype=np.int64) * cfg.reps
-    mean = np.full((2, 2, nn, nf, nt), complex(np.nan, np.nan), dtype=np.complex128)
-    for b, q, n, f in np.argwhere(complete):
-        mean[b, q, n, f] = data.signals[b, q, n, f].mean(axis=0)
-    return mean, counts, complete
+    if data.sums.shape != shape:
+        raise ValueError(f"Expected summed count shape {shape}, got {data.sums.shape}")
+    return terminal_counts(data.sums, heralded=heralded)
 
 
 def _plot_phase(
@@ -173,7 +143,7 @@ def _plot_phase(
         "phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
     )
     fig.suptitle(
-        f"{cfg.target.upper()} target · thermal nominal spectator branches · X/Y independent acquisitions"
+        f"{cfg.target.upper()} target · nominal spectator branches · X/Y independent acquisitions"
     )
     contrast_ax, phase_ax, conditional_ax = fig.axes
     for n, count in enumerate(data.gate_counts):
@@ -199,7 +169,7 @@ def _plot_phase(
         )
         for crossing in answer.crossings[n].frequencies_mhz:
             conditional_ax.plot(crossing, -180, "x", label=f"n={count} π crossing")
-    contrast_ax.set_ylabel("GE-normalized contrast")
+    contrast_ax.set_ylabel("Classified quadrature contrast")
     phase_ax.set_ylabel("Logical phase (deg, wrapped)")
     conditional_ax.set_ylabel("Xπ − I phase (deg, wrapped)")
     conditional_ax.axhline(-180, color="gray", linestyle="--", label="π modulo 2π")
@@ -212,27 +182,33 @@ def _plot_phase(
         answer.frequency_reason
         or f"n=1 unique crossing: {answer.frequency_mhz:g} MHz; higher n diagnostic only"
     )
-    for tone, readout in enumerate(cfg.readout.tones):
-        fig, _ = plots.subplots(
-            f"quadratures_tone_{tone}",
-            nrows=2,
-            ncols=2,
-            figsize=(11, 7),
-            layout="constrained",
-        )
-        fig.suptitle(
-            f"Tone {tone} {readout.label} · mean IQ · thermal nominal branches"
-        )
-        for b in range(2):
-            for q in range(2):
-                ax = fig.axes[2 * b + q]
-                for n, count in enumerate(data.gate_counts):
-                    iq = answer.mean_iq[b, q, n, :, tone]
-                    ax.plot(data.frequencies, iq.real, ".-", label=f"I n={count}")
-                    ax.plot(data.frequencies, iq.imag, ".--", label=f"Q n={count}")
-                ax.set_title(
-                    f"Spectator {('I', 'Xπ')[b]} · {('X', 'Y')[q]} projection pulse"
+    fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+    for b, branch in enumerate(("I", "Xπ")):
+        for q, projection in enumerate(("X", "Y")):
+            for n, count in enumerate(data.gate_counts):
+                axes.plot(
+                    data.frequencies,
+                    answer.quadratures[b, q, n],
+                    ".-",
+                    label=f"{branch} {projection} n={count}",
                 )
-                ax.set_xlabel("Common CZ frequency (MHz)")
-                ax.set_ylabel("Mean IQ (ADC units/sample)")
-                ax.legend(fontsize="small")
+    axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
+    axes.legend(fontsize="small", ncols=3)
+
+    if answer.herald_matrix is not None:
+        fig, axes = plots.subplots("herald", figsize=(12, 5))
+        matrix = answer.herald_matrix.reshape(-1, 9)
+        image = axes.imshow(
+            np.ma.masked_invalid(matrix), vmin=0, vmax=1, cmap="Blues", aspect="auto"
+        )
+        axes.set(
+            xticks=range(9),
+            xticklabels=[
+                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
+            ],
+            xlabel="Herald class (F1, F2)",
+            ylabel="Scan row (branch, projection, n, frequency)",
+            title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
+        )
+        fig.colorbar(image, ax=axes, label="Herald probability")
+        fig.tight_layout()

@@ -1,82 +1,83 @@
 # Rabi chevron
 
-**Readers:** operator, agent. Select a CZ frequency and duration window from a Rabi chevron acquired through the GUI or MCP.
+**Readers:** operator, agent. Run `two_qubit/chevron` and interpret its count-derived return.
 
-**Last updated:** 2026-10-21
+## Sequence and calibration
 
-GE centers come only from the saved readout cfg at `roles.f1_tone` and
-`roles.f2_tone`. Circle classifiers need no radius for this analysis. There is
-no manual center override or point-parameter calibration lookup. Missing or
-linear role-tone classifiers make the cfg invalid. Calibrate mux singleshot GE
-under the readout conditions used here.
+Scan common drive frequency in MHz and common envelope duration in us.
+Each shot emits optional reset, nominal B11 preparation, simultaneous two-line
+drive, double Xπ contrast and one terminal mux readout.
+The ordinary version retains every classified shot without herald selection.
+`reset=None` emits no reset. Set a reset cfg only after reviewing its pulse
+and timing against the authorized limits. The Form's Reset action recaptures
+inputs; it does not emit a reset pulse.
 
-Readout references `$mux.module.readout` when present, preserving the library's complete tones and scalar settings. Without a slot, fill every required readout field in the blank mux template.
-
-After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
-
-## Purpose and sequence
-
-Scan common drive frequency in MHz and common envelope duration in us at fixed
-signed gains and relative phase. The sequence is nominal B11 preparation with
-both calibrated Xπ pulses, simultaneous two-line drive, double Xπ contrast and
-one full mux readout. Every shot of the thermal ensemble is retained. Interpret
-the result as an ensemble diagnostic; pure-state preparation, heralding and
-fidelity estimation require separate experiments.
+Both role tones require circle classifiers with g/e centers and radius.
+Run mux singleshot GE Post under these readout conditions before Run.
+Missing classifiers, linear classifiers and missing radii make the cfg invalid.
+Classification happens during acquisition, not during analysis.
+The three classes are g, e and other. Other stays in the denominator.
 
 ## Prepare the Form
 
-Bind `f1`, `f2`, `coupler` and `mux`, then Open or Reset. Review captured component
-names and the original tone positions derived from the mux group's `qubits`.
-Check both Xπ pulses, GE centers, complete mux tones and routing. Missing sources
-remain required inputs. Existing coupler CZ pulse slots supply editable source
-pulses. Without slots, fill both explicit cosine templates, including common
-frequency, signed gains, length and Nyquist zones. Channels use captured role
-wiring. The drive uses only the two charge lines; the coupler stays DC-biased.
+Bind `f1`, `f2`, `coupler` and `mux`, then Open or Reset.
+Review the captured identities and original tone positions from the mux group.
+Check both Xπ pulses and all mux tones, ADC routes and scalar timing.
+Readout references `$mux.module.readout` when present. Otherwise fill the blank
+mux template, including classifiers. Missing sources remain required inputs.
 
-Choose relative phase using the separate constructive-phase experiment. Keep
-both signed gains and their ratio fixed in this scan. Both source frequencies,
-envelope lengths and pre-delays must match. Enter frequency and positive duration
-endpoints explicitly. Both pulse frequencies change together at each frequency
-coordinate. Only common duration changes within that trace. Individual phases,
-waveform styles and post-delays remain source values. Playback starts together
-and waits for the longer line, including post-delay.
+The coupler's `cz_f1` and `cz_f2` slots seed editable ordinary charge pulses.
+Without slots, fill both cosine templates, including signed gain, frequency,
+envelope length and Nyquist zone. Channels come from captured role wiring.
+Only F1/F2 charge lines play the drive; the coupler stays DC-biased.
+Both source frequencies, envelope lengths and pre-delays must match.
+The sequence waits for both drive pulses, including their individual post-delays.
+Keep the signed gain ratio fixed.
+At each frequency coordinate, both frequencies change together.
+Individual phases remain fixed; choose relative phase with constructive_phase first.
+Only common envelope duration changes within each trace.
 
-Review repetitions, rounds and timing against authorized limits before Run.
-Treat source values as editable inputs requiring a safety review. Acquisition
-uses the roles and pulses fixed at Open or Reset; Reset after changing sources.
+Enter finite scan endpoints and strictly positive durations.
+Review repetitions, rounds, optional reset and timing before Run.
+Refresh updates choices without overwriting authored inputs.
+After changing the parameter source, use the Form's Reset to recapture inputs.
+Reset can overwrite unsaved inputs.
 
-## Interpret the result
+## Read the figures
 
-Read the chevron and the return curves together to select a later CZ frequency
-and width window. Joint P00 after contrast counts same-shot outcomes directly.
-GE classification retains every shot and the original readout effects. This
-binary partition leaves higher-level population unresolved. A valley selects
-only a window for further calibration; gate fidelity needs separate evidence.
+The live traces and chevron map show P00 after double Xπ contrast.
+P00 is the terminal (g,g) count divided by all nine terminal class counts.
+The return figure shows all nine g/e/other joint outcomes.
+These figures include preparation and readout errors.
+They do not measure gate fidelity or resolve physical leakage by themselves.
+There are no mean-IQ diagnostics or saved IQ clouds.
 
-Full-tone mean I/Q plots preserve diagnostic information outside the selected
-pair. Incomplete points are shown as missing. Only complete duration traces
-support rate fitting. Degenerate or failed fits retain their failure reasons.
-Each complete duration slice uses an undamped cosine fit. Rates below 1 divided by the saved duration span are
-unresolved. The rate plot includes finite uncertainty; fit_quality reports
-residuals and relative parameter errors. Review these diagnostics manually;
-statistical ratios and fidelity are left to operator interpretation.
+Each finite nonempty duration trace uses the existing undamped cosine fit.
+Rates below 1 divided by the saved duration span are unresolved.
+Failed or degenerate fits report a reason rather than a zero rate.
+Inspect fit_quality and the measured traces against the model.
+Choose spacing so the expected rate is below `1/(2 × duration spacing)`.
+Check aliasing manually. Thermal mixtures may contain more than one rate.
 
-Choose duration spacing to keep expected rates below the Nyquist limit
-`1/(2 × duration spacing)`. The operator must check Nyquist and possible aliasing.
-Judge the single-frequency model against the visible trace.
-Thermal mixtures can violate its assumptions.
+Frequency and duration selection remain manual. A valley only identifies a
+window for later amplitude and phase calibration.
 
-## Persistence and next steps
+## Save and load
 
-Native save retains complete source cfg, GE centers, coordinate axes, full tone
-order and round-major raw shots. Cancellation preserves acquired rounds, while
-unacquired slots remain NaN. Nonfinite acquired IQ is an error. Load leaves the
-current Form unchanged; analysis uses only the loaded source cfg. Missing source
-cfg stops calibration-dependent analysis and reports the missing source.
+Native save keeps the complete source cfg, coordinate and duration axes, and
+float64 `sums` with shape `(Nc,Nd,3,3)`.
+Class axes are terminal F1, terminal F2.
+Every class axis is ordered g, e, other.
+Rounds accumulate during acquisition without normalization.
+File size does not grow with repetitions or rounds.
+Completed rounds survive cancellation; unmeasured points remain NaN.
+A point with acquired partial rounds contributes its actual available counts.
+Always check the execution status before accepting partial results.
 
-This experiment provides diagnostic plots only. Frequency, duration and pulse
-selection are manual. Select the next amplitude/frequency window after reviewing
-the plots. Alternate amplitude and frequency manually, with three rounds as a
-starting workflow rather than a required counter. Measure conditional phase and
-local Z after selecting the pair. Changing pulse shapes or bias requires another
-calibration. Validate the actual FTF control chain separately from offline data.
+Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
+Old raw-IQ files without `sums` are rejected; there is no format fallback.
+
+Use `two_qubit/chevron_heralded` for the version conditioned on a ground-ground herald.
+After amplitude/frequency selection, measure conditional phase and local Z.
+Repeat calibration after changing pulse shapes or the pair's working point.
+Validate the actual FTF control chain separately from offline compile checks.
