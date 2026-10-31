@@ -234,7 +234,7 @@ def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
             for case in range(2):
                 with branch.case(case):
                     p.trigger([0], t=0)
-                    p.pulse(0, "p", timeline="default")
+                    p.pulse(0, "p")
                     p.delay_timeline(case * 43 / 430.08)
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)

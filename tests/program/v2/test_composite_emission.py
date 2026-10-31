@@ -529,7 +529,7 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         with prog.branch(by="path", align_timeline=False) as branch:
             for index, amount in enumerate((60, 59)):
                 with branch.case(index):
-                    prog.delay_timeline(amount / 430.08, timeline="default")
+                    prog.delay_timeline(amount / 430.08)
         prog.emit(following)
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):

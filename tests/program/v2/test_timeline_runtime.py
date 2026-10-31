@@ -253,8 +253,9 @@ def test_branch_local_forks_are_discarded_unless_explicitly_joined(
         prog.delay_timeline(9 / 430.08, timeline="untouched")
         with (
             prog.branch(by="scan", align_timeline=align_timeline) as branch,
-            branch.case(1),
+            branch.case(1) as case,
         ):
+            prog.fork(case, into=["p", "q"])
             prog.delay_timeline(20 / 430.08, timeline="p")
             prog.delay_timeline(40 / 430.08, timeline="q")
             prog.fork("p", into="local")
@@ -263,15 +264,16 @@ def test_branch_local_forks_are_discarded_unless_explicitly_joined(
             if explicit_join:
                 prog.join("leaf", into="q")
                 prog.join("local", into="q")
-        prog.pulse(0, "p0", timeline="p")
+            prog.join("p", "q", into=case)
+        prog.pulse(0, "p0", timeline="default")
         prog.pulse(1, "p1", timeline="q")
         prog.sync(timeline="untouched")
         prog.pulse(0, "p0", t=200 / 430.08)
 
     result = shots(program(body))
-    # leaf ends at 20+80=100. Discarded: p=20,q=40. Explicit: p=20,q=100.
-    # Untouched stays at 9, so the native pulse after its sync is at 209.
-    selected = [20, 100 if explicit_join else 40, 209]
+    # Local p/q merge into the case; leaf affects it only with an explicit join.
+    # Outer q stays at zero and untouched stays at 9.
+    selected = [100 if explicit_join else 40, 0, 209]
     expected = (
         [selected] * 3 if align_timeline else [[0, 0, 209], selected, [0, 0, 209]]
     )
@@ -321,7 +323,7 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
             for i in range(3):
                 with branch.case(i):
                     prog.delay_timeline((10 + 10 * i) / 430.08)
-                    prog.pulse(0, "p0", timeline="default")
+                    prog.pulse(0, "p0")
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
 
@@ -335,9 +337,9 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
     def body(prog):
         with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case(i):
+                with branch.case(i) as case:
                     if i == 1:
-                        prog.fork("default", into="local")
+                        prog.fork(case, into="local")
                         prog.delay_timeline(20 / 430.08, timeline="local")
                     else:
                         prog.delay_timeline((10 if i == 0 else 30) / 430.08)
@@ -353,8 +355,8 @@ def test_branch_local_names_expire_even_when_every_case_forks_same_name():
     def body(prog):
         with prog.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
-                with branch.case(index):
-                    prog.fork("default", into="local")
+                with branch.case(index) as case:
+                    prog.fork(case, into="local")
         prog.delay_timeline(0, timeline="local")
 
     with pytest.raises(ValueError, match="local.*unknown timeline"):
@@ -429,10 +431,11 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
     def body(prog):
         with prog.repeat("r", 2), prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case(i):
-                    prog.pulse(0, "p0", timeline="default")
+                with branch.case(i) as case:
+                    prog.fork(case, into="raw")
+                    prog.pulse(0, "p0")
                     if i == 2:
-                        prog.pulse(0, "p0", t=35 / 430.08)
+                        prog.pulse(0, "p0", t=35 / 430.08, timeline="raw")
                         if not overlap:
                             prog.delay_timeline(35 / 430.08)
 
@@ -600,12 +603,14 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(
         prog.fork("external", into="working")
         if overwrite_before_branch:
             prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
-        with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+        with prog.branch(
+            by="scan", align_timeline=align_timeline, timeline="working"
+        ) as branch:
             with branch.case(0):
-                prog.delay_timeline(5 / 430.08, timeline="working")
+                prog.delay_timeline(5 / 430.08)
                 prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
             with branch.case(2):
-                prog.delay_timeline(15 / 430.08, timeline="working")
+                prog.delay_timeline(15 / 430.08)
         prog.pulse(0, "p0", timeline="working")
 
     result = shots(program(body))

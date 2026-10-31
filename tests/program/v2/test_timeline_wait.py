@@ -797,9 +797,9 @@ class MixedWaitProgram(TimelineProgramV2):
                 length=samples / 384,
             )
 
-    def read(self):
+    def read(self, timeline="default"):
         """Schedule one ADC, then leave the requested tail beyond body end."""
-        self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+        self.trigger(ros=[0], width=1 / 430.08, timeline=timeline)
         self.delay_timeline(-self.recipe.tail / 430.08)
 
     def emit_controls(self):
@@ -808,9 +808,9 @@ class MixedWaitProgram(TimelineProgramV2):
         if len(self.gaps) == 1 or recipe.read_at == "branch":
             with self.branch(by="axis0", align_timeline=True) as branch:
                 for index, delay in enumerate(recipe.branch_delays):
-                    with branch.case(index):
+                    with branch.case(index) as case:
                         if recipe.read_at == "branch":
-                            self.read()
+                            self.read(timeline=case)
                         self.delay_timeline(delay / 430.08)
         if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
             with self.repeat("fixed", recipe.fixed_count):

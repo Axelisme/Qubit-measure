@@ -192,14 +192,12 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     builder.sync()
     builder.fork("default", into=["f1", "f2"])
     with (
-        builder.timeline("f1"),
-        builder.branch(by="prepared_f1", align_timeline=True) as cases,
+        builder.branch(by="prepared_f1", align_timeline=True, timeline="f1") as cases,
         cases.case(1),
     ):
         builder.emit(x180_f1)
     with (
-        builder.timeline("f2"),
-        builder.branch(by="prepared_f2", align_timeline=True) as cases,
+        builder.branch(by="prepared_f2", align_timeline=True, timeline="f2") as cases,
         cases.case(1),
     ):
         builder.emit(x180_f2)
@@ -956,6 +954,63 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("operation", ["emit", "fork", "join", "scope", "parent"])
+def test_branch_case_rejects_access_to_outer_timelines_at_build(
+    mock_soccfg, frontend, operation
+):
+    pause = v2.Delay("pause", 0.1)
+
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        program.fork("default", into="outside")
+        with program.branch(by="scan", align_timeline=True) as cases:
+            with cases.case(0) as case:
+                if operation == "emit":
+                    program.emit(pause, timeline="outside")
+                elif operation == "fork":
+                    program.fork("outside", into="local")
+                elif operation == "join":
+                    program.join("outside", into=case)
+                elif operation == "scope":
+                    with program.timeline("outside"):
+                        pass
+                else:
+                    program.delay_timeline(0, timeline="default")
+
+    with pytest.raises(ValueError, match="(outside|default).*unknown timeline"):
+        _compile_scoped(
+            mock_soccfg, frontend, body, modules=(pause,), loops=(("scan", 2),)
+        )
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+def test_branch_case_local_forks_and_nested_parent_merge_without_leaking_names(
+    mock_soccfg, frontend
+):
+    pulse = _pulse("drive")
+
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        with program.branch(by="scan", align_timeline=True) as cases:
+            with cases.case(1) as case:
+                program.fork(case, into="local")
+                program.delay_timeline(10 / 430.08, timeline="local")
+                with program.branch(
+                    by="inner", align_timeline=True, timeline="local"
+                ) as nested:
+                    with nested.case(0):
+                        program.delay_timeline(20 / 430.08)
+                program.join("local", into=case)
+        # Both implicit and explicit local names expire, allowing fresh forks.
+        program.fork("default", into=["scan[1]", "inner[0]", "local"])
+        program.emit(pulse)
+
+    prog = _compile_scoped(
+        mock_soccfg, frontend, body, modules=(pulse,),
+        loops=(("scan", 2), ("inner", 2)),
+    )
+    assert [waves(shot) for shot in shots(prog)] == [[30]] * 4
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_timeline_scope_nested_override_and_restore_match_explicit_program(
     mock_soccfg, frontend
 ):
@@ -1077,14 +1132,14 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
             self.delay_timeline(0.1, timeline="work")
             with (
                 self.repeat("body", 2, timeline="work"),
-                self.branch(by="scan", align_timeline=True) as branch,
+                self.branch(by="scan", align_timeline=True, timeline="work") as branch,
             ):
-                with branch.case(0):
-                    self.emit(readout, timeline="work")
-                    self.delay_timeline(0.02, timeline="work")
-                with branch.case(1):
-                    self.delay_timeline(0.3, timeline="work")
-                    self.emit(readout, timeline="work")
+                with branch.case(0) as case:
+                    self.emit(readout, timeline=case)
+                    self.delay_timeline(0.02, timeline=case)
+                with branch.case(1) as case:
+                    self.delay_timeline(0.3, timeline=case)
+                    self.emit(readout, timeline=case)
             with self.repeat("override", 2, timeline="default"):
                 self.delay_timeline(0.05, timeline="default")
             self.emit(readout, timeline="default")
@@ -1132,10 +1187,10 @@ def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
             program.timeline("work"),
             program.branch(by="scan", align_timeline=True) as branch,
         ):
-            with branch.case(0), program.timeline("work"):
+            with branch.case(0) as case, program.timeline(case):
                 pass
             with branch.case(1):
-                program.emit(pause, timeline="default")
+                program.emit(pause)
         program.sync(timeline="default")
         program.join("work", into="default")
 
@@ -1147,11 +1202,11 @@ def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
         def _body(self, cfg):
             self.fork("default", into="work")
             self.delay_timeline(0.5, timeline="work")
-            with self.branch(by="scan", align_timeline=True) as branch:
+            with self.branch(by="scan", align_timeline=True, timeline="work") as branch:
                 with branch.case(0):
                     pass
                 with branch.case(1):
-                    self.emit(pause, timeline="default")
+                    self.emit(pause)
             self.sync(timeline="default")
             self.join("work", into="default")
 
@@ -1171,10 +1226,10 @@ def test_builder_timeline_between_branch_and_cases_matches_native(mock_soccfg):
     builder.fork("default", into="work")
     builder.delay_timeline(0.3, timeline="work")
     with builder.branch(by="scan", align_timeline=True) as branch:
-        with builder.timeline("work"), branch.case(0):
+        with builder.timeline("work"), branch.case(0) as case:
             builder.emit(pause)
-            builder.emit(pause, timeline="default")
-            with builder.timeline("default"):
+            builder.emit(pause, timeline=case)
+            with builder.timeline(case):
                 builder.emit(pause)
             builder.emit(pause)
         with branch.case(1):
@@ -1192,13 +1247,13 @@ def test_builder_timeline_between_branch_and_cases_matches_native(mock_soccfg):
             self.fork("default", into="work")
             self.delay_timeline(0.3, timeline="work")
             with self.branch(by="scan", align_timeline=True) as branch:
-                with branch.case(0):
-                    self.emit(self.pause, timeline="work")
-                    self.emit(self.pause, timeline="default")
-                    self.emit(self.pause, timeline="default")
-                    self.emit(self.pause, timeline="work")
-                with branch.case(1):
-                    self.emit(self.pause, timeline="default")
+                with branch.case(0) as case:
+                    self.emit(self.pause, timeline=case)
+                    self.emit(self.pause, timeline=case)
+                    self.emit(self.pause, timeline=case)
+                    self.emit(self.pause, timeline=case)
+                with branch.case(1) as case:
+                    self.emit(self.pause, timeline=case)
             self.emit(self.pause, timeline="default")
 
     expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
