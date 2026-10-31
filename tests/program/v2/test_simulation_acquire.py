@@ -55,9 +55,7 @@ def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
 def test_builder_program_acquires_and_sums_tagged_readouts():
     env = environment(std_adc=0, seed=123)
     try:
-        builder = TimelineBuilder(
-            env.soccfg, reps=3, initial_delay=0, relax_delay=0.1
-        )
+        builder = TimelineBuilder(env.soccfg, reps=3, initial_delay=0, relax_delay=0.1)
         builder.add_loop("point", 2)
         readout = PulseReadoutCfg(
             gen_ch=0,
