@@ -1102,6 +1102,8 @@ class RuntimeMath(TimedMacro):
         prog._timeline_math_active = True
         try:
             for operation in self.operations:
+                # Control lowering owns s15/flags, not compiler time storage.
+                self.prog._timeline_math_active = not isinstance(operation, (CondJump, Jump, Label))
                 operation.translate(prog)
         finally:
             prog._timeline_math_active = previous

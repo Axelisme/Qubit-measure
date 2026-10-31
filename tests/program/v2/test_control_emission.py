@@ -258,14 +258,14 @@ def test_module_join_selected_lengths_keep_pointwise_maximum_and_runtime_origin(
     # give per-child ceil48/76/104. Flat adds ramps16 gen clocks,
     # giving ceil66/94/122. Crossing maxima:104/76/104 or122/94/122.
     # Both emissions start at origin7 plus the accumulated pointwise maximum.
-    starts = [133, 105, 133] if flat else [115, 87, 115]
-    tails = [251, 195, 251] if flat else [215, 159, 215]
+    starts = [135, 107, 135] if flat else [117, 89, 117]
+    tails = [253, 197, 253] if flat else [217, 161, 217]
     copies = 6 if flat else 2  # Each flat pulse writes three contiguous segments.
     assert [waves(s) for s in result] == [
-        [11] * copies + [start] * copies + [tail_start]
+        [12] * copies + [start] * copies + [tail_start]
         for start, tail_start in zip(starts, tails, strict=True)
     ] * 2
-    ends = [279, 223, 279] if flat else [243, 187, 243]
+    ends = [281, 225, 281] if flat else [245, 189, 245]
     assert [s.body_end_cycle - s.start_cycle for s in result] == ends * 2
     assert [s.end_cycle - s.start_cycle for s in result] == ends * 2
     assert prog.compile_datamem() is not None
@@ -283,9 +283,9 @@ def test_module_join_minimal_selected_lengths_use_default_register_profile():
         prog.emit(tail)
 
     result = shots(_program([joined, tail], body))
-    assert [waves(s) for s in result] == [[4, 4, 104], [4, 4, 76], [4, 4, 104]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [132, 104, 132] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [132, 104, 132] * 2
+    assert [waves(s) for s in result] == [[5, 5, 105], [5, 5, 77], [5, 5, 105]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [133, 105, 133] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [133, 105, 133] * 2
 
 
 @pytest.mark.parametrize(

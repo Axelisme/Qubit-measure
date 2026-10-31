@@ -10,6 +10,7 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     placement_time,
+    step_time,
     time_bounds,
 )
 from ._timeline_state import TimelineBook
@@ -154,7 +155,7 @@ class TimelineSelectedPulse(TimedMacro):
             raw_origin,
             selection.selector,
             offsets,
-            tuple(c.post for c in selection.choices),
+            tuple(step_time(prog, c.post) for c in selection.choices),
             (finish,),
         )
         self.book.set_end(self.timeline, finish)

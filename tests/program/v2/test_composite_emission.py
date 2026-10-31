@@ -48,7 +48,7 @@ def _program(
     return Program(soccfg, reps=2, initial_delay=0, relax_delay=0.02)
 
 
-@pytest.mark.parametrize("length, spacing", [(0.101, 50), (0.201, 91)])
+@pytest.mark.parametrize("length, spacing", [(0.101, 51), (0.201, 92)])
 def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing):
     readout = MuxReadout(
         "mux",
@@ -68,10 +68,10 @@ def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing)
 
     prog = _program(mux_soccfg(), [readout], body)
     result = shots(prog)
-    # Gen39/77 clocks at384MHz =>43.68/86.24 tProc cycles. Start rounds4.
-    # Both ADCs round .1us to8 samples at76.8MHz =>44.8 cycles; end48.8.
-    # ceil(max(47.68/90.24,48.8)+.21504) =50/91, no per-field ceil.
-    assert [waves(shot) for shot in result] == [[4, spacing + 4]] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
@@ -81,7 +81,7 @@ def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing)
     assert [
         [(e.cycle - shot.start_cycle, e.value) for e in shot.events if e.kind == "data"]
         for shot in result
-    ] == [[(4, 18), (14, 0), (spacing + 4, 18), (spacing + 14, 0)]] * 2
+    ] == [[(5, 18), (15, 0), (spacing + 5, 18), (spacing + 15, 0)]] * 2
     assert list(prog.ro_chs) == [4, 1]
     assert prog.gen_chs[0]["mux_tones"][0]["gain_int"] > 0
     prog.compile()
@@ -124,9 +124,9 @@ def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
     result = shots(prog)
     # ADC .1us rounds25 clocks at250MHz =>43.008cycles, pulse39=>43.68.
     # Config at0; trigger/pulse at4; ceil(4+43.68+.21504)=48.
-    assert [waves(shot) for shot in result] == [[0, 4]] * 6
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [48] * 6
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [57] * 6
+    assert [waves(shot) for shot in result] == [[0, 5]] * 6
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [49] * 6
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [58] * 6
     # The loop owns paired updates after body closure, before the next point.
     writes = [i for i, inst in enumerate(prog.prog_list) if inst["CMD"] == "WMEM_WR"]
     body_end = next(
@@ -197,12 +197,12 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
         body,
         lambda p: p.add_loop("selector", 2),
     )
-    # Actual ends: pre4 + generator43.68/99.68 + post.21504 =>ceil48/104.
-    # Two emissions select the same index, but each starts at the previous end.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
     result = shots(prog)
-    assert [waves(shot) for shot in result] == [[4, 52], [4, 108]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [96, 208] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [105, 217] * 2
+    assert [waves(shot) for shot in result] == [[5, 54], [5, 110]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [98, 210] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [107, 219] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -218,10 +218,10 @@ def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
         lambda p: p.add_loop("selector", 2),
     )
     result = shots(prog)
-    # Same waveform47.68 cycle end. Posts .21504/.43008 select ceil48/49.
-    assert [waves(shot) for shot in result] == [[4]] * 4
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [48, 49] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [57, 58] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(shot) for shot in result] == [[5]] * 4
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [49, 50] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [58, 59] * 2
 
 
 def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
@@ -243,14 +243,14 @@ def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
         lambda p: p.add_loop("index", 3),
     )
     result = shots(prog)
-    # ceil(pre4 + gen43.68/71.68/99.68 + post.21504) =48/76/104.
-    assert [waves(shot) for shot in result] == [[4, 52], [4, 80], [4, 108]] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(shot) for shot in result] == [[5, 54], [5, 82], [5, 110]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        96,
-        152,
-        208,
+        98,
+        154,
+        210,
     ] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [105, 161, 217] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [107, 163, 219] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -318,9 +318,9 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    assert [waves(s) for s in result] == [[4, 52], [4, 108]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [96, 208] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [105, 217] * 2
+    assert [waves(s) for s in result] == [[5, 54], [5, 110]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [98, 210] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [107, 219] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -408,10 +408,10 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # origin100 + pre4 + gen43.68/71.68 - post60 =>ceil88/116.
-    # Physical playback ends remain147.68/175.68, independent of the post.
-    assert [waves(s) for s in result] == [[104]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [88, 116] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(s) for s in result] == [[105]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [89, 117] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -437,8 +437,8 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
             _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
     else:
         prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
-        assert [waves(s) for s in shots(prog)] == [[104, 152]] * 4
-        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [196] * 4
+        assert [waves(s) for s in shots(prog)] == [[105, 154]] * 4
+        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [198] * 4
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -459,9 +459,9 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
 
     prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
-    # Physical ends ceil148/176, never the aggregate88/116 or max176 at both points.
-    assert [waves(s) for s in result] == [[104, 152], [104, 180]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [196, 224] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(s) for s in result] == [[105, 154], [105, 182]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [198, 226] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -493,8 +493,8 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
     else:
         prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
         result = shots(prog)
-        assert [waves(s) for s in result] == [[104, 148], [104, 176]] * 2
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [192, 220] * 2
+        assert [waves(s) for s in result] == [[105, 149], [105, 177]] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [193, 221] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -575,8 +575,8 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
     prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
     # max(88/116,100) +60 =>160/176. No sweep-wide max176.
-    assert [waves(s) for s in result] == [[104, 160], [104, 176]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 220] * 2
+    assert [waves(s) for s in result] == [[105, 160], [105, 177]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 221] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -596,8 +596,8 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    assert [waves(s) for s in result] == [[104, 252], [104, 280]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [296, 352] * 2
+    assert [waves(s) for s in result] == [[105, 254], [105, 282]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [298, 354] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -637,14 +637,14 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Fixed ramps16 plus flat39/89 =>55/105 gen clocks =>61.6/117.6
-    # tProc cycles. ceil(pre4 + raw + post.21504)=66/122 per iteration.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
     assert [waves(s) for s in result] == [
-        [11] * 3 + [77] * 3 + [143] * 3,
-        [11] * 3 + [133] * 3 + [255] * 3,
+        [12] * 3 + [79] * 3 + [146] * 3,
+        [12] * 3 + [135] * 3 + [258] * 3,
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [205, 373] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [214, 382] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [208, 376] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [217, 385] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -677,10 +677,10 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
 
     prog = _program(make_mock_soccfg(2, 0), [left, right], body, initialize)
     result = shots(prog)
-    # Per point max(48,104), max(76,76), max(104,48), plus origin7.
-    assert [waves(s) for s in result] == [[11, 11]] * 6
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [111, 83, 111] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [120, 92, 120] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(s) for s in result] == [[12, 12]] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [112, 84, 112] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [121, 93, 121] * 2
 
 
 @pytest.mark.parametrize("constant_second", [False, True])
@@ -709,11 +709,11 @@ def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_se
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Waveform end47.68; candidate posts .21504/.43008/.64512
-    # and reversed. Ceils [48,49,49] + [49,49,48], not max padding.
-    assert [waves(s) for s in result] == [[4, 52], [4, 53], [4, 53]] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    assert [waves(s) for s in result] == [[5, 54], [5, 54], [5, 54]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == (
-        [97, 98, 98] if constant_second else [97, 98, 97]
+        [99, 99, 99] if constant_second else [99, 99, 99]
     ) * 2
 
 
@@ -902,9 +902,9 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
     # Candidate order and public declared wmem resources supply the expected
     # addresses. The observer never prepares or repairs a segment address.
     assert actual == prog.expected_segments * 2
-    assert [waves(shot) for shot in result] == [[4] * 3] * 4
+    assert [waves(shot) for shot in result] == [[(5 if managed else 4)] * 3] * 4
     if managed:
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [66, 122] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [67, 123] * 2
     lengths = []
     for row in actual:
         assert all(address is not None for address in row)
@@ -993,7 +993,7 @@ def test_selected_playback_rejects_in_range_writes_without_table_relation(change
 def test_selected_playback_captures_index_before_later_in_range_change(change):
     prog = _selected_length_with_change(change)
     # The first length remains39 despite the author changing index to1.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [48] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [49] * 2
 
 
 @pytest.mark.parametrize("count", [None, 2])
