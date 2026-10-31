@@ -100,11 +100,11 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
         prog.delay_timeline(14 / 430.08)
         with prog.branch(by="scan", align_timeline=align) as cases:
             with (
-                cases.case(0), prog.repeat("outer", outer, advance_ref=False)
+                cases.case(0),
+                prog.repeat("outer", outer, advance_ref=False)
                 if outer > 1
-                else nullcontext(), prog.repeat(
-                "inner", count, advance_ref=False, range_hint=hint
-            )
+                else nullcontext(),
+                prog.repeat("inner", count, advance_ref=False, range_hint=hint),
             ):
                 prog.pulse(0, "p0")
             with cases.case(1):
@@ -128,7 +128,9 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
     def body(prog):
         with (
             prog.repeat("outer", 2, advance_ref=False),
-            prog.repeat("inner", 2, advance_ref=False) if overlap == "nested" else nullcontext(),
+            prog.repeat("inner", 2, advance_ref=False)
+            if overlap == "nested"
+            else nullcontext(),
         ):
             prog.fork("default", into="local")
             prog.pulse(0, "p0")
