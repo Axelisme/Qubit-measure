@@ -77,7 +77,6 @@ class _RunOperation:
     adapter_name: str
     storage: StorageBinding | None
     parameters: ParameterContext | None
-    cancel_requested: threading.Event = field(default_factory=threading.Event)
     stop_requested: threading.Event = field(default_factory=threading.Event)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -155,10 +154,7 @@ class RunService:
     ) -> None:
         try:
             if bg.ok:
-                if op.cancel_requested.is_set():
-                    self._run_cancelled(op, bg.result, settle)
-                else:
-                    self._run_finished(op, bg.result, settle)
+                self._run_finished(op, bg.result, settle)
                 return
             error = bg.error or RuntimeError("Run worker failed without an error")
             self._run_failed(op, error, settle)
@@ -257,15 +253,6 @@ class RunService:
         settle(OperationOutcome("finished"))
         self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="finished"))
 
-    def _run_cancelled(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
-        logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
-        # A Stop request does not invalidate a returned record.
-        if not self._publish_run_result(op, result, settle):
-            return
-        self._clear_running(op.tab_id)
-        settle(OperationOutcome("cancelled"))
-        self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="cancelled"))
-
     def _run_failed(
         self, op: _RunOperation, error: BackgroundError, settle: SettleFn
     ) -> None:
@@ -358,7 +345,6 @@ class RunService:
 
         def request_cancel() -> None:
             with operation.request_lock:
-                operation.cancel_requested.set()
                 operation.stop_requested.set()
                 stop_signal.set(reason="GUI Run Stop requested")
 
@@ -492,9 +478,9 @@ class RunService:
 
         Call on the owner thread. A stale/non-Run handle returns scope not active.
         Scope syntax and sequence checks use the shared experiment resolver.
-        Accepted requests set stop_requested before signalling the core. Selecting
-        the run root also requests a cancelled terminal on normal core return;
-        descendant requests leave it finished. Core exceptions remain failed.
+        Accepted requests record stop_requested under the metadata snapshot lock.
+        Normal core return publishes a finished terminal for root and descendant
+        requests alike. Core exceptions remain failed.
         The reason forwarded to the core is opaque frontend request text.
         """
         parse_cancel_scope(scope, expected)
@@ -503,20 +489,17 @@ class RunService:
         if operation_id != self._active_token or signal is None or operation is None:
             return CancelResult(False, "scope not active", "")
 
-        def record_request(selected: Scope) -> None:
-            operation.stop_requested.set()
-            if selected is signal:
-                operation.cancel_requested.set()
-
-        # The worker snapshots metadata under the same lock. The resolver records
-        # intent for its selected scope before the core can observe the stop.
+        # The worker snapshots metadata under the same lock, so it cannot miss
+        # an accepted request even if the core returns as soon as stop is set.
         with operation.request_lock:
-            return signal.cancel(
+            result = signal.cancel(
                 scope,
                 expected=expected,
                 reason="GUI Run scope cancellation requested",
-                on_cancel=record_request,
             )
+            if result.cancelled:
+                operation.stop_requested.set()
+            return result
 
     def cancel_run(self) -> bool:
         """Request cancellation of the active run; best-effort.
@@ -524,7 +507,7 @@ class RunService:
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
         NOT a claim that the worker has stopped: a returned record is published
-        with a cancelled terminal, while an exception remains failed. Terminal is
+        with a finished terminal, while an exception remains failed. Terminal is
         observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")
