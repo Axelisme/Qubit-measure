@@ -192,13 +192,13 @@ class LoopTimelineExit(Macro):
         external = self._reference_external(prog, frame, summary.advance)
         result = self._reference_channels(prog, frame, result, summary)
         self._check_backedge(
-            prog, frame, LinearTime(), next_entry=time_expression(prog, finish)
+            prog, frame, TimeVariable(), next_entry=time_expression(prog, finish)
         )
         extra_advance = add_time(summary.advance, scale_time(frame.advance, -1))
         for outer in book.loop_timelines:
             outer.advance = add_time(outer.advance, extra_advance)
             outer.starts.extend(
-                (ch, substitute_time(start, {frame.progress: LinearTime()}), path)
+                (ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
                 for ch, start, path in frame.starts
             )
         for outer in book.repeats:
@@ -224,7 +224,7 @@ class LoopTimelineExit(Macro):
             )
 
         def fold(n: int) -> tuple[TimeExpression, TimeExpression]:
-            value, advance = incoming, LinearTime()
+            value, advance = incoming, TimeVariable()
             step, debit = transfer, frame.advance
             while n:
                 if n & 1:
@@ -236,7 +236,7 @@ class LoopTimelineExit(Macro):
                     step = apply(step, step)
             return value, advance
 
-        active = choose_time(count, LinearTime(1), maximum=False)
+        active = choose_time(count, TimeVariable(1), maximum=False)
         if isinstance(self.iterations, int):
             result_expression, total_advance = fold(self.iterations)
             last_entry, _ = fold(max(0, self.iterations - 1))
@@ -247,15 +247,15 @@ class LoopTimelineExit(Macro):
             total_advance = select_time(
                 active,
                 (
-                    LinearTime(),
+                    TimeVariable(),
                     add_time(
                         first_advance,
-                        multiply_time(add_time(count, LinearTime(-1)), later_advance),
+                        multiply_time(add_time(count, TimeVariable(-1)), later_advance),
                     ),
                 ),
             )
             last_entry = select_time(
-                choose_time(count, LinearTime(2), maximum=False),
+                choose_time(count, TimeVariable(2), maximum=False),
                 (incoming, incoming, transfer),
             )
         elif frame.progress not in time_variables(
@@ -265,7 +265,7 @@ class LoopTimelineExit(Macro):
             result_expression = add_time(incoming, multiply_time(count, delta))
             total_advance = multiply_time(count, frame.advance)
             last_entry = add_time(
-                incoming, multiply_time(add_time(count, LinearTime(-1)), delta)
+                incoming, multiply_time(add_time(count, TimeVariable(-1)), delta)
             )
         elif self.maximum is not None:
             states = [fold(i) for i in range(self.maximum + 1)]
@@ -275,14 +275,14 @@ class LoopTimelineExit(Macro):
                 count, tuple(states[max(0, i - 1)][0] for i in range(len(states)))
             )
         else:
-            result_expression = LinearTime(
-                terms=((CycleVariable("repeat relative end", 0, None), 1),)
+            result_expression = TimeVariable(
+                terms=((cycle_axis("repeat relative end", 0, None), 1),)
             )
-            total_advance = LinearTime(
-                terms=((CycleVariable("repeat reference advance", 0, None), 1),)
+            total_advance = TimeVariable(
+                terms=((cycle_axis("repeat reference advance", 0, None), 1),)
             )
-            last_entry = LinearTime(
-                terms=((CycleVariable("repeat final entry", 0, None), 1),)
+            last_entry = TimeVariable(
+                terms=((cycle_axis("repeat final entry", 0, None), 1),)
             )
 
         return _ReferenceSummary(result_expression, total_advance, last_entry)
@@ -320,10 +320,10 @@ class LoopTimelineExit(Macro):
         external = {}
         for name, initial in frame.external.items():
             expression = choose_time(
-                LinearTime(),
+                TimeVariable(),
                 add_time(time_expression(prog, initial), scale_time(advance, -1)),
             )
-            if time_expression(prog, initial) == LinearTime():
+            if time_expression(prog, initial) == TimeVariable():
                 external[name] = initial
             else:
                 external[name] = self._reference_store(prog, frame, initial, expression)
@@ -341,7 +341,7 @@ class LoopTimelineExit(Macro):
         """Keep last-generated tails distinct from repeatedly debited outer tails."""
         book = self.entry.book
         count = book.repeat_count(prog, self.iterations, self.minimum, self.maximum)
-        active = choose_time(count, LinearTime(1), maximum=False)
+        active = choose_time(count, TimeVariable(1), maximum=False)
         for (generator, ch), initial in frame.initial_channels.items():
             current = book.channel_end(prog, ch, generator=generator)
             if (generator, ch) in frame.written_channels:
@@ -362,13 +362,13 @@ class LoopTimelineExit(Macro):
                 )
             else:
                 expression = choose_time(
-                    LinearTime(),
+                    TimeVariable(),
                     add_time(
                         frame.initial_native[generator, ch],
                         scale_time(summary.advance, -1),
                     ),
                 )
-                if expression == LinearTime():
+                if expression == TimeVariable():
                     continue
                 tail = self._reference_store(prog, frame, initial, expression)
             channels = book.runtime_gens if generator else book.runtime_ros

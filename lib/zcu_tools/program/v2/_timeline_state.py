@@ -346,7 +346,7 @@ class LoopTimelineFrame:
     starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
         default_factory=list
     )
-    advance: TimeExpression = field(default_factory=LinearTime)
+    advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
 
