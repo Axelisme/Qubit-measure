@@ -29,7 +29,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、一般 tagged-model union 的同名同型別 raw 繼承、普通 select 與明確數值換算 command 的區別、具名固定 list／原始索引 participants、非 participant tone 的 None 初值與一般 nullable 編輯、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
 
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 擁有 generator／ADC、waveform 與 classifier 配置；分類與 correction 只取 run cfg，三態 reference Apply 到 readout library；單一 processor 同時接收所有 ADC，Classify／IQ 軸的逐 shot 外積求總和，框架只累加 round，Result 保存總和；emit tag 識別讀出，舊 ModularProgramV2 暫用 module 名稱；herald 條件平均與通過比例由總和衍生，舊格式明確拒絕；原生 QICK projection 仍由 readout 轉換校準、caller 明確選用。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 擁有 generator／ADC、waveform 與 classifier 配置；分類與 correction 只取 run cfg，三態 reference Apply 到 readout library；單一 processor 同時接收所有 ADC，Classify／IQ 軸的逐 shot 外積求總和，框架只累加 round，Result 保存總和；emit tag 識別讀出，舊 ModularProgramV2 暫用 module 名稱；herald 條件平均與通過比例由總和衍生，舊格式明確拒絕；原生 QICK projection 由 caller 明確選用，caller 準備參數並負責校準適用性。
 
 - [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。
