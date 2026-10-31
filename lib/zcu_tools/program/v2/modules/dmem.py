@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self, override
 
 from qick.asm_v2 import QickParam
@@ -39,6 +40,12 @@ def _encode_uint32_as_int32(value: int) -> int:
     if value > _INT32_MAX:
         return value - (1 << 32)
     return value
+
+
+@dataclass(frozen=True)
+class _LookupDeclaration:
+    offset: int
+    table: DeclaredTable
 
 
 class LoadValue(Module):
@@ -94,9 +101,10 @@ class LoadValue(Module):
         """
         if not self.use_existed:
             prog.add_reg(self.val_reg)
-        self._table = DeclaredTable(tuple(self.values))
-        if not self._is_empty:
-            self.offset = prog.add_dmem(self._packed_values)
+        offset = prog.add_dmem(self._packed_values) if not self._is_empty else 0
+        prog.set_module_state(
+            self, _LookupDeclaration(offset, DeclaredTable(tuple(self.values)))
+        )
 
     @override
     def lower(
@@ -129,7 +137,11 @@ class LoadValue(Module):
                 self.val_reg,
                 CycleBounds(min(self.values), max(self.values)),
                 dependency_ranges={index: CycleBounds(0, len(self.values) - 1)},
-                selection=TableSelection(self._table, self.val_reg, index),
+                selection=TableSelection(
+                    prog.get_module_state(self, _LookupDeclaration).table,
+                    self.val_reg,
+                    index,
+                ),
             ):
                 self._emit_lookup(prog, index)
 
@@ -145,7 +157,9 @@ class LoadValue(Module):
         if not self.values:
             raise ValueError(f"{self.name}: selected playback needs a nonempty table")
         captured = prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
-        relation = TableSelection(self._table, self.val_reg, captured)
+        relation = TableSelection(
+            prog.get_module_state(self, _LookupDeclaration).table, self.val_reg, captured
+        )
         index_limits = CycleBounds(0, len(self.values) - 1)
         with prog.time_producer(
             captured,
@@ -206,6 +220,13 @@ class LoadValue(Module):
         if self._is_empty:
             return
 
+        from ..timeline import TimelineProgramV2
+
+        offset = (
+            prog.get_module_state(self, _LookupDeclaration).offset
+            if isinstance(prog, TimelineProgramV2)
+            else self.offset
+        )
         # addr_reg computes dmem address / shift amount; word_reg holds the
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1
@@ -217,7 +238,7 @@ class LoadValue(Module):
                     DmemLookup(
                         dst=self.val_reg,
                         index=index,
-                        offset=self.offset,
+                        offset=offset,
                         address=addr_reg,
                     )
                 )
@@ -225,8 +246,8 @@ class LoadValue(Module):
 
             # addr = (idx ASR #word_shift) [+ #offset]
             prog.write_reg_op(addr_reg, index, "ASR", self._word_shift)
-            if self.offset != 0:
-                prog.inc_reg(addr_reg, self.offset)
+            if offset != 0:
+                prog.inc_reg(addr_reg, offset)
             prog.read_dmem(dst=word_reg, addr=addr_reg)
 
             # tProc v2 uses only B[3:0] as the shift count, including register
@@ -338,8 +359,12 @@ class LoadWord(Module):
         """
         if self._is_empty:
             return
-        self._table = DeclaredTable(tuple(self.values))
-        self.offset = prog.add_dmem(self._encoded_values)
+        prog.set_module_state(
+            self,
+            _LookupDeclaration(
+                prog.add_dmem(self._encoded_values), DeclaredTable(tuple(self.values))
+            ),
+        )
         if not self.use_existed:
             prog.add_reg(self.val_reg)
 
@@ -358,7 +383,11 @@ class LoadWord(Module):
                 self.val_reg,
                 CycleBounds(min(self.values), max(self.values)),
                 dependency_ranges={self.idx_reg: CycleBounds(0, len(self.values) - 1)},
-                selection=TableSelection(self._table, self.val_reg, self.idx_reg),
+                selection=TableSelection(
+                    prog.get_module_state(self, _LookupDeclaration).table,
+                    self.val_reg,
+                    self.idx_reg,
+                ),
             ):
                 self._emit_lookup(prog)
 
@@ -387,15 +416,30 @@ class LoadWord(Module):
         self._emit_lookup(prog)
         return t
 
+    def dmem_offset(self, prog: ModularProgramV2 | TimelineProgramV2) -> int:
+        """Return this program's raw-word table base for loop update consumers.
+
+        Nonempty tables must be declared or legacy-initialized on prog first.
+        Missing native declarations raise ValueError. Empty tables have no base.
+        """
+        from ..timeline import TimelineProgramV2
+
+        if self._is_empty:
+            raise ValueError(f"{self.name}: empty table has no dmem allocation")
+        if isinstance(prog, TimelineProgramV2):
+            return prog.get_module_state(self, _LookupDeclaration).offset
+        return self.offset
+
     def _emit_lookup(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         if self._is_empty:
             return
 
+        offset = self.dmem_offset(prog)
         with prog.acquire_temp_reg(1) as (addr_reg,):
-            if self.offset == 0:
+            if offset == 0:
                 prog.write_reg(addr_reg, self.idx_reg)
             else:
-                prog.write_reg_op(addr_reg, self.idx_reg, "+", self.offset)
+                prog.write_reg_op(addr_reg, self.idx_reg, "+", offset)
             prog.read_dmem(dst=self.val_reg, addr=addr_reg)
 
     def allow_rerun(self) -> bool:
