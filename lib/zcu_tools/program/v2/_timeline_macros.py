@@ -37,8 +37,8 @@ from ._timeline_runtime import (
     RuntimeMath,
     SelectedEventEnd,
     Time,
-    _known_maximum,
     align_end,
+    known_maximum,
     step_time,
     time_bounds,
 )
@@ -836,8 +836,8 @@ class BranchCaseState:
     used: set[str]
     runtime_gens: dict[int, RuntimeEnd]
     runtime_ros: dict[int, RuntimeEnd]
-    gens: dict[int, Time]
-    ros: dict[int, Time]
+    gens: dict[int, float | QickParam]
+    ros: dict[int, float | QickParam]
     provenance: BranchProvenance
     frames: list[RepeatFrameSnapshot]
     defined: set[str]
@@ -882,11 +882,6 @@ class TimelineBranch(Macro):
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
         frames = self._save_frames()
-        definitions: list[set[str]] = []
-        results: list[dict[str, Time]] = []
-        native_gens: list[dict[int, Time]] = []
-        native_ros: list[dict[int, Time]] = []
-        paths: list[list[RepeatFrameSnapshot]] = []
         states: list[BranchCaseState] = []
         self.prepared = []
         for case in self.cases:
@@ -905,53 +900,16 @@ class TimelineBranch(Macro):
             self.prepared.append(self._prepare_case(prog, case))
             parents, joined = self.book.case_lineage.pop()
             states.append(
-                BranchCaseState(
-                    self.book.ends.copy(),
-                    self.book.waiting.copy(),
-                    (self.book.used or set()).copy(),
-                    self.book.runtime_gens.copy(),
-                    self.book.runtime_ros.copy(),
-                    {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
-                    {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
-                    self.book.snapshot_branch_provenance(prog),
-                    self._save_frames(),
-                    prog._time_bounds.defined.copy(),
-                    self._static_case_ends(initial, parents, joined),
-                )
+                self._capture_case(prog, self._static_case_ends(initial, parents, joined))
             )
             self.book.pinned.update(prog._timeline_live_registers())
         static_ends = self._static_branch_ends(initial, states)
-        for prepared, state in zip(self.prepared, states, strict=True):
-            self._restore_case(prog, state)
-            if static_ends is None:
-                used = state.used | (state.ends.keys() - initial.keys())
-                closer = PreparedTimelineMacro(
-                    self.book,
-                    TimelineSync(self.book, None, sources=tuple(sorted(used))),
-                )
-                closer.preprocess(prog)
-                prepared.append(closer)
-            self.book.record_branch_sources(prog)
-            results.append({name: self.book.ends[name] for name in initial})
-            definitions.append(prog._time_bounds.defined.copy())
-            native_gens.append(
-                {
-                    ch: self.book.channel_end(prog, ch, generator=True)
-                    for ch in prog.gen_chs
-                }
-            )
-            native_ros.append(
-                {
-                    ch: self.book.channel_end(prog, ch, generator=False)
-                    for ch in prog.ro_chs
-                }
-            )
-            paths.append(self._save_frames())
-            self.book.pinned.update(prog._timeline_live_registers())
-            if outer_used is not None:
-                outer_used.update(self.book.used & initial.keys())
-        self._merge_frames(prog, paths)
-        prog._time_bounds.defined = set.intersection(*definitions)
+        states = self._close_cases(prog, initial, states, close=static_ends is None)
+        if outer_used is not None:
+            outer_used.update(set.union(*(state.used & initial.keys() for state in states)))
+        self._merge_frames(prog, [state.frames for state in states])
+        prog._time_bounds.defined = set.intersection(*(state.defined for state in states))
+        results = [{name: state.ends[name] for name in initial} for state in states]
         self.book.finish_branch_sources(prog, self.by)
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
@@ -965,8 +923,14 @@ class TimelineBranch(Macro):
             )
             if static_ends is None and not _same_times(values):
                 self.book.waiting.add(name)
-        self._merge_native(prog, native_gens, results, generator=True)
-        self._merge_native(prog, native_ros, results, generator=False)
+        self._merge_native(
+            prog, [{**state.gens, **state.runtime_gens} for state in states],
+            results, generator=True,
+        )
+        self._merge_native(
+            prog, [{**state.ros, **state.runtime_ros} for state in states],
+            results, generator=False,
+        )
         self.book.pinned = saved_pins
 
     def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
@@ -989,7 +953,7 @@ class TimelineBranch(Macro):
             ancestor = parents[local]
             while ancestor not in initial:
                 ancestor = parents[ancestor]
-            merged = _known_maximum(ends[ancestor], self.book.ends[local])
+            merged = known_maximum(ends[ancestor], self.book.ends[local])
             if merged is None:
                 return None
             ends[ancestor] = merged
@@ -1007,11 +971,47 @@ class TimelineBranch(Macro):
                 value = state.static_ends[name]
                 if isinstance(value, RuntimeEnd):
                     return None
-                merged = _known_maximum(ends[name], value)
+                merged = known_maximum(ends[name], value)
                 if merged is None:
                     return None
                 ends[name] = merged
         return ends
+
+    def _capture_case(
+        self, prog, static_ends: dict[str, Time] | None
+    ) -> BranchCaseState:
+        return BranchCaseState(
+            self.book.ends.copy(),
+            self.book.waiting.copy(),
+            (self.book.used or set()).copy(),
+            self.book.runtime_gens.copy(),
+            self.book.runtime_ros.copy(),
+            {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
+            {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+            self.book.snapshot_branch_provenance(prog),
+            self._save_frames(),
+            prog._time_bounds.defined.copy(),
+            static_ends,
+        )
+
+    def _close_cases(
+        self, prog, initial: dict[str, Time], states: list[BranchCaseState], *, close: bool
+    ) -> list[BranchCaseState]:
+        """Finish every path under the already chosen whole-branch closing policy."""
+        finished = []
+        for prepared, state in zip(self.prepared, states, strict=True):
+            self._restore_case(prog, state)
+            if close:
+                used = state.used | (state.ends.keys() - initial.keys())
+                closer = PreparedTimelineMacro(
+                    self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
+                )
+                closer.preprocess(prog)
+                prepared.append(closer)
+            self.book.record_branch_sources(prog)
+            finished.append(self._capture_case(prog, state.static_ends))
+            self.book.pinned.update(prog._timeline_live_registers())
+        return finished
 
     def _restore_case(self, prog, state: BranchCaseState) -> None:
         self._restore_frames(state.frames)

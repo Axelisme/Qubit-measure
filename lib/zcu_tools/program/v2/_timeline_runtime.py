@@ -329,7 +329,14 @@ def time_bounds(prog, value: Time) -> tuple[float, float]:
     return bounds(value)
 
 
-def _known_maximum(a: Time, b: Time) -> Time | None:
+def known_maximum(a: Time, b: Time) -> Time | None:
+    """Return a proven dominant operand, or None when a runtime max is needed.
+
+    a and b are reference-relative ends in us, or bounded cycle registers.
+    Equal ends and compile-time dominant scalar/affine ends return an input
+    unchanged. This never emits instructions or approximates crossing ends.
+    Invalid static bounds propagate their existing errors.
+    """
     if a is b or (isinstance(a, RuntimeEnd) and any(item is b for item in a.covers)):
         return a
     if isinstance(b, RuntimeEnd) and any(item is a for item in b.covers):
@@ -673,7 +680,7 @@ class RuntimeMath(TimedMacro):
         )
 
     def maximum(self, a: Time, b: Time, *, target: str | None = None) -> Time:
-        known = _known_maximum(a, b)
+        known = known_maximum(a, b)
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
