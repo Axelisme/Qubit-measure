@@ -291,19 +291,18 @@ def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
     assert actual.prog_list == expected.prog_list
 
 
-def test_builder_branch_reference_advances_inside_repeat_match_native(mock_soccfg):
+def test_builder_branch_timeline_delays_inside_repeat_match_native(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     builder.add_loop("scan", 2)
     readout = _readout()
     with builder.repeat("pairs", 2), builder.branch(by="scan", align_timeline=True) as branch:
         with branch.case(0):
             builder.emit(readout)
-            builder.delay(0.1)
+            builder.delay_timeline(0.1)
         with branch.case(1):
             builder.delay_timeline(0.4)
-            builder.sync()
             builder.emit(readout)
-            builder.delay_auto(0.1)
+            builder.delay_timeline(0.1)
     builder.emit(readout)
     actual = builder.build()
 
@@ -316,12 +315,11 @@ def test_builder_branch_reference_advances_inside_repeat_match_native(mock_soccf
             with self.repeat("pairs", 2), self.branch(by="scan", align_timeline=True) as branch:
                 with branch.case(0):
                     self.emit(readout)
-                    self.delay(0.1)
+                    self.delay_timeline(0.1)
                 with branch.case(1):
                     self.delay_timeline(0.4)
-                    self.sync()
                     self.emit(readout)
-                    self.delay_auto(0.1)
+                    self.delay_timeline(0.1)
             self.emit(readout)
 
     expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
@@ -530,8 +528,7 @@ def test_builder_case_handle_rejects_overlap_and_expires_on_exit(mock_soccfg):
     with builder.branch(by="scan", align_timeline=True) as branch, branch.case(0):
         with pytest.raises(ValueError, match="overlap"), branch.case(0):
             pass
-        with builder.repeat("body", 2):
-            builder.delay_timeline(0.1)
+        builder.delay_timeline(0.1)
     with pytest.raises(ValueError, match="open"), branch.case(0):
         pass
     assert builder.build().prog_list
@@ -1026,10 +1023,9 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
             with program.repeat("body", 2), program.branch(by="scan", align_timeline=True) as branch:
                 with branch.case(0):
                     program.emit(readout)
-                    program.delay(0.02)
+                    program.delay_timeline(0.02)
                 with branch.case(1):
                     program.delay_timeline(0.3)
-                    program.sync()
                     program.emit(readout, timeline=None)
             with program.repeat("override", 2, timeline="default"):
                 program.delay_timeline(0.05, timeline="default")
@@ -1049,10 +1045,9 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
             ):
                 with branch.case(0):
                     self.emit(readout, timeline="work")
-                    self.delay(0.02)
+                    self.delay_timeline(0.02)
                 with branch.case(1):
                     self.delay_timeline(0.3, timeline="work")
-                    self.sync(timeline="work")
                     self.emit(readout, timeline="work")
             with self.repeat("override", 2, timeline="default"):
                 self.delay_timeline(0.05, timeline="default")

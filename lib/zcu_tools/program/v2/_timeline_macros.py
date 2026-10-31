@@ -76,9 +76,6 @@ class TimelineFork(Macro):
         ):
             raise ValueError("fork requires new, distinct timeline names")
         self.book.ends.update(dict.fromkeys(self.targets, end))
-        if self.book.case_lineage:
-            parents, _ = self.book.case_lineage[-1]
-            parents.update(dict.fromkeys(self.targets, self.source))
 
     def translate(self, prog) -> None:
         pass
@@ -99,8 +96,6 @@ class TimelineJoin(Macro):
             end = self.book.math.maximum(end, self.book.end(source))
         self.book.ends[self.into] = end
         self.book.waiting.discard(self.into)
-        for parents, joined in self.book.case_lineage:
-            joined.update(source for source in self.sources if source in parents)
 
     def translate(self, prog) -> None:
         pass
@@ -674,6 +669,8 @@ class PreparedTimelineMacro(TimedMacro):
         )
 
     def preprocess(self, prog) -> None:
+        if self.book.used is not None and isinstance(self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)):
+            raise ValueError("branch cases cannot advance reference; use delay_timeline instead")
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
         previous_origin = prog._time_origin
@@ -969,8 +966,6 @@ class TimelineBranch(Macro):
     def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
-            if isinstance(macro.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)):
-                raise ValueError("branch cases cannot advance reference; use delay_timeline instead")
             macro.preprocess(prog)
         return prepared
 

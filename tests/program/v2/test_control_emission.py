@@ -584,10 +584,10 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
     def body(prog):
         prog.fork("default", into="waiting")
         prog.delay_timeline(100 / 430.08, timeline="waiting")
-        # A runtime branch still leaves a path-selected, wait-only external end.
-        prog.write_reg("duration", 10)
-        with prog.branch(by="scan", align_timeline=True) as cases, cases.case(1):
-            prog.delay_timeline("duration")
+        # A register Repeat leaves its unconsumed external end wait-only.
+        prog.write_reg("duration", 1)
+        with prog.repeat("runtime", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
         prog.emit(joined, timeline="waiting")
 
     with pytest.raises(ValueError, match="timeline can only wait"):

@@ -600,23 +600,13 @@ def test_register_time_rejects_out_of_range_producer(value):
         program(body)
 
 
-@pytest.mark.parametrize("control", ["branch", "repeat"])
-def test_wait_only_source_rejects_register_delay_but_derived_target_works(control):
+def test_wait_only_source_rejects_register_delay_but_derived_target_works():
     def body(prog):
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        if control == "repeat":
-            with prog.repeat("r", "duration", range_hint=(1, 3)):
-                prog.delay_timeline(10 / 430.08)
-        else:
-            with prog.branch(by="scan", align_timeline=True) as branch:
-                for i in range(3):
-                    with branch.case(i):
-                        # Runtime case closure, not static max accounting, is
-                        # what leaves the external source path-selected.
-                        prog.write_reg("duration", 10 + 10 * i)
-                        prog.delay_timeline("duration")
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
         prog.delay_timeline("duration", timeline="external")

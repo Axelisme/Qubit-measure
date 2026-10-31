@@ -244,12 +244,11 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
 def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
     def body(p):
+        p.trigger([0], t=0)
+        p.pulse(0, "p", timeline="default")
         with p.branch(by="scan", align_timeline=True) as branch:
-            with branch.case(0), p.repeat("twice", 2):
-                p.trigger([0], t=0)
-                p.pulse(0, "p", timeline="default")
-            with branch.case(1):
-                p.trigger([0], t=0)
+            with branch.case(0):
+                p.trigger([0], t=43 / 430.08)
                 p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
@@ -269,9 +268,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.branch(by="scan", align_timeline=True) as branch:
+        with p.repeat("reads", 3), p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
-                with branch.case(index), p.repeat(f"case_repeat_{index}", 3):
+                with branch.case(index):
                     p.trigger([0, 1], t=0)
                     p.pulse(0, "p", timeline="default", tag=f"case-{index}")
 
