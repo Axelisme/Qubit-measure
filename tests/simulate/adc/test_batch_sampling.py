@@ -75,9 +75,14 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
     # A zero-amplitude carrier is the existing no-physical-field reference.
     reference = replace(
         empty,
-        events=((replace(original.events[0][0], pulses=(
-            replace(original.events[0][0].pulses[0], amplitude=0.0),
-        )),),),
+        events=(
+            (
+                replace(
+                    original.events[0][0],
+                    pulses=(replace(original.events[0][0].pulses[0], amplitude=0.0),),
+                ),
+            ),
+        ),
     )
     conditional = adc.ADC(empty.model).responses(empty)
     assert conditional.traces is not None
@@ -95,9 +100,11 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
 
     def sample(batch):
         if mode == "integrated":
-            return adc.PreparedRawShots(readout, {3: batches[3], 1: batch}, reps=reps).bind(
-                identity
-            ).materialize(reps, 1)
+            return (
+                adc.PreparedRawShots(readout, {3: batches[3], 1: batch}, reps=reps)
+                .bind(identity)
+                .materialize(reps, 1)
+            )
         result = adc.sample_traces(
             readout, {3: batches[3], 1: batch}, reps=reps, identity=identity
         )
@@ -108,7 +115,9 @@ def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
     np.testing.assert_array_equal(actual[1], expected[1])
     observations = actual[1].reshape(-1, 2)
     count = 4 if mode == "integrated" else 1
-    np.testing.assert_allclose(observations.mean(axis=0), count * receiver.offset, atol=0.08)
+    np.testing.assert_allclose(
+        observations.mean(axis=0), count * receiver.offset, atol=0.08
+    )
     # Integer rounding contributes 1/12 on each integrated quadrature.
     covariance = count * receiver.noise_covariance
     if mode == "integrated":
