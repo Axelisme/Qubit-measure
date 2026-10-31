@@ -12,6 +12,7 @@ from qick.asm_v2 import (
     QickSweep1D,
     WriteReg,
 )
+from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -62,6 +63,33 @@ def test_crossing_floor_places_at_pointwise_remaining_end_and_resets_each_shot()
     assert [s.body_end_cycle - s.start_cycle for s in result] == [48, 48, 58] * 2
     prog.compile()
     assert shots(prog) == result
+
+
+def test_crossing_join_uses_three_instruction_flag_selection():
+    def body(prog):
+        prog.fork("default", into="other")
+        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 180 / 430.08))
+        prog.delay_timeline(100 / 430.08, timeline="other")
+        prog.join("other", into="default")
+
+    prog = program(body)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100, 100, 180]
+    selections = [
+        (index, inst)
+        for index, inst in enumerate(prog.prog_list)
+        if inst.get("CMD") == "REG_WR" and inst.get("IF") == "S"
+    ]
+    assert len(selections) == 1
+    index, selection = selections[0]
+    assert [inst["CMD"] for inst in prog.prog_list[index - 2 : index + 1]] == [
+        "TEST", "REG_WR", "REG_WR"
+    ]
+    changed = [dict(inst) for inst in prog.prog_list]
+    changed[index] = {**selection, "IF": "NS"}
+    inverted = ir.analyze_timing(
+        ir.CompiledTimingInput(changed, prog.labels, prog.timing_layout)
+    ).shots
+    assert [s.body_end_cycle - s.start_cycle for s in inverted] == [20, 100, 100]
 
 
 class AllocateTime(Macro):
