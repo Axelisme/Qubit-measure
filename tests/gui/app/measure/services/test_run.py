@@ -620,7 +620,7 @@ def test_frontend_stop_preserves_core_return_or_failure(requested: bool, fails: 
     service, _gate, background, handles = make_run_service(state)
     record = RunRecord(None, object())
 
-    def acquire(*_args: Any, context: RunContext) -> RunRecord:
+    def acquire(*_args: Any, context: RunContext) -> RunRecord[ConfigBase, object]:
         if requested:
             assert service.cancel_run()
         if fails:

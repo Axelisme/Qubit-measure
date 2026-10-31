@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -73,13 +73,13 @@ class _RunOperation:
 
     tab_id: str
     plots: Plots
-    cancel_requested: threading.Event
-    stop_requested: threading.Event
-    request_lock: threading.Lock
     origin: CommandOrigin
     adapter_name: str
     storage: StorageBinding | None
     parameters: ParameterContext | None
+    cancel_requested: threading.Event = field(default_factory=threading.Event)
+    stop_requested: threading.Event = field(default_factory=threading.Event)
+    request_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class RunService:
@@ -343,11 +343,8 @@ class RunService:
         self._prepare_tab_for_run(tab_id)
 
         # Request facts belong to the frontend, not the core's stop subtree.
-        stop_event = threading.Event()
-        stop_signal = StopSignal(stop_event)
+        stop_signal = StopSignal()
         scope = Scope("run", stop=stop_signal)
-        cancel_requested = threading.Event()
-        stop_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
         cfg = inputs.accepted_cfg.cfg
@@ -359,20 +356,15 @@ class RunService:
             scope=scope,
         )
 
-        request_lock = threading.Lock()
-
         def request_cancel() -> None:
-            with request_lock:
-                cancel_requested.set()
-                stop_requested.set()
+            with operation.request_lock:
+                operation.cancel_requested.set()
+                operation.stop_requested.set()
                 stop_signal.set(reason="GUI Run Stop requested")
 
         operation = _RunOperation(
             tab_id=tab_id,
             plots=plots,
-            cancel_requested=cancel_requested,
-            stop_requested=stop_requested,
-            request_lock=request_lock,
             origin=origin,
             adapter_name=inputs.adapter_name,
             storage=inputs.storage,
@@ -414,8 +406,8 @@ class RunService:
             with progress_ambient(factory):
                 result = adapter.run(cfg, context=context)
             # Metadata fixes the requests observed before acquisition returned.
-            with request_lock:
-                completion = "stopped" if stop_requested.is_set() else "complete"
+            with operation.request_lock:
+                completion = "stopped" if operation.stop_requested.is_set() else "complete"
             finished_at = datetime.now(UTC)
             if metadata is not None:
                 metadata = metadata.model_copy(
