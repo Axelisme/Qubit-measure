@@ -186,10 +186,8 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            freq_sweep = cfg.freq
-            freq_param = builder.add_sweep("freq", freq_sweep)
-
             builder.add_loop("ge", 2)
+            freq_param = builder.add_sweep("freq", cfg.freq)
 
             if cfg.reset is not None:
                 builder.emit(cfg.reset.build("reset"))
