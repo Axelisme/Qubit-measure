@@ -127,9 +127,7 @@ class ScopeRuntime(Protocol):
         """Apply a captured complete settings model cooperatively."""
         ...
 
-    async def execute_wait(
-        self, scope: Scope, target: datetime
-    ) -> Completed[None]:
+    async def execute_wait(self, scope: Scope, target: datetime) -> Completed[None]:
         """Wait cooperatively for an aware absolute deadline."""
         ...
 
@@ -314,9 +312,7 @@ class Scope:
         """
         return await self._capabilities().execute_run(self, experiment, cfg, name=name)
 
-    async def setup_device(
-        self, name: str, cfg: BaseDeviceInfo
-    ) -> Completed[None]:
+    async def setup_device(self, name: str, cfg: BaseDeviceInfo) -> Completed[None]:
         """Apply complete copied settings through the device owner; preserve its errors."""
         return await self._capabilities().execute_setup(self, name, cfg)
 

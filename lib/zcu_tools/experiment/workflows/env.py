@@ -235,9 +235,7 @@ class WorkflowEnv[C](Scope):
         while True:
             attempts: list[_Attempt] = []
 
-            def invoke(
-                ctx: CallContext, attempts: list[_Attempt] = attempts
-            ) -> T:
+            def invoke(ctx: CallContext, attempts: list[_Attempt] = attempts) -> T:
                 return self._invoke(scope, fn, attempts, ctx)
 
             completions: list[CallResult[T]] = []
@@ -271,9 +269,7 @@ class WorkflowEnv[C](Scope):
                 and result.stopped
                 and not self._hooks.stopping()
             )
-            facts = self._complete_attempt(
-                scope, kind, attempt, discard=discard
-            )
+            facts = self._complete_attempt(scope, kind, attempt, discard=discard)
             if cancelled is not None:
                 raise cancelled
             self._hooks.boundary()
@@ -423,9 +419,7 @@ class WorkflowEnv[C](Scope):
 
         return await self._call(scope, "setup_device", invoke)
 
-    async def execute_wait(
-        self, scope: Scope, target: datetime
-    ) -> Completed[None]:
+    async def execute_wait(self, scope: Scope, target: datetime) -> Completed[None]:
         """Wait for an aware deadline through call; Stop cooperatively returns.
 
         A naive deadline raises ValueError. A past target returns immediately.

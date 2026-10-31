@@ -52,9 +52,6 @@ def test_stop_tree_inherits_stop_and_releases_completed_scopes() -> None:
     assert not child.is_set(), "Released operation scopes must be detached"
 
 
-
-
-
 def test_host_labels_calls_under_explicit_iteration_lifetimes() -> None:
     host = host_module().ScriptHost(Scope("workflow", name="test"))
     observed: list[str] = []

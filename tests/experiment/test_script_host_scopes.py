@@ -111,6 +111,7 @@ def test_cancel_unrelated_sibling_does_not_mark_active_operation() -> None:
 
     async def script() -> None:
         with host.root.child("left") as left, host.root.child("right") as right:
+
             def work(ctx: CallContext) -> None:
                 assert host.cancel("right").cancelled
                 assert right.cancelled

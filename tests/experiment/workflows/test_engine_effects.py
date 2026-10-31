@@ -109,7 +109,9 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
     ).read_text() == "30:9"
 
 
-def test_call_delivers_the_original_experiment_exception_to_the_author(rig: Rig) -> None:
+def test_call_delivers_the_original_experiment_exception_to_the_author(
+    rig: Rig,
+) -> None:
     cause = OSError("acquire disconnected")
 
     def acquire(ctx: CallContext) -> int:

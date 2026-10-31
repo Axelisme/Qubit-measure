@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("callback_raises", [False, True])
-def test_cancel_notifies_selected_scope_before_setting_stop(callback_raises: bool) -> None:
+def test_cancel_notifies_selected_scope_before_setting_stop(
+    callback_raises: bool,
+) -> None:
     root = experiment.Scope("run")
     observed: list[tuple[Scope, bool]] = []
     cause = OSError("recording failed")
@@ -220,7 +222,6 @@ def test_cancel_is_descendant_only_and_born_cancelled_is_author_visible() -> Non
         assert refused.reason == "sequence mismatch"
 
 
-
 def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
     root = make_root()
 
@@ -246,5 +247,3 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
         assert schedule.data[0] == 2.0
     assert root.active_path == "run"
     assert not root.cancelled
-
-

@@ -381,11 +381,7 @@ async def calibrate_len_rabi(
         target_pi_length_us=target_pi_us,
         gain_clamped=tuple(gain_clamped),
         requested_sweep=cfg.length,
-        planned_sweep=(
-            None
-            if outcome.value.cfg is None
-            else outcome.value.cfg.length
-        ),
+        planned_sweep=(None if outcome.value.cfg is None else outcome.value.cfg.length),
     )
     # Save before fitting, so rejected fits retain their native trace.
     save_native(
