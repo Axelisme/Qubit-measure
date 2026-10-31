@@ -379,10 +379,14 @@ class RuntimeMath(TimedMacro):
         point grid or supplied in inputs.
         """
         for captured in captured_ends:
-            delta = add_time(expression, scale_time(runtime_expression(captured), -1))
-            points = evaluate_time(delta, expression_axes(delta))
-            if points is not None and int(points.min()) >= 0:
-                return self.add(captured, self.lookup([int(v) for v in points.flat], expression_axes(delta)))
+            delta = self._captured_delta(expression, runtime_expression(captured))
+            if delta is not None:
+                axes = expression_axes(delta)
+                points = evaluate_time(delta, axes)
+                if points is not None and int(points.min()) >= 0:
+                    if not np.any(points):
+                        return captured
+                    return self.add(captured, self.lookup([int(v) for v in points.flat], axes))
         axes = expression_axes(expression)
         points = evaluate_time(expression, axes)
         if points is not None:
@@ -411,6 +415,22 @@ class RuntimeMath(TimedMacro):
                     term = self.add(term, term)
             result = self.add(result, scaled) if coefficient > 0 else self.subtract(result, scaled)
         return result
+
+    def _captured_delta(
+        self, expression: TimeExpression, captured: TimeExpression
+    ) -> TimeExpression | None:
+        # Addition distributes over max/min. Match the same shift on every
+        # alternative before flattening case maxima loses the incoming floor.
+        if isinstance(expression, TimeChoice) and isinstance(captured, TimeChoice):
+            if expression.maximum != captured.maximum or len(expression.alternatives) != len(captured.alternatives):
+                return None
+            shifts = [
+                self._captured_delta(value, origin)
+                for value, origin in zip(expression.alternatives, captured.alternatives, strict=True)
+            ]
+            first = shifts[0]
+            return first if first is not None and all(shift == first for shift in shifts) else None
+        return add_time(expression, scale_time(captured, -1))
 
     def source(self, name: str) -> RuntimeEnd:
         """Describe a certified register at this consumer, retaining known points."""
