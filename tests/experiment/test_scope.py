@@ -197,6 +197,20 @@ def test_full_live_leaf_path_selects_a_named_root_without_children(
     assert result.active_path == path
 
 
+@pytest.mark.parametrize("kind", ["workflow", "recipe", "run"])
+@pytest.mark.parametrize("name", [None, "synthetic"])
+def test_root_kind_selector_stops_root_with_live_acquire(
+    kind: RootKind,
+    name: str | None,
+) -> None:
+    root = experiment.Scope(kind, name=name)
+    with root.branch("acquire") as acquire:
+        result = root.cancel(kind)
+        assert result.cancelled
+        assert root.cancelled
+        assert acquire.cancelled
+
+
 def test_release_is_idempotent_and_closed_scope_rejects_new_children() -> None:
     root = make_root()
     child = root.child("point")

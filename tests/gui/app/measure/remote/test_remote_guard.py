@@ -336,9 +336,9 @@ def test_tab_run_rejects_missing_active_context_without_starting(
         bridge.disconnect()
 
 
-@pytest.mark.parametrize("terminal", ["finished", "cancelled"])
+@pytest.mark.parametrize("stop_requested", [False, True])
 def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
-    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminal: str
+    fx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop_requested: bool
 ) -> None:
     _prepare_guarded_context(fx)
     tab_id = fx.ctrl.tab_control.new_tab("fake")
@@ -411,11 +411,13 @@ def test_tab_run_busy_close_and_terminal_keep_the_gui_result(
         other_editor = fx.ctrl.cfg_resources.lookup(other)
         other_editor.write({("gain",): 0.3})
         _edit_context_as_gui(fx, "run_source", 17)
-        if terminal == "cancelled":
+        if stop_requested:
             assert call("cancel", {"op": op})["status"] in {"cancelling", "cancelled"}
         release.set()
         # The admitted synthetic operation must publish terminal; 30s only guards a hang.
-        assert call("wait", {"op": op, "timeout": 30})["status"] == terminal
+        assert call("wait", {"op": op, "timeout": 30})["status"] == "finished"
+        snapshot = fx.ctrl.tab_control.get_tab_snapshot(tab_id)
+        assert snapshot.run.stop_requested is stop_requested
         assert fx.state.get_tab(tab_id).run.result is not None
         fx.ctrl.tab_control.close_tab(tab_id)
         with pytest.raises(CfgPreconditionError) as gone:

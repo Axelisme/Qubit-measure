@@ -160,7 +160,9 @@ def test_window_rpc_acquisition_saves_iq_and_public_environment_identity(
         terminal = call(
             sock, "operation.await", {"operation_id": started, "timeout": 30}
         )["result"]
-    assert terminal["status"] == ("cancelled" if outcome == "stopped" else "finished")
+    assert terminal["status"] == "finished"
+    snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
+    assert snapshot["result_state"]["stop_requested"] is (outcome == "stopped")
     saved = call(sock, "tab.save_data", {"tab_id": tab})
     assert saved["ok"], saved
     runs = ctrl.save_control.list_saved_runs()

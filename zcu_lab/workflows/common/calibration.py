@@ -100,7 +100,7 @@ class CalCarry:
     stages that observe them during a measurement. seed_flux is the seed pulse's
     calibration setpoint in the plan's flux unit; None disables matrix-element
     feed-forward. Only calibrate_point updates the history fields, from stage
-    results. Pause preserves this carry; there are no stage checkpoints.
+    results. There are no stage checkpoints.
     """
 
     seed: Calibrated

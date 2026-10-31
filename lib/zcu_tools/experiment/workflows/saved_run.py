@@ -22,7 +22,8 @@ class SavedRecord[P]:
     allocated commit directory; record_path is its framework record.json.
     call_seq identifies the commit scope. record is caller-validated P or the
     unvalidated EncodedRecord returned by read_records_raw. operations retains
-    the committed scope's actual attempts, including discarded/failed attempts.
+    the committed scope's actual attempts, including raised attempts and
+    discarded attempts from historical Pause records.
     """
 
     commit_seq: int

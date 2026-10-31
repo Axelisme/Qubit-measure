@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-31（workflow 例外與停止請求）
+**Last updated:** 2026-11-01（workflow 單次 operation 與停止請求）
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -8,13 +8,13 @@
 
 ## Shared async script host
 
-`script_host.ScriptHost(scope)` 接 caller 以 catalog 名建立的 workflow／recipe 根，建構時不啟動 thread 或 loop。`run(coroutine)` 在呼叫它的 worker 執行一次作者 coroutine，完成 finally 與 executor drain 後返回或 raise，不能重用。`await call(fn, scope=None, name=None, on_completed=None)` 在 executor 執行 `fn(CallContext)`，回 CallResult。未填 scope 時 operation 掛根，不預建 iteration。Context.scope 是該 operation child，epoch 記起跑值。子層取消由 owner 合作回傳，Host 不判斷資料完整度。Root 與 live_paths 是公開讀取介面。正常 executor completion 回到 worker loop 時先呼一次 on_completed，再檢查根取消；fn 或 hook 的真錯誤原樣傳播。作者 Task 不會被 cancel，finally 留在同一 worker。
+`script_host.ScriptHost(scope)` 接 caller 以 catalog 名建立的 workflow／recipe 根，建構時不啟動 thread 或 loop。`run(coroutine)` 在呼叫它的 worker 執行一次作者 coroutine，完成 finally 與 executor drain 後返回或 raise，不能重用。`await call(fn, scope=None, name=None, on_completed=None)` 在 executor 執行 `fn(CallContext)`，回 CallResult。未填 scope 時 operation 掛根，不預建 iteration。Context.scope 是該 operation child。子層取消由 owner 合作回傳，Host 不判斷資料完整度。Root 與 live_paths 是公開讀取介面。正常 executor completion 回到 worker loop 時先呼一次 on_completed，再檢查根取消；fn 或 hook 的真錯誤原樣傳播。作者 Task 不會被 cancel，finally 留在同一 worker。
 
 `await ask(question)` 以唯一 request id 等待具名 Answer，`answer(request_id, answer)` 驗證當前問題；錯誤、重複或遲到答案不消耗新問題。根取消會釋放 Ask 並 raise 普通 ScriptCancelled，作者 ask 不回 Optional。根取消前已開始的 call 先 drain，發布 completion 後再 raise。ScriptCancelled 不存進 Host.error。
 
-`control(fn)` 把數微秒級的 memory-only callback 排入與 cancel／pause／resume／answer 相同的 loop 序列，呼叫端等待回傳值或原例外。Fn 不 await、不阻塞、不 I/O，也不重入作者程式。Worker 上 inline 執行，foreign thread 經 call_soon_threadsafe 與 acknowledgement；run 前或 loop 關閉後 raise RuntimeError。`cancel(scope=None, expected=None)` 的 child 選擇器在 loop 序列匹配。根取消則在 Host lock 內設 token 並記 typed ack，第一次呼叫也不等 loop notification。根 ack 的 active_path 固定為根路徑，重複請求回同一 ack，不再排 notification。Loop 稍後釋放 Ask 與 pause gate。Ack 不表示作者 finally 或 executor 已 drain。Scope 也可填 label#N。省略 scope 選根，明填時使用 Scope resolver 與 `CancelResult(cancelled, reason, active_path, candidates)`，acknowledgement 不表示 operation 已 drain。Acquire 只停一次取得，Schedule 停該段後續取得，iteration 停本輪，下一個顯式 iteration 使用新 token，run 是當前 operation 的別名。Recipe runtime 另用 control 原子檢查當前 tab.run token，analysis／Ask／閒置時 run cancel 是 no-op。`close()` 合作 drain，off-worker 等到 coroutine／finally／executor 完成，worker 自己呼叫時只請求停止，不自等。
+`control(fn)` 把數微秒級的 memory-only callback 排入與 cancel／answer 相同的 loop 序列，呼叫端等待回傳值或原例外。Fn 不 await、不阻塞、不 I/O，也不重入作者程式。Worker 上 inline 執行，foreign thread 經 call_soon_threadsafe 與 acknowledgement；run 前或 loop 關閉後 raise RuntimeError。`cancel(scope=None, expected=None)` 的 child 選擇器在 loop 序列匹配。根取消則在 Host lock 內設 token 並記 typed ack，第一次呼叫也不等 loop notification。根 ack 的 active_path 固定為根路徑，重複請求回同一 ack，不再排 notification。Loop 稍後釋放 Ask。Ack 不表示作者 finally 或 executor 已 drain。Scope 也可填 label#N。省略 scope 選根，明填時使用 Scope resolver 與 `CancelResult(cancelled, reason, active_path, candidates)`，acknowledgement 不表示 operation 已 drain。Acquire 只停一次取得，Schedule 停該段後續取得，iteration 停本輪，下一個顯式 iteration 使用新 token，run 是當前 operation 的別名。Recipe runtime 另用 control 原子檢查當前 tab.run token，analysis／Ask／閒置時 run cancel 是 no-op。`close()` 合作 drain，off-worker 等到 coroutine／finally／executor 完成，worker 自己呼叫時只請求停止，不自等。
 
-Pause 只停止目前 operation、增加 epoch 並關 gate，不停止 iteration。Resume 只開 gate。CallResult 固定起跑 epoch，並原子擷取 fn 完成時的 stop_requested 與 stopped 事實。stop_requested 表示本 operation 自身已停止，或 Host 在執行期間取消本 operation、祖先或子孫，不包含無關 sibling。Stopped 只表示 operation 自己的 token 已 set。Workflow env 只丟棄 Pause 造成的 stale stopped attempt，再重跑相同 request；單純 scope cancel 的回傳值直接交付。Host 不重跑外部效果。Scope.commit 同步寫 snapshot，不等 pause gate，也不更換 iteration。根取消打開 async gate，使作者 finally 可同步保存已有成果。
+CallResult 原子擷取 fn 完成時的 stop_requested 與 stopped 事實。stop_requested 表示本 operation 自身已停止，或 Host 在執行期間取消本 operation、祖先或子孫，不包含無關 sibling。Stopped 只表示 operation 自己的 token 已 set。Host 與 Workflow env 每個 operation 只呼叫一次，不丟棄合作停止的回傳值，也不自動重跑外部效果。Scope.commit 同步寫 snapshot，不更換 iteration。根取消後作者 finally 可同步保存已有成果。
 
 `Scope(kind, name=None, stop=None)` 建立 workflow、recipe 或 run 根。`child(label)` 建作者 child，`branch(kind, name=...)` 建 iteration、operation、schedule 或 acquire。兩者都以 with 或 release 收尾。Name 若非 None 必須非空，且不得含 #、/、:，作者 label 也不得使用保留 kind。路徑使用 `workflow:<name>/iteration#1/operation:T1#1`，同 parent 的各 kind 從 1 編號。`active_path` 在第一個 fork 停下，`live_paths` 列出所有存活葉的完整路徑。
 
@@ -22,7 +22,7 @@ WorkflowEnv 繼承同一個 Scope，host.root is env。Child 透過注入的 Sco
 
 Scope.dir 第一次使用才建目錄，按 kind／作者 label 與六位 sequence 鏡射，name 不進目錄名。每個 scope 同步 commit 一次，record.json 保存 scope_path、name 與全 run commit_seq。後續 record mutation 不改快照。Root commit 寫 data root。作者用 env.iterations() 決定 iteration 壽命，generator 的 next／close 釋放前一趟／最後一趟。
 
-`scope.cancel(selector, on_cancel=None)` 搜尋整棵存活子樹。唯一匹配後先同步呼叫 on_cancel(selected_scope)，再設定 stop。Callback 拋錯時原樣傳出且不設 stop。Selector 可用 kind、kind#N、operation:name 或完整葉路徑。多筆命中回 reason="ambiguous" 與 candidates，不任選最新 child。`scope.cancelled` 表示自身停止，`scope.stop` 供低層 bit API 使用。StopSignal 負責出生繼承與向下停止。release 只解除父子關係。Host 在 cancel 與 Pause 入口記錄自己的停止請求，不讀子層完成事實。
+`scope.cancel(selector, on_cancel=None)` 搜尋整棵存活子樹。唯一匹配後先同步呼叫 on_cancel(selected_scope)，再設定 stop。Callback 拋錯時原樣傳出且不設 stop。Selector 可用 kind、kind#N、operation:name 或完整葉路徑。多筆命中回 reason="ambiguous" 與 candidates，不任選最新 child。`scope.cancelled` 表示自身停止，`scope.stop` 供低層 bit API 使用。StopSignal 負責出生繼承與向下停止。release 只解除父子關係。Host 在 cancel 入口記錄自己的停止請求，不讀子層完成事實。
 
 `Schedule(cfg, buffer, scope=..., name=None)` 在 context 入口建立 schedule child，每次 acquire 建立 acquire child，退出時 release。`RunContext.scope` 將當次 run 或 operation 的顯式 scope 交給 core；底層 driver、clock 與 program builder 仍只接 stop bit。
 
@@ -153,8 +153,8 @@ NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保
   `capture_device_snapshot(devices)` 由 Run owner 在下述 checkpoint 呼叫，讀取全部 connected drivers 的設定並轉成隔離 JSON。
   量測時間和 completion 由前端 adapter 在 acquire 邊界記錄，不由 core 或 datafile writer 擷取。Evidence 複製版本 mapping，獨立於可修改的 RunRecord cfg／Result。
 - GUI experiment 與 Notebook 的 Run 建立路徑各捕捉一次 device snapshot。GUI 在 hardware lease 後、adapter.run 前讀取。Notebook 同步執行，資源由 caller 擁有，不新增 lease；它在建立 RunContext 後、core.run 前讀取。兩路對全部已連線 device 各讀一次 get_info，只讀不寫。任一讀取失敗拒絕 Run，不進 adapter/core，不以 cached info 補值；無 device 記 `{}`。Snapshot 隨當次 Run 保存，後續 sweep 或 Save 不重讀、不覆寫。
-- Workflow 的 `await env.run(core.run, cfg)` 每次 attempt 建立新的 `RunContext` 與獨立的 operation Plots，呼叫 core 前捕捉 connected device snapshot，core 回傳時交付 `Completed[RunRecord]`，core 例外原樣傳出。`Completed.facts: OperationFacts` 與 journal／commit 信封共用事實結構；`env.identity` 回 detached startup RunIdentity。Lab saver 將 Completed、identity、spec.tag 與 snapshot 交給 `record_with_metadata`，由 experiment 組裝 RunMetadata 並放入 RunRecord.metadata。保存只傳 record，native 使用 datafile 的通用 Container。作者與保存介面見 [workflows](workflows/README.md)。
-- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run attempt 也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host；返回或失敗先 finish，Pause retry 使用新集合。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
+- Workflow 的 `await env.run(core.run, cfg)` 每次呼叫建立新的 `RunContext` 與獨立的 operation Plots，呼叫 core 前捕捉 connected device snapshot，core 回傳時交付 `Completed[RunRecord]`，core 例外原樣傳出。`Completed.facts: OperationFacts` 與 journal／commit 信封共用事實結構；`env.identity` 回 detached startup RunIdentity。Lab saver 將 Completed、identity、spec.tag 與 snapshot 交給 `record_with_metadata`，由 experiment 組裝 RunMetadata 並放入 RunRecord.metadata。保存只傳 record，native 使用 datafile 的通用 Container。作者與保存介面見 [workflows](workflows/README.md)。
+- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run 呼叫也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host。Core 只呼叫一次，不自動重試。返回或失敗都先 finish，下一次 operation 釋放上一組呈現資源。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
 - `axes_spec.py` 用 `AxesSpec` 描述軸與資料 channel。zcu_lab 以 `AxesSpec.Axis`、`AxesSpec.Z` 宣告子規格；獨立的 `Axis`、`ZSpec` 名稱仍可使用。這些規格描述 Result 欄位如何對應檔案中的軸與資料 channel。
 
   `AxesSpec.Axis("frequency", label="Frequency", unit="Hz", scale=1e6)` 與 `AxesSpec.Z("signal", label="Signal", unit="V")` 接受關鍵字。既有位置參數仍可使用。
