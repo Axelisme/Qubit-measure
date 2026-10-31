@@ -26,7 +26,7 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     relative_phase_deg: float | None
     reason: str | None
     interference_quality: FitQuality | None
-    interference_coefficients: tuple[float, float, float] | None = None
+    interference: tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]] | None = None
 
 
 def analyze_constructive_phase(
@@ -116,6 +116,6 @@ def analyze_constructive_phase(
             quality,
         )
     phase = float(np.rad2deg(np.arctan2(c, b)))
-    return ConstructivePhaseAnalysis(
-        returns, rates, phase, None, quality, (float(a), float(b), float(c))
-    )
+    dense = np.linspace(-180.0, 180.0, 721)
+    curve = a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense))
+    return ConstructivePhaseAnalysis(returns, rates, phase, None, quality, (phases, squared, dense, curve))

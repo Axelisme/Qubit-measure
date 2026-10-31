@@ -237,10 +237,9 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             )
         counts = result.sums
         totals = counts.sum(axis=(-2, -1))
-        acquired = result.sums.sum(axis=(-2, -1))
         answer = ReturnData(
             joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
-            (acquired == cfg.reps * cfg.rounds) & (totals > 0),
+            (totals == cfg.reps * cfg.rounds) & (totals > 0),
             totals,
             None,
         )
@@ -326,28 +325,11 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         )
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
-        if analysis.interference_coefficients is not None:
-            a, b, c = analysis.interference_coefficients
-            _, ax = plots.subplots(
-                "constructive_phase", figsize=(9, 6), layout="constrained"
-            )
-            phases = np.array(
-                [
-                    coordinate
-                    for coordinate, rate in zip(coordinates, rates, strict=True)
-                    if rate.rate is not None
-                ]
-            )
-            squared = np.array(
-                [rate.rate**2 for rate in rates if rate.rate is not None]
-            )
-            dense = np.linspace(-180.0, 180.0, 721)
+        if analysis.interference is not None:
+            phases, squared, dense, curve = analysis.interference
+            _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
-            ax.plot(
-                dense,
-                a + b * np.cos(np.deg2rad(dense)) + c * np.sin(np.deg2rad(dense)),
-                label="A + B cosφ + C sinφ",
-            )
+            ax.plot(dense, curve, label="A + B cosφ + C sinφ")
             ax.axvline(analysis.relative_phase_deg, ls="--", label="Maximum rate phase")
             ax.set(
                 xlabel="F2 relative to F1 phase (deg)",
