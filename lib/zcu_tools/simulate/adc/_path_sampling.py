@@ -73,10 +73,18 @@ def physical_shots(
             )
             for channel, batch in batches
             for content, events in enumerate(batch.events)
-            if events[event_index].grids
+            if events[event_index].grids and events[event_index].pulses
         }
         for key, group in groupby(ordered, key=keys.__getitem__):
             points = np.array(list(group), dtype=np.int64)
+            for (channel, batch), content in zip(batches, key, strict=True):
+                event = batch.events[content][event_index]
+                if not event.pulses:
+                    for index, grid in enumerate(event.grids):
+                        output[channel][points, :, offsets[channel] + index] = (
+                            batch.model.receiver.offset
+                            * (1 if traces else len(grid.times_ns))
+                        )
             observers = [
                 (channel, plans[channel, content])
                 for (channel, _), content in zip(batches, key, strict=True)
