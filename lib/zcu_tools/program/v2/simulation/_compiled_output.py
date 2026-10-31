@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +22,33 @@ from ..utils import generator_frequencies_from_words, readout_frequencies_from_w
 from ._compiled_state import BoolArray, IntArray, Machine
 from ._envelope_pool import EnvelopeContent, EnvelopePool
 from ._mux import static_readout_parameters
+
+
+@dataclass(frozen=True)
+class _EventValues:
+    """Per-lane output values before grouping into full-grid event slots.
+
+    Times are microseconds, carrier is MHz, phase is degrees, and gain is the
+    normalized signed amplitude. active identifies lanes playing this output.
+    """
+
+    start_us: NDArray[np.float64]
+    duration_us: NDArray[np.float64]
+    frequency_mhz: NDArray[np.float64]
+    phase_deg: NDArray[np.float64]
+    gain: NDArray[np.float64]
+    active: BoolArray
+
+
+def _overlaps_window(
+    event: EventSlot, start: NDArray[np.float64], duration: float
+) -> BoolArray:
+    """Select active events with strictly positive acquisition-window overlap."""
+    return (
+        event.active
+        & (event.start_us < start + duration)
+        & (event.start_us + event.duration_us > start)
+    )
 
 
 class Outputs:
@@ -186,7 +213,7 @@ class Outputs:
             return
         key = (position, 0, self.iterations)
         self._emit(
-            machine, key, ch, source, (start, duration, freq, phase, gain, active)
+            machine, key, ch, source, _EventValues(start, duration, freq, phase, gain, active)
         )
         slot = self.events[key]
         candidates = list(slot.envelopes)
@@ -234,7 +261,7 @@ class Outputs:
                 (position, tone, self.iterations),
                 ch,
                 source,
-                (start, duration, frequency, phase, gain, mask),
+                _EventValues(start, duration, frequency, phase, gain, mask),
             )
             self.events[(position, tone, self.iterations)].active[self.points] = mask
 
@@ -244,14 +271,7 @@ class Outputs:
         key: tuple[int, int, tuple[tuple[str, int], ...]],
         ch: int,
         source: str,
-        values: tuple[
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            NDArray[np.float64],
-            BoolArray,
-        ],
+        values: _EventValues,
     ) -> None:
         if key not in self.events:
             zero = np.zeros(self.size, dtype=np.float64)
@@ -269,21 +289,17 @@ class Outputs:
                 np.zeros(self.size, dtype=np.bool_),
             )
         slot = self.events[key]
-        for target, value in zip(
-            (
-                slot.start_us,
-                slot.duration_us,
-                slot.frequency_mhz,
-                slot.phase_deg,
-                slot.gain,
-            ),
-            values[:5],
-            strict=True,
+        for target, value in (
+            (slot.start_us, values.start_us),
+            (slot.duration_us, values.duration_us),
+            (slot.frequency_mhz, values.frequency_mhz),
+            (slot.phase_deg, values.phase_deg),
+            (slot.gain, values.gain),
         ):
-            self._put(target, np.where(values[5], value, 0), machine)
-        slot.active[self.points] = values[5]
+            self._put(target, np.where(values.active, value, 0), machine)
+        slot.active[self.points] = values.active
         self.current_end = np.maximum(
-            self.current_end, np.where(values[5], values[0] + values[1], 0)
+            self.current_end, np.where(values.active, values.start_us + values.duration_us, 0)
         )
 
     def _envelope(
@@ -523,11 +539,8 @@ class Outputs:
             start = values[:, read, 0]
             words = values[:, read, 1].astype(np.int64)
             for event in self.events.values():
-                active = (
-                    event.active
-                    & (event.gen_ch == routes[:, read])
-                    & (event.start_us < start + duration)
-                    & (event.start_us + event.duration_us > start)
+                active = _overlaps_window(event, start, duration) & (
+                    event.gen_ch == routes[:, read]
                 )
                 if not np.any(active):
                     continue
@@ -570,10 +583,8 @@ class Outputs:
             for index, gen in enumerate(wired):
                 for event in self.events.values():
                     if event.gen_ch == gen:
-                        candidates[:, index] |= (
-                            event.active
-                            & (event.start_us < times[:, read] + duration)
-                            & (event.start_us + event.duration_us > times[:, read])
+                        candidates[:, index] |= _overlaps_window(
+                            event, times[:, read], duration
                         )
             count = candidates.sum(axis=1)
             if np.any(count != 1):
