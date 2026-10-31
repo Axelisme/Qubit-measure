@@ -16,7 +16,7 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 `core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取 tProc、各 generator fabric、ADC output 與 envelope sample clocks，再交給 TimeBase。Core 不讀 soccfg，也不 import driver。
 
-TimeBase 已提供建立時基、格點檢查與 scalar／array 換算。Request schema、compiled frontend、consumer 與 replay 的整數時間遷移接續實作。本篇記錄這些模組共同遵守的目標契約，不表示整條遷移已完成。
+TimeBase 已提供建立時基、格點檢查與 scalar／array 換算。Request schema 與 compiled frontend 已使用整數時間。Consumer 與 replay 仍待遷移，本篇不表示整條遷移已完成。
 
 ## 時間契約
 
@@ -27,7 +27,9 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - 手建 fixture 也必須落在格點上。非格點時間報 `ValueError`，不四捨五入回格點。需要非十進位的精確時間時，caller 可提供 Fraction。
 - `TimeBase.ns` 是唯一的 tick→ns 換算入口。它支援 scalar 與 int64 ndarray，array shape 不變。每個結果都等於有理數 `ticks * 1000 * den / num` 正確捨入一次所得的 float64。
 - ADC 網格先在整數域組成 `trigger + k * period`，再交給 ns。Readout plan 與環境 template 呼叫這個入口，不各自展開換算迴圈或浮點乘除。
-- Num 必須能在 float64 精確表示。所有數值輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
+- Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
+- Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
+- `program.shot_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 只呼叫這個入口。它用 Python 整數加總各點、relax delay 與 reps，再由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定此 owner 與範圍。既有 us API 與硬體路徑不變。
 - Replay 明確保存時基的 num／den 與整數時間，並升級格式版本。舊版本明確拒絕，不做相容轉換。
 
 Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
