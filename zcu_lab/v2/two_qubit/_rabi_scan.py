@@ -1,4 +1,4 @@
-"""Shared configuration and raw results for two-line duration scans."""
+"""Input fields and count-array records for two-line duration scans."""
 
 from __future__ import annotations
 
@@ -10,12 +10,15 @@ from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import PulseCfg, SweepCfg
-from zcu_tools.program.v2.modules import MuxReadoutCfg
+from zcu_tools.program.v2 import (
+    PulseCfg,
+    SweepCfg,
+)
+from zcu_tools.program.v2.modules import MuxReadoutCfg, Reset
 
 from ._drive import DualLineCfg
 from ._readout import JointRoles
-from .joint_readout.core import GECenters, tone_centers
+from ._sums import validate_classifiers
 
 
 class DurationScanCfg(ConfigBase):
@@ -25,10 +28,18 @@ class DurationScanCfg(ConfigBase):
     drive carries the source pair: common MHz frequency, signed gains, phases
     in degrees, explicit waveforms and timing. Only scalar length-settable
     envelopes are supported; arbitrary assets are not resized. roles are saved
-    capture values. GE centers derive from the saved role-tone circles; missing
-    or linear calibration fails validation. No radius is needed. Every shot is kept.
+    capture values. F1/F2 require circle classifiers with radius from GE Post.
+    reset=None emits no reset; otherwise reset precedes preparation and herald.
+    Acquisition accumulates rounds without storing individual shots.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset",
+            description="Optional reset before each shot's reads and preparation.",
+        ),
+    ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -91,27 +102,10 @@ class DurationScanCfg(ConfigBase):
         ),
     ]
 
-    @property
-    def f1_centers(self) -> GECenters:
-        """Derive F1's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f1_tone)
-
-    @property
-    def f2_centers(self) -> GECenters:
-        """Derive F2's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f2_tone)
-
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
         """Reject invalid tones, routes, durations and unscalable waveforms."""
-        self.roles.validate_readout(self.readout)
-        _ = self.f1_centers, self.f2_centers
+        validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)
@@ -125,16 +119,17 @@ class DurationScanCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class RabiScanResult:
-    """Raw (coordinate,duration,rounds*reps,N) complex IQ in original tone order.
+    """Coordinates, requested durations in us and unchanged float64 class counts.
 
-    coordinates are relative phase degrees or common MHz frequency, according
-    to the leaf's native AxesSpec. durations are requested us. shot_indices are
-    round-major, tone_indices are original full mux indices. Unwritten whole
-    rounds remain complex NaN; acquired nonfinite IQ is an error, not a sentinel.
+    coordinates are relative phase degrees or common MHz frequency, as named by
+    the leaf AXES_SPEC. sums is (Nc,Nd,3,3), or (Nc,Nd,3,3,3,3) with herald.
+    Class order is g/e/other. Axis order is terminal F1/F2, preceded by herald
+    F1/F2 when present. Unmeasured points remain NaN; completed rounds survive
+    cancellation. There is no shot axis or IQ. The RunContext stop signal carries
+    only a stop request and reason. Execution errors propagate from run as
+    exceptions; a normal return after a stop request may contain partial counts.
     """
 
     coordinates: NDArray[np.float64]
     durations: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]

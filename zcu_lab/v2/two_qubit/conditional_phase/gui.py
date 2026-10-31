@@ -27,7 +27,7 @@ ConditionalPhaseRun: TypeAlias = RunRecord[ConditionalPhaseCfg, ConditionalPhase
 def _analyze(
     req: AnalyzeRequest[ConditionalPhaseRun, None], *, plots: Plots
 ) -> ConditionalPhaseAnalysis:
-    """Use only source cfg/raw; never fill missing quadratures from current inputs."""
+    """Use only source cfg/counts; never fill missing quadratures from current inputs."""
     return ConditionalPhaseExp().analyze(req.run_result, None, plots=plots)
 
 
@@ -36,7 +36,7 @@ def _get_writeback_items(
 ) -> Sequence[WritebackItem]:
     """Propose two ordinary source pulses with only common frequency replaced.
 
-    A unique n=1 crossing, saved cfg and fixed Run/Load capture are required.
+    A unique fitted per-gate crossing, saved cfg and fixed Run/Load capture are required.
     Preserve signed gain ratio, phases, waveform and timing. Module roots and
     independent slot rows target the captured coupler. FIT has no write effects;
     preview and selected Apply belong to the operator, not a paired transaction.
@@ -52,7 +52,7 @@ def _get_writeback_items(
             module_writeback(
                 pulse,
                 target=root,
-                description=f"CZ {role.upper()} source pulse with n=1 common frequency (MHz)",
+                description=f"CZ {role.upper()} source pulse with fitted common frequency (MHz)",
                 field_updates=(("freq", frequency),),
             )
         )

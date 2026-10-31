@@ -16,7 +16,7 @@ RBRun: TypeAlias = RunRecord[RBCfg, RBResult]
 
 
 def _analyze(req: AnalyzeRequest[RBRun, None], *, plots: Plots) -> RBAnalysis:
-    """Count joint00 and fit only the saved source, never the current Form."""
+    """Fit joint00 count ratios from the saved source, never the current Form."""
     return RBExp().analyze(req.run_result, RBOptions(), plots=plots)
 
 

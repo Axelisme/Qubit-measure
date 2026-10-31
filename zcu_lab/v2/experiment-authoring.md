@@ -665,6 +665,8 @@ Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
 `config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
 以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
 `on_update` 是本次實驗的 live plot callback，接收完整 signal array。
+直接讀取傳入的 `config`，不經 `sched.cfg` 或 `step.cfg` 取得設定。
+需要修改 pulse cfg 時，在 `run()` 開頭自行 deepcopy，不修改 caller 的 config。
 
 ```python
 import numpy as np
@@ -674,24 +676,23 @@ from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
 
 signals = SignalBuffer((config.length.expts,), on_update=on_update)
 with Schedule(config, signals, scope=context.scope) as sched:
-    cfg = sched.cfg
     builder = TimelineBuilder(
-        context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+        context.soccfg, reps=config.reps, relax_delay=config.relax_delay,
     )
-    delay = builder.add_sweep("length", cfg.length)
+    delay = builder.add_sweep("length", config.length)
 
-    drive = Pulse("pi_pulse", cfg.pi_pulse)
-    readout = Readout("readout", cfg.readout)
+    drive = Pulse("pi_pulse", config.pi_pulse)
+    readout = Readout("readout", config.readout)
     builder.emit(drive)
     builder.delay_timeline(delay)
     builder.emit(readout, tag="terminal")
 
     prog = builder.build()
     sched.run_acquire(
-        prog, context.soc, rounds=cfg.rounds,
+        prog, context.soc, rounds=config.rounds,
         options=RunOptions(
-            retry=cfg.acquire_retry,
-            stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, np.abs),
+            retry=config.acquire_retry,
+            stop_condition=snr_checker(signals.at(), config.earlystop_snr, np.abs),
         ),
     )
 ```
@@ -797,9 +798,42 @@ builder.sync()
 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
 `repeat` 的預設母 timeline 都遵守這條規則。
 `fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
-`branch` 只有 `by` 參數，例如 `with builder.branch(by="scan") as cases:`。
+`branch` 必填 `by` 與 `align_timeline`，例如 `with builder.branch(by="scan", align_timeline=True) as cases:`。
+Case 用 `with cases.case(index):` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
+未宣告的點不發射動作，重複、非整數或超界 index 報 ValueError。
 Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
-Case 只同步自身使用的 timeline 與局部 fork，不把不等長 case 補成共同長度。
+每個 case 從 branch 入口的結尾與 reference 開始。
+`align_timeline=True` 按 timeline 對各 case 結尾做 join，靜態取 max，runtime 取精確逐點 max。
+True 需要每個 case 的結尾能從 branch 入口狀態算出。
+`align_timeline=False` 保留實際執行 case 的 runtime 結尾，未使用的 timeline 不變。
+兩種都不推進共用 reference、不自動 sync，後續可在同一 timeline 繼續發射。
+Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
+Case 內 Repeat 也在 build 時報錯，須移到 branch 外。Repeat 內放 branch 仍合法。
+Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 delay_timeline 寫在 with 區塊前或後。
+局部 fork 名字在 case 結束後失效。沒有 join 的局部結尾直接丟棄，不合回祖先，也不報錯。
+
+兩顆 qubit 的準備 pulse 放在各自 fork 的 timeline，才能同時發射。
+以下 body 片段使用本次 build 預先建立的 `x180_f1`、`x180_f2` 與 `readout`。
+若有 reset 或 herald，先 emit 它們，再同步完成時間：
+
+```python
+builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e, outer
+builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e, inner
+# Emit optional reset and herald here.
+builder.sync()  # wait for herald/reset to finish before the branch-selected preparation
+builder.fork("default", into=["f1", "f2"])
+with builder.timeline("f1"):
+    with builder.branch(by="prepared_f1", align_timeline=True) as cases:
+        with cases.case(1):
+            builder.emit(x180_f1)
+with builder.timeline("f2"):
+    with builder.branch(by="prepared_f2", align_timeline=True) as cases:
+        with cases.case(1):
+            builder.emit(x180_f2)
+builder.join("f1", "f2", into="default")
+builder.emit(readout, tag="terminal")
+```
+
 Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。

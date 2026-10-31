@@ -14,12 +14,14 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
+from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
 from .analysis import CZAmplitudeAnalysis
 from .core import CZAmplitudeCfg, CZAmplitudeExp, CZAmplitudeResult
+from .fit import CZReturnFit
 from .form import make_form
 
 CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
@@ -28,12 +30,20 @@ CZAmplitudeRun: TypeAlias = RunRecord[CZAmplitudeCfg, CZAmplitudeResult]
 def _analyze(
     req: AnalyzeRequest[CZAmplitudeRun, None], *, plots: Plots
 ) -> CZAmplitudeAnalysis:
-    """Use only saved cfg/raw for joint return, fixed-phase fit and named plots."""
+    """Use saved cfg/counts for joint return, fixed-phase fit and named plots."""
     return CZAmplitudeExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
     req: WritebackRequest[CZAmplitudeRun, CZAmplitudeAnalysis],
+) -> Sequence[WritebackItem]:
+    return amplitude_writeback(
+        req.run_result.cfg, req.analyze_result.fit, req.ctx.parameters
+    )
+
+
+def amplitude_writeback(
+    cfg: CZAmplitudeCfg | None, fit: CZReturnFit, parameters: ParameterContext | None
 ) -> Sequence[WritebackItem]:
     """Propose two ordinary coupler pulses and two separate resolved slot keys.
 
@@ -44,10 +54,8 @@ def _get_writeback_items(
     capture raises ValueError. Read no current library calibration, perform
     no hardware or persistent writes, and leave source cfg untouched.
     """
-    cfg, fit = req.run_result.cfg, req.analyze_result.fit
     if cfg is None or fit.scale is None:
         return []
-    parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ amplitude writeback requires captured parameters")
     for role, identity in (

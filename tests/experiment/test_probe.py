@@ -8,6 +8,7 @@ from typing import Any
 import matplotlib
 import numpy as np
 import pytest
+from matplotlib import image as mpl_image
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
@@ -102,6 +103,52 @@ def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Pa
         assert all(
             report.timings[stage] >= 0
             for stage in ("run", "save", "restore", "analyze")
+        )
+    finally:
+        environment.devices.close_all_devices()
+
+
+@pytest.mark.parametrize(
+    "live_size, analysis_size, expected_pixels",
+    [
+        ((6.4, 4.8), (6.4, 4.8), [(480, 640), (480, 640)]),
+        ((9.0, 3.0), (12.0, 5.0), [(300, 900), (500, 1200)]),
+    ],
+    ids=["default", "nondefault"],
+)
+def test_probe_exports_current_figure_sizes(
+    tmp_path: Path,
+    live_size: tuple[float, float],
+    analysis_size: tuple[float, float],
+    expected_pixels: list[tuple[int, int]],
+):
+    class SizedExperiment(ProbeExperiment):
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            result = super().run(config, context=context)
+            context.plots.draw(
+                "signal/trace", lambda figure: figure.set_size_inches(*live_size)
+            )
+            return result
+
+        def analyze(
+            self,
+            source: RunRecord[SavingCfg, SavingResult],
+            options: Any,
+            *,
+            plots: Plots,
+        ) -> dict[str, object]:
+            summary = super().analyze(source, options, plots=plots)
+            plots["fit"].set_size_inches(*analysis_size)
+            return summary
+
+    environment = white_noise(seed=17)
+    try:
+        report = probe(SizedExperiment(), SavingCfg(), environment, tmp_path)
+        assert report.failed_stage is None
+        assert report.exception is None
+        assert report.roundtrip_equal is True
+        assert [mpl_image.imread(path).shape[:2] for path in report.png_paths] == (
+            expected_pixels
         )
     finally:
         environment.devices.close_all_devices()

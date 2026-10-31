@@ -1,47 +1,58 @@
-# Conditional higher-level spectroscopy
+# Conditional spectroscopy
 
-**讀者：** operator、agent。從 GUI 或 MCP 執行雙線條件頻譜量測，選擇後續 CZ probe 窗口。
+**讀者：** operator、agent。本頁說明 `two_qubit/conditional_spectroscopy`。需要先判 herald 再分析的版本，請開啟 [heralded spectroscopy](guide_heralded.md)。
 
-**Last updated:** 2026-10-21
+## 量測序列
 
-Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
+每個 shot 依序執行可選 reset、名目 B00/01/10/11 準備、雙線 weak probe、可選 Xπ⊗Xπ contrast、terminal mux readout。準備軸是 `prepared_f1`、`prepared_f2`，各為 0＝g、1＝e。F1 在外層，兩顆的 Xπ 在獨立 timeline 同時準備。未使用 reset 時，名目準備仍包含熱布居。
 
-`two_qubit/conditional_spectroscopy` 量四個熱初態上的名目準備分支。每 shot 做 `B00/01/10/11 → 雙線 weak probe → 可選 Xπ⊗Xπ → 完整 mux readout`。F1 是 branch 的第一個 bit，F2 是第二個 bit。B11 仍含熱 population，所有 shots 都保留，直接分析原始 ensemble。
-
-修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+F1/F2 的 terminal 讀出在取數時分成 g、e、other，保存每個聯合類別的計數。分析顯示兩顆 qubit 的 P_e，不再顯示全 tone mean IQ。不做 confusion correction、peak fit 或 writeback。
 
 ## 開啟前確認
 
-先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ pulses 與 mux readout。綁定 `f1`、`f2` 到不同 fluxonium，`coupler` 到本對 transmon，`mux` 到包含兩者的 MuxGroup。Group 的 `qubits` 與 `resonators` 必須有序對應。
+先依 [FTF bring-up 指南](../guide.md) 校準 F1/F2 的 Xπ pulses 與 mux readout。綁定 `f1`、`f2` 到不同 fluxonium，`coupler` 到本對 transmon，`mux` 到包含兩者的 MuxGroup。Group 的 qubits 與 resonators 必須有序對應。
 
-Open／Reset 固定捕捉角色、pulse 與 library。Tone 由各 component 在 `qubits` 的位置決定，畫面只供核對。完整 readout tone 列表維持原順序，包含 F1/F2 以外的 tones。缺 Xπ 或讀出校準時，先補與實測條件相符的有效設定。修改 aliases 或 library 後重新 Reset，再核對整份 cfg。
+Open／Reset 固定捕捉角色、tone mapping 與 pulse 初值。有 `$mux.module.readout` 時引用完整 library readout。缺 slot 時須填妥 blank mux。完整 tone 順序保持不變，F1/F2 之外的 tone 不參與本實驗的 P_e 分析。
+
+F1/F2 tone 都必須有 circle classifier 與 radius。缺少校準或使用 linear 時，Run 前會要求先做 GE Post。改動讀出設定後須重新校準，不可直接沿用舊 radius。修改 aliases 或 library 後重新 Reset，再核對 cfg。Refresh 不會覆蓋已填輸入。
 
 ## 設定與 Run
 
-1. 檢查兩個 preparation Xπ pulses。每條 probe 必須使用相同角色的 charge generator，F1/F2 的 generator 必須不同。Coupler 只設 DC bias。
-2. 設定 `drive.f1` 與 `drive.f2`。有 `$coupler.module.cz_f1`／`cz_f2` 時，表單複製兩個普通 pulse 作起點。先人工降低並確認 gain，使 pulse 適合 weak probe。沒有 slot 時，表單提供 cosine 包絡與捕捉的角色 wiring channel；frequency、gain、duration 與 Nyquist zone 保持未填，須人工設定。所有初值都須依已授權硬體範圍審閱。
-3. 兩線填相同 base frequency、envelope duration 與 pre-delay。兩個 waveform 都要明填；可保留不同形狀，但 duration 必須一致。Gain 可帶符號，兩線的 gain 比例與 relative phase 由操作員提供並保持固定。兩線同時間原點播放，等待兩線及各自 post-delay 結束後才接後續 pulse。頻率單位 MHz、時間 µs、phase degree。
-4. 填 Common probe frequency 掃描範圍與點數。每個 frequency 點同時把兩線 frequency 換成該座標，保留 gain、relative phase 及 waveform。保存軸是共同要求的 MHz 座標；實際硬體頻率依裝置解析度量化。
-5. Double Xπ contrast 開啟時，probe 後依序對 F1/F2 各播一次校準 Xπ。關閉時直接接 readout。比較 on／off 須分別 Run 並保留各自 cfg。兩次量測的對比只供診斷，高階態 population 仍須另行校準。
-6. 只掃頻率時，Coupler DC source 留空，所有 DC source 維持原值，結果中的 DC 座標 0 表示該軸停用。需要外層掃描時，填直接 device 名稱、working unit 與已授權 source values。支援 A、V 或 native，直接使用所填單位；F1/F2 bias 須另行確認。
-7. 核對 reps、rounds、等待時間及完整 mux 積分窗口後 Run。執行順序是 DC → B00/01/10/11 → frequency → host round。Live 圖顯示各 frequency 已取得 shots 的總數；FIT 顯示下節的診斷圖。
+1. 核對兩顆 qubit 的 preparation Xπ pulses。每條 probe 使用同角色的 charge generator，F1/F2 generator 必須不同。
+2. 填 `drive.f1` 與 `drive.f2`。表單會複製已有的 coupler `cz_f1`／`cz_f2` slots，這些 pulse 不保證適合 weak probe。沒有 slot 時，表單提供 cosine 包絡與角色 wiring channel，gain、duration 與 Nyquist zone 仍須人工確認。
+3. 兩線須填相同 base frequency、envelope duration 與 pre-delay。Gain 可帶符號，gain 比例及 relative phase 由 operator 決定。兩線平行播放，等待兩線及各自 post-delay 結束。頻率用 MHz，時間用 us，phase 用 degree。
+4. 填共同 probe frequency 掃描範圍。每點同時替換兩線 frequency，其他 pulse 設定不變。保存軸是要求的 MHz 座標，實際硬體頻率會量化。
+5. Double Xπ contrast 開啟時，probe 後依序播放 F1、F2 Xπ。關閉時直接接 terminal。比較兩種設定時分別 Run 並保存 cfg。
+6. 只掃頻率時，`dc_device=None`。實驗不動任何 DC source，結果 DC 軸為單點 `[0]`，只作停用哨兵。需要 DC 掃描時填直接 device 名稱、working unit 與已授權範圍。支援 A、V、native，不補償 F1/F2，也不換算單位。
+7. `reset=None` 不發射 reset。需要 reset 時明填其 cfg。核對 reps、rounds、等待時間與 mux 積分窗口後 Run。
 
-掃 coupler source 也可能影響其他 loop。F1/F2 bias 與工作點由操作員設定並記錄，結束後 DC source 維持最後設定。取消或失敗後先確認裝置當下值，再決定是否繼續。
+只有 DC 留在 host，因為每點要設定外部儀器。每個 DC 的一支 program 用兩層 2 點準備態 loop 與 frequency 硬體 sweep 取完四種準備及所有頻率。每點的 rounds 在取數端累加，不逐 round 保存。DC source 留在最後設定，取消或失敗也不自動恢復。繼續前先確認裝置當下值。
 
-## 看頻譜與熱圖
+## 看圖與分析
 
-FIT 提供頻譜與熱圖診斷，峰的位置由操作員判讀。每個完整 tone 各有一張四分支頻譜，畫各 DC 點的平均 I 與 Q。標題保留原 tone index、label、F1/F2 對應及 contrast 開關。啟用 DC 掃描時，另有逐 tone 的 I、Q 四分支熱圖；橫軸是共同 probe frequency，縱軸是具名 source 與 working unit。非 F1/F2 tone 也保留並顯示。
+Live 每個 DC／branch 顯示兩條 P_e 曲線，第一條為 F1，第二條為 F2。曲線由當下累計計數更新。FIT 分別提供 F1、F2 的四分支頻譜，各 DC 一條線。啟用 DC source 時，另有各 qubit 的四分支 DC × frequency 熱圖。
 
-每個 DC／branch 必須取得全部 frequency、rounds、reps，才計算該分支頻譜。Summary 列 complete、incomplete 或 not_started，以及 acquired／analyzed shots。Incomplete 分支的 analyzed shots 為 0，圖上將該分支標為缺失。已完成的其他分支仍可看。
+P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留在分母。零計數或未量點為 NaN。已完成 rounds 的部分資料仍可分析，`acquired_shots` 列出每點計數，`complete` 表示該 DC／準備態的所有頻率都取得要求的 reps × rounds。Shots 圖列出各頻率的實際 shot 數與要求值，部分資料不會偽裝成完整掃描。
 
-從四分支圖人工選下一步要調查的 transition 與 probe 窗口。平均 IQ 與雙 Xπ 對比是診斷 proxy。高階態與 leakage population、bare coupler 能級、EC/EJ/J、Hamiltonian 及 CZ frequency 都需其他校準或證據。本實驗只提供圖與 summary，後續校準由操作員另行選擇。
+這些圖顯示分類後的激發機率。它們不直接給出高階態 population、leakage、Hamiltonian 或 CZ frequency。峰的位置與下一步 probe 窗口由 operator 判讀。
 
-## 保存、取消與重分析
+## 保存與取消
 
-Raw complex IQ shape 是 `DC × 4 branches × frequency × (rounds*reps) × full tones`。Shot index 依 host round 再依 program reps 排列。每個 shot 的完整 tones 一起保存，保留原讀出的 ADC units/sample 與 normalization。
+Result 保存 float64 `sums`，形狀為 `DC × prepared_f1[2] × prepared_f2[2] × frequency × 3 × 3`。最後兩軸為 terminal F1、F2，順序皆為 g、e、other。數值是總和，不是比例，檔案大小不隨 reps 或 rounds 增長。
 
-取消保留已完成 rounds，未取得的完整 round slots 維持 complex NaN。部分取得的分支保留 raw，待資料完整才分析。已取得 IQ 中的非有限值或部分缺失 round 回報執行錯誤。
+取消保留已完成 rounds，未量點維持 NaN。StopSignal 只承載停止請求與 reason，不承載錯誤。取數失敗由 Run 直接拋出例外；停止請求後正常返回的結果可以是合法 partial。Save 保存座標、計數與本次 cfg。Load 不改目前表單，Analyze 只讀保存的 cfg 與 sums。舊 per-shot IQ 與單一 branch 軸格式會明確拒絕載入，不做自動轉換。
 
-Save 保存 raw、座標及本次 cfg，包括角色、tone mapping、兩線 waveform、gain、phase、contrast 與具名 DC 設定。Native Load 保持目前表單原值。Analyze 只用載入來源的 cfg／raw。Cfg 不可用時仍保留有效 raw，但拒絕需要該 cfg 的頻譜分析。
+## Notebook
 
-實際 FTF 控制鏈與物理 gate 表現須用現場資料另行驗證。後續 constructive phase、chevron、amplitude、conditional phase 與 local Z 仍需各自量測與人工判讀。
+先建立通過驗證的 `SpectroscopyCfg`，環境 handles 由 caller 提供。`point_view` 是保存目的地的 bound PointView。Notebook 經 adapter 管理 scope、plots 與 RunRecord。
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.conditional_spectroscopy.core import SpectroscopyExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(SpectroscopyExp())
+record = exp.run(cfg)
+exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```

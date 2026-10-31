@@ -1,4 +1,4 @@
-"""Ordinary two-line pulse configuration and parallel charge-line playback."""
+"""Scalar two-line pulse configuration shared by two-qubit experiments."""
 
 from __future__ import annotations
 
@@ -7,8 +7,7 @@ from typing import Annotated, Self
 
 from pydantic import model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.program.v2 import Pulse, PulseCfg
-from zcu_tools.program.v2.modules import Join
+from zcu_tools.program.v2 import PulseCfg
 
 
 class DualLineCfg(ConfigBase):
@@ -20,7 +19,8 @@ class DualLineCfg(ConfigBase):
     Post-delays may differ: parallel playback waits for both to finish.
     Frequency, gain, phase and delays must be finite scalars. Delays must be
     nonnegative and envelope duration positive.
-    Host scans replace both frequencies together, never use QICK parameter sweeps.
+    Runs apply typed Pulse overrides for hardware sweeps after validating this
+    scalar baseline; each run writes its own parallel Join sequence.
     No coupler AC line, persistent gate module kind or logical frame is implied.
     """
 
@@ -74,22 +74,3 @@ class DualLineCfg(ConfigBase):
         if self.f1.pre_delay != self.f2.pre_delay:
             raise ValueError("Dual-line pulses must share the same time origin")
         return self
-
-
-def dual_line_drive(
-    drive: DualLineCfg, *, frequency: float, name: str = "drive"
-) -> Join:
-    """Build parallel ordinary pulses at a common finite MHz frequency.
-
-    drive is a validated scalar pair; name prefixes its two program pulse names.
-    Return a Join that starts both at one origin and blocks through both pulses,
-    including their individual post-delays. Input pulses are never modified.
-    Frequency scans preserve gain ratio, relative phase and both waveforms.
-    Raise ValueError for nonfinite frequency; program/route failures propagate.
-    """
-    if not math.isfinite(frequency):
-        raise ValueError("Common drive frequency must be finite")
-    return Join(
-        Pulse(f"{name}_f1", drive.f1.with_updates(freq=frequency)),
-        Pulse(f"{name}_f2", drive.f2.with_updates(freq=frequency)),
-    )
