@@ -184,21 +184,21 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             # Keep the selected pi duration; the off case must not gain idle time.
-            builder.sync()
+            builder.delay_by_timeline()
             with (
                 builder.branch(by="before_pi", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(PulseReset("tested_reset", cfg.tested_reset, length=length))
-            builder.sync()
+            builder.delay_by_timeline()
             with (
                 builder.branch(by="after_pi", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

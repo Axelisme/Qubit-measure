@@ -139,9 +139,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(TwoPulseReset("tested_reset", tested_reset_cfg))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

@@ -127,14 +127,14 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain))
             # Preserve each selected case's duration instead of padding to the maximum.
-            builder.sync()
+            builder.delay_by_timeline()
             with builder.branch(by="reset_sel", align_timeline=False) as cases:
                 with cases.case(1):
                     builder.emit(Reset("tested_reset", cfg.tested_reset))
                 with cases.case(2):
                     builder.emit(Reset("tested_reset", cfg.tested_reset))
                     builder.emit(Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
