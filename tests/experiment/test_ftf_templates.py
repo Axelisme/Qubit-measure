@@ -234,7 +234,9 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
             assert tuple(p.start_ns for p in events[0].pulses) == (start,) * len(
                 herald_frequencies
             )
-            assert tuple(p.frequency_ghz for p in events[0].pulses) == herald_frequencies
+            assert (
+                tuple(p.frequency_ghz for p in events[0].pulses) == herald_frequencies
+            )
             assert tuple(p.amplitude for p in events[0].pulses) == (0.6j,) * len(
                 herald_frequencies
             )

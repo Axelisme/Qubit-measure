@@ -61,7 +61,7 @@ def test_request_rejects_equal_total_reads_with_different_template_event_layout(
             other_adc,
             trigger_ticks=both.trigger_ticks[:, :1],
             frequency_mhz=np.full((2, 1), 5980.0),
-)
+        )
     second = replace(
         first, points=first.points + 2, events=events, readouts=(terminal, other_adc)
     )

@@ -36,7 +36,9 @@ def isolated_carrier_plan(
             frequency_mhz=np.full(2, frequency),
             phase_deg=np.full(2, 23.0),
             phase_reference_ticks=ticks(phase_reference_us),
-            gain=np.full(2, 0.2 if addressed_tone is None or tone == addressed_tone else 0.0),
+            gain=np.full(
+                2, 0.2 if addressed_tone is None or tone == addressed_tone else 0.0
+            ),
             envelopes=(None,),
         )
         for tone, frequency in enumerate(frequencies)

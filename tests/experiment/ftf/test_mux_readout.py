@@ -115,7 +115,9 @@ def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
     for item, samples, gain, frequency in zip(
         plan.readouts, (4, 3), (1000, 1100), (6.0, 6.08), strict=True
     ):
-        assert tuple(p.frequency_ghz for p in item.batch.events[0][0].pulses) == (frequency,)
+        assert tuple(p.frequency_ghz for p in item.batch.events[0][0].pulses) == (
+            frequency,
+        )
         assert item.batch.model.reference_frequency_ghz == 6.0
         assert len(item.batch.events[0][0].grids[0].times_ns) == samples
         assert item.batch.model.receiver.gain == gain
@@ -172,7 +174,8 @@ def test_mux_retunes_independently_between_logical_events():
     )
     for events in plan.readouts[0].batch.events:
         assert [tuple(p.frequency_ghz for p in event.pulses) for event in events] == [
-            (5.9,), (6.0,)
+            (5.9,),
+            (6.0,),
         ]
     for item in plan.readouts:
         assert item.batch.model.reference_frequency_ghz == 6.0
@@ -188,7 +191,9 @@ def test_mux_rejects_grids_in_different_channels_within_one_event():
         phase_deg=np.repeat(window.phase_deg, 2, axis=1),
         generator_channels=np.ones((2, 2), dtype=np.int64),
     )
-    with pytest.raises(ValueError, match="ADC 4.*different PFB channels.*one readout event"):
+    with pytest.raises(
+        ValueError, match="ADC 4.*different PFB channels.*one readout event"
+    ):
         ftf_module.plan_template(
             settings(),
             snapshot(),
