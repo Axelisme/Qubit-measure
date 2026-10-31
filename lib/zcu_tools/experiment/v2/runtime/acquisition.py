@@ -130,9 +130,8 @@ class AcquireOptions:
     retry is a non-negative number of extra attempts, default zero, including
     shot overrun (AcquisitionContractError). Zero never retries. Exhausted
     producer failures propagate unchanged, even if cancellation was also requested.
-    Each retry
-    reruns all rounds on the same program with
-    fresh producer buffers; overrun discards the failed attempt's slot data.
+    Each retry reruns all rounds on the same program with fresh producer buffers;
+    overrun discards the failed attempt's slot data.
     External cancellation and interruption are never retried. progress
     defaults to hiding native acquisition progress. progress_label names the
     rounds bar (default "rounds"). progress_leave=None keeps the completed bar

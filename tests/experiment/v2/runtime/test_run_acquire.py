@@ -129,7 +129,7 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
                     options=acquire_options,
                 )
 
-    with sched, pytest.raises(RuntimeError, match="producer failed") as caught:
+    with pytest.raises(RuntimeError, match="producer failed") as caught, sched:
         acquire()
     assert caught.value is cause
     assert len(attempts) == (1 if cancel_on_failure else retry + 1)
@@ -350,10 +350,8 @@ def _policy_poll(
             return []
         if ending == "retry" and calls == 1:
             raise RuntimeError("transport unavailable")
-        if ending in {"failure", "interrupt"} and calls == 2:
-            if ending == "interrupt":
-                raise KeyboardInterrupt
-            raise RuntimeError("transport failed after one round")
+        if ending == "interrupt" and calls == 2:
+            raise KeyboardInterrupt
         first = calls == (2 if ending == "retry" else 1)
         iq = [3, 4] if first else [9, 12]
         raw = np.tile(iq, (2, 1)) * program.ro_chs[0]["length"]

@@ -189,12 +189,17 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
                 if context is None:
                     raise ValueError("RunContext required")
                 with Schedule(config, SignalBuffer((3,)), scope=context.scope) as sched:
-                    sched.prog_builder(context.soc, context.soccfg).run_program(Program())
+                    sched.prog_builder(context.soc, context.soccfg).run_program(
+                        Program()
+                    )
             return super().run(config, context=context)
 
     core = Core()
     exp = NotebookAdapter(
-        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=NonPresentingHost()
+        soc=object(),
+        soccfg=object(),
+        device_manager=DeviceManager(),
+        host=NonPresentingHost(),
     )(core)
     previous = exp.run(SavingCfg())
     evidence = exp.acquisition_for(previous)

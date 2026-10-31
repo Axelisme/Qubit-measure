@@ -85,7 +85,9 @@ def test_shot_overrun_obeys_explicit_retry_budget(
                     program, rounds=2, options=AcquireOptions(retry=retry)
                 )
             elif mode == "integrated":
-                sched.run_acquire(program, soc, rounds=2, options=RunOptions(retry=retry))
+                sched.run_acquire(
+                    program, soc, rounds=2, options=RunOptions(retry=retry)
+                )
             else:
                 sched.run_acquire_summed(
                     program,
@@ -463,7 +465,9 @@ def test_build_and_acquire_raises_without_retry_when_stop_set_after_failed_attem
 
     with (
         pytest.raises(RuntimeError) as caught,
-        Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run", stop=stop)) as sched,
+        Schedule(
+            _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=stop)
+        ) as sched,
     ):
         (
             sched.prog_builder(

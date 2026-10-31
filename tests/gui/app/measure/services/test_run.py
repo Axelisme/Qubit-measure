@@ -447,7 +447,9 @@ def test_schedule_failure_reports_failed_not_cancelled(source: str):
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
             raise NotImplementedError
 
-    program_cls = ConstructorFailingProgram if source == "build" else ProducerFailingProgram
+    program_cls = (
+        ConstructorFailingProgram if source == "build" else ProducerFailingProgram
+    )
 
     def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
         with Schedule(

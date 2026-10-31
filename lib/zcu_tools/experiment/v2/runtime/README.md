@@ -195,11 +195,17 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   目前已寫入 buffer / result tree 的 partial result 保留；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
-- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。Schedule 結束時將 cause 交給 RunContext 的 token，供 caller 診斷。一般 producer failure 直接傳播，不等 consumer 呼叫 `raise_if_error()`，也不轉成 workflow 的 `Failed` 回傳值。Notebook 不發布失敗當次的 record；GUI 將例外交給既有 operation failure 收尾。`stopped` 不記錄 error cause。
+- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。Schedule 結束時將 cause 交給 RunContext 的 token，供 caller 診斷。
+  一般 producer failure 直接傳播，不等 consumer 呼叫 `raise_if_error()`，也不轉成 workflow 的 `Failed` 回傳值。
+  Notebook 不發布失敗當次的 record。GUI 將例外交給既有 operation failure 收尾。`stopped` 不記錄 error cause。
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
-- 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。預設 `retry=0` 不重試；需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。耗盡後拋出最後一次 attempt 的同一例外。若失敗時也收到合作取消，不再重試，但仍拋出 producer 例外，不當作正常 partial。每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。Warning 保留 expected／received／chunk shots 與 round index。
+- 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。
+  預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。
+  耗盡後拋出最後一次 attempt 的同一例外。若失敗時也收到合作取消，不再重試，但仍拋出 producer 例外，不當作正常 partial。
+  每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。
+  Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
   Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
   stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。

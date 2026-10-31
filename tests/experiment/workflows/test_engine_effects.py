@@ -634,11 +634,14 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
     assert final.lifecycle == "failed"
     assert final.reason == f"OSError: {source} failed"
     assert observed == []
-    assert attempts == {
-        "build": ["build"],
-        "acquire": ["build", "acquire", "acquire"],
-        "conversion": ["build", "acquire", "conversion"],
-    }[source]
+    assert (
+        attempts
+        == {
+            "build": ["build"],
+            "acquire": ["build", "acquire", "acquire"],
+            "conversion": ["build", "acquire", "conversion"],
+        }[source]
+    )
 
 
 @pytest.mark.parametrize("first_round_stop", [False, True])

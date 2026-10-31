@@ -36,8 +36,9 @@ class RunOptions(Generic[T_Raw]):
     retry is the nonnegative number of extra attempts (default zero), including
     shot overrun. Zero never retries. Exhausted producer failures propagate as
     the original exception; concurrent cancellation does not suppress them.
-    Overrun restores the pre-acquire slot. External stop and interruption never retry. progress=False hides native acquisition
-    progress; the rounds bar uses label "rounds" and remains visible only at the
+    Overrun restores the pre-acquire slot. External stop and interruption never
+    retry. progress=False hides native acquisition progress; the rounds bar uses
+    label "rounds" and remains visible only at the
     root. stop_condition is a no-argument callback run after each completed round
     has been converted and written. True or StopDecision(met=True) stops this
     acquire, not the Schedule. Finite StopDecision values are logged on early
