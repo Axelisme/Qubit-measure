@@ -100,6 +100,38 @@ def test_indexed_branch_rejects_duplicate_and_out_of_range_points(
         _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
 
 
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_branch_rejects_emission_outside_cases_at_build(mock_soccfg, frontend, align_timeline):
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        with program.branch(by="scan", align_timeline=align_timeline):
+            program.emit(_pulse("outside"))
+
+    with pytest.raises(ValueError, match="before or after.*with"):
+        _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("operation", ["delay", "delay_auto", "sync", "repeat", "zero-repeat"])
+def test_branch_rejects_reference_advances_at_build(mock_soccfg, frontend, align_timeline, operation):
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        with program.branch(by="scan", align_timeline=align_timeline) as branch, branch.case(0):
+            if operation == "delay":
+                program.delay(0.1)
+            elif operation == "delay_auto":
+                program.delay_auto(0.1)
+            elif operation == "sync":
+                program.sync()
+            else:
+                with program.repeat("inner", 0 if operation == "zero-repeat" else 2):
+                    program.delay_timeline(0.1)
+
+    message = "Repeat.*outside.*branch" if "repeat" in operation else "delay_timeline"
+    with pytest.raises(ValueError, match=message):
+        _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
+
+
 @pytest.mark.parametrize("heralded", [False, True])
 @pytest.mark.parametrize("reset", [False, True])
 def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
