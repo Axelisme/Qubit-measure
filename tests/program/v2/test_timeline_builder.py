@@ -25,6 +25,32 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+@pytest.mark.parametrize(
+    ("reps_innermost", "expected_loops"),
+    [
+        (False, [("reps", 2), ("point", 3)]),
+        (True, [("point", 3), ("reps", 2)]),
+    ],
+)
+def test_builder_forwards_compilation_options_to_loop_order(
+    mock_soccfg: QickConfig,
+    reps_innermost: bool,
+    expected_loops: list[tuple[str, int]],
+) -> None:
+    builder = v2.TimelineBuilder(
+        mock_soccfg,
+        reps=2,
+        initial_delay=0.25,
+        relax_delay=1.5,
+        reps_innermost=reps_innermost,
+    )
+    builder.add_loop("point", 3)
+    builder.emit(_readout())
+    program = builder.build()
+    program.compile()
+    assert [(loop.name, loop.count) for loop in program.sweep_loops] == expected_loops
+
+
 @pytest.mark.parametrize("sync_at_end", [False, True])
 def test_builder_repeat_keeps_author_reference_advances(mock_soccfg, sync_at_end):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
