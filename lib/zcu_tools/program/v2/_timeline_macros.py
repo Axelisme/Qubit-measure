@@ -899,6 +899,7 @@ class TimelineBranch(Macro):
         initial_defined = prog._time_bounds.defined.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
+        self.book.pinned.update(value.register for value in inputs.values())
         frames = self._save_frames()
         states: list[BranchCaseState] = []
         self.prepared = []
@@ -931,6 +932,7 @@ class TimelineBranch(Macro):
         self.book.finish_branch_sources(prog, self.by)
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
+        self.result_math = RuntimeMath(prog)
         self.book.ends = {}
         used = set.union(*(state.used & initial.keys() for state in states))
         for name in initial:
@@ -939,14 +941,14 @@ class TimelineBranch(Macro):
                 self.book.ends[name] = initial[name]
             elif self.align_timeline:
                 if any(isinstance(value, RuntimeEnd) for value in values):
-                    self.book.ends[name] = self.book.math.reconstruct(
+                    self.book.ends[name] = self.result_math.reconstruct(
                         choose_time(*(time_expression(prog, value) for value in values)),
                         inputs,
                     )
                 else:
                     end = values[0]
                     for value in values[1:]:
-                        end = self.book.math.maximum(end, value)
+                        end = self.result_math.maximum(end, value)
                     self.book.ends[name] = end
             else:
                 self.book.ends[name] = self._merge_values(prog, values, force=True)
@@ -1143,3 +1145,4 @@ class TimelineBranch(Macro):
             Jump(label=f"{self.name}_end").translate(prog)
         prog.record_meta(type="BRANCH_END", name=self.name, info={}, regs={})
         Label(label=f"{self.name}_end").translate(prog)
+        self.result_math.translate(prog)
