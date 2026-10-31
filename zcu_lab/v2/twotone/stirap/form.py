@@ -17,20 +17,6 @@ def make_form(ctx: FormContext) -> Form[StirapCfg]:
     """
     return Form(
         StirapCfg,
-        field_order=(
-            "pump_ch",
-            "stokes_ch",
-            "pump_freq",
-            "stokes_freq",
-            "pump_gain",
-            "stokes_gain",
-            "width",
-            "stokes_lead",
-            "scan",
-            "readout",
-            "shots",
-            "relax_delay",
-        ),
         tree={
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")

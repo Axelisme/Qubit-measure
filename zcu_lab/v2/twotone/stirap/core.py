@@ -1,4 +1,4 @@
-"""Two-generator Gaussian STIRAP scans through legacy Modules."""
+"""Two-generator Gaussian STIRAP scans with independent timelines."""
 
 from __future__ import annotations
 
@@ -24,14 +24,14 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    Join,
+    TimelineBuilder,
     Pulse,
     PulseReadout,
-    SoftDelay,
     SweepCfg,
     shot_sums,
 )
@@ -197,7 +197,7 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
             else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
         )
         buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for y, row in sched.scan("stokes_detuning", ys.tolist()):
                 for x, step in row.scan("scan_x", xs.tolist()):
                     lead, scale = cfg.stokes_lead, 1.0
@@ -227,29 +227,23 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                             length=6 * cfg.width, sigma=cfg.width
                         ),
                     )
-                    builder = step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=cfg.shots,
-                        relax_delay=cfg.relax_delay,
-                    ).add(
-                        Join(
-                            [
-                                SoftDelay("stokes_start", max(-lead, 0.0)),
-                                Pulse("stokes", stokes),
-                            ],
-                            [
-                                SoftDelay("pump_start", max(lead, 0.0)),
-                                Pulse("pump", pump),
-                            ],
-                        ),
-                        PulseReadout("readout", step.cfg.readout),
+                    builder = TimelineBuilder(
+                        context.soccfg, reps=cfg.shots, relax_delay=cfg.relax_delay,
                     )
+                    builder.fork("default", into=["stokes", "pump"])
+                    with builder.timeline("stokes"):
+                        builder.delay_timeline(max(-lead, 0.0))
+                        builder.emit(Pulse("stokes", stokes))
+                    with builder.timeline("pump"):
+                        builder.delay_timeline(max(lead, 0.0))
+                        builder.emit(Pulse("pump", pump))
+                    builder.join("stokes", "pump", into="default")
+                    builder.emit(PulseReadout("readout", cfg.readout))
                     program = builder.build()
-                    builder.run_program_summed(
-                        program,
+                    step.run_acquire_summed(
+                        program, context.soc,
                         processor=shot_sums(program, [Classify("readout")]),
-                        sums2signal_fn=lambda sums: sums.reshape(3),
+                        options=RunOptions(converter=lambda sums: sums.reshape(3)),
                         charge_requirements=(
                             ChargeDriveRequirement("Pump", cfg.pump_ch),
                             ChargeDriveRequirement("Stokes", cfg.stokes_ch),

@@ -11,8 +11,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
-from zcu_tools.program.v2 import LoadValue, Module, Pulse, Readout, Repeat, Reset
-from zcu_tools.program.v2.modules.base import as_modules
+from zcu_tools.program.v2 import LoadValue, Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -29,22 +28,6 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
@@ -64,45 +47,30 @@ class ZigZagCfg(ConfigBase):
         ),
     ] = "X180_pulse"
 
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
-def build_zigzag_modules(cfg: ZigZagCfg) -> list[Module]:
-    """Build reset → X90 → repeated gates → readout for offline compilation.
-
-    This does not access hardware or mutate cfg.
-    The caller must declare the ``times`` loop with ``cfg.n_times + 1`` points.
-    X90 repetition counts correspond to pairs of pulses.
-    Raise ValueError if the selected repeat pulse is absent.
-    The cfg must satisfy ZigZagCfg validation.
-    """
-    repeat_pulse = getattr(cfg, cfg.repeat_on)
-    if repeat_pulse is None:
-        raise ValueError(f"Repeat on pulse {cfg.repeat_on} not found")
-    counts = [
-        n * (2 if cfg.repeat_on == "X90_pulse" else 1) for n in range(cfg.n_times + 1)
-    ]
-    return as_modules(
-        [
-            LoadValue(
-                "load_repeat_count",
-                values=counts,
-                idx_reg="times",
-                val_reg="repeat_count",
-            ),
-            Reset("reset", cfg.reset),
-            Pulse("X90_pulse", cfg.X90_pulse),
-            Repeat(
-                "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
-            ).add_content(Pulse(f"loop_{cfg.repeat_on}", repeat_pulse)),
-            Readout("readout", cfg.readout),
-        ]
-    )
 
 
 class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
     # times is an int counter (a.u.) -> Axis dtype int64, scale IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[ZigZagResult, ZigZagCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", "Times", "a.u.", dtype=np.int64),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", label="Times", unit="a.u.", dtype=np.int64),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=ZigZagResult,
         cfg_type=ZigZagCfg,
         cfg_schema_version="3.0",
@@ -132,39 +100,27 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                 zigzag_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            # 2. Count X90 gates in pairs so each step adds a nominal pi rotation.
-            repeat_pulse = getattr(sched.cfg, sched.cfg.repeat_on)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            repeat_pulse = getattr(cfg, cfg.repeat_on)
             if repeat_pulse is None:
-                raise ValueError(f"Repeat on pulse {sched.cfg.repeat_on} not found")
+                raise ValueError(f"Repeat on pulse {cfg.repeat_on} not found")
             counts = [
-                n * (2 if sched.cfg.repeat_on == "X90_pulse" else 1)
-                for n in range(sched.cfg.n_times + 1)
+                n * (2 if cfg.repeat_on == "X90_pulse" else 1)
+                for n in range(cfg.n_times + 1)
             ]
-
-            # 3. Load the count, prepare with X90, repeat gates, then read out.
-            builder = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    LoadValue(
-                        "load_repeat_count",
-                        values=counts,
-                        idx_reg="times",
-                        val_reg="repeat_count",
-                    ),
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("X90_pulse", sched.cfg.X90_pulse),
-                    Repeat(
-                        "zigzag_loop", n="repeat_count", range_hint=(0, max(counts))
-                    ).add_content(Pulse(f"loop_{sched.cfg.repeat_on}", repeat_pulse)),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("times", len(times))
-            )
-
-            # 4. Average acquisition rounds and keep partial data on cancellation.
-            _ = builder.build_and_acquire(rounds=cfg.rounds)
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder.add_loop("times", len(times))
+            builder.emit(LoadValue(
+                "load_repeat_count", values=counts, idx_reg="times", val_reg="repeat_count",
+            ))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
+            # Legacy repeats flush the reference at entry and after every gate.
+            builder.sync()
+            with builder.repeat("zigzag_loop", "repeat_count", range_hint=(0, max(counts))):
+                builder.emit(Pulse(cfg.repeat_on, repeat_pulse))
+                builder.sync()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return ZigZagResult(times=times, signals=signals_buffer.array)

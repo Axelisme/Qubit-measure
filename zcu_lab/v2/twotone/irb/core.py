@@ -17,9 +17,9 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     ComputedPulse,
     LoadValue,
-    ModularProgramV2,
+    TimelineProgramV2,
     Readout,
-    Repeat,
+    TimelineBuilder,
     Reset,
 )
 
@@ -66,17 +66,17 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[IRBResult, IRBCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("depths", "Depth", "a.u.", dtype=np.int64),
+            AxesSpec.Axis("depths", label="Depth", unit="a.u.", dtype=np.int64),
             AxesSpec.Axis(
                 "arms", "Arm (0=reference, 1=interleaved)", "", dtype=np.int64
             ),
             AxesSpec.Axis("sub_seeds", "Seed", "", dtype=np.int64),
             AxesSpec.Axis("rounds", "Round", "", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=IRBResult,
         cfg_type=IRBCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/irb",
     )
 
@@ -92,7 +92,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         """
         # 1. Pair both arms on the same reproducible seeds and depth axis.
         run_cfg = deepcopy(cfg)
-        depths = np.asarray(run_cfg.depths, dtype=np.int64)
+        depths = np.asarray(run_cfg.depth, dtype=np.int64)
         seeds = np.array(
             [
                 int(child.generate_state(1)[0])
@@ -114,9 +114,9 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                 depths.astype(float), project_arm_means(data)
             ),
         )
-        cache: dict[tuple[int, int], ModularProgramV2] = {}
+        cache: dict[tuple[int, int], TimelineProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
-        with Schedule(run_cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for round_index, round_step in sched.repeat("round", run_cfg.rounds):
                 for seed_index, (seed, seed_step) in enumerate(
                     round_step.scan("seed", seeds.tolist())
@@ -127,11 +127,8 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                         if sched.is_stop():
                             break
                         arm_step = seed_step.child(arm)
-                        builder = arm_step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=program_cfg.reps,
-                            relax_delay=program_cfg.relax_delay,
+                        builder = TimelineBuilder(
+                            context.soccfg, reps=program_cfg.reps, relax_delay=program_cfg.relax_delay,
                         )
                         key = (seed_index, arm)
                         if key not in cache:
@@ -177,67 +174,25 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                             ]
 
                             # 3. Play this arm's prefix and its own full inverse.
-                            program = (
-                                builder.add(
-                                    LoadValue(
-                                        "load_rand_len",
-                                        values=prefix_len_by_depth,
-                                        idx_reg="depth_idx",
-                                        val_reg="rand_len",
-                                    ),
-                                    LoadValue(
-                                        "load_recovery_gate_0",
-                                        values=recovery_gate0_by_depth,
-                                        idx_reg="depth_idx",
-                                        val_reg="recovery_gate_0",
-                                    ),
-                                    LoadValue(
-                                        "load_recovery_gate_1",
-                                        values=recovery_gate1_by_depth,
-                                        idx_reg="depth_idx",
-                                        val_reg="recovery_gate_1",
-                                    ),
-                                    Reset("reset", cfg=run_cfg.reset),
-                                    Repeat(
-                                        "rand_gate_idx",
-                                        "rand_len",
-                                        range_hint=(0, max_rand_len),
-                                    ).add_content(
-                                        [
-                                            LoadValue(
-                                                "load_rand_gate",
-                                                values=rand_gate_seq,
-                                                idx_reg="rand_gate_idx",
-                                                val_reg="gate_idx",
-                                            ),
-                                            ComputedPulse(
-                                                "basic_gate",
-                                                val_reg="gate_idx",
-                                                pulses=gate_pulses,
-                                            ),
-                                        ]
-                                    ),
-                                    # Full candidates in both slots keep recovery
-                                    # timing depth-independent, including padding.
-                                    ComputedPulse(
-                                        "recovery_gate_0",
-                                        val_reg="recovery_gate_0",
-                                        pulses=gate_pulses,
-                                    ),
-                                    ComputedPulse(
-                                        "recovery_gate_1",
-                                        val_reg="recovery_gate_1",
-                                        pulses=gate_pulses,
-                                    ),
-                                    Readout("readout", cfg=run_cfg.readout),
-                                )
-                                .declare_sweep("depth_idx", len(prefix_len_by_depth))
-                                .build()
-                            )
+                            builder.add_loop("depth", len(prefix_len_by_depth))
+                            builder.emit(LoadValue("load_rand_len", values=prefix_len_by_depth, idx_reg="depth", val_reg="rand_len"))
+                            builder.emit(LoadValue("load_recovery_gate_0", values=recovery_gate0_by_depth, idx_reg="depth", val_reg="recovery_gate_0"))
+                            builder.emit(LoadValue("load_recovery_gate_1", values=recovery_gate1_by_depth, idx_reg="depth", val_reg="recovery_gate_1"))
+                            builder.emit(Reset("reset", run_cfg.reset))
+                            builder.sync()
+                            with builder.repeat("rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)):
+                                builder.emit(LoadValue("load_rand_gate", values=rand_gate_seq, idx_reg="rand_gate_idx", val_reg="gate_idx"))
+                                builder.emit(ComputedPulse("basic_gate", val_reg="gate_idx", pulses=gate_pulses))
+                                builder.sync()
+                            # Both recovery slots retain the complete candidate set for fixed timing.
+                            builder.emit(ComputedPulse("recovery_gate_0", val_reg="recovery_gate_0", pulses=gate_pulses))
+                            builder.emit(ComputedPulse("recovery_gate_1", val_reg="recovery_gate_1", pulses=gate_pulses))
+                            builder.emit(Readout("readout", run_cfg.readout))
+                            program = builder.build()
 
                             cache[key] = program
                         # 4. Store one round's mean IQ; reuse programs next round.
-                        _ = builder.run_program(cache[key], rounds=1)
+                        arm_step.run_acquire(cache[key], context.soc, rounds=1)
             sched.trigger_update(flush=True)
         return IRBResult(
             rounds=np.arange(run_cfg.rounds, dtype=np.int64),

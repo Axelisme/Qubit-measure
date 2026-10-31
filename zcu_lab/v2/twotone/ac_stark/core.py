@@ -11,7 +11,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -77,6 +77,14 @@ def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AcStarkCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
+    readout: Readout.Cfg
+    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
+    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -93,13 +101,7 @@ class AcStarkCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    stark_pulse1: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit spectroscopy probe")]
-    readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe frequency", unit="MHz")]
-    earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
+
 
 
 class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
@@ -108,10 +110,10 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     # gains stored in a.u. -> IDENTITY; freqs stored in Hz on disk -> MHZ_TO_HZ
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("gains", label="Stark Pulse Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         cfg_schema_version="3.0",
@@ -176,40 +178,24 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
 
         # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            for _, step in sched.scan("resonator gain", gains.tolist()):
-                step_cfg = step.cfg
-
-                step_cfg.stark_pulse1.set_param("gain", step.value)
-                freq_sweep = step_cfg.freq
-                step_cfg.stark_pulse2.set_param("freq", sweep2param("freq", freq_sweep))
-
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step_cfg.reset),
-                        # Launch the Stark tone without waiting before the probe.
-                        Pulse("stark_pulse1", step_cfg.stark_pulse1, block_mode=False),
-                        Pulse("stark_pulse2", step_cfg.stark_pulse2),
-                        Readout("readout", step_cfg.readout),
-                    )
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(
-                        options=AcquireOptions(
-                            stop_condition=snr_checker(
-                                signals_buffer[step],
-                                cfg.earlystop_snr,
-                                lambda x: rotate2real(x).real,
-                                after_check=update_snr,
-                            )
-                        ),
-                        rounds=cfg.rounds,
-                    )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            for _, step in sched.scan("gain", gains.tolist()):
+                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                freq = builder.add_sweep("freq", cfg.freq)
+                builder.emit(Reset("reset", cfg.reset))
+                # The Stark tone does not block the probe or the following readout.
+                builder.fork("default", into=["stark", "probe"])
+                builder.emit(Pulse("stark_pulse1", cfg.stark_pulse1, gain=step.value), timeline="stark")
+                builder.emit(Pulse("stark_pulse2", cfg.stark_pulse2, freq=freq), timeline="probe")
+                builder.join("probe", into="default")
+                builder.emit(Readout("readout", cfg.readout))
+                program = builder.build()
+                step.run_acquire(
+                    program, soc, rounds=cfg.rounds,
+                    options=RunOptions(stop_condition=snr_checker(
+                        signals_buffer[step], cfg.earlystop_snr,
+                        lambda x: rotate2real(x).real, after_check=update_snr,
+                    )),
                 )
 
         return AcStarkResult(gains, freqs, signals_buffer.array)

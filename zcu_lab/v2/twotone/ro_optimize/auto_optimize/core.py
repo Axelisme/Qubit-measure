@@ -21,13 +21,14 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
+    TimelineBuilder,
     GainSweep,
     Pulse,
     PulseReadout,
@@ -109,22 +110,6 @@ class ReadoutOptimizer:
 
 
 class AutoOptCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -154,6 +139,24 @@ class AutoOptCfg(ConfigBase):
             ),
         ),
     ] = None
+
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 RO_AUTO_READOUT_FREQ_VARIABLE = "readout_freq"
@@ -274,7 +277,6 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     result_validator=_validate_auto_opt_result,
 )
 
-
 class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[AutoOptResult, AutoOptCfg]] = (
         RO_AUTO_GROUPED_AXES_SPEC
@@ -364,7 +366,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         )
 
         # Feed back the previous score before asking for the next candidate.
-        with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
                 current_index = idx
 
@@ -378,35 +380,26 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     break
 
                 params[idx, :] = cur_params
-                step.cfg.readout.set_param("freq", cur_params[0])
-                step.cfg.readout.set_param("gain", cur_params[1])
-                step.cfg.readout.set_param("length", cur_params[2])
+                run_cfg.readout.set_param("freq", cur_params[0])
+                run_cfg.readout.set_param("gain", cur_params[1])
+                run_cfg.readout.set_param("length", cur_params[2])
                 tracker = MomentTracker()
 
                 # Compare pulse-off/on preparations at this candidate's readout settings.
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", cfg=step.cfg.reset),
-                        Branch("ge", [], Pulse("qub_pulse", cfg=step.cfg.qub_pulse)),
-                        Readout("readout", cfg=step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .build_and_acquire(
-                        raw2signal_fn=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker],
-                            ge_axis=1,
-                            skew_penalty=sched.cfg.skew_penalty,
-                        ),
-                        trackers=[tracker],
-                        **(acquire_kwargs or {}),
-                        rounds=cfg.rounds,
-                    )
+                builder = TimelineBuilder(soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay)
+                builder.add_loop("ge", 2)
+                builder.emit(Reset("reset", run_cfg.reset))
+                with builder.branch(by="ge", align_timeline=True) as cases:
+                    with cases.case(1):
+                        builder.emit(Pulse("qub_pulse", run_cfg.qub_pulse))
+                builder.emit(Readout("readout", run_cfg.readout))
+                program = builder.build()
+                step.run_acquire(
+                    program, soc, rounds=run_cfg.rounds,
+                    options=RunOptions(converter=lambda _raw: snr_as_signal(
+                        [tracker], ge_axis=1, skew_penalty=run_cfg.skew_penalty,
+                    )),
+                    trackers=[tracker], **(acquire_kwargs or {}),
                 )
 
         # Keep the sampled path and scores, including unvisited NaN rows.

@@ -17,17 +17,6 @@ def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
     """
     return Form(
         RamanGFCfg,
-        field_order=(
-            "drive",
-            "readout",
-            "carrier_mhz",
-            "scan_mode",
-            "detuning",
-            "gain",
-            "shots",
-            "relax_delay",
-            "initial_delay",
-        ),
         tree={
             "scan_mode": "frequency_area",
             "detuning": Range(-50, 50, expts=11),
