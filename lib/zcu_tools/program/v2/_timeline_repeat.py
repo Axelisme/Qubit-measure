@@ -191,12 +191,15 @@ class LoopTimelineExit(Macro):
         book.math.operations.append(WriteReg(dst=result.register, src=operand.register))
         external = self._reference_external(prog, frame, summary.advance)
         result = self._reference_channels(prog, frame, result, summary)
-        self._check_backedge(prog, frame, LinearTime(), next_entry=time_expression(prog, finish))
+        self._check_backedge(
+            prog, frame, LinearTime(), next_entry=time_expression(prog, finish)
+        )
         extra_advance = add_time(summary.advance, scale_time(frame.advance, -1))
         for outer in book.loop_timelines:
             outer.advance = add_time(outer.advance, extra_advance)
             outer.starts.extend(
-                (ch, substitute_time(start, {frame.progress: LinearTime()}), path) for ch, start, path in frame.starts
+                (ch, substitute_time(start, {frame.progress: LinearTime()}), path)
+                for ch, start, path in frame.starts
             )
         for outer in book.repeats:
             outer.expression_advance = add_time(outer.expression_advance, extra_advance)
@@ -206,8 +209,9 @@ class LoopTimelineExit(Macro):
         book.waiting = frame.waiting
         book.pinned = frame.pinned
 
-
-    def _reference_summary(self, prog, frame: LoopTimelineFrame, finish: Time) -> "_ReferenceSummary":
+    def _reference_summary(
+        self, prog, frame: LoopTimelineFrame, finish: Time
+    ) -> "_ReferenceSummary":
         """Fold compile-only provenance, without choosing or replaying lowering."""
         book = self.entry.book
         incoming = time_expression(prog, frame.entry)
@@ -284,7 +288,13 @@ class LoopTimelineExit(Macro):
         return _ReferenceSummary(result_expression, total_advance, last_entry)
 
     def _reference_store(
-        self, prog, frame: LoopTimelineFrame, initial: Time, expression: TimeExpression, *, generated: Time | None = None
+        self,
+        prog,
+        frame: LoopTimelineFrame,
+        initial: Time,
+        expression: TimeExpression,
+        *,
+        generated: Time | None = None,
     ) -> RuntimeEnd:
         book = self.entry.book
         register = prog.add_reg()
@@ -297,16 +307,15 @@ class LoopTimelineExit(Macro):
         if generated is None:
             for math, advance in frame.debits:
                 remainder = math.cycles(math.floor(storage, advance))
-                math.operations.append(
-                    WriteReg(dst=register, src=remainder.register)
-                )
+                math.operations.append(WriteReg(dst=register, src=remainder.register))
         else:
             tail = book.math.cycles(generated)
             book.math.operations.append(WriteReg(dst=register, src=tail.register))
         return _end(register, expression)
 
-
-    def _reference_external(self, prog, frame: LoopTimelineFrame, advance: TimeExpression) -> dict[str, Time]:
+    def _reference_external(
+        self, prog, frame: LoopTimelineFrame, advance: TimeExpression
+    ) -> dict[str, Time]:
         """Debit each outer name at the reference operation's execution position."""
         external = {}
         for name, initial in frame.external.items():
@@ -322,7 +331,13 @@ class LoopTimelineExit(Macro):
 
         return external
 
-    def _reference_channels(self, prog, frame: LoopTimelineFrame, result: RuntimeEnd, summary: "_ReferenceSummary") -> RuntimeEnd:
+    def _reference_channels(
+        self,
+        prog,
+        frame: LoopTimelineFrame,
+        result: RuntimeEnd,
+        summary: "_ReferenceSummary",
+    ) -> RuntimeEnd:
         """Keep last-generated tails distinct from repeatedly debited outer tails."""
         book = self.entry.book
         count = book.repeat_count(prog, self.iterations, self.minimum, self.maximum)
@@ -332,12 +347,19 @@ class LoopTimelineExit(Macro):
             if (generator, ch) in frame.written_channels:
                 last = substitute_time(
                     book.native_expression(prog, ch, generator=generator),
-                    {frame.progress: add_time(summary.last_entry, scale_time(time_expression(prog, frame.entry), -1))},
+                    {
+                        frame.progress: add_time(
+                            summary.last_entry,
+                            scale_time(time_expression(prog, frame.entry), -1),
+                        )
+                    },
                 )
                 expression = select_time(
                     active, (frame.initial_native[generator, ch], last)
                 )
-                tail = self._reference_store(prog, frame, initial, expression, generated=current)
+                tail = self._reference_store(
+                    prog, frame, initial, expression, generated=current
+                )
             else:
                 expression = choose_time(
                     LinearTime(),
