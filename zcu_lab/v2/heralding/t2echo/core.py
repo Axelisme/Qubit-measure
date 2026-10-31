@@ -175,7 +175,9 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             delay = builder.add_sweep("delay", cfg.delay)
-            builder.emit(Reset("reset", cfg.reset))
+            reset = Reset("reset", cfg.reset)
+            if reset is not None:
+                builder.emit(reset)
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
             builder.delay_timeline(0.5 * delay)

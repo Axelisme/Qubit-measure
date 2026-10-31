@@ -51,7 +51,9 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
     with Schedule(None, buffer, scope=context.scope) as sched:
         builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         delay = builder.add_sweep("delay", cfg.delay)
-        builder.emit(Reset("reset", cfg.reset))
+        reset = Reset("reset", cfg.reset)
+        if reset is not None:
+            builder.emit(reset)
         builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
         builder.delay_timeline(delay)
         builder.emit(
