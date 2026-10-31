@@ -391,7 +391,10 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
 
 
 def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
-    pulse = Pulse("wide", _pulse_cfg(length=QickSweep1D("scan", 3 / 384, 65535 / 384), pre=0, post=0))
+    pulse = Pulse(
+        "wide",
+        _pulse_cfg(length=QickSweep1D("scan", 3 / 384, 65535 / 384), pre=0, post=0),
+    )
     tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
 
     def body(prog):
@@ -406,7 +409,10 @@ def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
 
 @pytest.mark.parametrize("align", [False, True])
 def test_branch_merge_preserves_runtime_cross_grid_length_producer(align):
-    pulse = Pulse("drive", _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 77 / 384), pre=0, post=0))
+    pulse = Pulse(
+        "drive",
+        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 77 / 384), pre=0, post=0),
+    )
     other = Pulse("other", _pulse_cfg(length=35 / 384, pre=0, post=0))
     tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
 
