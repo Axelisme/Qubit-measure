@@ -67,11 +67,11 @@ class DriveFreqCfg(ConfigBase):
 
 
 class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
-    # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
+    # signals is [frequency, gain], so gain is the inner-first storage axis.
     AXES_SPEC: ClassVar[AxesSpec[DriveFreqResult, DriveFreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", label="Pulse frequency", unit="Hz", scale=1e6),
             AxesSpec.Axis("gains", label="Pulse gain", unit="a.u."),
+            AxesSpec.Axis("freqs", label="Pulse frequency", unit="Hz", scale=1e6),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=DriveFreqResult,
