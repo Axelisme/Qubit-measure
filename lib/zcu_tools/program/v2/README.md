@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，fork／join、可選 register 時間 bounds 與 channel 宣告一致性
+**Last updated:** 2026-10-31，runtime 跨格點長度的定點換算
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -13,10 +13,25 @@ noise. For example, 119/430.08 us remains 119 cycles; positive tails outside tha
 tolerance round up. Static waveform and ADC lengths use rational clock conversion
 before the aggregate ceil. Author sweeps retain QICK
 native start rounding and truncated steps; they do not allocate pointwise time
-tables. Non-affine runtime cross-grid lengths currently raise at build and require
-the runtime conversion stage. Known scalar and affine time getters return actual
-quantized values; runtime-only and non-affine time getters raise RuntimeError.
-Author-declared data tables and IR dispatch jump-address tables remain supported.
+tables. Runtime cross-grid generator lengths use k=8 fixed-point upper conversion.
+The compiler chooses W to minimize canonical signed-digit terms, breaking ties
+with the smaller W. For every integer length up to 500 us, ceil(n*W/256) is never
+earlier than the physical end and is at most 1 us late. The same W applies beyond
+500 us, but the 1 us error bound does not. Each operation adds its post before the
+final ceil. Static lengths and integer-affine tProc lengths stay exact.
+
+Conversion uses shifts of at most 15 bits and addition/subtraction, without ARITH,
+DIV or time tables. A clock ratio of one needs no conversion instructions.
+The compiler rejects signed32 overflow in the product or any intermediate at build.
+The existing native length sweeps and selected waveform/length tables supply
+runtime lengths. Timeline length-register playback still requires selection
+metadata. This does not add an arbitrary author length-register or ADC length API.
+The conversion rule also gives W=359 for ratio7/5 and W=2872 for ratio56/5, but
+ADC/PFB runtime length consumers are not exposed by the current API.
+
+Known scalar and affine time getters return actual quantized values. Runtime-only
+and non-affine time getters raise RuntimeError. Author-declared data tables and IR
+dispatch jump-address tables remain supported.
 
 ## Testing & Type Checking Conventions
 

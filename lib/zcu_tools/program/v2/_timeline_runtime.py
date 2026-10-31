@@ -349,6 +349,8 @@ class EventEnd:
     offset includes resolved event start offset and waveform/ADC duration;
     a runtime offset is already an integer-cycle value.
     Keeping it separate defers ceil until the owner adds its post-delay.
+    native retains the integer length lattice for runtime conversion, or None
+    for operations without a swept generator length.
     rounded contains ceiled event boundaries used only for same-channel
     no-overlap proof after a nonnegative post; it never supplies aggregate time.
     """
@@ -369,6 +371,7 @@ class SelectedEventEnd:
     selector is a certified zero-based register. offsets and posts have equal
     nonzero lengths in selector order. rounded carries physical channel ends
     solely for coverage proof; it is never the aggregate timing source.
+    native pairs each offset with its generator-length lattice when available.
     """
 
     origin: Time
@@ -556,6 +559,8 @@ class RuntimeMath(TimedMacro):
 
     def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
         """Multiply by a nonnegative integer with checked CSD shifts/adds."""
+        if factor < 0:
+            raise ValueError("constant multiplication requires a nonnegative factor")
         digits = _csd(factor)
         if not digits:
             return self.cycles(0.0)
@@ -870,10 +875,10 @@ class RuntimeMath(TimedMacro):
     ) -> RuntimeEnd:
         """Select statically ceiled candidate offsets without allocating time data.
 
-        Each candidate is scalar or integer-affine after its static ceil. Native
-        loop axes retain their register initialization. The already certified
-        selector chooses one candidate at runtime; unknown cross-grid expressions
-        are rejected by align_end rather than replaced by an upper bound.
+        Static candidates ceil exactly. Swept generator candidates use native's
+        paired integer lattice for runtime fixed-point conversion. Native loop
+        axes retain their register initialization. The already certified selector
+        chooses the candidate at runtime, without longest-candidate padding.
         """
         candidates = tuple(
             align_end(self.prog, value, native[index] if native else None)
