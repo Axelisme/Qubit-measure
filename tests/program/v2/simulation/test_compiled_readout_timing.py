@@ -170,10 +170,10 @@ def test_runtime_config_start_uses_absolute_ticks_after_nonzero_origin(
     try:
         if config_lag_ticks:
             with pytest.raises(ValueError, match=r"ADC 0.*no.*config.*start"):
-                observed = request(prog, env)
-                observed
+                request(prog, env)
             assert not env.soc.binding.rounds
         else:
+            observed = request(prog, env)
             read = observed.materialize_point(0).readouts[0]
             assert times_us(observed.time_base, read.trigger_ticks) == pytest.approx((332 / 430.08,))
             assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)

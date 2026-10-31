@@ -228,12 +228,15 @@ class PulseEnvelope:
     """Owned immutable signed complex envelope, continuously linearly interpolated.
 
     Attributes:
-        sample_period_ticks: Strictly increasing local times in us from pulse start. These
-            are the actual waveform sample axis, not solver integration steps.
-        values: Dimensionless complex DAC amplitudes at sample_period_ticks, preserving
+        sample_period_ticks: Positive int64-range spacing in the request's TimeBase.
+            Sample k is at k * sample_period_ticks from pulse start, not a solver step.
+        values: Dimensionless complex DAC amplitudes on that uniform grid, preserving
             original scale and sign. No peak normalization is applied. Interpolate
             real and imaginary parts linearly; hold the final sample through pulse
             end and use zero outside the event. Gain is applied separately.
+        Noninteger periods raise TypeError, nonpositive periods raise ValueError,
+        and periods outside int64 raise OverflowError. AcquireRequest checks the
+        full envelope axis against its TimeBase range.
     """
 
     sample_period_ticks: int
@@ -251,9 +254,9 @@ class PulseEvent:
 
     Attributes:
         gen_ch: Zero-based generator index in the bound board configuration.
-        start_ticks: Pulse start in us from this execution's common time origin,
+        start_ticks: Integer tick start from this execution's common time origin,
             also used by ReadoutWindow.trigger_ticks. Not a wall-clock timestamp.
-        duration_ticks: Pulse duration in us, quantized on the generator clock by
+        duration_ticks: Integer tick duration, quantized on the generator clock by
             the frontend; independent of the ADC duration.
         frequency_mhz: Generator frequency in MHz after QICK DDS quantization,
             matched to the readout channel by the current frontend.
@@ -264,8 +267,9 @@ class PulseEvent:
             is -1 to 1; this record does not enforce that range.
         envelope: Owned immutable continuous complex amplitude, or None for
             unity throughout duration_ticks. Never includes gain or carrier phase.
-        phase_reference_ticks: Common carrier phase origin in execution us. Phase at
-            time t is phase_deg + 360 * frequency_mhz * (t-phase_reference_ticks).
+        phase_reference_ticks: Common carrier phase origin in execution ticks. After
+            conversion to physical us, phase is phase_deg + 360 * frequency_mhz
+            * (time_us - reference_us).
             Pulses do not independently reset their oscillator phase.
         source: Originating Module name for diagnostics, detached from the Module.
         iterations: Enclosing semantic loop (name, zero-based index) coordinates.
@@ -293,9 +297,9 @@ class ReadoutWindow:
             frontend uses the last PulseReadout route declared for this ADC.
         samples: Compiled integer sample count per trigger, shared by all reads
             on this ADC. It is a count, not a duration or an integration weight.
-        sample_period_ticks: ADC output sample rate in MHz, or samples per us.
-            The sample period is 1 / sample_period_ticks us.
-        trigger_ticks: Read start times in us from the same per-execution origin
+        sample_period_ticks: Positive integer ADC output sample spacing in the
+            request's TimeBase; sample k follows the trigger by k periods.
+        trigger_ticks: Integer read start ticks from the same per-execution origin
             as PulseEvent.start_ticks. Tuple order is trigger emission order,
             not a separate chronological sort. Read r uses trigger_ticks[r] and
             samples equally spaced samples on this ADC's grid.
@@ -335,8 +339,9 @@ class PointTimeline:
         events: Generator events in semantic emission order, not time-sorted.
         readouts: ADC declaration order; each window retains trigger emission
             order and this execution's trigger/demod values.
-        duration_ticks: End of the body in execution us, including blocking waits
-            and pending channel activity but excluding inter-shot relax_delay.
+        duration_ticks: Integer body end ticks, including blocking waits and pending
+            channel activity but excluding inter-shot relax delay.
+        time_base: Common rational clock for every time field in this point.
     """
 
     coordinates: tuple[tuple[str, int], ...]
@@ -356,17 +361,17 @@ class EventSlot:
     gen_ch: Fixed zero-based generator index.
     source: Originating Module name, for diagnostics only.
     iterations: Fixed enclosing Repeat (name, zero-based iteration) pairs.
-    start_ticks: Start relative to the execution origin.
-    duration_ticks: Generator-clock quantized duration.
+    start_ticks: int64 start ticks relative to the execution origin.
+    duration_ticks: int64 generator-clock quantized duration in ticks.
     frequency_mhz: DDS-quantized carrier frequency.
-    phase_deg: Phase-word phase; carrier phase at time t is phase_deg plus
-        360 * frequency_mhz * (t - phase_reference_ticks).
+    phase_deg: Phase-word phase; after converting ticks to physical us, carrier
+        phase is phase_deg + 360 * frequency_mhz * (time_us - reference_us).
     gain: Signed normalized DAC amplitude, nominal full scale [-1, 1].
     envelopes: Candidate envelopes; None means unity. Plain pulses have one
         candidate; computed pulses include every selected candidate.
     envelope_index: int64 candidate index for each point.
     active: bool mask; False omits this event at that point.
-    phase_reference_ticks: Fixed common oscillator origin; current frontends use 0.
+    phase_reference_ticks: Integer common oscillator origin; current frontends use 0.
     """
 
     gen_ch: int
@@ -392,8 +397,8 @@ class ReadoutSlot:
 
     channel: Fixed zero-based ADC index.
     samples: Fixed compiled samples per trigger.
-    sample_period_ticks: Fixed ADC output rate, in samples/us.
-    trigger_ticks: Trigger start relative to execution zero.
+    sample_period_ticks: Positive integer ADC output sample spacing in ticks.
+    trigger_ticks: int64 trigger start ticks relative to execution zero.
     frequency_mhz: Demodulation frequency per trigger.
     phase_deg: Demodulation phase per trigger, relative to execution zero.
     generator_channels: int64 generator route per trigger.
@@ -495,6 +500,8 @@ class AcquireRequest:
     """Fixed compiled controls/layout and private sampling identity for one call.
 
     Attributes:
+        time_base: Common rational clock for all integer time fields. Required;
+            no floating-time request format is accepted.
         mode: "integrated" requests unnormalized ADC sample sums; "decimated"
             requests individual ADC samples. Neither mode asks for averaging.
         loop_dims: Compiled loop lengths, including reps, ordered outermost to
@@ -512,7 +519,7 @@ class AcquireRequest:
             Required when templates are supplied; length mismatch raises ValueError.
         reps: Length of the reps axis; repetitions do not create new points.
         templates: Structural point classes partitioning range(prod(point_dims)).
-        relax_delay_ticks: Nonnegative inter-shot relaxation in us, added after
+        relax_delay_ticks: Nonnegative integer inter-shot ticks, added after
             every template point for pacing; not part of template body durations.
         root_seed: Nonnegative integer entropy supplied by the environment
             author or generated once by the binding when seed is omitted.
@@ -526,6 +533,10 @@ class AcquireRequest:
     root_seed, sequence and rng_version are private replay metadata, not normal
     GUI/MCP metadata. Replay also requires the round snapshot and backend version;
     equal seeds alone do not promise bit-exact results across library versions.
+    Construction rejects noninteger scalar/array times with TypeError, time
+    array shape mismatches or nonpositive sample periods with ValueError, and
+    times or derived event/ADC/envelope ends outside TimeBase bounds with
+    OverflowError. Arrays are borrowed and must not be mutated during use.
     """
 
     time_base: TimeBase = field(kw_only=True)
@@ -684,7 +695,8 @@ class ChannelSignals:
             (execution, read, sample, 2) and individual ADC
             sample units, with sample length equal to the window's samples.
             Executions follow loop_dims C order; reads follow trigger_ticks order;
-            samples follow increasing time at 1 / sample_period_ticks us intervals.
+            samples follow increasing time at sample_period_ticks intervals in the
+            request's TimeBase.
             No reps/rounds averaging or integer rounding has been applied.
 
     The backend owns iq and lends it until the adapter finishes copying the round.

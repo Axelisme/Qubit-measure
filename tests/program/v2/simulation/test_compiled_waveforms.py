@@ -22,6 +22,8 @@ def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
     observed = request(prog, env)
     event = observed.materialize_point(0).events[0]
     assert event.envelope is not None
+    assert event.envelope.sample_period_ticks == 7
+    assert event.duration_ticks == 336
     assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx((0, 1 / 6144))
     assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / 32766)
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(3 / 384)
@@ -63,7 +65,8 @@ def test_adjacent_ordinary_commands_keep_the_exact_shared_boundary():
     prog, env = program(body, initialize, reps=1)
     observed = request(prog, env)
     first, second = observed.materialize_point(0).events
-    assert time_us(observed.time_base, first.start_ticks) == 0
+    assert first.start_ticks == 0
+    assert first.duration_ticks == second.start_ticks == 2800
     assert time_us(observed.time_base, first.duration_ticks) == time_us(observed.time_base, second.start_ticks) == 25 / 384
 
 

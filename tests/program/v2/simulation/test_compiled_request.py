@@ -100,6 +100,11 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     result = request(prog, env)
     assert result.point_names == ("outer", "scan")
     assert result.point_dims == (2, 3)
+    slot = result.templates[0].events[0]
+    assert slot.start_ticks.dtype == np.int64
+    assert slot.start_ticks.shape == (6,)
+    assert slot.start_ticks.tolist() == [0, 800, 1600, 0, 800, 1600]
+    assert slot.duration_ticks.tolist() == [4256] * 6
     events = [result.materialize_point(i).events[0] for i in range(6)]
     assert [e.frequency_mhz for e in events] == pytest.approx(
         [80, 90, 100, 180, 190, 200], abs=1e-5

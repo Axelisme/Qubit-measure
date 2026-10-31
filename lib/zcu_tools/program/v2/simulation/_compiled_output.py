@@ -29,7 +29,7 @@ from ._mux import static_readout_parameters
 class _EventValues:
     """Per-lane output values before grouping into full-grid event slots.
 
-    Times are microseconds, carrier is MHz, phase is degrees, and gain is the
+    Times are int64 common-clock ticks; carrier is MHz, phase is degrees, and gain is the
     normalized signed amplitude. active identifies lanes playing this output.
     """
 
@@ -110,8 +110,8 @@ class Outputs:
         self.reads: dict[int, list[_Read]] = {
             ch: [] for ch in prog.ro_chs
         }
-        # Retain absolute trigger ticks so config admission uses the same
-        # ticks-to-us conversion as WPORT, without subtracting/readding origin.
+        # Retain absolute tProc cycles for config admission without
+        # subtracting and readding the per-shot origin.
         self.trigger_ticks: dict[int, list[IntArray]] = {ch: [] for ch in prog.ro_chs}
         self.duration = np.zeros(size, dtype=np.int64)
         self.visited = np.zeros(size, dtype=np.bool_)
