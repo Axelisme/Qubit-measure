@@ -651,6 +651,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 book.record_native(self, gen_ch, val, generator=True)
             if ro_ch is not None:
                 book.record_native(self, ro_ch, val, generator=False)
+            for loop in book.loop_timelines:
+                if gen_ch is not None:
+                    loop.written_channels.add((True, gen_ch))
+                if ro_ch is not None:
+                    loop.written_channels.add((False, ro_ch))
             if book.repeats:
                 frame = book.repeats[-1]
                 if gen_ch is not None:

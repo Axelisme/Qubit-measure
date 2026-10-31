@@ -344,6 +344,9 @@ class LoopTimelineFrame:
     starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
         default_factory=list
     )
+    advance: TimeExpression = field(default_factory=LinearTime)
+    debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
+    written_channels: set[tuple[bool, int]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -582,10 +585,6 @@ class TimelineBook:
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
-        if self.loop_timelines:
-            raise ValueError(
-                "cannot advance reference inside advance_ref=False; use delay_timeline or advance_ref=True instead"
-            )
         if self.used is not None or self.reference_guards:
             raise ValueError("cannot advance reference; use delay_timeline instead")
 
@@ -595,6 +594,9 @@ class TimelineBook:
             return
         if observe_pulses:
             advance = time_expression(self.math.prog, t)
+            for frame in self.loop_timelines:
+                frame.advance = add_time(frame.advance, advance)
+                frame.debits.append((self.math, t))
             self.native_expressions = {
                 key: choose_time(LinearTime(), add_time(end, scale_time(advance, -1)))
                 for key, end in self.native_expressions.items()
