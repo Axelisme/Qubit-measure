@@ -32,6 +32,46 @@ def _readout(name="read", *, gain: float | QickParam = 0.5):
     )
 
 
+def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_soccfg):
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2, pulse: v2.Pulse):
+        with program.branch(by="scan") as branch:
+            # Declaration order does not change the selector's zero-based index.
+            with branch.case(3):
+                program.emit(pulse)
+                program.emit(pulse)
+            with branch.case(1):
+                program.emit(pulse)
+        with program.branch(by="scan"):
+            pass  # A branch may leave every point empty.
+
+    pulse = _pulse("drive")
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.add_loop("scan", 4)
+    body(builder, pulse)
+    actual = builder.build()
+
+    class Native(v2.TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("scan", 4)
+            self.drive = _pulse("drive")
+            self.declare(self.drive)
+
+        def _body(self, cfg):
+            body(self, self.drive)
+
+    expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
+    assert actual.prog_list == expected.prog_list
+    np.testing.assert_array_equal(actual.compile_pmem(), expected.compile_pmem())
+    from tests.program.v2.timing_support import shots, waves
+
+    assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == [
+        0, 43, 0, 86
+    ]
+    actual.compile()
+    np.testing.assert_array_equal(actual.compile_pmem(), expected.compile_pmem())
+
+
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
     builder = v2.TimelineBuilder(
         mock_soccfg, reps=2, initial_delay=0.1, relax_delay=0.3
