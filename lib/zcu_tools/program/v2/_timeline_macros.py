@@ -915,7 +915,7 @@ class TimelineBranch(Macro):
                     f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
                 )
         self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
-        parent_end = self.book.end(self.timeline)
+        self.book.end(self.timeline)
         initial = self.book.ends.copy()
         self._capture_entry(prog, initial)
         self.book.begin_branch_sources(prog)
@@ -940,22 +940,15 @@ class TimelineBranch(Macro):
         for index, case in enumerate(self.cases):
             self._restore_frames(frames)
             prog._time_bounds.defined = initial_defined.copy()
-            case_name = f"{self.by}[{index}]"
-            self.book.ends, self.book.waiting = {case_name: parent_end}, set()
             self.book.runtime_gens, self.book.runtime_ros = (
                 runtime_gens.copy(),
                 runtime_ros.copy(),
             )
-            self.book.used = set()
             for ch, value in initial_gens.items():
                 self.book.native_timestamp(prog, value, gen_ch=ch)
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
-            self.prepared.append(self._prepare_case(prog, case))
-            case_end = self.book.end(case_name)
-            self.book.ends = {**initial, self.timeline: case_end}
-            self.book.waiting = waiting.copy()
-            self.book.used = {self.timeline}
+            self.prepared.append(self._prepare_case(prog, case, index, initial))
             states.append(self._capture_case(prog))
             self.book.pinned.update(prog._timeline_live_registers())
         states = self._record_case_sources(prog, states)
@@ -1035,10 +1028,20 @@ class TimelineBranch(Macro):
                     end = self.result_math.maximum(end, value)
                 self.book.ends[name] = end
 
-    def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
+    def _prepare_case(
+        self, prog, case: list[Macro], index: int, initial: dict[str, Time]
+    ) -> list[PreparedTimelineMacro]:
+        case_name = f"{self.by}[{index}]"
+        waiting = self.book.waiting.copy()
+        # Hide all outer names while the implicit fork and its local forks live.
+        self.book.ends = {case_name: initial[self.timeline]}
+        self.book.waiting, self.book.used = set(), set()
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
             macro.preprocess(prog)
+        case_end = self.book.end(case_name)
+        self.book.ends = {**initial, self.timeline: case_end}
+        self.book.waiting, self.book.used = waiting, {self.timeline}
         return prepared
 
     def _capture_case(self, prog) -> BranchCaseState:

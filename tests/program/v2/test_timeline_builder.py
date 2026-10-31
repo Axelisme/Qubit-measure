@@ -932,16 +932,18 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
         program.fork("default", into="parent")
         program.delay_timeline(10 / 430.08, timeline="parent")
-        with program.timeline("parent" if not explicit_parent else "default"):
-            with program.branch(
+        with (
+            program.timeline("parent" if not explicit_parent else "default"),
+            program.branch(
                 by="scan",
                 align_timeline=align_timeline,
                 timeline="parent" if explicit_parent else None,
-            ) as cases:
-                with cases.case(1) as name:
-                    names.append(name)
-                    program.delay_timeline(20 / 430.08)
-                    program.emit(pulse)
+            ) as cases,
+            cases.case(1) as name,
+        ):
+            names.append(name)
+            program.delay_timeline(20 / 430.08)
+            program.emit(pulse)
         program.emit(pulse, timeline="parent")
 
     prog = _compile_scoped(
@@ -962,19 +964,21 @@ def test_branch_case_rejects_access_to_outer_timelines_at_build(
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
         program.fork("default", into="outside")
-        with program.branch(by="scan", align_timeline=True) as cases:
-            with cases.case(0) as case:
-                if operation == "emit":
-                    program.emit(pause, timeline="outside")
-                elif operation == "fork":
-                    program.fork("outside", into="local")
-                elif operation == "join":
-                    program.join("outside", into=case)
-                elif operation == "scope":
-                    with program.timeline("outside"):
-                        pass
-                else:
-                    program.delay_timeline(0, timeline="default")
+        with (
+            program.branch(by="scan", align_timeline=True) as cases,
+            cases.case(0) as case,
+        ):
+            if operation == "emit":
+                program.emit(pause, timeline="outside")
+            elif operation == "fork":
+                program.fork("outside", into="local")
+            elif operation == "join":
+                program.join("outside", into=case)
+            elif operation == "scope":
+                with program.timeline("outside"):
+                    pass
+            else:
+                program.delay_timeline(0, timeline="default")
 
     with pytest.raises(ValueError, match="(outside|default).*unknown timeline"):
         _compile_scoped(
@@ -989,16 +993,20 @@ def test_branch_case_local_forks_and_nested_parent_merge_without_leaking_names(
     pulse = _pulse("drive")
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
-        with program.branch(by="scan", align_timeline=True) as cases:
-            with cases.case(1) as case:
-                program.fork(case, into="local")
-                program.delay_timeline(10 / 430.08, timeline="local")
-                with program.branch(
+        with (
+            program.branch(by="scan", align_timeline=True) as cases,
+            cases.case(1) as case,
+        ):
+            program.fork(case, into="local")
+            program.delay_timeline(10 / 430.08, timeline="local")
+            with (
+                program.branch(
                     by="inner", align_timeline=True, timeline="local"
-                ) as nested:
-                    with nested.case(0):
-                        program.delay_timeline(20 / 430.08)
-                program.join("local", into=case)
+                ) as nested,
+                nested.case(0),
+            ):
+                program.delay_timeline(20 / 430.08)
+            program.join("local", into=case)
         # Both implicit and explicit local names expire, allowing fresh forks.
         program.fork("default", into=["scan[1]", "inner[0]", "local"])
         program.emit(pulse)
