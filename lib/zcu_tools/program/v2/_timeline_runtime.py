@@ -640,14 +640,14 @@ class RuntimeMath(TimedMacro):
             )
         if isinstance(operand, RuntimeEnd):
             operand = self.cycles(operand)
-        result = self.op(
+        result = self._operation_result(
             logical_base,
             "+",
             logical_operand,
             limits=self._sum_limits(logical_base, logical_operand),
-            target="s_out_time",
+            storage=_CycleStorage("s_out_time"),
         )
-        self.operations[-1] = EventTime(base, operand, result.expression)
+        self.operations.append(EventTime(base, operand, result.expression))
         return result
 
     def native_end(
@@ -1336,6 +1336,24 @@ class RuntimeMath(TimedMacro):
         target: str | None = None,
     ) -> RuntimeEnd:
         register, offset = self._operation_storage(left, operator, right, target)
+        return self._operation_result(
+            left,
+            operator,
+            right,
+            limits=limits,
+            storage=_CycleStorage(register, offset),
+        )
+
+    def _operation_result(
+        self,
+        left: RuntimeEnd,
+        operator: str,
+        right: RuntimeEnd | int,
+        *,
+        limits: tuple[int | None, int | None],
+        storage: _CycleStorage,
+    ) -> RuntimeEnd:
+        """Prove an arithmetic result without emitting or materializing operands."""
         covers: tuple[Time, ...] = ()
         deferred: list[DeferredCoverage] = []
         expression = None
@@ -1366,7 +1384,7 @@ class RuntimeMath(TimedMacro):
                     else:
                         covers += (proof.boundary,)
         result = RuntimeEnd(
-            _CycleStorage(register, offset),
+            storage,
             *limits,
             covers,
             tuple(deferred),
