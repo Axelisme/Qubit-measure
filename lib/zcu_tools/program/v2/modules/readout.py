@@ -1,8 +1,10 @@
+# tolerated(file-size): Readout families share ADC routes, pulse templates, and acquisition contracts.
 from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
 
 import numpy as np
@@ -361,6 +363,14 @@ class Readout:
         return effective.build(name)
 
 
+@dataclass(frozen=True)
+class _ReadoutDeclaration:
+    """Optional register-driven generator template and ADC configuration name."""
+
+    runtime_pulse: Pulse | None
+    runtime_ro_name: str | None
+
+
 class PulseReadout(AbsReadout):
     """Play and acquire a pulse readout configured with ``PulseReadout.Cfg``."""
 
@@ -405,14 +415,18 @@ class PulseReadout(AbsReadout):
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         """Declare the generator, ADC window and fixed/runtime configuration templates."""
-        self._declare_resources(prog, declare_pulse=lambda pulse: pulse.init(prog))
+        state = self._declare_resources(
+            prog, declare_pulse=lambda pulse: pulse.init(prog)
+        )
+        self._runtime_pulse = state.runtime_pulse
+        self._runtime_ro_name = state.runtime_ro_name
 
     def _declare_resources(
         self,
         prog: ModularProgramV2 | TimelineProgramV2,
         *,
         declare_pulse: Callable[[Pulse], None],
-    ) -> None:
+    ) -> _ReadoutDeclaration:
         declare_pulse(self.pulse)
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
         prog.add_readoutconfig(
@@ -421,22 +435,25 @@ class PulseReadout(AbsReadout):
             freq=self.cfg.freq,
             gen_ch=self.cfg.gen_ch,
         )
+        runtime_pulse = None
+        runtime_ro_name = None
         if self._uses_runtime_pulse:
-            self._runtime_pulse = Pulse(
+            runtime_pulse = Pulse(
                 name=f"{self.name}_runtime_pulse",
                 cfg=self.pulse.cfg,
                 ro_ch=self.cfg.ro_ch,
                 pulse_id=f"{self.name}_runtime_pulse",
             )
-            declare_pulse(self._runtime_pulse)
+            declare_pulse(runtime_pulse)
         if self.ro_freq_val is not None:
-            self._runtime_ro_name = f"{self.name}_adc_runtime"
+            runtime_ro_name = f"{self.name}_adc_runtime"
             prog.add_readoutconfig(
                 ch=self.cfg.ro_ch,
-                name=self._runtime_ro_name,
+                name=runtime_ro_name,
                 freq=self.cfg.freq,
                 gen_ch=self.cfg.gen_ch,
             )
+        return _ReadoutDeclaration(runtime_pulse, runtime_ro_name)
 
     def total_length(
         self, prog: ModularProgramV2 | TimelineProgramV2
@@ -498,7 +515,10 @@ class PulseReadout(AbsReadout):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare generator/ADC templates on prog before emission."""
-        self._declare_resources(prog, declare_pulse=lambda pulse: pulse.declare(prog))
+        state = self._declare_resources(
+            prog, declare_pulse=lambda pulse: pulse.declare(prog)
+        )
+        prog.set_module_state(self, state)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -510,13 +530,14 @@ class PulseReadout(AbsReadout):
         Declaration and QICK timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
+        state = prog.get_module_state(self, _ReadoutDeclaration)
         prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch, tag))
         if self.ro_freq_val is None:
             prog.send_readoutconfig(
                 self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline
             )
         else:
-            runtime_ro_name = self._runtime_ro_name
+            runtime_ro_name = state.runtime_ro_name
             if runtime_ro_name is None:
                 raise ValueError(f"{self.name}: runtime ADC template is not declared")
             prog.send_readoutconfig_from_regs(
@@ -529,12 +550,12 @@ class PulseReadout(AbsReadout):
             )
         prog.trigger([self.cfg.ro_ch], t=self.cfg.trig_offset, timeline=timeline)
         if self._uses_runtime_pulse:
-            runtime_pulse = self._runtime_pulse
-            if runtime_pulse is None or runtime_pulse.pulse_id is None:
+            runtime_pulse = state.runtime_pulse
+            if runtime_pulse is None:
                 raise ValueError(f"{self.name}: runtime pulse template is not declared")
             prog.pulse_from_regs(
                 self.cfg.gen_ch,
-                runtime_pulse.pulse_id,
+                runtime_pulse.pulse_name(prog),
                 t=self.cfg.pre_delay,
                 freq_reg=self.freq_val,
                 gain_reg=self.gain_val,
@@ -665,8 +686,7 @@ class TablePulseReadout(AbsReadout):
         self._readout.lower(prog, timeline=timeline, tag=tag)
 
     def _append_updates(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        pulse_id = self._readout.pulse.pulse_id
-        assert pulse_id is not None
+        pulse_id = self._readout.pulse.pulse_name(prog)
         prog.append_loop_after(
             self.idx_reg,
             PatchWmemFromDmem(
@@ -674,14 +694,14 @@ class TablePulseReadout(AbsReadout):
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._freq_loader.val_reg,
-                dmem_offset=self._freq_loader.offset,
+                dmem_offset=self._freq_loader.dmem_offset(prog),
             ),
             PatchWmemFromDmem(
                 name=self._readout.adc_name,
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._ro_freq_loader.val_reg,
-                dmem_offset=self._ro_freq_loader.offset,
+                dmem_offset=self._ro_freq_loader.dmem_offset(prog),
             ),
         )
 

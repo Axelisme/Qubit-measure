@@ -33,7 +33,7 @@ def test_shared_pulse_resources_keep_each_emission_source_on_waveform_outputs():
             self.emit(first, tag="third_occurrence")
 
     prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
-    assert first.pulse_id == second.pulse_id
+    assert first.pulse_name(prog) == second.pulse_name(prog)
     sources = []
     active = []
     boundaries = []

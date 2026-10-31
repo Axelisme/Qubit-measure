@@ -102,9 +102,11 @@ class AbsReset(Module):
 
 
 class PulseResetOverrides(PulseOverrides, total=False):
-    """Pulse reset carrier MHz, normalized gain, phase degrees and length us.
+    """Optional pulse-reset knobs; None keeps each cfg value.
 
-    Inherited fields accept scalars or QICK sweeps; None keeps cfg.
+    freq sets the pulse carrier in MHz, gain the normalized amplitude,
+    phase the pulse phase in degrees, and length the waveform duration in us.
+    Every field accepts a float scalar, QickParam sweep or None.
     Waveform length sweep restrictions remain unchanged.
     """
 
@@ -145,10 +147,16 @@ class BathResetOverrides(TypedDict, total=False):
 class ResetOverrides(PulseResetOverrides, BathResetOverrides, total=False):
     """Factory keyword union; only the selected cfg variant's keys are valid.
 
-    Inherited fields keep their documented units, scalar/sweep support and
-    None-means-keep behavior. gain1/gain2 are normalized pulse1/pulse2
-    amplitudes; freq1/freq2 their carriers in MHz. These four also accept
-    scalars, QICK sweeps or None.
+    freq sets the pulse-reset carrier in MHz, gain its normalized amplitude,
+    and phase its phase in degrees. length sets waveform duration in us for
+    pulse reset, or both waveform durations for two-pulse reset.
+    gain1/gain2 set normalized pulse1/pulse2 amplitudes; freq1/freq2 set
+    their carriers in MHz. qub_gain/qub_freq/qub_length set qubit-tone
+    normalized amplitude, carrier MHz and waveform duration us.
+    res_gain/res_freq/res_length set those quantities for the cavity tone.
+    pi2_phase sets the final pi/2 phase in degrees. Every field accepts a
+    float scalar, QickParam sweep or None to keep cfg. Waveform length
+    sweep restrictions remain unchanged.
     """
 
     gain1: float | QickParam | None

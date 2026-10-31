@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
 
 from pydantic import BeforeValidator
@@ -74,6 +75,14 @@ class PulseOverrides(TypedDict, total=False):
     length: float | QickParam | None
 
 
+@dataclass(frozen=True)
+class _PulseDeclaration:
+    """Program-local QICK pulse name and its built envelope (including length)."""
+
+    pulse_id: str
+    waveform: AbsWaveform
+
+
 class Pulse(Module):
     """Emit a generator pulse; zcu_lab declares its settings as ``Pulse.Cfg``."""
 
@@ -108,6 +117,7 @@ class Pulse(Module):
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id
+        self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
@@ -130,6 +140,14 @@ class Pulse(Module):
     def init_pulse(
         self, prog: ModularProgramV2 | TimelineProgramV2, pulse_id: str
     ) -> None:
+        self._add_pulse(prog, pulse_id, self.waveform)
+
+    def _add_pulse(
+        self,
+        prog: ModularProgramV2 | TimelineProgramV2,
+        pulse_id: str,
+        waveform: AbsWaveform,
+    ) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -141,7 +159,7 @@ class Pulse(Module):
             ro_ch=ro_ch,
         )
 
-        self.waveform.create(prog, cfg.ch)
+        waveform.create(prog, cfg.ch)
         prog.add_pulse(
             cfg.ch,
             pulse_id,
@@ -149,7 +167,7 @@ class Pulse(Module):
             freq=cfg.freq,
             phase=cfg.phase,
             gain=cfg.gain,
-            **self.waveform.to_wav_kwargs(),
+            **waveform.to_wav_kwargs(),
         )
 
     def total_length(
@@ -166,12 +184,21 @@ class Pulse(Module):
         """
         if self.cfg is None:
             return 0.0
-        length = self.waveform.length
+        from ..timeline import TimelineProgramV2
+
+        waveform = (
+            prog.get_module_state(self, _PulseDeclaration).waveform
+            if isinstance(prog, TimelineProgramV2)
+            else self.waveform
+        )
+        length = waveform.length
         if isinstance(length, QickParam) and length.is_sweep():
             loops = {name: count for name, count, _, _ in prog.loops}
             generator_cycles = QickParam(0.0)
             # Registered segments include quantized flat-top ramps and FIR tails.
-            for name in prog.list_pulse_waveforms(self.pulse_id, exclude_special=False):
+            for name in prog.list_pulse_waveforms(
+                self.pulse_name(prog), exclude_special=False
+            ):
                 wave_length = prog.waves[prog.wave2idx[name]].length
                 if isinstance(wave_length, QickRawParam):
                     # Step a copy so QICK's later compile keeps sole ownership.
@@ -214,8 +241,33 @@ class Pulse(Module):
         return t
 
     def declare(self, prog: TimelineProgramV2) -> None:
-        """Register the pulse template on prog; QICK declaration errors propagate."""
-        self._declare_resources(prog)
+        """Register this program's pulse template; QICK errors propagate."""
+        if self.cfg is None:
+            return
+        pulse_id = self._requested_pulse_id
+        if pulse_id is None:
+            pulse_id = prog.pulse_registry.calc_name(self.cfg, ro_ch=self.ro_ch)
+            create = prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch)
+        else:
+            create = True
+        waveform = self.cfg.waveform.build(f"{pulse_id}_waveform")
+        prog.set_module_state(self, _PulseDeclaration(pulse_id, waveform))
+        if create:
+            self._add_pulse(prog, pulse_id, waveform)
+
+    def pulse_name(self, prog: ModularProgramV2 | TimelineProgramV2) -> str:
+        """Return the pulse identifier declared on prog for native QICK calls.
+
+        prog must have declared this nonempty pulse (or initialized it on the
+        legacy path). Missing declaration or empty cfg raises ValueError.
+        """
+        from ..timeline import TimelineProgramV2
+
+        if isinstance(prog, TimelineProgramV2):
+            return prog.get_module_state(self, _PulseDeclaration).pulse_id
+        if self.pulse_id is None:
+            raise ValueError(f"{self.name}: pulse must be initialized before playback")
+        return self.pulse_id
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -247,9 +299,7 @@ class Pulse(Module):
         """
         if self.cfg is None:
             return
-        pulse_id = self.pulse_id
-        if pulse_id is None:
-            raise ValueError(f"{self.name}: pulse must be declared before playback")
+        pulse_id = self.pulse_name(prog)
         prog.pulse(
             self.cfg.ch,
             pulse_id,
@@ -377,13 +427,14 @@ class TableLengthPulse(Module):
             raise ValueError(f"{self.name}: missing runtime pulse template")
         template_cfg.set_param("length", self.lengths[0])
         self._template.declare(prog)
-        self._length_loader = LoadValue(
+        length_loader = LoadValue(
             f"{self.name}_load_gen_length",
             wave_cycles,
             idx_reg=self.idx_reg,
             val_reg=self._length_reg,
         )
-        self._length_loader.declare(prog)
+        length_loader.declare(prog)
+        prog.set_module_state(self, length_loader)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -394,10 +445,8 @@ class TableLengthPulse(Module):
         Timeline owner resolves flat-top ramps, exact end rounding and audits.
         """
         del tag  # ModuleEmission owns the occurrence tag.
-        relation = self._length_loader.lower_selected(prog)
-        name = self._template.pulse_id
-        if name is None:
-            raise ValueError(f"{self.name}: undeclared runtime pulse template")
+        relation = prog.get_module_state(self, LoadValue).lower_selected(prog)
+        name = self._template.pulse_name(prog)
         prog.pulse_from_length_reg(
             self.cfg.ch,
             name,

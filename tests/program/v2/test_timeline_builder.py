@@ -1,3 +1,4 @@
+# tolerated(file-size): Builder recording and replay share native compile fixtures.
 """Builder recording and native-program compilation share a public contract.
 
 The handwritten parity oracle remains until TimelineProgramV2 author hooks are
@@ -605,11 +606,25 @@ def test_builder_preserves_borrowed_selector_and_shared_pulse_templates(mock_soc
         # Distinct objects intentionally share generator and template definitions.
         return [loader, computed, v2.Pulse("first", cfg), v2.Pulse("second", cfg)]
 
-    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    builder.add_loop("scan", 2)
-    for module in modules():
-        builder.emit(module)
-    actual = builder.build()
+    shared = modules()
+
+    def build(items, *, padded=False):
+        builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+        builder.add_loop("scan", 2)
+        if padded:
+            builder.emit(v2.LoadValue("padding", [91, 83, 79], "scan", "padding"))
+            builder.emit(v2.Pulse("padding", cfg.model_copy(update={"gain": 0.1})))
+        for module in items:
+            builder.emit(module)
+        return builder.build()
+
+    first = build(shared)
+    actual = build(shared, padded=True)
+    fresh = build(modules(), padded=True)
+    assert actual.prog_list == fresh.prog_list
+    np.testing.assert_array_equal(actual.compile_datamem(), fresh.compile_datamem())
+    first.compile()
+    assert first.prog_list == build(modules()).prog_list
 
     class Native(v2.TimelineProgramV2):
         def _initialize(self, cfg):
@@ -623,8 +638,8 @@ def test_builder_preserves_borrowed_selector_and_shared_pulse_templates(mock_soc
                 self.emit(module)
 
     expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
-    assert actual.prog_list == expected.prog_list
-    np.testing.assert_array_equal(actual.compile_datamem(), expected.compile_datamem())
+    assert first.prog_list == expected.prog_list
+    np.testing.assert_array_equal(first.compile_datamem(), expected.compile_datamem())
 
 
 @pytest.mark.parametrize("method", ["delay_auto", "trigger"])
