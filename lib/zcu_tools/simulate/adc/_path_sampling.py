@@ -86,10 +86,20 @@ def physical_shots(
             ]
             if not observers:
                 continue
+            # Receiver-only windows still bound the shared physical event.
+            # Retuning one ADC must not shorten paths or shift receiver-noise draws.
+            end = max(
+                max(observer.end for _, observer in observers),
+                max(
+                    float(grid.times_ns[-1]) - batch.model.receiver.time_of_flight_ns
+                    for (_, batch), content in zip(batches, key, strict=True)
+                    for grid in batch.events[content][event_index].grids
+                ),
+            )
             paths = JumpPaths(
                 states[points].ravel(),
                 min(observer.start for _, observer in observers),
-                max(observer.end for _, observer in observers),
+                end,
                 batches[0][1].model.rates_per_ns,
                 rng,
             )
