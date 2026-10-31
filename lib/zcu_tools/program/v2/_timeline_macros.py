@@ -40,6 +40,7 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     align_end,
+    ceil_tick,
     known_maximum,
     optional_time_bounds,
     source_expression,
@@ -320,16 +321,10 @@ class TimelineAdvance(TimedMacro):
                 if isinstance(event.origin, RuntimeEnd)
                 else round(event.origin * get_fclk(prog))
             )
-            ticks = duration * get_fclk(prog)
-            nearest = round(ticks)
-            # Normalize native integer-cycle float noise, never a positive subcycle.
-            duration_cycles = (
-                Fraction(nearest)
-                if nearest != 0 and abs(ticks - nearest) <= 1e-10
-                else Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
-            )
+            duration_cycles = Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
             exact = static_cycles + origin + duration_cycles
-            result: Time = -(-exact.numerator // exact.denominator) / get_fclk(prog)
+            # Apply the shared float-noise policy only to the complete aggregate.
+            result: Time = ceil_tick(float(exact)) / get_fclk(prog)
         else:
             result = fractional if self.aligned else align_end(prog, fractional)
         for register in registers:

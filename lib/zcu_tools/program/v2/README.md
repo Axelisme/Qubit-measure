@@ -7,8 +7,11 @@
 ## Timeline rounding
 
 Timeline event starts now ceil to tProc cycles instead of nearest rounding.
-Each operation quantizes its result once. Static waveform and ADC lengths use
-rational clock conversion before the aggregate ceil. Author sweeps retain QICK
+Each operation quantizes its result once. Ceil treats values within 1e-10 tProc
+cycles of the nearest integer as that integer to absorb floating-point conversion
+noise. For example, 119/430.08 us remains 119 cycles; positive tails outside that
+tolerance round up. Static waveform and ADC lengths use rational clock conversion
+before the aggregate ceil. Author sweeps retain QICK
 native start rounding and truncated steps; they do not allocate pointwise time
 tables. Non-affine runtime cross-grid lengths currently raise at build and require
 the runtime conversion stage. Known scalar and affine time getters return actual
