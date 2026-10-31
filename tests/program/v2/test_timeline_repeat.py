@@ -124,6 +124,44 @@ def test_repeat_nonfixed_tail_preserves_explicit_reference_position(sync_in_midd
     assert len(prog.reg_dict) > 2
 
 
+@pytest.mark.parametrize("shape", ["nested-scope", "other-timeline"])
+def test_repeat_nested_or_other_timeline_sync_keeps_variable_tail(shape):
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.fork("default", into="local")
+            prog.pulse(0, "p0")
+            if shape == "nested-scope":
+                with prog.timeline("default"):
+                    prog.sync()
+            else:
+                prog.join("default", into="local")
+                prog.sync(timeline="local")
+        prog.pulse(1, "p1")
+
+    prog = _program(body)
+    (shot,) = _shots(prog)
+    assert _waves(shot) == [0, 28, 56]
+    assert (shot.body_end_cycle, shot.end_cycle) == (56, 84)
+    assert len(prog.reg_dict) > 2
+
+
+def test_repeat_nonzero_entry_warns_without_inserting_reference_advance():
+    def body(prog):
+        prog.delay_timeline(7 / 430.08)
+        with prog.repeat("r", 2):
+            # Direct native macro exposes the first entry reference.
+            prog.append_macro(Pulse(ch=1, name="p1", t=0))
+            prog.pulse(0, "p0")
+            prog.sync()
+
+    with pytest.warns(UserWarning, match=r"sync\(\).*before.*loop"):
+        prog = _program(body)
+    (shot,) = _shots(prog)
+    assert _waves(shot) == [0, 7, 35, 35]
+    assert (shot.body_end_cycle, shot.end_cycle) == (63, 63)
+    assert len(prog.reg_dict) > 2
+
+
 @pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto"])
 def test_repeat_allows_explicit_reference_owner_advances_outside_case(operation):
     def body(prog):
