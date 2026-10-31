@@ -103,13 +103,28 @@ class Reset:
     Cfg: TypeAlias = ResetCfg
 
     @overload
-    def __new__(cls, name: str, cfg: AbsResetCfg) -> AbsReset: ...
+    def __new__(cls, name: str, cfg: AbsResetCfg, **overrides: float | QickParam | None) -> AbsReset: ...
 
     @overload
-    def __new__(cls, name: str, cfg: None) -> None: ...
+    def __new__(cls, name: str, cfg: None, **overrides: float | QickParam | None) -> None: ...
 
-    def __new__(cls, name: str, cfg: AbsResetCfg | None) -> AbsReset | None:
-        return None if cfg is None else cfg.build(name)
+    def __new__(cls, name: str, cfg: AbsResetCfg | None, **overrides: float | QickParam | None) -> AbsReset | None:
+        """Build the reset with keyword-only overrides on a detached cfg.
+
+        Pulse reset accepts freq/gain/phase/length. Two-pulse reset accepts
+        gain1/gain2/freq1/freq2/length. Bath reset accepts qub_gain/qub_freq/
+        qub_length/res_gain/res_freq/res_length/pi2_phase. Frequencies are MHz,
+        lengths us, phases degrees and gains normalized; values may be sweeps.
+        None keeps each cfg value. Unknown names or unsupported waveform sweeps
+        raise ValueError through set_param. cfg=None returns None without reset.
+        """
+        if cfg is None:
+            return None
+        effective = deepcopy(cfg)
+        for knob, value in overrides.items():
+            if value is not None:
+                effective.set_param(knob, value)
+        return effective.build(name)
 
 
 class PulseReset(AbsReset):
@@ -117,9 +132,18 @@ class PulseReset(AbsReset):
 
     Cfg: TypeAlias = PulseResetCfg
 
-    def __init__(self, name: str, cfg: PulseResetCfg) -> None:
+    def __init__(self, name: str, cfg: PulseResetCfg, *, freq: float | QickParam | None = None, gain: float | QickParam | None = None, phase: float | QickParam | None = None, length: float | QickParam | None = None) -> None:
+        """Capture named reset settings without changing the caller's cfg.
+
+        Override freq (MHz), gain (normalized), phase (degrees), length (us).
+        Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
+        waveform restrictions apply and unsupported length sweeps raise ValueError.
+        """
         self.name = name
         self.cfg = deepcopy(cfg)
+        for knob, value in dict(freq=freq, gain=gain, phase=phase, length=length).items():
+            if value is not None:
+                self.cfg.set_param(knob, value)
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
@@ -151,9 +175,18 @@ class TwoPulseReset(AbsReset):
 
     Cfg: TypeAlias = TwoPulseResetCfg
 
-    def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
+    def __init__(self, name: str, cfg: TwoPulseResetCfg, *, gain1: float | QickParam | None = None, gain2: float | QickParam | None = None, freq1: float | QickParam | None = None, freq2: float | QickParam | None = None, length: float | QickParam | None = None) -> None:
+        """Capture named reset settings without changing the caller's cfg.
+
+        Override gain1/gain2 (normalized), freq1/freq2 (MHz), shared length (us).
+        Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
+        waveform restrictions apply and unsupported length sweeps raise ValueError.
+        """
         self.name = name
         self.cfg = deepcopy(cfg)
+        for knob, value in dict(gain1=gain1, gain2=gain2, freq1=freq1, freq2=freq2, length=length).items():
+            if value is not None:
+                self.cfg.set_param(knob, value)
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.cfg.pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.cfg.pulse2_cfg)
 
@@ -198,9 +231,18 @@ class BathReset(AbsReset):
 
     Cfg: TypeAlias = BathResetCfg
 
-    def __init__(self, name: str, cfg: BathResetCfg) -> None:
+    def __init__(self, name: str, cfg: BathResetCfg, *, qub_gain: float | QickParam | None = None, qub_freq: float | QickParam | None = None, qub_length: float | QickParam | None = None, res_gain: float | QickParam | None = None, res_freq: float | QickParam | None = None, res_length: float | QickParam | None = None, pi2_phase: float | QickParam | None = None) -> None:
+        """Capture named reset settings without changing the caller's cfg.
+
+        Override qub/res gain (normalized), freq (MHz), length (us), pi2_phase (degrees).
+        Values accept scalars or QICK sweeps; None keeps cfg. Existing set_param
+        waveform restrictions apply and unsupported length sweeps raise ValueError.
+        """
         self.name = name
         self.cfg = deepcopy(cfg)
+        for knob, value in dict(qub_gain=qub_gain, qub_freq=qub_freq, qub_length=qub_length, res_gain=res_gain, res_freq=res_freq, res_length=res_length, pi2_phase=pi2_phase).items():
+            if value is not None:
+                self.cfg.set_param(knob, value)
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=self.cfg.cavity_tone_cfg)
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=self.cfg.qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=self.cfg.pi2_cfg)
