@@ -3,6 +3,7 @@
 import signal
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from types import FrameType
 
 import pytest
@@ -26,9 +27,12 @@ class InterruptCore(RecordingCore):
         return super().run(config, context=context)
 
 
-def notebook(core: InterruptCore) -> NotebookExperiment[InterruptCore]:
+def notebook(
+    core: InterruptCore, *, interrupt_timeout: float = 10.0
+) -> NotebookExperiment[InterruptCore]:
     return NotebookAdapter(
-        soc=object(), soccfg=object(), device_manager=DeviceManager(), host=NonPresentingHost()
+        soc=object(), soccfg=object(), device_manager=DeviceManager(),
+        host=NonPresentingHost(), interrupt_timeout=interrupt_timeout,
     )(core)
 
 
@@ -121,6 +125,51 @@ def test_second_sigint_interrupts_without_publishing(timers: list[ManualTimer]) 
         adapter.run(Cfg())
     assert adapter.last_run is None
     assert timers[-1].cancelled
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0])
+def test_nonpositive_timeout_is_rejected_at_adapter_entry(timeout: float) -> None:
+    with pytest.raises(ValueError, match="interrupt_timeout"):
+        NotebookAdapter(interrupt_timeout=timeout)
+    with pytest.raises(ValueError, match="interrupt_timeout"):
+        NotebookExperiment(RecordingCore(), interrupt_timeout=timeout)
+
+
+def test_custom_timeout_is_forwarded_to_deadline(timers: list[ManualTimer]) -> None:
+    def author(context: RunContext) -> None:
+        signal.raise_signal(signal.SIGINT)
+        assert timers[-1].interval == 0.25
+
+    notebook(InterruptCore(author), interrupt_timeout=0.25).run(Cfg())
+
+
+def test_timeout_fallback_delivers_keyboard_interrupt(
+    monkeypatch: pytest.MonkeyPatch, timers: list[ManualTimer]
+) -> None:
+    monkeypatch.delattr(signal, "pthread_kill", raising=False)
+
+    def author(context: RunContext) -> None:
+        signal.raise_signal(signal.SIGINT)
+        timers[-1].expire()
+
+    adapter = notebook(InterruptCore(author))
+    with pytest.raises(KeyboardInterrupt):
+        adapter.run(Cfg())
+    assert adapter.last_run is None
+
+
+def test_worker_thread_run_keeps_process_sigint_handler() -> None:
+    previous = signal.getsignal(signal.SIGINT)
+
+    def author(context: RunContext) -> None:
+        assert signal.getsignal(signal.SIGINT) is previous
+
+    adapter = notebook(InterruptCore(author))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        # Submitted synchronous core returns; timeout is only a deadlock watchdog.
+        record = executor.submit(adapter.run, Cfg()).result(timeout=30)
+    assert adapter.acquisition_for(record).completion == "complete"
+    assert signal.getsignal(signal.SIGINT) is previous
 
 
 def test_first_sigint_requests_stop_and_publishes_returned_record() -> None:
