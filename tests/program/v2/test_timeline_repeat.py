@@ -7,7 +7,7 @@ from contextlib import nullcontext
 import pytest
 from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.timeline import TimelineProgramV2
+from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
@@ -1067,16 +1067,9 @@ def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
 @pytest.mark.parametrize("tail_sync", [False, True])
 @pytest.mark.parametrize("external_end", [0, 100])
 def test_repeat_allows_native_register_reference_advance(tail_sync, external_end):
-    from zcu_tools.program.v2.modules import LoadValue
-
-    loader = LoadValue("counts", [3, 3], "scan", "count")
-
-    def initialize(prog):
-        prog.add_loop("scan", 2)
-        prog.declare(loader)
-
     def body(prog):
-        prog.emit(loader)
+        with prog.time_producer("count", CycleBounds(3, 3)):
+            prog.write_reg("count", 3)
         prog.fork("default", into="external")
         prog.delay_timeline(external_end / 430.08, timeline="external")
         with prog.repeat("r", 2):
@@ -1087,13 +1080,12 @@ def test_repeat_allows_native_register_reference_advance(tail_sync, external_end
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
 
-    prog = _program(body, initialize)
-    result = _shots(prog)
+    prog = _program(body, _register_initialize)
+    (shot,) = _shots(prog)
     # Each iteration consumes the 28-cycle native end plus count=3 cycles.
     final_start = 100 if external_end else 62
-    assert [_waves(shot) for shot in result] == [[0, 31, final_start]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [final_start + 28] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [final_start + 28] * 2
+    assert _waves(shot) == [0, 31, final_start]
+    assert (shot.body_end_cycle, shot.end_cycle) == (final_start + 28,) * 2
 
 
 def test_wrong_repeat_pulse_offset_is_detected_by_independent_timing_oracle():
