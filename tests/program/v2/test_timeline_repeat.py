@@ -163,6 +163,30 @@ def test_repeat_nonzero_entry_warns_without_inserting_reference_advance():
     assert len(prog.reg_dict) > 2
 
 
+@pytest.mark.parametrize("actual", [0, 3])
+@pytest.mark.parametrize("hint", [None, (0, 3)])
+def test_variable_reference_repeat_resets_count_and_external_debit_each_shot(actual, hint):
+    def initialize(prog):
+        prog.add_reg("count")
+
+    def body(prog):
+        prog.write_reg("count", actual)
+        prog.fork("default", into="external")
+        prog.delay_timeline(140 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=hint):
+            prog.pulse(0, "p0")
+            prog.sync()
+            prog.delay_timeline(7 / 430.08)
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    result = _shots(_program(body, initialize, reps=2))
+    expected = [0, 35, 70, 140] if actual else [140]
+    assert [_waves(shot) for shot in result] == [expected] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [168] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [168] * 2
+
+
 @pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto"])
 def test_repeat_allows_explicit_reference_owner_advances_outside_case(operation):
     def body(prog):
