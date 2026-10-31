@@ -23,7 +23,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support import live_line
@@ -32,6 +32,11 @@ from .core import T1Analysis, T1Result, t1_signal2real
 
 
 class T1WithToneCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -48,11 +53,6 @@ class T1WithToneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    pi_pulse: Pulse.Cfg
-    test_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    length: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -65,8 +65,8 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
 
     # times stored as seconds on disk -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[T1Result, T1WithToneCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=T1Result,
         cfg_type=T1WithToneCfg,
         cfg_schema_version="3.0",
@@ -104,27 +104,20 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
 
             # 2. Sweep the tone after excitation, then acquire the readout IQ.
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
             length_sweep = cfg.length
-            length_param = sweep2param("length", length_sweep)
-            cfg.test_pulse.set_param("length", length_param)
+            length_param = builder.add_sweep("length", length_sweep)
 
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg.reset),
-                    Pulse(name="pi_pulse", cfg=cfg.pi_pulse),
-                    Pulse(name="test_pulse", cfg=cfg.test_pulse),
-                    Readout("readout", cfg.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+
+            builder.emit(Reset('reset', cfg.reset))
+            builder.emit(Pulse(name='pi_pulse', cfg=cfg.pi_pulse))
+            builder.emit(Pulse(name='test_pulse', cfg=cfg.test_pulse))
+            builder.emit(Readout('readout', cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         # 3. Return acquired averages without filling unfinished points.
         return T1Result(times=lengths, signals=signals_buffer.array)
@@ -144,9 +137,19 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         real_signals = t1_signal2real(signals)
 
         if dual_exp:
-            t1b, t1berr, t1, t1err, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
+            fit = fit_dual_decay(xs, real_signals)
+            t1b = fit.decay_time1
+            t1berr = fit.decay_time1_err
+            t1 = fit.decay_time2
+            t1err = fit.decay_time2_err
+            y_fit = fit.curve
+            pOpt = fit.params
         else:
-            t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            fit = fit_decay(xs, real_signals)
+            t1 = fit.decay_time
+            t1err = fit.decay_time_err
+            y_fit = fit.curve
+            pOpt = fit.params
             t1b = 0.0
             t1berr = 0.0
 

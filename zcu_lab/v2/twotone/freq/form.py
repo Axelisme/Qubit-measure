@@ -13,18 +13,6 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqCfg,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "qub_pulse",
-            "readout",
-            "freq",
-            "reps",
-            "rounds",
-            "acquire_retry",
-            "earlystop_snr",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": None,

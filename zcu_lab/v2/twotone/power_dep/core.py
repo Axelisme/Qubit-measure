@@ -11,7 +11,7 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -31,6 +31,12 @@ def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -47,22 +53,16 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 class PowerExp(Experiment[PowerResult, PowerCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("gains", "Power", "a.u."),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("gains", label="Power", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         cfg_schema_version="3.0",
@@ -115,29 +115,22 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
 
         # Acquire a complete spectrum at each fixed drive gain.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-                cfg = step.cfg
 
-                cfg.qub_pulse.set_param("gain", step.value)
+                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+
                 freq_sweep = cfg.freq
-                cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+                freq_param = builder.add_sweep("freq", freq_sweep)
 
                 # Reset and initialize before each probe; read out its response.
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add_pulse("init_pulse", cfg.init_pulse)
-                    .add_pulse("qubit_pulse", cfg.qub_pulse)
-                    .add_readout("readout", cfg.readout)
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
-                )
+
+                builder.emit(Reset('reset', cfg.reset))
+                builder.emit(Pulse('init_pulse', cfg.init_pulse))
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param, gain=step.value))
+                builder.emit(Readout('readout', cfg.readout))
+                prog = builder.build()
+                step.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return PowerResult(
             gains=gains,
