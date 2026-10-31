@@ -99,7 +99,7 @@ def analyze_irb(
     seed over its complete rounds, then weight seeds equally. Bootstrap resamples
     entire paired seed curves, preserving depth and arm correlations. Raises
     ValueError for insufficient data, invalid fits or >10% failed bootstrap fits.
-    Known optimizer failures in the main fit become ValueError with their cause;
+    Known optimizer failures in the main fit propagate as AnalysisFailed;
     in bootstrap they count as failed draws, without replacement or retry.
     The ratio is the single-qubit estimate in Magesan et al., arXiv:1203.4550;
     its confidence interval does not include gate-dependent noise systematics.
@@ -121,10 +121,7 @@ def analyze_irb(
     )
     means = project_arm_means(seed_means[None, ...])
     xs = depths.astype(np.float64)
-    try:
-        ps, curves = _fit_pair(xs, means)
-    except AnalysisFailed as exc:
-        raise ValueError(f"IRB decay fit failed: {exc}") from exc
+    ps, curves = _fit_pair(xs, means)
     error = float((1 - ps[1] / ps[0]) / 2)
     rng = np.random.default_rng(bootstrap_seed)
     fidelities: list[float] = []
