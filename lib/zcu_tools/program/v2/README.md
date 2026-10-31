@@ -1,16 +1,19 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，逐點常數軸正規化
+**Last updated:** 2026-11-01，timeline ceil 相對與絕對容差
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
 ## Timeline rounding
 
 Timeline event starts now ceil to tProc cycles instead of nearest rounding.
-Each operation quantizes its result once. Ceil treats values within 1e-10 tProc
-cycles of the nearest integer as that integer to absorb floating-point conversion
-noise. For example, 119/430.08 us remains 119 cycles; positive tails outside that
-tolerance round up. Static waveform and ADC lengths use rational clock conversion
+Each operation quantizes its result once. Ceil uses
+`math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` to treat values
+near the nearest integer as that integer. This absorbs floating-point conversion
+noise even at large cycle counts. For example, 119/430.08 us remains 119 cycles.
+Near 2³¹ cycles, the relative tolerance can also absorb real fractional tails
+of up to about 0.002 cycle. Positive tails outside both tolerances round up.
+Static waveform and ADC lengths use rational clock conversion
 before the aggregate ceil. Author sweeps retain QICK
 native start rounding and truncated steps; they do not allocate pointwise time
 tables. Runtime cross-grid generator lengths use k=8 fixed-point upper conversion.
