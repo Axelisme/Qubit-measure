@@ -192,7 +192,12 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
             rounded, rel=0, abs=1e-8
         )
     # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
-    end = start + {"pulse": 43, "config": 0, "trigger": 173, "delay": 0}[operation]
+    end = start + {
+        "pulse": 43,
+        "config": 0,
+        "trigger": max(rounded, 173),
+        "delay": 0,
+    }[operation]
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"][-1] == end
     assert prog.get_time_param("after", "t") == 0
 
