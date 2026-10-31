@@ -127,51 +127,70 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
         lengths = sweep2array(
             cfg.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
+            {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
-            viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
-            signals_buffer = SignalBuffer(
-                (len(lengths),),
-                on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
-            )
-            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                length_sweep = sched.cfg.length
-                sched.cfg.qub_pulse.set_param(
-                    "length", sweep2param("length", length_sweep)
-                )
+            return self._run_for_flat(cfg, lengths, context=context)
+        return self._run_for_arb(cfg, lengths, context=context)
 
-                # 2. Sweep length on the FPGA: reset -> init -> drive -> readout.
-                _ = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add_reset("reset", sched.cfg.reset)
-                    .add_pulse("init_pulse", sched.cfg.init_pulse)
-                    .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
-                    .add_readout("readout", sched.cfg.readout)
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        rounds=cfg.rounds,
-                        options=AcquireOptions(
-                            retry=cfg.acquire_retry,
-                            stop_condition=snr_checker(
-                                signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
-                            ),
+    def _run_for_flat(
+        self,
+        cfg: LenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> LenRabiResult:
+        """Sweep const/flat-top length on the FPGA and return mean IQ."""
+        soc, soccfg = context.soc, context.soccfg
+        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
+        signals_buffer = SignalBuffer(
+            (len(lengths),),
+            on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
+        )
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+            length_sweep = sched.cfg.length
+            sched.cfg.qub_pulse.set_param("length", sweep2param("length", length_sweep))
+
+            # 2. Sweep length on the FPGA: reset -> init -> drive -> readout.
+            _ = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add_reset("reset", sched.cfg.reset)
+                .add_pulse("init_pulse", sched.cfg.init_pulse)
+                .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
+                .add_readout("readout", sched.cfg.readout)
+                .declare_sweep("length", length_sweep)
+                .build_and_acquire(
+                    rounds=cfg.rounds,
+                    options=AcquireOptions(
+                        retry=cfg.acquire_retry,
+                        stop_condition=snr_checker(
+                            signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
                         ),
-                    )
+                    ),
                 )
+            )
 
-            # 3. The program acquisition supplies the completed-round mean IQ.
-            return LenRabiResult(lengths=lengths, signals=signals_buffer.array)
+        # 3. The program acquisition supplies the completed-round mean IQ.
+        return LenRabiResult(lengths=lengths, signals=signals_buffer.array)
+
+    def _run_for_arb(
+        self,
+        cfg: LenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> LenRabiResult:
+        """Scan shaped lengths on the host and average available rounds."""
+        soc, soccfg = context.soc, context.soccfg
 
         # 2. Other waveforms need a separate program for each distinct length.
         rounds = cfg.rounds

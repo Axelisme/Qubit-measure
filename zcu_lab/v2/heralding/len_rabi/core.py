@@ -129,14 +129,23 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 "Heralding requires a circle classifier with g/e/other; run GE Post"
             )
         cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
+        soccfg = context.soccfg
         lengths = sweep2array(
             cfg.length, "time", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
-        hardware_sweep = cfg.qub_pulse.waveform.style in ["const", "flat_top"]
-        if not hardware_sweep:
-            lengths = np.unique(lengths)
+        if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
+            return self._run_for_flat(cfg, lengths, context=context)
+        return self._run_for_arb(cfg, np.unique(lengths), context=context)
 
+    def _run_for_flat(
+        self,
+        cfg: HeraldingLenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> HeraldingLenRabiResult:
+        """Sweep drive length on hardware and add per-class shot sums."""
+        soc, soccfg = context.soc, context.soccfg
         viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
         buffer = SignalBuffer(
             (len(lengths), 3, 3),
@@ -150,83 +159,105 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             cfg.earlystop_snr,
             lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
         )
-        acquisition_buffer = (
-            buffer
-            if hardware_sweep
-            else SignalBuffer((cfg.rounds, len(lengths), 3, 3), dtype=np.float64)
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            cfg = sched.cfg
+            # Reset -> herald -> optional init -> swept drive -> signal.
+            cfg.qub_pulse.set_param("length", sweep2param("length", cfg.length))
+            herald_readout = PulseReadout("herald", cfg.readout)
+            prog = ModularProgramV2(
+                soccfg,
+                modules=[
+                    Reset("reset", cfg.reset),
+                    herald_readout,
+                    Pulse("init_pulse", cfg.init_pulse),
+                    Pulse("qubit_pulse", cfg.qub_pulse),
+                    PulseReadout("signal", cfg.readout),
+                ],
+                sweep=[("length", cfg.length)],
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
+            )
+            sched.prog_builder(soc, soccfg).run_program_summed(
+                prog,
+                rounds=cfg.rounds,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                sums2signal_fn=np.copy,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry, stop_condition=check_snr
+                ),
+            )
+        return HeraldingLenRabiResult(lengths, buffer.array)
+
+    def _run_for_arb(
+        self,
+        cfg: HeraldingLenRabiCfg,
+        lengths: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> HeraldingLenRabiResult:
+        """Scan lengths on the host with cached programs and sum host rounds."""
+        soc, soccfg = context.soc, context.soccfg
+        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
+        buffer = SignalBuffer(
+            (len(lengths), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                lengths, rabi_signal2real(split_sums(data)[1][..., 0])
+            ),
+        )
+        check_snr = snr_checker(
+            buffer.at(),
+            cfg.earlystop_snr,
+            lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
+        )
+        acquisition_buffer = SignalBuffer(
+            (cfg.rounds, len(lengths), 3, 3), dtype=np.float64
         )
         with Schedule(cfg, acquisition_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
-            if hardware_sweep:
-                # Reset -> herald -> optional init -> swept drive -> signal.
-                cfg.qub_pulse.set_param("length", sweep2param("length", cfg.length))
-                herald_readout = PulseReadout("herald", cfg.readout)
-                prog = ModularProgramV2(
-                    soccfg,
-                    modules=[
-                        Reset("reset", cfg.reset),
-                        herald_readout,
-                        Pulse("init_pulse", cfg.init_pulse),
-                        Pulse("qubit_pulse", cfg.qub_pulse),
-                        PulseReadout("signal", cfg.readout),
-                    ],
-                    sweep=[("length", cfg.length)],
-                    reps=cfg.reps,
-                    relax_delay=cfg.relax_delay,
-                )
-                sched.prog_builder(soc, soccfg).run_program_summed(
-                    prog,
-                    rounds=cfg.rounds,
-                    processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                    sums2signal_fn=np.copy,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry, stop_condition=check_snr
-                    ),
-                )
-            else:
-                # Each host round scans all lengths before checking curve SNR.
-                programs: dict[float, ModularProgramV2] = {}
-                for _, rep in sched.repeat("round", cfg.rounds):
-                    for index, step in rep.scan("length", list(range(len(lengths)))):
-                        length = float(lengths[index])
-                        if length not in programs:
-                            step.cfg.qub_pulse.set_param("length", length)
-                            herald_readout = PulseReadout("herald", step.cfg.readout)
-                            prog = ModularProgramV2(
-                                soccfg,
-                                modules=[
-                                    Reset("reset", step.cfg.reset),
-                                    herald_readout,
-                                    Pulse("init_pulse", step.cfg.init_pulse),
-                                    Pulse("qubit_pulse", step.cfg.qub_pulse),
-                                    PulseReadout("signal", step.cfg.readout),
-                                ],
-                                reps=step.cfg.reps,
-                                relax_delay=step.cfg.relax_delay,
-                            )
-                            programs[length] = prog
-                        prog = programs[length]
+            # Each host round scans all lengths before checking curve SNR.
+            programs: dict[float, ModularProgramV2] = {}
+            for _, rep in sched.repeat("round", cfg.rounds):
+                for index, step in rep.scan("length", list(range(len(lengths)))):
+                    length = float(lengths[index])
+                    if length not in programs:
+                        step.cfg.qub_pulse.set_param("length", length)
+                        herald_readout = PulseReadout("herald", step.cfg.readout)
+                        prog = ModularProgramV2(
+                            soccfg,
+                            modules=[
+                                Reset("reset", step.cfg.reset),
+                                herald_readout,
+                                Pulse("init_pulse", step.cfg.init_pulse),
+                                Pulse("qubit_pulse", step.cfg.qub_pulse),
+                                PulseReadout("signal", step.cfg.readout),
+                            ],
+                            reps=step.cfg.reps,
+                            relax_delay=step.cfg.relax_delay,
+                        )
+                        programs[length] = prog
+                    prog = programs[length]
 
-                        try:
-                            step.prog_builder(soc, soccfg).run_program_summed(
-                                prog,
-                                rounds=1,
-                                processor=shot_sums(
-                                    prog, [Classify("herald"), IQ("signal")]
-                                ),
-                                sums2signal_fn=np.copy,
-                                options=AcquireOptions(retry=cfg.acquire_retry),
-                            )
-                        finally:
-                            segments = acquisition_buffer.array
-                            completed = np.any(np.isfinite(segments), axis=0)
-                            combined = np.nansum(segments, axis=0)
-                            buffer.set(np.where(completed, combined, np.nan))
-                    if check_snr():
-                        break
-                viewer.update(
-                    lengths, rabi_signal2real(split_sums(buffer.array)[1][..., 0])
-                )
+                    try:
+                        step.prog_builder(soc, soccfg).run_program_summed(
+                            prog,
+                            rounds=1,
+                            processor=shot_sums(
+                                prog, [Classify("herald"), IQ("signal")]
+                            ),
+                            sums2signal_fn=np.copy,
+                            options=AcquireOptions(retry=cfg.acquire_retry),
+                        )
+                    finally:
+                        segments = acquisition_buffer.array
+                        completed = np.any(np.isfinite(segments), axis=0)
+                        combined = np.nansum(segments, axis=0)
+                        buffer.set(np.where(completed, combined, np.nan))
+                if check_snr():
+                    break
+            viewer.update(
+                lengths, rabi_signal2real(split_sums(buffer.array)[1][..., 0])
+            )
         return HeraldingLenRabiResult(lengths, buffer.array)
 
     def analyze(
