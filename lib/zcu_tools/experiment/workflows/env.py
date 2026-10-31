@@ -272,7 +272,7 @@ class WorkflowEnv[C](Scope):
                 and not self._hooks.stopping()
             )
             facts = self._complete_attempt(
-                scope, kind, attempt, result, discard=discard
+                scope, kind, attempt, discard=discard
             )
             if cancelled is not None:
                 raise cancelled
@@ -284,12 +284,11 @@ class WorkflowEnv[C](Scope):
                 continue
             return Completed(result.result, result.stop_requested, facts)
 
-    def _complete_attempt[T](
+    def _complete_attempt(
         self,
         scope: Scope,
         kind: OperationKind,
         attempt: _Attempt,
-        result: CallResult[T],
         *,
         discard: bool,
     ) -> OperationFacts:

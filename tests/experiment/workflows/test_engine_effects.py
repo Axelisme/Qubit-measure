@@ -117,6 +117,7 @@ def test_call_delivers_the_original_experiment_exception_to_the_author(rig: Rig)
 
         with Schedule(Cfg(), buffer, scope=ctx.scope):
             raise cause
+        return 99
 
     caught: list[OSError] = []
 

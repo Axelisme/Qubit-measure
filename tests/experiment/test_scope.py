@@ -27,7 +27,7 @@ def test_cancel_notifies_selected_scope_before_setting_stop(callback_raises: boo
 
     with root.child("selected") as selected:
         if callback_raises:
-            with pytest.raises(OSError) as caught:
+            with pytest.raises(OSError, match="recording failed") as caught:
                 root.cancel("selected", on_cancel=record)
             assert caught.value is cause
         else:
