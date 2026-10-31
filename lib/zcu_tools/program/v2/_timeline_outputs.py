@@ -97,6 +97,8 @@ class TimelineObservedPulse(Pulse):
             else self.source.t
         )
         self.source.preprocess(prog)
+        if self.source.t != "auto":
+            self.book.runtime_gens.pop(self.ch, None)
         if self.source.t == "auto" and self.ch in self.book.runtime_gens:
             start = self.book.runtime_gens[self.ch]
             self.runtime_start = start
