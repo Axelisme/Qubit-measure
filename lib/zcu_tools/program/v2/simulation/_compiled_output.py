@@ -365,7 +365,7 @@ class Outputs:
                 self.trigger_ticks[ch].append(np.zeros(self.size, dtype=np.int64))
             self.trigger_ticks[ch][index][self.points[active]] = timestamp[active]
             read = self.reads[ch][index]
-            self._put(read[:, 0], start, machine)
+            read[self.points[active], 0] = start[active]
             if cfg.get("tproc_ctrl") is None:
                 gen = self.prog.ro_chs[ch]["gen_ch"]
                 mixer = float(
@@ -374,8 +374,8 @@ class Outputs:
                 frequency, phase = static_readout_parameters(
                     self.prog, ch, mixer_mhz=mixer
                 )
-                self._put(read[:, 1], np.full(machine.size, frequency), machine)
-                self._put(read[:, 2], np.full(machine.size, phase), machine)
+                read[self.points[active], 1] = frequency
+                read[self.points[active], 2] = phase
             self.read_count[ch] += active
             self.current_end = np.maximum(
                 self.current_end,
