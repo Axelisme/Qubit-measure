@@ -564,8 +564,6 @@ class RuntimeMath(TimedMacro):
         digits = _csd(factor)
         if not digits:
             return self.cycles(0.0)
-        if value.minimum is None or value.maximum is None:
-            raise RuntimeError("constant multiplication needs known bounds")
         coefficient = 1
         result = self.snapshot(value)
         previous = digits[-1][0]
@@ -573,13 +571,11 @@ class RuntimeMath(TimedMacro):
             shift = previous - exponent
             while shift:
                 amount = min(15, shift)
-                if result.minimum is None or result.maximum is None:
-                    raise RuntimeError("constant multiplication needs known bounds")
                 result = self.op(
                     result,
                     "SL",
                     amount,
-                    limits=(result.minimum << amount, result.maximum << amount),
+                    limits=(None if result.minimum is None else result.minimum << amount, None if result.maximum is None else result.maximum << amount),
                     target=result.register,
                 )
                 coefficient <<= amount
@@ -590,19 +586,17 @@ class RuntimeMath(TimedMacro):
                 "+" if sign > 0 else "-",
                 value,
                 # Both operands are multiples of this same native source.
-                limits=(coefficient * value.minimum, coefficient * value.maximum),
+                limits=(None if value.minimum is None else coefficient * value.minimum, None if value.maximum is None else coefficient * value.maximum),
                 target=result.register,
             )
             previous = exponent
         while previous:
             amount = min(15, previous)
-            if result.minimum is None or result.maximum is None:
-                raise RuntimeError("constant multiplication needs known bounds")
             result = self.op(
                 result,
                 "SL",
                 amount,
-                limits=(result.minimum << amount, result.maximum << amount),
+                limits=(None if result.minimum is None else result.minimum << amount, None if result.maximum is None else result.maximum << amount),
                 target=result.register,
             )
             previous -= amount
@@ -689,14 +683,7 @@ class RuntimeMath(TimedMacro):
                 raise RuntimeError(
                     f"{variable.name}: integer time expression lost its runtime producer"
                 )
-            magnitude = abs(coefficient)
-            scaled = self.cycles(0.0)
-            while magnitude:
-                if magnitude & 1:
-                    scaled = self.add(scaled, term)
-                magnitude >>= 1
-                if magnitude:
-                    term = self.add(term, term)
+            scaled = self.multiply(term, abs(coefficient))
             result = (
                 self.add(result, scaled)
                 if coefficient > 0
