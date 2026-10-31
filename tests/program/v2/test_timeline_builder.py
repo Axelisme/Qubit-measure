@@ -72,6 +72,22 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
 
 
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize(("index", "message"), [(0, "duplicate"), (-1, "index"), (2, "index")])
+def test_indexed_branch_rejects_duplicate_and_out_of_range_points(
+    mock_soccfg, frontend, index, message
+):
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        with program.branch(by="scan") as branch:
+            with branch.case(0):
+                program.delay_timeline(0.1)
+            with branch.case(index):
+                program.delay_timeline(0.2)
+
+    with pytest.raises(ValueError, match=message):
+        _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
+
+
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
     builder = v2.TimelineBuilder(
         mock_soccfg, reps=2, initial_delay=0.1, relax_delay=0.3
