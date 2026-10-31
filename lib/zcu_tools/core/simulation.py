@@ -10,14 +10,57 @@ AcquireRequest validates template coordinate names. Frontend and adapter checks
 validate the remaining field ranges, layouts and contents against the request.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from math import prod
+from fractions import Fraction
+from math import gcd, lcm, prod
 from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
 
 AcquisitionMode = Literal["integrated", "decimated"]
+
+
+@dataclass(frozen=True)
+class TimeBase:
+    """Common rational simulation clock, independent of board drivers.
+
+    ticks_per_us: Positive rational frequency in MHz. One integer tick lasts
+        1 / ticks_per_us microseconds. Program supplies the board's tProc,
+        generator fabric, ADC output and envelope sample clocks to from_clocks.
+    """
+
+    ticks_per_us: Fraction
+
+    @classmethod
+    def from_clocks(cls, clocks_mhz: Iterable[float]) -> "TimeBase":
+        """Build the least common rational frequency for clocks in MHz.
+
+        Interpret each finite positive clock through its round-tripping decimal
+        repr, not its binary floating-point expansion. Clock order and duplicates
+        do not affect the result. An empty iterable raises ValueError.
+        """
+        clocks = [Fraction(repr(clock)) for clock in clocks_mhz]
+        if not clocks:
+            raise ValueError("at least one clock is required")
+        return cls(
+            Fraction(
+                lcm(*(clock.numerator for clock in clocks)),
+                gcd(*(clock.denominator for clock in clocks)),
+            )
+        )
+
+    def period_ticks(self, clock_mhz: float) -> int:
+        """Return one clock period in ticks, rejecting off-grid clocks.
+
+        clock_mhz is a finite positive frequency in MHz, interpreted as in
+        from_clocks. A noninteger number of ticks raises ValueError.
+        """
+        period = self.ticks_per_us / Fraction(repr(clock_mhz))
+        if period.denominator != 1:
+            raise ValueError("clock period is not on the time-base grid")
+        return period.numerator
 
 
 class CancellationQuery(Protocol):
