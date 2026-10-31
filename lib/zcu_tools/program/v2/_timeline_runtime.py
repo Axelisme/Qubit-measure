@@ -200,7 +200,9 @@ class RuntimeEnd:
             expression = (
                 TimeVariable(minimum)
                 if minimum is not None and minimum == maximum
-                else TimeVariable(terms=((cycle_axis(storage.register, minimum, maximum), 1),))
+                else TimeVariable(
+                    terms=((cycle_axis(storage.register, minimum, maximum), 1),)
+                )
             )
         object.__setattr__(self, "storage", storage)
         object.__setattr__(self, "covers", covers)
@@ -630,7 +632,9 @@ class RuntimeMath(TimedMacro):
             base = replace(
                 base,
                 storage=_CycleStorage(base.register),
-                expression=add_time(runtime_expression(base), TimeVariable(-base.offset)),
+                expression=add_time(
+                    runtime_expression(base), TimeVariable(-base.offset)
+                ),
                 covers=(),
                 deferred=(),
             )
@@ -1331,10 +1335,14 @@ class RuntimeMath(TimedMacro):
         if isinstance(right, int) and operator in ("+", "-"):
             if operator == "+" and target is None and left.register != "s_out_time":
                 return left.register, left.offset + right
-            rhs: int | str = right + left.offset if operator == "+" else right - left.offset
+            rhs: int | str = (
+                right + left.offset if operator == "+" else right - left.offset
+            )
         else:
             left = self.cycles(left)
-            rhs = self.cycles(right).register if isinstance(right, RuntimeEnd) else right
+            rhs = (
+                self.cycles(right).register if isinstance(right, RuntimeEnd) else right
+            )
         register = self.allocate() if target is None else target
         self.operations.append(
             WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
@@ -1381,7 +1389,11 @@ class RuntimeMath(TimedMacro):
                     else:
                         covers += (proof.boundary,)
         result = RuntimeEnd(
-            _CycleStorage(register, offset), *limits, covers, tuple(deferred), expression
+            _CycleStorage(register, offset),
+            *limits,
+            covers,
+            tuple(deferred),
+            expression,
         )
         if result.minimum is not None and result.maximum is not None:
             self.check(result.minimum, result.maximum)

@@ -382,9 +382,7 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
 
 
 def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg):
-    builder = v2.TimelineBuilder(
-        mock_soccfg, reps=2, initial_delay=0, relax_delay=0
-    )
+    builder = v2.TimelineBuilder(mock_soccfg, reps=2, initial_delay=0, relax_delay=0)
     length = builder.add_sweep(
         "length", v2.SweepCfg(start=0.1, stop=0.3, step=0.1, expts=3)
     )
@@ -392,7 +390,10 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
         v2.Pulse(
             "drive",
             v2.PulseCfg(
-                ch=0, nqz=1, freq=1000, gain=0.2,
+                ch=0,
+                nqz=1,
+                freq=1000,
+                gain=0.2,
                 waveform=ConstWaveformCfg(length=0.1),
             ),
             length=length,
@@ -410,7 +411,9 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
     # Native lengths are 38, 76, 114 fabric cycles. The k=8 upper
     # conversion gives 43, 86, 128 tProc cycles, plus the largest offset.
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        63, 106, 148
+        63,
+        106,
+        148,
     ] * 2
 
 

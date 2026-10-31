@@ -253,9 +253,7 @@ class TimelinePlacedConfig(ConfigReadout):
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
             self.source.t_regs["t"] = "s_out_time"
-            finish = self.book.math.add(
-                origin, placement_time(prog, self.relative_t)
-            )
+            finish = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.book.set_end(self.timeline, self.book.math.maximum(0.0, finish))
             return
         self.source.t = origin + placement_time(prog, self.relative_t)

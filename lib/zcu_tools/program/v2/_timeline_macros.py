@@ -492,7 +492,11 @@ class TimelineSync(Delay):
         if isinstance(self.t, RuntimeEnd) and self.literal_advance:
             operations.append(
                 AsmInst(
-                    inst={"CMD": "TIME", "C_OP": "inc_ref", "LIT": f"#{self.literal_advance}"},
+                    inst={
+                        "CMD": "TIME",
+                        "C_OP": "inc_ref",
+                        "LIT": f"#{self.literal_advance}",
+                    },
                     addr_inc=1,
                 )
             )
