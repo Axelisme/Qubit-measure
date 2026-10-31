@@ -274,7 +274,7 @@ def inputs(
     )
     manifest.roots.data_root.mkdir(parents=True)
     prepared = PreparedRunData(
-        native_container(), native_cfg(), LabberMetadata(), "independent"
+        native_container(), native_cfg(), LabberMetadata(), metadata.experiment, "independent"
     )
     return manifest, prepared, metadata.snapshot
 

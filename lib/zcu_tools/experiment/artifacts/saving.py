@@ -114,6 +114,11 @@ def save_artifacts(
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()
+        for member in artifact.members:
+            if isinstance(member, DataItem) and not isinstance(
+                member.data, DataPreparationFailure
+            ):
+                member.data.validate_metadata(record.metadata)
     results: list[OutputResult] = []
     for artifact in artifacts:
         for member in artifact.members:

@@ -79,6 +79,7 @@ class PreparedRunData:
     container: Container
     cfg: CfgSnapshot
     labber_metadata: LabberMetadata
+    experiment_tag: str
     labber_layout: Literal["common", "independent"] = "common"
 
     def __post_init__(self) -> None:
@@ -95,6 +96,20 @@ class PreparedRunData:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
         object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
 
+    def validate_metadata(self, metadata: JsonObject) -> RunMetadata:
+        """Validate native history and its declaration tag without performing I/O.
+
+        Return typed evidence; missing/invalid fields or an experiment mismatch
+        raise ValueError naming /docs/metadata. Extra keys remain in the caller's
+        document for writing, not in this typed projection.
+        """
+        projected = _validate_metadata_doc(metadata)
+        if projected.experiment != self.experiment_tag:
+            raise ValueError(
+                f"/docs/metadata: experiment {projected.experiment!r} does not match {self.experiment_tag!r}"
+            )
+        return projected
+
     def to_container(self, metadata: JsonObject) -> Container:
         """Return the prepared arrays with validated docs/cfg and docs/metadata.
 
@@ -104,7 +119,7 @@ class PreparedRunData:
         docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
-        _validate_metadata_doc(metadata)
+        self.validate_metadata(metadata)
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
         docs["metadata"] = deepcopy(_JSON.validate_python(metadata))
@@ -154,6 +169,7 @@ def prepare_run_data(
         container,
         cfg,
         LabberMetadata(comment=comment, tags=spec.tag),
+        spec.tag,
         spec.labber_layout if isinstance(spec, GroupedAxesSpec) else "common",
     )
 

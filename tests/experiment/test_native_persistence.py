@@ -564,6 +564,7 @@ def test_prepared_envelope_isolates_mappings_without_copying_arrays() -> None:
         replace(original.container, vars=variables),
         original.cfg,
         original.labber_metadata,
+        original.experiment_tag,
     )
     variables.clear()
     original.labber_metadata.tags.append("later")
