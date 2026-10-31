@@ -287,9 +287,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         curves = np.full_like(means, np.nan)
         seed_means = np.full((2, len(data.seeds), 2, len(data.depths)), np.nan)
         seed_variances = np.full_like(seed_means, np.nan)
-        estimate = None
-        fit = None
-        quality = None
+        estimate, fit, quality = None, None, None
         reason = None
         if cfg is None:
             reason = "RB analysis requires saved cfg; current Form is not a substitute"
