@@ -35,8 +35,8 @@ from .._phase import QuadraturePhase
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
 from .analysis import (
     ConditionalPhaseAnalysis,
-    count_quadratures,
     PhaseSlopeFit,
+    count_quadratures,
     fit_phase_slopes,
     fitted_crossings,
     phase_points,
