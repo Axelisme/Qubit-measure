@@ -1,10 +1,16 @@
 """Adapt core callables to explicit operation capabilities."""
 
-from zcu_tools.cfg_model import ConfigBase
+from copy import deepcopy
 
-from .operations import Completed, RunFunction
+from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import JsonObject
+
+from .acquisition import capture_device_snapshot
+from .context import RunContext
+from .operations import Completed, MissingCapability, RunFunction
 from .records import RunRecord
 from .scope import Scope
+from .script_host import CallContext
 
 
 async def run_core[Cfg: ConfigBase, Result](
@@ -14,5 +20,40 @@ async def run_core[Cfg: ConfigBase, Result](
     *,
     name: str | None = None,
 ) -> Completed[RunRecord[Cfg, Result]]:
-    """Run a core once with an owned cfg and operation resources, without saving."""
-    raise NotImplementedError("Core adaptation and pre-call metadata are not implemented")
+    """Call experiment(cfg, *, context) once under scope, without saving.
+
+    scope must have a runtime supplying operation CallContext resources, as
+    WorkflowEnv does. experiment may be a bound Experiment.run. cfg must be a
+    ConfigBase; it is deep-copied before operation admission and never mutated.
+    name is an optional explicit operation label. The returned RunRecord holds
+    the core's returned value and cfg at return, with detached pre-call settings
+    in metadata["device_snapshot"]. Every connected driver is read once before
+    the core; empty devices records {}. Driver errors prevent the core call.
+    Missing soc, soccfg, devices or plots raises MissingCapability; unavailable
+    devices never falls back to an empty mapping. Non-ConfigBase cfg raises
+    TypeError. Core and plotting errors propagate unchanged. The framework owns
+    plots cleanup and completion facts. Child stops deliver the core's partial
+    value; root stop raises ScriptCancelled after drain and fact recording.
+    """
+    if not isinstance(cfg, ConfigBase):
+        raise TypeError("run_core cfg must be a ConfigBase instance")
+    captured = deepcopy(cfg)
+
+    def invoke(ctx: CallContext) -> RunRecord[Cfg, Result]:
+        if ctx.soc is None:
+            raise MissingCapability("soc")
+        if ctx.soccfg is None:
+            raise MissingCapability("soccfg")
+        if ctx.devices is None:
+            raise MissingCapability("devices")
+        if ctx.plots is None:
+            raise MissingCapability("plots")
+        context = RunContext(
+            soc=ctx.soc, soccfg=ctx.soccfg, devices=ctx.devices,
+            plots=ctx.plots, scope=ctx.scope,
+        )
+        snapshot: JsonObject = dict(capture_device_snapshot(context.devices))
+        result = experiment(captured, context=context)
+        return RunRecord(captured, result, metadata={"device_snapshot": snapshot})
+
+    return await scope.call(invoke, name=name)
