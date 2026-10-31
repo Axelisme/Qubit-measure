@@ -20,8 +20,8 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    TwoPulseReset,
     TimelineBuilder,
+    TwoPulseReset,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -129,7 +129,9 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         # Sweep both durations together before reading out the reset response.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             length = builder.add_sweep("length", cfg.length)
             tested_reset_cfg = deepcopy(cfg.tested_reset)
             tested_reset_cfg.pulse1_cfg.set_param("length", length)
