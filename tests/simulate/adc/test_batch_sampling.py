@@ -58,6 +58,63 @@ def physical_batches(*, covariance=None, rates=None):
     return {3: batch, 1: batch}
 
 
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
+    batches = physical_batches(rates=np.array([[0.0, 0.04], [0.02, 0.0]]))
+    original = batches[1]
+    receiver = adc.Receiver(
+        iq_offset=np.array([11.0, -7.0]),
+        noise_covariance=np.array([[4.0, 0.5], [0.5, 2.0]]),
+    )
+    empty = replace(
+        original,
+        model=replace(original.model, receiver=receiver),
+        events=((adc.ReadoutEvent((), original.events[0][0].grids),),),
+        include_traces=True,
+    )
+    # A zero-amplitude carrier is the existing no-physical-field reference.
+    reference = replace(
+        empty,
+        events=((replace(original.events[0][0], pulses=(
+            replace(original.events[0][0].pulses[0], amplitude=0.0),
+        )),),),
+    )
+    conditional = adc.ADC(empty.model).responses(empty)
+    assert conditional.traces is not None
+    np.testing.assert_array_equal(
+        conditional.traces,
+        np.broadcast_to([11.0, -7.0], conditional.traces.shape),
+    )
+    np.testing.assert_array_equal(
+        adc.ADC(empty.model).responses(replace(empty, include_traces=False)).sums,
+        conditional.traces.sum(axis=-2),
+    )
+    readout = adc.ProjectionReadout.unprojected(np.array([[[0.4, 0.6], [0.7, 0.3]]]))
+    identity = SamplingIdentity(811, (2, 3, 0))
+    reps = 6000
+
+    def sample(batch):
+        if mode == "integrated":
+            return adc.PreparedRawShots(readout, {3: batches[3], 1: batch}, reps=reps).bind(
+                identity
+            ).materialize(reps, 1)
+        result = adc.sample_traces(
+            readout, {3: batches[3], 1: batch}, reps=reps, identity=identity
+        )
+        return {channel.channel: channel.iq for channel in result.channels}
+
+    actual, expected = sample(empty), sample(reference)
+    np.testing.assert_array_equal(actual[3], expected[3])
+    np.testing.assert_array_equal(actual[1], expected[1])
+    observations = actual[1].reshape(-1, 2)
+    count = 4 if mode == "integrated" else 1
+    np.testing.assert_allclose(observations.mean(axis=0), count * receiver.iq_offset, atol=0.08)
+    # Integrated integer rounding adds at most its 1/12 variance term.
+    np.testing.assert_allclose(
+        np.cov(observations.T), count * receiver.noise_covariance, atol=0.25
+    )
+
+
 def test_decimated_shots_share_states_paths_and_keep_content_and_sample_order():
     batches = physical_batches(rates=np.array([[0, 0.04], [0.02, 0]]))
     result = adc.sample_traces(
