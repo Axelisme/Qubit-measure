@@ -224,8 +224,9 @@ class AcquisitionRunner:
         and final raw payload to the slot shape. options selects retry, progress
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
-        Interrupt or cancellation records the Schedule outcome and returns partial
-        data. Producer failures use the explicit retry budget, including zero
+        Cancellation records the Schedule outcome and returns partial data.
+        KeyboardInterrupt propagates unchanged without retry. Producer failures
+        use the explicit retry budget, including zero
         retries, then propagate unchanged. A concurrent stop prevents retry but
         does not suppress the failure. Overrun restores the pre-acquire slot.
         Conversion/update errors propagate without retry.
@@ -269,9 +270,6 @@ class AcquisitionRunner:
                     break
                 except _CallbackError as exc:
                     raise exc.error from None
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                    break
                 # Retry producer failures; exhausted errors propagate unchanged.
                 except Exception as exc:
                     if self._schedule.check_stop_requested(exception=exc):
@@ -288,8 +286,6 @@ class AcquisitionRunner:
                 slot.set(signal_fn(raw))
                 observation.log_early_stop(rounds)
                 break
-        except KeyboardInterrupt as exc:
-            self._schedule.mark_interrupted(exc)
         finally:
             pbar.close()
 

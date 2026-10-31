@@ -387,18 +387,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
             # Enrich a prior stop without replacing its status or an earlier cause.
             self._outcome = replace(self._outcome, exception=exception)
 
-    def mark_interrupted(self, exc: BaseException) -> None:
-        """Stop the run after an interrupt without discarding buffered results.
-
-        Record exc on the outcome and shared stop signal only if no prior
-        non-completed outcome exists; otherwise preserve that outcome and cause.
-        """
-        reason = exception_reason(exc)
-        if self._set_outcome("interrupted", reason=reason, exception=exc):
-            self.stop.set_error("interrupted", reason, exc)
-        else:
-            self.stop.set()
-
     def mark_failed(self, exc: BaseException) -> None:
         """Stop the run after a failure without discarding buffered results.
 
