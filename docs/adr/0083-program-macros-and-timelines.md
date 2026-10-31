@@ -31,9 +31,27 @@ Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 
 這些檢查由 program 擁有，builder 不解析 module 的內部資源；`ModularProgramV2` 的規則不變。
 
 作者在 `_initialize` 建立並 `declare(module)`，在 `_body` 呼叫 `emit(module, timeline=..., tag=...)`。
-Module 保存資源宣告結果，不繼承 QICK Macro，也不能直接傳給 `append_macro`。
+Module 描述資源需求，不繼承 QICK Macro，也不能直接傳給 `append_macro`。
+原生路徑由 `TimelineProgramV2` 以 module 物件身分為 key 持有宣告結果，宣告時寫入，lowering 從該 program 讀取。
+同一 module 物件可同時宣告進多個原生 program，手寫 program 與 `TimelineBuilder` 都適用。
+重新 compile 只重建該 program 的宣告結果，不覆寫其他 program 的資源。
+Legacy `ModularProgramV2` 仍將宣告狀態放在 module 上，不提供此跨 program 重用契約。
+
+2026-10-30，對宣告結果改由 program 持有的 B1 方案，使用者回答：「我也傾向B1，原因是對作者而言最小驚訝」。
+Builder 深複製只解決 builder 的重用，且會分離原物件與複本的身分，手寫 program 不受益。
+切換 program 時重新綁定也無法保留多個 program 各自的宣告結果，因此兩者都不能取代 program ownership。
+
+作者以 `Pulse("probe", cfg.probe, freq=freq)` 這類 constructor keyword 傳入數值或 sweep。
+支援覆寫的 module 建構子先複製 cfg，再套用覆寫並保留有效 cfg，caller cfg 不變。
+`None` 沿用原值。
+Registry identity、read axes 與 lowering 都使用有效 cfg。
+作者不必只為套入掃描值先 deepcopy cfg，也不必知道 waveform 的內部路由。
+各 module 的 keyword、單位與限制見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
+2026-10-30，對掃描值的作者寫法，使用者指出：「11其實我覺得set_param有點複雜，不夠python原生，作者不容易直接看出來要怎麼寫新實驗。」
+使用者選擇「11B」，採用建構時 keyword 覆寫。
+
 每次 emit 建立新的通用 `ModuleEmission`，時間與 tag 屬於那次發射。
-各 module owner 提供宣告與 lowering，不經舊 `run`。
+各 module owner 提供宣告與 lowering，原生 declare／lower 不呼叫 legacy `init`／`run`。
 只有確實需要不同 preprocess／expand 行為時，才另建 macro 類別。
 
 使用者於 2026-10-29 對原生作者入口指出：「我覺得不太好，用program寫法就該接近原生的寫法，而builder才該設計成一個with scope，內部是像body的寫法」。
@@ -322,7 +340,7 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 | B，已交付 | 其餘 Module lowering、規則 b、runtime timeline 與 a→b 時序差異報告。新路徑不讀 block_mode，legacy 欄位與 init／run 保留到 D。B 不遷移實驗、不改模擬 frontend，也不刪舊路徑。MuxReadout 只轉換 declaration／playback，collect_raw_iq 仍只接受 legacy program。 |
 | Builder，已交付 | 在 B 的 TimelineProgramV2 上提供序列錄製與 build，Schedule 提供共用 run_acquire*。交付時與舊 builder 並存，不遷移實驗，也不等待 C 的 frontend 切換。 |
 | C，已交付 | 兩種 program 共用優化前 compiled snapshot 與唯一 compiled simulation frontend，已完成既定語料的 parity／完整 acquire 效能驗收並移除舊 Module-tree simulation frontend。現行支援與拒絕範圍見上節；大量實驗遷移仍未交付。 |
-| D，另行交付 | 刪除舊 init／run 路徑與退役的 legacy 入口，不再於此切換規則 b。 |
+| D，另行交付 | 原生宣告 ownership 與 constructor overrides 已交付。2026-10-31，對 D 移回大量實驗遷移結尾的安排，使用者回答：「採用建議」。屆時一併刪除舊 init／run／block_mode、ModularProgramV2 與 ProgramBuilder。set_param 也於大量遷移時退出作者介面。目前 legacy 路徑與 set_param 保留，不先替即將退役的 ModularProgramV2 改寫 declare／lower 路徑。D 不再切換規則 b。 |
 
 2026-10-29，對規則 b 與差異報告提前到 B、D 只刪舊路徑的安排，使用者回答：「採用建議」。
 同日，對 B 的 register delay、Module Join lowering 與 Mux 取數範圍，使用者回答：「1A  2B 3A」。
