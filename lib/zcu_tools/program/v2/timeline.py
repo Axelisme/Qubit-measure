@@ -632,6 +632,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         *,
         timeline: str | None = None,
         tag: str | None = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         """Add time to a timeline without advancing reference or channel timestamps.
 
@@ -644,6 +645,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         ValueError during compilation. tag exposes static ends as parameter 't';
         runtime ends have no affine get_time_param value.
         """
+        if range_hint is not None:
+            if not isinstance(t, str):
+                raise ValueError("range_hint requires a register time")
+            _repeat_minimum("time", t, range_hint)
         selected = timeline if timeline is not None else self._timeline_default
         self.append_macro(
             TimelineAdvance(
@@ -651,6 +656,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 selected if selected is not None else "default",
                 t,
                 tag=tag,
+                range_hint=range_hint,
             )
         )
 
