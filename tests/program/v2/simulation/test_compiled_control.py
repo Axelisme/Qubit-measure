@@ -58,9 +58,9 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(sync_at_
             with p.repeat("inner", 2):
                 p.pulse(0, "p", timeline="default", tag="repeated")
                 if sync_at_end:
-                    p.sync()
+                    p.delay_by_timeline()
             if sync_at_end:
-                p.sync()
+                p.delay_by_timeline()
 
     prog, env = program(body, trigger_time=None)
     result = request(prog, env)
@@ -95,7 +95,7 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(
         with p.repeat("inner", "count", range_hint=(0, 2)):
             p.pulse(0, "p", timeline="default", tag="repeated")
             if sync_at_end:
-                p.sync()
+                p.delay_by_timeline()
         p.pulse(0, "p", timeline="default", tag="final")
 
     # Counts 0..2 leave 86 cycles of shell WAIT slack; allow that exact budget.
@@ -131,7 +131,7 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
             ):
                 p.pulse(1, "drive", tag="repeated")
             with cases.case(1):
-                p.delay_timeline(43 / 430.08)
+                p.timeline_inc(43 / 430.08)
         p.pulse(1, "drive", timeline="default", tag="final")
 
     prog, env = program(body, initialize, trigger_time=None)
@@ -159,12 +159,12 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
     def body(p):
         p.trigger([0], t=0)
         p.fork("default", into="external")
-        p.delay_timeline(100 / 430.08, timeline="external")
+        p.timeline_inc(100 / 430.08, timeline="external")
         with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
                     p.pulse(0, "p", tag=f"case-{index}")
-                    p.delay_timeline((10 + index * 10) / 430.08)
+                    p.timeline_inc((10 + index * 10) / 430.08)
         p.join("external", into="default")
         p.pulse(1, "tail", timeline="default", tag="tail")
 
@@ -191,7 +191,7 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
     def body(p):
         if register_count:
             p.emit(loader)
-        p.sync()
+        p.delay_by_timeline()
         with p.repeat(
             "inner",
             "count" if register_count else count,
@@ -210,7 +210,7 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
                 )
             )
             p.pulse(0, "p", timeline="default")
-            p.sync()
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     static = prog.ro_chs[0]["trigs"]
@@ -244,7 +244,7 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
 
     def body(p):
         p.emit(loader)
-        p.sync()
+        p.delay_by_timeline()
         with p.repeat("inner", "count", range_hint=(1, 3)):
             p.append_macro(
                 Trigger(
@@ -259,7 +259,7 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
                 )
             )
             p.pulse(0, "p", timeline="default")
-            p.sync()
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     static = prog.ro_chs[0]["trigs"]
@@ -284,12 +284,12 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
         p.fork("default", into=["left", "right"])
         p.emit(left)
         p.emit(right)
-        p.delay_timeline("left_time", timeline="left")
-        p.delay_timeline("right_time", timeline="right")
-        p.delay_timeline(25 / 430.08)
+        p.timeline_inc("left_time", timeline="left")
+        p.timeline_inc("right_time", timeline="right")
+        p.timeline_inc(25 / 430.08)
         p.join("left", "right", into="default")
         p.delay(20 / 430.08)
-        p.sync()
+        p.delay_by_timeline()
         p.pulse(0, "p", timeline="default")
 
     prog, env = program(body, initialize, trigger_time=None)
@@ -309,7 +309,7 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
     def body(p):
         p.emit(loader)
-        p.sync()
+        p.delay_by_timeline()
         with p.repeat("inner", "count", range_hint=(0, 2)):
             p.append_macro(
                 Trigger(
@@ -324,7 +324,7 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
                 )
             )
             p.pulse(0, "p", timeline="default")
-            p.sync()
+            p.delay_by_timeline()
 
     prog, env = program(body, initialize, trigger_time=None)
     assert prog.ro_chs[0]["trigs"] == 1
@@ -358,7 +358,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        p.sync()
+        p.delay_by_timeline()
         with p.repeat("reads", 3):
             with p.branch(by="scan", align_timeline=True) as branch:
                 for index in range(3):
@@ -366,7 +366,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
                         p.fork(case, into="capture")
                         p.trigger([0, 1], t=0, timeline="capture")
                         p.pulse(0, "p", tag=f"case-{index}")
-            p.sync()
+            p.delay_by_timeline()
 
     prog, env = program(
         body,

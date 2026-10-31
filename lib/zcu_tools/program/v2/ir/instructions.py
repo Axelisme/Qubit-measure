@@ -46,6 +46,7 @@ from .labels import Label, LabelRef
 from .operands import (
     AddrType,
     AluExpr,
+    AluOp,
     DmemAddr,
     ExprType,
     Immediate,
@@ -238,7 +239,7 @@ class MetaInst(Instruction):
 
 @dataclass(frozen=True)
 class TimeInst(BaseInst):
-    """TIME instruction: advance timing counter."""
+    """TIME instruction: update the reference clock independently of s14."""
 
     c_op: TimeCOp
     lit: Immediate | None = None
@@ -255,15 +256,13 @@ class TimeInst(BaseInst):
     @property
     def reg_read(self) -> frozenset[str]:
         reads = self.r1.regs() if self.r1 else frozenset()
-        if self.c_op == "inc_ref":
-            reads = reads | {TIMED_BASE_REG}
         if self.c_op == "updt":
             reads = reads | {USR_TIME_REG}
         return reads
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return frozenset({TIMED_BASE_REG})
+        return frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -423,6 +422,31 @@ class RegWriteInst(BaseInst):
         if self.wr is not None:
             writes = writes | self.wr.regs()
         return writes
+
+    @property
+    def is_pure_self_copy(self) -> bool:
+        """Whether this write copies its destination without any other effect."""
+        return (
+            self.src == SrcKeyword.OP
+            and self.op is not None
+            and self.op.op == AluOp.NONE
+            and self.op.rhs is None
+            and self.op.lhs.regs() == self.dst.regs()
+            and not self.uf
+            and self.if_cond is None
+            and all(
+                value is None
+                for value in (
+                    self.wr,
+                    self.ww,
+                    self.wp,
+                    self.port,
+                    self.lit,
+                    self.addr,
+                    self.label,
+                )
+            )
+        )
 
     @property
     def need_label(self) -> Label | None:
