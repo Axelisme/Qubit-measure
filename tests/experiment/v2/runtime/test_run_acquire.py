@@ -12,8 +12,11 @@ from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.experiment.v2.runtime.acquisition import SynchronousAcquireKeywords
-from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    AcquireOptions,
+    SynchronousAcquireKeywords,
+)
+from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -46,6 +49,87 @@ class RawProgram:
         **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
     ) -> list[NDArray[np.float64]]:
         return self.acquire(soc, **kwargs)
+
+
+@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
+@pytest.mark.parametrize("retry", [0, 2])
+@pytest.mark.parametrize("cancel_on_failure", [False, True])
+def test_producer_failure_propagates_same_exception_after_explicit_retries(
+    entry: str, mode: str, retry: int, cancel_on_failure: bool
+) -> None:
+    cause = RuntimeError("producer failed")
+    attempts: list[int] = []
+    root = Scope("run")
+    buffer = SignalBuffer((1,))
+
+    def fail() -> None:
+        attempts.append(1)
+        if cancel_on_failure:
+            root.stop.set()
+        raise cause
+
+    class FailingProgram(RawProgram):
+        def acquire(
+            self,
+            soc: object,
+            **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
+        ) -> list[NDArray[np.float64]]:
+            kwargs["round_hook"](1, self.raw, kwargs["cancel_flag"])
+            fail()
+            return self.raw
+
+        def acquire_summed(
+            self,
+            soc: object,
+            *,
+            processor: ShotSumProcessor,
+            rounds: int = 1,
+            step_rounds: bool = False,
+            **qick_options: object,
+        ) -> NDArray[np.float64]:
+            fail()
+            return np.ones((1,))
+
+    program = FailingProgram([np.array([[[3.0, 4.0]]])])
+    with pytest.raises(RuntimeError) as caught, Schedule({}, buffer, scope=root) as sched:
+        if entry == "schedule":
+            options = RunOptions[list[NDArray[np.float64]]](
+                retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
+            )
+            if mode == "integrated":
+                sched.run_acquire(program, object(), options=options)
+            elif mode == "decimated":
+                sched.run_acquire_decimated(program, object(), options=options)
+            else:
+                sched.run_acquire_summed(
+                    program,
+                    object(),
+                    processor=lambda _iq: np.ones((1,)),
+                    options=RunOptions(retry=retry),
+                )
+        else:
+            builder = sched.prog_builder(object(), object())
+            acquire_options = AcquireOptions(retry=retry)
+            if mode == "integrated":
+                builder.run_program(program, options=acquire_options)
+            elif mode == "decimated":
+                builder.run_program_decimated(
+                    program,
+                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]).reshape(1),
+                    options=acquire_options,
+                )
+            else:
+                builder.run_program_summed(
+                    program,
+                    processor=lambda _iq: np.ones((1,)),
+                    sums2signal_fn=lambda raw: raw,
+                    options=acquire_options,
+                )
+    assert caught.value is cause
+    assert len(attempts) == (1 if cancel_on_failure else retry + 1)
+    if mode != "summed":
+        np.testing.assert_array_equal(buffer.array, [3 + 4j])
 
 
 @pytest.mark.parametrize("entry", ["schedule", "builder"])
