@@ -47,7 +47,6 @@ from ._timeline_runtime import (
     optional_time_bounds,
     source_expression,
     step_time,
-    time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import (
@@ -472,7 +471,7 @@ class TimelineSync(Delay):
             super().preprocess(prog)
 
 
-class TimelineRepeatEnter(Macro):
+class ZeroEntryReferenceEnter(Macro):
     """Isolate the constant-zero loop namespace without moving reference."""
 
     def __repr__(self) -> str:
@@ -510,7 +509,7 @@ class TimelineRepeatEnter(Macro):
         self.book.ends = {parent: 0.0}
 
 
-class TimelineRepeatExit(Macro):
+class ZeroEntryReferenceExit(Macro):
     """Restore outer ends using only the body's explicit reference advances."""
 
     def __repr__(self) -> str:
@@ -574,12 +573,15 @@ class TimelineRepeatExit(Macro):
         runtime: dict[str, Time] = {}
         for name, end in self.book.ends.items():
             if isinstance(end, RuntimeEnd):
-                upper = time_bounds(prog, frame.initial_external[name])[1]
+                limits = optional_time_bounds(prog, frame.initial_external[name])
                 debit = _bounds(frame.advance)[0] * self.count
+                upper = (
+                    None
+                    if limits is None
+                    else max(0, round((limits[1] - debit) * get_fclk(prog)))
+                )
                 runtime[name] = (
-                    RuntimeEnd(
-                        end.register, 0, max(0, round((upper - debit) * get_fclk(prog)))
-                    )
+                    RuntimeEnd(end.register, 0, upper)
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
                 )
@@ -659,7 +661,7 @@ class TimelineRepeatExit(Macro):
                 )
 
 
-class RepeatTimelineEnter(Macro):
+class RepeatLoweringEnter(Macro):
     """Choose one lowering from recorded structure and the incoming end."""
 
     def __repr__(self) -> str:
@@ -670,7 +672,7 @@ class RepeatTimelineEnter(Macro):
         self.book = book
         self.parent = parent
         self.tail_sync = False
-        self.reference = TimelineRepeatEnter(book, parent, counter)
+        self.reference = ZeroEntryReferenceEnter(book, parent, counter)
         self.accumulator = LoopTimelineEnter(book, parent, counter)
         self.constant = False
         self.counter = counter
@@ -725,7 +727,7 @@ class RepeatTimelineBody(Macro):
         # QICK eagerly formats macros even when debug logging is disabled.
         return f"{type(self).__name__}()"
 
-    def __init__(self, entry: RepeatTimelineEnter):
+    def __init__(self, entry: RepeatLoweringEnter):
         self.entry = entry
 
     def preprocess(self, prog) -> None:
@@ -748,7 +750,7 @@ class RepeatTimelineCapture(Macro):
         # QICK eagerly formats macros even when debug logging is disabled.
         return f"{type(self).__name__}()"
 
-    def __init__(self, entry: RepeatTimelineEnter):
+    def __init__(self, entry: RepeatLoweringEnter):
         self.entry = entry
 
     def preprocess(self, prog) -> None:
@@ -767,7 +769,7 @@ class RepeatTimelineCapture(Macro):
         pass
 
 
-class RepeatTimelineExit(Macro):
+class RepeatLoweringExit(Macro):
     """Close the selected lowering without adding an implicit synchronization."""
 
     def __repr__(self) -> str:
@@ -776,7 +778,7 @@ class RepeatTimelineExit(Macro):
 
     def __init__(
         self,
-        entry: RepeatTimelineEnter,
+        entry: RepeatLoweringEnter,
         iterations: int | str,
         minimum: int,
         maximum: int | None,
@@ -788,7 +790,7 @@ class RepeatTimelineExit(Macro):
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
-        self.reference = TimelineRepeatExit(
+        self.reference = ZeroEntryReferenceExit(
             entry.book,
             minimum,
             maximum,
@@ -1273,7 +1275,7 @@ class TimelineBranch(Macro):
                 macro.iterations
                 for case in self.cases
                 for macro in case
-                if isinstance(macro, (LoopTimelineExit, RepeatTimelineExit))
+                if isinstance(macro, (LoopTimelineExit, RepeatLoweringExit))
                 and isinstance(macro.iterations, str)
             }
             for register in registers:

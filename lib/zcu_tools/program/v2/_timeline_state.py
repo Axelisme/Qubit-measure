@@ -213,7 +213,8 @@ class RepeatFrame:
         if self.entry_math is None:
             raise RuntimeError("repeat entry has no arithmetic plan")
         for name, end in self.external.items():
-            if time_bounds(prog, end)[1] > 1e-12:
+            limits = optional_time_bounds(prog, end)
+            if limits is None or limits[1] > 1e-12:
                 self.external[name] = self._store(prog, end)
         self.tail_gens = self._native_stores(
             prog, self.native_gens, self.initial_runtime_gens, self.written_gens
@@ -272,7 +273,8 @@ class RepeatFrame:
         result: dict[int, RuntimeEnd] = {}
         for ch, value in initial.items():
             end = runtime.get(ch, value)
-            if time_bounds(prog, end)[1] <= 1e-12 and ch not in written:
+            limits = optional_time_bounds(prog, end)
+            if limits is not None and limits[1] <= 1e-12 and ch not in written:
                 continue
             match = next(
                 (
