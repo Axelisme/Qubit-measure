@@ -1054,8 +1054,6 @@ class TimelineBranch(Macro):
                     and register not in prog.loop_dict
                     else source_expression(prog, register)
                 )
-                if expression is None:
-                    raise RuntimeError("branch entry source has no cycle expression")
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
                     if not variable.producer.axes or (

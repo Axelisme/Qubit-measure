@@ -73,13 +73,7 @@ def cycle_variable(
     name: str,
     minimum: int | None,
     maximum: int | None,
-    axes: tuple[tuple[str, int], ...] = (),
-    points: tuple[int, ...] | None = None,
-    *,
-    interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None,
-    reconstruction: "TimeExpression | None" = None,
-    selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None,
-    fixed_point: "tuple[TimeExpression, int] | None" = None,
+    producer: CycleProducer = CycleProducer(),
 ) -> CycleVariable:
     """Capture a producer's range once, without evaluating expression grids.
 
@@ -88,6 +82,7 @@ def cycle_variable(
     multi-loop nonlinear results receive independent IDs, even with bounds.
     Recipe metadata survives independently for runtime reconstruction.
     """
+    axes, points, interval_points = producer.axes, producer.points, producer.interval_points
     source: str | object = object()
     start, end = minimum, maximum
     low = high = (Fraction(0),)
@@ -108,7 +103,7 @@ def cycle_variable(
     return CycleVariable(
         name,
         VariableRange(source, start, end, low, high),
-        CycleProducer(axes, points, interval_points, reconstruction, selection, fixed_point),
+        producer,
     )
 
 
@@ -249,23 +244,31 @@ def evaluate_time(
 
 
 def exact_bounds(value: TimeExpression) -> CycleBounds | None:
-    """Return exact legal-point extrema, or None for a nonconstant unknown input.
+    """Return the common range only when its extrema are attainable.
 
-    Algebraic constants use no Cartesian allocation. Other expressions evaluate
-    only the appearing loop axes, not all of the program's sweep dimensions.
+    Unknown-input envelopes cannot establish actual slack. A multi-loop
+    nonlinear source is independent in this representation; if another term
+    reuses its axes, no exact-extrema claim is made. No linear-expression grid
+    is evaluated to obtain these bounds.
     """
     if unbounded_time(value):
-        points = evaluate_time(value, expression_axes(value))
-        return (
-            None
-            if points is None
-            else CycleBounds(int(points.min()), int(points.max()))
-        )
+        return None
+    variables = time_variables(value)
     limits = expression_bounds(value)
     if limits.minimum == limits.maximum:
         return limits
-    points = evaluate_time(value, expression_axes(value))
-    return None if points is None else CycleBounds(int(points.min()), int(points.max()))
+    for variable in variables:
+        recipe = variable.producer
+        if recipe.interval_points is not None or not recipe.axes:
+            return None
+        if not isinstance(variable.bounds.source, str):
+            axes = dict(recipe.axes).keys()
+            if any(
+                other is not variable and axes & dict(other.producer.axes).keys()
+                for other in variables
+            ):
+                return None
+    return limits
 
 
 def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
@@ -282,7 +285,7 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
             index = int(upper == (coefficient > 0))
             points = variable.producer.interval_points[index]
             endpoint = cycle_variable(
-                variable.name, min(points), max(points), variable.producer.axes, points
+                variable.name, min(points), max(points), CycleProducer(variable.producer.axes, points)
             )
             terms.append((endpoint, coefficient))
         elif variable.producer.axes:
@@ -302,27 +305,11 @@ def projected_expression_bounds(value: TimeExpression) -> CycleBounds:
     return expression_bounds(value)
 
 def slack_variables(value: TimeExpression) -> list[str]:
-    """Name unknown sources and known producers on axes that change the tail."""
-    axes = expression_axes(value)
-    changing: set[str] = set()
-    grids = interval_arrays(value, axes)
-    for points in (grids.minimum, grids.maximum):
-        points = np.broadcast_to(points, tuple(axes.values()))
-        for dimension, name in enumerate(axes):
-            if np.any(np.diff(points, axis=dimension)):
-                changing.add(name)
-    return sorted(
-        {
-            v.name
-            for v in time_variables(value)
-            if v.minimum != v.maximum
-            and (
-                not v.producer.axes
-                or v.producer.interval_points is not None
-                or any(name in changing for name, _ in v.producer.axes)
-            )
-        }
-    )
+    """Name surviving nonconstant cycle sources without constructing a point grid."""
+    return sorted({
+        variable.name for variable in time_variables(value)
+        if variable.minimum != variable.maximum
+    })
 
 
 def point_time(
@@ -334,8 +321,9 @@ def point_time(
     if lower == upper:
         return LinearTime(lower)
     variable = cycle_variable(
-        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in points.flat),
-        reconstruction=reconstruction,
+        name, lower, upper, CycleProducer(
+            tuple(axes.items()), tuple(int(v) for v in points.flat), reconstruction=reconstruction,
+        ),
     )
     return LinearTime(terms=((variable, 1),))
 
@@ -383,10 +371,11 @@ def interval_time(
         name,
         int(lower.min()),
         int(upper.max()),
-        tuple(axes.items()),
-        interval_points=(
-            tuple(int(v) for v in lower.flat),
-            tuple(int(v) for v in upper.flat),
+        CycleProducer(
+            tuple(axes.items()), interval_points=(
+                tuple(int(v) for v in lower.flat),
+                tuple(int(v) for v in upper.flat),
+            ),
         ),
     )
     return LinearTime(terms=((variable, 1),))
@@ -528,8 +517,8 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
             return unique[index]
     choice = TimeChoice(unique, maximum)
     axes = expression_axes(choice)
-    if len(axes) == 1 and all(
-        variable.bounds.source in axes for variable in time_variables(choice)
+    if axes and all(
+        isinstance(variable.bounds.source, str) for variable in time_variables(choice)
     ):
         points = evaluate_time(choice, axes)
         if points is not None:

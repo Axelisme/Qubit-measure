@@ -5,7 +5,6 @@ from dataclasses import replace
 from qick.asm_v2 import Macro, WriteReg
 
 from ._timeline_expression import (
-    CycleVariable,
     cycle_variable,
     LinearTime,
     TimeExpression,

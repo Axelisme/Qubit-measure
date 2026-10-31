@@ -10,6 +10,7 @@ from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
+    CycleProducer,
     CycleVariable,
     cycle_variable,
     LinearTime,
@@ -196,8 +197,6 @@ class RuntimeEnd:
 
 def runtime_expression(value: RuntimeEnd) -> TimeExpression:
     """Return the immutable value identity, independent of mutable register storage."""
-    if value.expression is None:
-        raise RuntimeError("runtime end has no compile-time cycle expression")
     return value.expression
 
 
@@ -248,7 +247,7 @@ def parameter_expression(
         count = prog.loop_dict[name]
         if count > 1:
             if name not in axes:
-                axes[name] = cycle_variable(name, 0, count - 1, ((name, count),))
+                axes[name] = cycle_variable(name, 0, count - 1, CycleProducer(((name, count),)))
             terms.append((axes[name], round(span * factor / (count - 1))))
     return LinearTime(round(value.start * factor), tuple(terms))
 
@@ -293,7 +292,7 @@ def source_expression(prog, name: str) -> TimeExpression:
     if name in prog.loop_dict:
         count = prog.loop_dict[name]
         if name not in book.cycle_axes:
-            book.cycle_axes[name] = cycle_variable(name, 0, count - 1, ((name, count),))
+            book.cycle_axes[name] = cycle_variable(name, 0, count - 1, CycleProducer(((name, count),)))
         return LinearTime(terms=((book.cycle_axes[name], 1),))
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
@@ -328,7 +327,7 @@ def bounded_source_expression(
                         name,
                         minimum,
                         maximum,
-                        reconstruction=prog._timeline_book.source_expressions.get(name),
+                        CycleProducer(reconstruction=prog._timeline_book.source_expressions.get(name)),
                     ),
                     1,
                 ),
@@ -359,10 +358,10 @@ def lookup_expression(
         name,
         lower,
         upper,
-        tuple(axes.items()),
-        tuple(int(v) for v in selected.flat),
-        reconstruction=reconstruction,
-        selection=(index, values),
+        CycleProducer(
+            tuple(axes.items()), tuple(int(v) for v in selected.flat),
+            reconstruction=reconstruction, selection=(index, values),
+        ),
     )
     return LinearTime(terms=((variable, 1),))
 
@@ -576,9 +575,10 @@ class RuntimeMath(TimedMacro):
             "fabric conversion",
             int(values.min()),
             int(values.max()),
-            tuple(axes.items()),
-            tuple(int(v) for v in values.flat),
-            fixed_point=(expression, 8),
+            CycleProducer(
+                tuple(axes.items()), tuple(int(v) for v in values.flat),
+                fixed_point=(expression, 8),
+            ),
         )
         return RuntimeEnd(
             result.register,
@@ -1112,8 +1112,10 @@ class RuntimeMath(TimedMacro):
                 values = points >> right
                 variable = cycle_variable(
                     "shifted cycles", int(values.min()), int(values.max()),
-                    tuple(axes.items()), tuple(int(v) for v in values.flat),
-                    fixed_point=(numerator, right),
+                    CycleProducer(
+                        tuple(axes.items()), tuple(int(v) for v in values.flat),
+                        fixed_point=(numerator, right),
+                    ),
                 )
                 expression = LinearTime(terms=((variable, 1),))
         if operator == "+":
