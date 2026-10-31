@@ -125,8 +125,11 @@ Run 會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 li
 `RunOptions[T_Raw]` 提供 retry、progress、stop_condition 與 converter。`rounds` 等 native 參數直接傳給 run 方法。
 program 層無前綴的 `acquire*` 只取數並回傳，不承擔 slot/live update、自動 retry 或
 Schedule stop_condition。
-Integrated 的預設 converter 將第一個 ADC/readout 的 IQ 轉成複數，summed 直接寫入
-累積總和，decimated 將第一個 ADC 的 trace 轉成複數並保留 repetitions 與 sample axes。
+Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並將 IQ 轉成複數。
+多 ADC 或多 read 時拋出 `ValueError`，訊息列出 ADC 數與各 ADC 的 read 數，要求提供
+`RunOptions(converter=...)`。Summed 直接寫入累積總和。Decimated 的預設 converter
+只接受單一 ADC，將 IQ 轉成複數並保留全部 repetition／read／sample 軸；多 ADC 時
+拋出 `ValueError`，訊息列出 ADC 數並要求提供 converter。
 
 `run_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
 或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
@@ -155,7 +158,8 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
-  預設使用 `default_decimated_raw2signal_fn`。
+  預設使用 `default_decimated_raw2signal_fn`。預設 converter 沿用上述 ADC／read 限制；
+  多 ADC 或 integrated 多 read 的作者須明確提供 `raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
 - 五個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
   progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
@@ -195,7 +199,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
   per-child retry。
-- Shot 超量（`AcquisitionContractError`）的重試上限是 `max(options.retry, 1)`，預設也會重量一次。每次從第一 round 重跑，producer 重建 raw buffers；超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。Warning 保留 expected／received／chunk shots 與 round index。
+- 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。預設 `retry=0` 不重試；需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
   Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
   stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。

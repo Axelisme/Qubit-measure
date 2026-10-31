@@ -88,23 +88,38 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-    """Convert the first receiver/readout's final-axis IQ pairs to complex signals.
+    """Convert a single ADC/read's final-axis IQ pairs to complex signals.
 
-    raw follows integrated program acquisition layout: receiver, readout, then
-    signal axes ending in a length-two I/Q axis. Invalid layouts raise NumPy or
-    indexing errors; this function does not modify raw.
+    raw follows integrated program acquisition layout: ADC, read, then signal
+    axes ending in a length-two I/Q axis. Require exactly one ADC and one read
+    per shot, otherwise raise ValueError requesting an explicit converter.
+    Other invalid layouts raise NumPy or indexing errors. raw is not modified.
     """
+    read_counts = [adc.shape[0] for adc in raw]
+    if len(raw) != 1 or read_counts != [1]:
+        raise ValueError(
+            f"Default integrated conversion: ADC count={len(raw)}, "
+            f"read counts={read_counts}; provide an explicit converter "
+            "unless there is exactly one ADC and one read per shot"
+        )
     return raw[0][0].dot([1, 1j])
 
 
 def default_decimated_raw2signal_fn(
     raw: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
-    """Convert the first receiver's decimated IQ trace to a complex array.
+    """Convert a single ADC's decimated IQ traces to a complex array.
 
-    raw contains receiver arrays ending in a length-two I/Q axis. Invalid layouts
-    raise NumPy or indexing errors; this function does not modify raw.
+    raw contains ADC arrays ending in a length-two I/Q axis. Require exactly one
+    ADC, otherwise raise ValueError requesting an explicit converter. Preserve
+    all repetition, read and sample axes. Other invalid layouts raise NumPy or
+    indexing errors. raw is not modified.
     """
+    if len(raw) != 1:
+        raise ValueError(
+            f"Default decimated conversion: ADC count={len(raw)}; "
+            "provide an explicit converter unless there is exactly one ADC"
+        )
     return raw[0].dot([1, 1j])
 
 
@@ -112,9 +127,9 @@ def default_decimated_raw2signal_fn(
 class AcquireOptions:
     """Policy shared by integrated and decimated program acquisition.
 
-    retry is a non-negative number of extra attempts, default zero. Shot
-    overrun (AcquisitionContractError) uses max(retry, 1) extra attempts, even
-    when retry is zero. Each retry reruns all rounds on the same program with
+    retry is a non-negative number of extra attempts, default zero, including
+    shot overrun (AcquisitionContractError). Zero never retries. Each retry
+    reruns all rounds on the same program with
     fresh producer buffers; overrun discards the failed attempt's slot data.
     External cancellation and interruption are never retried. progress
     defaults to hiding native acquisition progress. progress_label names the
@@ -154,8 +169,7 @@ class _AcquireProgress:
         overrun = isinstance(error, AcquisitionContractError)
         if overrun:
             slot.set(initial_signal)
-        retry_limit = max(retry, 1) if overrun else retry
-        if self.attempts > retry_limit:
+        if self.attempts > retry:
             return False
         reason = "shot_overrun" if overrun else type(error).__name__
         logger.warning(
@@ -210,8 +224,9 @@ class AcquisitionRunner:
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
         Producer failure, interrupt or cancellation records the Schedule outcome
-        and retains partial data; overrun restores the pre-acquire slot and allows
-        at least one retry. Conversion/update errors propagate without retry.
+        and retains partial data; overrun restores the pre-acquire slot. All
+        producer failures use the explicit retry budget, including zero retries.
+        Conversion/update errors propagate without retry.
         """
         require_positive_rounds(rounds)
         retry = options.retry
@@ -231,7 +246,7 @@ class AcquisitionRunner:
         )
         observation = _AcquireProgress(pbar)
         try:
-            for _ in range(max(retry, 1) + 1):
+            for _ in range(retry + 1):
                 if self._schedule.check_stop_requested():
                     break
                 pbar.reset()

@@ -33,16 +33,19 @@ T_Raw_co = TypeVar("T_Raw_co", covariant=True)
 class RunOptions(Generic[T_Raw]):
     """Policy for Schedule run acquisition and slot conversion.
 
-    retry is the nonnegative number of extra attempts (default zero). Shot
-    overrun gets at least one retry and restores the pre-acquire slot. External
+    retry is the nonnegative number of extra attempts (default zero), including
+    shot overrun. Zero never retries. Overrun restores the pre-acquire slot. External
     stop and interruption never retry. progress=False hides native acquisition
     progress; the rounds bar uses label "rounds" and remains visible only at the
     root. stop_condition is a no-argument callback run after each completed round
     has been converted and written. True or StopDecision(met=True) stops this
     acquire, not the Schedule. Finite StopDecision values are logged on early
     completion. converter maps cumulative and final raw payloads to the owner's
-    slot shape. None selects the method's default converter. Converter and live
-    update exceptions propagate without retry or a failed acquisition outcome.
+    slot shape. None selects the default: integrated requires one ADC and one
+    read per shot; decimated requires one ADC and retains all repetition/read/
+    sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
+    requesting an explicit converter. Converter and live update exceptions
+    propagate without retry or a failed acquisition outcome.
     """
 
     retry: int = 0
@@ -153,7 +156,8 @@ class RunAcquisitionMixin(ABC):
         Requires an active Schedule and a writable default SignalBuffer slot.
         program supplies synchronous acquire; soc is its borrowed transport.
         options controls retry, native progress, stop and raw conversion. With
-        no converter, the first ADC/readout's final-axis IQ pairs become complex.
+        no converter, require one ADC and one read per shot, otherwise raise
+        ValueError requesting an explicit converter. Final-axis IQ becomes complex.
         Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation/failure. Converter and update errors propagate without retry.
@@ -188,8 +192,9 @@ class RunAcquisitionMixin(ABC):
         Requires an active Schedule and a writable default SignalBuffer slot.
         program supplies synchronous acquire_decimated; soc is its transport.
         options controls retry, native progress, stop and raw conversion. With
-        no converter, the first ADC's final-axis IQ becomes complex, retaining
-        repetitions and sample axes. Native qick_options are forwarded.
+        no converter, require one ADC, otherwise raise ValueError requesting an
+        explicit converter. Final-axis IQ becomes complex, retaining all
+        repetition, read and sample axes. Native qick_options are forwarded.
         rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
         cancellation/failure. Converter and update errors propagate without retry.
