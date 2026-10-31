@@ -150,9 +150,13 @@ class TimelineSelectedPulse(TimedMacro):
             self.source.preprocess(prog)
         lengths = self._lengths(prog)
         offsets = tuple(offset + length for length in lengths)
-        native = tuple(NativeLength(length, prog.soccfg["gens"][self.source.ch]["f_fabric"])
-                       for length in lengths)
-        physical = self.book.math.selected_end(selection.selector, offsets, native=native)
+        native = tuple(
+            NativeLength(length, prog.soccfg["gens"][self.source.ch]["f_fabric"])
+            for length in lengths
+        )
+        physical = self.book.math.selected_end(
+            selection.selector, offsets, native=native
+        )
         finish = self.book.math.add(raw_origin, physical, target=physical.register)
         self.event_end = SelectedEventEnd(
             raw_origin,

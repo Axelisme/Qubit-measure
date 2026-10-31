@@ -51,7 +51,8 @@ def _program(
     modules: Sequence[Module],
     body: Callable[[TimelineProgramV2], None],
     initialize: Callable[[TimelineProgramV2], None] | None = None,
-    *, fabric_clock: float = 384,
+    *,
+    fabric_clock: float = 384,
 ) -> TimelineProgramV2:
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -338,16 +339,25 @@ def _signed_power_cost(value: int) -> int:
     return 1 + min(_signed_power_cost(value // 2), _signed_power_cost(value // 2 + 1))
 
 
-@pytest.mark.parametrize("clock, weight", [(384, 287), (307.2, 359), (38.4, 2872), (430.08, 256)])
-def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(clock, weight):
-    pulse = Pulse("drive", _pulse_cfg(length=QickSweep1D("scan", 256 / clock, 258 / clock), pre=0, post=0))
+@pytest.mark.parametrize(
+    "clock, weight", [(384, 287), (307.2, 359), (38.4, 2872), (430.08, 256)]
+)
+def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
+    clock, weight
+):
+    pulse = Pulse(
+        "drive",
+        _pulse_cfg(length=QickSweep1D("scan", 256 / clock, 258 / clock), pre=0, post=0),
+    )
     tail = Pulse("tail", _pulse_cfg(1, length=3 / clock, pre=0, post=0))
 
     def body(prog):
         prog.emit(pulse)
         prog.emit(tail)
 
-    prog = _program([pulse, tail], body, lambda p: p.add_loop("scan", 3), fabric_clock=clock)
+    prog = _program(
+        [pulse, tail], body, lambda p: p.add_loop("scan", 3), fabric_clock=clock
+    )
     starts = [waves(shot)[1] for shot in shots(prog)]
     assert starts == [(n * weight + 255) // 256 for n in (256, 257, 258)] * 2
     observed = starts[0]  # At n=256 the public end reveals the multiplier exactly.
@@ -359,13 +369,22 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(cloc
     assert np.all(error_numerator >= 0)
     assert np.all(error_numerator <= 430.08 * ratio.denominator)
     admissible = []
-    for candidate in range(ceil(256 * ratio), int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2):
-        error = ((counts * candidate + 255) // 256) * ratio.denominator - physical_numerator
+    for candidate in range(
+        ceil(256 * ratio),
+        int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2,
+    ):
+        error = (
+            (counts * candidate + 255) // 256
+        ) * ratio.denominator - physical_numerator
         if np.all(error >= 0) and np.all(error <= 430.08 * ratio.denominator):
             admissible.append(candidate)
     assert observed == min(admissible, key=lambda w: (_signed_power_cost(w), w))
-    shifts = [op for inst in prog.prog_list if isinstance(op := inst.get("OP"), str)
-              and any(shift in op for shift in ("SL", "SR", "ASR"))]
+    shifts = [
+        op
+        for inst in prog.prog_list
+        if isinstance(op := inst.get("OP"), str)
+        and any(shift in op for shift in ("SL", "SR", "ASR"))
+    ]
     assert all(int(op.split("#")[-1]) <= 15 for op in shifts)
     if clock == 430.08:
         assert shifts == []
@@ -374,17 +393,29 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(cloc
 def test_runtime_cross_grid_product_overflow_fails_at_build():
     # Native waveform words fit 16 bits, and the final end fits signed32.
     # Only the required fixed-point product overflows, before ASR8.
-    pulse = Pulse("large", _pulse_cfg(length=QickSweep1D("scan", 25000, 25002), pre=0, post=0))
+    pulse = Pulse(
+        "large", _pulse_cfg(length=QickSweep1D("scan", 25000, 25002), pre=0, post=0)
+    )
     with pytest.raises(ValueError, match="overflow signed 32-bit"):
-        _program([pulse], lambda p: p.emit(pulse), lambda p: p.add_loop("scan", 3), fabric_clock=1)
+        _program(
+            [pulse],
+            lambda p: p.emit(pulse),
+            lambda p: p.add_loop("scan", 3),
+            fabric_clock=1,
+        )
 
 
 def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
     selector = LoadValue("selector", [0, 1], "choice", "selected")
     playback = ComputedPulse(
-        "chosen", val_reg="selected",
-        pulses=[_pulse_cfg(length=QickSweep1D("scan", n / 384, (n + 76) / 384), pre=0, post=0)
-                for n in (39, 40)],
+        "chosen",
+        val_reg="selected",
+        pulses=[
+            _pulse_cfg(
+                length=QickSweep1D("scan", n / 384, (n + 76) / 384), pre=0, post=0
+            )
+            for n in (39, 40)
+        ],
     )
     tail = Pulse("tail", _pulse_cfg(1, length=10 / 384, pre=0, post=0))
 

@@ -444,7 +444,9 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
         ):
             candidates.append(weight)
     if not candidates:
-        raise ValueError("k=8 runtime conversion cannot meet the 500us/1us error budget")
+        raise ValueError(
+            "k=8 runtime conversion cannot meet the 500us/1us error budget"
+        )
     return min(candidates, key=lambda weight: (len(_csd(weight)), weight))
 
 
@@ -461,7 +463,9 @@ class RuntimeMath(TimedMacro):
         if previous is not None:
             self.claimed.update(previous.claimed)
 
-    def native_end(self, aggregate: float | QickParam, native: NativeLength) -> RuntimeEnd:
+    def native_end(
+        self, aggregate: float | QickParam, native: NativeLength
+    ) -> RuntimeEnd:
         """Ceil one aggregate using a checked CSD upper fabric conversion.
 
         Only runtime cross-grid values reach here. Static and integer-affine
@@ -477,7 +481,14 @@ class RuntimeMath(TimedMacro):
         ratio = Fraction(str(get_fclk(self.prog))) / Fraction(str(clock))
         weight = _conversion_weight(ratio, clock, get_fclk(self.prog))
         sources = self.prog._timeline_book.native_length_sources
-        key = (round(counts.start), tuple(sorted((k, round(v)) for k, v in counts.spans.items()))) if isinstance(counts, QickParam) else (counts, ())
+        key = (
+            (
+                round(counts.start),
+                tuple(sorted((k, round(v)) for k, v in counts.spans.items())),
+            )
+            if isinstance(counts, QickParam)
+            else (counts, ())
+        )
         if key not in sources:
             sources[key] = self.cycles(counts / get_fclk(self.prog))
         source = sources[key]
@@ -491,19 +502,37 @@ class RuntimeMath(TimedMacro):
         # The product is integer. Ceil the fractional bias once, keeping the
         # public 1e-10-cycle tolerance at the complete aggregate boundary.
         nearest = round(constant * 256)
-        bias = nearest if abs(constant - nearest / 256) <= 1e-10 else math.ceil(constant * 256)
+        bias = (
+            nearest
+            if abs(constant - nearest / 256) <= 1e-10
+            else math.ceil(constant * 256)
+        )
         if spans:
             tail_value = self.cycles(QickParam(bias + 255, spans) / get_fclk(self.prog))
-            numerator = self.op(product, "+", tail_value,
-                                limits=self._sum_limits(product, tail_value), target=product.register)
+            numerator = self.op(
+                product,
+                "+",
+                tail_value,
+                limits=self._sum_limits(product, tail_value),
+                target=product.register,
+            )
         else:
-            numerator = self.op(product, "+", bias + 255,
-                                limits=self._sum_limits(product, bias + 255), target=product.register)
+            numerator = self.op(
+                product,
+                "+",
+                bias + 255,
+                limits=self._sum_limits(product, bias + 255),
+                target=product.register,
+            )
         if numerator.minimum is None or numerator.maximum is None:
             raise RuntimeError("native conversion lost its known bounds")
-        result = self.op(numerator, "ASR", 8,
-                         limits=(numerator.minimum // 256, numerator.maximum // 256),
-                         target=product.register)
+        result = self.op(
+            numerator,
+            "ASR",
+            8,
+            limits=(numerator.minimum // 256, numerator.maximum // 256),
+            target=product.register,
+        )
         expression = runtime_expression(numerator)
         axes = expression_axes(expression)
         points = evaluate_time(expression, axes)
@@ -511,12 +540,19 @@ class RuntimeMath(TimedMacro):
             raise RuntimeError("native conversion lost its producer points")
         values = points // 256
         variable = CycleVariable(
-            "fabric conversion", int(values.min()), int(values.max()),
-            tuple(axes.items()), tuple(int(v) for v in values.flat),
+            "fabric conversion",
+            int(values.min()),
+            int(values.max()),
+            tuple(axes.items()),
+            tuple(int(v) for v in values.flat),
             fixed_point=(expression, 8),
         )
-        return RuntimeEnd(result.register, result.minimum, result.maximum,
-                          expression=LinearTime(terms=((variable, 1),)))
+        return RuntimeEnd(
+            result.register,
+            result.minimum,
+            result.maximum,
+            expression=LinearTime(terms=((variable, 1),)),
+        )
 
     def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
         """Multiply by a nonnegative integer with checked CSD shifts/adds."""
@@ -531,21 +567,33 @@ class RuntimeMath(TimedMacro):
                 amount = min(15, shift)
                 if result.minimum is None or result.maximum is None:
                     raise RuntimeError("constant multiplication needs known bounds")
-                result = self.op(result, "SL", amount,
-                                 limits=(result.minimum << amount, result.maximum << amount),
-                                 target=result.register)
+                result = self.op(
+                    result,
+                    "SL",
+                    amount,
+                    limits=(result.minimum << amount, result.maximum << amount),
+                    target=result.register,
+                )
                 shift -= amount
-            result = self.op(result, "+" if sign > 0 else "-", value,
-                             limits=self._sum_limits(result, value, subtract=sign < 0),
-                             target=result.register)
+            result = self.op(
+                result,
+                "+" if sign > 0 else "-",
+                value,
+                limits=self._sum_limits(result, value, subtract=sign < 0),
+                target=result.register,
+            )
             previous = exponent
         while previous:
             amount = min(15, previous)
             if result.minimum is None or result.maximum is None:
                 raise RuntimeError("constant multiplication needs known bounds")
-            result = self.op(result, "SL", amount,
-                             limits=(result.minimum << amount, result.maximum << amount),
-                             target=result.register)
+            result = self.op(
+                result,
+                "SL",
+                amount,
+                limits=(result.minimum << amount, result.maximum << amount),
+                target=result.register,
+            )
             previous -= amount
         return result
 
@@ -654,10 +702,15 @@ class RuntimeMath(TimedMacro):
         raw = self.reconstruct(numerator, inputs)
         if raw.minimum is None or raw.maximum is None:
             raise RuntimeError("fixed-point reconstruction lost bounds")
-        result = self.op(raw, "ASR", shift,
-                         limits=(raw.minimum >> shift, raw.maximum >> shift))
-        return RuntimeEnd(result.register, result.minimum, result.maximum,
-                          expression=LinearTime(terms=((variable, 1),)))
+        result = self.op(
+            raw, "ASR", shift, limits=(raw.minimum >> shift, raw.maximum >> shift)
+        )
+        return RuntimeEnd(
+            result.register,
+            result.minimum,
+            result.maximum,
+            expression=LinearTime(terms=((variable, 1),)),
+        )
 
     def reconstruct_maximum(
         self,
@@ -836,7 +889,11 @@ class RuntimeMath(TimedMacro):
                     operands.append(scalar.register)
                 else:
                     operands.append(round(scalar * get_fclk(self.prog)))
-        register = candidates[0].register if isinstance(candidates[0], RuntimeEnd) else self.allocate()
+        register = (
+            candidates[0].register
+            if isinstance(candidates[0], RuntimeEnd)
+            else self.allocate()
+        )
         for index, operand in enumerate(operands):
             inst = {
                 "CMD": "REG_WR",

@@ -74,8 +74,10 @@ class TimelineObservedPulse(Pulse):
 
     def native_length(self, prog) -> NativeLength:
         """Identify this pulse's resolved generator-count lattice."""
-        return NativeLength(prog.pulses[self.name].get_length(),
-                            prog.soccfg["gens"][self.ch]["f_fabric"])
+        return NativeLength(
+            prog.pulses[self.name].get_length(),
+            prog.soccfg["gens"][self.ch]["f_fabric"],
+        )
 
     def record(self, prog, t, limit: float | QickParam | None = None) -> None:
         if self.book.repeats:
@@ -100,7 +102,10 @@ class TimelineObservedPulse(Pulse):
             self.runtime_start = start
             self.source.t_regs["t"] = start.register
             self.book.runtime_gens[self.ch] = self.book.math.add(
-                start, align_end(prog, prog.pulses[self.name].get_length(), self.native_length(prog))
+                start,
+                align_end(
+                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
+                ),
             )
             self.book.record_native(
                 prog, self.ch, self.book.runtime_gens[self.ch], generator=True
@@ -161,7 +166,10 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.source.preprocess(prog)
             self.source.t_regs["t"] = self.book.math.cycles(start).register
             finish = self.book.math.add(
-                start, align_end(prog, prog.pulses[self.name].get_length(), self.native_length(prog))
+                start,
+                align_end(
+                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
+                ),
             )
             offset = (
                 0.0
