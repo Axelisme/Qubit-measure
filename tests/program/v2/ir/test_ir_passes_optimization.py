@@ -40,6 +40,22 @@ from .pass_test_support import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("register", ["r3", "s14"])
+def test_pipeline_removes_pure_register_self_copy(register):
+    copy = RegWriteInst.from_dict(
+        {"CMD": "REG_WR", "DST": register, "SRC": "op", "OP": register}
+    )
+    assert make_default_pipeline()([copy]) == []
+
+
+@pytest.mark.parametrize("effect", [{"IF": "Z"}, {"UF": "1"}, {"WR": "r2 op"}])
+def test_pipeline_preserves_self_copy_with_effect(effect):
+    copy = RegWriteInst.from_dict(
+        {"CMD": "REG_WR", "DST": "s14", "SRC": "op", "OP": "s14", **effect}
+    )
+    assert make_default_pipeline()([copy]) == [copy]
+
+
 def test_unroll_full_expansion_removes_overwritten_writes_in_body():
     """body: REG_WR r1 imm #1. n=2. Full expansion = 2 copies.
     Only the last write to r1 should survive.
