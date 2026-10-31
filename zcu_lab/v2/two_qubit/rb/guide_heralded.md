@@ -96,11 +96,11 @@ hardware handles, device manager and destination `point_view`.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
-from zcu_lab.v2.two_qubit.rb.core_heralded import RBHeraldedExp
+from zcu_lab.v2.two_qubit.rb.core_heralded import RBHeraldedExp, RBOptions
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(RBHeraldedExp())
 record = exp.run(cfg)
-analysis = exp.analyze(None)
+analysis = exp.analyze(RBOptions())
 saved = exp.save_run(point_view, source=record)
 ```
