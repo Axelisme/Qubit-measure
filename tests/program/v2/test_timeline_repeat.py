@@ -63,6 +63,18 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
+def test_variable_repeat_shadows_default_without_advancing_reference():
+    def body(prog):
+        with prog.repeat("r", 2, advance_ref=False):
+            prog.pulse(0, "p0")
+        # Native, unscoped output still uses the original reference.
+        prog.pulse(1, "p1")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 28, 0]
+    assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
+
+
 @pytest.mark.parametrize("parent", ["default", "drive"])
 def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_iteration(
     parent,
