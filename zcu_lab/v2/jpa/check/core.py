@@ -126,7 +126,9 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

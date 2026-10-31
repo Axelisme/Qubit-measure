@@ -314,60 +314,12 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
         point_indices = np.arange(num_points, dtype=np.float64)
-        # Show SNR versus iteration and each candidate parameter, colored by phase.
-        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
-        initial_ax.remove()
-        figure.suptitle("JPA Auto Optimization")
-        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
-        axes = [
-            figure.add_subplot(cell)
-            for cell in (grid[:, 0], grid[0, 1], grid[1, 1], grid[2, 1])
-        ]
-        for ax, label in zip(
-            axes,
-            (
-                "Iteration",
-                "JPA Flux value (a.u.)",
-                "JPA Frequency (MHz)",
-                "JPA Power (dBm)",
-            ),
-            strict=True,
-        ):
-            ax.set(xlabel=label, ylabel="SNR (a.u.)")
-        viewers = [live_scatter(ax) for ax in axes]
+        update = self._live_plot(context, point_indices)
         current_index = 0
-
-        @context.plots.on_plot_thread
-        def update(payload):
-            data, sampled_params, sampled_phases, idx = payload
-            cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
-            title = (
-                f"Iteration {idx}, Phase {sampled_phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
-                f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
-            )
-            axes[0].set_title(title)
-            artists = []
-            for viewer, xs in zip(
-                viewers,
-                (
-                    point_indices,
-                    sampled_params[:, 0],
-                    sampled_params[:, 1],
-                    sampled_params[:, 2],
-                ),
-                strict=True,
-            ):
-                artists.extend(
-                    viewer.set(
-                        xs, np.abs(data), colors=sampled_phases.astype(np.float64)
-                    )
-                )
-            return artists
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             update((data, params, phases, current_index))
 
-        figure.show()
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
         )
@@ -407,12 +359,16 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.sync()
                 # Empty g case has no pi-length padding; preserve each case's readout time.
-                with builder.branch(by="ge", align_timeline=False) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.sync()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
@@ -434,6 +390,59 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         return JPAOptimizeResult(
             params=params, phases=phases, signals=signals_buffer.array
         )
+
+    def _live_plot(self, context: RunContext, point_indices: NDArray[np.float64]):
+        # Show SNR versus iteration and each candidate parameter, colored by phase.
+        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
+        initial_ax.remove()
+        figure.suptitle("JPA Auto Optimization")
+        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
+        axes = [
+            figure.add_subplot(cell)
+            for cell in (grid[:, 0], grid[0, 1], grid[1, 1], grid[2, 1])
+        ]
+        for ax, label in zip(
+            axes,
+            (
+                "Iteration",
+                "JPA Flux value (a.u.)",
+                "JPA Frequency (MHz)",
+                "JPA Power (dBm)",
+            ),
+            strict=True,
+        ):
+            ax.set(xlabel=label, ylabel="SNR (a.u.)")
+        viewers = [live_scatter(ax) for ax in axes]
+
+        @context.plots.on_plot_thread
+        def update(payload):
+            data, sampled_params, sampled_phases, idx = payload
+            cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
+            title = (
+                f"Iteration {idx}, Phase {sampled_phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
+                f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+            )
+            axes[0].set_title(title)
+            artists = []
+            for viewer, xs in zip(
+                viewers,
+                (
+                    point_indices,
+                    sampled_params[:, 0],
+                    sampled_params[:, 1],
+                    sampled_params[:, 2],
+                ),
+                strict=True,
+            ):
+                artists.extend(
+                    viewer.set(
+                        xs, np.abs(data), colors=sampled_phases.astype(np.float64)
+                    )
+                )
+            return artists
+
+        figure.show()
+        return update
 
     def analyze(
         self,

@@ -139,7 +139,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         )
 
         # Display magnitude, but retain complex IQ for each flux/frequency point.
-        fig, (heat_ax, line_ax) = context.plots.subplots(1, 2, num="measurement")
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
         line_ax.set_xlabel("Frequency (MHz)")
         heatmap = live_heatmap(heat_ax, uniform=False)
@@ -156,11 +157,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             history = np.full((10, len(freqs)), np.nan)
             for offset in range(min(10, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = (
+            return (
                 *heatmap.set(dev_values, freqs, real),
                 *lines.set(freqs, history),
             )
-            return artists
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -184,7 +184,9 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
                 step.run_acquire(
                     builder.build(),

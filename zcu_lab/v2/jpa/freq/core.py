@@ -56,6 +56,16 @@ class FreqCfg(ConfigBase):
             description="Nonnegative SNR skew penalty.",
         ),
     ] = Field(default=0.0, ge=0.0)
+    seed: Annotated[
+        int | None,
+        FieldMeta(
+            label="Scan-order seed",
+            description=(
+                "Fixes the shuffled order of interior frequencies; empty draws a new "
+                "order each run."
+            ),
+        ),
+    ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -138,12 +148,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.sync()
                 # Empty g case has no pi-length padding; preserve each case's readout time.
-                with builder.branch(by="ge", align_timeline=False) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.sync()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()

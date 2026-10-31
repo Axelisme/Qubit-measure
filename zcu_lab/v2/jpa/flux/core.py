@@ -150,12 +150,16 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.sync()
                 # Empty g case has no pi-length padding; preserve each case's readout time.
-                with builder.branch(by="ge", align_timeline=False) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.sync()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()

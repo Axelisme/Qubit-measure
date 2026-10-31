@@ -110,7 +110,8 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        fig, (heat_ax, line_ax) = context.plots.subplots(1, 2, num="measurement")
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="JPA Flux value (a.u.)", ylabel="Readout frequency (MHz)")
         line_ax.set_xlabel("Readout frequency (MHz)")
         heatmap = live_heatmap(heat_ax, uniform=True)
@@ -127,8 +128,7 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
             history = np.full((5, len(freqs)), np.nan)
             for offset in range(min(5, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = (*heatmap.set(jpa_fluxs, freqs, real), *lines.set(freqs, history))
-            return artists
+            return (*heatmap.set(jpa_fluxs, freqs, real), *lines.set(freqs, history))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -154,7 +154,9 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
                 step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 

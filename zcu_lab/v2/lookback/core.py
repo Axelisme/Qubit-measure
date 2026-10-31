@@ -93,10 +93,6 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         ax.set(xlabel="Time (us)", ylabel="Amplitude")
         line = live_line(ax)
 
-        @context.plots.on_plot_thread
-        def update(data):
-            return line.set(times, lookback_signal2real(data))
-
         fig.show()
         # Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
@@ -106,12 +102,18 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             initial_delay=run_cfg.initial_delay,
             relax_delay=run_cfg.relax_delay,
         )
-        builder.emit(Reset("reset", run_cfg.reset))
+        reset = Reset("reset", run_cfg.reset)
+        if reset is not None:
+            builder.emit(reset)
         builder.emit(Pulse("init_pulse", run_cfg.init_pulse))
         builder.emit(Readout("readout", run_cfg.readout))
         program = builder.build()
         times = program.get_time_axis(ro_index=0) + run_cfg.readout.trig_offset
         assert isinstance(times, np.ndarray)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return line.set(times, lookback_signal2real(data))
 
         # Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(

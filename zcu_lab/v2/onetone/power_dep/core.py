@@ -135,7 +135,8 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        fig, (heat_ax, line_ax) = context.plots.subplots(1, 2, num="measurement")
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel="Power (a.u.)", ylabel="Frequency (MHz)")
         line_ax.set_xlabel("Frequency (MHz)")
         heatmap = live_heatmap(heat_ax, uniform=True)
@@ -171,7 +172,9 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                     relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                reset = Reset("reset", cfg.reset)
+                if reset is not None:
+                    builder.emit(reset)
                 builder.emit(
                     PulseReadout("readout", cfg.readout, freq=freq, gain=step.value),
                 )

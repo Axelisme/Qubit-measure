@@ -163,7 +163,9 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
                 relax_delay=cfg.relax_delay,
             )
             freq = builder.add_sweep("freq", cfg.freq)
-            builder.emit(Reset("reset", cfg.reset))
+            reset = Reset("reset", cfg.reset)
+            if reset is not None:
+                builder.emit(reset)
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
             sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)
 
