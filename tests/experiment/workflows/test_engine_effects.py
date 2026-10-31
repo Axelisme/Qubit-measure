@@ -109,17 +109,14 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
     ).read_text() == "30:9"
 
 
-def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
+def test_schedule_failure_is_recoverable(rig: Rig) -> None:
     cause = OSError("acquire disconnected")
 
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        def fail(_step: object) -> None:
-            raise cause
-
         with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            schedule.batch({"acquire": fail})
+            schedule.mark_failed(cause)
         return 99
 
     observed = start_call(rig, acquire)
@@ -150,11 +147,12 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
 ) -> None:
     observed: list[Completed[int] | Failed] = []
     attempts: list[int] = []
+    cause = OSError("readout disconnected")
 
     class Program:
         def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
             attempts.append(1)
-            raise OSError("readout disconnected")
+            raise cause
 
         acquire_decimated = acquire
 
@@ -177,7 +175,12 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         iterations = env.iterations()
         try:
             iteration = next(iterations)
-            observed.append(await iteration.call(operation))
+            if failed:
+                with pytest.raises(OSError, match="readout disconnected") as caught:
+                    await iteration.call(operation)
+                assert caught.value is cause
+            else:
+                observed.append(await iteration.call(operation))
             observed.append(
                 await iteration.call(
                     lambda ctx: (
@@ -195,15 +198,14 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
     if failed:
-        assert isinstance(observed[0], Failed)
-        assert "readout disconnected" in observed[0].reason
+        assert len(observed) == 1
         assert attempts == [1, 1]
     else:
         first = completed(observed[0])
         assert (first.value, first.partial_result) == (99, True)
         assert first.facts.stopped is False
         assert first.facts.outcome == "partial"
-    second = completed(observed[1])
+    second = completed(observed[-1])
     assert (second.value, second.partial_result) == (7, False)
     assert second.facts.stopped is False
     assert second.facts.outcome == "completed"
@@ -215,7 +217,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     assert [
         (fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts
     ] == [
-        (1, 1, "failed" if failed else "partial", False),
+        (1, 1, "raised" if failed else "partial", False),
         (1, 2, "completed", False),
     ]
     if not failed:
@@ -626,18 +628,17 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     observed = start_call(rig, operation)
     final = rig.engine.execute("run")
-    if source == "acquire":
-        assert final.lifecycle == "done", final.reason
-        assert isinstance(observed[0], Failed)
-        assert "acquire failed" in observed[0].reason
-        assert attempts == ["build", "acquire", "acquire"]
-    else:
-        assert final.lifecycle == "failed"
-        assert final.reason == f"OSError: {source} failed"
-        assert observed == []
-        assert attempts == (
-            ["build"] if source == "build" else ["build", "acquire", "conversion"]
-        )
+    assert final.lifecycle == "failed"
+    assert final.reason == f"OSError: {source} failed"
+    assert observed == []
+    assert (
+        attempts
+        == {
+            "build": ["build"],
+            "acquire": ["build", "acquire", "acquire"],
+            "conversion": ["build", "acquire", "conversion"],
+        }[source]
+    )
 
 
 @pytest.mark.parametrize("first_round_stop", [False, True])

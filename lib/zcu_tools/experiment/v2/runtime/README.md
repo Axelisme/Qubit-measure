@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-30，Schedule run acquisition
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -21,7 +21,9 @@ acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
   NaN 初始化底層 ndarray。
 - `buffer[step]` / `buffer.at(...)` 回傳 `SignalSlot`，slot 寫入的是 buffer 的
   writable view。
-- `SignalBuffer.set(...)` / `SignalSlot.set(...)` 寫入後自動觸發 `on_update`。
+- `SignalBuffer.set(...)` / `SignalSlot.set(...)` 只接受與目標完全相同的 shape，寫入後自動觸發 `on_update`。
+  Shape 不符會在寫入前拋出 `ValueError`，訊息列出 target 與 value 的 shape，不發布 update。
+  不做 NumPy broadcasting，純量或長度 1 陣列不能填滿多格 slot。純量 slot 的 shape 是 `()`，傳入 `np.array(value)` 即可寫入。
 - `trigger_update()` 用於沒有新資料寫入、但 caller 想強制刷新 liveplot 的等待期。
 - `flush_pending_update()` 立即交付被節流、尚未呈現的更新。若 callback 已經完成，這個方法直接返回。顯式 `trigger_update(flush=True)` 則仍會強制刷新。
 
@@ -90,20 +92,17 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 - `sched.scan(...)` / `step.scan(...)` 表示 host-side Python loop。
 - `sched.repeat(name, times, interval)` 表示 host-side repeat；等待期間會檢查
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
-- `sched.batch({key: callable})` 執行 replayable child callable；child 取得獨立
-  deepcopy cfg 與同一個 typed env。batch child 出現一般例外或 `KeyboardInterrupt`
-  時會標記 `Schedule.outcome`、停止後續 child，並回傳已完成 child 的 partial
-  result；per-child retry 由 caller 編排。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot。
 - `with Schedule(cfg, result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
   `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
-- `ScheduleStep.value` 是 scan/repeat/batch 的 control-flow coordinate；result tree 由
+- `ScheduleStep.value` 是 scan/repeat 的 control-flow coordinate；result tree 由
   `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
   `step.array_data` 做型別邊界。`flush=True` 對 ResultTree 表示立即送出 node event；
   對一般 `SignalBuffer` 不改變 `on_update(data)` public shape。
+  `set_data` 與 `ResultNode.set` 寫入 ndarray target 時同樣要求 shape 完全相同。數字只可寫入 shape 為 `()` 的 target；mapping 與 list 的既有更新語意不變。
 - `sched.trigger_update(flush=True)` 是 root-level update，會對 root buffer 傳
   `step=None`；step-level update 才帶 `ScheduleStep`。
 - 正常離開 scope 時（包含 requested stop），`Schedule` 對 root `SignalBuffer` 呼叫 `flush_pending_update()`，交付最後尚未呈現的資料。已顯式 flush 或已經呈現的更新不重複發布。Body 拋出例外或 `KeyboardInterrupt` 時不做自動 flush；正常退出的 callback 錯誤會傳播，但 scope 仍關閉。
@@ -118,12 +117,16 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 acquire 方法。
 
 Run 會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 live update。
-它依 `RunOptions.retry` 自動重試，並依 `RunOptions.stop_condition` 停止目前 acquire。
+它依 `RunOptions.retry` 自動重試，耗盡後向 caller 拋出原 producer 例外，不回傳 failed partial。
+`RunOptions.stop_condition` 只停止目前 acquire。
 `RunOptions[T_Raw]` 提供 retry、progress、stop_condition 與 converter。`rounds` 等 native 參數直接傳給 run 方法。
 program 層無前綴的 `acquire*` 只取數並回傳，不承擔 slot/live update、自動 retry 或
 Schedule stop_condition。
-Integrated 的預設 converter 將第一個 ADC/readout 的 IQ 轉成複數，summed 直接寫入
-累積總和，decimated 將第一個 ADC 的 trace 轉成複數並保留 repetitions 與 sample axes。
+Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並將 IQ 轉成複數。
+多 ADC 或多 read 時拋出 `ValueError`，訊息列出 ADC 數與各 ADC 的 read 數，要求提供
+`RunOptions(converter=...)`。Summed 直接寫入累積總和。Decimated 的預設 converter
+只接受單一 ADC，將 IQ 轉成複數並保留全部 repetition／read／sample 軸；多 ADC 時
+拋出 `ValueError`，訊息列出 ADC 數並要求提供 converter。
 
 `run_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
 或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
@@ -152,7 +155,8 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
 - `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
   conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
-  預設使用 `default_decimated_raw2signal_fn`。
+  預設使用 `default_decimated_raw2signal_fn`。預設 converter 沿用上述 ADC／read 限制；
+  多 ADC 或 integrated 多 read 的作者須明確提供 `raw2signal_fn`。
 - `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
 - 五個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
   progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
@@ -167,7 +171,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 將第一個 error 與 partial 完成事實交到父 token，不設父 event。交付在 operation 層截止。GUI 的 run root 收到 Schedule error 後仍可用 `raise_if_error()` 轉成 failure。已完成 child 從 active tree 移除，不隨 run 長度累積。
 - `Schedule` scope 接住一次 `KeyboardInterrupt`，包含 scan/repeat 的 caller loop body，將 schedule child 記為 `interrupted` 並保留 buffer，讓 with 後的 return 組出部分結果。其他例外不改變原有傳播。Scope 外中斷不受保護，Notebook 將正常返回的 interrupted 表示為 stopped；其他 caller 的 `raise_if_error()` 仍拋錯。
-- `Schedule` 的 scan/repeat/batch 會在 host step 前檢查 stop；`ProgramBuilder` 會把
+- `Schedule` 的 scan/repeat 會在 host step 前檢查 stop；`ProgramBuilder` 會把
   composite `cancel_flag` 傳給 program acquire：它讀取 acquire child 的 external
   stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome` 或 partial 完成事實。
   `StopSignal` 對外只暴露 external cancel flag contract：`is_set()` / `set()`；retry reset
@@ -187,12 +191,16 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   目前已寫入 buffer / result tree 的 partial result 保留；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
   以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
-- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。Schedule 結束時將 cause 交給 RunContext 的 token。Consumer（例如 measure-gui run policy）在 experiment adapter 回傳後呼叫 `raise_if_error()`，把 runner 內部錯誤轉成 operation failure。`stopped` 不記錄 error cause；retry reset 會同時
-  清掉 stop flag 與 transient error cause。
+- `StopSignal` 也攜帶第一個 `failed` / `interrupted` cause。Schedule 結束時將 cause 交給 RunContext 的 token，供 caller 診斷。
+  一般 producer failure 直接傳播，不等 consumer 呼叫 `raise_if_error()`，也不轉成 workflow 的 `Failed` 回傳值。
+  Notebook 不發布失敗當次的 record。GUI 將例外交給既有 operation failure 收尾。`stopped` 不記錄 error cause。
 - `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
-  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry；`Schedule.batch(...)` 不提供
-  per-child retry。
-- Shot 超量（`AcquisitionContractError`）的重試上限是 `max(options.retry, 1)`，預設也會重量一次。每次從第一 round 重跑，producer 重建 raw buffers；超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。Warning 保留 expected／received／chunk shots 與 round index。
+  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry。
+- 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。
+  預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。
+  耗盡後拋出最後一次 attempt 的同一例外。若失敗時也收到合作取消，不再重試，但仍拋出 producer 例外，不當作正常 partial。
+  每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。
+  Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
   Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
   stop / interrupted outcome 不會被 retry，也不會被 retry reset 清掉。
@@ -209,7 +217,7 @@ acquisition pipeline，不宣稱 legacy simulator 支援 emit 寫法。
 modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
 `test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；
 `test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
-`test_schedule.py` 覆蓋 typed env 與 host scan/repeat/batch；`test_schedule_buffers.py` 覆蓋
+`test_schedule.py` 覆蓋 typed env 與 host scan/repeat；`test_schedule_buffers.py` 覆蓋
 root buffer 註冊、child buffer 同步與 shape validation。`test_signal_buffer_flush.py` 覆蓋
 SignalBuffer 寫入通知、manual update 與 flush。
 `test_schedule_lifecycle.py` 覆蓋 context 使用邊界、schedule child 的停止與錯誤交付、host body 中斷的

@@ -6,7 +6,6 @@ from collections.abc import (
     Hashable,
     Iterable,
     Iterator,
-    Mapping,
     Sequence,
     Sized,
 )
@@ -21,7 +20,12 @@ from typing_extensions import TypeVar
 
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime._path import get_path, set_target, writable_view
+from zcu_tools.experiment.v2.runtime._path import (
+    copy_array_exact,
+    get_path,
+    set_target,
+    writable_view,
+)
 from zcu_tools.experiment.v2.runtime.outcome import (
     RunStatus as RunStatus,
 )
@@ -47,7 +51,6 @@ T_Env = TypeVar("T_Env", default=dict[str, Any])
 
 T_Value = TypeVar("T_Value")
 T_NestedValue = TypeVar("T_NestedValue")
-T_BatchResult = TypeVar("T_BatchResult")
 
 
 class BufferProtocol(Protocol):
@@ -94,7 +97,8 @@ class SignalBuffer:
         return self.at(index_or_step)
 
     def set(self, value: NDArray[Any]) -> None:
-        np.copyto(dst=self.array, src=value)
+        """Write an identically shaped array and notify; mismatch raises ValueError."""
+        copy_array_exact(self.array, value)
         self.trigger_update()
 
     def trigger_update(
@@ -132,7 +136,8 @@ class SignalSlot:
         return self.view
 
     def set(self, value: NDArray[Any]) -> None:
-        np.copyto(dst=self.view, src=value)
+        """Write an identically shaped array and notify; mismatch raises ValueError."""
+        copy_array_exact(self.view, value)
         self.buffer.trigger_update()
 
 
@@ -268,15 +273,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         yield from self.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
-
-    def batch(
-        self,
-        tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
-        ],
-    ) -> dict[Hashable, T_BatchResult]:
-        self.ensure_active()
-        return self.batch_from(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
@@ -580,66 +576,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
             iter_pbar.close()
             time_pbar.close()
 
-    def batch_from(
-        self,
-        *,
-        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
-        tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
-        ],
-    ) -> dict[Hashable, T_BatchResult]:
-        """Run tasks in mapping order with child steps and return completed results.
-
-        parent must belong to this schedule; the caller ensures an active scope.
-        Each child deepcopies parent.cfg, shares env and appends its task key to
-        the path. Stop skips later tasks. Exception or KeyboardInterrupt records
-        failure/interruption and returns prior results without retry. Release
-        child-local buffers before and after each task, retaining written data.
-        """
-        results: dict[Hashable, T_BatchResult] = {}
-        task_items = list(tasks.items())
-        pbar = make_pbar(
-            total=len(task_items),
-            smoothing=0,
-            leave=isinstance(parent, Schedule),
-        )
-        try:
-            for key, child_fn in task_items:
-                if self.check_stop_requested():
-                    break
-
-                pbar.set_description(f"Batch [{str(key)}]")
-                step: ScheduleStep[T_Cfg, Hashable, T_Env] = ScheduleStep(
-                    schedule=self,
-                    name=str(key),
-                    index=key,
-                    value=key,
-                    cfg=deepcopy(parent.cfg),
-                    path=parent.path + (key,),
-                )
-                self._clear_local_buffers(step.path)
-                try:
-                    result = child_fn(step)
-                except KeyboardInterrupt as exc:
-                    self._clear_local_buffers(step.path)
-                    self.mark_interrupted(exc)
-                    break
-                # tolerated: Child callables may fail arbitrarily; retain prior results and the cause.
-                except Exception as exc:  # noqa: BLE001
-                    self._clear_local_buffers(step.path)
-                    self.mark_failed(exc)
-                    break
-
-                self._clear_local_buffers(step.path)
-                results[key] = result
-                pbar.update()
-                if self.check_stop_requested():
-                    break
-        finally:
-            pbar.close()
-
-        return results
-
     def get_data_for(
         self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]
     ) -> Any:
@@ -667,9 +603,11 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     ) -> None:
         """Write value into owner's existing result node, then notify root buffers.
 
-        owner must belong to this active schedule. Container assignment enforces
-        supported value types and array shapes; lookup or write errors propagate
-        before update. flush requests immediate delivery through the root hook.
+        owner must belong to this active schedule. An ndarray target requires
+        an identical value shape; a number is valid only for a scalar target.
+        Shape mismatch raises ValueError with both shapes before writing or
+        notifying. Other lookup or write errors also propagate before update.
+        flush requests immediate delivery through the root hook.
         """
         target = self.get_data_for(owner)
         set_target(target, value)
@@ -685,7 +623,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         owner must belong to this active schedule. Raise ValueError unless its
         result node is an ndarray with buffer's shape. ScheduleStep.buffer wires
         updates back to that node; registration alone does not copy or notify.
-        The enclosing scan/repeat/batch controls the registration's lifetime.
+        The enclosing scan/repeat controls the registration's lifetime.
         """
         self.ensure_active()
         target = self.get_data_for(owner)
@@ -748,7 +686,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         if not all(isinstance(part, int) for part in owner.path):
             raise ValueError(
                 "Schedule default acquire target requires an integer-indexed path; "
-                "write to an explicit SignalBuffer slot for non-integer batch keys"
+                "register a child-local buffer for non-integer paths"
             )
         return self._buffers[0].at(*owner.path)
 
@@ -851,15 +789,6 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
         yield from self.schedule.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
-
-    def batch(
-        self,
-        tasks: Mapping[
-            Hashable, Callable[[ScheduleStep[T_Cfg, Hashable, T_Env]], T_BatchResult]
-        ],
-    ) -> dict[Hashable, T_BatchResult]:
-        self.schedule.ensure_active()
-        return self.schedule.batch_from(parent=self, tasks=tasks)
 
     @overload
     def prog_builder(
