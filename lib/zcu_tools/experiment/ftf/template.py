@@ -371,6 +371,15 @@ def _mux_channel_contents(
                 for pulse in event.pulses
                 if not addressed or pfb_channel(pulse.frequency_ghz) in addressed
             )
+            if addressed and not pulses:
+                frequencies = ", ".join(
+                    f"{grid.demodulation_frequency_ghz * 1000:g}"
+                    for grid in event.grids
+                )
+                raise ValueError(
+                    f"FTF mux ADC {channel} demod {frequencies} MHz, "
+                    f"PFB channel {next(iter(addressed))} has no in-channel carrier"
+                )
             row.append(replace(event, pulses=pulses))
         selected.append(tuple(row))
     return replace(content, events=tuple(selected))
@@ -415,6 +424,9 @@ def plan_template(
     same-channel superposition. Each logical event selects independently. Grids
     in one event spanning different PFB channels raise ValueError. An addressed
     single carrier is unchanged; off-channel carriers are excluded even alone.
+    An observed mux event without an in-channel carrier raises ValueError naming
+    the ADC, demodulation frequencies and PFB channel. Unobserved events retain
+    their pulses and empty grids without emitting data.
     Program
     common-origin carrier phases convert to pulse-local phases in the first
     terminal carrier's model reference frame; ADC demodulation remains absolute-time.

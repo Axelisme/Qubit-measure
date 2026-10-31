@@ -51,12 +51,17 @@ def test_request_rejects_equal_total_reads_with_different_template_event_layout(
         trigger_ticks=np.column_stack(
             (both.trigger_ticks[:, 1], both.trigger_ticks[:, 1] + ticks(0.004))
         ),
+        frequency_mhz=np.full((2, 2), 6000.0),
     )
     other_adc = first.readouts[1]
     events = first.events[-2:]
     if difference == "adc_layout":
         events = first.events
-        other_adc = replace(other_adc, trigger_ticks=both.trigger_ticks[:, :1])
+        other_adc = replace(
+            other_adc,
+            trigger_ticks=both.trigger_ticks[:, :1],
+            frequency_mhz=np.full((2, 1), 5980.0),
+)
     second = replace(
         first, points=first.points + 2, events=events, readouts=(terminal, other_adc)
     )
