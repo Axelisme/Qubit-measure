@@ -602,7 +602,7 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
         prog.declare(drive)
 
     def body(prog):
-        prog.write_reg("duration", 40)
+        prog.write_reg_op("duration", "scan", "+", 40)
         with prog.repeat("r", 2):
             prog.timeline_inc("duration")
             prog.emit(drive)
@@ -610,7 +610,7 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
         prog.pulse(1, "p1", timeline="default")
 
     prog = _program(body, initialize, reps=2)
-    assert [_waves(s) for s in _shots(prog)] == [[40, 88, 96], [40, 93, 106]] * 2
+    assert [_waves(s) for s in _shots(prog)] == [[40, 88, 96], [41, 95, 108]] * 2
 
 
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
