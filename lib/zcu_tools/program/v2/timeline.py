@@ -730,8 +730,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             yield cases
         finally:
             self._branch_cases.pop()
-        if len(self.macro_list) != start:
-            raise ValueError("move unconditional branch actions before or after the with block")
         self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name, align_timeline=align_timeline))
 
     @contextmanager

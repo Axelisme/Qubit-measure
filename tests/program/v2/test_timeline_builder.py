@@ -103,12 +103,14 @@ def test_indexed_branch_rejects_duplicate_and_out_of_range_points(
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 @pytest.mark.parametrize("align_timeline", [True, False])
 def test_branch_rejects_emission_outside_cases_at_build(mock_soccfg, frontend, align_timeline):
+    pulse = _pulse("outside")
+
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
         with program.branch(by="scan", align_timeline=align_timeline):
-            program.emit(_pulse("outside"))
+            program.emit(pulse)
 
     with pytest.raises(ValueError, match="before or after.*with"):
-        _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
+        _compile_scoped(mock_soccfg, frontend, body, modules=(pulse,), loops=(("scan", 2),))
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])
