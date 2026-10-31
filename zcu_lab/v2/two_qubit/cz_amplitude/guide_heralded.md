@@ -53,3 +53,32 @@ Unmeasured scales are NaN. Cancellation retains completed rounds.
 Native Load rejects old per-shot files without sums.
 Full run, saving and offline analysis use the saved cfg rather than current
 Form calibrations. Missing saved cfg stops the fit.
+
+## Notebook
+
+Use the adapter with a complete saved or operator-reviewed cfg.
+`point_view` is the bound PointView for the save destination.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.cz_amplitude.core_heralded import CZAmplitudeHeraldedExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(CZAmplitudeHeraldedExp())
+record = exp.run(cfg)
+exp.analyze(None)
+exp.save_run(point_view, source=record)
+```
+
+## Excited-excited control
+
+Analysis also selects herald (e,e). Preparation flips this state to |00⟩.
+The final double Xπ should return it to ee. The ee control plot shows one
+minus its terminal ee probability, including other outcomes in the denominator.
+Zero accepted counts give NaN. This control has no fit shared with gg.
+Only the gg slice supplies calibration proposals and writeback.
+
+The common gain scale is a hardware sweep in one compiled program.
+
+Fits use count-weighted binomial errors. Endpoint probabilities use
+Jeffreys-smoothed variance so observations at zero or one retain finite weight.

@@ -2,7 +2,7 @@
 
 from .analysis import RBAnalysis, RBEstimate, RBOptions
 from .core import RBCfg, RBExp, RBResult
-from .program import CZPhasePair, sequence_modules
+from .program import CZPhasePair
 
 __all__ = [
     "CZPhasePair",
@@ -12,5 +12,4 @@ __all__ = [
     "RBExp",
     "RBOptions",
     "RBResult",
-    "sequence_modules",
 ]
