@@ -786,10 +786,13 @@ class BranchCases:
     def case(self, index: int) -> Generator[None]:
         """Record the zero-based selector point; omitted points do nothing.
 
-        Cases may be declared in any order. Nested cases raise ValueError.
+        Cases may be declared in any order. Duplicate indices and nested cases
+        raise ValueError. Non-integer or out-of-range indices fail at compile.
         """
         if self.active:
             raise ValueError("branch.case cannot overlap another case")
+        if index in self.cases:
+            raise ValueError(f"duplicate branch case index: {index}")
         self.active = True
         start = len(self.prog.macro_list)
         try:
@@ -829,9 +832,13 @@ class TimelineBranch(Macro):
             raise ValueError(
                 f"{self.by}: Branch requires a sweep selector, not measurement feedback"
             )
-        self.cases = [
-            self.indexed_cases.get(index, []) for index in range(prog.loop_dict[self.by])
-        ]
+        count = prog.loop_dict[self.by]
+        for index in self.indexed_cases:
+            if type(index) is not int or not 0 <= index < count:
+                raise ValueError(
+                    f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
+                )
+        self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
         initial = self.book.ends.copy()
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()

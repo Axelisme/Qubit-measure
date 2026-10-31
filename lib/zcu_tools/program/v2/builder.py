@@ -77,8 +77,10 @@ class BuilderBranchCases:
     def case(self, index: int) -> AbstractContextManager[None]:
         """Record a zero-based sweep point's body; omitted points do nothing.
 
-        Record through the owning builder. Calls after branch exit or build
-        raise ValueError. Nested branch/repeat structures remain allowed.
+        Record through the owning builder. Duplicate, non-integer and out-of-range
+        indices raise ValueError at build. Calls after branch exit or build,
+        and overlapping cases, raise ValueError immediately.
+        Nested branch/repeat structures remain allowed.
         """
         return self._record_case(index)
 

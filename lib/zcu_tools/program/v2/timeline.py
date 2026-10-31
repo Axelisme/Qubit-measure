@@ -711,6 +711,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         by is an existing sweep loop name. Use case(index) for zero-based points,
         in any order. Omitted points execute no actions and add no duration.
+        Duplicate, non-integer or out-of-range indices raise ValueError.
         Each case closes only timelines it uses. Different remaining ends become
         wait-only; join/fork derive ordinary targets, while sync consumes them.
         Forked names are case-local, even when every case uses the same spelling.
