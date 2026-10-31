@@ -69,7 +69,8 @@ class RunPaneState:
 
     result is the adapter-owned record or None. source_path identifies loaded
     data, not an acquisition destination. source_operation_id identifies the
-    publishing GUI operation. metadata is evidence from Run or native Load, or
+    publishing GUI operation or failed Run's request facts, not result availability.
+    metadata is evidence from Run or native Load, or
     None when no native evidence exists; Load retains the file's original history.
     confirmed_run_id is None until a complete Save report confirms at least one
     persistent output. It survives failed resaves of this Run, but replacement
@@ -80,8 +81,9 @@ class RunPaneState:
     storage fixes the Save capability: Run admission or Load request storage.
     None means no Save destination. Native Load may have a different analysis
     target; Save still checks this capability against file history.
-    partial_result is the Run owner's completion-time cancellation fact, even
-    without metadata. Non-acquisition replacement and new Run reset it to False.
+    stop_requested is True when the frontend sent an accepted Stop or selector
+    cancel during this Run, even if the core later failed. Core-owned stops do
+    not set it. Non-acquisition replacement and new Run reset it to False.
     """
 
     result: RunRecord[Any, Any] | None = None
@@ -90,7 +92,7 @@ class RunPaneState:
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
     storage: StorageBinding | None = None
-    partial_result: bool = False
+    stop_requested: bool = False
     # None for readable loaded history or non-Load; otherwise the fixed Load reason.
     analysis_source_issue: str | None = None
 

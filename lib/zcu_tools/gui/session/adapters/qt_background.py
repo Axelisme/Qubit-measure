@@ -46,7 +46,7 @@ from qtpy.QtCore import (
 # the operation layer share one sentinel identity; importing it does not make
 # ``operation_handles`` (or ``operation_runner``) pull Qt.
 from zcu_tools.gui.session.operation_handles import NO_RESULT
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class _PoolRunnable(QRunnable):
     def run(self) -> None:  # pragma: no cover - exercised via QThreadPool
         try:
             result = self._thunk()
-        except Exception as exc:  # forwarded to on_error on main
+        except (Exception, KeyboardInterrupt) as exc:  # forwarded to on_error on main
             # Log here (worker thread) where the real traceback is live: the
             # exception is otherwise only carried as a value to on_error, so the
             # stack would evaporate. ERROR with exc_info captures it.
@@ -92,13 +92,13 @@ class _OpWorker(QThread):
         super().__init__(parent)
         self._thunk = thunk
         self._result: Any = NO_RESULT
-        self._error: Exception | None = None
+        self._error: BackgroundError | None = None
         self.finished.connect(self._emit)
 
     def run(self) -> None:
         try:
             self._result = self._thunk()
-        except Exception as exc:  # forwarded to on_error on main
+        except (Exception, KeyboardInterrupt) as exc:  # forwarded to on_error on main
             # Log here (worker thread) where the real traceback is live: _emit
             # only re-emits the stored exception as a value, losing the stack.
             logger.error("background dedicated worker failed", exc_info=exc)
@@ -148,12 +148,13 @@ class BackgroundRunner(QObject):
         work: Callable[[], Any],
         *,
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
         run_in_pool: bool = True,
         enter: AbstractContextManager[Any] | None = None,
     ) -> None:
         """Run ``work`` off-main inside ``enter``; deliver its result to
-        ``on_done`` or its exception to ``on_error``, both on the main thread.
+        ``on_done`` or its Exception or KeyboardInterrupt unchanged to ``on_error``,
+        both on the main thread. SystemExit and GeneratorExit are not delivered.
 
         ``run_in_pool=True`` uses the shared pool (short helper); ``False`` spawns
         a dedicated thread (long operation). ``enter`` (if given) is entered on the

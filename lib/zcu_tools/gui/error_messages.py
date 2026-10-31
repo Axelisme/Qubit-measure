@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from zcu_tools.gui.session.ports import BackgroundError
+
 # An ordered domain rule: (matches the lowercased raw error?) → the friendly head.
 FriendlyRule = tuple[Callable[[str], bool], str]
 
@@ -27,7 +29,7 @@ def details_tail(raw: str, fallback: str) -> str:
     return f"\n\nDetails: {raw if raw else fallback}"
 
 
-def normalize_raw(exc: Exception | str) -> str:
+def normalize_raw(exc: BackgroundError | str) -> str:
     """The error text to match/show — works for an exception or a marshalled string.
 
     Worker failures cross a Qt signal as a plain string; locally-caught ones are the
@@ -54,7 +56,7 @@ def friendly_from_rules(
 
 
 def fit_io_redirect(
-    exc: Exception | str,
+    exc: BackgroundError | str,
     raw: str,
     io_message: Callable[[str, str, Exception], str],
 ) -> str | None:

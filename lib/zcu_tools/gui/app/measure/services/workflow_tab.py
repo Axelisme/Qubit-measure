@@ -26,6 +26,7 @@ from zcu_tools.experiment.workflows import (
 )
 from zcu_tools.experiment.workflows.clock import UtcClock
 from zcu_tools.gui.form import FormEnv, FormErrors, FormModel, FormState, FormWritePath
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.build import SessionServices
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import NonPresentingHost, PlotHost
@@ -339,7 +340,9 @@ class WorkflowTab[C]:
         self._changed()
         return token
 
-    def _finished(self, status: RunStatus | None, error: Exception | None) -> None:
+    def _finished(
+        self, status: RunStatus | None, error: BackgroundError | None
+    ) -> None:
         self.error = None if error is None else str(error)
         if self.plots is not None and (status is None or status.lifecycle != "paused"):
             self.plots.finish()

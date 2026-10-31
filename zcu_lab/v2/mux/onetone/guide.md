@@ -80,7 +80,8 @@ Run 使用 tab 在 Open 或 Reset 時捕捉的參數來源。
 Live 圖以共同 offset 為橫軸，每個 active tone 各有一張 `measurement_i` magnitude 圖。
 標題使用原始 tone 序號與 label，空 label 顯示例如 `tone 2`。Label 可以重複。
 資料軸使用原始 tone 序號。停止後保留已取得資料，未取得點保持 NaN。
-失敗操作即使取得部分資料，仍保留失敗狀態。
+Acquisition 例外直接傳出，當次不發布新 record。
+停止請求不代表資料可用性，Analyze 前須由作者確認已取得資料。
 
 ## 保存與讀回
 

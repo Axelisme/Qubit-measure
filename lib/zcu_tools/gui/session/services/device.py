@@ -48,6 +48,7 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.ports import (
     BackgroundAdmissionClosedError,
+    BackgroundError,
     DeviceMemoryInfo,
     DeviceRegistryPort,
     DriverFactoryPort,
@@ -965,7 +966,7 @@ class DeviceService:
             if self._state.refresh_device_info_cache(name, info):
                 self._emit_device_changed(name)
 
-        def on_read_failed(exc: Exception) -> None:
+        def on_read_failed(exc: BackgroundError) -> None:
             # Best-effort: a failed single read is logged and dropped so the
             # poller keeps ticking.
             logger.debug("device poll read failed: name=%r error=%s", name, exc)

@@ -42,6 +42,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ class StagedAnalyzeService:
             )
 
         def _fail(
-            error: Exception,
+            error: BackgroundError,
             settle: SettleFn,
             *,
             failure_kind: Literal["analysis"] | None = None,

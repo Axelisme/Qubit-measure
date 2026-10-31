@@ -1,6 +1,6 @@
 # 撰寫逐點 workflow
 
-**讀者：** lab-author、agent。用顯式 Scope 串接量測，保存每點已收集的成果，並處理 Failed 與取消。
+**讀者：** lab-author、agent。用顯式 Scope 串接量測，保存每點已收集的成果，並處理作者選定的例外與取消。
 
 Workflow 在一個 async 函式內保留 history 與區域變數。`env` 是本次 workflow 的根 Scope。
 `env.run(...)` 明確把量測掛在根下。逐點量測則把 `iteration` 傳給 helper，讓取消只影響目前這一點。
@@ -14,20 +14,20 @@ Workflow 在一個 async 函式內保留 history 與區域變數。`env` 是本�
 ```python
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed, Failed
+from zcu_tools.experiment.workflows import Completed
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
 
 
 async def run_t1(
     scope: Scope, cfg: T1Cfg
-) -> Completed[RunRecord[T1Cfg, T1Result]] | Failed:
+) -> Completed[RunRecord[T1Cfg, T1Result]]:
     return await scope.run(T1Exp().run, cfg, name="T1")
 ```
 
 `scope.run` 複製 cfg、擷取 connected device snapshot，並建立 operation child。
-成功取得資料時回 `Completed`，值在 `t1_record.value`，當次事實在 `t1_record.facts`。
-`partial_result=True` 表示 operation 或其下的工作曾被取消，不代表資料可用來擬合。
-只有 acquisition 的可恢復失敗回 `Failed`。Cfg、writer 與程式錯誤仍會 raise。
+Core 正常回傳就交付 `Completed`，值在 `t1_record.value`，當次事實在 `t1_record.facts`。
+`stop_requested=True` 表示這次 operation 收到停止請求，包含只取消其子層。它不代表資料是否完整或可用來擬合。
+Acquisition、cfg 與程式例外原樣傳出。作者在能恢復的地方明確 catch，不把 framework run 分成 Completed／Failed 兩條路。
 
 需要 workflow 圖的 helper 另外收 `plots: Plots`。`scope.identity` 提供根的歷史身分，
 `scope.get_device_cfg(name)` 讀完整裝置設定。Child 繼承這些能力，不另建 provenance。
@@ -56,10 +56,11 @@ class PointRecord(BaseModel):
 for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
     point_record = PointRecord(index=iteration.sequence - 1)
     try:
-        t1_record = await run_t1(iteration, cfg)
-        if isinstance(t1_record, Failed):
+        try:
+            t1_record = await run_t1(iteration, cfg)
+        except OSError as exc:
             point_record.status = "failed"
-            point_record.reason = t1_record.reason
+            point_record.reason = str(exc)
             continue
         save_native(
             t1_record,
@@ -73,10 +74,11 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
             point_record.status = "skipped"
             continue
 
-        repeat_record = await iteration.run(T1Exp().run, cfg, name="T1-repeat")
-        if isinstance(repeat_record, Failed):
+        try:
+            repeat_record = await iteration.run(T1Exp().run, cfg, name="T1-repeat")
+        except OSError as exc:
             point_record.status = "failed"
-            point_record.reason = repeat_record.reason
+            point_record.reason = str(exc)
             continue
         save_native(
             repeat_record,
@@ -90,6 +92,9 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
     finally:
         iteration.commit(point_record)
 ```
+
+範例只恢復作者選定的 acquisition `OSError`。保存不在 catch 內，writer 或其他程式錯誤繼續傳出。
+實際裝置若使用其他例外型別，作者應在這兩個 await 周圍捕捉明確可恢復的型別。
 
 `commit` 同步寫下當時的快照，不加 `await`，也不等待 Pause 的 Resume。
 後續修改 `point_record` 不會改已提交資料。同一 scope 第二次 commit 會 raise。
@@ -112,14 +117,15 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
 若把 generator 存在變數中，就由作者在 finally 呼叫 `close()`。
 Reader 走這棵目錄樹，依 commit 序號排序，不依目錄名排序。
 
-## 拿到 Failed 之後
+## 作者決定如何恢復失敗
 
-點與點獨立時，把原因填進 point record，再 `continue`。上面的 finally 會提交 failed 點。
+Core 例外不會自動變成 `Failed`。點與點獨立且例外可恢復時，把原因填進 point record，再 `continue`。
+上面的 finally 會提交 failed 點。不能恢復的錯誤直接傳出，finally 仍會保存先前已填的欄位。
 後續工作全部依賴這個結果時，填入原因並 `return Summary(reason=...)`，讓 workflow 結束。
 這種 workflow 的 return annotation 要包含自己的 Summary model。
 
 可重試時，由作者用有限的 `for attempt in range(...)` 包住相同的 await，並決定何時停止重試。
 框架不替作者重做外部效果。Pause 的 interrupted-attempt retry 是另一個機制，它只重跑原 capture。
 
-不要對 `Failed` 再 raise。它是結果值，讓作者選擇繼續、結束或自行重試。
-不要把真實的 writer 或程式例外轉成 `Failed`，否則讀者無法分辨未取得資料與保存出錯。
+作者的分析 helper 仍可回 `Failed(reason)`，例如 fitter 明示不收斂。這是作者的分析結果，不是 `scope.run` 的回傳分支。
+Caller 對這種值選擇繼續、結束或自行重試。Writer 或程式例外仍應傳出，不把它們混成分析拒絕。

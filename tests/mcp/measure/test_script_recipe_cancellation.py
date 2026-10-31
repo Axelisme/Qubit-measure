@@ -8,6 +8,7 @@ from typing import Literal
 import pytest
 from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.session import GuiRpcError
 
 from ._script_recipe_support import (
     Fit,
@@ -24,8 +25,8 @@ async def run_twice(
 ) -> Report:
     """Record two GUI Run completions using each test's own transport and list."""
     tab = session.open_tab("synthetic")
-    partials.append((await tab.run()).partial_result)
-    partials.append((await tab.run()).partial_result)
+    partials.append((await tab.run()).stop_requested)
+    partials.append((await tab.run()).stop_requested)
     return Report(count=inputs.count)
 
 
@@ -241,7 +242,7 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
-        assert snapshot.outcome.runs[0].partial_result
+        assert snapshot.outcome.runs[0].stop_requested
         assert snapshot.outcome.runs[0].run_id == "native-1"
         assert snapshot.outcome.runs[0].status == "completed"
         assert len(snapshot.outcome.runs[0].saves) == 1
@@ -315,7 +316,80 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
-        assert not snapshot.outcome.runs[0].partial_result
+        assert not snapshot.outcome.runs[0].stop_requested
+    finally:
+        client.context.session.close()
+
+
+@pytest.mark.parametrize(
+    ("stopped", "source", "snapshot_fails", "expected"),
+    [
+        (True, 1, False, True),
+        (False, 1, False, False),
+        (True, None, False, False),
+        (True, 99, False, False),
+        (True, 1, True, False),
+    ],
+)
+def test_failed_run_retains_only_its_own_frontend_stop_facts(
+    tmp_path: Path,
+    stopped: bool,
+    source: int | None,
+    snapshot_fails: bool,
+    expected: bool,
+) -> None:
+    gui = SyntheticGui()
+    errors: list[GuiRpcError] = []
+
+    def respond(method: str, params: dict[str, object]) -> dict[str, object]:
+        if method == "operation.await" and params["operation_id"] == 1:
+            return {"reason": "completed", "status": "failed", "error": "core failed"}
+        if method == "tab.snapshot" and gui.runs == 1:
+            if snapshot_fails:
+                return {"tabs": []}
+            return {
+                "tabs": [
+                    {
+                        "tab_id": "tab-1",
+                        "adapter_name": "synthetic",
+                        "interaction": {"is_running": False, "is_analyzing": False},
+                        "raw_data": {"run_id": None, "saved": False},
+                        "result_state": {
+                            "available": False,
+                            "source_operation_id": source,
+                            "stop_requested": stopped,
+                        },
+                    }
+                ]
+            }
+        return gui.respond(method, params)
+
+    @recipe("synthetic", "Retain failed Run facts without contaminating another Run")
+    async def synthetic(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic")
+        try:
+            await tab.run()
+        except GuiRpcError as error:
+            errors.append(error)
+        await tab.run()
+        return Report(count=inputs.count)
+
+    client = make_client(tmp_path, respond, recipes=(synthetic,))
+    try:
+        execution = start(client, "synthetic")
+        execution.join()
+        snapshot = execution.snapshot()
+        assert snapshot.status == "completed", snapshot.error
+        assert len(errors) == 1
+        assert str(errors[0]) == "core failed"
+        assert errors[0].reason == "operation_failed"
+        assert snapshot.outcome is not None
+        first, second = snapshot.outcome.runs
+        assert first.status == "failed"
+        assert first.run_id is None
+        assert first.stop_requested is expected
+        assert second.status == "completed"
+        assert not second.stop_requested
     finally:
         client.context.session.close()
 
@@ -356,5 +430,6 @@ def test_script_cancel_preserves_real_operation_failure(tmp_path: Path) -> None:
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert snapshot.outcome.runs[0].status == "failed"
+        assert snapshot.outcome.runs[0].stop_requested
     finally:
         client.context.session.close()

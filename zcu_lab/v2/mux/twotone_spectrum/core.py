@@ -63,14 +63,13 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 
     core = MuxFreqExp()
     result = core.run(cfg, context=context)
-    context.scope.stop.raise_if_error()
     source = RunRecord(cfg=cfg, result=result)
     outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, ClassVar
@@ -85,7 +84,7 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ResetCfg, sweep2param
@@ -220,7 +219,13 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
 
     Options: ClassVar[type[FreqAnalyzeOptions]] = FreqAnalyzeOptions
 
-    def run(self, config: MuxFreqCfg, *, context: RunContext) -> MuxSweepResult:
+    def run(
+        self,
+        config: MuxFreqCfg,
+        *,
+        context: RunContext,
+        on_acquire_stop: Callable[[], None] | None = None,
+    ) -> MuxSweepResult:
         """Sweep selected drive frequencies together, then measure mux IQ.
 
         config supplies independent MHz sweeps and shared averaging settings;
@@ -233,7 +238,10 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         Drive frequencies share one hardware loop; readout frequencies stay fixed.
         Cancellation keeps completed-round averages across the sweep, or NaN
         when no round completed.
-        Call context.scope.stop.raise_if_error() before reporting success.
+        Acquisition and program errors propagate. on_acquire_stop optionally
+        observes external cancellation once, after acquire scope and progress
+        cleanup, before returning its signal view. Pure data stop does not call
+        it. Observer exceptions propagate without retry or outcome changes.
         """
         # 1. Prepare zipped frequencies and readout channels in participant order.
         cfg = MuxFreqCfg.model_validate(config.model_dump())
@@ -298,6 +306,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
                 prog,
                 raw2signal_fn=partial(averaged_mux_signal, prog),
                 rounds=cfg.rounds,
+                options=AcquireOptions(on_stop=on_acquire_stop),
             )
 
         # Publish the final spectra and restore tone-major result storage.

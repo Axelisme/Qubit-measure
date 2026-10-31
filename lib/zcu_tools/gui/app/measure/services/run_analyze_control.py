@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from zcu_tools.gui.app.measure.state import PaneTransitionPreview, State
     from zcu_tools.gui.event_bus import BaseEventBus as EventBus
     from zcu_tools.gui.plotting import FigureContainer
-    from zcu_tools.gui.session.ports import OwnerScheduler
+    from zcu_tools.gui.session.ports import BackgroundError, OwnerScheduler
     from zcu_tools.plotting.figures import FigureCollection
     from zcu_tools.plotting.plots import Plots
 
@@ -177,7 +177,7 @@ class RunAnalyzeControlFacet:
             [
                 Callable[[], object],
                 Callable[[object], None],
-                Callable[[Exception], None],
+                Callable[[BackgroundError], None],
             ],
             None,
         ]

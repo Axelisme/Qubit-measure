@@ -131,7 +131,7 @@ def test_run_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
         threads.append(get_ident())
         tab = session.open_tab("synthetic")
         try:
-            partial.append((await tab.run()).partial_result)
+            partial.append((await tab.run()).stop_requested)
             fit = await tab.analyze("primary", result=Fit)
             assert fit is not None
             return Report(count=inputs.count)
@@ -151,7 +151,7 @@ def test_run_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
         assert outcome.report == Report(count=9)
         assert partial == [True]
         assert len(outcome.runs) == 1
-        assert all(run.partial_result for run in outcome.runs)
+        assert all(run.stop_requested for run in outcome.runs)
         assert len(threads) == 2 and threads[0] == threads[1] != get_ident()
         assert snapshot.error is None
     finally:
@@ -720,7 +720,7 @@ def test_mcp_rejected_answer_preserves_question_and_reports_pending_id(
                         "adapter": "synthetic",
                         "run_id": "native-1",
                         "status": "completed",
-                        "partial_result": False,
+                        "stop_requested": False,
                         "saves": [],
                     }
                 ],
@@ -848,7 +848,7 @@ def test_mcp_interactive_wait_and_status_project_same_pending_owner(
                     "adapter": "synthetic",
                     "run_id": "native-1",
                     "status": "completed",
-                    "partial_result": False,
+                    "stop_requested": False,
                     "saves": [],
                 }
             ],

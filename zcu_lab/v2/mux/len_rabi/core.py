@@ -87,7 +87,6 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 
     core = MuxLenRabiExp()
     result = core.run(cfg, context=context)
-    context.scope.stop.raise_if_error()
     source = RunRecord(cfg=cfg, result=result)
     outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 """
@@ -275,8 +274,8 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         context supplies soc/soccfg, plots and a fresh stop signal. Cancellation
         retains completed-round averages and leaves unmeasured points NaN.
-        Check context.scope.stop.raise_if_error() before reporting success;
-        the caller owns plot and hardware cleanup. Invalid cfg/builds raise.
+        Acquisition and cfg/build errors propagate. The caller owns plot and
+        hardware cleanup and decides whether returned data can be analyzed.
         """
         # 1. Prepare each qubit's length grid and select its original readout tone.
         cfg = MuxLenRabiCfg.model_validate(config.model_dump())
