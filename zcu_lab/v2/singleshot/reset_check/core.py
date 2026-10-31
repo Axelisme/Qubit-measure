@@ -142,7 +142,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=None if pulse_readout else 0, classifier=classifier
+            "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None, classifier=classifier
         )
         gains = sweep2array(
             cfg.gain,

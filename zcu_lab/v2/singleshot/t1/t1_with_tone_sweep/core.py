@@ -146,6 +146,8 @@ class T1WithToneSweepCfg(ConfigBase):
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     delay: Annotated[
         SweepCfg,
         FieldMeta(
@@ -157,8 +159,6 @@ class T1WithToneSweepCfg(ConfigBase):
             ),
         ),
     ]
-    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
-    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
     sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -282,7 +282,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=None if pulse_readout else 0, classifier=classifier
+            "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None, classifier=classifier
         )
         soc, soccfg = context.soc, context.soccfg
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)

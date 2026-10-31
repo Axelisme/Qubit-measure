@@ -193,7 +193,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
             axis = Classify(
-                "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
+                "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None
             )
             sched.run_acquire_summed(
                 program,
@@ -245,7 +245,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     program = programs[length_key]
                     axis = Classify(
                         "readout",
-                        tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0,
+                        tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None,
                     )
                     step.run_acquire_summed(
                         program,
