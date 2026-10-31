@@ -86,7 +86,7 @@ class EnvelopePool:
 
 
 def _entry_bytes(key: EnvelopeContent, envelope: PulseEnvelope) -> int:
-    # Each sample is a fresh built-in float/complex. Arithmetic accounting avoids
+    # Samples are built-in complex values with one integer period. Accounting avoids
     # another Python walk over all samples on the cold conversion path.
     key_bytes = getsizeof(key) + sum(
         getsizeof(value)

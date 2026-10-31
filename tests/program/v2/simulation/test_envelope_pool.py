@@ -88,7 +88,11 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     assert changed is not first
     if difference == "clock":
         # Doubling the common frequency preserves period ticks, but halves us.
-        assert changed.sample_period_ticks == first.sample_period_ticks
+        changed_request = build_compiled_request(
+            prog, "integrated", soc.binding, 2, routes=soc.routes
+        )
+        assert changed_request.time_base.ticks_per_us == 86016
+        assert changed.sample_period_ticks == first.sample_period_ticks == 7
         assert changed.values == first.values
     else:
         assert changed != first

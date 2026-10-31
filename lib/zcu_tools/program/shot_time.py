@@ -21,7 +21,7 @@ def request_round_time_s(request: AcquireRequest) -> float:
         raise ValueError("reps must be a positive built-in integer")
     ticks = sum(
         sum(int(t) for t in template.duration_ticks)
-        + len(template.points) * request.relax_delay_ticks
+        + len(template.points) * int(request.relax_delay_ticks)
         for template in request.templates
     )
     return request.time_base.seconds(request.reps * ticks)
