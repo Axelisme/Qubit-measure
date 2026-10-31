@@ -183,9 +183,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.sync()
-            with builder.branch(by="ge", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.sync()
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse, length=delay))
             builder.emit(Readout("readout", cfg.readout))
@@ -227,9 +229,11 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                             builder.emit(Reset("reset", cfg.reset))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
                         builder.sync()
-                        with builder.branch(by="ge", align_timeline=False) as cases:
-                            with cases.case(1):
-                                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                        with (
+                            builder.branch(by="ge", align_timeline=False) as cases,
+                            cases.case(1),
+                        ):
+                            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                         builder.sync()
                         # Zero duration still prepares and reads, without a zero-cycle pulse.
                         if length > 0.0:

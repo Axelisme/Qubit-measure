@@ -341,9 +341,11 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 if cfg.reset is not None:
                     builder.emit(Reset("reset", cfg.reset))
                 builder.sync()
-                with builder.branch(by="ge", align_timeline=False) as cases:
-                    with cases.case(1):
-                        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.sync()
                 builder.emit(
                     TableLengthPulse(

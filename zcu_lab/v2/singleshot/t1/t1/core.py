@@ -163,9 +163,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.sync()
-            with builder.branch(by="ge", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.sync()
             builder.delay_timeline(delay)
             builder.emit(Readout("readout", cfg.readout))
@@ -204,9 +206,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.sync()
-            with builder.branch(by="ge", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.sync()
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             builder.emit(Readout("readout", cfg.readout))
