@@ -29,8 +29,21 @@ from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
 
+def scalar_cycles(prog, value: float) -> Fraction:
+    """Recover an exact grid round-trip, otherwise preserve the author scalar.
+
+    Equality with the canonical integer/frequency representation identifies a
+    grid value without a tolerance band that could consume a positive tail.
+    """
+    frequency = get_fclk(prog)
+    nearest = round(value * frequency)
+    if value == nearest / frequency:
+        return Fraction(nearest)
+    return Fraction(str(value)) * Fraction(str(frequency))
+
+
 def ceil_tick(ticks: float) -> int:
-    """Ceil cycle values, ignoring floating noise within 1e-10 of an integer."""
+    """Ceil native aggregate cycles, tolerating their integer float round-trips."""
     nearest = round(ticks)
     return (
         nearest
@@ -81,7 +94,7 @@ def placement_time(prog, value: float | QickParam) -> float | QickParam:
     if isinstance(value, QickParam) and value.is_sweep():
         return step_time(prog, value)
     scalar = value.start if isinstance(value, QickParam) else value
-    return ceil_tick(scalar * get_fclk(prog)) / get_fclk(prog)
+    return math.ceil(scalar_cycles(prog, scalar)) / get_fclk(prog)
 
 
 def step_time(prog, value: float | QickParam) -> float | QickParam:

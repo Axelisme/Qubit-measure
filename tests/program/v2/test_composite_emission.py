@@ -68,10 +68,7 @@ def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing)
 
     prog = _program(mux_soccfg(), [readout], body)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
+    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
@@ -205,8 +202,7 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
         body,
         lambda p: p.add_loop("selector", 2),
     )
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # First start is ceil(.01 * 430.08) = 5; selected spacing is 49 or 105.
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[5, 54], [5, 110]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [98, 210] * 2
@@ -416,8 +412,7 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Integer origin 100 plus ceil(.01 * 430.08) = 105.
     assert [waves(s) for s in result] == [[105]] * 4
     assert [s.body_end_cycle - s.start_cycle for s in result] == [89, 117] * 2
 
@@ -645,8 +640,7 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Origin 7 plus pre-delay 5 starts at 12; selected spacing is 67 or 123.
     assert [waves(s) for s in result] == [
         [12] * 3 + [79] * 3 + [146] * 3,
         [12] * 3 + [135] * 3 + [258] * 3,
@@ -717,12 +711,9 @@ def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_se
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Native subcycle post steps truncate to zero in both input branches.
     assert [waves(s) for s in result] == [[5, 54], [5, 54], [5, 54]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == (
-        [99, 99, 99] if constant_second else [99, 99, 99]
-    ) * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [99, 99, 99] * 2
 
 
 class _OverwriteSelected(Macro):
