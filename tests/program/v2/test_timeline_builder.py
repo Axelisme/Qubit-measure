@@ -704,9 +704,9 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
     mock_soccfg,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    frequency = builder.add_sweep("frequency", v2.SweepCfg(start=100, stop=102, expts=3))
+    frequency = builder.add_sweep("frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3))
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, expts=9)
+        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
     )
     for name, length in (("prepare", 77 / 384), ("drive", duration)):
         builder.emit(
