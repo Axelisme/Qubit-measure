@@ -118,6 +118,7 @@ def test_done_returns_next_recipe_handoff(tmp_path: Path, following: str) -> Non
         assert reply["execution"] == key
         if following == "question":
             assert reply["status"] == "waiting"
+            assert execution.snapshot().phase == "waiting"
             assert (
                 reply["pending_question"]["question"]["proposal"]["items"][0]["name"]
                 == "Q1.freq"
