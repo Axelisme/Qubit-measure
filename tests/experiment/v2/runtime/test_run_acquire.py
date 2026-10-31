@@ -1,7 +1,9 @@
 """Schedule-owned acquisition, independently of program construction."""
 
+import re
 from collections.abc import Callable, Iterator
 from functools import partial
+from typing import Unpack
 
 import numpy as np
 import pytest
@@ -10,6 +12,7 @@ from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime.acquisition import SynchronousAcquireKeywords
 from zcu_tools.program.acquisition import CancelFlagProtocol
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -21,6 +24,83 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
+
+
+class RawProgram:
+    """Synchronous producer exposing the documented raw payload unchanged."""
+
+    def __init__(self, raw: list[NDArray[np.float64]]) -> None:
+        self.raw = raw
+
+    def acquire(
+        self, soc: object, **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]]
+    ) -> list[NDArray[np.float64]]:
+        kwargs["round_hook"](1, self.raw, kwargs["cancel_flag"])
+        return self.raw
+
+    def acquire_decimated(
+        self, soc: object, **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]]
+    ) -> list[NDArray[np.float64]]:
+        return self.acquire(soc, **kwargs)
+
+
+@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize(
+    ("mode", "reads"),
+    [("integrated", (1, 2)), ("integrated", (2,)), ("decimated", (1, 1))],
+)
+@pytest.mark.parametrize("explicit_converter", [False, True])
+def test_ambiguous_raw_requires_explicit_converter(
+    entry: str, mode: str, reads: tuple[int, ...], explicit_converter: bool
+) -> None:
+    raw = [np.ones((nreads, 2, 2), dtype=np.float64) for nreads in reads]
+    program = RawProgram(raw)
+    buffer = SignalBuffer((2,))
+
+    def convert(payload: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        return sum((adc.sum(axis=0) for adc in payload), np.zeros((2, 2))).dot([1, 1j])
+
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        if entry == "schedule":
+            run = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+            acquire = partial(
+                run, program, "soc",
+                options=RunOptions(converter=convert if explicit_converter else None),
+            )
+        else:
+            builder = schedule.prog_builder("soc", "soccfg")
+            run = builder.run_program if mode == "integrated" else builder.run_program_decimated
+            acquire = partial(
+                run, program, raw2signal_fn=convert if explicit_converter else None
+            )
+        if explicit_converter:
+            np.testing.assert_array_equal(acquire(), np.full(2, sum(reads) * (1 + 1j)))
+        else:
+            message = rf"ADC.*{len(reads)}.*converter"
+            if mode == "integrated":
+                message = rf"ADC.*{len(reads)}.*read.*{re.escape(str(list(reads)))}.*converter"
+            with pytest.raises(ValueError, match=message):
+                acquire()
+            assert schedule.outcome.status == "completed"
+            assert np.isnan(buffer.array).all()
+
+
+@pytest.mark.parametrize(
+    ("mode", "raw_shape", "signal_shape"),
+    [("integrated", (1, 2, 3, 2), (2, 3)), ("decimated", (2, 3, 4, 2), (2, 3, 4))],
+)
+def test_single_adc_default_converter_preserves_all_signal_axes(
+    mode: str, raw_shape: tuple[int, ...], signal_shape: tuple[int, ...]
+) -> None:
+    raw = np.arange(np.prod(raw_shape), dtype=np.float64).reshape(raw_shape)
+    buffer = SignalBuffer(signal_shape)
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        run = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+        result = run(RawProgram([raw]), "soc")
+    expected_iq = raw[0] if mode == "integrated" else raw
+    np.testing.assert_array_equal(result.real, expected_iq[..., 0])
+    np.testing.assert_array_equal(result.imag, expected_iq[..., 1])
+    assert result.shape == signal_shape
 
 
 @pytest.fixture
