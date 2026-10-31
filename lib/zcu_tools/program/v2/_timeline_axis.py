@@ -147,8 +147,9 @@ class TimeVariable:
         frozen = []
         for axis, component in components:
             if isinstance(component, np.ndarray):
-                if np.all(component == component.flat[0]):
-                    folded += Fraction(component.flat[0])
+                first = component.flat[0]
+                if np.all(component == first):
+                    folded += int(first) if isinstance(first, np.integer) else first
                     continue
                 component = component.copy()
                 component.flags.writeable = False
