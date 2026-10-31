@@ -12,7 +12,7 @@ Open／Reset 固定捕捉 F1/F2 與原始 full-mux tone 位置。先完成兩角
 
 選 target，填 signed detune 與 delay。分析至少需要 6 個不同且等距的實際 delay。Detune 絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，兩分支須留在 detune 選定的同側。可選具名 DC source 只按指定工作單位掃描，不補償也不恢復原值。需要 reset 時填入已校準的 cfg，再核對 reps、rounds 與等待時間後 Run。
 
-每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。Live 同時顯示 gg 與反號 ee 的 target ⟨σ⟩，按實際 spectator g/e 排列。這不是 active reset。取消後保存已完成 rounds，未量點維持 NaN。
+每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。硬體 delay sweep 會產生逐點等待差。若編譯指出收尾 WAIT slack 大於 relax_delay，增加 relax_delay 後再 Run，不把 delay 改回 host scan。Live 同時顯示 gg 與反號 ee 的 target ⟨σ⟩，按實際 spectator g/e 排列。這不是 active reset。取消後保存已完成 rounds，未量點維持 NaN。
 
 ## 保存與分析
 

@@ -18,7 +18,7 @@ Refresh 更新來源與選項，保留已填輸入。修改來源或 aliases 後
 2. 人工填 signed detune，單位 MHz。其絕對值須明顯大於預期 abs(ζ) 加 qubit 頻率誤差，使兩分支留在 detune 選定的同側。單一 projection 的資料不能證明此前提。
 3. 設 delay 的 µs 範圍及點數。分析至少需要 6 個不同、等距的實際 delay，正的時間跨度，並解析數個 fringe 週期。量化後 delay 不可重複。
 4. 只掃 delay 時，DC source 留空，各 source 不變。結果的單點 DC 座標 0 代表該軸停用。要掃 DC 時，填直接 device 名稱、driver 的 working unit 與已授權的 source values 範圍。支援 A、V、native，不做單位轉換或 F1/F2 補償。
-5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
+5. 核對 reps、rounds、等待時間與完整 mux 積分窗口，再 Run。每個 DC 點用一支 program 在硬體掃 spectator_states 與 delay。DC 要設定外部儀器，因此留在 host。硬體 delay sweep 會產生逐點等待差。若編譯指出收尾 WAIT slack 大於 relax_delay，增加 relax_delay 後再 Run，不把 delay 改回 host scan。Live 每條線是一個 DC／branch 的 target ⟨σ⟩。
 
 DC 操作也可能影響其他 loop。工作點與補償由操作員設定並記錄。結束後 source 維持最後設定，取消或失敗後先核對裝置狀態。
 

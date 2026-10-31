@@ -301,7 +301,6 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
-                builder.sync()  # Reset must finish before spectator preparation.
                 with (
                     builder.branch(by="spectator_states", align_timeline=True) as cases,
                     cases.case(1),
