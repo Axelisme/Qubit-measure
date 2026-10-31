@@ -448,7 +448,10 @@ def test_accepted_retains_run_identity_with_or_without_save(
 
 
 @pytest.mark.parametrize("interactive", [False, True])
-@pytest.mark.parametrize("source", ["run", "load", "without_metadata", "context_free"])
+@pytest.mark.parametrize(
+    "source",
+    ["run", "load", "without_metadata", "context_free", "identity_only", "experiment_only", "device_only"],
+)
 def test_analysis_draft_uses_start_run_identity(
     tmp_path: Path,
     qapp: QApplication,
@@ -473,10 +476,29 @@ def test_analysis_draft_uses_start_run_identity(
             tab.run.result = replace(require_record(tab.run), metadata={})
             if source == "context_free":
                 tab.run.parameters = None
+        elif source == "identity_only":
+            tab.run.result = replace(
+                require_record(tab.run),
+                metadata={"run_id": native.metadata.run_id, "completion": "unused-invalid"},
+            )
+        elif source == "experiment_only":
+            tab.run.result = replace(
+                require_record(tab.run), metadata={"experiment": "test/custom", "device_snapshot": {}}
+            )
+        elif source == "device_only":
+            tab.run.result = replace(
+                require_record(tab.run), metadata={"device_snapshot": {"bias": {"value": 0.25}}}
+            )
         captured = tab.run.parameters
-        expected = (
-            require_metadata(tab.run).run_id
-            if require_record(tab.run).metadata
+        expected = native.metadata.run_id if source in ("run", "load", "identity_only") else None
+        expected_experiment = (
+            native.metadata.experiment if source in ("run", "load")
+            else "test/custom" if source == "experiment_only"
+            else tab.adapter_name
+        )
+        expected_devices = (
+            {"bias": {"value": 0.25}} if source == "device_only"
+            else {} if source == "experiment_only"
             else None
         )
         seen_analyze: list[
@@ -546,6 +568,8 @@ def test_analysis_draft_uses_start_run_identity(
         draft = tab.analysis.writeback_draft
         assert isinstance(draft, WritebackDraft)
         assert draft.run_id == expected
+        assert draft.experiment_name == expected_experiment
+        assert draft.device_snapshot == expected_devices
         assert draft.parameters is captured
         assert len(seen_proposals) == 1
         assert seen_proposals[0].ctx.parameters is captured
