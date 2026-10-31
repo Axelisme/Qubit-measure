@@ -19,7 +19,7 @@ from zcu_tools.experiment.operations import RunIdentity as RunIdentity
 from zcu_tools.experiment.script_host import PendingQuestion
 
 type Lifecycle = Literal[
-    "running", "pausing", "paused", "stopping", "done", "cancelled", "failed"
+    "running", "waiting", "stopping", "done", "cancelled", "failed"
 ]
 
 

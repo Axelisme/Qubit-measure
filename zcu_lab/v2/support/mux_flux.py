@@ -264,8 +264,10 @@ def run_flux_scan(
     cfg is not mutated. context supplies connected drivers/board and the one
     Run scope. Validate every selected driver's unit before the first write.
     Global scans write the coil once per point; local scans zip selected lines.
-    Stop during ramp, settle or inner acquisition discards that incomplete flux
-    point and preserves earlier points. Uncancelled nonfinite inner IQ raises
+    Cancelling an inner acquire leaves that whole flux point NaN and continues
+    with the next point. Cancelling the Run scope stops the scan during ramp,
+    settle or acquisition, preserving earlier completed points and leaving the
+    unfinished point and later points NaN. Uncancelled nonfinite inner IQ raises
     ValueError with the zero-based flux point and first invalid tone/cell.
     Driver/acquisition errors propagate. Sources retain their last setting;
     no automatic restoration occurs.
@@ -337,7 +339,8 @@ def run_flux_scan(
             break
         acquired, stopped = _acquire_spectrum(spectrum, context=context)
         if stopped or context.scope.stop.is_set():
-            break
+            # Skip incomplete IQ; the loop's root-stop check ends the whole scan.
+            continue
         _require_finite_spectrum(
             acquired,
             point=point,

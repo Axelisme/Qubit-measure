@@ -146,7 +146,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     capture.assert_called_once()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == ("cancelled" if stopped else "finished")
+    assert outcome.status == "finished"
 
 
 def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
@@ -383,7 +383,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     metadata = require_record(state.get_tab(tab_id).run).metadata
     assert metadata is not None and metadata.completion == "complete"
     outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "cancelled"
+    assert outcome is not None and outcome.status == "finished"
 
 
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:

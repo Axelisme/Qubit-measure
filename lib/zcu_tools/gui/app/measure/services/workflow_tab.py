@@ -54,8 +54,6 @@ class WorkflowRunPort(Protocol):
     def has_pending_segment(self) -> bool: ...
     def status(self) -> RunStatus | None: ...
     def require_run_id(self, run_id: str) -> None: ...
-    def pause(self, run_id: str) -> RunStatus: ...
-    def resume(self, run_id: str) -> int: ...
     def stop(self, run_id: str) -> RunStatus | None: ...
     def cancel(
         self, run_id: str, scope: str = "workflow", *, expected: int | None = None
@@ -149,7 +147,7 @@ class WorkflowTab[C]:
 
     @property
     def busy(self) -> bool:
-        """True until terminal owner delivery, including all paused ownership."""
+        """True until terminal owner delivery, including Ask waits."""
         return self.run.has_pending_segment or self.run.operation_id is not None
 
     def _ensure_idle(self) -> None:
@@ -341,10 +339,10 @@ class WorkflowTab[C]:
         return token
 
     def _finished(
-        self, status: RunStatus | None, error: BackgroundError | None
+        self, _status: RunStatus | None, error: BackgroundError | None
     ) -> None:
         self.error = None if error is None else str(error)
-        if self.plots is not None and (status is None or status.lifecycle != "paused"):
+        if self.plots is not None:
             self.plots.finish()
         self._changed()
 

@@ -135,7 +135,7 @@ Carry 與 lifetime history 是 async 函式的區域變數。每點先建可變 
 Coherence 與 MIST 共用的 calibrate_point（`common/point_calibration.py`）是複合 stage，依序呼叫 frequency、Rabi 與 readout；Rabi 依模式包含 AmpRabi。它正常回傳 PointCalibrationResult，主迴圈再填 frequency/rabi/readout；`CalCarry` 的歷史欄位（last、f01_by_flux、traces、last_amp_gain、readout_source）由 calibrate_point 依各 stage 回傳的結果更新。Expected failed/rejected 仍回傳各 stage 的結果。
 校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
-Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
+每個 operation 只呼叫一次，停止後不自動重試。
 子層取消後 core 回傳就交付 Completed。作者先保存 raw，再檢查 stop_requested，保留原有拒絕原因，不進擬合或接受。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
@@ -164,7 +164,7 @@ Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false
 每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
 目前 iteration 未取消時才開始另一 member。取消的 pair 留 status="skipped" 與已取得欄位，再進下一點。
 下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
-Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop 保留既有 commits。
+Stop 保留既有 commits。要接續量測，開新 run 並從 saved_run 初始化 history。
 區域變數 `trend_points` 保留具名 scalar pair tuple，不保存 Figure 或 axes。
 `overnight.trend.draw_overnight_trend` 直接畫這些 pair，缺值維持 gaps，不重 fit。
 缺值在資料區只標 `× [編號]`，完整原因依編號列在兩個 panel 下方的換行註腳。
@@ -208,9 +208,9 @@ MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1�
 
 `duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
 Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。
-只計 delivered Completed（含 partial），不包含拋錯或 Pause discarded attempts；缺少時間就省略 duration。
+只計 delivered Completed（含 partial），不包含拋錯的 operation；缺少時間就省略 duration。
 ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不在摘要聚合。
-完整 raised／Pause operation attempts 留在 point 信封與 journal，不在此摘要重建。
+完整 operation facts 留在 point 信封與 journal，不在此摘要重建。
 
 `qubits` 只在 overnight／overnight_mux 列出，各 qubit 的 t1／echo 記 accepted、mean_us、std_us。
 平均與母體標準差只取原有主模型的接受值，不混入 rejected／failed 或副模型值。單筆標準差為 0，零筆省略平均與標準差。
@@ -221,7 +221,7 @@ ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不�
 作者用 zip(plan.fluxes, env.iterations()) 取得每點的 Scope，第一次用 iteration.dir 才建 absolute 保存目錄。
 目錄是 data root 下的 iteration-000001，nested child 再按 label 與 sequence 鏡射。Commit 序號另按提交順序增加。
 Workflow 在 iteration.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
-Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
+Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
 Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，不捕捉新事實。
 H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.stop_requested 決定 complete 或 stopped，experiment 取 persistence spec.tag。
@@ -272,7 +272,7 @@ Latest-wins 由 record table owner 決定，重匯出更新整列，僅 append �
 
 `common.devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，await 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
-每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 Resume、alias 修改或 Save 刷新 snapshot。
+每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 alias 修改或 Save 刷新 snapshot。
 
 核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 每次 env.run attempt 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。

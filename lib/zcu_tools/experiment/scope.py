@@ -307,8 +307,10 @@ class Scope:
         """Run a core (cfg, *, context) callable with a copied cfg, without saving.
 
         The host captures device settings and supplies borrowed hardware and
-        operation plots. Pause retries the same captured request. Completion
-        carries RunRecord and immutable attempt facts; exceptions propagate.
+        operation plots. The callable runs once, without automatic retries.
+        Child cancellation delivers partial values; root cancellation raises
+        ScriptCancelled after work drains and completion facts are recorded.
+        Completion carries RunRecord and immutable attempt facts; exceptions propagate.
         """
         return await self._capabilities().execute_run(self, experiment, cfg, name=name)
 
@@ -323,7 +325,7 @@ class Scope:
     def commit(self, record: BaseModel) -> None:
         """Snapshot one BaseModel into this scope's record.json; second commit raises.
 
-        Publication is synchronous and bypasses Pause, including root-cancel cleanup.
+        Publication is synchronous and remains available during root-cancel cleanup.
         Later mutation of record does not change the committed snapshot.
         """
         _validate_record(record)
@@ -364,6 +366,7 @@ class Scope:
         """Atomically select and stop a live subtree, never its parent.
 
         Select by kind, kind#N, operation:name, or exact full leaf path.
+        A root kind selects the root even while it has live children.
         run aliases operation outside a run root. Multiple matches refuse with
         reason ambiguous and candidate full paths. Missing/stale selectors
         refuse without stopping anything. Invalid syntax raises ValueError.
@@ -382,7 +385,7 @@ class Scope:
             if self._closed:
                 return CancelResult(False, "scope not active", path)
             nodes = self._walk()
-            if "/" in label or label == self.path:
+            if "/" in label or (label == self.path and self.name is not None):
                 matches = [
                     node for node in nodes if node.path == label and not node._children
                 ]

@@ -84,7 +84,7 @@ def build_recipe_tools(
     return {
         "answer": {
             "handler": partial(answer, context),
-            "description": "Answer a paused recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question paused and return accepted=false, reason and pending_request_id.",
+            "description": "Answer a waiting recipe question. Use pending_question.request_id and answer_schema. Stale answers leave the question waiting and return accepted=false, reason and pending_request_id.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-31，analyze error propagation
+**Last updated:** 2026-11-01，GUI run stop terminal
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -385,6 +385,11 @@ Generic cancel(op=17) 維持整個 script Stop 語意。
 
 Ack 保留 execution／workflow snapshot，另帶 cancelled、reason、active_path 與 candidates。
 Cancelled=True 表示 owner 已接受命令，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+GUI 單次 Run 的 core 正常回傳時，`wait(op)` 與 `operation.await` 一律回 finished。
+Stop、未帶 scope 的 `cancel(op)`、root 或子孫 scope 的取消都不改這個 terminal。
+Core 拋錯仍回 failed。`tab.snapshot.result_state.stop_requested` 記錄這次 Run 接受過停止請求，
+存檔 metadata.completion 的 stopped 記錄 core 回傳前接受的請求，不表示資料是否完整。
+Workflow 與 recipe 根停止仍交付 cancelled，不套用 GUI 單次 Run 的 terminal 規則。
 Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
 這個分支的 accepted ack 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token。
 Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
@@ -448,7 +453,8 @@ Stdio server 同步處理請求，不保證首次等待期間同連線的控制�
 answer 符合 pending question 的 Answer schema 與 evidence 規則。
 錯誤、遲到、重複答案回 accepted／reason／pending_request_id，
 不消耗問題、不記 answered。
-問題沒有自動預設回答或 timeout。
+問題沒有自動預設回答或 timeout。等答覆時 status 與 phase 都是 waiting。
+Answer 後同一作者 coroutine 繼續一次，根 Stop 可中斷等待。
 
 Terminal recipe summary 回 execution／status／report／runs。Status 另帶 active_path 與結構化 live_paths。
 Failed 另帶 `failure: {phase, reason}`，full detail 也保留同一 failure 與原 error。
@@ -508,7 +514,7 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_close` | `tab_id`，回 `tab_id/closed`。Busy 回 false，不替 caller Stop。 |
 | `workflow_status` | 可選 `run_id`。明填回 native status 與 tab 識別，省略/null 回 names 與全部 opened tabs。 |
 | `workflow_start` | `tab_id/run_id`，可選 `plan/tunables` batches。回 pending `handle`，用既有 `wait(op=handle)` 觀察終局。 |
-| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 維持 script scope，等 terminal delivery。 |
+| `workflow_stop` | 明填 native `run_id`。Stop 維持 script scope，等 terminal delivery。 |
 | `cancel` | 明填 `run_id`，可選 scope 與 expected，經 `workflow.cancel` 核對 native active_path，不另建 workflow execution。 |
 | `workflow_form` | `tab_id/form`，form 是 plan 或 tunables。可選 batch 只 preview，回 input/values/errors。 |
 | `workflow_describe_form` | 同上另給 typed `path`，root 是 []。只加同一 candidate 的單層 metadata，不回整棵 schema。 |
@@ -540,7 +546,7 @@ data 帶目前 pending_request_id 或 null，不改 lifecycle、不記 accepted 
 `last_exchange` 保留最近問題、已接受的 answer 或 null，以及
 waiting/submitted/answered/cancelled 狀態。它與 GUI 共用 headless owner。
 Submitted 不表示已接受，錯型答案不記入 answer。整個 coroutine 留在同一 worker，
-Pause、Ask、Resume 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
+Ask 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
 並執行清理，terminal owner delivery 才釋放 RUN。
 
 Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。新 attempt 整組替換 operation 圖，terminal 保留最新一組。Workflow 層登記圖名時拒絕 `operation/` 前綴。
@@ -550,9 +556,9 @@ record_type 與 operations。配置目錄順序不等於 commit 順序。Operati
 kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
 outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
 OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
-Running 或 paused 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
-operation 的 cfg。Pause 打斷的 stale partial 在 Resume 後重試原 request，完整結果
-只等 Resume 交付。Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
+Running 或 waiting 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
+operation 的 cfg。每個 operation 只呼叫一次，合作停止的回傳值直接交給作者。
+Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
 
 ## 分析、互動與寫回
 

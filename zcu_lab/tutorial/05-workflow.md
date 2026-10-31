@@ -96,7 +96,7 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
 範例只恢復作者選定的 acquisition `OSError`。保存不在 catch 內，writer 或其他程式錯誤繼續傳出。
 實際裝置若使用其他例外型別，作者應在這兩個 await 周圍捕捉明確可恢復的型別。
 
-`commit` 同步寫下當時的快照，不加 `await`，也不等待 Pause 的 Resume。
+`commit` 同步寫下當時的快照，不加 `await`。
 後續修改 `point_record` 不會改已提交資料。同一 scope 第二次 commit 會 raise。
 `finally` 只提交既有成果。它不重設 status，也不吞掉 `ScriptCancelled` 或真實錯誤。
 根取消時，下一個 async operation 或 Ask 會丟普通 `ScriptCancelled`，作者的 finally 仍會執行。
@@ -125,7 +125,7 @@ Core 例外不會自動變成 `Failed`。點與點獨立且例外可恢復時，
 這種 workflow 的 return annotation 要包含自己的 Summary model。
 
 可重試時，由作者用有限的 `for attempt in range(...)` 包住相同的 await，並決定何時停止重試。
-框架不替作者重做外部效果。Pause 的 interrupted-attempt retry 是另一個機制，它只重跑原 capture。
+框架每個 operation 只呼叫一次，不替作者重做外部效果。
 
 作者的分析 helper 仍可回 `Failed(reason)`，例如 fitter 明示不收斂。這是作者的分析結果，不是 `scope.run` 的回傳分支。
 Caller 對這種值選擇繼續、結束或自行重試。Writer 或程式例外仍應傳出，不把它們混成分析拒絕。

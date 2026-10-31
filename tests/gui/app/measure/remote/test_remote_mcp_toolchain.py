@@ -266,7 +266,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
         if returns_record:
             assert reply["result"] == {
                 "reason": "completed",
-                "status": "cancelled",
+                "status": "finished",
             }
         else:
             assert reply["result"] == {
