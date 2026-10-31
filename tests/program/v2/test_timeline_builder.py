@@ -859,6 +859,22 @@ class DeclarationModule(v2.Module):
         pass
 
 
+@pytest.mark.parametrize("field,value", [("nqz", 2), ("mixer_freq", 100)])
+def test_generator_declaration_mismatch_names_both_objects_and_field(
+    mock_soccfg, field, value
+):
+    first = DeclarationModule("first", lambda p: p.declare_gen(0, nqz=1))
+    second = DeclarationModule("second", lambda p: p.declare_gen(0, **{field: value}))
+    builder = v2.TimelineBuilder(mock_soccfg)
+    builder.emit(first)
+    builder.emit(second)
+    with pytest.raises(ValueError, match=field) as error:
+        builder.build()
+    for module in (first, second):
+        assert module.name in str(error.value)
+        assert repr(module) in str(error.value)
+
+
 def test_protected_generator_conflict_names_protector_not_earlier_shared_user(
     mock_soccfg,
 ):
