@@ -84,15 +84,14 @@ def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(produc
         if producer == "alu":
             prog.write_reg_op("duration", "scan", "+", 10)
         else:
-            prog.write_dmem(17, 11)
-            prog.read_dmem("duration", 17)
+            prog.read_dmem("duration", 0)
         prog.fork("default", into="other")
         prog.delay_timeline("duration")
         prog.delay_timeline(11 / 430.08, timeline="other")
         prog.join("other", into="default")
         prog.pulse(0, "p0", timeline="default")
 
-    result = shots(program(body, reps=2))
+    result = shots(program(body, reps=2, initialize=lambda p: p.add_dmem([11])))
     expected = [11, 11, 12] if producer == "alu" else [11, 11, 11]
     assert [waves(s) for s in result] == [[t] for t in expected] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
