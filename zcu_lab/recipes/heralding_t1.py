@@ -99,8 +99,8 @@ async def heralding_t1(
     )
     tab.select("readout", inputs.readout_ref)
     tab.select("pi_pulse", inputs.pi_ref)
-    tab.set("length.stop", inputs.max_delay_us)
-    tab.set("length.n", inputs.points)
+    tab.set("delay.stop", inputs.max_delay_us)
+    tab.set("delay.n", inputs.points)
     tab.set("reps", inputs.reps)
     tab.set("rounds", inputs.rounds)
     for edit in inputs.overrides:

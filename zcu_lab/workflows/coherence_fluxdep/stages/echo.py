@@ -87,7 +87,7 @@ def _cfg(
         pi_pulse=pi,
         pi2_pulse=pi2,
         readout=readout,
-        length=sweep,
+        delay=sweep,
     ), tuple(gain_clamped)
 
 
@@ -121,7 +121,7 @@ def estimate_echo_time_s(
     )
     ro = pulses.readout
     readout_us = ro.nominal_duration_us()
-    delays_us = np.linspace(cfg.length.start, cfg.length.stop, cfg.length.expts)
+    delays_us = np.linspace(cfg.delay.start, cfg.delay.stop, cfg.delay.expts)
     return shot_time_s(
         rounds=cfg.rounds,
         reps=cfg.reps,

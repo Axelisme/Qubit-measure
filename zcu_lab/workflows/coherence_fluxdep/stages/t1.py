@@ -99,10 +99,10 @@ def _cfg(
         acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=relax,
-        uniform=settings.uniform,
+        sampling=settings.sampling,
         pi_pulse=pi,
         readout=readout,
-        length=SweepCfg(
+        delay=SweepCfg(
             start=settings.sweep_start_us,
             stop=stop,
             expts=points,
@@ -118,7 +118,7 @@ def estimate_t1_time_s(
     """Return nominal T1 shot seconds for pi → delay → readout.
 
     pulses supplies scalar pi/readout modules (pi2 unused), with timing in us.
-    settings supplies averaging, uniform/nonuniform sampling and auto/fixed
+    settings supplies averaging, linear/decay sampling and auto/fixed
     sweep/relax rules. points is the delay count, at least two. guess_us is a
     positive finite T1 estimate in us, supplied by the caller, not read from
     history. Auto sweep is clamped to the configured bounds; auto relax uses
@@ -131,16 +131,12 @@ def estimate_t1_time_s(
     if type(points) is not int or points < 2:
         raise ValueError("Delay points must be a built-in integer of at least two")
     cfg, _ = _cfg(pulses, settings, points=points, guess_us=guess_us)
-    delays_us = (
-        t1_delay_axis(
-            start=cfg.length.start,
-            stop=cfg.length.stop,
-            expts=cfg.length.expts,
-            uniform=cfg.uniform,
-            model_t1=0.2 * cfg.length.stop,
-        )
-        if isinstance(cfg.length, SweepCfg)
-        else np.asarray(cfg.length)
+    delays_us = t1_delay_axis(
+        start=cfg.delay.start,
+        stop=cfg.delay.stop,
+        expts=cfg.delay.expts,
+        uniform=cfg.sampling == "linear",
+        model_t1=0.2 * cfg.delay.stop,
     )
     pi = cfg.pi_pulse
     pulse_us = float(pi.pre_delay) + float(pi.waveform.length) + float(pi.post_delay)

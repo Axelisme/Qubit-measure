@@ -1,6 +1,7 @@
 """One mux acquisition and independent participant fits per stage."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -48,7 +49,7 @@ class T1Settings(FitSettings):
 
     reps/rounds are native acquisition averages. acquire_retry counts transient
     retries; earlystop_snr is the active tones' minimum completed-round SNR, or
-    None to disable. uniform selects linear delays, otherwise the core
+    None to disable. sampling=linear selects linear delays; sampling=decay
     concentrates the same window. sweep_factor times guess_us sets its endpoint.
     Relaxation is max(relax_min_us, relax_factor*guess_us), in us.
     """
@@ -57,7 +58,7 @@ class T1Settings(FitSettings):
     rounds: int
     acquire_retry: int
     earlystop_snr: float | None
-    uniform: bool
+    sampling: Literal["linear", "decay"]
     sweep_factor: float
     relax_factor: float
     relax_min_us: float
@@ -212,7 +213,7 @@ async def measure_mux_t1(
     """
     stop = settings.sweep_factor * guess_us
     cfg = MuxT1Cfg(
-        uniform=settings.uniform,
+        sampling=settings.sampling,
         reps=settings.reps,
         rounds=settings.rounds,
         acquire_retry=settings.acquire_retry,
@@ -222,7 +223,7 @@ async def measure_mux_t1(
         readout=pulses.readout,
         tones=[MuxT1ToneCfg(name=t.name, drive=t.drive) for t in pulses.tones],
         participants=list(pulses.participants),
-        delays=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
+        delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
     record = await scope.run(MuxT1Exp().run, cfg, name="Mux T1")
     observe_operation(env.summary, record)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -15,13 +14,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Join,
     Pulse,
     Readout,
     Reset,
-    SoftDelay,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -59,6 +56,13 @@ def get_resonance_freq(
 
 
 class FreqCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    readout_t: float
+    length: SweepCfg
+    freq: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -75,13 +79,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    readout_t: float
-    length: SweepCfg
-    freq: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -95,10 +92,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     # outer lengths stores us on disk (disk s) -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("lengths", label="Wait Time", unit="s", scale=1e-6),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -115,7 +112,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Resonance fits in analyze trace the flux-induced frequency response.
         """
         # Quantize probe timing and frequency on the configured hardware.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         length_sweep = cfg.length
@@ -139,31 +136,24 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            length_param = sweep2param("length", sched.cfg.length)
-            sched.cfg.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
-
-            # Probe while flux is scheduled independently; read after all branches.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Join(
-                        Pulse("flux_pulse", sched.cfg.flux_pulse),
-                        [
-                            SoftDelay("wait_time", delay=length_param),
-                            Pulse("qub_pulse", sched.cfg.qub_pulse),
-                        ],
-                        SoftDelay("readout_t", sched.cfg.readout_t),
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("length", sched.cfg.length)
-                .declare_sweep("freq", sched.cfg.freq)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            length = builder.add_sweep("length", cfg.length)
+            freq = builder.add_sweep("freq", cfg.freq)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.fork("default", into=["flux", "probe", "readout_wait"])
+            builder.emit(Pulse("flux_pulse", cfg.flux_pulse), timeline="flux")
+            builder.timeline_inc(length, timeline="probe")
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq), timeline="probe")
+            builder.timeline_inc(cfg.readout_t, timeline="readout_wait")
+            builder.join("flux", "probe", "readout_wait", into="default")
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return FreqResult(lengths, freqs, signals_buffer.array)
 
@@ -211,7 +201,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             mean_topdetune
         )
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             amps.T,
