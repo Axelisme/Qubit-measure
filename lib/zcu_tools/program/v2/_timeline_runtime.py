@@ -816,7 +816,7 @@ class RuntimeMath(TimedMacro):
                     operands.append(scalar.register)
                 else:
                     operands.append(round(scalar * get_fclk(self.prog)))
-        register = self.allocate()
+        register = candidates[0].register if isinstance(candidates[0], RuntimeEnd) else self.allocate()
         for index, operand in enumerate(operands):
             inst = {
                 "CMD": "REG_WR",
@@ -844,7 +844,7 @@ class RuntimeMath(TimedMacro):
         # Candidate conversions have been consumed by the selection writes.
         # Their immutable expressions survive; their storage is no longer live.
         for candidate in candidates:
-            if isinstance(candidate, RuntimeEnd):
+            if isinstance(candidate, RuntimeEnd) and candidate.register != register:
                 self.claimed.discard(candidate.register)
         return RuntimeEnd(
             register,
