@@ -1,17 +1,7 @@
-"""Bitwise frontend characterization for repeated pulse metadata.
+"""Repeated compiled requests preserve numeric controls and detached envelopes."""
 
-Digests cover request content, including source labels, inactive placeholders,
-candidate arrays and lowered flat-top envelopes. Semantic checks make the Repeat contract
-visible without depending on the interpreter's cache or private helpers.
-"""
-
-from dataclasses import fields, is_dataclass
-from hashlib import sha256
-
-import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
-from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
@@ -26,12 +16,14 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
-from zcu_tools.program.v2.simulation.frontend import build_request
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 
 @pytest.fixture
 def environment():
-    env = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        std_adc=0, seed=4, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1))
+    )
     yield env
     env.devices.close_all_devices()
 
@@ -131,85 +123,40 @@ def repeated_program(env, case):
     )
 
 
-def request_digest(request: AcquireRequest):
-    """Hash numeric values and ndarray bytes, not admission metadata or aliasing."""
-    digest = sha256()
-
-    def visit(value):
-        if isinstance(value, np.ndarray):
-            digest.update(repr((value.dtype.str, value.shape)).encode())
-            digest.update(value.tobytes())
-        elif is_dataclass(value) and not isinstance(value, type):
-            for field in fields(value):
-                digest.update(field.name.encode())
-                visit(getattr(value, field.name))
-        elif isinstance(value, tuple):
-            digest.update(str(len(value)).encode())
-            for child in value:
-                visit(child)
-        else:
-            digest.update(repr(value).encode())
-
-    for field in fields(request):
-        # Charge admission has its own acquire contract, outside these numeric pins.
-        if field.name != "charge_requirements":
-            digest.update(field.name.encode())
-            visit(getattr(request, field.name))
-    return digest.hexdigest()
-
-
 @pytest.mark.parametrize(
-    ("case", "expected"),
+    "case",
     [
-        ("swept", "ce07cccf6884cd443d72ac94ba6cb734d43c9950b9b9cae00e8657e646bb3860"),
-        (
-            "nonblocking",
-            "a6ab6c7947682738559e29c869d593da18de47a617fbe73cb377406daf7749b5",
-        ),
-        (
-            "flat_top",
-            "2e4ade443db4157b0481f9ebb891eef269686799a1ee1c1c448578bcd543a3a0",
-        ),
-        (
-            "computed",
-            "03bb5211ed5da8dce0d3f86d70626e3538f48e62a1bdc401e34e0b2a2fd41d8a",
-        ),
-        (
-            "computed_selection",
-            "d796deeb3c2001c266b1de9e5dcb4f3051557424745ba70594d532d7328d181f",
-        ),
-        (
-            "computed_tables",
-            "c479a8be410544303e9653960329862f1a59fcebca7caabb0155be5c49183445",
-        ),
-        (
-            "computed_qick_time",
-            "dd7d3f7318c487daf917707acb69f0d9bda0e9b49d5c91b01feebc9872646c11",
-        ),
-        (
-            "computed_flat_top",
-            "7d08fa57c36b1fd498be2150abf7ebc87bb8568e91fa7fa46923ccfab10bf182",
-        ),
-        # TableLengthPulse owns its source; only the former helper label changed.
-        ("dynamic", "1c3345ca38bd34d4cfaa5d4aa1a1ba160977099783017bed0fec8791f2d4f02b"),
-        ("branch", "283718448f03e2272ffe4ed594bc92af6a5028bcf9e19809a1a0fae6eb5fb9a7"),
+        "swept",
+        "nonblocking",
+        "flat_top",
+        "computed",
+        "computed_selection",
+        "computed_tables",
+        "computed_qick_time",
+        "computed_flat_top",
+        "dynamic",
+        "branch",
     ],
 )
-def test_repeated_request_preserves_all_numeric_content(environment, case, expected):
+def test_repeated_request_preserves_numeric_controls(environment, case):
     prog = repeated_program(environment, case)
-    request = build_request(prog, "integrated", environment.soc.binding, 0)
+    request = build_compiled_request(
+        prog, "integrated", environment.soc.binding, 0, routes=environment.soc.routes
+    )
     assert request.point_names == ("axis",)
     assert request.point_dims == (3,)
     assert request.reps == 2
-    for template in request.templates:
-        for slot in template.events:
-            if slot.source == "readout":
-                continue
-            outer, inner = slot.iterations
-            assert outer[0] == "outer" and inner[0] == "inner"
-            np.testing.assert_array_equal(
-                slot.active, np.asarray([0, 2, 1])[template.points] > outer[1]
-            )
+    for point, count in enumerate([0, 2, 1]):
+        iterations = {
+            event.iterations
+            for event in request.materialize_point(point).events
+            if event.source != "readout"
+        }
+        assert iterations == {
+            (("outer", outer), ("inner", inner))
+            for outer in range(count)
+            for inner in range(2)
+        }
     if case == "dynamic":
         assert {
             event.source for template in request.templates for event in template.events
@@ -247,20 +194,36 @@ def test_repeated_request_preserves_all_numeric_content(environment, case, expec
                 ]
                 assert len(second) == len(gates)
                 assert second[0].start_us > gates[0].start_us + gates[0].duration_us
-    assert request_digest(request) == expected
 
 
-@pytest.mark.parametrize("case", ["computed", "computed_selection"])
-def test_next_request_reads_current_compiled_pulse_content(environment, case):
-    prog = repeated_program(environment, case)
-    first = build_request(prog, "integrated", environment.soc.binding, 0)
-    original = request_digest(first)
+def test_next_request_reads_current_compiled_pulse_content(environment):
+    prog = repeated_program(environment, "computed")
+    first = build_compiled_request(
+        prog, "integrated", environment.soc.binding, 0, routes=environment.soc.routes
+    )
+    original = tuple(first.materialize_point(point) for point in range(3))
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
     next(iter(table.values()))["data"][:, 1] = 7
-    second = build_request(prog, "integrated", environment.soc.binding, 0)
-    assert request_digest(second) != original
-    assert request_digest(first) == original
-    assert request_digest(
-        build_request(prog, "integrated", environment.soc.binding, 0)
-    ) == request_digest(second)
+    second = build_compiled_request(
+        prog, "integrated", environment.soc.binding, 0, routes=environment.soc.routes
+    )
+    changed = tuple(second.materialize_point(point) for point in range(3))
+    assert changed != original
+    assert tuple(first.materialize_point(point) for point in range(3)) == original
+    envelopes = [
+        event.envelope
+        for point in changed
+        for event in point.events
+        if event.source == "gate" and event.envelope is not None
+    ]
+    assert envelopes
+    assert all(
+        value.imag == pytest.approx(7 / prog.soccfg.get_maxv(1))
+        for envelope in envelopes
+        for value in envelope.values
+    )
+    third = build_compiled_request(
+        prog, "integrated", environment.soc.binding, 0, routes=environment.soc.routes
+    )
+    assert tuple(third.materialize_point(point) for point in range(3)) == changed

@@ -26,7 +26,6 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.simulation.timeline import TimelineInterpreter
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -302,8 +301,7 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     )
 
 
-@pytest.mark.parametrize("seam", ["acquire", "scalar_diagnostic"])
-def test_two_pulse_reset_swept_lengths_use_machine_blocking_end(seam):
+def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
     env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
     pulses = [
         PulseCfg(
@@ -336,16 +334,9 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end(seam):
             modules=[reset.build("reset"), readout.build("readout")],
             sweep=[("length", 3)],
         )
-        if seam == "acquire":
-            prog.acquire(env.soc, progress=False)
-            request = request_of(env)
-            timelines = [request.materialize_point(point) for point in range(3)]
-        else:
-            interpreter = TimelineInterpreter(prog)
-            timelines = [
-                interpreter.run_point({"reps": 0, "length": point})
-                for point in range(3)
-            ]
+        prog.acquire(env.soc, progress=False)
+        request = request_of(env)
+        timelines = [request.materialize_point(point) for point in range(3)]
         # Machine scheduling emits literal tProc timestamps 84, 93 and 181.
         # The two swept waveforms remain 19, 38 and 57 generator clocks long.
         for point, timeline in enumerate(timelines):
@@ -364,7 +355,7 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end(seam):
         env.devices.close_all_devices()
 
 
-def test_join_cross_branch_register_dependency_rejected_before_backend():
+def test_reps_counter_lookup_in_join_rejected_before_backend():
     modules = [
         Join(
             LoadValue("writer", [0], "reps", "selection"),
@@ -374,12 +365,14 @@ def test_join_cross_branch_register_dependency_rejected_before_backend():
     ]
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     prog = ModularProgramV2(env.soccfg, modules=modules)
-    with pytest.raises(ValueError, match="Join.*register.*selection"):
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
+    ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
-def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
+def test_reps_counter_word_lookup_rejected_before_backend():
     modules = [
         LoadWord("raw", [1], "reps", "cycles"),
         DelayAuto("invalid_wait", t="cycles"),
@@ -387,6 +380,8 @@ def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
     ]
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(env.soccfg, modules=modules)
-    with pytest.raises(ValueError, match="DelayAuto.*invalid_wait.*reps.*cycles.*word"):
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
+    ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds

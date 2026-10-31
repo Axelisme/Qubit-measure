@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-31, compiled acquisition entry
+**Last updated:** 2026-10-31, legacy frontend removal
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -132,6 +132,11 @@ when that envelope sample is exactly zero. Phase reset would affect later comman
 which requires DDS phase state outside the current numeric event contract.
 Do not infer support for every control form or registered experiment from this builder.
 
+Simulation acquisition has one frontend. It reads the pre-optimization compiled
+stream through `build_compiled_request` for native and Modular programs.
+There is no runtime frontend selector or fallback. Module lowering remains part
+of program construction; acquisition does not interpret the Module tree.
+
 ## Build and own an environment
 
 An environment file is trusted Python, not a sandbox or a configuration DSL.
@@ -246,10 +251,10 @@ nested iteration coordinates and a common phase origin of zero. A nonconstant
 `PulseEnvelope` owns immutable complex samples on the actual DAC sample clock.
 Consumers interpolate linearly, hold the final sample through pulse end and use
 zero outside the event. No per-pulse peak normalization or solver grid is imposed.
-Const uses a unity envelope (`None`). A flat-top with at least 10 ns of plateau
-becomes adjacent up-ramp, half-gain constant and down-ramp slots. Short flat-tops
-keep whole sampled-envelope candidates. Long plateaus never expand onto a fine
-grid. Ramp boundary samples preserve the scalar envelope's linear interpolation.
+Const uses a unity envelope (`None`). Compiled waveform commands determine event
+durations and envelope samples. Flat-top ramp and plateau commands retain their
+compiled playback order. Template grouping is not a public waveform
+decomposition guarantee.
 
 MuxReadout lowers the real compiled mixmux tones into simultaneous EventSlots
 on one generator, with one static PFB ADC slot per declared tone. DDS, gain,
@@ -267,9 +272,9 @@ new consumers use template arrays for point-dependent timing/demodulation.
 Environments, not this frontend, explicitly convert us/MHz into the independent
 numeric APIs' ns/GHz.
 
-ComputedPulse reserves the maximum candidate blocking length. TableLengthPulse
-uses the selected quantized duration and the existing runtime timestamp policy,
-without padding to the longest entry. TablePulseReadout first plays its initial
+ComputedPulse and TableLengthPulse follow the selected compiled waveform and
+timestamp effects. The frontend does not pad a selected event to the longest
+candidate. TablePulseReadout first plays its initial
 compiled template; only its named loop's exec-after hook prepares the next words.
 The last update restores table entry zero for the next outer repetition. Register
 and template state belongs to one frontend preparation, never to another acquire.
