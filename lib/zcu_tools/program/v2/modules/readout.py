@@ -504,7 +504,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
@@ -729,7 +729,7 @@ class MuxReadout(AbsReadout):
             t=self.cfg.trig_offset,
             timeline=timeline,
         )
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         from ..timeline import TimelineProgramV2

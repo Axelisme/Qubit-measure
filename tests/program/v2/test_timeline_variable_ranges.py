@@ -114,7 +114,7 @@ def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
         def _body(self, cfg):
             self.fork("default", into="pulse")
             self.pulse(0, "p", timeline="pulse")
-            self.delay_timeline(QickSweep1D("i", 80 / 430.08, 374 / 430.08))
+            self.timeline_inc(QickSweep1D("i", 80 / 430.08, 374 / 430.08))
             self.join("pulse", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
@@ -134,14 +134,14 @@ def test_three_way_join_prunes_partial_dominance_and_reconstructs_shared_length_
         def _body(self, cfg):
             length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
             other = QickSweep1D("j", 0, 80 / 430.08)
-            self.delay_timeline(7 / 430.08)
+            self.timeline_inc(7 / 430.08)
             with self.branch(by="case", align_timeline=True) as branch:
                 with branch.case(0):
-                    self.delay_timeline(length + 40 / 430.08)
+                    self.timeline_inc(length + 40 / 430.08)
                 with branch.case(1):
-                    self.delay_timeline(length + other)
+                    self.timeline_inc(length + other)
                 with branch.case(2):
-                    self.delay_timeline(2 * length)
+                    self.timeline_inc(2 * length)
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
@@ -170,15 +170,15 @@ def test_join_eliminates_every_provably_dominated_candidate(extra):
 
         def _body(self, cfg):
             length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
-            self.delay_timeline(7 / 430.08)
+            self.timeline_inc(7 / 430.08)
             with self.branch(by="case", align_timeline=True) as branch:
                 with branch.case(0):
-                    self.delay_timeline(length + 50 / 430.08)
+                    self.timeline_inc(length + 50 / 430.08)
                 with branch.case(1):
-                    self.delay_timeline(2 * length)
+                    self.timeline_inc(2 * length)
                 if extra:
                     with branch.case(2):
-                        self.delay_timeline(length + 10 / 430.08)
+                        self.timeline_inc(length + 10 / 430.08)
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
@@ -211,7 +211,7 @@ def test_join_compares_negative_residuals_with_a_proven_signed32_difference():
                     ]
                 ):
                     with branch.case(index):
-                        self.delay_timeline(duration)
+                        self.timeline_inc(duration)
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
@@ -249,8 +249,8 @@ def test_author_register_does_not_inherit_loop_correlation(hint):
         def _body(self, cfg):
             self.write_reg_op("duration", "i", "+", 80)
             self.fork("default", into="other")
-            self.delay_timeline("duration", range_hint=hint, tag="author")
-            self.delay_timeline(
+            self.timeline_inc("duration", range_hint=hint, tag="author")
+            self.timeline_inc(
                 QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
             )
             self.join("other", into="default")
@@ -284,8 +284,8 @@ def test_measurement_selected_table_is_independent_of_loop_time():
                 self.write_reg_op("duration", "s_port_l", "AND", 1)
             self.emit(loader)
             self.fork("default", into="other")
-            self.delay_timeline("selected", tag="selected")
-            self.delay_timeline(
+            self.timeline_inc("selected", tag="selected")
+            self.timeline_inc(
                 QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
             )
             self.join("other", into="default")
@@ -321,7 +321,7 @@ def test_two_loop_fabric_conversion_keeps_linear_part_for_dominance():
         def _body(self, cfg):
             self.fork("default", into="pulse")
             self.pulse(0, "p", timeline="pulse")
-            self.delay_timeline(
+            self.timeline_inc(
                 QickSweep1D("i", 80 / 430.08, 92 / 430.08)
                 + QickSweep1D("j", 0, 12 / 430.08)
             )

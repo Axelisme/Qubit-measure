@@ -331,6 +331,12 @@ class LoopTimelineFrame:
     for the backedge proof, in relative integer cycles. advance is cumulative
     reference movement in cycles; debits retain its execution-position plans.
     written_channels distinguishes generated tails from untouched outer tails.
+    body_math starts empty and retains the prepared RuntimeMath plans emitted
+    in this frame's body, in preparation order. Loop exit may rewrite these plans
+    to s14-only pointer updates when their event offsets and duration are proven
+    constant. recording starts False and becomes True at the body boundary,
+    after the iteration-origin capture. Only the active innermost frame records
+    plans; popping the frame at exit ends recording before exit plans prepare.
     """
 
     parent: str
@@ -349,6 +355,8 @@ class LoopTimelineFrame:
     advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
+    body_math: list[RuntimeMath] = field(default_factory=list)
+    recording: bool = False
 
 
 @dataclass(frozen=True)
@@ -393,6 +401,7 @@ class TimelineBook:
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
+        self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
@@ -577,7 +586,7 @@ class TimelineBook:
         if placement and name in self.waiting:
             raise ValueError(
                 f"{name}: timeline can only wait after register repeat; "
-                "sync it or use join/fork to establish a conservative scheduling point"
+                "call delay_by_timeline or use join/fork to establish a conservative scheduling point"
             )
         return self.ends[name]
 
@@ -595,7 +604,7 @@ class TimelineBook:
         )
         if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
             raise ValueError(
-                f"channel {channel} pulse overlap inside repeat; use delay_timeline"
+                f"channel {channel} pulse overlap inside repeat; use timeline_inc"
             )
         self.loop_timelines[-1].starts.append(
             (channel, expression, tuple(self.case_path))
@@ -604,7 +613,7 @@ class TimelineBook:
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
         if self.used is not None or self.reference_guards:
-            raise ValueError("cannot advance reference; use delay_timeline instead")
+            raise ValueError("cannot advance reference; use timeline_inc instead")
 
     def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
         self.require_reference_advance()
@@ -764,22 +773,14 @@ class TimelineBook:
 
         Known producers use exact legal-point extrema. A bounds-only unknown
         emits an explicitly conservative warning and never triggers the relax
-        guard. This check emits no runtime instructions.
+        guard. Body closure has already consumed unbounded ADC tails at runtime.
+        This check emits no runtime instructions.
         """
         if not prog.ro_chs:
             return
         expression = choose_time(
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
-        if unbounded_time(expression):
-            unknown = [
-                ch
-                for ch in prog.ro_chs
-                if unbounded_time(self.native_expression(prog, ch, generator=False))
-            ]
-            raise ValueError(
-                f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending"
-            )
         exact = exact_bounds(expression)
         limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its
@@ -798,5 +799,26 @@ class TimelineBook:
                 raise ValueError(f"{message}, relax={relax} cycles")
             warnings.warn(message, UserWarning, stacklevel=2)
 
-    def maximum(self) -> Time:
-        return self.math.join(list(self.ends.values()) or [0.0])
+    def maximum(self, *, close_adc: bool = False) -> Time:
+        """Return the maximum selected relative end as a Time value.
+
+        With close_adc=False, select only the current timeline ends. With
+        close_adc=True, also select actual native ADC ends whose expressions
+        have no compile-time upper bound. True is only for the existing
+        all-timeline shot closure; finite ADC tails stay on the constant shell
+        WAIT and slack-proof path rather than being added as extra candidates.
+
+        Return a float or QickParam when the maximum is statically representable,
+        otherwise a RuntimeEnd for the actual runtime maximum. An empty selection
+        returns zero. This method does not advance reference or debit ends; the
+        caller consumes the returned end when synchronizing.
+        """
+        values = list(self.ends.values())
+        if close_adc:
+            prog = self.math.prog
+            values.extend(
+                self.channel_end(prog, ch, generator=False)
+                for ch in prog.ro_chs
+                if unbounded_time(self.native_expression(prog, ch, generator=False))
+            )
+        return self.math.join(values or [0.0])

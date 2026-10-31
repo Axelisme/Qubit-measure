@@ -136,7 +136,7 @@ def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
     def body(prog):
         if origin:
             prog.write_reg("duration", origin)
-            prog.delay_timeline("duration")
+            prog.timeline_inc("duration")
         prog.emit(readout)
 
     result = shots(_program([readout], body, initialize))
@@ -184,7 +184,7 @@ def test_fractional_delay_from_register_origin_rounds_up_without_reference_advan
 
     def body(prog):
         prog.write_reg("duration", 40)
-        prog.delay_timeline("duration")
+        prog.timeline_inc("duration")
         prog.emit(delay)
 
     result = shots(
@@ -227,7 +227,7 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
 
     def body(prog):
         prog.write_reg("duration", 40)
-        prog.delay_timeline("duration")
+        prog.timeline_inc("duration")
         prog.emit(owner)
 
     result = shots(_program([owner], body, initialize))
@@ -554,13 +554,13 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
         prog.add_loop("fine", 3)
 
     def body(prog):
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("outer", 2):
-            prog.sync()
+            prog.delay_by_timeline()
             with prog.repeat("inner", 2):
                 prog.emit(pulse)
-                prog.sync()
-            prog.sync()
+                prog.delay_by_timeline()
+            prog.delay_by_timeline()
 
     prog = _program([pulse], body, initialize)
     # Generator grids39/40/41,77/78/79,115/116/117 at ratio28/25.
@@ -645,7 +645,7 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
         prog.fork("default", into=["drive", "other"])
         prog.emit(pulse, timeline="drive")
         prog.emit(loader)
-        prog.delay_timeline("other_end", timeline="other")
+        prog.timeline_inc("other_end", timeline="other")
         prog.delay(50 / 430.08)
         prog.join("drive", "other", into="default")
         prog.emit(tail)
@@ -681,7 +681,7 @@ def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
 def test_sweep_end_requires_a_discovered_native_axis_before_using_its_bounds():
     with pytest.raises(ValueError, match="missing.*native sweep axis"):
         _program(
-            [], lambda prog: prog.delay_timeline(QickSweep1D("missing", 0.101, 0.301))
+            [], lambda prog: prog.timeline_inc(QickSweep1D("missing", 0.101, 0.301))
         )
 
 
@@ -692,7 +692,7 @@ def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
 
     prog = _program(
         [],
-        lambda prog: prog.delay_timeline(
+        lambda prog: prog.timeline_inc(
             QickSweep1D("scan", 43.68 / 430.08, 128.8 / 430.08)
         ),
         initialize,
@@ -812,7 +812,7 @@ def test_reset_retains_child_posts_and_rounds_dependent_placement(
     def body(prog):
         if origin:
             prog.write_reg("duration", origin)
-            prog.delay_timeline("duration")
+            prog.timeline_inc("duration")
         prog.emit(reset)
 
     result = shots(
