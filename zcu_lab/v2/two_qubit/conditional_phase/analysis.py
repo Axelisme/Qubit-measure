@@ -25,17 +25,20 @@ class CountQuadratures:
     values is target sigma, variances is its count-derived variance, acquired
     is each projection's shot total. Empty counts give NaN values/variances.
     """
+
     values: NDArray[np.float64]
     variances: NDArray[np.float64]
     acquired: NDArray[np.float64]
 
 
 def count_quadratures(
-    counts: NDArray[np.float64], target: Literal["f1", "f2"],
+    counts: NDArray[np.float64],
+    target: Literal["f1", "f2"],
 ) -> CountQuadratures:
     """Reduce terminal (...,3,3) counts to sigma, variance and shot totals."""
     return CountQuadratures(
-        sigma(counts, target), sigma_variance(counts, target),
+        sigma(counts, target),
+        sigma_variance(counts, target),
         counts.sum(axis=(-2, -1)),
     )
 
