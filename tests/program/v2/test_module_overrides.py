@@ -35,7 +35,9 @@ from tests.program.v2._mux_support import native_mux
 ProgramKind = Literal["native", "builder", "legacy"]
 
 
-def _reset_module(cfg: AbsResetCfg, overrides: dict[str, float | QickParam | None], use_factory: bool):
+def _reset_module(
+    cfg: AbsResetCfg, overrides: dict[str, float | QickParam | None], use_factory: bool
+):
     if use_factory:
         return Reset("reset", cfg, **overrides)
     if isinstance(cfg, PulseResetCfg):
@@ -111,12 +113,20 @@ def test_pulse_overrides_match_set_param_without_mutating_cfg(
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    actual = _compile(kind, [Pulse("drive", cfg,
-        freq=value if knob == "freq" else None,
-        gain=value if knob == "gain" else None,
-        phase=value if knob == "phase" else None,
-        length=value if knob == "length" else None,
-    )], swept)
+    actual = _compile(
+        kind,
+        [
+            Pulse(
+                "drive",
+                cfg,
+                freq=value if knob == "freq" else None,
+                gain=value if knob == "gain" else None,
+                phase=value if knob == "phase" else None,
+                length=value if knob == "length" else None,
+            )
+        ],
+        swept,
+    )
     expected = _compile(kind, [Pulse("drive", equivalent)], swept)
     _assert_same_compile(actual, expected)
     assert cfg.model_dump() == original
@@ -167,7 +177,9 @@ def test_readout_overrides_match_set_param_without_mutating_cfg(
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    overrides: dict[str, float | QickParam | None] = dict(freq=None, gain=None, length=None, ro_length=None)
+    overrides: dict[str, float | QickParam | None] = dict(
+        freq=None, gain=None, length=None, ro_length=None
+    )
     overrides[knob] = value
     readout = factory("read", cfg, **overrides)
     if knob == "ro_length" and swept:
