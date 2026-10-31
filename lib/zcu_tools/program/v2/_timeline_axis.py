@@ -116,7 +116,9 @@ def nonzero_component(component: Component) -> bool:
 
 def component_values(component: Component) -> tuple[Scalar, ...]:
     """Return actual component values as immutable Python numeric scalars."""
-    return tuple(component.tolist()) if isinstance(component, np.ndarray) else (component,)
+    return (
+        tuple(component.tolist()) if isinstance(component, np.ndarray) else (component,)
+    )
 
 
 def component_key(axis: CycleAxis, component: Component) -> tuple[object, ...]:

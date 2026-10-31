@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .hw_semantics import TIMED_BASE_REG
 from .instructions import (
     BaseInst,
     LabelInst,
@@ -17,7 +18,6 @@ from .io_instructions import (
 )
 from .labels import Label
 from .node import BasicBlockNode, BlockNode, IRBranch, IRLoop, IRNode
-from .hw_semantics import TIMED_BASE_REG
 from .operands import AluOp, Immediate, SrcKeyword
 
 if TYPE_CHECKING:

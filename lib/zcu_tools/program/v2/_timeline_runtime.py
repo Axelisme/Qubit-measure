@@ -513,7 +513,9 @@ class EventTime(Macro):
         # QICK eagerly formats macros even when debug logging is disabled.
         return f"{type(self).__name__}()"
 
-    def __init__(self, base: RuntimeEnd, offset: RuntimeEnd | int, expression: TimeExpression):
+    def __init__(
+        self, base: RuntimeEnd, offset: RuntimeEnd | int, expression: TimeExpression
+    ):
         self.base = base
         self.offset = offset
         self.expression = expression
@@ -521,17 +523,25 @@ class EventTime(Macro):
     def translate(self, prog) -> None:
         book = prog._timeline_book
         previous = book.output_time
-        delta = None if previous is None else difference_limits(self.expression, previous)
+        delta = (
+            None if previous is None else difference_limits(self.expression, previous)
+        )
         if delta is not None and delta[0] == delta[1] and delta[0] is not None:
             amount = int(delta[0])
             if amount:
-                WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=amount).translate(prog)
+                WriteRegOp(
+                    dst="s_out_time", lhs="s_out_time", op="+", rhs=amount
+                ).translate(prog)
         elif self.offset == 0:
             WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
         else:
             WriteRegOp(
-                dst="s_out_time", lhs=self.base.register, op="+",
-                rhs=self.offset.register if isinstance(self.offset, RuntimeEnd) else self.offset,
+                dst="s_out_time",
+                lhs=self.base.register,
+                op="+",
+                rhs=self.offset.register
+                if isinstance(self.offset, RuntimeEnd)
+                else self.offset,
             ).translate(prog)
         book.output_time = self.expression
 
@@ -560,8 +570,21 @@ class RuntimeMath(TimedMacro):
         before another event or native macro can overwrite the output register.
         Native sweep offsets retain their QICK time registers.
         """
-        operand = self.cycles(offset) if isinstance(offset, QickParam) and offset.is_sweep() else round((offset.start if isinstance(offset, QickParam) else offset) * get_fclk(self.prog))
-        result = self.op(base, "+", operand, limits=self._sum_limits(base, operand), target="s_out_time")
+        operand = (
+            self.cycles(offset)
+            if isinstance(offset, QickParam) and offset.is_sweep()
+            else round(
+                (offset.start if isinstance(offset, QickParam) else offset)
+                * get_fclk(self.prog)
+            )
+        )
+        result = self.op(
+            base,
+            "+",
+            operand,
+            limits=self._sum_limits(base, operand),
+            target="s_out_time",
+        )
         self.operations[-1] = EventTime(base, operand, result.expression)
         return result
 

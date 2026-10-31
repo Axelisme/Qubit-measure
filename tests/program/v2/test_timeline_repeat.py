@@ -74,7 +74,11 @@ def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
 
     prog = _program(body, _register_initialize, reps=2)
     assert [_waves(s) for s in _shots(prog)] == [[0, 40, 80, 120]] * 2
-    increments = [i for i in prog.prog_list if i.get("DST") == "s14" and i.get("OP") == "s14 + #40"]
+    increments = [
+        i
+        for i in prog.prog_list
+        if i.get("DST") == "s14" and i.get("OP") == "s14 + #40"
+    ]
     assert 1 <= len(increments) < 32
     for index, inst in enumerate(prog.prog_list):
         if inst in increments:

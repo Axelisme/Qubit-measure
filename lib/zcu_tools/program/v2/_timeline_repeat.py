@@ -10,6 +10,7 @@ from ._timeline_expression import (
     add_time,
     choose_time,
     cycle_axis,
+    difference_limits,
     multiply_time,
     projected_expression_bounds,
     scale_time,
@@ -19,10 +20,15 @@ from ._timeline_expression import (
     unbounded_time,
 )
 from ._timeline_guard import PulseGuard
-from ._timeline_runtime import RuntimeEnd, Time, EventTime, runtime_expression, time_expression
-from ._timeline_expression import difference_limits
-from .macro.write_reg import WriteRegOp
+from ._timeline_runtime import (
+    EventTime,
+    RuntimeEnd,
+    Time,
+    runtime_expression,
+    time_expression,
+)
 from ._timeline_state import LoopTimelineFrame, TimelineBook
+from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
 
@@ -158,7 +164,9 @@ class LoopTimelineExit(Macro):
             tail = frame.entry_math.snapshot(frame.entry_math.cycles(initial))
             last = book.math.cycles(current)
             if not simple:
-                book.math.operations.append(WriteReg(dst=tail.register, src=last.register))
+                book.math.operations.append(
+                    WriteReg(dst=tail.register, src=last.register)
+                )
             relative = add_time(
                 native, scale_time(runtime_expression(frame.origin), -1)
             )
@@ -175,7 +183,9 @@ class LoopTimelineExit(Macro):
                     multiply_time(last_expression, active),
                 )
             if simple:
-                self._capture_channel(prog, tail, result, native, time_expression(prog, finish))
+                self._capture_channel(
+                    prog, tail, result, native, time_expression(prog, finish)
+                )
             tail = _end(tail.register, last_expression)
             channels = book.runtime_gens if generator else book.runtime_ros
             channels[ch] = tail
@@ -207,7 +217,12 @@ class LoopTimelineExit(Macro):
         duration = difference_limits(end, origin)
         if duration[0] is None or duration[0] != duration[1]:
             return False
-        events = [op for math in frame.body_math for op in math.operations if isinstance(op, EventTime)]
+        events = [
+            op
+            for math in frame.body_math
+            for op in math.operations
+            if isinstance(op, EventTime)
+        ]
         offsets = [difference_limits(event.expression, origin) for event in events]
         if any(lo is None or lo != hi for lo, hi in offsets):
             return False
@@ -218,7 +233,9 @@ class LoopTimelineExit(Macro):
                 if lo is None or lo != hi:
                     return False
         for math in frame.body_math:
-            math.operations = [op for op in math.operations if isinstance(op, EventTime)]
+            math.operations = [
+                op for op in math.operations if isinstance(op, EventTime)
+            ]
         for event, (offset, _) in zip(events, offsets, strict=True):
             if offset is None:
                 raise RuntimeError("pointer event lost its constant offset")
@@ -228,20 +245,53 @@ class LoopTimelineExit(Macro):
         advance, _ = difference_limits(end, last)
         if advance is None:
             raise RuntimeError("pointer end lost its constant increment")
-        self.entry.book.math.operations = [WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=int(advance))]
+        self.entry.book.math.operations = [
+            WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=int(advance))
+        ]
         return True
 
-    def _capture_channel(self, prog, tail: RuntimeEnd, result: RuntimeEnd, native: TimeExpression, finish: TimeExpression) -> None:
+    def _capture_channel(
+        self,
+        prog,
+        tail: RuntimeEnd,
+        result: RuntimeEnd,
+        native: TimeExpression,
+        finish: TimeExpression,
+    ) -> None:
         """Derive a final physical tail from the pointer, preserving n=0 tails."""
         offset, _ = difference_limits(native, finish)
         if offset is None:
             raise RuntimeError("pointer channel lost its constant final offset")
         operations = self.entry.post_operations
         if self.minimum == 0 and isinstance(self.iterations, str):
-            operations.append(AsmInst(inst={"CMD": "TEST", "OP": prog.reg_dict[self.iterations].full_addr(), "UF": "1"}, addr_inc=1))
-            operations.append(AsmInst(inst={"CMD": "REG_WR", "DST": prog.reg_dict[tail.register].full_addr(), "SRC": "op", "OP": f"{prog.reg_dict[result.register].full_addr()} + #{int(offset)}", "IF": "NZ"}, addr_inc=1))
+            operations.append(
+                AsmInst(
+                    inst={
+                        "CMD": "TEST",
+                        "OP": prog.reg_dict[self.iterations].full_addr(),
+                        "UF": "1",
+                    },
+                    addr_inc=1,
+                )
+            )
+            operations.append(
+                AsmInst(
+                    inst={
+                        "CMD": "REG_WR",
+                        "DST": prog.reg_dict[tail.register].full_addr(),
+                        "SRC": "op",
+                        "OP": f"{prog.reg_dict[result.register].full_addr()} + #{int(offset)}",
+                        "IF": "NZ",
+                    },
+                    addr_inc=1,
+                )
+            )
         else:
-            operations.append(WriteRegOp(dst=tail.register, lhs=result.register, op="+", rhs=int(offset)))
+            operations.append(
+                WriteRegOp(
+                    dst=tail.register, lhs=result.register, op="+", rhs=int(offset)
+                )
+            )
 
     def _reference_exit(self, prog, frame: LoopTimelineFrame, finish: Time) -> None:
         """Store exact runtime debits, then restore loop-relative provenance."""

@@ -94,7 +94,9 @@ def test_scheduled_ticks_counts_literal_output_pointer_increment():
     increment = RegWriteInst.from_dict(
         {"CMD": "REG_WR", "DST": "s14", "SRC": "op", "OP": "s14 + #40"}
     )
-    body = BasicBlockNode(insts=[increment, TimeInst(c_op="inc_ref", lit=Immediate(10))])
+    body = BasicBlockNode(
+        insts=[increment, TimeInst(c_op="inc_ref", lit=Immediate(10))]
+    )
     assert estimate_body_scheduled_ticks([body]) == 50
 
 

@@ -815,9 +815,7 @@ def _structural_key(value: TimeExpression) -> _StructuralKey:
 
 def _orientation(value: TimeExpression) -> int:
     linear, absolute = _parts(value)
-    for _, component in sorted(
-        linear.components, key=lambda item: item[0].sort_key
-    ):
+    for _, component in sorted(linear.components, key=lambda item: item[0].sort_key):
         items = np.asarray(component, dtype=object).flat
         for amount in items:
             if amount:

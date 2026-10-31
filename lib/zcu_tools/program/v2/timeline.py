@@ -24,10 +24,10 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
-    RepeatTimelineEnter,
-    RepeatTimelineExit,
     RepeatTimelineBody,
     RepeatTimelineCapture,
+    RepeatTimelineEnter,
+    RepeatTimelineExit,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -197,8 +197,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if inst["CMD"] in ("JUMP", "CALL", "RET") or (
             "s14" in instruction.reg_write
             and not (
-                isinstance(instruction, RegWriteInst)
-                and instruction.is_pure_self_copy
+                isinstance(instruction, RegWriteInst) and instruction.is_pure_self_copy
             )
         ):
             self._timeline_book.output_time = None

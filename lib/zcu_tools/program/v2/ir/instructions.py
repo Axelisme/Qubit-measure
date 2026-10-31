@@ -434,9 +434,18 @@ class RegWriteInst(BaseInst):
             and self.op.lhs.regs() == self.dst.regs()
             and not self.uf
             and self.if_cond is None
-            and all(value is None for value in (
-                self.wr, self.ww, self.wp, self.port, self.lit, self.addr, self.label
-            ))
+            and all(
+                value is None
+                for value in (
+                    self.wr,
+                    self.ww,
+                    self.wp,
+                    self.port,
+                    self.lit,
+                    self.addr,
+                    self.label,
+                )
+            )
         )
 
     @property
