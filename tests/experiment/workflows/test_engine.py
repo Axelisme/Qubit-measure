@@ -118,7 +118,9 @@ def test_nested_inputs_and_published_records_are_detached(rig: Rig) -> None:
     assert rig.engine.records("run")[0].encoded_record.value == {"value": 1}
 
 
-def test_thread_safe_stop_does_not_wait_and_repeated_stop_is_idempotent(rig: Rig) -> None:
+def test_thread_safe_stop_does_not_wait_and_repeated_stop_is_idempotent(
+    rig: Rig,
+) -> None:
     entered, release = Event(), Event()
     stops: list[bool] = []
 

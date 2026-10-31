@@ -277,8 +277,7 @@ class WorkflowPane(QWidget):
         self._bind_form("plan", editable=idle)
         self._bind_form(
             "tunables",
-            editable=writable
-            and (idle or lifecycle in {"running", "waiting"}),
+            editable=writable and (idle or lifecycle in {"running", "waiting"}),
         )
         self._project_controls(snapshot, lifecycle, idle=idle)
         self._refresh_discard()

@@ -217,8 +217,7 @@ def _controls(driver: ComponentDriver) -> set[str]:
     return {
         widget.text
         for widget in driver.visible().widgets
-        if widget.kind == "QPushButton"
-        and widget.text in {"Refresh", "Start", "Stop"}
+        if widget.kind == "QPushButton" and widget.text in {"Refresh", "Start", "Stop"}
     }
 
 
