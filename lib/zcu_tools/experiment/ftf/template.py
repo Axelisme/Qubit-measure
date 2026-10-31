@@ -20,6 +20,7 @@ from zcu_tools.experiment.readout_plan import (
     map_readout_events,
     readout_contents,
 )
+from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
@@ -89,8 +90,9 @@ class FTFModelFacts:
 class FTFReadoutPlan:
     """One ADC's detached batch in program declaration order.
 
-    channel is the logical ADC index. batch contains all incident carriers and
-    this receiver's calibrated model, grids and point-to-content mapping.
+    channel is the logical ADC index. batch contains this receiver's calibrated
+    model, grids and point-to-content mapping. Mux events retain only incident
+    carriers in the ADC's profile PFB channel; same-channel carriers superpose.
     """
 
     channel: int
@@ -331,6 +333,49 @@ def _projective_contents(
     ), reference
 
 
+def _mux_channel_contents(
+    content: ReadoutMapping, path: _ReadoutPath, channel: int
+) -> ReadoutMapping:
+    """Select incident carriers using the fixed compile profile's PFB channels."""
+    channels = tuple(receiver.ro_ch for receiver in path.receivers)
+    profile = make_mux_mock_soccfg(
+        path.gen_ch + 1, max(channels) + 1, gen_ch=path.gen_ch, ro_chs=channels
+    )
+    config = profile["readouts"][channel]
+    sample_rate = float(config["fs"])
+    spacing = float(config["f_dds"]) / 2
+    offset, count = int(config["pfb_ch_offset"]), int(config["pfb_nch"])
+
+    def pfb_channel(frequency_ghz: float) -> int:
+        frequency = frequency_ghz * 1000
+        zone = int(frequency // (sample_rate / 2)) + 1
+        if zone % 2 == 0:
+            frequency = -frequency
+        folded = frequency % sample_rate
+        return (offset + round(folded / spacing)) % count
+
+    selected = []
+    for events in content.events:
+        row = []
+        for event in events:
+            addressed = {
+                pfb_channel(grid.demodulation_frequency_ghz) for grid in event.grids
+            }
+            if len(addressed) > 1:
+                raise ValueError(
+                    f"FTF mux ADC {channel} cannot select different PFB channels "
+                    "within one readout event"
+                )
+            pulses = tuple(
+                pulse
+                for pulse in event.pulses
+                if not addressed or pfb_channel(pulse.frequency_ghz) in addressed
+            )
+            row.append(replace(event, pulses=pulses))
+        selected.append(tuple(row))
+    return replace(content, events=tuple(selected))
+
+
 def plan_template(
     settings: FTFSettings,
     snapshot: EnvironmentSnapshot,
@@ -366,7 +411,11 @@ def plan_template(
     Event generators select pulse or mux capabilities. Using both configured
     readout generators in one template raises ValueError naming both channels.
     Readout windows must belong to that path's receivers and generator.
-    Mux permits simultaneous coherent tones with independent ADC grids. Program
+    Mux retains only carriers in each ADC's fixed-profile PFB channel, including
+    same-channel superposition. Each logical event selects independently. Grids
+    in one event spanning different PFB channels raise ValueError. An addressed
+    single carrier is unchanged; off-channel carriers are excluded even alone.
+    Program
     common-origin carrier phases convert to pulse-local phases in the first
     terminal carrier's model reference frame; ADC demodulation remains absolute-time.
     All ADCs retain the same ordered event axis, even if none observes terminal.
@@ -429,6 +478,8 @@ def plan_template(
     joint, source, physical = facts.joint, facts.source, facts.readout
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
+        if path.multiplexed:
+            content = _mux_channel_contents(content, path, window.channel)
         adc = receivers[window.channel]
         dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
