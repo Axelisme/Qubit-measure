@@ -12,6 +12,7 @@ from .model import RealArray
 
 if TYPE_CHECKING:
     from .raw import PreparedRawShots
+    from .readout_batch import ReadoutBatch
 
 
 def physical_shots(
@@ -46,6 +47,7 @@ def physical_shots(
             raise ValueError("trace reads of one ADC must have equal sample counts")
         shape = (len(weights), reps, len(counts))
         output[channel] = np.zeros((*shape, *((counts[0],) if traces else ()), 2))
+        _fill_empty_events(batch, output[channel], traces=traces)
     if not batches or not reps or not len(weights):
         return output
     # ADCs may deduplicate contents differently. Group by the complete tuple.
@@ -77,14 +79,6 @@ def physical_shots(
         }
         for key, group in groupby(ordered, key=keys.__getitem__):
             points = np.array(list(group), dtype=np.int64)
-            for (channel, batch), content in zip(batches, key, strict=True):
-                event = batch.events[content][event_index]
-                if not event.pulses:
-                    for index, grid in enumerate(event.grids):
-                        output[channel][points, :, offsets[channel] + index] = (
-                            batch.model.receiver.offset
-                            * (1 if traces else len(grid.times_ns))
-                        )
             observers = [
                 (channel, plans[channel, content])
                 for (channel, _), content in zip(batches, key, strict=True)
@@ -116,6 +110,22 @@ def physical_shots(
             axis=2,
         )
     return output
+
+
+def _fill_empty_events(
+    batch: "ReadoutBatch", shots: RealArray, *, traces: bool
+) -> None:
+    """Fill receiver-only windows without constructing physical path observers."""
+    for content, events in enumerate(batch.events):
+        offset = 0
+        for event in events:
+            if not event.pulses:
+                for index, grid in enumerate(event.grids):
+                    shots[batch.content_index == content, :, offset + index] = (
+                        batch.model.receiver.offset
+                        * (1 if traces else len(grid.times_ns))
+                    )
+            offset += len(event.grids)
 
 
 def _add_receiver_noise(
