@@ -391,7 +391,7 @@ def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_end
     def body(p):
         p.emit(origin)
         p.fork("default", into="parallel")
-        p.delay_timeline("origin_cycles", timeline="parallel")
+        p.timeline_inc("origin_cycles", timeline="parallel")
         for occurrence in range(2):
             if bookkeeping:
                 # Only the emits output waves. Fork/join manipulate timeline ends.
@@ -434,7 +434,7 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
 
     def body(p):
         p.emit(origin)
-        p.delay_timeline("origin_cycles")
+        p.timeline_inc("origin_cycles")
         p.emit(joined)
         p.emit(joined)
         p.emit(readout)

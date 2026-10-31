@@ -80,7 +80,7 @@ Builder 產生的 program 與手寫 program 使用相同入口；program 自身�
 對儲存狀態裁定：「我倒是認為只要存當前結尾就好，不用存開始，我傾向B1」。
 
 `with builder.timeline(name)` 與 `with program.timeline(name)` 只切換範圍內省略 `timeline=` 或傳入 `None` 時的預設。
-它涵蓋 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與 `repeat` 的母 timeline。
+它涵蓋 `emit`、`emit_parallel`、`pulse`、`trigger`、`timeline_inc`、`delay_by_timeline` 與 `repeat` 的母 timeline。
 顯式名字優先，包含 `"default"`；巢狀範圍覆蓋外層，離開時還原。
 名字須是 default 或已 fork 的 timeline，未知名字報錯；範圍本身不 fork、不 join，也不推進 reference。
 `branch` 仍只有 `by`，沒有母 timeline 參數；case 內的發射沿用當下範圍預設。
@@ -101,7 +101,7 @@ Delay 與 SoftDelay 都只加結尾，不產生 reference advance。
 經 timeline 或 emit 放置的 pulse 若早於同 channel 前一個 pulse 結束，編譯報錯；另一條 timeline 不能豁免此檢查。
 未進入範圍且未帶 timeline 的原生 pulse 保留 QICK 行為。
 
-`delay_timeline(t, timeline=X)` 只加 X 的結尾，`sync(timeline=X)` 才將 reference 推到 X 的結尾。
+`timeline_inc(t, timeline=X)` 只加 X 的結尾，`delay_by_timeline(timeline=X)` 才將 reference 推到 X 的結尾。
 Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d)`。
 原生 delay／delay_auto／wait_auto／resync 沿用 QICK，不增加 timeline keyword。
 不提供 `delay_auto_timeline`。
@@ -117,7 +117,7 @@ delay_reg_auto 先消耗選定的 native channels，再推進非負 register cyc
 PulseReadout 的 gain／frequency runtime words 是非時間 consumer，不受這項時間限制排除。
 
 使用者於 2026-10-31 指出：「ModularProgram那個是沒有rintime timeline功能時的無可奈何辦法，新program有就不要模仿了」。
-新 program 的 runtime sync 依逐點實際結尾對齊，不模仿 `ModularProgramV2` 的 DelayAuto symbolic max 權宜行為。
+新 program 的 runtime delay_by_timeline 依逐點實際結尾對齊，不模仿 `ModularProgramV2` 的 DelayAuto symbolic max 權宜行為。
 實驗遷移也不帶入這項舊行為。
 Compiled frontend 模擬 `ModularProgramV2` 時仍執行其編譯指令；這是忠實模擬，不是新 program 的相容性要求。
 
@@ -125,7 +125,7 @@ Compiled frontend 模擬 `ModularProgramV2` 時仍執行其編譯指令；這是
 
 Scalar 與可精確表示的整數仿射 QickParam end 保持靜態。
 跨零 floor、交叉 max、path-selected end 與 runtime length 需要時才物化為 cycle register。
-`delay_timeline` 的 scalar／QickParam 單位為 us；register 名稱代表非負 tProc cycles，只更新目標結尾，不移 reference。
+`timeline_inc` 的 scalar／QickParam 單位為 us；register 名稱代表非負 tProc cycles，只更新目標結尾，不移 reference。
 Runtime 算術只用不更新旗標的 ABS、ASR、加與減。
 End 的非負 cycle 範圍為 `0..2**31-1`，中間運算也須符合 signed 32-bit；可能溢位就在編譯期報錯，不依賴硬體 wrap。
 
@@ -160,8 +160,8 @@ Program／timeline owner 也為每個 native channel 保存編譯期結尾式子
 
 ### 收尾 WAIT 與 slack 護欄
 
-`sync` 的 runtime 結尾仍由 tProc register 每點取 maximum，精確推進 reference。
-Shell 收尾 WAIT 使用編譯期常數，不以靜態上界替代 runtime sync 或改變其指令。
+`delay_by_timeline` 的 runtime 結尾仍由 tProc register 每點取 maximum，精確推進 reference。
+Shell 收尾 WAIT 使用編譯期常數，不以靜態上界替代 runtime delay_by_timeline 或改變其指令。
 剩餘時間可抵銷為常數時，WAIT 使用精確值，不發 warning，即使該常數大於 `relax_delay` 也不拒絕。
 例如 ADC 結尾為 `O+190`、body 收尾為 `O+200` 時，剩餘時間是 0，不因 O 的掃描範圍增加等待。
 
@@ -178,7 +178,7 @@ Warning 明說 slack 只有 upper bound，不是實際差距；即使該上界�
 可逐點求值的部分仍保留精確來源，不因另有未知值就丟掉已知 provenance。
 
 使用者於 2026-10-30 對靜態上界、warning 與 relax 護欄的方案選擇：「A」。
-使用者補充：「WAIT可以用常數，但sync要考慮runtime」。
+使用者補充：「WAIT可以用常數，但delay_by_timeline要考慮runtime」。
 對未知 slack 只發 warning、不以其上界拒絕的選項，使用者同日回答：「A」。
 合法點精確 min／max 與 provenance 的求法由 advisor 於 2026-10-30 依代理授權裁定。
 執行期等待留待有實驗需要每點精確 WAIT 時再評估，不在此契約中自動切換等待方式。
@@ -201,7 +201,7 @@ Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeli
 入口前既有 timeline 的 path ends 不同時，保留實際選中 end 並標為只能等待。
 
 `with self.repeat(name, n, timeline=P, range_hint=...)` 的母 timeline P 預設為 default。
-入口先 `sync(timeline=P)`，避免第一圈與迴圈前 P 的內容重疊。固定 n=0 仍同步入口，但不執行 body。
+入口先 `delay_by_timeline(timeline=P)`，避免第一圈與迴圈前 P 的內容重疊。固定 n=0 仍同步入口，但不執行 body。
 內部只能用 P，或從 P／局部 timeline fork 的局部名字。
 其他外部 timeline 可以橫跨迴圈，但不能在內部使用，連作為 fork source 也不行。
 每圈同步 P 與局部結尾。離開後 P 為 0，局部名字失效，可在外部重新 fork。
@@ -218,8 +218,8 @@ Register n 是既有 register 名字，不得與 name 命名的 counter 同名�
 Register 次數或不同 case 的推進需要 runtime storage 時，外部結尾按實際路徑扣除，不採 minimum count 的等待上界。
 路徑不同或 register 次數後尚未消耗的原 timeline 保持只能等待。
 
-只能等待的來源可供 join／fork、sync 或 body 對齊使用。
-在它自己上面放置 pulse／trigger／emit／兩種 readout config 或使用 delay_timeline 都報錯，config 的 t=0 也不例外。
+只能等待的來源可供 join／fork、delay_by_timeline 或 body 對齊使用。
+在它自己上面放置 pulse／trigger／emit／兩種 readout config 或使用 timeline_inc 都報錯，config 的 t=0 也不例外。
 Join 目標與 fork 新 timeline 是普通狀態，從實際 remaining end 建立可繼續發射的排程點，來源本身仍只能等待。
 Sync 或原生 reference 推進完整消耗該 end 後，來源恢復普通狀態；部分消耗仍只能等待。
 

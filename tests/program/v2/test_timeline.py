@@ -47,7 +47,7 @@ def test_timeline_pulses_are_serial_but_native_pulse_stays_at_reference(timeline
     def body(prog):
         if timeline != "default":
             prog.fork("default", into=timeline)
-        prog.delay_timeline(10 / 430.08, timeline=timeline)
+        prog.timeline_inc(10 / 430.08, timeline=timeline)
         prog.pulse(0, "p0", timeline=timeline)
         prog.pulse(1, "p1", timeline=timeline)
         prog.pulse(0, "p0", t=0)
@@ -65,9 +65,9 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(
     subcycle, scalar_end
 ):
     def body(prog):
-        prog.delay_timeline(subcycle / 430.08)
-        prog.delay_timeline(subcycle / 430.08)
-        prog.delay_timeline(QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08), tag="end")
+        prog.timeline_inc(subcycle / 430.08)
+        prog.timeline_inc(subcycle / 430.08)
+        prog.timeline_inc(QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08), tag="end")
         prog.pulse(0, "p0", timeline="default", tag="pulse")
 
     prog = _program(body, lambda p: p.add_loop("scan", 4))
@@ -87,9 +87,9 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(
 def test_sync_rebases_default_and_other_timelines_and_shell_follows_body():
     def body(prog):
         prog.fork("default", into="other")
-        prog.delay_timeline(40 / 430.08)
-        prog.delay_timeline(70 / 430.08, timeline="other")
-        prog.sync(timeline="default")
+        prog.timeline_inc(40 / 430.08)
+        prog.timeline_inc(70 / 430.08, timeline="other")
+        prog.delay_by_timeline(timeline="default")
         prog.pulse(0, "p0")
         prog.pulse(1, "p1", timeline="other")
 
@@ -104,7 +104,7 @@ def test_sync_rebases_default_and_other_timelines_and_shell_follows_body():
 @pytest.mark.parametrize("advance, expected", [(20, 40), (40, 40), (60, 60)])
 def test_native_delay_subtracts_each_timeline_with_zero_floor(advance, expected):
     def body(prog):
-        prog.delay_timeline(40 / 430.08)
+        prog.timeline_inc(40 / 430.08)
         prog.delay(advance / 430.08)
         prog.pulse(0, "p0", timeline="default")
 
@@ -114,11 +114,11 @@ def test_native_delay_subtracts_each_timeline_with_zero_floor(advance, expected)
 
 def test_fork_copies_current_source_end_for_one_or_multiple_names_each_compile():
     def body(prog):
-        prog.delay_timeline(10 / 430.08)
+        prog.timeline_inc(10 / 430.08)
         prog.fork("default", into=["a", "b"])
-        prog.delay_timeline(5 / 430.08, timeline="a")
+        prog.timeline_inc(5 / 430.08, timeline="a")
         prog.fork("a", into="c")
-        prog.delay_timeline(20 / 430.08)
+        prog.timeline_inc(20 / 430.08)
         prog.pulse(0, "p0", timeline="b")
         prog.pulse(1, "p1", timeline="c")
 
@@ -143,7 +143,7 @@ def test_fork_rejects_unknown_source_and_duplicate_targets(body):
         _program(body)
 
 
-@pytest.mark.parametrize("operation", ["pulse", "trigger", "delay", "sync", "config"])
+@pytest.mark.parametrize("operation", ["pulse", "trigger", "delay", "delay_by_timeline", "config"])
 def test_timeline_operations_reject_undeclared_names(operation):
     def body(prog):
         if operation == "pulse":
@@ -151,11 +151,11 @@ def test_timeline_operations_reject_undeclared_names(operation):
         elif operation == "trigger":
             prog.trigger(timeline="missing")
         elif operation == "delay":
-            prog.delay_timeline(0.1, timeline="missing")
+            prog.timeline_inc(0.1, timeline="missing")
         elif operation == "config":
             prog.send_readoutconfig(0, "ro", timeline="missing")
         else:
-            prog.sync(timeline="missing")
+            prog.delay_by_timeline(timeline="missing")
 
     def initialize(prog):
         prog.declare_readout(0, length=0.4)
@@ -167,11 +167,11 @@ def test_timeline_operations_reject_undeclared_names(operation):
 
 def test_join_merges_only_selected_ends_without_advancing_reference():
     def body(prog):
-        prog.delay_timeline(10 / 430.08)
+        prog.timeline_inc(10 / 430.08)
         prog.fork("default", into=["a", "b", "omitted"])
-        prog.delay_timeline(20 / 430.08, timeline="a")
-        prog.delay_timeline(30 / 430.08, timeline="b")
-        prog.delay_timeline(90 / 430.08, timeline="omitted")
+        prog.timeline_inc(20 / 430.08, timeline="a")
+        prog.timeline_inc(30 / 430.08, timeline="b")
+        prog.timeline_inc(90 / 430.08, timeline="omitted")
         prog.join("a", "b", into="default")
         prog.pulse(0, "p0", timeline="default")
         prog.pulse(1, "p1", timeline="a")
@@ -186,8 +186,8 @@ def test_join_merges_only_selected_ends_without_advancing_reference():
 def test_join_retains_later_target_and_does_not_consume_sources():
     def body(prog):
         prog.fork("default", into=["source", "target"])
-        prog.delay_timeline(10 / 430.08, timeline="source")
-        prog.delay_timeline(50 / 430.08, timeline="target")
+        prog.timeline_inc(10 / 430.08, timeline="source")
+        prog.timeline_inc(50 / 430.08, timeline="target")
         prog.join("source", into="target")
         prog.pulse(0, "p0", timeline="target")
         prog.pulse(1, "p1", timeline="source")
@@ -211,8 +211,8 @@ def test_join_proves_swept_order_by_difference_and_resets_each_shot():
 
     def body(prog):
         prog.fork("default", into=["a", "b"])
-        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08), timeline="a")
-        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="b")
+        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08), timeline="a")
+        prog.timeline_inc(QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="b")
         prog.join("a", "b", into="default")
         prog.pulse(0, "p0", timeline="default")
         prog.pulse(1, "p1", timeline="a")
@@ -232,8 +232,8 @@ def test_join_uses_pointwise_crossing_swept_ends():
 
     def body(prog):
         prog.fork("default", into="a")
-        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
-        prog.delay_timeline(20 / 430.08, timeline="a")
+        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.timeline_inc(20 / 430.08, timeline="a")
         prog.join("a", into="default")
 
     result = _shots(_program(body, initialize))
@@ -243,7 +243,7 @@ def test_join_uses_pointwise_crossing_swept_ends():
 def test_join_without_fork_rejoining_still_closes_all_body_ends():
     def body(prog):
         prog.fork("default", into="unjoined")
-        prog.delay_timeline(90 / 430.08, timeline="unjoined")
+        prog.timeline_inc(90 / 430.08, timeline="unjoined")
         prog.pulse(0, "p0", timeline="default")
 
     (shot,) = _shots(_program(body))
@@ -278,7 +278,7 @@ def test_same_channel_pulses_may_touch_exactly_and_cross_channel_pulses_overlap(
     def body(prog):
         prog.fork("default", into=["other", "parallel"])
         prog.pulse(0, "exact", timeline="default")
-        prog.delay_timeline(28 / 430.08, timeline="other")
+        prog.timeline_inc(28 / 430.08, timeline="other")
         prog.pulse(0, "exact", timeline="other")
         prog.pulse(1, "p1", timeline="parallel")
 
@@ -301,7 +301,7 @@ def test_recompile_and_sweep_shots_reset_timeline_ends():
         prog.add_loop("scan", 3)
 
     def body(prog):
-        prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
         prog.pulse(0, "p0", timeline="default")
 
     prog = _program(body, initialize, reps=2)

@@ -277,7 +277,7 @@ class Pulse(Module):
         timeline = timeline if timeline is not None else "default"
         self.play(prog, timeline=timeline, tag=tag)
         if self.cfg is not None:
-            prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+            prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def play(
         self,
@@ -461,7 +461,7 @@ class TableLengthPulse(Module):
                 relation,
             ),
         )
-        prog.delay_timeline(
+        prog.timeline_inc(
             self.cfg.post_delay, timeline="default" if timeline is None else timeline
         )
 

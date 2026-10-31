@@ -202,7 +202,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         ):
             raise ValueError(
                 f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
-                "start >= previous end at every sweep point; use delay_timeline"
+                "start >= previous end at every sweep point; use timeline_inc"
             )
         self.record(prog, t, actual_t)
         actual_end = actual_t + prog.pulses[self.name].get_length()
