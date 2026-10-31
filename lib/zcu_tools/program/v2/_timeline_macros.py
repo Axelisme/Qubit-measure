@@ -779,26 +779,20 @@ class BranchCases:
 
     def __init__(self, prog):
         self.prog = prog
-        self.cases: dict[int, list[Macro]] = {}
+        self.cases: list[list[Macro]] = []
         self.active = False
 
     @contextmanager
-    def case(self, index: int) -> Generator[None]:
-        """Record the zero-based selector point; omitted points do nothing.
-
-        Cases may be declared in any order. Duplicate indices and nested cases
-        raise ValueError. Non-integer or out-of-range indices fail at compile.
-        """
+    def case(self) -> Generator[None]:
+        """Append one sweep-selected case; nested case() calls raise ValueError."""
         if self.active:
             raise ValueError("branch.case cannot overlap another case")
-        if index in self.cases:
-            raise ValueError(f"duplicate branch case index: {index}")
         self.active = True
         start = len(self.prog.macro_list)
         try:
             yield
         finally:
-            self.cases[index] = self.prog.macro_list[start:]
+            self.cases.append(self.prog.macro_list[start:])
             del self.prog.macro_list[start:]
             self.active = False
 
@@ -818,12 +812,11 @@ def _same_times(values: Sequence[Time]) -> bool:
 
 class TimelineBranch(Macro):
     def __init__(
-        self, book: TimelineBook, by: str, cases: dict[int, list[Macro]], name: str
+        self, book: TimelineBook, by: str, cases: list[list[Macro]], name: str
     ):
         self.book = book
         self.by = by
-        self.indexed_cases = cases
-        self.cases: list[list[Macro]] = []
+        self.cases = cases
         self.name = name
         self.prepared: list[list[PreparedTimelineMacro]] = []
 
@@ -832,13 +825,8 @@ class TimelineBranch(Macro):
             raise ValueError(
                 f"{self.by}: Branch requires a sweep selector, not measurement feedback"
             )
-        count = prog.loop_dict[self.by]
-        for index in self.indexed_cases:
-            if type(index) is not int or not 0 <= index < count:
-                raise ValueError(
-                    f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
-                )
-        self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
+        if len(self.cases) != prog.loop_dict[self.by]:
+            raise ValueError("Branch must provide one case per selector point")
         initial = self.book.ends.copy()
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
