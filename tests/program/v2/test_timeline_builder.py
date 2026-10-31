@@ -923,6 +923,39 @@ def _compile_scoped(
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("explicit_parent", [True, False])
+def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
+    mock_soccfg, frontend, align_timeline, explicit_parent
+):
+    pulse = _pulse("drive")
+    names = []
+
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
+        program.fork("default", into="parent")
+        program.delay_timeline(10 / 430.08, timeline="parent")
+        with program.timeline("parent" if not explicit_parent else "default"):
+            with program.branch(
+                by="scan",
+                align_timeline=align_timeline,
+                timeline="parent" if explicit_parent else None,
+            ) as cases:
+                with cases.case(1) as name:
+                    names.append(name)
+                    program.delay_timeline(20 / 430.08)
+                    program.emit(pulse)
+        program.emit(pulse, timeline="parent")
+
+    prog = _compile_scoped(
+        mock_soccfg, frontend, body, modules=(pulse,), loops=(("scan", 3),)
+    )
+    assert names == ["scan[1]"]
+    assert [waves(shot) for shot in shots(prog)] == (
+        [[73], [30, 73], [73]] if align_timeline else [[10], [30, 73], [10]]
+    )
+
+
+@pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_timeline_scope_nested_override_and_restore_match_explicit_program(
     mock_soccfg, frontend
 ):
