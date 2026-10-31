@@ -886,7 +886,7 @@ def test_protected_generator_conflict_names_protector_not_earlier_shared_user(
         prog.protect_readout_routes("protector", 0, [0])
 
     protector = DeclarationModule("protector", protect)
-    conflicting = DeclarationModule("conflicting", lambda p: p.declare_gen(0, nqz=1))
+    conflicting = DeclarationModule("conflicting", lambda p: p.declare_gen(0, nqz=2))
     builder = v2.TimelineBuilder(mock_soccfg)
     for module in (shared, protector, conflicting):
         builder.emit(module)

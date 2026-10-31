@@ -439,15 +439,20 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     @override
     def declare_gen(self, ch: int, *args, **kwargs) -> None:
-        """Declare a generator, retaining module-family registry sharing.
+        """Declare or reuse a generator with identical QICK resource settings.
 
-        QICK arguments pass unchanged. Protected readout generators reject
-        distinct owners with both module names/objects. Unprotected generators
-        retain native declaration and Pulse registry semantics.
+        Arguments follow QICK declare_gen (nqz, mixer, mux tones and matching
+        ADC). Different declarations raise ValueError naming both modules and
+        inconsistent fields, rather than overwriting the first declaration.
         """
-        if ch in self._protected_gen_routes:
-            self._check_resource_owner("generator", ch)
+        bound = signature(QickProgramV2.declare_gen).bind(self, ch, *args, **kwargs)
+        bound.apply_defaults()
+        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
+        if self._reuse_declaration("generator", ch, settings):
+            return
         super().declare_gen(ch, *args, **kwargs)
+        self._resource_declarations[("generator", ch)] = deepcopy(settings)
+        self._remember_resource_owner("generator", ch)
 
     @override
     def protect_readout_routes(
