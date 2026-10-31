@@ -9,9 +9,20 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._timeline_axis import (
-    CONST_AXIS, Component, Components, CycleAxis, CycleProducer, CycleValues,
-    CycleLimits, Scalar, TimeVariable, cycle_axis, component_key,
-    scale_component, nonzero_component, merge_components,
+    CONST_AXIS,
+    Component,
+    Components,
+    CycleAxis,
+    CycleLimits,
+    CycleProducer,
+    CycleValues,
+    Scalar,
+    TimeVariable,
+    component_key,
+    cycle_axis,
+    merge_components,
+    nonzero_component,
+    scale_component,
 )
 from ._timeline_bounds import CycleBounds
 

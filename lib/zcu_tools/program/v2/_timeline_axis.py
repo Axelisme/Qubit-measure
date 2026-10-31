@@ -195,5 +195,3 @@ def component_limits(axis: CycleAxis, component: Component) -> CycleLimits:
         None if a is None else Fraction(a * component),
         None if b is None else Fraction(b * component),
     )
-
-
