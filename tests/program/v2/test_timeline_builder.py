@@ -64,7 +64,9 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
     assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
 
 
-def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(mock_soccfg):
+def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(
+    mock_soccfg,
+):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0, reps=2)
     builder.add_loop("scan", 3)
     drive = _pulse("drive")
@@ -75,9 +77,7 @@ def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(moc
     with builder.repeat("r", "scan", range_hint=(0, 2)):
         builder.delay_timeline(15 / 430.08)
         builder.sync()
-    with builder.branch(
-        by="scan", align_timeline=False, timeline="external"
-    ) as branch:
+    with builder.branch(by="scan", align_timeline=False, timeline="external") as branch:
         with branch.case(0):
             builder.delay_timeline(5 / 430.08)
         with branch.case(2):
@@ -87,7 +87,9 @@ def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(moc
     prog = builder.build()
     assert [waves(shot) for shot in shots(prog)] == [[0, 105], [0, 100], [0, 115]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(prog)] == [
-        148, 143, 158
+        148,
+        143,
+        158,
     ] * 2
 
 
