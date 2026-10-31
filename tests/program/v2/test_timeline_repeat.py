@@ -64,6 +64,106 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
+def test_repeat_fixed_point_matches_explicit_native_reference_loop():
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(7 / 430.08)
+            prog.sync()
+        prog.pulse(1, "p1", timeline="default")
+
+    def native_body(prog):
+        prog.open_loop(2, name="r")
+        prog.pulse(0, "p0", timeline="default")
+        prog.delay_timeline(7 / 430.08)
+        prog.sync()
+        prog.close_loop()
+        prog.pulse(1, "p1", timeline="default")
+
+    actual = _program(body)
+    expected = _program(native_body)
+    (shot,) = _shots(actual)
+    assert _waves(shot) == [0, 35, 70]
+    assert (shot.body_end_cycle, shot.end_cycle) == (98, 98)
+    # Only the native reps/r counters need data registers, not an end carrier.
+    assert len(actual.reg_dict) == len(expected.reg_dict) == 2
+    assert [
+        (inst["C_OP"], inst.get("LIT"))
+        for inst in actual.prog_list
+        if inst["CMD"] == "TIME"
+    ] == [
+        (inst["C_OP"], inst.get("LIT"))
+        for inst in expected.prog_list
+        if inst["CMD"] == "TIME"
+    ]
+    assert any(
+        inst["CMD"] == "TIME"
+        and inst["C_OP"] == "inc_ref"
+        and inst.get("LIT") == "#35"
+        for inst in actual.prog_list
+    )
+
+
+@pytest.mark.parametrize("sync_in_middle", [False, True])
+def test_repeat_nonfixed_tail_preserves_explicit_reference_position(sync_in_middle):
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0")
+            if sync_in_middle:
+                prog.sync()
+            prog.delay_timeline(7 / 430.08)
+        # A native output exposes reference, not the accumulated timeline end.
+        prog.pulse(1, "p1")
+
+    prog = _program(body)
+    (shot,) = _shots(prog)
+    assert _waves(shot) == [0, 35, 63 if sync_in_middle else 0]
+    assert (shot.body_end_cycle, shot.end_cycle) == (
+        (70, 91) if sync_in_middle else (70, 70)
+    )
+    assert len(prog.reg_dict) > 2
+
+
+@pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto"])
+def test_repeat_allows_explicit_reference_owner_advances_outside_case(operation):
+    def body(prog):
+        with prog.repeat("r", 2):
+            prog.pulse(0, "p0")
+            if operation == "sync":
+                prog.sync()
+            elif operation == "delay":
+                prog.delay(28 / 430.08)
+            else:
+                prog.delay_auto()
+        prog.pulse(1, "p1")
+
+    (shot,) = _shots(_program(body))
+    assert _waves(shot) == [0, 28, 56]
+    assert (shot.body_end_cycle, shot.end_cycle) == (56, 84)
+
+
+@pytest.mark.parametrize("operation", ["sync", "delay", "delay_auto"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_case_rejects_reference_owner_advances_through_repeat(operation, nested):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        with prog.branch(by="scan", align_timeline=False) as cases:
+            with (
+                cases.case(0),
+                prog.repeat("r", 2) if nested else nullcontext(),
+            ):
+                prog.delay_timeline(28 / 430.08)
+                if operation == "delay":
+                    prog.delay(28 / 430.08)
+                else:
+                    getattr(prog, operation)()
+
+    with pytest.raises(ValueError, match="cannot advance reference"):
+        _program(body, initialize)
+
+
 def test_variable_repeat_shadows_default_without_advancing_reference():
     def body(prog):
         with prog.repeat("r", 2, advance_ref=False):

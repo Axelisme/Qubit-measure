@@ -25,6 +25,26 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+@pytest.mark.parametrize("sync_at_end", [False, True])
+def test_builder_repeat_keeps_author_reference_advances(mock_soccfg, sync_at_end):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    drive = _pulse("drive")
+    with builder.repeat("r", 2):
+        builder.emit(drive)
+        builder.delay_timeline(5 / 430.08)
+        if sync_at_end:
+            builder.sync()
+    builder.emit(drive)
+    prog = builder.build()
+    (shot,) = shots(prog)
+    assert waves(shot) == [0, 48, 96]
+    assert (shot.body_end_cycle, shot.end_cycle) == (139, 139)
+    if sync_at_end:
+        assert len(prog.reg_dict) == 2
+    else:
+        assert len(prog.reg_dict) > 2
+
+
 @pytest.mark.parametrize("align", [False, True])
 def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0, reps=2)
