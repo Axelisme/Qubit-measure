@@ -634,7 +634,10 @@ def test_incompatible_wire_refuses_catalog_and_mutation(
     client.context.bridge.set_transport(None)
     client.transport.replies["wire.version"] = {
         "ok": True,
-        "result": {"wire_version": -1, "gui_version": 100},
+        "result": {
+            "wire_version": client.context.config.wire_version - 1,
+            "gui_version": 166,
+        },
     }
 
     def connect(port: int, token: str | None = None) -> str:

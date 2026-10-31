@@ -122,21 +122,21 @@ Peak SNR 取選定候選相對 median 的高度 SNR。Trace SNR 用完整投影 
 `gates` 記名稱、comparison、threshold、actual、passed 與 applied。非有限或未取得的 actual 為 null，該比較不通過；尚未執行的 fit gate 不虛造結果。
 選定候選記 SNR 與 truncation gate。Coarse 另記局部 fit interval 上下界，最終接受 gates 只供診斷，標記 applied=false。
 Fine 與 single 記正中心、窗內中心上下界、正 FWHM、非負 center error、error/FWHM、normalized RMS 與 MAE/fit ptp 的既有門檻。Fine 另記最強候選是否存在及其中心到粗峰的距離上限。
-每個試過的局部粗峰診斷保存在 `coarse_candidate_diagnostics`，以 selected_peak_center_mhz 對應候選。Failed／partial acquisition 不擬合，保留 fit_failure，無法取得的數值為 null。這些紀錄不參與接受判斷。
+每個試過的局部粗峰診斷保存在 `coarse_candidate_diagnostics`，以 selected_peak_center_mhz 對應候選。收到停止請求的 acquisition 不擬合，保留 fit_failure，無法取得的數值為 null。這些紀錄不參與接受判斷。
 `candidate_attempts` 逐一保存試過的粗峰、粗掃檔名、局部擬合中心、細掃檔名與 rejection_reason。
 拒絕原因包含沒有細峰、超出粗峰寬度、截斷、擬合失敗與品質 gate；只有接受的候選沒有拒絕原因。
 候選的 `truncated` 表示窗內無法觀察完整半 prominence 寬度。
 兩步檔名含 coarse 或 fine，single 維持 frequency-NN.h5。
 Frequency 保存每個 Completed attempt 的引用，fit 拒絕也保留 native raw。
-Schedule Failed／skipped stage 沒有偽造檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
+Acquisition 拋錯就傳給作者。Skipped stage 不填檔名。分析失敗仍保留先保存的 Completed 檔名。工具按 point 的用途欄位讀檔，不掃目錄或猜 effect 次序。
 這讓 frequency 接受而 Rabi 失敗的點仍保留部分科學證據。
 
 Carry 與 lifetime history 是 async 函式的區域變數。每點先建可變 point_record，欄位尚未取得時為 None。
 Coherence 與 MIST 共用的 calibrate_point（`common/point_calibration.py`）是複合 stage，依序呼叫 frequency、Rabi 與 readout；Rabi 依模式包含 AmpRabi。它正常回傳 PointCalibrationResult，主迴圈再填 frequency/rabi/readout；`CalCarry` 的歷史欄位（last、f01_by_flux、traces、last_amp_gain、readout_source）由 calibrate_point 依各 stage 回傳的結果更新。Expected failed/rejected 仍回傳各 stage 的結果。
 校準的 unexpected exception 不回傳 aggregate。例如 frequency 成功後 Rabi 內部 bug，finally 保存的 point 不含 frequency 結果，但 frequency 已存的 h5 仍在磁碟，run 失敗。
 主迴圈用 try/finally，在 finally 同步 iteration.commit(point_record) 一次，正常、continue 與例外都經過同一提交位置。
-Pause 中斷目前 operation，Resume 重試同一 request；已完成的校準與區域變數不重做。
-子層取消讓 operation 回 partial。作者先保存 Completed raw，再檢查 partial_result，保留原有拒絕原因，不進擬合或接受。
+每個 operation 只呼叫一次，停止後不自動重試。
+子層取消後 core 回傳就交付 Completed。作者先保存 raw，再檢查 stop_requested，保留原有拒絕原因，不進擬合或接受。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，只跳過目前點。Helper 以 return 退出該點。
 根 Stop 在 async operation 或 Ask raise ScriptCancelled。Finally 提交已有成果，不改 status，例外繼續向上傳播。
 分析 helper 對非有限 measured IQ 回 Failed(reason)，不填值或 mask。Native fitter 的具名 AnalysisFailed 與訊息恰為 `array must not contain infs or NaNs` 的 scipy ValueError 也轉 Failed。Caller 記 status=failed 並保留 raw 檔名。
@@ -164,7 +164,7 @@ Tunables 的 `uniform` 預設 true，控制 T1 的線性 delay sweep。設 false
 每個 Completed member 先保存 raw，partial 不擬合並記原有原因。預期 fit failure 記 reason 且 lifetime/error 為 None。
 目前 iteration 未取消時才開始另一 member。取消的 pair 留 status="skipped" 與已取得欄位，再進下一點。
 下一 pair 在 max(now, previous actual start + interval) 開始，不做 catch-up bursts。
-Pause 保留 pair 的區域進度，Resume 繼續等待中的 operation；Stop 保留既有 commits。
+Stop 保留既有 commits。要接續量測，開新 run 並從 saved_run 初始化 history。
 區域變數 `trend_points` 保留具名 scalar pair tuple，不保存 Figure 或 axes。
 `overnight.trend.draw_overnight_trend` 直接畫這些 pair，缺值維持 gaps，不重 fit。
 缺值在資料區只標 `× [編號]`，完整原因依編號列在兩個 panel 下方的換行註腳。
@@ -201,16 +201,16 @@ Stage 的拒絕或失敗不會扣除 completed_points。
 `stages` 按 frequency、Rabi、readout 與啟用的 singleshot／T1／Ramsey／Echo／MIST 彙整 accepted、rejected、skipped、failed。
 Amp Rabi 若執行則獨立列出。未走到的啟用 stage 算 skipped／not reached，關閉的 stage 不列入。
 Coherence lifetime 與 calibration 沿用原有 status。完整 singleshot 的 measured 對應 accepted，partial 仍按 point 的 failed 計數。
-Overnight 與 mux member 的 status 直接在結果產生處填寫：接受值為 accepted、完整 fit 未過門檻或 partial 為 rejected、Schedule／預期 fit failure 為 failed、未執行為 skipped。
-MIST trace 完整 success 為 accepted、partial 為 rejected、Schedule failure 為 failed、依賴不足或未執行為 skipped。
+Overnight 與 mux member 的 status 直接在結果產生處填寫：接受值為 accepted、完整 fit 未過門檻或 partial 為 rejected、預期 fit failure 為 failed，acquisition 例外則傳出、未執行為 skipped。
+MIST trace 完整 success 為 accepted、partial 為 rejected、預期分析失敗為 failed，acquisition 例外則傳出、依賴不足或未執行為 skipped。
 MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1／Echo。副模型診斷不計為另一個 stage，也不改主模型的狀態。
 各 stage 的 rejected_reasons、skipped_reasons、failed_reasons 按原始 reason 字串計數，不分類或改寫原因。
 
 `duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
 Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。
-只計 delivered Completed（含 partial），不包含 Failed 或 Pause discarded attempts；缺少時間就省略 duration。
+只計 delivered Completed（含 partial），不包含拋錯的 operation；缺少時間就省略 duration。
 ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不在摘要聚合。
-完整 Failed／Pause operation attempts 留在 point 信封與 journal，不在此摘要重建。
+完整 operation facts 留在 point 信封與 journal，不在此摘要重建。
 
 `qubits` 只在 overnight／overnight_mux 列出，各 qubit 的 t1／echo 記 accepted、mean_us、std_us。
 平均與母體標準差只取原有主模型的接受值，不混入 rejected／failed 或副模型值。單筆標準差為 0，零筆省略平均與標準差。
@@ -221,10 +221,10 @@ ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不�
 作者用 zip(plan.fluxes, env.iterations()) 取得每點的 Scope，第一次用 iteration.dir 才建 absolute 保存目錄。
 目錄是 data root 下的 iteration-000001，nested child 再按 label 與 sequence 鏡射。Commit 序號另按提交順序增加。
 Workflow 在 iteration.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
-Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
+Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
 Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，不捕捉新事實。
-H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.partial_result 決定 complete 或 stopped，experiment 取 persistence spec.tag。
+H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.stop_requested 決定 complete 或 stopped，experiment 取 persistence spec.tag。
 Provenance 取 workflow identity，不逐 operation 捕捉。Lab 不建立 AcquisitionEvidence。
 Framework 只保存 manifest、journal 與 best-effort record.json。
 Conversion 的科學型別與輸入驗證留在此 package，不在框架建立 reader 或通用 dispatcher。
@@ -272,7 +272,7 @@ Latest-wins 由 record table owner 決定，重匯出更新整列，僅 append �
 
 `common.devices.set_flux` 讀 live typed cfg，重用 check_flux_unit，再以 model_copy 只改 value，await 完整 setup。
 Fake 明填 native；YOKO 明填 A 或 V。Plan／表單不推測、換算單位或預驗 connected membership。
-每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 Resume、alias 修改或 Save 刷新 snapshot。
+每次 env.run 在 callback 前 capture connected drivers。Native saver 使用該次 Completed.facts，不因 alias 修改或 Save 刷新 snapshot。
 
 核心只透過當次 RunContext.plots 更新 native typed handles；buffer callback 只送座標與複數資料。
 每次 env.run attempt 使用同 host 的獨立 operation Plots，完成後 finish。新 attempt release 並替換舊 operation，workflow 趨勢圖留在 env.plots。

@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-29，global 與 point 文件組
+**Last updated:** 2026-10-31，整數時基 replay
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -12,7 +12,9 @@
   atomic file I/O and acquire/round reference resolution. It retains detached
   waveform samples and settings, not measured I/Q. Template arrays use explicit
   JSON records of dtype, shape and flat values, with typed float64, int64 and bool
-  reconstruction. Numeric manifests stay opaque and are verified by their numeric
+  reconstruction. Private acquire and round files use version 2 and reject version 1.
+  The request clock uses explicit positive integer num/den fields in MHz. All
+  time arrays retain int64 ticks, including ADC and envelope periods. Numeric manifests stay opaque and are verified by their numeric
   owner. Normal waveform assets and data.h5
   policies do not change. This module does not import program or simulate.
 - [`six_fluxonium/`](six_fluxonium/README.md) reads six independent circuit materials with six local DC sources, one shared coil and fixed mux/pulse routes.

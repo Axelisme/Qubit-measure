@@ -36,6 +36,10 @@
 - 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。已被 2026-10-16 的 FTF 模擬加速取代：FTF 一定有耗散，離線 U 表會刪除，改用 runtime lazy 快取。
 - 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：早期選項與 prototype 的歷史快照；後續決策以[模擬環境 ADR](../adr/draft/simulation-environments.md)為準，文末後記說明已定案與仍待完成的範圍。
 
+## Program 與 timeline 編譯
+
+- 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：宣告回到 QICK 原生；變數是「軸 → 分量」、計算靠軸比對，跨軸 max／min 是保留 8 支加殘差包絡的極值節點；所有合流走同一個 join，runtime max 4 條指令；runtime 時間寫進 s14，ref 只由名字含 delay 的方法推進；Repeat 拿掉 `advance_ref` 改用結構定點規則；tProc v2 讀不到也回撥不了 ref。後記：跨軸 max／min 改用 Abs 表示（線性部分加 Σc|x|），儲存不展開，求範圍時依共用軸分塊、分支定界並快取，取代保留 8 支的極值節點。
+
 ## Cfg 與表單
 
 - 2026-10-29 [Singleshot 分類參數放進 readout cfg](2026-10-29-readout-classifier.md)：g/e 中心、radius、confusion matrix 改為 readout cfg 的可選 `classifier`，由 library readout module 擁有、GE 寫回 module；acquire 的分類參數由 readout module 工具算出、作者明確傳入；讀出設定改變後的失效機制暫不做。

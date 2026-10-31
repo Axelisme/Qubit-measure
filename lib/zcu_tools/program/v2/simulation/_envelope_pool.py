@@ -12,8 +12,8 @@ class EnvelopeContent:
     """Exact compiled DAC inputs, never program identities or buffer references.
 
     dtype/shape/samples describe the current DAC array. maxv normalizes its
-    amplitude; fabric_mhz and samples_per_clock set the sample clock.
-    flat_duration_us is playback duration for flat-tops, otherwise None.
+    amplitude; sample_period_ticks sets the sample interval in the request time base.
+    flat_duration_ticks is playback duration for flat-tops, otherwise None.
     """
 
     dtype: str
@@ -21,8 +21,8 @@ class EnvelopeContent:
     samples: bytes
     maxv: float
     fabric_mhz: float
-    samples_per_clock: int
-    flat_duration_us: float | None
+    sample_period_ticks: int
+    flat_duration_ticks: int | None
 
 
 class EnvelopePool:
@@ -64,7 +64,7 @@ class EnvelopePool:
     def put(self, key: EnvelopeContent, envelope: PulseEnvelope) -> None:
         """Retain an owned immutable envelope, evicting least recently used entries.
 
-        envelope must contain built-in float sample times and complex values,
+        envelope must contain a built-in integer sample period and complex values,
         as produced by the compiled frontend. Replacing a key releases the old
         pool reference only. Oversize entries are not retained.
         """
@@ -86,7 +86,7 @@ class EnvelopePool:
 
 
 def _entry_bytes(key: EnvelopeContent, envelope: PulseEnvelope) -> int:
-    # Each sample is a fresh built-in float/complex. Arithmetic accounting avoids
+    # Samples are built-in complex values with one integer period. Accounting avoids
     # another Python walk over all samples on the cold conversion path.
     key_bytes = getsizeof(key) + sum(
         getsizeof(value)
@@ -96,16 +96,15 @@ def _entry_bytes(key: EnvelopeContent, envelope: PulseEnvelope) -> int:
             key.samples,
             key.maxv,
             key.fabric_mhz,
-            key.samples_per_clock,
-            key.flat_duration_us,
+            key.sample_period_ticks,
+            key.flat_duration_ticks,
             *key.shape,
         )
     )
     envelope_bytes = (
         getsizeof(envelope)
         + getsizeof(envelope.__dict__)
-        + getsizeof(envelope.sample_us)
-        + len(envelope.sample_us) * getsizeof(0.0)
+        + getsizeof(envelope.sample_period_ticks)
         + getsizeof(envelope.values)
         + len(envelope.values) * getsizeof(0j)
     )

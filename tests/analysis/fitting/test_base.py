@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-import zcu_tools.experiment as experiment
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting.base import (
     asym_lorfunc,
     cosfunc,
@@ -195,7 +195,7 @@ def test_fit_func_reports_real_optimizer_nonconvergence() -> None:
             init_p=[8.0, 0.1],
             maxfev=1,
         )
-    assert isinstance(failure.value, experiment.AnalysisFailed)
+    assert isinstance(failure.value, AnalysisFailed)
     assert isinstance(failure.value.__cause__, RuntimeError)
 
 
@@ -207,7 +207,7 @@ def test_fit_func_reports_insufficient_observations() -> None:
             lambda x, slope, offset: slope * x + offset,
             init_p=[1.0, 0.0],
         )
-    assert isinstance(failure.value, experiment.AnalysisFailed)
+    assert isinstance(failure.value, AnalysisFailed)
 
 
 def test_fit_func_preserves_model_programming_errors() -> None:

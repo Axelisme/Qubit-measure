@@ -1,8 +1,6 @@
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from zcu_tools.analysis.failure import AnalysisFailed as AnalysisFailed
-
 if TYPE_CHECKING:
     from . import config
     from .acquisition import (
@@ -63,7 +61,6 @@ if TYPE_CHECKING:
     from .scope import Scope, ScriptCancelled
 
 __all__ = [
-    "AnalysisFailed",
     "Scope",
     "ScriptCancelled",
     "validate_run_id",

@@ -399,7 +399,7 @@ def test_run_finished_calls_refresh_tab(cf):
     )
 
 
-@pytest.mark.parametrize("source", ["run", "cancelled", "load"])
+@pytest.mark.parametrize("source", ["run", "stopped", "load"])
 def test_result_commit_survives_analysis_preparation_failure(
     cf, monkeypatch, source, tmp_path
 ):
@@ -414,9 +414,9 @@ def test_result_commit_survives_analysis_preparation_failure(
     loaded = RunRecord(RecordingCfg(), RecordingResult(), metadata)
 
     def run(cfg: RecordingCfg, *, context: RunContext):
-        if source == "cancelled":
+        if source == "stopped":
             entered.set()
-            # Cancellation assertions release the accepted run in finally.
+            # Stop assertions release the accepted run in finally.
             if not release.wait(30):
                 raise RuntimeError("test did not release partial run")
         return dataclasses.replace(loaded, cfg=cfg)
@@ -437,7 +437,7 @@ def test_result_commit_survives_analysis_preparation_failure(
         entered, release = threading.Event(), threading.Event()
 
         cf.ctrl.run_analyze_control.start_run(tab_id)
-        if source == "cancelled":
+        if source == "stopped":
             try:
                 _wait_for(entered.is_set)
                 cf.ctrl.run_analyze_control.cancel_run()
@@ -447,9 +447,12 @@ def test_result_commit_survives_analysis_preparation_failure(
         assert terminal == [
             RunFinishedPayload(
                 tab_id=tab_id,
-                outcome="cancelled" if source == "cancelled" else "finished",
+                outcome="finished",
             )
         ]
+        assert cf.ctrl.tab_control.get_tab_snapshot(tab_id).run.stop_requested is (
+            source == "stopped"
+        )
         expected_fact = TabContentFact.RUN_RESULT_COMMITTED
         cf.view.notify_diagnostic.assert_any_call(
             "error",

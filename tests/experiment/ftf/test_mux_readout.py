@@ -24,7 +24,14 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
-from tests.experiment._ftf_templates import request, settings, snapshot, template
+from tests.core._simulation import TIME_BASE, ticks
+from tests.experiment._ftf_templates import (
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 
@@ -86,6 +93,7 @@ def test_planner_applies_optional_background_to_every_receiver(path):
         snapshot(),
         template() if path == "pulse" else mux_template(),
         readout=config,
+        time_base=TIME_BASE,
     )
     rough = BackgroundRoughness(0.02, 50.0, 82)
     # At 6 GHz: wave=1+0.2j, edge=-10 dB, plus the fixed rough field.
@@ -94,22 +102,162 @@ def test_planner_applies_optional_background_to_every_receiver(path):
         np.testing.assert_allclose(item.batch.model.receiver.background(6.0), expected)
 
 
-def test_mux_planning_keeps_every_incident_tone_and_independent_adc_grid():
+def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
     plan = ftf_module.plan_template(
-        settings(), snapshot(), mux_template(), readout=configuration()
+        settings(),
+        snapshot(),
+        mux_template(),
+        readout=configuration(),
+        time_base=TIME_BASE,
     )
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
-    for item, samples, gain in zip(plan.readouts, (4, 3), (1000, 1100), strict=True):
-        assert len(item.batch.events[0][0].pulses) == 2
-        assert item.batch.events[0][0].pulses[0].frequency_ghz == 6.0
-        assert item.batch.events[0][0].pulses[1].frequency_ghz == 6.08
+    for item, samples, gain, frequency in zip(
+        plan.readouts, (4, 3), (1000, 1100), (6.0, 6.08), strict=True
+    ):
+        assert tuple(p.frequency_ghz for p in item.batch.events[0][0].pulses) == (
+            frequency,
+        )
+        assert item.batch.model.reference_frequency_ghz == 6.0
         assert len(item.batch.events[0][0].grids[0].times_ns) == samples
         assert item.batch.model.receiver.gain == gain
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,
         plan.readouts[1].batch.model.frequencies_ghz,
     )
+
+
+@pytest.mark.parametrize(
+    ("carrier_mhz", "companion_mhz", "retained"),
+    [
+        (6000.0, 6009.599, 2),
+        (6000.0, 6009.6, 2),
+        (6000.0, 6009.601, 1),
+        (6000.0, 6080.0, 1),
+        (7190.0, 7195.0, 2),
+        (7190.0, 7080.0, 1),
+        (2450.0, 2458.0, 2),
+    ],
+)
+def test_mux_channel_passband_keeps_only_in_channel_carriers(
+    carrier_mhz, companion_mhz, retained
+):
+    base = mux_template()
+    carrier = replace(base.events[0], frequency_mhz=np.full(2, carrier_mhz))
+    companion = replace(base.events[1], frequency_mhz=np.full(2, companion_mhz))
+    window = replace(base.readouts[0], frequency_mhz=np.full((2, 1), carrier_mhz))
+    plan = ftf_module.plan_template(
+        settings(),
+        snapshot(),
+        replace(base, events=(carrier, companion), readouts=(window,)),
+        readout=configuration(),
+        time_base=TIME_BASE,
+    )
+    assert len(plan.readouts[0].batch.events[0][0].pulses) == retained
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+@pytest.mark.parametrize("tones", [1, 2])
+def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
+    base = mux_template()
+    base = replace(base, events=base.events[:tones])
+    empty_window = replace(base.readouts[1], frequency_mhz=np.full((2, 1), 6200.0))
+    empty = replace(base, readouts=(base.readouts[0], empty_window))
+    config = configuration()
+    assert config.mux is not None
+    first, second = config.mux.receivers
+    config = replace(
+        config,
+        mux=replace(
+            config.mux,
+            receivers=(
+                first,
+                replace(
+                    second,
+                    offset_adc=(11.0, -7.0),
+                    noise_psd_adc2_ns=((4.0, 0.5), (0.5, 2.0)),
+                ),
+            ),
+        ),
+    )
+    numeric = settings()
+    plan = ftf_module.plan_template(
+        numeric, snapshot(), empty, readout=config, time_base=TIME_BASE
+    )
+    assert plan.readouts[1].batch.events[0][0].pulses == ()
+    assert len(plan.readouts[1].batch.events[0][0].grids) == 1
+
+    def acquire(content):
+        source = ftf_module.FTFSource(
+            numeric, DeviceManager(), engine=MixedEngine(), readout=config
+        )
+        acquire_request = replace(request(mode), reps=6000, templates=(content,))
+        try:
+            result = source.open_acquire(acquire_request).sample_round(snapshot(), 0)
+            if isinstance(result, IntegratedRound):
+                return result.raw.materialize(
+                    acquire_request.reps, acquire_request.avg_level
+                )
+            return {channel.channel: channel.iq for channel in result.channels}
+        finally:
+            source.close()
+
+    actual = acquire(empty)
+    # Retuning only the other ADC must not change the observed carrier's bits.
+    reference = replace(
+        base,
+        readouts=(
+            base.readouts[0],
+            replace(base.readouts[1], frequency_mhz=np.full((2, 1), 6000.0)),
+        ),
+    )
+    np.testing.assert_array_equal(actual[4], acquire(reference)[4])
+    observations = actual[1].reshape(-1, 2)
+    count = 3 if mode == "integrated" else 1
+    np.testing.assert_allclose(
+        observations.mean(axis=0), np.array([11.0, -7.0]) * count, atol=0.1
+    )
+    covariance = count * np.array([[4.0, 0.5], [0.5, 2.0]])
+    if mode == "integrated":
+        covariance += np.eye(2) / 12
+    tolerance = 6 * covariance.max() * np.sqrt(2 / (len(observations) - 1))
+    np.testing.assert_allclose(np.cov(observations.T), covariance, atol=tolerance)
+
+
+def test_mux_retunes_independently_between_logical_events():
+    base, config = herald_template()
+    plan = ftf_module.plan_template(
+        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+    )
+    for events in plan.readouts[0].batch.events:
+        assert [tuple(p.frequency_ghz for p in event.pulses) for event in events] == [
+            (5.9,),
+            (6.0,),
+        ]
+    for item in plan.readouts:
+        assert item.batch.model.reference_frequency_ghz == 6.0
+
+
+def test_mux_rejects_grids_in_different_channels_within_one_event():
+    base = mux_template()
+    window = base.readouts[0]
+    retuned = replace(
+        window,
+        trigger_ticks=np.repeat(window.trigger_ticks, 2, axis=1),
+        frequency_mhz=np.tile([6000.0, 6080.0], (2, 1)),
+        phase_deg=np.repeat(window.phase_deg, 2, axis=1),
+        generator_channels=np.ones((2, 2), dtype=np.int64),
+    )
+    with pytest.raises(
+        ValueError, match="ADC 4.*different PFB channels.*one readout event"
+    ):
+        ftf_module.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, readouts=(retuned,)),
+            readout=configuration(),
+            time_base=TIME_BASE,
+        )
 
 
 def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
@@ -121,14 +269,18 @@ def test_mux_planner_rejects_unbound_receiver_and_different_pulse_start():
             snapshot(),
             replace(base, readouts=(unbound,)),
             readout=configuration(),
+            time_base=TIME_BASE,
         )
-    delayed = replace(base.events[1], start_us=base.events[1].start_us + 0.001)
+    delayed = replace(
+        base.events[1], start_ticks=base.events[1].start_ticks + ticks(0.001)
+    )
     with pytest.raises(ValueError, match="common.*start|same.*start"):
         ftf_module.plan_template(
             settings(),
             snapshot(),
             replace(base, events=(base.events[0], delayed)),
             readout=configuration(),
+            time_base=TIME_BASE,
         )
 
 
@@ -141,7 +293,9 @@ def test_one_program_cannot_mix_pulse_and_mux_readout_generators():
         readouts=(*pulse.readouts, *mux.readouts),
     )
     with pytest.raises(ValueError, match=r"readout generators.*0.*1"):
-        ftf_module.plan_template(settings(), snapshot(), mixed, readout=configuration())
+        ftf_module.plan_template(
+            settings(), snapshot(), mixed, readout=configuration(), time_base=TIME_BASE
+        )
 
 
 @pytest.mark.parametrize("split_templates", [False, True])
@@ -239,7 +393,9 @@ def test_mux_ftf_channels_share_physical_shots_and_initial_mixture(mode, jumping
             first, second = (ch.iq for ch in result.channels)
         assert channel_order == (4, 1)
         np.testing.assert_array_equal(first, second)
-        plan = ftf_module.plan_template(numeric, snapshot(), content, readout=config)
+        plan = ftf_module.plan_template(
+            numeric, snapshot(), content, readout=config, time_base=TIME_BASE
+        )
         batch = plan.readouts[0].batch
         if jumping:
             # A fixed conditional centre or shared initial states alone cannot

@@ -191,8 +191,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
     def run(self, config: CZAmplitudeCfg, *, context: RunContext) -> CZAmplitudeResult:
         """Acquire raw summed counts, without host round loops or per-shot IQ.
 
-        The cfg is unchanged. Completed rounds survive cancellation; check the
-        RunContext stop signal for acquisition errors before interpreting results.
+        The cfg is unchanged. Completed rounds survive cooperative cancellation.
+        Acquisition exceptions propagate unchanged. The stop signal carries only
+        stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scales)

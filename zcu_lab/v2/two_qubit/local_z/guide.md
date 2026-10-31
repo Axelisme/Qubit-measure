@@ -20,13 +20,13 @@ Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時
 
 終端 F1/F2 在取數時分類為 g/e/other。`sums` 是 float64 `(2,2,Nn,3,3)`，依序為 target、projection、n、terminal F1、terminal F2。Target 座標 0/1 表示 F1/F2，projection 0/1 表示 X/Y。Class 順序是 g/e/other。保存總和原值，不保存逐 shot IQ，也不先換算比例。未量點保持 NaN。
 
-取消保留已完成 round 的總和。先檢查 Run 的 stop/error 狀態，再判斷 partial data 是否可用。Native Save／Load 保留 sums、axes 與來源 cfg。Load 不修改目前 Form。Analyze 只用保存來源，缺來源 cfg 時停止分析。缺 sums 的舊逐 shot 檔案會明確拒絕載入。
+取消保留已完成 round 的總和。StopSignal 只承載停止請求與 reason。取數失敗由 Run 直接拋出例外；停止請求後正常返回的 partial 仍須按分析完整性規則判讀。Native Save／Load 保留 sums、axes 與來源 cfg。Load 不修改目前 Form。Analyze 只用保存來源，缺來源 cfg 時停止分析。缺 sums 的舊逐 shot 檔案會明確拒絕載入。
 
 ## Phase 與 slope
 
 每個 projection 的 `sigma=(N_e-N_g)/N_total`，other 留在分母。Logical phase 是 `atan2(sigma_Y,sigma_X)`，degree wrap 到 `[-180,180)`。Contrast 是兩個 sigma 的向量長度。分析不再線性投影 IQ。
 
-每個 phase 使用兩個 projection 已取得的總和，不要求完成全部預定 rounds。空或缺失 projection、零 contrast 都保留原因，不猜 phase。每個 target 必須有整列 phase 才做 unwrap 與 fit。微弱但非零 contrast 仍可分析，操作員須看 quadratures 與 contrast 判斷是否重測。
+每個 phase 要求 X/Y 兩個 projection 各自完成預定的全部 rounds。分析以全部分類計數總和是否等於來源 cfg 的 reps × rounds 判定完整性。未完成 rounds 的點不產生 phase，即使 partial 計數有限也不做 fit 或 writeback。空或缺失 projection、零 contrast 都保留原因，不猜 phase。每個 target 必須有整列 phase 才做 unwrap 與 fit。微弱但非零 contrast 仍可分析，操作員須看 quadratures 與 contrast 判斷是否重測。
 
 分析沿 n 做相鄰主值 unwrap，再用含 intercept 的計數加權最小平方擬合 `phase_deg=intercept+slope*n`。兩 target 各自擬合。Slope 是每 CZ 的 logical Bloch phase accrual，correction 是它的負值，不重新 wrap。零 slope 可以有效，缺失 correction 維持缺失。
 

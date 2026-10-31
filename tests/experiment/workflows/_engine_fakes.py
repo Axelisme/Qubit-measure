@@ -176,7 +176,7 @@ class Rig:
 
 @contextmanager
 def running(rig: Rig) -> Generator[Future[RunStatus]]:
-    """Keep execute on one worker until Stop/return, including paused/Ask time."""
+    """Keep execute on one worker until Stop/return, including Ask time."""
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(rig.engine.execute, "run")
         try:
@@ -197,12 +197,3 @@ def question(rig: Rig) -> PendingQuestion:
     value = rig.engine.pending_question("run")
     assert value is not None
     return value
-
-
-def paused(rig: Rig) -> None:
-    until(
-        lambda: (
-            (status := rig.engine.status()) is not None and status.lifecycle == "paused"
-        ),
-        "paused lifecycle",
-    )

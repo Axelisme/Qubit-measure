@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-10-29 (UTC), negative population clipping
+**Last updated:** 2026-10-31, empty read events
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -150,7 +150,8 @@ that share one physical read event. `ReadoutBatch(model, events, content_index)`
 stores ordered events per distinct content. Every grid in an event observes the
 sum of its incident carriers through the same physical line. Receiver offset
 is applied once per sample, not once per tone. Responses concatenate grids in
-event order. `ReadoutEvent.grids=()` keeps an event's position when that ADC
+event order. `ReadoutEvent.pulses=()` keeps observed grids and emits receiver
+offset and noise only, without CTMC or cavity propagation. `ReadoutEvent.grids=()` keeps an event's position when that ADC
 does not observe it. It emits no read column. All ADCs and projection populations
 use the same event axis, while each ADC keeps its own observed trigger order.
 All ADCs may omit terminal observations. The terminal event still occupies the

@@ -252,7 +252,7 @@ async def overnight[C](  # noqa: PLR0915  # tolerated: workflow flow reads top t
     propagate without undoing the committed pair or earlier rows.
     Unexpected acquisition/fit/plot/save/device errors propagate. Each pair starts
     at max(now, previous actual start + interval), without catch-up bursts.
-    Pause resumes the pending operation; it does not freeze wall time.
+    Each operation runs once, without automatic retries.
     Read timing and acceptance from tun.current. The trend retains scalar
     pairs, not Figures, and is not automatically saved.
     To revisit past points, start a new run with a sliced plan and seed local

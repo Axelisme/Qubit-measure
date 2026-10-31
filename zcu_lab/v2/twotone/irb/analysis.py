@@ -97,10 +97,12 @@ def analyze_irb(
     Requires shape (round, seed, 2, depth), at least four distinct depths and two
     paired seeds. Drop incomplete round/seed pairs as whole curves, average each
     seed over its complete rounds, then weight seeds equally. Bootstrap resamples
-    entire paired seed curves, preserving depth and arm correlations. Raises
-    ValueError for insufficient data, invalid fits or >10% failed bootstrap fits.
-    Known optimizer failures in the main fit become ValueError with their cause;
-    in bootstrap they count as failed draws, without replacement or retry.
+    entire paired seed curves, preserving depth and arm correlations.
+    Invalid inputs or unidentifiable/non-decaying fits raise ValueError.
+    Main-fit AnalysisFailed propagates unchanged. Bootstrap isolates only
+    AnalysisFailed as failed draws, without replacement or retry; fewer than
+    90% successful draws raises AnalysisFailed with the valid/total counts.
+    All other fitting exceptions propagate unchanged.
     The ratio is the single-qubit estimate in Magesan et al., arXiv:1203.4550;
     its confidence interval does not include gate-dependent noise systematics.
     """
@@ -121,10 +123,7 @@ def analyze_irb(
     )
     means = project_arm_means(seed_means[None, ...])
     xs = depths.astype(np.float64)
-    try:
-        ps, curves = _fit_pair(xs, means)
-    except AnalysisFailed as exc:
-        raise ValueError(f"IRB decay fit failed: {exc}") from exc
+    ps, curves = _fit_pair(xs, means)
     error = float((1 - ps[1] / ps[0]) / 2)
     rng = np.random.default_rng(bootstrap_seed)
     fidelities: list[float] = []
@@ -132,12 +131,12 @@ def analyze_irb(
         sample = seed_means[rng.integers(0, len(seed_means), len(seed_means))]
         try:
             boot_ps, _ = _fit_pair(xs, project_arm_means(sample[None, ...]))
-        except (AnalysisFailed, ValueError, RuntimeError):
+        except AnalysisFailed:
             # A failed resample is reported in the success count, never replaced.
             continue
         fidelities.append(float((1 + boot_ps[1] / boot_ps[0]) / 2))
     if len(fidelities) < 0.9 * bootstrap_samples:
-        raise ValueError(
+        raise AnalysisFailed(
             f"Unstable bootstrap: {len(fidelities)}/{bootstrap_samples} valid fits"
         )
     low, high = np.quantile(fidelities, [0.025, 0.975])

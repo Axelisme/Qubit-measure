@@ -91,13 +91,13 @@ Recipe 本體依序開 tab、選 module、逐欄 set、依序套 overrides、che
 `session.open_tab(...)`、`tab.select(...)`、`tab.set(...)`、
 `await tab.run()`、`await tab.analyze("primary", result=T)` 與
 `await tab.ask_writeback()`。接受答案後才 `tab.accept_writeback(decision.items)`。
-每次 Analyze 後先檢查 `analysis.result`。預期擬合失敗時 result=None、status="failed"，立即回含 `analysis_failure=analysis.reason` 的 report，不 Ask、不接受 writeback、不跑相依 Post。Post 失敗保留 Primary 估計；成功時 analysis_failure=None。任意程式錯誤仍 raise。
+Analyze 的例外直接交給作者，包含 fitting 例外；作者決定是否捕捉，未捕捉就使 recipe failed。每次 Analyze 後先檢查 `analysis.result`，因為子層分析取消且無結果時仍可返回 result=None、status="failed"。這個取消分支回報 `analysis.reason`，不 Ask、不接受 writeback、不跑相依 Post，不用來處理 fitting 例外。
 
 Run 留在 try 外，成功返回後的流程以既有 finally 同步 `tab.save()`。根取消使下一個 await raise 普通 ScriptCancelled，進行中的 Run 先 drain 並保留 facts。該 Run await 被根取消時不進後續 Save finalizer，partial 留在 tab 交 agent 決定。作者不新增取消分支或 Save finalizer。
 Inputs 繼承 RecipeInputs，框架只作 pydantic／MCP JSON schema 驗證，不渲染 recipe inputs Form。
 可省略欄位用 KEEP，null 原樣交 owner。Read 與寫入都用 dotted string。
 明填 scalar 前直接 command to_inline，保留 waveform family。已 inline 時不改值。
-完整宣告、Analyze 失敗值與根取消契約見 [recipe 教學](../tutorial/04-recipe.md)。
+完整宣告、Analyze 例外與取消契約見 [recipe 教學](../tutorial/04-recipe.md)。
 
 ### 3. Docstring 說明量測、序列與結果
 
@@ -450,8 +450,8 @@ Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/s
 `SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
 Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
 Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
-Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。RunContext 的
-`context.scope.stop.raise_if_error()` 區分 acquisition failure 與正常取消；有 partial data 不代表成功。
+Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。
+Acquisition 例外直接傳出。作者決定回傳資料是否足夠分析，不從 StopSignal 判斷資料完整度。
 Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
 Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。
 
@@ -631,7 +631,7 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 
 ### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
 
-把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）一律在 runner-owned cfg 上做：一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+新寫法以 module constructor keyword 傳入掃描值，不修改 caller cfg。以下 mutation 規則只適用仍使用 `set_param` 的既有程式。這些程式把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）時，一律修改 runner-owned cfg，一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
 
 只有兩類「副本外操作」是有意保留的：
 
@@ -882,9 +882,11 @@ Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_a
 Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
 Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後續 host loop。
 外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
-失敗或中斷可能留下 partial data，回傳後仍須檢查本次 `context.scope.stop.raise_if_error()`。
+一般 acquisition 失敗在 retry 耗盡後原樣傳出，KeyboardInterrupt 直接傳出。Buffer 可能仍有資料，作者自行決定是否攔截並回傳。
+`RunOptions(on_stop=callback)` 在本次 acquire 因外部停止而正常返回時通知作者，純 data stop 不通知。
+Callback 不收參數，在 acquire scope 與 progress 清理後、ndarray 返回前同步呼叫一次；callback 例外原樣傳出且不 retry。
 
-`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 至少重試一次，並先還原取數前的 slot。
+`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 同樣使用這個預算，並先還原取數前的 slot。
 外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
 `progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
 `rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
@@ -1002,7 +1004,11 @@ distinct depths 時分析明確失敗。
 
 ## 外部中斷支援（cancel_flag）
 
-新 Schedule 寫法由 `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動把 acquire-local composite `cancel_flag` 傳給 program acquire；它會觀察 `Schedule.stop` 的 external stop，但 data-driven early stop 只停止目前 program acquire，不會把 `Schedule.outcome` 改成 `stopped`。direct ProgramBuilder path 在 external stop / `KeyboardInterrupt` / acquire error 時會保留目前 buffer partial result，並把狀態寫入 `Schedule.outcome`（`completed` / `stopped` / `interrupted` / `failed`）。外部 stop 若在 current round 未完成時被 acquire loop 觀察到，會丟棄該 partial round、保留先前 completed rounds；first round 尚未完成就 stop 時，runner 保留 NaN partial 並標記 `stopped`，不對空 rounds 平均。`failed` / `interrupted` 仍保留 partial result，但本次 `RunContext.scope.stop` 會攜帶第一個非取消錯誤 cause，GUI 與 Notebook 在提交成果前呼叫 `raise_if_error()`，不將失敗的 partial data 當成成功；retry 成功會清除 transient failure cause。
+Schedule 的 builder 與 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` 傳給 program。它觀察目前 acquire scope 的外部停止，包含 Schedule 祖先的停止請求。Data-driven early stop 只停止目前 acquire，不改 Schedule outcome。
+
+取消 acquire 子層時，runner 保留 completed rounds，首輪前取消則保留 NaN。Schedule 自己未停止時，其 outcome 仍是 completed，下一次 acquire 可繼續。取消 Schedule 本身才記 stopped。作者需要知道本次 acquire 是否被取消時，傳 `AcquireOptions(on_stop=callback)` 或 `RunOptions(on_stop=callback)`。這個通知不交給前端，也不寫回 StopSignal。
+
+Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 retry、不轉 outcome；converter 與 update 錯誤也直接傳出。Schedule 的作者 outcome 保留 completed、stopped 或 failed，但不代表資料可用性。GUI 與 Notebook 只依 core 回傳或拋錯發布結果，不解析 buffer 或 outcome。
 
 - `AcquireOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(options=AcquireOptions(stop_condition=...))`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
 - `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
@@ -1016,7 +1022,7 @@ distinct depths 時分析明確失敗。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
 4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
 5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
-6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)` / `sched.batch(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`；batch child 必須是 replayable callable，buffer 寫入由 child 明確指定，batch 本身不做 per-child retry。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
+6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。
 

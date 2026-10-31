@@ -78,7 +78,7 @@ the compiled program.
 `shot_time_s(rounds=..., reps=..., shot_lengths_us=..., relax_delay_us=...)`
 從各 sweep 點的 shot 長度與共同 relax 計算完整 acquisition 的 shot 秒數。
 輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
-模擬 binding 的 pacing 使用同一個公式，不累計 acquisition 的硬體總時間。
+`request_round_time_s(request)` 從整數 request 計算一輪 pacing 秒數。它以 Python 整數加總各點與 relax，再乘 reps，由 TimeBase 一次換成秒。整輪總和不套用單一 request 時間的 ns 精確界限。模擬 binding 只呼叫此入口，不累計 acquisition 的硬體總時間。既有 µs API 與硬體路徑不變。
 
 ## Conditional readout
 

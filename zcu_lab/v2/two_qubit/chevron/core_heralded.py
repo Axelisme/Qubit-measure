@@ -109,18 +109,26 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
     def run(
         self, config: ChevronHeraldedCfg, *, context: RunContext
     ) -> ChevronHeraldedResult:
-        """Acquire optional reset → herald → B11 → drive → double Xπ → terminal.
+        """Dispatch duration acquisition by the two drive waveform types.
 
-        Both reads emit one mux object with separate tags. Return all 81-class
-        counts, including completed partial rounds. Check context.scope.stop.
+        Constant and flat-top drives use a hardware duration sweep. Sampled
+        envelopes rebuild at each host duration. Both return coordinate-major
+        float64 counts with the same Result axes and cancellation semantics.
         """
+        if all(
+            isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
+            for pulse in (config.drive.f1, config.drive.f2)
+        ):
+            return self._run_hardware_duration(config, context=context)
+        return self._run_host_duration(config, context=context)
+
+    def _run_hardware_duration(
+        self, config: ChevronHeraldedCfg, *, context: RunContext
+    ) -> ChevronHeraldedResult:
+        """Acquire all coordinates and durations in hardware, accumulating rounds."""
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        hardware_duration = all(
-            isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
-            for pulse in (config.drive.f1, config.drive.f2)
-        )
         viewer = live_line(
             context.plots,
             "measurement",
@@ -130,22 +138,89 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         )
 
         def update_view(sums: NDArray[np.float64]) -> None:
-            ordered = sums[0] if hardware_duration else sums.swapaxes(0, 1)
+            ordered = sums
             counts = terminal_counts(ordered, ("g", "g"))
             viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3, 3, 3)
-        shape = (
-            (1, len(coordinates), len(durations), *class_shape)
-            if hardware_duration
-            else (len(durations), len(coordinates), *class_shape)
+        shape = (len(coordinates), len(durations), *class_shape)
+        buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=config.reps,
+                initial_delay=config.initial_delay,
+                relax_delay=config.relax_delay,
+            )
+            coordinate = builder.add_sweep("frequency", config.frequency)
+            length = builder.add_sweep("duration", config.duration)
+            drive_f1 = Pulse(
+                "drive_f1", config.drive.f1, length=length, freq=coordinate
+            )
+            drive_f2 = Pulse(
+                "drive_f2", config.drive.f2, length=length, freq=coordinate
+            )
+            prepare_f1 = Pulse("prepare_f1", config.x180_f1)
+            prepare_f2 = Pulse("prepare_f2", config.x180_f2)
+            contrast_f1 = Pulse("contrast_f1", config.x180_f1)
+            contrast_f2 = Pulse("contrast_f2", config.x180_f2)
+            readout = MuxReadout("readout", config.readout)
+            if config.reset is not None:
+                builder.emit(Reset("reset", config.reset))
+            builder.emit(readout, tag="herald")
+            builder.emit(Join(prepare_f1, prepare_f2))
+            builder.emit(Join(drive_f1, drive_f2))
+            # Advance reference to consume duration-sweep runtime ends here.
+            # Contrast, readout, ADC and shot end then use constant relative
+            # times while their absolute event times remain unchanged.
+            builder.delay_by_timeline()
+            builder.emit(Join(contrast_f1, contrast_f2))
+            builder.emit(readout, tag="terminal")
+            prog = builder.build()
+            axes = [
+                Classify("herald", config.roles.f1_tone),
+                Classify("herald", config.roles.f2_tone),
+                Classify("terminal", config.roles.f1_tone),
+                Classify("terminal", config.roles.f2_tone),
+            ]
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                processor=shot_sums(prog, axes),
+                rounds=config.rounds,
+                options=RunOptions(),
+            )
+        buffer.trigger_update(flush=True)
+        sums = buffer.array
+        return ChevronHeraldedResult(coordinates, durations, sums)
+
+    def _run_host_duration(
+        self, config: ChevronHeraldedCfg, *, context: RunContext
+    ) -> ChevronHeraldedResult:
+        """Rebuild sampled envelopes per host duration; keep coordinates in hardware."""
+        validate_classifiers(config.readout, config.roles)
+        coordinates = sweep2array(config.frequency)
+        durations = sweep2array(config.duration)
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Drive duration (us)",
+            "Terminal P00 | herald (g,g)",
+            num_lines=len(coordinates),
         )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            ordered = sums.swapaxes(0, 1)
+            counts = terminal_counts(ordered, ("g", "g"))
+            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+
+        class_shape = (3, 3, 3, 3)
+        shape = (len(durations), len(coordinates), *class_shape)
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
-        batches = [None] if hardware_duration else durations.tolist()
         with Schedule(config, buffer, scope=context.scope) as sched:
-            for duration, step in sched.scan("duration_batch", batches):
+            for duration, step in sched.scan("duration", durations.tolist()):
                 builder = TimelineBuilder(
                     context.soccfg,
                     reps=config.reps,
@@ -153,11 +228,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                     relax_delay=config.relax_delay,
                 )
                 coordinate = builder.add_sweep("frequency", config.frequency)
-                length = (
-                    builder.add_sweep("duration", config.duration)
-                    if hardware_duration
-                    else duration
-                )
+                length = duration
                 drive_f1 = Pulse(
                     "drive_f1", config.drive.f1, length=length, freq=coordinate
                 )
@@ -174,6 +245,9 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 builder.emit(readout, tag="herald")
                 builder.emit(Join(prepare_f1, prepare_f2))
                 builder.emit(Join(drive_f1, drive_f2))
+                # Advance reference at the same drive boundary as the hardware path.
+                # Keep downstream relative times constant without moving absolute events.
+                builder.delay_by_timeline()
                 builder.emit(Join(contrast_f1, contrast_f2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
@@ -191,7 +265,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        sums = buffer.array[0] if hardware_duration else buffer.array.swapaxes(0, 1)
+        sums = buffer.array.swapaxes(0, 1)
         return ChevronHeraldedResult(coordinates, durations, sums)
 
     def analyze(

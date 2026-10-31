@@ -255,23 +255,25 @@ class RunResult:
     """Terminal acquisition result, without an automatic save or analysis.
 
     status is completed or failed. run_id is the owner's acquisition identity,
-    or None when none exists; it does not prove persistence. partial_result
-    marks cooperative interruption and may retain usable data for Save.
+    or None when none exists; it does not prove persistence. stop_requested
+    is True when the GUI frontend sent Stop or an accepted selector cancel
+    during this Run. It does not classify the returned data's completeness.
     """
 
     status: Literal["completed", "failed"]
     run_id: str | None
-    partial_result: bool = False
+    stop_requested: bool = False
 
 
 @dataclass(frozen=True)
 class AnalysisResult[T]:
-    """Analysis success or an expected failure that the author can act on.
+    """Analysis success or descendant cancellation.
 
-    Completed result is TypeAdapter(T).validate_python(summary); incompatible
-    fields raise without repair. Failed result is None and reason explains the
-    expected fitting failure or descendant cancellation. Programming errors
-    still raise. Root cancellation raises ScriptCancelled after owner drain.
+    result is TypeAdapter(T).validate_python(summary) on success, or None after
+    descendant cancellation. status is completed on success or failed after
+    descendant cancellation; reason is None on success or the cancellation
+    message. Analyze errors and incompatible fields raise without repair.
+    Root cancellation raises ScriptCancelled after owner drain.
     """
 
     result: T | None
@@ -412,7 +414,9 @@ class RecipeRun:
 
     tab is its GUI locator; adapter is the registered name. run_id is the
     acquisition identity, or None before a known owner identity. status records
-    completed/failed operation delivery. partial_result records interruption.
+    completed/failed operation delivery. stop_requested is True when the GUI
+    frontend sent Stop or an accepted selector cancel during this Run; it does
+    not classify the returned data's completeness.
     saves retains every Save report attempt, including confirmed prefixes on
     failure. No identity or completed status implies persistence.
     """
@@ -421,7 +425,7 @@ class RecipeRun:
     adapter: str
     run_id: str | None
     status: Literal["completed", "failed"] = "completed"
-    partial_result: bool = False
+    stop_requested: bool = False
     saves: tuple[SaveResult, ...] = ()
 
 
@@ -561,7 +565,7 @@ class RecipeTab:
     async def run(self) -> RunResult:
         """Acquire the current cfg and retain its identity, without saving.
 
-        Descendant cancellation returns completed with partial_result=True.
+        Descendant cancellation returns completed with stop_requested=True.
         Root cancellation raises ScriptCancelled without starting a new Run;
         an in-flight Run drains and retains completion facts first. Synchronous
         finally Save remains available. Genuine operation/admission failures propagate.
@@ -578,11 +582,11 @@ class RecipeTab:
     ) -> AnalysisResult[T]:
         """Analyze this Run and decode the owner summary as the author's T view.
 
-        No automatic Save or preview occurs. Expected fitting failures and
-        descendant cancellation return status="failed", result=None and reason;
-        the author decides whether to save, retry, skip or stop. Root cancellation
-        raises ScriptCancelled after owner drain. Invalid stages, stale sources,
-        incompatible summary fields, programming and transport errors propagate.
+        No automatic Save or preview occurs. Any analyze failure raises to the
+        author with the operation's original error message, regardless of type.
+        Descendant cancellation returns status="failed", result=None and reason.
+        Root cancellation raises ScriptCancelled after owner drain. Invalid stages,
+        stale sources, incompatible summary fields and transport errors propagate.
         updates maps the adapter's analysis parameter names to ordinary values
         in their declared units; no conversion or Form expression evaluation
         occurs. None or an empty mapping keeps the owner's current parameters.

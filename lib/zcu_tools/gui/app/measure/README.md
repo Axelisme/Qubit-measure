@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-29, GLOBAL startup restore 與 writeback destination
+**Last updated:** 2026-11-01, GUI run stop terminal
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -106,6 +106,7 @@ rejects Done without closing input.
 - [`services/`](services/app_services.py)：app service layer。Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交及退役資源清理交給 `pane_commit`。
   GuardService 統一 domain admission，啟動時的 hardware exclusion 由 gate 裁決。
   各 operation 決定終局與觸發清理的時機。Run 與 Load 不依賴 WritebackService 來清理 draft。
+  Analyze 回傳就發布結果，拋錯就 failed 並顯示原始訊息，不辨識例外型別。
   Service 透過 ports 與其他 services 合作；package `__init__` 只做 lazy public re-export。
   `services.results_index.scan_results(project_root)` 供結果瀏覽器與 RPC 共用唯讀 `ResultsIndex`。它掃描各 Database entry 的 run 目錄，從 datafile.read_doc 讀保存 metadata，再以同名 Result entry 的 acquired 事件提供歷史身分，缺 ledger 仍列為未登錄。瀏覽投影容許 metadata 缺欄與額外欄位，不以目前 RunMetadata 型別擋住歷史內容；壞文件保留 run 與 issues。Cfg JSON 原樣讀取，不查 catalog 或驗證實驗 schema。Cfg／analysis 搜尋包含未出現在 roles 的 tone 名稱。文件與圖檔讀取只接受索引中的 run key 與成員檔名，讀取前重驗根目錄與 symlink 邊界。索引不建立檔案或 lock，也不改 opened entry。
   `services.results_comparison.build_comparison(index, run_keys)` 將保存的 summary JSON 投影為逐 run 的比較列。身分四欄後接葉節點點路徑，欄位依釘選與 JSON 順序取 union。物件 list 以索引多行呈現，不辨識實驗名稱或特定 key；parameters 不進表。檔案與 JSON 讀取仍委派 `ResultsIndex`，不換算單位或重新分析。
@@ -289,9 +290,9 @@ imports the lab registry.
 
 `Controller.workflow_control()` returns the headless facet. Each `open(name)`
 creates independent plan/tunables drafts, including repeated names. `tab_id`
-addresses a draft owner; `run_id` addresses its native run. Start, Pause, Resume,
-Stop and Apply use the same runner, operation and RUN lease as experiment tabs.
-Pending and paused runs refuse tab close. Closing the last idle workflow tab
+addresses a draft owner; `run_id` addresses its native run. Start, Stop and Apply
+use the same runner, operation and RUN lease as experiment tabs.
+Busy runs, including Ask waits, refuse tab close. Closing the last idle workflow tab
 does not drain services or disconnect hardware.
 
 Qt workflow panes display these owners and forward commands. A busy workflow's
@@ -299,10 +300,9 @@ local Stop remains available under Remote control. It reclaims locked Local befo
 requesting Stop through the same facet; other mutations still require the holder.
 Tunables Discard restores the latest accepted input and clears local invalid text.
 Before Start, it restores the captured form base. It is enabled only for a changed
-draft while editing is allowed. Running, pausing and paused runs allow tunables
-edits and Apply; stopping locks edits, Apply and Discard. Entering paused selects
-Tunables and shows 「Resume 會重做未提交的點；可先 Apply 新的 tunables」.
-Resume or Stop hides the hint. A new Ask still selects its question page.
+draft while editing is allowed. Running and waiting runs allow tunables edits
+and Apply; stopping locks edits, Apply and Discard. A new Ask selects its
+question page. Waiting means an Ask is awaiting its answer.
 Measure remote calls the same facet without a pane, toggle or selected-tab
 dependency. Form
 `observe_form` prepares one call-local candidate using the owner's fixed env;
@@ -312,12 +312,12 @@ defaults. Tunables Apply with an empty batch submits the current shared draft.
 
 `WorkflowAttachment(script=...)` pairs an async workflow with its native plan,
 live tunables and optional summary types. One Runner worker calls Engine.execute
-through terminal completion. Pause and Ask retain that worker, operation,
-progress and RUN lease. Resume and Answer signal it without another submission.
-Running and paused Apply both publish a complete tunables model and a new revision.
+through terminal completion. Ask retains that worker, operation, progress and
+RUN lease. Answer signals it without another submission.
+Running and waiting Apply both publish a complete tunables model and a new revision.
 The next tun.current read sees it; already captured operation cfg stays unchanged.
-Pause interrupts acquisition and retries only a stale partial after Resume, not
-an entire point. A naturally completed result waits for Resume without retry.
+Each operation calls its callable once. Cooperative child cancellation delivers
+its returned value. Root Stop records completion facts, then raises ScriptCancelled.
 
 `pending_question` returns the detached
 `{request_id, question_type, question, answer_schema}` envelope while that worker
@@ -368,7 +368,14 @@ Recipe 的 logical read/edit/selector 命令也由 `TabFormResource` 擁有。Ad
 
 RunService 在 run 終局後請 DeviceService 背景讀回已連線儀器。成功台更新觀察 cache，失敗台保留既有值。這項讀回不改變 run 終局、settlement、lease 或 run 前固定的 acquisition snapshot。
 
-RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。`partial_result` 固定 worker 完成時的 Run root 完成事實，與 operation 終態及 metadata 是否存在無關。Snapshot 與 wire 的 result_state 交付同一 bool，new Run 或非 acquisition replacement 重設為 False。
+RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存同一引用。
+`stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
+Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
+New Run 或非 acquisition replacement 重設為 False。
+Core 正常回傳就發布 record，GUI 顯示 finished，operation handle 也回 finished。
+Stop、root 與子孫 scope 的取消都不改這個 terminal。
+Core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
+RunMetadata.completion 的 stopped 表示 core 回傳前前端發出過停止請求，不判定資料是否完整。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。
 Load 接受任意位置的檔案，不讀 live point，也不依 entry 身分選來源。

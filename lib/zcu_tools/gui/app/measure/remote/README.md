@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-29，global 文件組的 wire 133／GUI 166
+**Last updated:** 2026-11-01，Ask waiting 與 GUI run terminal，wire 136／GUI 169
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -126,12 +126,12 @@ GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 AD
 
 ## Workflow namespace
 
-`workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/cancel/records/figures/figure/answer`
+`workflow.open/close/start/status/form/describe_form/edit_form/tunables/stop/cancel/records/figures/figure/answer`
 call the same headless `WorkflowControlFacet` as Qt panes. Commands do not require
 any GUI mode or selected tab. When the GUI mounts a newly opened owner, it selects
 the new tab and switches to Workflow mode. `tab_id` names an opened draft owner;
 `run_id` names a native run. Status without run_id lists catalog names and all opened tab
-snapshots. Start/Resume operation_id uses the existing measure operation owner;
+snapshots. Start operation_id uses the existing measure operation owner;
 submission does not prove native acceptance. MCP exposes the same operation as
 an opaque handle for wait.
 
@@ -170,7 +170,7 @@ consumes the question or records an accepted answer.
 Status retains `last_exchange` with the latest question envelope, accepted
 answer fields or null, and waiting/submitted/answered/cancelled state. Host
 acknowledgement proves answer validation and delivery, not run completion.
-Pause, Resume and Answer retain one worker and RUN lease through terminal owner
+Ask and Answer retain one worker and RUN lease through terminal owner
 delivery; RPC/UI code never executes the author. Committed records project their
 directory, UTC commit time, read-order revisions, qualified model name and
 actual operation-attempt facts alongside the encoded authored record.
@@ -191,17 +191,22 @@ The GUI path starts with run. Recipe projects only its schedule/acquire tail
 onto the local recipe:<name>/operation#N path. Composite live_paths and cancel
 ack candidates omit the GUI run root by the same rule. GUI acceptance and refusal
 reasons remain unchanged. Handle and sequence checks are process-local; the combined path
-is not an atomic cross-process observation. Descendant cancellation marks Run
-metadata stopped through partial_result, without changing run Stop intent.
-`tab.snapshot.result_state.partial_result` carries the fixed completion fact even
-without native metadata. New Run and result replacement clear the old fact.
-Recipe RunResult reads this field, not operation terminal status or cancel ack.
+is not an atomic cross-process observation.
+`tab.snapshot.result_state.stop_requested` is true when the frontend sent Stop
+or an accepted selector cancel during this Run, including descendant cancellation.
+Core-owned stops do not set it. The flag survives core failure and does not
+classify data completeness. New Run and result replacement reset it to false.
+Run metadata uses stopped for requests recorded before core return.
+Recipe RunResult reads stop_requested, not operation terminal status or cancel ack.
+Normal core return publishes its record and operation.await returns status=finished,
+including after Stop, unscoped operation.cancel, or root/descendant cancel_scope.
+Core errors fail the operation and remain visible also after Stop.
+Wire version 135 introduced stop_requested.
 
-Analyze work may explicitly raise AnalysisFailed. Only that work failure adds
-failure_kind="analysis" to operation.await; recording/postprocessing errors stay
-unclassified. Recipe converts the analysis classification to a failed value,
-while arbitrary errors still raise. Root cancellation uses ScriptCancelled after
-drain and does not overwrite genuine errors.
+Analyze returns publish results. Any analyze exception settles operation.await
+as failed with the original error message, regardless of exception type.
+Recipe raises the operation error to its author, just as it does for Run.
+Root cancellation uses ScriptCancelled after drain and does not overwrite genuine errors.
 
 ## Analysis presentation
 

@@ -410,8 +410,8 @@ async def mist_fluxdep(  # noqa: C901, PLR0912, PLR0915  # tolerated: workflow f
     Partial saves raw IQ then records success=False/reason=stopped, without
     projecting the trace into the map or declaring success. The point still
     commits and later points follow the same flow.
-    Unexpected native/plot/save errors propagate. Pause resumes the pending
-    operation, not the whole point. Tunables reads use tun.current.
+    Unexpected native/plot/save errors propagate. Each operation runs once.
+    Tunables reads use tun.current.
     To revisit past points, start a new run with a sliced plan and seed local
     history from the previous run using the saved_run reader.
     """

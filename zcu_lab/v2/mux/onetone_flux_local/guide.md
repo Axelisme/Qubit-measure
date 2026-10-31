@@ -125,10 +125,13 @@ the existing mux onetone spectrum. Each `flux_i` figure shows absolute MHz
 against that tone's DC coordinate. Sources retain their final written settings.
 Run does not restore bias automatically.
 
-Stop interrupts ramps, settle and acquisition. A flux point is published only
-after the complete inner spectrum returns. Earlier completed points remain;
-the interrupted point and later points stay NaN. Analyze needs at least five
-completed flux points and at least two distinct frequency values.
+A flux point is published only after its complete inner spectrum returns.
+Cancelling an inner acquire leaves the entire current flux point NaN, including
+any data already collected there. The scan continues with the next flux point.
+To stop the whole scan, cancel the Run scope. The GUI Stop button does this;
+it interrupts ramps, settle and acquisition. Earlier completed points remain,
+and the interrupted point and later points stay NaN. Analyze needs at least
+five completed flux points and at least two distinct frequency values.
 Device and acquisition failures are errors, not empty
 successful maps.
 

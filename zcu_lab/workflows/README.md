@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-31
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -96,11 +96,11 @@ Stage 遇到 unexpected exception 不回傳部分結果，point 只保留主迴�
 主 body 用 try/finally，只在 finally 同步呼叫 `iteration.commit(point_record)` 一次，不加 await。
 量測間若 iteration.cancelled，補 status="skipped" 再 continue，下一點仍可執行。
 在 helper 裡則用 return 退出目前點，不用主 workflow 的 return 結束整個 run。
-完整收集式範例與 Failed 指引見 [教學](../tutorial/05-workflow.md)。
+完整收集式範例、例外恢復與作者分析 Failed 指引見 [教學](../tutorial/05-workflow.md)。
 
 `iteration.dir` 第一次使用才建立目錄。Nested child 在該目錄下鏡射 label 與 sequence。
 `scope.commit(record)` 寫該 scope 的 record.json，第二次提交會 raise。
-根 env.commit 寫 data root，也只能提交一次。Commit 不經 pause gate，取消 finally 可保存已有成果。
+根 env.commit 寫 data root，也只能提交一次。Commit 同步執行，取消 finally 可保存已有成果。
 Reader 走 nested 樹依 commit_seq 排序，不依目錄名排序。
 
 每個 point 的 `record.json` 在 `operations[]` 信封保存各 stage 的 `name`、時間與 outcome。
@@ -165,14 +165,13 @@ MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 
 所有用到 π 的下游都要求本點 accepted π，Ramsey／Echo 另要求本點可信 π/π2 pair。Readout 與 excited MIST 只要求 π。Ground MIST 不加 π，不受 Rabi 接受狀態限制。Point 的 calibration_sources 記本點 pulse 來源；readout_source 另記保留的 readout 校準來源。
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
-Pause 保留等待中的 await。若 Pause 中斷 operation 並產生 partial result，框架丟棄該次結果，
-Resume 後以同一 request 與原 capture 重試。自然完成的完整結果會等到 Resume 才交付，不重跑。
-兩種情況都不重跑整個 workflow。
-子層取消讓 operation 回 partial result。作者先保存 Completed raw，再檢查 partial_result。
-Partial 不進擬合或接受，保留原本拒絕原因，不更新 accepted history。
+每個 operation 只呼叫一次。框架不丟棄合作停止的回傳值，也不自動重跑。
+子層取消後，core 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.stop_requested。
+stop_requested 表示本次 operation 收到停止請求，不表示框架判定資料不完整。
+這些 workflow 由作者把 stop_requested 的回傳資料分類為 partial，不進擬合或接受，保留拒絕原因，也不更新 accepted history。
 根 Stop 則在下一個 async operation 或 Ask raise ScriptCancelled。進行中工作先 drain 並留 facts。
 作者 finally 同步提交已有成果，不吞掉例外，也不在 finally 改寫 status。
-Failed 表示 Schedule acquisition 或預期分析失敗。分析 helper 的 Failed 由 caller 記 failed 與 reason。
+Acquisition 例外原樣傳給作者，不轉 Failed。分析 helper 的 Failed 由 caller 記 failed 與 reason。
 NaN／infinity IQ 與 fitter 明示的不收斂轉 Failed。結構、cfg 與其他程式例外仍 raise，停止 run。
 
 要回到過去某點，開新 run 並切 plan 範圍。History 初值用 `saved_run.read_records`
@@ -190,7 +189,7 @@ Overnight 與 overnight_mux 另列每個 qubit 的 T1／Echo 接受數、平均�
 
 耗時先加總每點同 stage 的 delivered Completed operations，再算平均與最大。
 MIST both 的兩種 preparation 共用 MIST 耗時；mux 不依 participant 數重複計時。
-Failed 沒有可交付 facts，Pause 丟棄的 attempts 也不交給作者，因此它們不計入耗時統計。
+拋錯的 operation 沒有可交付 Completed，因此不計入耗時統計。
 沒有可用時間時省略 duration 欄位。完整的 attempt 事實仍保存在 point 信封與 journal。
 
 Stop 或錯誤中止時 workflow 沒有 return，框架不產生摘要，即使 finally 已提交部分 point。

@@ -24,7 +24,7 @@ The herald figure shows all nine herald fractions for each scan row. Its (g,g) c
 
 Spectator, quadrature and frequency use hardware loops. Gate count stays on the host because it changes the sequence structure. Both read tags share one mux object within each freshly built program.
 
-Native Save retains all sums, axes and source cfg. Load leaves the Form unchanged. Analysis requires saved cfg and rejects old per-shot files without sums. Cancellation preserves completed rounds; unmeasured points remain NaN. Check the run stop/error state before interpreting partial results.
+Native Save retains all sums, axes and source cfg. Load leaves the Form unchanged. Analysis requires saved cfg and rejects old per-shot files without sums. Cancellation preserves completed rounds; unmeasured points remain NaN. StopSignal carries only a stop request and reason. Acquisition failures propagate from Run as exceptions. A normal return after a stop request may contain partial counts. Phase and fits require every planned round of both projections, checked against reps × rounds using all 81 classes before herald selection. Low or zero gg/ee acceptance does not mean acquisition is incomplete. Incomplete points retain counts but supply no phase; the existing complete-axis fit and writeback rules still apply.
 
 Preview every proposal before Apply Selected. Writeback keys and acceptance conditions match the ordinary version. Recalibrate after changing pulse or readout conditions. Herald selection does not establish gate fidelity.
 

@@ -8,7 +8,6 @@ from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
 from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.operations import RunFunction
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.workflows import Failed
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.workflows.common.saving import save_native
@@ -34,13 +33,13 @@ class StageEnv:
 class SavedAcquisition[Result]:
     """Acquisition outcome after saving every Completed, including partials.
 
-    status is completed, partial or failed. result is available only on complete
-    acquisition, so partial data never enters a fit. file is the relative native
-    filename after saving, or None on acquisition failure. reason is stopped for
-    partial, the acquisition reason for failed, and None for completed.
+    status is completed or partial, the author's stopped-data classification.
+    result is available only when no stop was requested, so stopped data never
+    enters a fit. file is the relative native filename after saving. reason is
+    stopped for partial and None for completed. Acquisition exceptions propagate.
     """
 
-    status: Literal["completed", "partial", "failed"]
+    status: Literal["completed", "partial"]
     result: Result | None = None
     file: str | None = None
     reason: str | None = None
@@ -67,14 +66,13 @@ async def acquire_saved[Cfg: ConfigBase, Result](
 
     cfg is the detached native configuration; name labels the operation.
     output pairs a filename relative to scope.dir with its native axes mapping.
-    Failed acquisitions have no file. Partial completions save raw then return
-    status=partial without fit data. Complete results are returned unchanged.
+    Exceptions propagate without creating a file. Stop-requested completions
+    save raw then return status=partial without fit data. Other results are
+    returned unchanged.
     Acquisition, writer and unexpected framework exceptions propagate.
     """
     outcome = await scope.run(experiment, cfg, name=name)
     observe_operation(env.summary, outcome)
-    if isinstance(outcome, Failed):
-        return SavedAcquisition(status="failed", reason=outcome.reason)
     save_native(
         outcome,
         scope.dir / output.filename,
@@ -82,7 +80,7 @@ async def acquire_saved[Cfg: ConfigBase, Result](
         snapshot=env.snapshot,
         identity=scope.identity,
     )
-    if outcome.partial_result:
+    if outcome.stop_requested:
         return SavedAcquisition(
             status="partial", file=output.filename, reason="stopped"
         )

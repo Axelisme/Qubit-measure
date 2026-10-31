@@ -54,11 +54,13 @@ class RunFunction[Cfg: ConfigBase, Result](Protocol):
 
 @dataclass(frozen=True)
 class Completed[T]:
-    """A returned value, partial-delivery flag and facts for one attempt.
+    """A returned value, stop-request flag and facts for one attempt.
 
     value is fn's payload; env.run uses the existing RunRecord with cfg/data.
-    partial_result includes cancellation of the operation or a descendant. It is
-    not a scientific completeness check or a persistence guarantee. facts is the
+    stop_requested is true if the operation token was stopped at completion or
+    the host cancelled this operation, an ancestor or a descendant during this
+    attempt. Cancelling an unrelated sibling does not mark this flag.
+    It is not a scientific completeness check or a persistence guarantee. facts is the
     required OperationFacts for this delivered attempt, also written to journal
     and the enclosing commit. facts.stopped records the operation token's own
     control intent at completion, not descendant cancellation. These flags
@@ -66,37 +68,39 @@ class Completed[T]:
     """
 
     value: T
-    partial_result: bool
+    stop_requested: bool
     facts: OperationFacts
 
 
 @dataclass(frozen=True)
 class Failed:
-    """A recoverable acquire/analysis failure, without partial data.
+    """An author-owned recoverable analysis failure.
 
-    reason describes the cause. Authors decide whether to retry or continue;
-    arbitrary framework/build/conversion exceptions instead propagate.
+    reason describes the analysis failure. Authors decide whether to retry or
+    continue. Operation exceptions propagate rather than becoming this value.
     """
 
     reason: str
 
 
 type OperationKind = Literal["run", "call", "setup_device", "wait_until"]
-type OperationOutcome = Literal["completed", "partial", "discarded", "failed", "raised"]
+type OperationOutcome = Literal["completed", "discarded", "raised"]
 
 
 @dataclass(frozen=True)
 class OperationFacts:
-    """One actual executor attempt, retained even when Pause discards its value.
+    """Facts for one executor invocation; operations are not automatically retried.
 
     kind names run/call/setup_device/wait_until. iteration is the nearest
     iteration scope's birth number, or zero outside iterations. attempt counts
-    from one within that iteration or the root, including retries. started_at/finished_at are UTC
-    worker boundaries. device_snapshot is detached pre-call driver JSON for run,
-    otherwise None. outcome is completed, partial, discarded by Pause, failed
-    acquire, or raised exception. reason is a diagnostic or None on completion.
-    stopped is the operation token's completion-time stop bit, including failed,
-    raised and discarded attempts; it is not inferred from later run state.
+    from one within that iteration or the root, once per operation. Historical
+    records also counted retries from the removed Pause/Resume behavior.
+    started_at/finished_at are UTC worker boundaries. device_snapshot is detached
+    pre-call driver JSON for run, otherwise None. Current outcome values are
+    completed or raised. discarded is retained for historical Pause records only.
+    reason is a diagnostic or None on completion.
+    stopped is the operation token's completion-time stop bit, including raised
+    attempts and historical discarded attempts; it is not inferred from later run state.
     name is the caller-supplied operation label, or None when unnamed or absent
     in historical records. Readers ignore unknown historical fields.
     """

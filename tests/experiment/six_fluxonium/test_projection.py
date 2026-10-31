@@ -34,7 +34,7 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
 from tests.resources._six_fluxonium_data import six_document
 
 pytestmark = pytest.mark.sim
@@ -46,17 +46,18 @@ def test_routing_rejects_unsupported_charge_requirements_before_preparation():
         0,
         0,
         4,
-        1000,
-        (0.018,),
+        TIME_BASE.period_ticks(1000),
+        tick_tuple((0.018,)),
         frequency_mhz=(6800,),
         phase_deg=(0,),
         generator_channels=(0,),
     )
     timeline = PointTimeline(
         (),
-        (PulseEvent(0, 0.016, 0.008, 6800, 0, 0.1),),
+        (PulseEvent(0, ticks(0.016), ticks(0.008), 6800, 0, 0.1),),
         (window,),
-        0.024,
+        ticks(0.024),
+        time_base=TIME_BASE,
     )
     ordinary = AcquireRequest(
         "integrated",
@@ -67,6 +68,7 @@ def test_routing_rejects_unsupported_charge_requirements_before_preparation():
         0,
         "test",
         templates=(single_point_template(timeline),),
+        time_base=TIME_BASE,
     )
     assert len(route_request(settings, ordinary)) == 1
     requested = replace(
@@ -151,7 +153,9 @@ def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
         )
         prepared = single.prepare(subrequest, single.snapshot())
         facts = single.model_facts(single.snapshot())
-        plan = single.plan_template(single.snapshot(), group.templates[0])
+        plan = single.plan_template(
+            single.snapshot(), group.templates[0], time_base=request.time_base
+        )
         rate = facts.readout.rates_per_ns
         elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
         transition = expm((rate - np.diag(rate.sum(axis=0))) * elapsed).T
@@ -206,7 +210,7 @@ def shared_cavity_request(env: SimulationEnvironment):
     first, second = template.readouts
     terminal = replace(
         second,
-        trigger_us=second.trigger_us[:, 1:],
+        trigger_ticks=second.trigger_ticks[:, 1:],
         frequency_mhz=first.frequency_mhz[:, 1:],
         phase_deg=second.phase_deg[:, 1:],
         generator_channels=second.generator_channels[:, 1:],
@@ -292,8 +296,11 @@ def test_all_sources_preflight_second_adc_template_layout_before_any_evolution(
     first, second = original.readouts
     conflict = replace(
         second,
-        trigger_us=np.column_stack(
-            (second.trigger_us[:, 0], second.trigger_us[:, 0] + 0.008)
+        trigger_ticks=np.column_stack(
+            (
+                second.trigger_ticks[:, 0],
+                second.trigger_ticks[:, 0] + 3 * request.time_base.period_ticks(384.0),
+            )
         ),
     )
     other = replace(
@@ -322,11 +329,11 @@ def test_observed_cavity_requires_terminal_tone_even_with_a_herald(
     program.acquire(env.soc, progress=False)
     request = env.soc.binding.rounds[0].acquire
     original = request.templates[0]
-    latest = max(event.start_us[0] for event in original.events)
+    latest = max(event.start_ticks[0] for event in original.events)
     events = tuple(
         event
         for event in original.events
-        if not (event.start_us[0] == latest and event.frequency_mhz[0] > 6900)
+        if not (event.start_ticks[0] == latest and event.frequency_mhz[0] > 6900)
     )
     request = replace(request, templates=(replace(original, events=events),))
     with pytest.raises(ValueError, match="incident terminal tone"):
@@ -383,17 +390,17 @@ def test_different_cavity_event_topologies_are_legal(projection_environment, mod
     first, second = original.readouts
     terminal = replace(
         second,
-        trigger_us=second.trigger_us[:, 1:],
+        trigger_ticks=second.trigger_ticks[:, 1:],
         frequency_mhz=second.frequency_mhz[:, 1:],
         phase_deg=second.phase_deg[:, 1:],
         generator_channels=second.generator_channels[:, 1:],
     )
     # Cavity 1 has no herald pulse or trigger. Cavity 0 still projects once.
-    earliest = min(event.start_us[0] for event in original.events)
+    earliest = min(event.start_ticks[0] for event in original.events)
     events = tuple(
         event
         for event in original.events
-        if not (event.start_us[0] == earliest and event.frequency_mhz[0] > 6900)
+        if not (event.start_ticks[0] == earliest and event.frequency_mhz[0] > 6900)
     )
     request = replace(
         request,

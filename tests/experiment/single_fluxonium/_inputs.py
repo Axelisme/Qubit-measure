@@ -10,6 +10,8 @@ from zcu_tools.core.simulation import (
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
 
+from tests.core._simulation import TIME_BASE, tick_array
+
 
 def settings() -> SingleFluxoniumSettings:
     return parse_single_fluxonium(
@@ -86,8 +88,8 @@ def slot(
         channel,
         "synthetic",
         (),
-        np.full(2, start_ns / 1000),
-        np.full(2, duration_ns / 1000),
+        tick_array(np.full(2, start_ns / 1000)),
+        tick_array(np.full(2, duration_ns / 1000)),
         np.full(2, frequency_mhz),
         np.full(2, phase_deg),
         np.full(2, gain),
@@ -102,8 +104,8 @@ def template() -> TimelineTemplate:
     window = ReadoutSlot(
         0,
         4,
-        1000,
-        np.full((2, 1), 0.018),
+        TIME_BASE.period_ticks(1000),
+        tick_array(np.full((2, 1), 0.018)),
         np.full((2, 1), 7000),
         np.zeros((2, 1)),
         np.zeros((2, 1), dtype=np.int64),
@@ -116,5 +118,5 @@ def template() -> TimelineTemplate:
             readout,
         ),
         (window,),
-        np.full(2, 0.024),
+        tick_array(np.full(2, 0.024)),
     )

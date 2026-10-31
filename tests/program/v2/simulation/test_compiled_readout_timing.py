@@ -13,6 +13,7 @@ from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
 def test_register_data_triggers_keep_each_adc_lanes_actual_window():
@@ -64,9 +65,11 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     result = request(prog, env)
     for point, ticks in enumerate((128, 0)):
         read = result.materialize_point(point).readouts[0]
-        assert read.trigger_us == pytest.approx((ticks / 430.08,))
+        assert times_us(result.time_base, read.trigger_ticks) == pytest.approx(
+            (ticks / 430.08,)
+        )
         assert read.samples == 61
-        assert read.sample_rate_mhz == 307.2
+        assert (1 / time_us(result.time_base, read.sample_period_ticks)) == 307.2
         assert read.generator_channels == (0,)
         assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
 
@@ -188,8 +191,11 @@ def test_runtime_config_start_uses_absolute_ticks_after_nonzero_origin(
                 request(prog, env)
             assert not env.soc.binding.rounds
         else:
-            read = request(prog, env).materialize_point(0).readouts[0]
-            assert read.trigger_us == pytest.approx((332 / 430.08,))
+            observed = request(prog, env)
+            read = observed.materialize_point(0).readouts[0]
+            assert times_us(observed.time_base, read.trigger_ticks) == pytest.approx(
+                (332 / 430.08,)
+            )
             assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
     finally:
         env.devices.close_all_devices()

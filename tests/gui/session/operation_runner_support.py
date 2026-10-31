@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 from zcu_tools.gui.event_bus import BaseEventBus, OriginKind
 from zcu_tools.gui.session.operation_handles import OperationHandles
 from zcu_tools.gui.session.operation_runner import OperationRunner
-from zcu_tools.gui.session.ports import OperationConflictError
+from zcu_tools.gui.session.ports import BackgroundError, OperationConflictError
 
 
 class FakeGate:
@@ -61,7 +61,7 @@ class FakeBg:
     def __init__(self, *, fail_submit: bool = False) -> None:
         self._fail_submit = fail_submit
         self._on_done: Callable[[Any], None] | None = None
-        self._on_error: Callable[[Exception], None] | None = None
+        self._on_error: Callable[[BackgroundError], None] | None = None
 
     def submit(
         self,
@@ -69,7 +69,7 @@ class FakeBg:
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._fail_submit:
             raise RuntimeError("submit boom")

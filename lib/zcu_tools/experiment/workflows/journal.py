@@ -92,22 +92,6 @@ def describe_error(error: BaseException) -> ErrorInfo:
 
 
 @dataclass(frozen=True)
-class ExperimentFailed:
-    """Recoverable acquire failure without partial Result data.
-
-    call_seq identifies the commit scope. run_no counts experiment requests in
-    that scope. experiment names the callback. reason/error retain its cause.
-    """
-
-    call_seq: int
-    run_no: int
-    experiment: str
-    reason: str
-    error: ErrorInfo
-    kind: Literal["experiment_failed"] = field(default="experiment_failed", init=False)
-
-
-@dataclass(frozen=True)
 class TunablesChanged:
     """Whole-model update: actor, consecutive revisions and complete new JSON."""
 
@@ -127,35 +111,10 @@ class ControlRequest:
 
 
 @dataclass(frozen=True)
-class PauseRequested(ControlRequest):
-    """Pause intent, tagged pause_requested; not proof of operation drain."""
-
-    kind: Literal["pause_requested"] = field(default="pause_requested", init=False)
-
-
-@dataclass(frozen=True)
 class StopRequested(ControlRequest):
     """Explicit Stop intent, tagged stop_requested; author cleanup may still run."""
 
     kind: Literal["stop_requested"] = field(default="stop_requested", init=False)
-
-
-@dataclass(frozen=True)
-class Paused:
-    """Reached suspension boundary: current call_seq and published commit_seq."""
-
-    call_seq: int | None
-    commit_seq: int
-    kind: Literal["paused"] = field(default="paused", init=False)
-
-
-@dataclass(frozen=True)
-class Resumed:
-    """Accepted continuation, retaining commit_seq and latest tunables revision."""
-
-    commit_seq: int
-    revision: int
-    kind: Literal["resumed"] = field(default="resumed", init=False)
 
 
 @dataclass(frozen=True)
@@ -181,11 +140,7 @@ type JournalPayload = (
     | OperationFinished
     | QuestionAnswered
     | DeviceSetup
-    | ExperimentFailed
     | TunablesChanged
-    | PauseRequested
     | StopRequested
-    | Paused
-    | Resumed
     | RunEnded
 )

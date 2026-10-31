@@ -28,7 +28,9 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
             130.0,
             "Wait for a known operation with the fixed wait(op) tool. MCP translates "
             "the exposed op handle to a GUI-local operation_id. Unknown or evicted "
-            "ids fail; terminal failure and Stop feedback are returned as data.",
+            "ids fail; terminal failure and Stop feedback are returned as data. "
+            "Run core return is finished even after root or descendant Stop; "
+            "result_state.stop_requested records accepted requests.",
             (
                 required_integer(
                     "operation_id", "GUI-local operation id mapped from an MCP handle"

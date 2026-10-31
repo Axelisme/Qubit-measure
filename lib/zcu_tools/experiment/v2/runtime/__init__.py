@@ -1,4 +1,4 @@
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.program_builder import (
     AcquireOptions,
     ProgramBuilder,
@@ -31,7 +31,6 @@ __all__ = [
     "RunStatus",
     "Schedule",
     "ScheduleOutcome",
-    "ScheduleOutcomeError",
     "ScheduleStep",
     "SignalBuffer",
     "StopSignal",

@@ -13,16 +13,16 @@ def test_tab_snapshot_keeps_partial_fact_without_metadata_and_resets_on_replacem
     commit_run(
         state,
         tab_id,
-        RunPaneState(result=RunRecord(None, object()), partial_result=True),
+        RunPaneState(result=RunRecord(None, object()), stop_requested=True),
     )
     snapshot = fixture.ctrl.tab_control.get_tab_snapshot(tab_id)
     assert snapshot.run is not None
-    assert snapshot.run.partial_result
+    assert snapshot.run.stop_requested
     response = rpc.call("tab.snapshot", {"tab_id": tab_id})
     assert response["ok"], response
-    assert response["result"]["tabs"][0]["result_state"]["partial_result"] is True
+    assert response["result"]["tabs"][0]["result_state"]["stop_requested"] is True
     assert response["result"]["tabs"][0]["raw_data"]["run_id"] is None
     commit_run(state, tab_id, RunPaneState(result=RunRecord(None, object())))
     response = rpc.call("tab.snapshot", {"tab_id": tab_id})
     assert response["ok"], response
-    assert response["result"]["tabs"][0]["result_state"]["partial_result"] is False
+    assert response["result"]["tabs"][0]["result_state"]["stop_requested"] is False

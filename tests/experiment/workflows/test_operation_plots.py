@@ -1,14 +1,13 @@
 """env.run isolates core plotting lifetimes without clearing workflow trends."""
 
 from pathlib import Path
-from threading import Event
 
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed, Failed, Live, WorkflowEnv
+from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -21,9 +20,6 @@ from ._engine_fakes import (
     Rig,
     Tunables,
     completed,
-    paused,
-    running,
-    until,
 )
 
 
@@ -88,72 +84,14 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
         rig.close()
 
 
-def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
-    tmp_path: Path,
-) -> None:
-    host = Presentation()
-    rig = Rig(tmp_path, native=True, plot_host=host)
-    entered = Event()
-    attempts: list[Plots] = []
-    configs: list[Cfg] = []
-    delivered: list[int] = []
-
-    def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        attempts.append(context.plots)
-        configs.append(cfg.model_copy(deep=True))
-        create_trace(context.plots, "measurement", "Delay", "Signal")
-        if len(attempts) == 1:
-            entered.set()
-            assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
-            cfg.value = -1
-            return -1
-        return cfg.value
-
-    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        iterations = env.iterations()
-        try:
-            iteration = next(iterations)
-            create_trace(env.plots, "trend", "Iteration", "Value")
-            result = completed(await iteration.run(acquire, Cfg(value=9)))
-            delivered.append(result.value.result)
-            iteration.commit(Point(value=result.value.result))
-            iteration = next(iterations)
-        finally:
-            iterations.close()
-
-    try:
-        rig.start(script)
-        with running(rig) as future:
-            until(lambda: entered.is_set() or future.done(), "core operation entry")
-            assert entered.is_set(), future.result() if future.done() else None
-            rig.engine.pause("run")
-            paused(rig)
-            assert delivered == []
-            rig.engine.resume("run")
-            final = future.result(timeout=10)
-        assert final.lifecycle == "done", final.reason
-        assert delivered == [9]
-        assert configs == [Cfg(value=9), Cfg(value=9)]
-        assert all(plots["measurement"] in host.final for plots in attempts)
-        assert attempts[0] is not attempts[1]
-        assert attempts[0]["measurement"] in host.released
-        assert tuple(rig.plots) == ("trend",)
-        assert [op.outcome for op in rig.engine.records("run")[0].operations] == [
-            "discarded",
-            "completed",
-        ]
-    finally:
-        rig.close()
-
-
-@pytest.mark.parametrize("outcome", ["completed", "failed", "raised"])
+@pytest.mark.parametrize("outcome", ["completed", "raised"])
 def test_operation_finishes_before_return_or_failure_delivery(
     tmp_path: Path, outcome: str
 ) -> None:
     rig = Rig(tmp_path, native=True)
     handles: list[LiveUpdate[TraceData]] = []
     attempts: list[Plots] = []
-    delivered: list[Completed[RunRecord[Cfg, int]] | Failed] = []
+    delivered: list[Completed[RunRecord[Cfg, int]]] = []
     errors: list[str] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
@@ -161,10 +99,6 @@ def test_operation_finishes_before_return_or_failure_delivery(
         handles.append(create_trace(context.plots, "measurement", "x", "y"))
         if outcome == "raised":
             raise ValueError("core failed")
-        if outcome == "failed":
-            context.scope.stop.set_error(
-                "failed", "acquire failed", OSError("acquire failed")
-            )
         return 3
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -187,9 +121,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
         final = rig.engine.execute("run")
         assert final.lifecycle == "done", final.reason
         assert attempts[0] is not rig.plots
-        if outcome == "failed":
-            assert delivered == [Failed("acquire failed")]
-        elif outcome == "raised":
+        if outcome == "raised":
             assert errors == ["core failed"]
         else:
             assert completed(delivered[0]).value.result == 3

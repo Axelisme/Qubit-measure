@@ -106,8 +106,9 @@ class JointReadoutResult:
     Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
     Class axes are terminal F1,
     terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
-    remain NaN. Completed rounds survive cancellation. Check the RunContext stop
-    signal for acquisition errors rather than interpreting partial data as success.
+    remain NaN. Completed rounds survive cooperative cancellation. Acquisition
+    exceptions propagate unchanged from run; the stop signal carries only stop
+    requests and reason text, not errors or data completeness.
     """
 
     prepared_f1: NDArray[np.int64]

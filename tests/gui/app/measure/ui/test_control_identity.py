@@ -374,7 +374,7 @@ def test_remote_disables_writes_but_keeps_tabs_figures_inspect_and_screenshots(
     assert button(local_inspect, "New").isEnabled()
 
 
-def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
+def test_remote_measurement_stop_reclaims_and_finishes(control_ui, qapp):
     ui = control_ui
     handle = ui.controller.run_analyze_control.start_run(ui.tab_id)
     ui.connect()
@@ -384,11 +384,14 @@ def test_remote_measurement_stop_reclaims_and_cancels(control_ui, qapp):
     assert ui.controller.control_identity.status().locked
     denied = ui.rpc("tab.new", adapter_name="stoppable")
     assert denied["error"]["reason"] == "not_holder"
-    # Stop cancels the admitted Run; await its real terminal, not a sampling RPC probe.
+    # Stop requests early completion; the returned record still finishes the Run.
     assert (
         ui.rpc("operation.await", timeout=30, operation_id=handle)["result"]["status"]
-        == "cancelled"
+        == "finished"
     )
+    snapshot = ui.controller.tab_control.get_tab_snapshot(ui.tab_id)
+    assert snapshot.run.stop_requested is True
+    assert snapshot.run.result is not None
     assert ui.controller.tab_control.get_running_tab_id() is None
 
 

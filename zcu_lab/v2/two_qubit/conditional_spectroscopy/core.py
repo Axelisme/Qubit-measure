@@ -202,8 +202,9 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
     ) -> SpectroscopyResult:
         """Acquire optional reset → nominal branch → probe → contrast → terminal.
 
-        Return raw counts, not IQ or proportions. Check the operation stop signal
-        for acquisition errors; unmeasured points remain NaN after cancellation.
+        Return raw counts, not IQ or proportions. Unmeasured points remain NaN
+        after cooperative cancellation. Acquisition exceptions propagate unchanged.
+        The stop signal carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)

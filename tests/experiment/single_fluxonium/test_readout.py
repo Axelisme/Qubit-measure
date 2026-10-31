@@ -8,6 +8,8 @@ from zcu_tools.experiment.single_fluxonium.template import plan_template
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate.adc import BackgroundRoughness, ReadoutModel
 
+from tests.core._simulation import TIME_BASE, tick_tuple
+
 from ._inputs import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
@@ -24,12 +26,12 @@ def test_preparation_uses_fixed_background_seed_independent_of_noise(noise_seed)
     }
     config = parse_single_fluxonium(values)
     original = template()
-    plan = plan_template(config, snapshot(), original)
+    plan = plan_template(config, snapshot(), original, time_base=TIME_BASE)
     request = AcquireRequest(
         "integrated",
         (1,),
         0,
-        (ReadoutWindow(0, 0, 4, 1000.0, (0.018,)),),
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), tick_tuple((0.018,))),),
         22,
         0,
         "synthetic",
@@ -37,6 +39,7 @@ def test_preparation_uses_fixed_background_seed_independent_of_noise(noise_seed)
         point_names=("sweep",),
         reps=1,
         templates=(original,),
+        time_base=TIME_BASE,
     )
     physical = ReadoutModel(
         "background-wiring",

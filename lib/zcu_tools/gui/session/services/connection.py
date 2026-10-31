@@ -14,7 +14,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
-from zcu_tools.gui.session.ports import OperationKind
+from zcu_tools.gui.session.ports import BackgroundError, OperationKind
 from zcu_tools.gui.session.types import SocCfgHandle, SocHandle
 
 if TYPE_CHECKING:
@@ -310,7 +310,7 @@ def _release_connected(soc: SocHandle, req: ConnectRemoteRequest) -> None:
     )
 
 
-def _format_error(exc: Exception) -> str:
+def _format_error(exc: BackgroundError) -> str:
     """Classify connection exceptions to user-facing prefixes (§B.5).
 
     Mirrors the old _ConnectWorker.run error classification so MCP / View error

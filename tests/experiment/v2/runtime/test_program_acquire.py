@@ -177,16 +177,15 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
                 assert sched.scope.active_path == sched.scope.path
                 assert not sched.is_stop()
                 assert sched.outcome.status == "completed"
-                assert sched.stop.error is None
             assert program.calls == 2
         assert not ctx.scope.stop.is_set()
 
     async def script() -> None:
         result = await host.call(operation)
-        assert result.partial_result
-        later = await host.call(lambda ctx: ctx.scope.stop.partial_result)
+        assert result.stop_requested
+        later = await host.call(lambda ctx: ctx.scope.stop.is_set())
         assert later.result is False
-        assert later.partial_result is False
+        assert later.stop_requested is False
 
     host.run(script())
     np.testing.assert_allclose(results[0], [np.nan if before_data else 1.0])
@@ -198,7 +197,7 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
     ]
 
 
-def test_stop_condition_completes_without_partial_or_scope_cancellation() -> None:
+def test_stop_condition_completes_without_scope_cancellation() -> None:
     host = ScriptHost(Scope("workflow", name="test"))
 
     def operation(ctx: CallContext) -> None:
@@ -214,13 +213,12 @@ def test_stop_condition_completes_without_partial_or_scope_cancellation() -> Non
                 raw2signal_fn=identity_array,
                 options=AcquireOptions(stop_condition=lambda: True),
             )
-            assert not sched.stop.partial_result
             assert not sched.is_stop()
             assert sched.outcome.status == "completed"
-        assert not ctx.scope.stop.partial_result
+        assert not ctx.scope.stop.is_set()
 
     async def script() -> None:
-        assert not (await host.call(operation)).partial_result
+        assert not (await host.call(operation)).stop_requested
 
     host.run(script())
 

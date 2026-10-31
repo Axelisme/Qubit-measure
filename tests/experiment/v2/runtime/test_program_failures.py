@@ -95,6 +95,6 @@ def test_non_acquire_failures_raise_without_retry_or_failed_outcome(
         run_acquire()
     assert caught.value is cause
     assert schedule.outcome.status == "completed"
-    assert signal.error is None
+
     assert builds == [1]
     assert acquires == ([] if failure_site == "build" else [1])
