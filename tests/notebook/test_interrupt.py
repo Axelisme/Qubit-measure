@@ -2,7 +2,7 @@
 
 import signal
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from types import FrameType
 
@@ -175,27 +175,16 @@ def test_timeout_fallback_delivers_keyboard_interrupt(
     assert adapter.last_run is None
 
 
-@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX signal contract")
-def test_controlled_deadline_targets_main_thread_during_blocking_wait(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.fixture
+def blocking_deadline(
     timers: list[ManualTimer],
-) -> None:
-    send = signal.pthread_kill
-    main_thread = threading.get_ident()
-    delivered: list[tuple[int, int, int]] = []
-
-    def deliver(thread_id: int, signum: int) -> None:
-        delivered.append((threading.get_ident(), thread_id, signum))
-        send(thread_id, signum)
-
-    monkeypatch.setattr(signal, "pthread_kill", deliver)
-
+) -> Iterator[tuple[Callable[[RunContext], None], list[bool]]]:
+    """Release/join the external deadline sender even if adapter assertions fail."""
     condition = threading.Condition()
     armed = threading.Event()
     abort = threading.Event()
     entered_wait: list[bool] = []
-    errors: list[BaseException] = []
-    previous_handler = signal.getsignal(signal.SIGINT)
+    errors: list[Exception] = []
 
     def expire_when_waiting() -> None:
         try:
@@ -209,7 +198,7 @@ def test_controlled_deadline_targets_main_thread_during_blocking_wait(
                 # No notifier releases the wait before the deadline is delivered.
                 entered_wait.append(True)
                 timers[-1].expire()
-        except BaseException as error:
+        except Exception as error:
             errors.append(error)
             with condition:
                 condition.notify_all()
@@ -223,11 +212,9 @@ def test_controlled_deadline_targets_main_thread_during_blocking_wait(
         pytest.fail("The deadline must interrupt the blocking wait")
 
     worker = threading.Thread(target=expire_when_waiting)
-    adapter = notebook(InterruptCore(author))
     worker.start()
     try:
-        with pytest.raises(KeyboardInterrupt):
-            adapter.run(Cfg())
+        yield author, entered_wait
     finally:
         abort.set()
         armed.set()
@@ -237,6 +224,28 @@ def test_controlled_deadline_targets_main_thread_during_blocking_wait(
         assert not worker.is_alive(), "Deadline delivery must finish before teardown"
         if errors:
             raise errors[0]
+
+
+@pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX signal contract")
+def test_controlled_deadline_targets_main_thread_during_blocking_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    timers: list[ManualTimer],
+    blocking_deadline: tuple[Callable[[RunContext], None], list[bool]],
+) -> None:
+    send = signal.pthread_kill
+    main_thread = threading.get_ident()
+    delivered: list[tuple[int, int, int]] = []
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def deliver(thread_id: int, signum: int) -> None:
+        delivered.append((threading.get_ident(), thread_id, signum))
+        send(thread_id, signum)
+
+    monkeypatch.setattr(signal, "pthread_kill", deliver)
+    author, entered_wait = blocking_deadline
+    adapter = notebook(InterruptCore(author))
+    with pytest.raises(KeyboardInterrupt):
+        adapter.run(Cfg())
     assert entered_wait == [True]
     assert timers[-1].cancelled
     assert signal.getsignal(signal.SIGINT) is previous_handler
