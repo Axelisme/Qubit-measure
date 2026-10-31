@@ -956,9 +956,39 @@ class MuxReadout(AbsReadout):
             selected.append(iq if read_index is None else iq[..., read_index, :])
         return np.stack(selected, axis=-2)
 
+    def _validate_collection_program(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> None:
+        from .._timeline_macros import (
+            ModuleEmission,
+            PreparedTimelineMacro,
+            TimelineBranch,
+            TimeProducer,
+        )
+        from ..timeline import TimelineProgramV2
+
+        if not isinstance(prog, TimelineProgramV2):
+            if self._program is not prog:
+                raise ValueError(f"{self.name}: use the program that initialized this module")
+            return
+
+        def emitted(macros) -> bool:
+            for macro in macros:
+                source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+                if isinstance(source, ReadoutEmission) and source.owner is self:
+                    return True
+                if isinstance(source, (ModuleEmission, TimeProducer)) and emitted(source.macros):
+                    return True
+                if isinstance(source, TimelineBranch) and any(emitted(case) for case in source.cases):
+                    return True
+            return False
+
+        if not emitted(prog.macro_list):
+            raise ValueError(f"{self.name}: module has no compiled readout emission on this program")
+
     def collect_iq(
         self,
-        prog: ModularProgramV2,
+        prog: ModularProgramV2 | TimelineProgramV2,
         acquired: Sequence[NDArray[np.float64]],
         *,
         read_index: int = 0,
@@ -976,16 +1006,11 @@ class MuxReadout(AbsReadout):
         missing initialization/channels, list count, read_index, dtype or shape.
         Unrelated channels' shapes are ignored.
         """
-        if self._program is None:
-            raise ValueError(f"{self.name}: module is not initialized")
+        self._validate_collection_program(prog)
         positions = {ch: i for i, ch in enumerate(prog.ro_chs)}
         for i, tone in enumerate(self.cfg.tones):
             if tone.ro_ch not in positions:
                 raise ValueError(f"{self.name}: tone {i} missing ro_ch {tone.ro_ch}")
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
         if len(acquired) != len(positions):
             raise ValueError(
                 f"{self.name}: acquired item count {len(acquired)} != channels {len(positions)}"
