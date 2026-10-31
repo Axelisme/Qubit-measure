@@ -138,8 +138,9 @@ def test_author_register_hint_controls_same_channel_overlap_proof(hint):
         assert [waves(s) for s in shots(program(body))] == [[0, 10], [0, 11], [0, 12]]
 
 
+@pytest.mark.parametrize("as_array", [False, True])
 @pytest.mark.parametrize("operation", ["delay", "pulse", "config", "trigger"])
-def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(operation):
+def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(operation, as_array):
     def initialize(prog):
         prog.add_dmem([40])
         prog.declare_readout(0, length=4 / 307.2)
@@ -157,7 +158,38 @@ def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(opera
 
     prog = program(body, initialize=initialize)
     with pytest.raises(RuntimeError, match="runtime"):
-        prog.get_time_param("runtime", "t")
+        prog.get_time_param("runtime", "t", as_array=as_array)
+
+
+def test_known_affine_register_getter_returns_actual_time_without_rescheduling():
+    loader = LoadValue("time", [5, 10, 15], "scan", "loaded")
+
+    def body(prog):
+        prog.emit(loader)
+        prog.delay_timeline("loaded", tag="end")
+        prog.pulse(0, "p0", timeline="default", tag="pulse")
+
+    prog = program(body, initialize=lambda p: p.declare(loader))
+    before = shots(prog)
+    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx([5, 10, 15])
+    value = prog.get_time_param("end", "t")
+    assert value.to_array({"scan": 3}) * 430.08 == pytest.approx([5, 10, 15])
+    assert shots(prog) == before
+
+
+@pytest.mark.parametrize("as_array", [False, True])
+def test_nonaffine_author_table_time_getter_rejects_array_and_scalar(as_array):
+    loader = LoadValue("time", [5, 10, 6], "scan", "loaded")
+
+    def body(prog):
+        prog.emit(loader)
+        prog.delay_timeline("loaded", tag="end")
+        prog.pulse(0, "p0", timeline="default", tag="pulse")
+
+    prog = program(body, initialize=lambda p: p.declare(loader))
+    for tag in ("end", "pulse"):
+        with pytest.raises(RuntimeError, match="non-affine"):
+            prog.get_time_param(tag, "t", as_array=as_array)
 
 
 @pytest.mark.parametrize("synchronize", [False, True])

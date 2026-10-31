@@ -55,7 +55,7 @@ def _program(
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0.02)
 
 
-@pytest.mark.parametrize("post, spacing", [(0.0005, 48), (0.001, 49)])
+@pytest.mark.parametrize("post, spacing", [(0.0005, 49), (0.001, 50)])
 @pytest.mark.parametrize("block_mode", [False, True])
 @pytest.mark.parametrize("timeline", [None, "drive"])
 def test_pulse_ceil_covers_actual_playback_plus_post_once(
@@ -71,19 +71,17 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(
 
     prog = _program([pulse], body)
     # 39 generator clocks at 384 MHz = 43.68 tProc cycles.
-    # pre rounds to 4. Posts are .21504/.43008 cycles: final ceil is 48/49.
-    # Separately ceiling end and post gives 49 in both cases (wrong for .0005).
-    # Nearest rounding 48.11008 gives 48, omitting part of the .001 post.
-    # Rule a instead ceils pre/playback/post separately: 5+44+1=50.
+    # Start ceil(.01*430.08)=5. Adding 43.68 and .21504/.43008
+    # before the operation's final ceil gives 49/50, respectively.
     result = shots(prog)
-    assert [waves(shot) for shot in result] == [[4, spacing + 4]] * 2
+    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing + 9
     ] * 2
-    assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(spacing + 4)
+    assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(spacing + 5)
     prog.compile()
     assert shots(prog) == result
 
@@ -127,12 +125,13 @@ def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
         prog.emit(readout)
 
     result = shots(_program([readout], body, initialize))
-    # Trigger .559104 rounds up to 1; .473088 rounds down to 0.
-    # 13 ADC clocks span 18.2 cycles, dominating pulse end 11.2 and width 10.
-    # Aggregate ceil: 1+18.2+.21504 =>20, or 0+18.2+.516096 =>19.
-    # Each sweep point adds one trigger cycle; register origin adds exactly 40.
+    # Scalar triggers ceil both .559104 and .473088 to 1. Author
+    # sweeps start at native round(.559104/.473088), then step by one.
+    # ADC length is 18.2 cycles. Add post before final ceil.
     steps = [0, 1, 2] if swept_trigger else [0]
-    trigger_start = 1 if offset == 0.0013 else 0
+    trigger_start = 1 if not swept_trigger or offset == 0.0013 else 0
+    if not swept_trigger and offset == 0.0011:
+        end = 20
     assert [
         [
             (event.cycle - shot.start_cycle, event.value)
@@ -217,12 +216,11 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
         prog.emit(owner)
 
     result = shots(_program([owner], body, initialize))
-    # Integer origin40 + ceil(pre4 + tail43.68/43.4 + post.21504)=88.
-    # A swept post adds exactly0/2/4 cycles; separate tail/post ceilings give89.
-    # Rule a at this origin gives90 for Pulse and89 for ADC-dominant Readout.
-    ends = [88, 90, 92] if swept_post else [88]
+    # Integer origin40 + ceil(start5 + tail43.68/43.4 + post)=89.
+    # Native post sweep starts at zero and adds 0/2/4 cycles.
+    ends = [89, 91, 93] if swept_post else [89]
     assert [waves(shot) for shot in result] == (
-        [[40, 44]] if kind == "readout" else [[44]]
+        [[40, 45]] if kind == "readout" else [[45]]
     ) * (2 * len(ends))
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
@@ -236,7 +234,7 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
                 if event.kind == "data"
             ]
             for shot in result
-        ] == [[(44, 1), (54, 0)]] * (2 * len(ends))
+        ] == [[(45, 1), (55, 0)]] * (2 * len(ends))
 
 
 @pytest.mark.parametrize("swept_post", [False, True])
@@ -253,13 +251,12 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
 
     prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
     # Registered lengths39,64,89 generator clocks =>43.68,71.68,99.68.
-    # pre=4, post=.21504 (+0/2/4 when swept): ends48,76,104 or48,78,108.
-    # Rule a uses pre5, waveform start44+steps28, post1(+0/2/4):50,78,106
-    # or50,80,110; it retains two extra cycles per emission.
-    ends = [48, 78, 108] if swept_post else [48, 76, 104]
+    # Start ceils to5. Scalar post is .21504; native swept post starts0.
+    # Both produce ceil(5+43.68+post)=49 at the first point.
+    ends = [49, 79, 109] if swept_post else [49, 77, 105]
     result = shots(prog)
     assert prog.compile_datamem() is None
-    assert [waves(shot) for shot in result] == [[4, end + 4] for end in ends] * 2
+    assert [waves(shot) for shot in result] == [[5, end + 5] for end in ends] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * end for end in ends
     ] * 2
@@ -364,7 +361,7 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
 
 
 @pytest.mark.parametrize("swept_post", [False, True])
-@pytest.mark.parametrize("length, end", [(0.051, 48), (0.201, 91)])
+@pytest.mark.parametrize("length, end", [(0.051, 49), (0.201, 92)])
 def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_post):
     readout = PulseReadout(
         "read",
@@ -396,13 +393,10 @@ def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_po
     )
     result = shots(prog)
     ends = [end, end + 2, end + 4] if swept_post else [end]
-    # ADC: 31/307.2 us = 43.4 cycles, starting at4 =>47.4.
-    # Generator: nearest(.051/.201 *384)=20/77 clocks =>22.4/86.24 cycles.
-    # ceil(max(26.4/90.24,47.4)+.21504) =>48/91.
-    # Rule a: ADC ceil(ceil(offset)=5 +43.4)=49; pulse 29/94.
-    # Rule-a owner max=49/94; it did not add post after ADC max.
+    # Start5 plus ADC43.4 or generator86.24 dominates. Scalar post .21504
+    # or native swept post0 gives final ceil49/92, with swept steps2.
     assert [waves(shot) for shot in result] == [
-        [0, 4, point_end] for point_end in ends
+        [0, 5, point_end] for point_end in ends
     ] * 2
     assert [
         [
@@ -411,7 +405,7 @@ def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_po
             if event.kind == "data"
         ]
         for shot in result
-    ] == [[(4, 1), (14, 0)]] * (2 * len(ends))
+    ] == [[(5, 1), (15, 0)]] * (2 * len(ends))
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         point_end + 44 for point_end in ends
     ] * 2
@@ -487,7 +481,7 @@ def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
 
 
 def test_sweep_end_requires_a_discovered_native_axis_before_using_its_bounds():
-    with pytest.raises(ValueError, match="missing.*native sweep axis"):
+    with pytest.raises(ValueError, match="missing.*loop"):
         _program(
             [], lambda prog: prog.delay_timeline(QickSweep1D("missing", 0.101, 0.301))
         )
@@ -607,10 +601,10 @@ def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
 @pytest.mark.parametrize(
     "kind, expected_waves, end",
     [
-        ("pulse", [4], 48),
-        ("two", [4, 9], 53),
-        ("bath_short", [4, 9, 52], 75),
-        ("bath_long", [4, 9, 52], 183),
+        ("pulse", [5], 49),
+        ("two", [5, 9], 53),
+        ("bath_short", [5, 9, 54], 77),
+        ("bath_long", [5, 9, 54], 183),
     ],
 )
 def test_reset_retains_child_posts_and_rounds_dependent_placement(

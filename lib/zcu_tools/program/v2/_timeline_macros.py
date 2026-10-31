@@ -329,7 +329,7 @@ class TimelineAdvance(TimedMacro):
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
         if isinstance(self.resolved_time, RuntimeEnd):
-            return self.book.math.time_parameter(self.resolved_time)
+            raise RuntimeError("runtime timeline end is not an affine time parameter")
         return (
             self.resolved_time
             if isinstance(self.resolved_time, QickParam)
