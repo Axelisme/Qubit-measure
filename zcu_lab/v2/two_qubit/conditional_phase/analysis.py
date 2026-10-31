@@ -13,7 +13,7 @@ from zcu_tools.analysis.fitting.shared import (
 )
 
 from .._phase import QuadraturePhase, count_phase
-from .crossing import PhaseCrossings
+from .crossing import PhaseCrossings, phase_crossings
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,22 @@ class ConditionalPhaseAnalysis:
     crossings: PhaseCrossings
     frequency_mhz: float | None
     frequency_reason: str | None
+
+
+def fitted_crossings(
+    frequencies: NDArray[np.float64], conditional_deg: NDArray[np.float64],
+    fit: PhaseSlopeFit,
+) -> PhaseCrossings:
+    """Find per-gate π crossings, preserving fit-unavailability reasons.
+
+    Inputs are the increasing frequency axis, its conditional slope difference,
+    and the fits that produced it. Any unavailable slope prevents selection.
+    """
+    crossings = phase_crossings(frequencies, conditional_deg)
+    reasons = [reason for state in fit.reasons for reason in state if reason]
+    if reasons:
+        return PhaseCrossings((), "; ".join(dict.fromkeys(reasons)))
+    return crossings
 
 
 def gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:

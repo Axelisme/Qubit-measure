@@ -42,10 +42,10 @@ from .._sums import sigma, validate_classifiers
 from .analysis import (
     ConditionalPhaseAnalysis,
     fit_phase_slopes,
+    fitted_crossings,
     gate_count_alias_reason,
     phase_points,
 )
-from .crossing import phase_crossings
 
 
 class ConditionalPhaseCfg(ConfigBase):
@@ -373,9 +373,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             data.gate_counts, quadratures[None], variances[None], acquired[None]
         )
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
-        crossings = phase_crossings(data.frequencies, conditional)
-        reasons = [reason for state in fitted.reasons for reason in state if reason]
-        reason = "; ".join(dict.fromkeys(reasons)) if reasons else crossings.reason
+        crossings = fitted_crossings(data.frequencies, conditional, fitted)
         answer = ConditionalPhaseAnalysis(
             phases,
             quadratures,
@@ -385,8 +383,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             fitted,
             conditional,
             crossings,
-            crossings.frequencies_mhz[0] if reason is None else None,
-            reason,
+            crossings.frequencies_mhz[0] if crossings.reason is None else None,
+            crossings.reason,
         )
 
         fig, _ = plots.subplots(
@@ -418,7 +416,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             fig.axes[2].plot(crossing, -180, "x", label="Per-gate π crossing")
         fig.axes[2].axhline(-180, color="gray", linestyle="--")
         fig.axes[2].set_title(
-            reason or f"Unique fitted crossing: {answer.frequency_mhz:g} MHz"
+            crossings.reason or f"Unique fitted crossing: {answer.frequency_mhz:g} MHz"
         )
         for ax, label in zip(
             fig.axes,

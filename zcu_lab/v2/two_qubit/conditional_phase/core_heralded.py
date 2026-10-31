@@ -37,6 +37,7 @@ from .analysis import (
     ConditionalPhaseAnalysis,
     PhaseSlopeFit,
     fit_phase_slopes,
+    fitted_crossings,
     phase_points,
 )
 from .core import ConditionalPhaseCfg
@@ -311,10 +312,8 @@ class ConditionalPhaseHeraldedExp(
         gg_conditional = (
             gg_fitted.slopes_deg[1] - gg_fitted.slopes_deg[0] + 180
         ) % 360 - 180
-        crossings = phase_crossings(data.frequencies, conditional)
+        crossings = fitted_crossings(data.frequencies, conditional, fitted)
         gg_crossings = phase_crossings(data.frequencies, gg_conditional)
-        reasons = [reason for state in fitted.reasons for reason in state if reason]
-        reason = "; ".join(dict.fromkeys(reasons)) if reasons else crossings.reason
         herald_matrix = herald_probabilities(data.sums)
         answer = ConditionalPhaseHeraldedAnalysis(
             phases,
@@ -325,8 +324,8 @@ class ConditionalPhaseHeraldedExp(
             fitted,
             conditional,
             crossings,
-            crossings.frequencies_mhz[0] if reason is None else None,
-            reason,
+            crossings.frequencies_mhz[0] if crossings.reason is None else None,
+            crossings.reason,
             ee_phases,
             ee_quadratures,
             ee_acquired,
@@ -377,7 +376,7 @@ class ConditionalPhaseHeraldedExp(
             fig.axes[2].plot(crossing, -180, "x", label="Joint per-gate π crossing")
         fig.axes[2].axhline(-180, color="gray", linestyle="--")
         fig.axes[2].set_title(
-            reason or f"Joint unique crossing: {answer.frequency_mhz:g} MHz"
+            crossings.reason or f"Joint unique crossing: {answer.frequency_mhz:g} MHz"
         )
         for ax, label in zip(
             fig.axes,
