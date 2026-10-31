@@ -61,7 +61,7 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
 
     expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
     assert actual.prog_list == expected.prog_list
-    np.testing.assert_array_equal(actual.compile_pmem(), expected.compile_pmem())
+    np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
     from tests.program.v2.timing_support import shots, waves
 
     assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
@@ -69,7 +69,7 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
         0, 43, 0, 86
     ]
     actual.compile()
-    np.testing.assert_array_equal(actual.compile_pmem(), expected.compile_pmem())
+    np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
 
 
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
