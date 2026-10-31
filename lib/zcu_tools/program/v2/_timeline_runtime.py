@@ -602,6 +602,7 @@ class RuntimeMath(TimedMacro):
                 * get_fclk(self.prog)
             )
         )
+        logical_base, logical_operand = base, operand
         if base.offset:
             operand = (
                 self.add(operand, base.offset / get_fclk(self.prog))
@@ -618,10 +619,10 @@ class RuntimeMath(TimedMacro):
         if isinstance(operand, RuntimeEnd):
             operand = self.cycles(operand)
         result = self.op(
-            base,
+            logical_base,
             "+",
-            operand,
-            limits=self._sum_limits(base, operand),
+            logical_operand,
+            limits=self._sum_limits(logical_base, logical_operand),
             target="s_out_time",
         )
         self.operations[-1] = EventTime(base, operand, result.expression)
@@ -1315,18 +1316,18 @@ class RuntimeMath(TimedMacro):
             register = left.register
             offset = left.offset + right
         else:
-            left = self.cycles(left)
+            literal_offset = left.offset if operator in ("+", "-") and isinstance(right, int) else 0
+            if not literal_offset:
+                left = self.cycles(left)
             if isinstance(right, RuntimeEnd):
                 right = self.cycles(right)
+            rhs = right.register if isinstance(right, RuntimeEnd) else right
+            if isinstance(rhs, int):
+                rhs += literal_offset if operator == "+" else -literal_offset
             register = self.allocate() if target is None else target
             offset = 0
             self.operations.append(
-                WriteRegOp(
-                    dst=register,
-                    lhs=left.register,
-                    op=operator,
-                    rhs=right.register if isinstance(right, RuntimeEnd) else right,
-                )
+                WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
             )
         covers: tuple[Time, ...] = ()
         deferred: list[DeferredCoverage] = []

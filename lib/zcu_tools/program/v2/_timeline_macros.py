@@ -460,7 +460,11 @@ class TimelineSync(Delay):
                 [0.0, *(self.book.end(name) for name in self.sources)]
             )
         if isinstance(self.t, RuntimeEnd):
-            self.t_regs["t"] = self.book.math.cycles(self.t).register
+            self.t_regs["t"] = (
+                self.book.math.event_time(self.t, 0.0).register
+                if self.t.offset
+                else self.t.register
+            )
             self.book.native_only = True
             try:
                 if self.t.minimum is not None:
