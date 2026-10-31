@@ -559,6 +559,9 @@ class RuntimeMath(TimedMacro):
         digits = _csd(factor)
         if not digits:
             return self.cycles(0.0)
+        if value.minimum is None or value.maximum is None:
+            raise RuntimeError("constant multiplication needs known bounds")
+        coefficient = 1
         result = self.snapshot(value)
         previous = digits[-1][0]
         for exponent, sign in reversed(digits[:-1]):
@@ -574,12 +577,15 @@ class RuntimeMath(TimedMacro):
                     limits=(result.minimum << amount, result.maximum << amount),
                     target=result.register,
                 )
+                coefficient <<= amount
                 shift -= amount
+            coefficient += sign
             result = self.op(
                 result,
                 "+" if sign > 0 else "-",
                 value,
-                limits=self._sum_limits(result, value, subtract=sign < 0),
+                # Both operands are multiples of this same native source.
+                limits=(coefficient * value.minimum, coefficient * value.maximum),
                 target=result.register,
             )
             previous = exponent
