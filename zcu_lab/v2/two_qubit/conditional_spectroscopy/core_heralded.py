@@ -1,6 +1,6 @@
 """Four-branch spectroscopy conditioned on a classified ground-ground herald."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
@@ -48,7 +48,8 @@ class SpectroscopyHeraldedResult:
 class SpectroscopyHeraldedAnalysis:
     """terminal is shared P_e analysis of herald (g,g) selected counts.
 
-    Its complete flags describe all acquired shots, not just selected shots.
+    Its acquired_shots totals and complete flags describe all acquired shots,
+    not just selected shots.
     herald_matrix is (DC,4,frequency,3,3); pass_fraction is its (g,g) cell,
     not ground-state purity. Zero acceptance gives NaN terminal P_e.
     """
@@ -155,12 +156,12 @@ class SpectroscopyHeraldedExp(
             data.frequencies,
             terminal_counts(data.sums, heralded=True),
         )
-        terminal = analyze_spectra(cfg, selected, plots=plots)
-        if cfg is not None:
-            total = data.sums.sum(axis=(-4, -3, -2, -1))
-            terminal = replace(
-                terminal, complete=np.all(total >= cfg.reps * cfg.rounds, axis=-1)
-            )
+        terminal = analyze_spectra(
+            cfg,
+            selected,
+            acquired_shots=data.sums.sum(axis=(-4, -3, -2, -1)),
+            plots=plots,
+        )
         herald = herald_probabilities(data.sums)
         fig, _ = plots.subplots(
             "herald",

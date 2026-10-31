@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 class SpectroscopyAnalysis:
     """excitation is (DC,4,frequency,2), ordered F1 then F2.
 
-    acquired_shots is the terminal count total at each (DC,branch,frequency).
+    acquired_shots is the total of all acquired shots at each
+    (DC,branch,frequency), before any herald selection.
     complete is (DC,4): every frequency has all requested reps × rounds.
     Available counts enter P_e even for partial branches; zero counts give NaN.
     Other remains in the denominator. These are classified probabilities, not
@@ -33,13 +34,23 @@ class SpectroscopyAnalysis:
 
 
 def analyze_spectra(
-    cfg: SpectroscopyCfg | None, data: SpectroscopyResult, *, plots: Plots
+    cfg: SpectroscopyCfg | None,
+    data: SpectroscopyResult,
+    *,
+    acquired_shots: NDArray[np.float64],
+    plots: Plots,
 ) -> SpectroscopyAnalysis:
     """Validate saved coordinates and plot F1/F2 P_e from terminal joint counts.
 
-    Use only saved cfg and counts, including completed rounds of partial points.
-    No live library, IQ classification, peak fit or writeback is involved.
-    Whole unmeasured points are NaN. Negative or nonfinite acquired counts fail.
+    data.sums holds terminal counts, optionally selected on herald (g,g).
+    acquired_shots is (DC,4,frequency), totaled over all 9 ordinary or 81 heralded
+    classes before selection. It determines whether every frequency in a branch
+    has the requested reps × rounds. Partial counts still enter P_e.
+    Use only saved cfg and counts. No live library, IQ classification, peak fit
+    or writeback is involved.
+    acquired_shots must contain nonnegative totals, with NaN for unmeasured
+    points. Wrong shapes or invalid terminal counts raise ValueError; whole
+    unmeasured terminal points may be NaN.
     """
     if cfg is None:
         raise ValueError(
@@ -55,9 +66,11 @@ def analyze_spectra(
         )
         or not np.array_equal(data.branches, np.arange(4))
         or data.sums.shape != (len(dc), 4, len(frequencies), 3, 3)
+        or acquired_shots.shape != (len(dc), 4, len(frequencies))
     ):
         raise ValueError(
-            "Spectroscopy axes/shape must match saved cfg: (DC,4,frequency,3,3)"
+            "Spectroscopy axes/shape must match saved cfg: sums (DC,4,frequency,3,3), "
+            "acquired_shots (DC,4,frequency)"
         )
     finite = np.all(np.isfinite(data.sums) & (data.sums >= 0), axis=(-2, -1))
     missing = np.all(np.isnan(data.sums), axis=(-2, -1))
@@ -65,13 +78,14 @@ def analyze_spectra(
         raise ValueError(
             "Spectroscopy contains invalid counts or a partially missing point"
         )
-    counts = data.sums.sum(axis=(-2, -1))
     excitation = np.stack(
         [marginal_probabilities(data.sums, target)[..., 1] for target in ("f1", "f2")],
         axis=-1,
     )
     answer = SpectroscopyAnalysis(
-        excitation, counts, np.all(counts >= cfg.reps * cfg.rounds, axis=-1)
+        excitation,
+        acquired_shots,
+        np.all(acquired_shots >= cfg.reps * cfg.rounds, axis=-1),
     )
     _plot_spectra(cfg, data, answer, plots=plots)
     return answer

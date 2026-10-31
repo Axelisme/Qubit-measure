@@ -14,7 +14,7 @@ Live 與 terminal 分析只使用 herald 判為 `(g,g)` 的 terminal 計數。�
 
 Herald 圖按 DC、branch 顯示 frequency 對九個 herald 聯合類別的比例。類別依 F1、F2 的 g、e、other 排列。`pass_fraction` 是其中 `(g,g)` 的比例，表示分類接受率，**不是 ground-state purity**。它包含 classifier 的誤判與 readout 效應。
 
-分析的 `terminal.acquired_shots` 是通過 herald 的計數。`terminal.complete` 則以全部 herald 類別的計數判定要求的 reps × rounds 是否完成，不要求每個 shot 都通過 herald。
+分析的 `terminal.acquired_shots` 是全部 81 類的實際取得 shot 總數。`terminal.complete` 以這個總數判定該 DC／branch 的所有頻率是否完成要求的 reps × rounds，不要求每個 shot 都通過 herald。通過 herald 的數量可由 Result 的 `(g,g)` 切片總數讀取，或以 `terminal.acquired_shots × pass_fraction` 換算。
 
 ## 保存與 DC
 

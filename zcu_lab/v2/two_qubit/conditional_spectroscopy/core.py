@@ -323,4 +323,10 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
     ) -> SpectroscopyAnalysis:
         """Plot count-derived F1/F2 P_e with other retained in the denominator."""
         del options
-        return analyze_spectra(source.cfg, source.result, plots=plots)
+        data = source.result
+        return analyze_spectra(
+            source.cfg,
+            data,
+            acquired_shots=data.sums.sum(axis=(-2, -1)),
+            plots=plots,
+        )
