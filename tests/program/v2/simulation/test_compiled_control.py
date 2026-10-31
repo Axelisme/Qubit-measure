@@ -29,7 +29,9 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding():
         p.pulse(0, "p", t=0, tag="terminal")
         p.trigger([0], t=0)
 
-    prog, env = program(body, initialize, trigger_time=None)
+    prog, env = program(
+        body, initialize, trigger_time=None, n_readouts=2, routes=((0, 0), (1, 1))
+    )
     try:
         result = prog.acquire(env.soc, progress=False)
         np.testing.assert_array_equal(result[0], np.zeros((1, 3, 2)))

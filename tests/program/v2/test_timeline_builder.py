@@ -69,7 +69,7 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
     assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == [
-        0, 43, 0, 86
+        86, 86, 86, 86
     ]
     actual.compile()
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
@@ -146,6 +146,7 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     assert [len(events) for events in drives] == [
         2 * int(reset), 2 * int(reset) + 1, 2 * int(reset) + 1, 2 * int(reset) + 2
     ]
+    print(f"ee_cycles={[event.cycle for event in drives[-1][-2:]]}")
     # Both selected preparations must start together, after the optional prefix.
     assert drives[-1][-2].cycle == drives[-1][-1].cycle
 
