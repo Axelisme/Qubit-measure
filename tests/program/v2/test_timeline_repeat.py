@@ -583,6 +583,36 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
     assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 6
 
 
+def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
+    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    drive = TableLengthPulse(
+        "selected",
+        PulseCfg(
+            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)
+        ),
+        lengths=[7 / 384, 11 / 384],
+        idx_reg="scan",
+    )
+
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        prog.add_reg("duration")
+        prog.declare(drive)
+
+    def body(prog):
+        prog.write_reg("duration", 40)
+        with prog.repeat("r", 2):
+            prog.timeline_inc("duration")
+            prog.emit(drive)
+            prog.delay_by_timeline()
+        prog.pulse(1, "p1", timeline="default")
+
+    prog = _program(body, initialize, reps=2)
+    assert [_waves(s) for s in _shots(prog)] == [[40, 88, 96], [40, 93, 106]] * 2
+
+
 def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
