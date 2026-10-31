@@ -133,6 +133,21 @@ def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
     assert shot.body_end_cycle == 226
 
 
+def test_fractional_event_start_and_trigger_width_ceil_once():
+    def body(prog):
+        prog.send_readoutconfig(0, "ro", t=0.2 / 430.08, timeline="default", tag="config")
+        prog.trigger([], pins=[0], t=0.2 / 430.08, width=0.2 / 430.08,
+                     timeline="default", tag="edge")
+        prog.sync()
+        prog.pulse(0, "pulse", timeline="default", tag="after")
+
+    prog = _program(body)
+    assert prog.get_time_param("config", "t") * 430.08 == pytest.approx(1)
+    assert prog.get_time_param("edge", "t") * 430.08 == pytest.approx(2)
+    assert prog.get_time_param("edge", "width") * 430.08 == pytest.approx(1)
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 3]
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):
