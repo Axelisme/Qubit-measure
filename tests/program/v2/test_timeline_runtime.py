@@ -170,12 +170,15 @@ def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait
 
     def body(prog):
         prog.read_dmem("duration", 0)
-        with prog.branch(by="scan", align_timeline=False) as branch, branch.case(0):
-            prog.fork("default", into="local")
+        with (
+            prog.branch(by="scan", align_timeline=False) as branch,
+            branch.case(0) as case_timeline,
+        ):
+            prog.fork(case_timeline, into="local")
             prog.delay_timeline("duration", timeline="local")
             prog.trigger([0], width=1 / 430.08, timeline="local")
             if synchronize:
-                prog.join("local", into="default")
+                prog.join("local", into=case_timeline)
 
     if not synchronize:
         with pytest.raises(ValueError, match="ADC.*0.*range_hint.*sync"):
@@ -196,8 +199,11 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
 
         def _body(self, cfg):
             self.read_dmem("duration", 0)
-            with self.branch(by="scan", align_timeline=False) as branch, branch.case(0):
-                self.fork("default", into="local")
+            with (
+                self.branch(by="scan", align_timeline=False) as branch,
+                branch.case(0) as case_timeline,
+            ):
+                self.fork(case_timeline, into="local")
                 self.delay_timeline("duration", timeline="local", range_hint=(30, 50))
                 self.trigger([0], width=1 / 430.08, timeline="local")
 
