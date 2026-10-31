@@ -64,7 +64,9 @@ def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
     schedule = (
         Schedule(scope=Scope("run"))
         if cfg_mode == "omitted"
-        else Schedule({"reps": 99} if cfg_mode == "legacy" else None, buffer, scope=Scope("run"))
+        else Schedule(
+            {"reps": 99} if cfg_mode == "legacy" else None, buffer, scope=Scope("run")
+        )
     )
     with schedule:
         if cfg_mode == "omitted":
@@ -75,17 +77,23 @@ def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
                 update_interval=None,
             )
         if target == "root":
-            result = schedule.run_acquire_summed(program, soc, rounds=2, processor=_sum_iq)
+            result = schedule.run_acquire_summed(
+                program, soc, rounds=2, processor=_sum_iq
+            )
             np.testing.assert_array_equal(result, [12.0, 16.0])
         else:
             for _, step in schedule.scan("point", [10, 20]):
                 if target == "child":
                     step = step.child(0)
                     step.buffer((2,), dtype=np.float64)
-                result = step.run_acquire_summed(program, soc, rounds=2, processor=_sum_iq)
+                result = step.run_acquire_summed(
+                    program, soc, rounds=2, processor=_sum_iq
+                )
                 np.testing.assert_array_equal(result, [12.0, 16.0])
         assert schedule.outcome.status == "completed"
-        np.testing.assert_array_equal(schedule.data, np.broadcast_to([12.0, 16.0], shape))
+        np.testing.assert_array_equal(
+            schedule.data, np.broadcast_to([12.0, 16.0], shape)
+        )
     np.testing.assert_array_equal(buffer.array, np.broadcast_to([12.0, 16.0], shape))
     if cfg_mode == "omitted":
         np.testing.assert_array_equal(updates[-1], buffer.array)
