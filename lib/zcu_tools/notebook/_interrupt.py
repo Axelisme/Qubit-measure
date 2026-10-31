@@ -12,9 +12,10 @@ from zcu_tools.experiment.stop_signal import StopSignal
 class _RunInterrupts:
     """Own the temporary main-thread handler and the frontend stop-request fact."""
 
-    def __init__(self, stop: StopSignal) -> None:
+    def __init__(self, stop: StopSignal, timeout: float) -> None:
         self.stop_requested = False
         self._stop = stop
+        self._timeout = timeout
         self._previous = signal.getsignal(signal.SIGINT)
         self._main_thread = threading.current_thread() is threading.main_thread()
         self._thread_id = threading.get_ident()
@@ -34,7 +35,7 @@ class _RunInterrupts:
             raise KeyboardInterrupt
         self.stop_requested = True
         self._stop.set(reason="Notebook SIGINT")
-        self._timer = threading.Timer(10.0, self._interrupt_main)
+        self._timer = threading.Timer(self._timeout, self._interrupt_main)
         self._timer.daemon = True
         self._timer.start()
 

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
@@ -39,12 +40,19 @@ ResultT = TypeVar("ResultT")
 OptionsT = TypeVar("OptionsT")
 
 
+def _validate_interrupt_timeout(seconds: float) -> None:
+    if not isfinite(seconds) or seconds <= 0:
+        raise ValueError("interrupt_timeout must be finite and positive (seconds)")
+
+
 class NotebookAdapter:
     """Bind an environment once, then wrap independent experiment instances.
 
     Construction only retains references. Each run takes one current driver
     mapping from the bound manager; it does not refresh cfg or reconnect devices.
     Reassigning a caller's variables does not rebind this environment.
+    interrupt_timeout is the positive, finite SIGINT grace period in seconds
+    (default 10.0). Invalid values raise ValueError at construction.
     """
 
     def __init__(
@@ -54,7 +62,10 @@ class NotebookAdapter:
         soccfg: Any = None,
         device_manager: DeviceManager | None = None,
         host: PlotHost | None = None,
+        interrupt_timeout: float = 10.0,
     ) -> None:
+        _validate_interrupt_timeout(interrupt_timeout)
+        self._interrupt_timeout = interrupt_timeout
         self._soc = soc
         self._soccfg = soccfg
         self._device_manager = device_manager
@@ -67,6 +78,7 @@ class NotebookAdapter:
             soccfg=self._soccfg,
             device_manager=self._device_manager,
             host=self._host,
+            interrupt_timeout=self._interrupt_timeout,
         )
 
 
@@ -77,6 +89,8 @@ class NotebookExperiment(Generic[CoreT]):
     Load and analysis work without hardware. Run requires handles and a manager
     before starting an operation. Run and analyze own fresh plots; retaining a
     prior record does not let later operations close its figures.
+    interrupt_timeout is the positive, finite SIGINT grace period in seconds
+    (default 10.0); invalid values raise ValueError at construction.
     """
 
     def __init__(
@@ -87,7 +101,10 @@ class NotebookExperiment(Generic[CoreT]):
         soccfg: Any = None,
         device_manager: DeviceManager | None = None,
         host: PlotHost | None = None,
+        interrupt_timeout: float = 10.0,
     ) -> None:
+        _validate_interrupt_timeout(interrupt_timeout)
+        self._interrupt_timeout = interrupt_timeout
         self._core = experiment
         self._soc = soc
         self._soccfg = soccfg
@@ -174,7 +191,7 @@ class NotebookExperiment(Generic[CoreT]):
             )
             started_at = datetime.now(UTC)
             run_id = new_run_id(started_at)
-            with _RunInterrupts(context.scope.stop) as interrupts:
+            with _RunInterrupts(context.scope.stop, self._interrupt_timeout) as interrupts:
                 result = self._core.run(working_cfg, context=context)
             finished_at = datetime.now(UTC)
             evidence = AcquisitionEvidence(
