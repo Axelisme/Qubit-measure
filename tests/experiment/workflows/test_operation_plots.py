@@ -7,6 +7,7 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -21,6 +22,39 @@ from ._engine_fakes import (
     Tunables,
     completed,
 )
+
+
+def test_call_injects_resources_and_finishes_its_operation_plots(tmp_path: Path) -> None:
+    host = Presentation()
+    rig = Rig(tmp_path, native=True, plot_host=host)
+    handles: list[LiveUpdate[TraceData]] = []
+
+    def operation(ctx: CallContext) -> int:
+        plots = getattr(ctx, "plots", None)
+        assert plots is not None, "Workflow call must supply operation plots"
+        assert ctx.soc is not None
+        assert ctx.soccfg is not None
+        assert ctx.devices == {}
+        assert ctx.scope.kind == "operation"
+        handles.append(create_trace(plots, "measurement", "x", "y"))
+        return 7
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        outcome = await env.call(operation, name="measurement")
+        assert outcome.value == 7
+        assert outcome.facts.kind == "call"
+        assert outcome.facts.name == "measurement"
+        assert outcome.facts.stopped is False
+        with pytest.raises(RuntimeError, match="finished"):
+            handles[0].update((np.array([0.0]), np.array([1.0])))
+
+    try:
+        rig.start(script)
+        final = rig.engine.execute("run")
+        assert final.lifecycle == "done", final.reason
+        assert len(host.final) == 1
+    finally:
+        rig.close()
 
 
 class Presentation(NonPresentingHost):
