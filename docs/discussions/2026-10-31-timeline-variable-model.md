@@ -141,3 +141,17 @@ advisor 先提 P1（以差值上下界剔除被支配的結尾）與 P2（4 條�
 - 本機 qick 0.2.436：`tprocv2_assembler.py` 的 sreg 別名（s11 `s_usr_time`、s14 `s_out_time`），`asm_v2.py` 的 `set_timereg`／`inc_timereg` 與 `trigger(t=None)` 說明。
 - 本 repo：`ir/passes/loop/unroll.py`（k 的選法）、`ir/analysis.py::estimate_body_scheduled_ticks`、`ir/passes/timeline/timed_merge.py`、`ir/passes/dataflow/inc_reg_merge.py`、`ir/instructions.py::TimeInst`。
 - 指令數與 register 數由 advisor 在 lane 06 f318fd448 與 integration a63e1dbf1 編譯固定小程式量得。機制成本盤點的行數是函式邊界估計。原始腳本與逐輪裁決記在未入庫的工作檔，本文已寫入所需數字。
+
+## 後記
+
+2026-10-31 同日，使用者提出另一個方向，取代結論 4 的極值節點：「我考慮的另外一個方案是基於Abs，葉節點一樣是變數」「非葉節點是Abs(x)+y，有兩個子節點。優點是直接對齊底層實現方式。」
+
+Abs(x)+y 等於 max(x+y, −x+y)，所以兩種表示在數學上等價。差別在複雜度放在哪裡：極值節點在儲存時展開正負號組合，兩個節點相加要做分支乘積，需要 m、K、D 三個上限；Abs 表示只在求範圍時才展開，儲存時兩個運算式相加只是 abs 項並列。使用者：「我也傾向Abs寫法，而且k可以開足夠大，因為一次只求一個節點的範圍，還可以考慮快取」。
+
+改採的表示：
+- 運算式＝線性部分（變數）＋Σ cₖ·|xₖ|，cₖ 為有理數，可負，可為 1/2。max(a,b)＝(a+b)/2＋|a−b|/2，min(a,b)＝(a+b)/2−|a−b|/2；a+b+|a−b| 必為偶數，除 2 精確。
+- 正規化：|−x|＝|x|，同一 |x| 的係數相加，x 的正負號已知時 |x| 退回線性部分。
+- 求範圍：依共用軸把 abs 項與線性部分分成連通塊，塊內用分支定界逐一決定 abs 項的正負號，每塊正負號未定的 abs 項上限 k=20，超過退回區間；結果快取在節點上，支配判斷的相減式以正規化結構為 key 快取。
+- runtime 照舊每次 join 算一次並物化，用 4 條指令的 mask max；Abs 表示只用於證明。
+
+結論 4 中的保留 m=8 支、殘差包絡、K=81、交替深度 D=2 與子節點收合因此不再採用。結論 2、3、5 到 9 不變。

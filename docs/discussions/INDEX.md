@@ -38,7 +38,7 @@
 
 ## Program 與 timeline 編譯
 
-- 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：宣告回到 QICK 原生；變數是「軸 → 分量」、計算靠軸比對，跨軸 max／min 是保留 8 支加殘差包絡的極值節點；所有合流走同一個 join，runtime max 4 條指令；runtime 時間寫進 s14，ref 只由名字含 delay 的方法推進；Repeat 拿掉 `advance_ref` 改用結構定點規則；tProc v2 讀不到也回撥不了 ref。
+- 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：宣告回到 QICK 原生；變數是「軸 → 分量」、計算靠軸比對，跨軸 max／min 是保留 8 支加殘差包絡的極值節點；所有合流走同一個 join，runtime max 4 條指令；runtime 時間寫進 s14，ref 只由名字含 delay 的方法推進；Repeat 拿掉 `advance_ref` 改用結構定點規則；tProc v2 讀不到也回撥不了 ref。後記：跨軸 max／min 改用 Abs 表示（線性部分加 Σc|x|），儲存不展開，求範圍時依共用軸分塊、分支定界並快取，取代保留 8 支的極值節點。
 
 ## Cfg 與表單
 
