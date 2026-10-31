@@ -239,6 +239,11 @@ class PulseEnvelope:
     sample_period_ticks: int
     values: tuple[complex, ...]
 
+    def __post_init__(self) -> None:
+        _check_tick_scalar(self.sample_period_ticks)
+        if self.sample_period_ticks <= 0:
+            raise ValueError("envelope sample period must be positive")
+
 
 @dataclass(frozen=True)
 class PulseEvent:
@@ -420,6 +425,51 @@ class TimelineTemplate:
     duration_ticks: NDArray[np.int64]
 
 
+def _check_tick_scalar(ticks: int) -> None:
+    if type(ticks) not in (int, np.int64):
+        raise TypeError("time fields must be integer ticks")
+    _check_int64(int(ticks))
+
+
+def _validate_window_times(base: TimeBase, window: ReadoutWindow) -> None:
+    base.validate_ticks(window.sample_period_ticks)
+    if window.sample_period_ticks <= 0:
+        raise ValueError("ADC sample period must be positive")
+    duration = window.samples * window.sample_period_ticks
+    base.validate_ticks(duration)
+    for start in window.trigger_ticks:
+        base.validate_ticks(start)
+        base.validate_ticks(int(start) + duration)
+
+
+def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None:
+    size = len(template.points)
+    base.validate_ticks(template.duration_ticks)
+    if template.duration_ticks.shape != (size,):
+        raise ValueError("template duration shape must be (points,)")
+    for event in template.events:
+        for times in (event.start_ticks, event.duration_ticks):
+            base.validate_ticks(times)
+            if times.shape != (size,):
+                raise ValueError("event time shape must be (points,)")
+        base.validate_ticks(event.start_ticks + event.duration_ticks)
+        base.validate_ticks(event.phase_reference_ticks)
+        for envelope in event.envelopes:
+            if envelope is not None:
+                base.validate_ticks(envelope.sample_period_ticks)
+                base.validate_ticks(envelope.sample_period_ticks * len(envelope.values))
+    for readout in template.readouts:
+        base.validate_ticks(readout.sample_period_ticks)
+        if readout.sample_period_ticks <= 0:
+            raise ValueError("ADC sample period must be positive")
+        duration = readout.samples * readout.sample_period_ticks
+        base.validate_ticks(duration)
+        base.validate_ticks(readout.trigger_ticks)
+        if readout.trigger_ticks.ndim != 2 or readout.trigger_ticks.shape[0] != size:
+            raise ValueError("trigger time shape must be (points, reads)")
+        base.validate_ticks(readout.trigger_ticks + duration)
+
+
 @dataclass(frozen=True)
 class ChargeDriveRequirement:
     """Caller requirement that one generator bind to a physical charge drive.
@@ -502,6 +552,13 @@ class AcquireRequest:
     def __post_init__(self) -> None:
         if self.templates and len(self.point_names) != len(self.point_dims):
             raise ValueError("point_names must align with point_dims for templates")
+        self.time_base.validate_ticks(self.relax_delay_ticks)
+        if self.relax_delay_ticks < 0:
+            raise ValueError("relax delay must be nonnegative")
+        for window in self.readouts:
+            _validate_window_times(self.time_base, window)
+        for template in self.templates:
+            _validate_template_times(self.time_base, template)
 
     def materialize_point(self, point: int) -> PointTimeline:
         """Expand a flat C-order point into detached diagnostic controls.
