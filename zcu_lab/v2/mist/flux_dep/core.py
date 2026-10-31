@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
@@ -13,7 +12,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.simulate import value2flux
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -52,6 +51,20 @@ class FluxDepAnalyzeOptions:
 
 
 class FluxDepCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
+    flux_dev: Annotated[
+        DeviceName,
+        FieldMeta(
+            label="Flux device",
+            description="Connected flux device driven by the sweep.",
+        ),
+    ]
+    flux: SweepCfg
+    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -68,20 +81,6 @@ class FluxDepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    flux_unit: Literal["A", "V", "native"]  # External flux driver unit; no conversion.
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    flux_dev: Annotated[
-        DeviceName,
-        FieldMeta(
-            label="Flux device",
-            description="Connected flux device driven by the sweep.",
-        ),
-    ]
-    flux: SweepCfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
 
 
 class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
@@ -89,10 +88,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FluxDepResult, FluxDepCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("gains", "Power", "a.u."),
-            AxesSpec.Axis("values", "Flux value", "a.u."),
+            AxesSpec.Axis("gains", label="Power", unit="a.u."),
+            AxesSpec.Axis("values", label="Flux value", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FluxDepResult,
         cfg_type=FluxDepCfg,
         tag="mist/flux_dep",
@@ -117,7 +116,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         ``flux_unit`` selects its working unit without conversion.
         """
         # 1. Prepare external flux values and the board's probe-gain coordinates.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         values = sweep2array(cfg.flux, allow_array=True)
@@ -142,35 +141,29 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         )
 
         # 2. Set each external bias before acquiring its full gain trace.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for flux, step in sched.scan("flux", values.tolist()):
                 set_flux(
-                    context.devices[step.cfg.flux_dev],
+                    context.devices[cfg.flux_dev],
                     flux,
-                    unit=step.cfg.flux_unit,
+                    unit=cfg.flux_unit,
                     stop=context.scope.stop,
                     progress=False,
                 )
 
-                # 3. Reset, initialize, perturb with the probe, then measure IQ.
-                step.cfg.probe_pulse.set_param(
-                    "gain", sweep2param("gain", step.cfg.gain)
+                # Build the pulse sequence without changing the caller's cfg.
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Pulse("init_pulse", step.cfg.init_pulse),
-                        Pulse("probe_pulse", step.cfg.probe_pulse),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("gain", step.cfg.gain)
-                    .build_and_acquire(rounds=cfg.rounds)
+                gain = builder.add_sweep("gain", cfg.gain)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog, soc, rounds=cfg.rounds
                 )
 
         # 4. Preserve raw complex response; baseline subtraction is display-only.
@@ -214,7 +207,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             ylabel = r"$\bar n$"
         ys = np.asarray(ys)
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.pcolormesh(xs, ys, amp_diff.T, shading="nearest", cmap="Greys")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel(ylabel, fontsize=12)

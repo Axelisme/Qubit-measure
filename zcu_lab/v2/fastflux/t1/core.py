@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -15,7 +14,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_heatmap
@@ -33,6 +32,12 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1Cfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    flux_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
+    length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -49,12 +54,6 @@ class T1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    pi_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
-    length: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -68,10 +67,10 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     # outer gains -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
-            AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),
+            AxesSpec.Axis("lengths", label="Time", unit="s", scale=1e-6),
+            AxesSpec.Axis("gains", label="Flux Pulse Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
         cfg_schema_version="3.0",
@@ -87,7 +86,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         not a directly measured population or a conversion from gain to flux.
         """
         # Resolve flux gain and duration coordinates on the hardware grid.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         gain_sweep = cfg.gain
@@ -106,26 +105,21 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             on_update=lambda data: viewer.update(gains, lengths, t1_signal2real(data)),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            sched.cfg.flux_pulse.set_param(
-                "length", sweep2param("length", sched.cfg.length)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-
-            # Let the excited state evolve during the flux pulse before readout.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("pi_pulse", sched.cfg.pi_pulse),
-                    Pulse("flux_pulse", sched.cfg.flux_pulse),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("gain", sched.cfg.gain)
-                .declare_sweep("length", sched.cfg.length)
-                .build_and_acquire(rounds=cfg.rounds)
+            gain = builder.add_sweep("gain", cfg.gain)
+            length = builder.add_sweep("length", cfg.length)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.emit(Pulse("flux_pulse", cfg.flux_pulse, gain=gain, length=length))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog, soc, rounds=cfg.rounds
             )
 
         return T1Result(gains, lengths, signals_buffer.array)
@@ -162,29 +156,29 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         prev_pOpt = None
         list_pOpt = []
         for real_signal in real_signals:
-            *_, fit_signal, (pOpt, _) = fit_decay(
+            fit = fit_decay(
                 lengths,
                 real_signal,
                 fit_params=prev_pOpt,
             )
-            prev_pOpt = pOpt if is_good_fit(fit_signal, real_signal) else None
+            prev_pOpt = fit.params if is_good_fit(fit.curve, real_signal) else None
             list_pOpt.append(prev_pOpt)
         mean_y0 = np.median([pOpt[0] for pOpt in list_pOpt if pOpt is not None]).item()
 
         t1s = np.full_like(gains, np.nan)
         t1errs = np.zeros_like(gains)
         for i, real_signal in enumerate(real_signals):
-            t1, t1err, fit_signal, *_ = fit_decay(
+            fit = fit_decay(
                 lengths,
                 real_signals[i, :],
                 fit_params=list_pOpt[i],
                 fixedparams=(mean_y0, None, None),
             )
-            if is_good_fit(fit_signal, real_signal):
-                t1s[i] = t1
-                t1errs[i] = t1err
+            if is_good_fit(fit.curve, real_signal):
+                t1s[i] = fit.decay_time
+                t1errs[i] = fit.decay_time_err
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             real_signals.T,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -14,13 +13,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Join,
     Pulse,
     Readout,
     Reset,
-    SoftDelay,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -39,6 +36,13 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PhaseCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    pi2_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    readout_t: float
+    length: SweepCfg
+    phase: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -55,13 +59,6 @@ class PhaseCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    pi2_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    readout_t: float
-    length: SweepCfg
-    phase: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -74,10 +71,10 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
     # inner phases raw deg (IDENTITY); outer lengths memory-us -> disk-s via US_TO_S
     AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("phases", "Phase", "deg"),
-            AxesSpec.Axis("lengths", "Wait Time", "s", scale=1e-6),
+            AxesSpec.Axis("phases", label="Phase", unit="deg"),
+            AxesSpec.Axis("lengths", label="Wait Time", unit="s", scale=1e-6),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
         cfg_schema_version="3.0",
@@ -94,7 +91,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         phases in degrees and mean complex IQ shaped (wait, phase).
         """
         # Quantize the pair start time and the second pulse projection phase.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         length_sweep = cfg.length
@@ -116,35 +113,24 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            length_param = sweep2param("length", sched.cfg.length)
-            phase_param = sweep2param("phase", sched.cfg.phase)
-
-            # Move the whole π/2 pair through the independently scheduled flux pulse.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Join(
-                        Pulse("flux_pulse", sched.cfg.flux_pulse),
-                        [
-                            SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", sched.cfg.pi2_pulse),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=sched.cfg.pi2_pulse.with_updates(phase=phase_param),
-                            ),
-                        ],
-                        SoftDelay("readout_t", sched.cfg.readout_t),
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("length", sched.cfg.length)
-                .declare_sweep("phase", sched.cfg.phase)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            length = builder.add_sweep("length", cfg.length)
+            phase = builder.add_sweep("phase", cfg.phase)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.fork("default", into=["flux", "pair", "readout_wait"])
+            builder.emit(Pulse("flux_pulse", cfg.flux_pulse), timeline="flux")
+            builder.delay_timeline(length, timeline="pair")
+            builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse), timeline="pair")
+            builder.emit(Pulse("pi2_pulse2", cfg.pi2_pulse, phase=phase), timeline="pair")
+            builder.delay_timeline(cfg.readout_t, timeline="readout_wait")
+            builder.join("flux", "pair", "readout_wait", into="default")
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return PhaseResult(lengths, phases, signals_buffer.array)
 
@@ -201,7 +187,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
             mean_topdetune
         )
 
-        fig, _ = plots.subplots("fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True)
+        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, figsize=(8, 4), sharex=True)
         ax1, ax2 = fig.axes
         ax1.imshow(
             real_signals.T,

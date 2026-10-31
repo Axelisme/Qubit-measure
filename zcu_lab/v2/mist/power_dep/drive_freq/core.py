@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -13,7 +12,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.support import live_heatmap
 
@@ -36,6 +35,12 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class DriveFreqCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    freq: SweepCfg
+    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -52,22 +57,16 @@ class DriveFreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    freq: SweepCfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
 
 
 class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[DriveFreqResult, DriveFreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Pulse frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("gains", "Pulse gain", "a.u."),
+            AxesSpec.Axis("freqs", label="Pulse frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("gains", label="Pulse gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=DriveFreqResult,
         cfg_type=DriveFreqCfg,
         cfg_schema_version="3.0",
@@ -91,7 +90,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         readout modules and both sweep ranges.
         """
         # 1. Prepare both hardware axes using the probe's generator channel.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         freq_sweep = cfg.freq
@@ -116,24 +115,21 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         )
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.probe_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
-            sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-
-            # 3. Reset and initialize before each probe/readout sequence.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    Pulse("probe_pulse", sched.cfg.probe_pulse),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("freq", sched.cfg.freq)
-                .declare_sweep("gain", sched.cfg.gain)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            freq = builder.add_sweep("freq", cfg.freq)
+            gain = builder.add_sweep("gain", cfg.gain)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("probe_pulse", cfg.probe_pulse, freq=freq, gain=gain))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog, soc, rounds=cfg.rounds
             )
 
         # 4. Preserve complex IQ; the baseline-subtracted magnitude is a view.
@@ -159,7 +155,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
 
         real_signals = drivefreq_signal2real(signals)
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             real_signals.T,

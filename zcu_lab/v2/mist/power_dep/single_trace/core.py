@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -11,11 +10,11 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support import live_line
 
@@ -44,6 +43,11 @@ class PowerDepAnalyzeOptions:
 
 
 class PowerDepCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    probe_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -67,19 +71,14 @@ class PowerDepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    probe_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
 
 
 class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     Options: ClassVar[type[PowerDepAnalyzeOptions]] = PowerDepAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[PowerDepResult, PowerDepCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("gains", "Drive Power", "a.u."),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("gains", label="Drive Power", unit="a.u."),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
         cfg_schema_version="3.0",
@@ -102,7 +101,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         probe/readout modules and gain range.
         """
         # 1. Prepare gain coordinates for the probe's generator channel.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         gains = sweep2array(
@@ -118,24 +117,20 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         )
 
         # 2. Bind the board gain sweep without changing the other probe settings.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.probe_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-
-            # 3. Reset and initialize before each probe/readout sequence.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    Pulse("probe_pulse", sched.cfg.probe_pulse),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("gain", sched.cfg.gain)
-                .build_and_acquire(
-                    rounds=cfg.rounds, options=AcquireOptions(retry=cfg.acquire_retry)
-                )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            gain = builder.add_sweep("gain", cfg.gain)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog, soc, rounds=cfg.rounds, options=RunOptions(retry=cfg.acquire_retry)
             )
 
         # 4. Preserve complex IQ so analysis can choose its own reference.
@@ -172,7 +167,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(xs, amp_diff.T, marker=".")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Signal difference (a.u.)", fontsize=14)
