@@ -26,8 +26,8 @@ from ._timeline_macros import (
     ReferenceGuard,
     RepeatTimelineBody,
     RepeatTimelineCapture,
-    RepeatTimelineEnter,
-    RepeatTimelineExit,
+    RepeatLoweringEnter,
+    RepeatLoweringExit,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -630,8 +630,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         range. With no known range, maxima execute at runtime; same-channel
         overlap and signed overflow are the author's responsibility. Certified
         producers and explicit hints retain finite-range checks. Hints on scalar
-        times and invalid ranges raise ValueError. Wait-only targets still fail
-        compilation. tag exposes static ends as 't'; runtime-only ends raise
+        times and invalid ranges raise ValueError. External timelines after branch
+        or Repeat use their actual runtime end. tag exposes static ends as 't'; runtime-only ends raise
         RuntimeError from get_time_param rather than returning a bound.
         """
         if range_hint is not None:
@@ -818,7 +818,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 self._timeline_default = previous
                 del self.macro_list[start:]
             return
-        entry = RepeatTimelineEnter(
+        entry = RepeatLoweringEnter(
             self._timeline_book, parent, name if isinstance(n, str) else None
         )
         self.append_macro(entry)
@@ -848,7 +848,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 for macro in body
             )
             self.append_macro(
-                RepeatTimelineExit(
+                RepeatLoweringExit(
                     entry,
                     n,
                     minimum,
@@ -898,9 +898,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         None uses the scoped name, or native reference timing outside a scope.
         Native args are t=0, tag=None. A timeline end becomes the scheduled config
         instant; config length and unrelated ADC windows do not contribute.
-        Wait-only timelines reject placement even at t=0; first call
-        delay_by_timeline to consume the bound or establish an ordinary
-        scheduling point with join/fork.
+        External timelines after branch or Repeat schedule from their actual
+        runtime end, without requiring delay_by_timeline, join or fork first.
         Declaration and timing errors propagate.
         """
         timeline = timeline if timeline is not None else self._timeline_default
@@ -1005,9 +1004,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         None uses the scoped name, or native reference timing outside a scope.
         kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
-        instant, independent of config length. Wait-only timelines reject placement
-        even at t=0; first call delay_by_timeline to consume the bound or
-        establish an ordinary scheduling point with join/fork.
+        instant, independent of config length. External timelines after branch
+        or Repeat schedule from their actual runtime end, without requiring
+        delay_by_timeline, join or fork first.
         Native patching and declaration/register validation
         are unchanged.
         """
