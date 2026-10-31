@@ -1,5 +1,7 @@
 """Detached private-input storage, not normal data.h5 or waveform assets."""
 
+from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -11,17 +13,26 @@ from zcu_tools.core.simulation import (
     PulseEnvelope,
     PulseEvent,
     ReadoutWindow,
+    TimeBase,
 )
 from zcu_tools.resources.ftf import parse_ftf
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import (
+    TIME_BASE,
+    single_point_template,
+    tick_array,
+    tick_tuple,
+    ticks,
+)
 from tests.resources._ftf_data import ftf_document
 
 
 @pytest.mark.parametrize("requirements", [(), (ChargeDriveRequirement("drive", 2),)])
+@pytest.mark.parametrize("time_base", [TIME_BASE, TimeBase(Fraction(5, 3))])
 def test_replay_retains_complex_samples_and_deduplicated_acquire(
     tmp_path: Path,
     requirements: tuple[ChargeDriveRequirement, ...],
+    time_base: TimeBase,
 ) -> None:
     from zcu_tools.resources.simulation_replay import (
         ReplayAcquire,
@@ -29,11 +40,17 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         save_replay,
     )
 
-    window = ReadoutWindow(0, 0, 3, 100.0, (0.02,))
+    window = ReadoutWindow(0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02,)))
     event = PulseEvent(
-        2, 0.0, 0.016, 42.0, 90.0, -0.3, PulseEnvelope((0.0, 0.008), (1 + 2j, -3 - 4j))
+        2,
+        ticks(0.0),
+        ticks(0.016),
+        42.0,
+        90.0,
+        -0.3,
+        PulseEnvelope(ticks(0.008), (1 + 2j, -3 - 4j)),
     )
-    timeline = PointTimeline((), (event,), (window,), 0.05)
+    timeline = PointTimeline((), (event,), (window,), ticks(0.05), time_base=TIME_BASE)
     request = AcquireRequest(
         "integrated",
         (1,),
@@ -44,7 +61,9 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         "test-rng-v1",
         templates=(single_point_template(timeline),),
         charge_requirements=requirements,
+        time_base=TIME_BASE,
     )
+    request = replace(request, time_base=time_base)
     fixed = ReplayAcquire(
         settings=parse_ftf(ftf_document()),
         request=request,
@@ -126,7 +145,9 @@ def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
             },
         }
     )
-    request = AcquireRequest("integrated", (1,), 0, (), 123, 0, "test-rng-v1")
+    request = AcquireRequest(
+        "integrated", (1,), 0, (), 123, 0, "test-rng-v1", time_base=TIME_BASE
+    )
     try:
         fixed = ReplayAcquire(
             settings=settings, request=request, versions=(("backend", "single"),)
@@ -141,6 +162,50 @@ def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
     assert loaded.acquire.settings.format == "zcu.single-fluxonium"
     assert loaded.round.snapshot == snapshot
     assert loaded.round.index == 2
+
+
+def test_replay_rejects_float_time_format_version() -> None:
+    from zcu_tools.resources.simulation_replay import ReplayRound
+
+    with pytest.raises(ValueError, match="version"):
+        ReplayRound.model_validate(
+            {
+                "version": 1,
+                "acquire_identity": "0" * 64,
+                "snapshot": {"version": "test", "model_identity": "test", "values": []},
+                "index": 0,
+            }
+        )
+
+
+def test_replay_rejects_fractional_values_in_integer_time_arrays() -> None:
+    from zcu_tools.resources.simulation_replay import ReplayAcquire
+
+    timeline = PointTimeline(
+        (),
+        (PulseEvent(0, 0, 1344, 100.0, 0.0, 0.1),),
+        (),
+        1344,
+        time_base=TIME_BASE,
+    )
+    request = AcquireRequest(
+        "integrated",
+        (1,),
+        0,
+        (),
+        123,
+        0,
+        "test",
+        time_base=TIME_BASE,
+        templates=(single_point_template(timeline),),
+    )
+    fixed = ReplayAcquire(
+        settings=parse_ftf(ftf_document()), request=request, versions=()
+    )
+    payload = fixed.model_dump(mode="json")
+    payload["request"]["templates"][0]["events"][0]["start_ticks"]["values"][0] = 0.5
+    with pytest.raises(ValueError, match="int64"):
+        ReplayAcquire.model_validate(payload)
 
 
 def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
@@ -167,21 +232,21 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
         gen_ch=2,
         source="selected",
         iterations=(("inner", 1),),
-        start_us=np.array([0.125, 0.25]),
-        duration_us=np.array([0.016, 0.032]),
+        start_ticks=tick_array(np.array([0.125, 0.25])),
+        duration_ticks=tick_array(np.array([0.016, 0.032])),
         frequency_mhz=np.array([42.0, 43.125]),
         phase_deg=np.array([90.0, -30.0]),
         gain=np.array([-0.3, 0.25]),
-        envelopes=(None, PulseEnvelope((0.0, 0.008), (1 + 2j, -3 - 4j))),
+        envelopes=(None, PulseEnvelope(ticks(0.008), (1 + 2j, -3 - 4j))),
         envelope_index=np.array([1, 0], dtype=np.int64),
         active=np.array([True, False], dtype=np.bool_),
-        phase_reference_us=0.125,
+        phase_reference_ticks=ticks(0.125),
     )
     readout = ReadoutSlot(
         channel=0,
         samples=3,
-        sample_rate_mhz=100.0,
-        trigger_us=np.array([[0.02, 0.04], [0.03, 0.05]]),
+        sample_period_ticks=TIME_BASE.period_ticks(100.0),
+        trigger_ticks=tick_array(np.array([[0.02, 0.04], [0.03, 0.05]])),
         frequency_mhz=np.array([[42.0, 43.0], [44.0, 45.0]]),
         phase_deg=np.array([[0.0, 90.0], [180.0, -90.0]]),
         generator_channels=np.array([[2, 0], [0, 2]], dtype=np.int64),
@@ -190,13 +255,17 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
         points=np.array([0, 1], dtype=np.int64),
         events=(event,),
         readouts=(readout,),
-        duration_us=np.array([0.4, 0.5]),
+        duration_ticks=tick_array(np.array([0.4, 0.5])),
     )
     request = AcquireRequest(
         mode="integrated",
         loop_dims=(3, 2),
         avg_level=0,
-        readouts=(ReadoutWindow(0, 0, 3, 100.0, (0.02, 0.04)),),
+        readouts=(
+            ReadoutWindow(
+                0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02, 0.04))
+            ),
+        ),
         root_seed=12345,
         sequence=17,
         rng_version="test-rng-v1",
@@ -204,6 +273,7 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
         point_names=("axis",),
         reps=3,
         templates=(template,),
+        time_base=TIME_BASE,
     )
     acquire = ReplayAcquire(
         settings=parse_ftf(ftf_document()),

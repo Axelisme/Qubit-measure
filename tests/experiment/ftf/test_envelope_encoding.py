@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from sys import getsizeof
 
-import numpy as np
 import pytest
 from zcu_tools.core.simulation import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager
@@ -28,7 +27,7 @@ from tests.experiment._ftf_templates import (
 
 def test_envelope_encoding_is_a_fixed_size_content_fingerprint():
     encoder = EnvelopeEncoder()
-    envelope = PulseEnvelope((0.0, 0.5, 1.0), (0j, 0.5j, 1j))
+    envelope = PulseEnvelope(672000, (0j, 0.5j, 1j))
     fingerprint = encoder.encode(envelope)
     assert len(fingerprint) == 32, "outer keys must hash a SHA256 fingerprint"
     assert encoder.encode(envelope) == fingerprint
@@ -37,15 +36,11 @@ def test_envelope_encoding_is_a_fixed_size_content_fingerprint():
     assert encoder.encode(replace(envelope)) == fingerprint
     assert EnvelopeEncoder(0).encode(envelope) == fingerprint
     for other in (
-        replace(envelope, sample_us=(0.0, 0.25, 1.0)),
+        replace(envelope, sample_period_ticks=336000),
         replace(envelope, values=(0j, -0.5j, 1j)),
-        PulseEnvelope((0.0, 1.0), (0j, 1j)),
+        PulseEnvelope(1344000, (0j, 1j)),
     ):
         assert encoder.encode(other) != fingerprint
-
-
-class SampleTimes(tuple[float, ...]):
-    """Non-builtin tuple producer accepted by the generic accounting path."""
 
 
 class SampleValue(complex):
@@ -58,19 +53,16 @@ class ExtendedEnvelope(PulseEnvelope):
 
 
 def _accounting_envelope(kind: str) -> PulseEnvelope:
-    times = tuple(float(i) / 64 for i in range(64))
     values = tuple(complex(i / 64, 0.5) for i in range(64))
     if kind == "shared":
-        return PulseEnvelope(times, (complex(0.5, 0.25),) * len(times))
+        return PulseEnvelope(21000, (complex(0.5, 0.25),) * 64)
     if kind == "empty":
-        return PulseEnvelope((), ())
+        return PulseEnvelope(21000, ())
     if kind == "scalar-subclass":
-        return PulseEnvelope(times, tuple(SampleValue(v) for v in values))
-    if kind == "tuple-subclass":
-        return PulseEnvelope(SampleTimes(times), values)
+        return PulseEnvelope(21000, tuple(SampleValue(v) for v in values))
     if kind == "envelope-subclass":
-        return ExtendedEnvelope(times, values)
-    return PulseEnvelope(times, values)
+        return ExtendedEnvelope(21000, values)
+    return PulseEnvelope(21000, values)
 
 
 def _retained_charge(envelope: PulseEnvelope, fingerprint: bytes, *, deduplicate: bool):
@@ -79,7 +71,8 @@ def _retained_charge(envelope: PulseEnvelope, fingerprint: bytes, *, deduplicate
     for field in fields(envelope):
         values = getattr(envelope, field.name)
         objects.extend((field.name, values))
-        objects.extend(values)
+        if isinstance(values, tuple):
+            objects.extend(values)
     if deduplicate:
         objects = list({id(obj): obj for obj in objects}.values())
     metadata = (
@@ -99,7 +92,6 @@ def _retained_charge(envelope: PulseEnvelope, fingerprint: bytes, *, deduplicate
         "shared",
         "empty",
         "scalar-subclass",
-        "tuple-subclass",
         "envelope-subclass",
     ],
 )
@@ -367,17 +359,13 @@ def test_encoder_byte_budget_eviction_disable_and_source_close():
     try:
         assert hasattr(source, "envelope_encoder"), "source must own envelope encoding"
         encoder = source.envelope_encoder
-        envelopes = [
-            PulseEnvelope(tuple(np.linspace(0.0, 1.0, 64)), (complex(i),) * 64)
-            for i in range(3)
-        ]
+        envelopes = [PulseEnvelope(21000, (complex(i),) * 64) for i in range(3)]
         encoded = encoder.encode(envelopes[0])
         single_entry_bytes = encoder.resident_bytes
         assert single_entry_bytes > (
             getsizeof(envelopes[0])
-            + getsizeof(envelopes[0].sample_us)
+            + getsizeof(envelopes[0].sample_period_ticks)
             + getsizeof(envelopes[0].values)
-            + sum(getsizeof(t) for t in envelopes[0].sample_us)
         ), "the budget must charge the full retained envelope, not just its digest"
         encoder.max_bytes = single_entry_bytes
         encoder.encode(envelopes[1])

@@ -18,23 +18,11 @@ from zcu_tools.core.simulation import (
     RoundRequest,
     RoundSignals,
 )
-from zcu_tools.program.shot_time import shot_time_s
+from zcu_tools.program.shot_time import request_round_time_s
 
 from ._envelope_pool import EnvelopePool
 from .clock import SimulationTiming
 from .result import IntegratedRound
-
-
-def _physical_round_s(request: AcquireRequest) -> float:
-    return sum(
-        shot_time_s(
-            rounds=1,
-            reps=request.reps,
-            shot_lengths_us=template.duration_us,
-            relax_delay_us=request.relax_delay_us,
-        )
-        for template in request.templates
-    )
 
 
 @dataclass(frozen=True)
@@ -139,8 +127,9 @@ class SimulationBinding:
 
         timing=None uses SimulationTiming's defaults. timing.time_scale is a
         finite nonnegative physical-time multiplier. Each round
-        targets time_scale * reps * sum(point body duration + relax_delay_us),
-        converting timeline us to seconds. One follows physical time; 0.1 runs
+        targets time_scale * request_round_time_s(request). The program shot-time
+        owner sums integer body/relax ticks and reps, then TimeBase converts the
+        aggregate to seconds. One follows physical time; 0.1 runs
         ten times faster. Zero (default) disables pacing. Without clock it also
         skips round clock reads. Snapshot
         and execution consume this budget; failures never wait. With cancel,
@@ -296,7 +285,7 @@ class SimulationBinding:
         ):
             raise ValueError(f"backend result does not match {request.mode} mode")
         if self._time_scale > 0:
-            target = self._time_scale * _physical_round_s(request)
+            target = self._time_scale * request_round_time_s(request)
             remaining = target - (now() - started)
             wait_cancel = cancel if pacing_cancel is None else pacing_cancel
             if wait_cancel is None:
@@ -309,5 +298,5 @@ class SimulationBinding:
         if self._clock is not None and not any(
             query is not None and query.is_set() for query in (cancel, pacing_cancel)
         ):
-            self._clock.complete_round(_physical_round_s(request), now() - started)
+            self._clock.complete_round(request_round_time_s(request), now() - started)
         return result

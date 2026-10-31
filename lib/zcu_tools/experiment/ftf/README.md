@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-29 (UTC), explicit charge requirements
+**Last updated:** 2026-10-31, integer request clocks
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -295,13 +295,15 @@ direct author callers must do the same.
 `plan_template` accepts optional matching `FTFModelFacts` for shared physical
 inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
 the source-owned latest facts and rejects calls after close.
-`plan_template` converts QICK us/MHz/degrees into ns/GHz/radians with point
-arrays. It preserves signed gains, complex sampled envelopes and the common
+`plan_template` requires the originating request's `time_base` keyword.
+It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
+`TimeBase.ns` owns exact nearest-2-ns rounding and converts complete integer ADC
+sample grids. Preparation keys include the clock. It preserves signed gains, complex sampled envelopes and the common
 carrier origin for evolution. Readout converts the program's common-origin
 phase to ADC's pulse-local phase by subtracting
 `2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. The model reference
 is the first carrier; that carrier's phase stays unchanged. The existing
-`phase_reference_us` contribution stays part of the common-origin phase.
+`phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
 ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
 shift. With multiple nonzero carriers, finite-window cross-tone leakage can
@@ -586,7 +588,8 @@ memory. They need only agree with direct means in expectation, not realization.
 ### Private replay
 
 `acquisition=FTFAcquisitionOptions(private_replay=absolute_directory)` opts into
-checked private input archives. Import `FTFAcquisitionOptions` from
+checked private input archives. Acquire and round JSON use schema version 2.
+Version 1 archives fail rather than converting float times. Import `FTFAcquisitionOptions` from
 `zcu_tools.experiment.ftf`. Relative replay roots raise `ValueError`.
 `replay_round(round_path)` recomputes one round without drivers, earlier rounds,
 current YAML or numeric records. Import it from `zcu_tools.experiment.ftf`.
