@@ -55,6 +55,7 @@ from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import ParameterContext, SessionEnv
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.entry import (
+    JsonObject,
     ResultEntry,
     document_meta,
     document_value,
