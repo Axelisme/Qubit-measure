@@ -13,7 +13,7 @@ validate the remaining field ranges, layouts and contents against the request.
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from fractions import Fraction
-from math import gcd, lcm, prod
+from math import gcd, isfinite, lcm, prod
 from typing import Literal, Protocol, overload
 
 import numpy as np
@@ -29,9 +29,23 @@ class TimeBase:
     ticks_per_us: Positive rational frequency in MHz. One integer tick lasts
         1 / ticks_per_us microseconds. Program supplies the board's tProc,
         generator fabric, ADC output and envelope sample clocks to from_clocks.
+
+    Construction rejects nonpositive frequencies with ValueError. Rational
+    components and 1000 * denominator must fit int64; the numerator must be
+    exactly representable in float64. Violations raise OverflowError. ns and
+    ticks also enforce the exact nanosecond numerator range before conversion.
     """
 
     ticks_per_us: Fraction
+
+    def __post_init__(self) -> None:
+        if self.ticks_per_us <= 0:
+            raise ValueError("time-base frequency must be positive")
+        _check_fraction_range(self.ticks_per_us)
+        numerator = self.ticks_per_us.numerator
+        if int(float(numerator)) != numerator:
+            raise OverflowError("time-base numerator is not exact in float64")
+        _check_int64(1000 * self.ticks_per_us.denominator)
 
     @classmethod
     def from_clocks(cls, clocks_mhz: Iterable[float]) -> "TimeBase":
@@ -39,9 +53,12 @@ class TimeBase:
 
         Interpret each finite positive clock through its round-tripping decimal
         repr, not its binary floating-point expansion. Clock order and duplicates
-        do not affect the result. An empty iterable raises ValueError.
+        do not affect the result. Empty, nonpositive or nonfinite clocks raise
+        ValueError; lossy decimal conversion raises ValueError. Rational clock
+        components and the common frequency obey the constructor's range limits
+        and raise OverflowError when exceeded.
         """
-        clocks = [Fraction(repr(clock)) for clock in clocks_mhz]
+        clocks = [_clock_fraction(clock) for clock in clocks_mhz]
         if not clocks:
             raise ValueError("at least one clock is required")
         return cls(
@@ -55,12 +72,33 @@ class TimeBase:
         """Return one clock period in ticks, rejecting off-grid clocks.
 
         clock_mhz is a finite positive frequency in MHz, interpreted as in
-        from_clocks. A noninteger number of ticks raises ValueError.
+        from_clocks. A noninteger number of ticks raises ValueError. Nonpositive
+        or nonfinite clocks raise ValueError; out-of-range clocks or periods
+        raise OverflowError under the same bounds as ns.
         """
-        period = self.ticks_per_us / Fraction(repr(clock_mhz))
+        period = self.ticks_per_us / _clock_fraction(clock_mhz)
+        _check_fraction_range(period)
         if period.denominator != 1:
             raise ValueError("clock period is not on the time-base grid")
+        self._validate_ticks(period.numerator)
         return period.numerator
+
+    def ticks(self, time_us: float | Fraction) -> int:
+        """Return exact grid ticks for a finite time in microseconds.
+
+        Fraction inputs preserve exact rational times. Float inputs use their
+        round-tripping decimal repr; they are never rounded onto the grid.
+        Off-grid times raise ValueError. Out-of-range rational inputs, results
+        or nanosecond numerators raise OverflowError, as in ns.
+        """
+        time = time_us if isinstance(time_us, Fraction) else _decimal_fraction(time_us)
+        _check_fraction_range(time)
+        ticks = time * self.ticks_per_us
+        _check_fraction_range(ticks)
+        if ticks.denominator != 1:
+            raise ValueError("time is not on the time-base grid")
+        self._validate_ticks(ticks.numerator)
+        return ticks.numerator
 
     @overload
     def ns(self, ticks: int | np.int64) -> float: ...
@@ -75,11 +113,58 @@ class TimeBase:
 
         Scalars return float; int64 arrays return float64 arrays with identical
         shape. All arithmetic before the final division is integer arithmetic.
+        Raise OverflowError unless ticks and intermediates fit int64 and
+        abs(ticks * 1000 * frequency.denominator) <= 2**53. Noninteger scalars
+        or arrays with a dtype other than int64 raise TypeError.
         """
+        self._validate_ticks(ticks)
         scale = 1000 * self.ticks_per_us.denominator
+        # Both operands are exactly representable in float64. Only the final
+        # IEEE division rounds, including for noninteger rational time bases.
         if isinstance(ticks, np.ndarray):
             return np.divide(ticks * scale, self.ticks_per_us.numerator)
         return (int(ticks) * scale) / self.ticks_per_us.numerator
+
+    def _validate_ticks(self, ticks: int | np.int64 | NDArray[np.int64]) -> None:
+        limit = 2**53 // (1000 * self.ticks_per_us.denominator)
+        if isinstance(ticks, np.ndarray):
+            if ticks.dtype != np.dtype(np.int64):
+                raise TypeError("tick arrays must have int64 dtype")
+            outside = np.any(ticks < -limit) or np.any(ticks > limit)
+        else:
+            if not isinstance(ticks, (int, np.int64)) or isinstance(ticks, bool):
+                raise TypeError("ticks must be integers")
+            _check_int64(int(ticks))
+            outside = ticks < -limit or ticks > limit
+        if outside:
+            raise OverflowError("nanosecond numerator exceeds the exact float64 range")
+
+
+def _check_int64(value: int) -> None:
+    if not -(2**63) <= value < 2**63:
+        raise OverflowError("time-base arithmetic exceeds int64 range")
+
+
+def _check_fraction_range(value: Fraction) -> None:
+    _check_int64(value.numerator)
+    _check_int64(value.denominator)
+
+
+def _decimal_fraction(value: float) -> Fraction:
+    if not isfinite(value):
+        raise ValueError("time and clock values must be finite")
+    result = Fraction(repr(value))
+    _check_fraction_range(result)
+    if float(result) != value:
+        raise ValueError("decimal conversion loses precision")
+    return result
+
+
+def _clock_fraction(clock_mhz: float) -> Fraction:
+    clock = _decimal_fraction(clock_mhz)
+    if clock <= 0:
+        raise ValueError("clock frequency must be positive")
+    return clock
 
 
 class CancellationQuery(Protocol):
