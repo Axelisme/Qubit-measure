@@ -239,7 +239,7 @@ class MetaInst(Instruction):
 
 @dataclass(frozen=True)
 class TimeInst(BaseInst):
-    """TIME instruction: advance timing counter."""
+    """TIME instruction: update the reference clock independently of s14."""
 
     c_op: TimeCOp
     lit: Immediate | None = None
@@ -256,15 +256,13 @@ class TimeInst(BaseInst):
     @property
     def reg_read(self) -> frozenset[str]:
         reads = self.r1.regs() if self.r1 else frozenset()
-        if self.c_op == "inc_ref":
-            reads = reads | {TIMED_BASE_REG}
         if self.c_op == "updt":
             reads = reads | {USR_TIME_REG}
         return reads
 
     @property
     def reg_write(self) -> frozenset[str]:
-        return frozenset({TIMED_BASE_REG})
+        return frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         d = {

@@ -22,7 +22,7 @@ After::
 QICK Hardware Notes
 -------------------
 - Volatile registers (s0–s14) have hardware side effects on every write
-  (e.g., s14 is the time reference, s0–s13 drive hardware signals directly).
+  (s14 is the output offset; TIME updates a separate reference clock).
   Their writes are NEVER eliminated regardless of liveness.
 - The ``-uf`` flag on a RegWriteInst updates the condition-flag register as a
   side effect of the ALU operation.  Such instructions are treated as barriers:
