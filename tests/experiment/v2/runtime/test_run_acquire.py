@@ -50,7 +50,7 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     updates = []
     bars: list[RecordingProgressBar] = []
     buffer = SignalBuffer(
-        (2, 1), on_update=lambda data: updates.append(data.copy()), update_interval=1
+        (2,), on_update=lambda data: updates.append(data.copy()), update_interval=1
     )
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
@@ -58,9 +58,9 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     ):
         for _, step in schedule.scan("point", [10, 20]):
             result = step.run_acquire(program, env.soc, rounds=2)
-            np.testing.assert_array_equal(result, [0j])
+            np.testing.assert_array_equal(result, np.array(0j))
             assert np.shares_memory(result, buffer.array)
-    np.testing.assert_array_equal(buffer.array, [[0j], [0j]])
+    np.testing.assert_array_equal(buffer.array, [0j, 0j])
     assert len(updates) == 6  # Two completed rounds plus final per point.
     assert np.isnan(updates[0][1]).all()
     rounds_bars = [bar for bar in bars if bar.desc == "rounds"]

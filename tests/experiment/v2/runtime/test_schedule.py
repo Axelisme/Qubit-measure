@@ -198,11 +198,11 @@ def test_schedule_batch_string_key_default_program_target_marks_failed_outcome()
 
 
 def test_schedule_batch_string_key_uses_child_local_default_buffer():
-    root = {"child": {"signals": np.full((1,), np.nan)}}
+    root = {"child": {"signals": np.full((), np.nan)}}
 
     def child(step):
         signals_step = step.child("signals")
-        signals_step.buffer((1,), dtype=np.float64)
+        signals_step.buffer((), dtype=np.float64)
         signals_step.cfg.value = 6.0
         signals_step.prog_builder(
             "soc",
@@ -216,7 +216,7 @@ def test_schedule_batch_string_key_uses_child_local_default_buffer():
     with Schedule(_cfg(rounds=1), RecordingBuffer(root), scope=Scope("run")) as sched:
         sched.batch({"child": child})
 
-    assert np.allclose(root["child"]["signals"], [6.0])
+    np.testing.assert_array_equal(root["child"]["signals"], np.array(6.0))
 
 
 def test_schedule_batch_does_not_retry_keyboard_interrupt():
