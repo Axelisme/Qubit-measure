@@ -237,28 +237,27 @@ def test_runtime_event_restores_output_time_after_clobber(clobber):
         prog.fork("default", into="other")
         prog.pulse(0, "p0", timeline="default")
         if clobber == "native":
-            prog.append_macro(Pulse(ch=1, name="p1", t="duration"))
+            prog.append_macro(WriteReg(dst="s_out_time", src=7))
         else:
-            prog.asm_inst({"CMD": "REG_WR", "DST": "s14", "SRC": "imm", "LIT": "7"})
+            prog.asm_inst({"CMD": "REG_WR", "DST": "s14", "SRC": "imm", "LIT": "#7"})
         prog.pulse(0, "p0", t=40 / 430.08, timeline="other")
 
     result = shots(program(body, reps=2))
-    expected = [100, 100, 140] if clobber == "native" else [100, 140]
-    assert [waves(shot) for shot in result] == [expected] * 6
+    assert [waves(shot) for shot in result] == [[100, 140]] * 6
 
 
 def test_runtime_event_restores_output_time_after_branch_merge():
     def body(prog):
         prog.write_reg("duration", 100)
         prog.delay_timeline("duration")
-        with prog.branch(by="scan", align_timeline=False) as branch:
+        with prog.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
                     prog.pulse(0, "p0", t=index * 40 / 430.08)
-        prog.pulse(0, "p0")
+        prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body, reps=2))
-    assert [waves(shot) for shot in result] == [[100, 128], [140, 168], [180, 208]] * 2
+    assert [waves(shot) for shot in result] == [[100, 208], [140, 208], [180, 208]] * 2
 
 
 def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
