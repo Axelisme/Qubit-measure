@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，timeline 來源範圍與 runtime recipe 分離
+**Last updated:** 2026-10-31，軸分量、Abs 範圍證明與 runtime recipe
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -234,16 +234,20 @@ Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，
 原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
 未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
 
-編譯器以來源 ID、有方向的起點→終點與沿該 loop 軸的逐點偏差描述時間範圍。
-同 loop 的 sweep、選表與定點換算共用 loop 名稱作 ID。仿射來源的偏差為零。
-作者 register 與量測結果選表各自獨立，提供 range_hint 也不會讓它繼承 loop 相關性。
-線性式先按 ID 合併，再沿各自的一維軸取界，最後加總不同 ID 的界。
-Max/min 保留符號式。同單一軸的 choice 整體沿該軸投影，跨軸的 choice 依分配代數與分支界投影。
-真正跨 loop 的非線性結果使用新 ID。跨 loop 的 ceil 與定點換算保留線性部分，另加有界取整誤差。
-超過 64 個展平分支時，編譯器改用獨立保守範圍，並記錄分支數與 warning。
-Runtime 結尾、支配與重疊證明、overflow 檢查都從這些式子取界，不另存一套結尾 min/max。
-Runtime recipe 另存 loop、sweep、選表、定點與捕獲結尾的產生方式，執行仍讀已捕獲的 register。
-偏差與誤差只供編譯期證明，不配置時間 DMEM。
+編譯器以軸 ID 對齊時間分量。同 loop 的 sweep、選表與定點換算共用 loop 名稱作 ID。
+已知分量是一維 numpy 陣列。只有範圍的分量是獨立未知軸的係數，常數使用大小為 1 的固定軸。
+作者 register 的每次寫入、量測結果選表與取整誤差各自獨立，range_hint 不建立 loop 相關性。
+加減先合併同軸分量並消去零項，再加總各軸的界。證明不建立多維網格。
+同單一已知軸的非線性運算逐點計算。跨軸 ceil 與定點換算保留原式，另加有界取整誤差。
+跨軸 max/min 使用線性部分加有理係數的 Abs 項，允許負係數及巢狀 Abs。
+正規化合併同類項，消去零係數，並在已知符號時化簡 Abs。
+取界依共用軸分連通塊，在塊內分支定界並剪枝。每塊超過 20 個未定號 Abs 項時退回區間界。
+退回只影響證明，不改執行值，也不把保守 slack 當成實際差距來拒絕 relax_delay。
+不可變節點快取範圍，支配判斷以正規化相減式快取結果。
+Runtime 結尾、支配、重疊與 overflow 都從運算式取界，不另存結尾 min/max。
+Runtime recipe 保留原整數候選與捕獲值，每個 join 只物化一次實際 max。
+後續操作讀取捕獲的 register，不從 Abs 證明式重建 max 或重讀已覆寫的來源。
+編譯期分量與誤差不配置時間 DMEM。
 
 Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
 Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。

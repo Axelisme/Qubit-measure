@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from ._timeline_bounds import CycleBounds
 
 CycleValues = NDArray[np.int64] | NDArray[np.object_]
+CycleLimits = tuple[Fraction | None, Fraction | None]
 Scalar = int | Fraction
 MAX_ABS_TERMS = 20
 
@@ -73,6 +74,7 @@ def cycle_axis(
 CONST_AXIS = CycleAxis("constant", "const", 1, 1, np.asarray([1]), CycleProducer())
 Component = CycleValues | Scalar
 AxisDomains = dict[object, NDArray[np.int64]]
+Components = tuple[tuple[CycleAxis, Component], ...]
 
 
 def _component_scale(component: Component, coefficient: Scalar) -> Component:
@@ -112,14 +114,14 @@ class TimeVariable:
 
     constant: Scalar
     terms: tuple[tuple[CycleAxis, Scalar], ...]
-    components: tuple[tuple[CycleAxis, Component], ...]
+    components: Components
 
     def __init__(
         self,
         constant: Scalar = 0,
         terms: tuple[tuple[CycleAxis, Scalar], ...] = (),
         *,
-        components: tuple[tuple[CycleAxis, Component], ...] | None = None,
+        components: Components | None = None,
     ) -> None:
         if components is None:
             components = ((CONST_AXIS, np.asarray([constant], dtype=object)),)
@@ -135,14 +137,15 @@ class TimeVariable:
             if isinstance(component, np.ndarray):
                 component = component.copy()
                 component.flags.writeable = False
-            frozen.append((axis, component))
+            if _nonzero(component):
+                frozen.append((axis, component))
         components = tuple(frozen)
         object.__setattr__(self, "constant", constant)
         object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "components", components)
 
     @cached_property
-    def limits(self) -> tuple[Fraction | None, Fraction | None]:
+    def limits(self) -> CycleLimits:
         """Return this immutable variable's cached independent-axis bounds."""
         lower: Fraction | None = Fraction(0)
         upper: Fraction | None = Fraction(0)
@@ -184,22 +187,23 @@ class TimeAbs:
     """
 
     linear: TimeVariable
-    absolute: tuple[tuple["TimeExpression", Fraction], ...]
+    absolute: "AbsTerms"
     runtime: TimeOperation = field(compare=False, hash=False)
 
     @cached_property
-    def limits(self) -> tuple[Fraction | None, Fraction | None]:
+    def limits(self) -> CycleLimits:
         """Return this immutable node's cached conservative cycle range."""
         return _abs_limits(self)
 
 
 TimeExpression = TimeVariable | TimeAbs
+AbsTerms = tuple[tuple[TimeExpression, Fraction], ...]
 
 
 def _merge_components(
-    left: tuple[tuple[CycleAxis, Component], ...],
-    right: tuple[tuple[CycleAxis, Component], ...],
-) -> tuple[tuple[CycleAxis, Component], ...]:
+    left: Components,
+    right: Components,
+) -> Components:
     groups = {axis.identity: (axis, component) for axis, component in left}
     for axis, component in right:
         previous = groups.get(axis.identity)
@@ -211,7 +215,7 @@ def _merge_components(
 
 def _component_limits(
     axis: CycleAxis, component: Component
-) -> tuple[Fraction | None, Fraction | None]:
+) -> CycleLimits:
     if isinstance(component, np.ndarray):
         return Fraction(component.min()), Fraction(component.max())
     a, b = (
@@ -223,7 +227,7 @@ def _component_limits(
     )
 
 
-def expression_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
+def expression_limits(value: TimeExpression) -> CycleLimits:
     """Return cached bounds without reading mutable runtime storage."""
     return value.limits
 
@@ -457,7 +461,7 @@ def reduce_loop_time(
             components.append((CONST_AXIS, np.asarray([amount], dtype=object)))
         else:
             components.append((source, c if last else c * count))
-    merged: tuple[tuple[CycleAxis, Component], ...] = ()
+    merged: Components = ()
     for component in components:
         merged = _merge_components(merged, (component,))
     return TimeVariable(components=merged)
@@ -582,7 +586,7 @@ def _connected_blocks(value: TimeAbs) -> list[TimeAbs]:
     return blocks
 
 
-def _interval_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
+def _interval_limits(value: TimeExpression) -> CycleLimits:
     linear, absolute = _parts(value)
     lower, upper = linear.limits
     for argument, coefficient in absolute:
@@ -624,7 +628,7 @@ def _signed_linear(
 
 def _domain_limits(
     value: TimeVariable, domains: AxisDomains
-) -> tuple[Fraction | None, Fraction | None]:
+) -> CycleLimits:
     components = tuple(
         (
             axis,
@@ -666,7 +670,7 @@ def _constrain_domains(
                     continue
                 previous = domains[axis.identity]
                 kept = previous[
-                    np.asarray(component[previous] + rest_upper >= 0, dtype=bool)
+                    np.asarray(np.asarray(component[previous], dtype=object) + np.asarray(rest_upper, dtype=object) >= 0, dtype=bool)
                 ]
                 if not len(kept):
                     return None
@@ -744,7 +748,7 @@ def _linear_extreme(
 
 def _constrained_limits(
     value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: AxisDomains
-) -> tuple[Fraction | None, Fraction | None]:
+) -> CycleLimits:
     lower, upper = _domain_limits(value, domains)
     components = {axis.identity: c for axis, c in value.components}
     for constraint in constraints:
@@ -768,7 +772,7 @@ def _constrained_limits(
     return lower, upper
 
 
-def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
+def _block_limits(value: TimeAbs) -> CycleLimits:
     arguments = _abs_arguments(value)
     if len(arguments) > MAX_ABS_TERMS:
         return _interval_limits(value)
@@ -779,7 +783,7 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
         for identity, axis in axes.items()
         if axis.values is not None
     }
-    leaves: list[tuple[Fraction | None, Fraction | None]] = []
+    leaves: list[CycleLimits] = []
     pending: list[
         tuple[dict[TimeExpression, int], tuple[TimeVariable, ...], AxisDomains]
     ] = [({}, (), domains)]
@@ -831,7 +835,7 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
     )
 
 
-def _abs_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
+def _abs_limits(value: TimeAbs) -> CycleLimits:
     axes = expression_axes(value)
     if len(axes) <= 1:
         points = evaluate_time(value, axes)
@@ -873,12 +877,21 @@ def _linear_scale(value: TimeVariable, coefficient: Scalar) -> TimeVariable:
 
 def _parts(
     value: TimeExpression,
-) -> tuple[TimeVariable, tuple[tuple[TimeExpression, Fraction], ...]]:
+) -> tuple[TimeVariable, AbsTerms]:
     return (
         (value, ())
         if isinstance(value, TimeVariable)
         else (value.linear, value.absolute)
     )
+
+
+def _structural_key(value: TimeExpression) -> tuple[object, ...]:
+    linear, absolute = _parts(value)
+    components = tuple(sorted(
+        (_component_key(axis, component) for axis, component in linear.components),
+        key=repr,
+    ))
+    return components, tuple((_structural_key(argument), coefficient) for argument, coefficient in absolute)
 
 
 def _orientation(value: TimeExpression) -> int:
@@ -898,7 +911,7 @@ def _orientation(value: TimeExpression) -> int:
 
 def _normalized(
     linear: TimeVariable,
-    absolute: tuple[tuple[TimeExpression, Fraction], ...],
+    absolute: AbsTerms,
     runtime: TimeOperation,
 ) -> TimeExpression:
     combined: dict[TimeExpression, Fraction] = {}
@@ -921,7 +934,7 @@ def _normalized(
             combined[term] = combined.get(term, Fraction(0)) + coefficient * amount
     terms = tuple(
         sorted(
-            ((x, c) for x, c in combined.items() if c), key=lambda item: repr(item[0])
+            ((x, c) for x, c in combined.items() if c), key=lambda item: repr(_structural_key(item[0]))
         )
     )
     return TimeAbs(linear, terms, runtime) if terms else linear
@@ -948,12 +961,16 @@ def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
     return _normalized(_linear_add(a, b), (*x, *y), TimeOperation("add", (left, right)))
 
 
-@lru_cache(maxsize=4096)
 def difference_limits(
     left: TimeExpression, right: TimeExpression
-) -> tuple[Fraction | None, Fraction | None]:
-    """Cache normalized structural differences for dominance, not runtime values."""
-    return expression_limits(add_time(left, scale_time(right, -1)))
+) -> CycleLimits:
+    """Cache the normalized difference structure, not operand bounds or storage."""
+    return _difference_range(add_time(left, scale_time(right, -1)))
+
+
+@lru_cache(maxsize=4096)
+def _difference_range(difference: TimeExpression) -> CycleLimits:
+    return expression_limits(difference)
 
 
 def _binary_choice(

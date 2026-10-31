@@ -19,6 +19,7 @@ from ._timeline_expression import (
     ceiled_time,
     choose_time,
     cycle_axis,
+    difference_limits,
     evaluate_time,
     expression_axes,
     expression_limits,
@@ -1171,11 +1172,9 @@ class RuntimeMath(TimedMacro):
         """Prove coverage with exact identities or the common source-range rule."""
         if known_maximum(end, previous) is end:
             return True
-        difference = add_time(
-            time_expression(self.prog, end),
-            scale_time(time_expression(self.prog, previous), -1),
+        lower, _ = difference_limits(
+            time_expression(self.prog, end), time_expression(self.prog, previous)
         )
-        lower, _ = expression_limits(difference)
         return lower is not None and lower >= 0
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
@@ -1238,10 +1237,9 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
-        difference = add_time(
-            runtime_expression(left), scale_time(runtime_expression(right), -1)
+        lower, upper = difference_limits(
+            runtime_expression(left), runtime_expression(right)
         )
-        lower, upper = expression_limits(difference)
         if lower is not None and lower >= 0:
             return a
         if upper is not None and upper <= 0:
