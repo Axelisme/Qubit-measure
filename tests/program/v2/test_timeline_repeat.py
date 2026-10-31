@@ -75,6 +75,32 @@ def test_variable_repeat_shadows_default_without_advancing_reference():
     assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
 
 
+@pytest.mark.parametrize("align", [False, True])
+@pytest.mark.parametrize("count,hint", [(2, None), ("count", None), ("count", (0, 3))])
+def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(align, count, hint):
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        prog.delay_timeline(14 / 430.08)
+        with prog.branch(by="scan", align_timeline=align) as cases:
+            with cases.case(0):
+                with prog.repeat("outer", 2, advance_ref=False):
+                    with prog.repeat("inner", count, advance_ref=False, range_hint=hint):
+                        prog.pulse(0, "p0")
+            with cases.case(1):
+                prog.delay_timeline(28 / 430.08)
+        prog.pulse(1, "p1", timeline="default")
+
+    shots = _shots(_program(body, initialize, reps=2))
+    n = 2 if count == 2 else 3
+    case0 = [14 + 28 * i for i in range(2 * n)] + [14 + 56 * n]
+    case1 = [14 + (56 * n if align else 28)]
+    assert [_waves(s) for s in shots] == [case0, case1] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [42 + 56 * n, 42 + (56 * n if align else 28)] * 2
+
+
 @pytest.mark.parametrize("parent", ["default", "drive"])
 def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_iteration(
     parent,
