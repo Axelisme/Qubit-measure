@@ -53,7 +53,6 @@ class JPAOptimizeAnalysis:
 
 
 class JPAOptCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -326,7 +325,12 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         ]
         for ax, label in zip(
             axes,
-            ("Iteration", "JPA Flux value (a.u.)", "JPA Frequency (MHz)", "JPA Power (dBm)"),
+            (
+                "Iteration",
+                "JPA Flux value (a.u.)",
+                "JPA Frequency (MHz)",
+                "JPA Power (dBm)",
+            ),
             strict=True,
         ):
             ax.set(xlabel=label, ylabel="SNR (a.u.)")
@@ -345,10 +349,19 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             artists = []
             for viewer, xs in zip(
                 viewers,
-                (point_indices, sampled_params[:, 0], sampled_params[:, 1], sampled_params[:, 2]),
+                (
+                    point_indices,
+                    sampled_params[:, 0],
+                    sampled_params[:, 1],
+                    sampled_params[:, 2],
+                ),
                 strict=True,
             ):
-                artists.extend(viewer.set(xs, np.abs(data), colors=sampled_phases.astype(np.float64)))
+                artists.extend(
+                    viewer.set(
+                        xs, np.abs(data), colors=sampled_phases.astype(np.float64)
+                    )
+                )
             return artists
 
         def plot_fn(data: NDArray[np.float64]) -> None:
@@ -383,15 +396,15 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                     stop=context.scope.stop,
                     progress=False,
                 )
-                set_rf_frequency(
-                    context.devices[cfg.jpa_rf_dev], 1e6 * params[idx, 1]
-                )
+                set_rf_frequency(context.devices[cfg.jpa_rf_dev], 1e6 * params[idx, 1])
                 set_rf_power(context.devices[cfg.jpa_rf_dev], params[idx, 2])
 
                 # 3. Compare reset-only and pi-prepared readout for this candidate.
                 tracker = MomentTracker()
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
                 builder.emit(Reset("reset", cfg.reset))
@@ -404,13 +417,17 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(
-                    prog, soc,
+                    prog,
+                    soc,
                     options=RunOptions(
                         converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=cfg.skew_penalty,
                         ),
                     ),
-                    trackers=[tracker], rounds=cfg.rounds,
+                    trackers=[tracker],
+                    rounds=cfg.rounds,
                 )
 
         # 4. Keep candidates, search phases, and measured SNR paired by iteration.

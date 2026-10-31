@@ -18,8 +18,8 @@ from zcu_tools.program.v2 import (
     PulseReadout,
     Reset,
     SweepCfg,
-    TimelineBuilder,
     TablePulseReadout,
+    TimelineBuilder,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -66,17 +66,43 @@ class HomophasalSamplingCfg(ConfigBase):
 
 
 class FreqCfg(ConfigBase):
-
-
-
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+        ),
+    ]
     sampling_mode: Annotated[SamplingMode, FieldMeta(label="Sampling mode")] = "linear"
     homophasal: Annotated[
         HomophasalSamplingCfg | None, FieldMeta(label="Homophasal")
     ] = None
 
-
-
-
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
     @model_validator(mode="after")
     def _validate_sampling_cfg(self) -> FreqCfg:
@@ -186,12 +212,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         return self._run_homophasal(cfg, freqs, context=context)
 
     def _run_linear(
-        self, cfg: FreqCfg, freqs: NDArray[np.float64], *, context: RunContext,
+        self,
+        cfg: FreqCfg,
+        freqs: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> FreqResult:
         signals = spectrum_buffer(freqs, plots=context.plots)
         with Schedule(None, signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                context.soccfg,
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
             )
             freq = builder.add_sweep("freq", cfg.freq)
             builder.emit(Reset("reset", cfg.reset))
@@ -200,26 +232,38 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         return FreqResult(freqs=freqs, signals=signals.array)
 
     def _run_homophasal(
-        self, cfg: FreqCfg, freqs: NDArray[np.float64], *, context: RunContext,
+        self,
+        cfg: FreqCfg,
+        freqs: NDArray[np.float64],
+        *,
+        context: RunContext,
     ) -> FreqResult:
         signals = spectrum_buffer(freqs, plots=context.plots)
         readout_cfg = cfg.readout.with_updates(freq=float(freqs[0]))
         freq_words, ro_freq_words = readout_freq_words(
-            context.soccfg, freqs, gen_ch=readout_cfg.gen_ch,
-            ro_ch=readout_cfg.ro_ch, mixer_freq=readout_cfg.mixer_freq,
+            context.soccfg,
+            freqs,
+            gen_ch=readout_cfg.gen_ch,
+            ro_ch=readout_cfg.ro_ch,
+            mixer_freq=readout_cfg.mixer_freq,
             nqz=readout_cfg.nqz,
         )
         with Schedule(None, signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                context.soccfg,
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
             )
             builder.add_loop("freq", len(freqs))
             builder.emit(Reset("reset", cfg.reset))
             # DDS table updates wrap for the next rep, preserving phase timing.
             builder.emit(
                 TablePulseReadout(
-                    "readout", readout_cfg, idx_reg="freq",
-                    freq_words=freq_words, ro_freq_words=ro_freq_words,
+                    "readout",
+                    readout_cfg,
+                    idx_reg="freq",
+                    freq_words=freq_words,
+                    ro_freq_words=ro_freq_words,
                 ),
             )
             sched.run_acquire(builder.build(), context.soc, rounds=cfg.rounds)

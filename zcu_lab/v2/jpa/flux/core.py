@@ -37,7 +37,6 @@ class FluxAnalysis:
 
 
 class FluxCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -146,7 +145,9 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 tracker = MomentTracker()
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
                 builder.emit(Reset("reset", cfg.reset))
@@ -159,13 +160,17 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(
-                    prog, soc,
+                    prog,
+                    soc,
                     options=RunOptions(
                         converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=cfg.skew_penalty,
                         ),
                     ),
-                    trackers=[tracker], rounds=cfg.rounds,
+                    trackers=[tracker],
+                    rounds=cfg.rounds,
                 )
 
         # 4. Return the SNR trace in the requested flux-coordinate order.

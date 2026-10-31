@@ -37,7 +37,6 @@ class FreqAnalysis:
 
 
 class FreqCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi pulse")]
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
@@ -112,6 +111,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="JPA Frequency (MHz)", ylabel="Signal Difference")
         line = live_line(ax)
+        configure_axes(ax)
 
         @context.plots.on_plot_thread
         def update(data):
@@ -128,14 +128,14 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                 if cfg.jpa_rf_dev is not None:
-                    set_rf_frequency(
-                        context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6
-                    )
+                    set_rf_frequency(context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6)
 
                 # 3. Compare reset-only and pi-prepared readout in one GE sweep.
                 tracker = MomentTracker()
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 builder.add_loop("ge", 2)
                 builder.emit(Reset("reset", cfg.reset))
@@ -148,13 +148,17 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(
-                    prog, soc,
+                    prog,
+                    soc,
                     options=RunOptions(
                         converter=lambda _raw, tracker=tracker: snr_as_signal(
-                            [tracker], ge_axis=1, skew_penalty=cfg.skew_penalty,
+                            [tracker],
+                            ge_axis=1,
+                            skew_penalty=cfg.skew_penalty,
                         ),
                     ),
-                    trackers=[tracker], rounds=cfg.rounds,
+                    trackers=[tracker],
+                    rounds=cfg.rounds,
                 )
 
         # 4. Keep SNR paired with the actual acquisition-order coordinates.

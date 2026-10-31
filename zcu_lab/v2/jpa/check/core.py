@@ -33,7 +33,6 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class CheckCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     jpa_rf_dev: Annotated[
@@ -118,13 +117,13 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         # 2. Acquire OFF first, then ON; the final pump state is not restored.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for output, step in sched.scan("JPA on/off", outputs.tolist()):
-                set_output(
-                    context.devices[cfg.jpa_rf_dev], self.OUTPUT_MAP[output]
-                )
+                set_output(context.devices[cfg.jpa_rf_dev], self.OUTPUT_MAP[output])
 
                 # 3. Reset before each frequency-swept readout pulse.
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))

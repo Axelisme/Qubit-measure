@@ -37,7 +37,6 @@ class LookbackAnalysis:
 
 
 class LookbackCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
@@ -102,8 +101,10 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         # Compile reset→optional preparation→readout before acquisition so an
         # interrupted trace still has its fixed sample-time axis and buffer.
         builder = TimelineBuilder(
-            context.soccfg, reps=1,
-            initial_delay=run_cfg.initial_delay, relax_delay=run_cfg.relax_delay,
+            context.soccfg,
+            reps=1,
+            initial_delay=run_cfg.initial_delay,
+            relax_delay=run_cfg.relax_delay,
         )
         builder.emit(Reset("reset", run_cfg.reset))
         builder.emit(Pulse("init_pulse", run_cfg.init_pulse))

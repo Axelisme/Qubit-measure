@@ -28,13 +28,38 @@ from zcu_lab.v2.onetone._shared import (
 class RangeFindCfg(ConfigBase):
     """Pulse-readout acquisition for a wide absolute-frequency survey."""
 
-
-
-
-
-
-
-
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    readout: Annotated[
+        PulseReadout.Cfg,
+        FieldMeta(
+            label="Readout",
+            description="填入 resonator readout 設定。先用 lookback 取得 TOF，再以 onetone 取得 kappa，確認 trigger offset 與 waveform duration，單位 us。",
+        ),
+    ]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="填入 absolute MHz 起訖值。range_find 不會從已知中心自動設定掃描窗。",
+        ),
+    ]
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 DEFAULT_MIN_SEPARATION_MHZ = 1.0
@@ -133,7 +158,9 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         signals = spectrum_buffer(freqs, plots=context.plots)
         with Schedule(None, signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
-                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                context.soccfg,
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
             )
             freq = builder.add_sweep("freq", cfg.freq)
             builder.emit(Reset("reset", cfg.reset))

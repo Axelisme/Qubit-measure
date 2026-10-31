@@ -29,7 +29,6 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FluxDepCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     flux_dev: Annotated[
@@ -157,7 +156,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             history = np.full((10, len(freqs)), np.nan)
             for offset in range(min(10, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = (*heatmap.set(dev_values, freqs, real), *lines.set(freqs, history))
+            artists = (
+                *heatmap.set(dev_values, freqs, real),
+                *lines.set(freqs, history),
+            )
             return artists
 
         fig.show()
@@ -177,13 +179,18 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
 
                 # Reset at each frequency, then excite and measure the resonator.
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))
                 builder.emit(PulseReadout("readout", cfg.readout, freq=freq))
                 step.run_acquire(
-                    builder.build(), soc, **(acquire_kwargs or {}), rounds=cfg.rounds,
+                    builder.build(),
+                    soc,
+                    **(acquire_kwargs or {}),
+                    rounds=cfg.rounds,
                 )
 
         # Publish the final map without treating an acquisition error as success.

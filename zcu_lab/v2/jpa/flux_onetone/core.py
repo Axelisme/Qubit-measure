@@ -27,7 +27,6 @@ class OneToneFluxResult:
 
 
 class OneToneFluxCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     jpa_flux_dev: Annotated[
@@ -150,7 +149,9 @@ class OneToneFluxExp(Experiment[OneToneFluxResult, OneToneFluxCfg]):
 
                 # 3. Reset, then read out at each board-swept frequency.
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))

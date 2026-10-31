@@ -17,7 +17,13 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 )
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
-from zcu_tools.program.v2 import GainSweep, PulseReadout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    GainSweep,
+    PulseReadout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import minus_background, rescale
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -41,7 +47,6 @@ def _positive_snr_or_none(value: float | None) -> float | None:
 
 
 class PowerDepCfg(ConfigBase):
-
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
@@ -159,10 +164,11 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-
                 # Repeat reset/readout across frequency at this fixed gain.
                 builder = TimelineBuilder(
-                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
+                    soccfg,
+                    reps=cfg.reps,
+                    relax_delay=cfg.relax_delay,
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
                 builder.emit(Reset("reset", cfg.reset))
@@ -170,11 +176,14 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                     PulseReadout("readout", cfg.readout, freq=freq, gain=step.value),
                 )
                 step.run_acquire(
-                    builder.build(), soc,
+                    builder.build(),
+                    soc,
                     options=RunOptions(
                         stop_condition=snr_checker(
-                            signals_buffer[step], cfg.earlystop_snr,
-                            gaindep_signal2real, after_check=update_snr,
+                            signals_buffer[step],
+                            cfg.earlystop_snr,
+                            gaindep_signal2real,
+                            after_check=update_snr,
                         ),
                     ),
                     rounds=cfg.rounds,

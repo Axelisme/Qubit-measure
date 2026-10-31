@@ -26,7 +26,6 @@ class FreqResult:
 class LinearFreqCfg(ConfigBase):
     """One-tone acquisition settings, averaging, delays and absolute frequency grid."""
 
-
     reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[
         PulseReadoutCfg,
@@ -62,7 +61,10 @@ class LinearFreqCfg(ConfigBase):
 
 
 def linear_freqs(
-    freq: SweepCfg, readout: PulseReadoutCfg, *, context: RunContext,
+    freq: SweepCfg,
+    readout: PulseReadoutCfg,
+    *,
+    context: RunContext,
 ) -> NDArray[np.float64]:
     """Expand the absolute MHz sweep onto the readout's hardware frequency grid.
 
