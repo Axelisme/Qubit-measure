@@ -203,6 +203,68 @@ def test_native_register_reference_advance_preserves_unconsumed_end():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [68] * 3
 
 
+def test_static_branch_joins_case_maximum_and_allows_next_placement():
+    def body(prog):
+        prog.fork("default", into="untouched")
+        prog.delay_timeline(7 / 430.08, timeline="untouched")
+        with prog.branch(by="scan") as branch:
+            with branch.case(0):
+                prog.delay_timeline(10 / 430.08)
+            with branch.case(2):
+                prog.delay_timeline(30 / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", timeline="untouched")
+
+    result = shots(program(body))
+    # Cases end at 10/0/30, so default resumes at 30 on every point.
+    # No closing reference advance may shift untouched's independent cycle 7.
+    assert [waves(s) for s in result] == [[30, 7]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
+
+
+@pytest.mark.parametrize("explicit_join", [False, True])
+def test_branch_local_forks_merge_only_into_their_unjoined_ancestor(explicit_join):
+    def body(prog):
+        prog.fork("default", into=["p", "q", "untouched"])
+        prog.delay_timeline(9 / 430.08, timeline="untouched")
+        with prog.branch(by="scan") as branch:
+            with branch.case(1):
+                prog.delay_timeline(20 / 430.08, timeline="p")
+                prog.delay_timeline(40 / 430.08, timeline="q")
+                prog.fork("p", into="local")
+                prog.fork("local", into="leaf")
+                prog.delay_timeline(80 / 430.08, timeline="leaf")
+                if explicit_join:
+                    prog.join("leaf", into="q")
+                    prog.join("local", into="q")
+        prog.pulse(0, "p0", timeline="p")
+        prog.pulse(1, "p1", timeline="q")
+        prog.sync(timeline="untouched")
+        prog.pulse(0, "p0", t=200 / 430.08)
+
+    result = shots(program(body))
+    # leaf ends at 20+80=100. Unjoined: p=100,q=40. Explicit: p=20,q=100.
+    # Untouched stays at 9, so the native pulse after its sync is at 209.
+    expected = [20, 100, 209] if explicit_join else [100, 40, 209]
+    assert [waves(s) for s in result] == [expected] * 3
+
+
+def test_runtime_branch_keeps_per_case_closing_sync():
+    loader = LoadValue("time", [10, 20, 30], "scan", "loaded")
+
+    def body(prog):
+        prog.emit(loader)
+        prog.fork("default", into="untouched")
+        with prog.branch(by="scan") as branch:
+            with branch.case(1):
+                prog.delay_timeline("loaded")
+        # Native pulse observes shared reference, not a managed end.
+        prog.pulse(0, "p0", t=0)
+
+    result = shots(program(body, initialize=lambda p: p.declare(loader)))
+    assert [waves(s) for s in result] == [[0], [20], [0]]
+
+
 def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
     def body(prog):
         prog.fork("default", into="external")
