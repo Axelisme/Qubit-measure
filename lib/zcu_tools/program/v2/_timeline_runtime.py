@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
+from qick.asm_v2 import AsmInst, CondJump, Jump, Label, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
@@ -408,10 +408,6 @@ class RuntimeMath(TimedMacro):
         since those ends were computed. Other variables must be known on the
         point grid or supplied in inputs.
         """
-        axes = expression_axes(expression)
-        points = evaluate_time(expression, axes)
-        if points is not None:
-            return self.lookup([int(value) for value in points.flat], axes)
         for captured in captured_ends:
             delta = self._captured_delta(expression, runtime_expression(captured))
             if delta is not None:
@@ -664,65 +660,40 @@ class RuntimeMath(TimedMacro):
     def selected_end(
         self, selector: str, values: tuple[float | QickParam, ...]
     ) -> RuntimeEnd:
-        """Ceil raw us offsets once, selected by a certified arbitrary register.
+        """Select statically ceiled candidate offsets without allocating time data.
 
-        Native axes inside each candidate remain native axes; selector is a
-        separate table dimension. Bounds and initialization are checked at this
-        execution position and every selector/dependency write is audited.
-        Offsets may be signed32; the aggregate owner checks the final end.
+        Each candidate is scalar or integer-affine after its static ceil. Native
+        loop axes retain their register initialization. The already certified
+        selector chooses one candidate at runtime; unknown cross-grid expressions
+        are rejected by align_end rather than replaced by an upper bound.
         """
-        axes = self._selected_axes(values)
-        count = math.prod(axes.values())
-        points = self._selected_points(values, axes)
-        lower, upper = min(points), max(points)
+        candidates = tuple(align_end(self.prog, value) for value in values)
+        operands = tuple(self.cycles(value) for value in candidates)
+        lower = min(value.minimum for value in operands if value.minimum is not None)
+        upper = max(value.maximum for value in operands if value.maximum is not None)
         self.check(lower, upper)
-        proof = self.prog._time_bounds
-        limits = {selector: CycleBounds(0, len(values) - 1)}
-        index = self.scratch(0)
-        # Index arithmetic is compiler-owned. It does not certify the author
-        # selector as a native sweep or relax the selector's input proof.
-        native = None
-        if axes:
-            native = sweep_table_index(
-                self.prog, axes, name=f"_selected_grid_{len(self.prog.reg_dict)}"
-            )
-            proof.register(native, CycleBounds(0, count - 1), (), tuple(axes))
-            limits[native] = CycleBounds(0, count - 1)
-        self.check(0, len(values) * count - 1)
-        self.operations.append(WriteReg(dst=index, src=selector))
-        for bit in bin(count)[3:]:
-            self.operations.append(WriteRegOp(dst=index, lhs=index, op="+", rhs=index))
-            if bit == "1":
-                self.operations.append(
-                    WriteRegOp(dst=index, lhs=index, op="+", rhs=selector)
-                )
-        if native is not None:
-            self.operations.append(WriteRegOp(dst=index, lhs=index, op="+", rhs=native))
-        offset = self.prog.add_timing_dmem(points, owner=self.prog._timing_table_owner)
         register = self.allocate()
-        operation = DmemLookup(
-            dst=register, index=index, offset=offset, address=self.scratch(1)
-        )
-        proof.register(register, CycleBounds(lower, upper), (operation,), (), limits)
-        proof.capture_inputs(self.prog, register, (), limits)
-        proof.defined.add(register)
-        proof.watch_signed(self.prog, register)
-        self.operations.append(operation)
-        candidates = tuple(
-            point_time(
-                selector,
-                axes,
-                np.asarray(points[start : start + count], dtype=np.int64).reshape(
-                    tuple(axes.values())
-                ),
-            )
-            for start in range(0, len(points), count)
-        )
+        book = self.prog._timeline_book
+        prefix = f"_timeline_select_{book.selection_count}"
+        book.selection_count += 1
+        for index, operand in enumerate(operands):
+            if index < len(operands) - 1:
+                self.operations.append(CondJump(
+                    arg1=selector, op="-", arg2=index, test="NZ",
+                    label=f"{prefix}_{index}",
+                ))
+            self.operations.append(WriteReg(dst=register, src=operand.register))
+            if index < len(operands) - 1:
+                self.operations.extend((
+                    Jump(label=f"{prefix}_end"), Label(label=f"{prefix}_{index}"),
+                ))
+        self.operations.append(Label(label=f"{prefix}_end"))
         return RuntimeEnd(
-            register,
-            lower,
-            upper,
-            expression=select_time(source_expression(self.prog, selector), candidates),
+            register, lower, upper,
+            expression=select_time(
+                source_expression(self.prog, selector),
+                tuple(time_expression(self.prog, value) for value in candidates),
+            ),
         )
 
     def cycles(self, value: Time) -> RuntimeEnd:

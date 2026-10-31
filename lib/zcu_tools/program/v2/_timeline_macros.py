@@ -156,6 +156,7 @@ class TimelineBoundary(Macro):
         super().preprocess(prog)
         if self.section == "reset":
             self.book.ends = {"default": 0.0}
+            self.book.selection_count = 0
             self.book.cycle_axes.clear()
             self.book.source_expressions.clear()
             self.book.branch_provenance.clear()

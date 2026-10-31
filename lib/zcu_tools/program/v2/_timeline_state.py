@@ -349,6 +349,7 @@ class TimelineBook:
 
     def __init__(self):
         self.ends: dict[str, Time] = {"default": 0.0}
+        self.selection_count = 0
         self.shell_wait_bound: int | None = None
         self.cycle_axes: dict[str, CycleVariable] = {}
         self.source_expressions: dict[str, TimeExpression] = {}
