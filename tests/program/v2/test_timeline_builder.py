@@ -36,11 +36,12 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
         builder.repeat("r", 2, advance_ref=False),
     ):
         builder.emit(drive)
+        builder.delay_timeline(5 / 430.08)
     builder.emit(drive)
     prog = builder.build()
-    assert [waves(s) for s in shots(prog)] == [[0, 43, 86], [86 if align else 0]] * 2
+    assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
     prog.compile()
-    assert [waves(s) for s in shots(prog)] == [[0, 43, 86], [86 if align else 0]] * 2
+    assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
 
 
 def test_builder_forwards_author_register_time_hint(mock_soccfg):

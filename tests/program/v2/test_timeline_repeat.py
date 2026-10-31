@@ -144,6 +144,24 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
         _program(body)
 
 
+def test_aligned_case_reconstructs_variable_repeat_with_pulse_and_delay():
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        with prog.branch(by="scan", align_timeline=True) as cases:
+            with cases.case(0), prog.repeat("r", 2, advance_ref=False):
+                prog.pulse(0, "p0")
+                prog.delay_timeline(5 / 430.08)
+            with cases.case(1):
+                prog.delay_timeline(10 / 430.08)
+        prog.pulse(1, "p1", timeline="default")
+
+    shots = _shots(_program(body, initialize))
+    assert [_waves(s) for s in shots] == [[0, 33, 66], [66]]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [94, 94]
+
+
 @pytest.mark.parametrize("align", [False, True])
 def test_branch_inside_variable_repeat_retains_iteration_origin(align):
     def initialize(prog):
