@@ -178,7 +178,6 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
-                builder.sync()
                 builder.emit(Join(prepare_f1, prepare_f2))
                 builder.emit(Join(drive_f1, drive_f2))
                 builder.emit(Join(contrast_f1, contrast_f2))

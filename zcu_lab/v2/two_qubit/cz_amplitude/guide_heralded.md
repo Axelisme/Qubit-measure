@@ -57,6 +57,7 @@ Form calibrations. Missing saved cfg stops the fit.
 ## Notebook
 
 Use the adapter with a complete saved or operator-reviewed cfg.
+`point_view` is the bound PointView for the save destination.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -64,9 +65,9 @@ from zcu_lab.v2.two_qubit.cz_amplitude.core_heralded import CZAmplitudeHeraldedE
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(CZAmplitudeHeraldedExp())
-exp.run(cfg)
+record = exp.run(cfg)
 exp.analyze(None)
-exp.save_run("data", "classified_cz_amplitude_heralded")
+exp.save_run(point_view, source=record)
 ```
 
 ## Excited-excited control

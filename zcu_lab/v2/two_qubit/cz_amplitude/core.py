@@ -221,7 +221,6 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset))
-        builder.sync()
         builder.emit(
             Join(
                 Pulse("prepare_f1", config.x180_f1), Pulse("prepare_f2", config.x180_f2)

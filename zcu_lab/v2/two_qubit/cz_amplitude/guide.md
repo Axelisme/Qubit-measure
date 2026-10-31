@@ -118,6 +118,7 @@ See the [heralded guide](guide_heralded.md) for post-selection and pass fraction
 ## Notebook
 
 Use the adapter with a complete saved or operator-reviewed cfg.
+`point_view` is the bound PointView for the save destination.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -125,9 +126,9 @@ from zcu_lab.v2.two_qubit.cz_amplitude.core import CZAmplitudeExp
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(CZAmplitudeExp())
-exp.run(cfg)
+record = exp.run(cfg)
 exp.analyze(None)
-exp.save_run("data", "classified_cz_amplitude")
+exp.save_run(point_view, source=record)
 ```
 
 The common gain scale is a hardware sweep in one compiled program.

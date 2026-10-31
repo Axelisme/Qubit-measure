@@ -19,7 +19,9 @@ class ConstructivePhaseAnalysis(RabiAnalysis):
     """Maximum-rate relative phase in degrees or an explicit unresolved reason.
 
     interference_quality describes the ordinary least-squares rate² fit at the
-    valid phase coordinates. relative_phase_deg is atan2(C,B), not an IQ phase
+    valid phase coordinates. interference contains measured phases and rates²,
+    the dense model axis and curve, and its resolved maximum phase.
+    relative_phase_deg is atan2(C,B), not an IQ phase
     quadrature or logical local-Z correction. No module is written by analysis.
     """
 

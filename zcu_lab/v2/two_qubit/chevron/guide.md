@@ -52,7 +52,8 @@ These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
 
-Each finite nonempty duration trace uses the existing undamped cosine fit.
+Each fully acquired duration trace with nonzero selected counts uses an
+undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
 Failed or degenerate fits report a reason rather than a zero rate.
 Inspect fit_quality and the measured traces against the model.
@@ -71,7 +72,8 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-Partial rounds remain visible. Fits require all requested shots at every point of a duration trace.
+Partial rounds remain visible.
+Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
@@ -85,6 +87,7 @@ Validate the actual FTF control chain separately from offline compile checks.
 ## Notebook
 
 Use the adapter with a complete saved or operator-reviewed cfg.
+`point_view` is the bound PointView for the save destination.
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -92,9 +95,9 @@ from zcu_lab.v2.two_qubit.chevron.core import ChevronExp
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(ChevronExp())
-exp.run(cfg)
+record = exp.run(cfg)
 exp.analyze(None)
-exp.save_run("data", "classified_chevron")
+exp.save_run(point_view, source=record)
 ```
 
 The coordinate is a hardware sweep. Constant and flat-top pulse durations also
