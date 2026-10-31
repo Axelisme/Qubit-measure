@@ -18,6 +18,7 @@ from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
 
@@ -55,6 +56,57 @@ def raw_of(prog):
     if raw is None:
         raise AssertionError("completed acquisition must retain raw buffers")
     return raw
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_native_timeline_acquire_uses_compiled_effects(mode):
+    env = environment(std_adc=0, seed=123, routes=((0, 0),))
+
+    class NativeProgram(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare_gen(0, nqz=1)
+            self.add_pulse(
+                0, "probe", style="const", freq=100, phase=30, gain=0.25, length=0.1
+            )
+            self.declare_readout(0, length=env.soccfg.cycles2us(16, ro_ch=0))
+            self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
+
+        def _body(self, cfg):
+            self.send_readoutconfig(0, "ro", t=0)
+            self.pulse(0, "probe", t=0, tag="native-probe")
+            self.trigger([0], t=0)
+
+    try:
+        prog = NativeProgram(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+        if mode == "integrated":
+            result = prog.acquire(env.soc, progress=False)
+            assert result[0].shape == (1, 2)
+        else:
+            result = prog.acquire_decimated(env.soc, progress=False)
+            assert result[0].shape == (2, 16, 2)
+        np.testing.assert_array_equal(result[0], 0)
+        raw = raw_of(prog)[0]
+        assert raw.shape == (2, 1, 2)
+        assert raw.dtype == np.int64
+        np.testing.assert_array_equal(raw, 0)
+        request = env.soc.binding.last_request
+        assert request is not None
+        assert request.mode == mode
+        assert request.reps == 2
+        assert request.sequence == 0
+        assert len(env.soc.binding.rounds) == 1
+        point = request.materialize_point(0)
+        (event,) = point.events
+        assert event.source == "native-probe"
+        assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
+        assert event.gain == pytest.approx(0.25, abs=1e-4)
+        (readout,) = point.readouts
+        assert readout.channel == 0
+        assert readout.generator_channels == (0,)
+        assert readout.samples == 16
+        assert readout.frequency_mhz == pytest.approx((100,), abs=1e-5)
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_explicit_zero_noise_preserves_shapes_and_raw():
