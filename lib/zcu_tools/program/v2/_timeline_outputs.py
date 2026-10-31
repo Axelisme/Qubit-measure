@@ -219,7 +219,8 @@ class TimelinePlacedTrigger(Trigger):
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
-        self.width = placement_time(prog, self.width)
+        if self.width is not None:
+            self.width = placement_time(prog, self.width)
         if isinstance(origin, RuntimeEnd):
             start = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
