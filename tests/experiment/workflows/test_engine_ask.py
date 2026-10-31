@@ -80,8 +80,6 @@ def test_pending_answer_type_and_parse_are_readonly_and_allow_retry(rig: Rig) ->
         assert rig.events() == before
         assert question(rig).request_id == request_id
         assert not future.done()
-        with pytest.raises(InvalidRunState):
-            rig.engine.resume("run")
         rig.engine.answer("run", Decision(value=7), request_id=request_id)
         assert future.result(timeout=10).lifecycle == "done"
     assert rig.engine.pending_answer_type("run") is None

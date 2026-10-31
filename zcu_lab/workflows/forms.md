@@ -81,7 +81,7 @@ Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不�
 
 Headless tab owner 將 fixed context/storage、typed cached device mapping、software provenance 與 native plan 交給該 run 的 controller。
 Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 `await env.run(core.run, cfg)` acquisition。
-Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 保留同一 workflow coroutine，重試被 Pause 中斷的 operation，不在 Resume 讀硬體。
+每個 operation 只呼叫一次。Ask 等答時保留 operation、lease、plan、accepted input、capture 與 Plots。
 Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 Completed.facts。
 Stop 等 producer 返回與 terminal delivery 後才 finish。Busy tab 拒絕 close；replacement Start 或成功 close 才 release presentation，不 disconnect 共用硬體。
 

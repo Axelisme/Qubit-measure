@@ -508,7 +508,7 @@ Workflow 工具在同一 measure MCP session，與既有 recipe `answer` 分開�
 | `workflow_close` | `tab_id`，回 `tab_id/closed`。Busy 回 false，不替 caller Stop。 |
 | `workflow_status` | 可選 `run_id`。明填回 native status 與 tab 識別，省略/null 回 names 與全部 opened tabs。 |
 | `workflow_start` | `tab_id/run_id`，可選 `plan/tunables` batches。回 pending `handle`，用既有 `wait(op=handle)` 觀察終局。 |
-| `workflow_pause/resume/stop` | 明填 native `run_id`。Pause 保留 lease，Resume 重用原 run 與 handle，Stop 維持 script scope，等 terminal delivery。 |
+| `workflow_stop` | 明填 native `run_id`。Stop 維持 script scope，等 terminal delivery。 |
 | `cancel` | 明填 `run_id`，可選 scope 與 expected，經 `workflow.cancel` 核對 native active_path，不另建 workflow execution。 |
 | `workflow_form` | `tab_id/form`，form 是 plan 或 tunables。可選 batch 只 preview，回 input/values/errors。 |
 | `workflow_describe_form` | 同上另給 typed `path`，root 是 []。只加同一 candidate 的單層 metadata，不回整棵 schema。 |
@@ -540,7 +540,7 @@ data 帶目前 pending_request_id 或 null，不改 lifecycle、不記 accepted 
 `last_exchange` 保留最近問題、已接受的 answer 或 null，以及
 waiting/submitted/answered/cancelled 狀態。它與 GUI 共用 headless owner。
 Submitted 不表示已接受，錯型答案不記入 answer。整個 coroutine 留在同一 worker，
-Pause、Ask、Resume 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
+Ask 與 Answer 都不新增 worker segment。Stop 在該 worker 交 None
 並執行清理，terminal owner delivery 才釋放 RUN。
 
 Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目前 operation 圖名為 `operation/<name>`。新 attempt 整組替換 operation 圖，terminal 保留最新一組。Workflow 層登記圖名時拒絕 `operation/` 前綴。
@@ -551,8 +551,8 @@ kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_
 outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
 OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
 Running 或 paused 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
-operation 的 cfg。Pause 打斷的 stale partial 在 Resume 後重試原 request，完整結果
-只等 Resume 交付。Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
+operation 的 cfg。每個 operation 只呼叫一次，合作停止的回傳值直接交給作者。
+Status 仍用公開讀取／polling，不新增 lifecycle subscribe。
 
 ## 分析、互動與寫回
 

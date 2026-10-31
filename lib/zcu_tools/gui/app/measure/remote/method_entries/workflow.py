@@ -67,17 +67,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
         operation=True,
     ),
-    _entry(
-        "pause",
-        "Request cooperative Pause, retaining the operation and RUN lease until resume/terminal delivery.",
-        (_RUN,),
-    ),
-    _entry(
-        "resume",
-        "Resume a delivered paused run in the worker under the same RUN lease and operation.",
-        (_RUN,),
-        operation=True,
-    ),
     method_entry(
         "workflow.cancel",
         "workflow:h_workflow_cancel",

@@ -97,7 +97,7 @@ class WorkflowPane(QWidget):
         self._add_feedback(left, column)
         actions = QHBoxLayout()
         self._buttons: dict[str, QPushButton] = {}
-        for caption in ("Refresh", "Start", "Pause", "Resume", "Stop"):
+        for caption in ("Refresh", "Start", "Stop"):
             button = QPushButton(caption, left)
             self._scope.connect(
                 button.clicked,
@@ -189,13 +189,6 @@ class WorkflowPane(QWidget):
         scroll.setWidget(body)
         column.addWidget(scroll)
         if kind == "tunables":
-            self._pause_hint = QLabel(
-                "Resume 會重做未提交的點；可先 Apply 新的 tunables", page
-            )
-            self._pause_hint.setObjectName("workflow.pause_hint")
-            self._pause_hint.setWordWrap(True)
-            make_label_selectable(self._pause_hint)
-            column.addWidget(self._pause_hint)
             button = QPushButton("Apply", page)
             self._scope.connect(button.clicked, lambda: self._command("Apply"))
             self._apply = button
@@ -266,9 +259,6 @@ class WorkflowPane(QWidget):
         lifecycle = "pending" if snapshot.busy else "idle"
         if status is not None:
             lifecycle = status.lifecycle
-        if lifecycle == "paused" and self._status.text() != "paused":
-            self._subtabs.setCurrentIndex(1)
-        self._pause_hint.setVisible(lifecycle == "paused")
         self._status.setText(lifecycle)
         self._scope_labels["active_path"].setText(
             "" if status is None else status.active_path
@@ -309,24 +299,9 @@ class WorkflowPane(QWidget):
         accepted = snapshot.status is not None and snapshot.run_id is not None
         for caption in ("Refresh", "Start"):
             self._buttons[caption].setVisible(not snapshot.busy)
-        self._buttons["Pause"].setVisible(snapshot.busy and lifecycle == "running")
-        self._buttons["Resume"].setVisible(
-            snapshot.busy
-            and lifecycle == "paused"
-            and snapshot.pending_question is None
-        )
         self._buttons["Stop"].setVisible(snapshot.busy)
         self._buttons["Refresh"].setEnabled(idle)
         self._buttons["Start"].setEnabled(idle)
-        self._buttons["Pause"].setEnabled(
-            writable and accepted and lifecycle == "running"
-        )
-        self._buttons["Resume"].setEnabled(
-            writable
-            and accepted
-            and lifecycle == "paused"
-            and snapshot.pending_question is None
-        )
         self._buttons["Stop"].setEnabled(snapshot.busy)
         self._apply.setEnabled(
             writable and accepted and lifecycle in {"running", "pausing", "paused"}
@@ -411,10 +386,6 @@ class WorkflowPane(QWidget):
             self._message.clear()
         elif run_id is None:
             raise RuntimeError("Workflow has not started")
-        elif command == "Pause":
-            self._control.pause(run_id)
-        elif command == "Resume":
-            self._control.resume(run_id)
         elif command == "Stop":
             if self._ctrl.control_identity.status().holder != "gui":
                 self._ctrl.control_identity.reclaim_local()

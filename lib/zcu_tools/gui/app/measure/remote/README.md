@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-31，analyze error propagation，wire 135／GUI 168
+**Last updated:** 2026-10-31，workflow 單次 operation，wire 136／GUI 169
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -126,12 +126,12 @@ GUI／MCP 的所有權模型允許問答期間的 draft 編輯與替換，見 AD
 
 ## Workflow namespace
 
-`workflow.open/close/start/status/form/describe_form/edit_form/tunables/pause/resume/stop/cancel/records/figures/figure/answer`
+`workflow.open/close/start/status/form/describe_form/edit_form/tunables/stop/cancel/records/figures/figure/answer`
 call the same headless `WorkflowControlFacet` as Qt panes. Commands do not require
 any GUI mode or selected tab. When the GUI mounts a newly opened owner, it selects
 the new tab and switches to Workflow mode. `tab_id` names an opened draft owner;
 `run_id` names a native run. Status without run_id lists catalog names and all opened tab
-snapshots. Start/Resume operation_id uses the existing measure operation owner;
+snapshots. Start operation_id uses the existing measure operation owner;
 submission does not prove native acceptance. MCP exposes the same operation as
 an opaque handle for wait.
 
@@ -170,7 +170,7 @@ consumes the question or records an accepted answer.
 Status retains `last_exchange` with the latest question envelope, accepted
 answer fields or null, and waiting/submitted/answered/cancelled state. Host
 acknowledgement proves answer validation and delivery, not run completion.
-Pause, Resume and Answer retain one worker and RUN lease through terminal owner
+Ask and Answer retain one worker and RUN lease through terminal owner
 delivery; RPC/UI code never executes the author. Committed records project their
 directory, UTC commit time, read-order revisions, qualified model name and
 actual operation-attempt facts alongside the encoded authored record.

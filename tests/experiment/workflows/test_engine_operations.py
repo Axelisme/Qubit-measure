@@ -1,4 +1,4 @@
-"""Cooperative async operation, Pause and request-bound Ask contracts."""
+"""Cooperative async operations and request-bound Ask contracts."""
 
 from __future__ import annotations
 
@@ -121,66 +121,6 @@ def until(predicate: Callable[[], bool], label: str) -> None:
     finally:
         timer.cancel()
         timer.join()
-
-
-def test_pause_retries_an_interrupted_call_without_returning_partial_to_author(
-    rig: Rig,
-) -> None:
-    engine, paths, _devices = rig
-    ready, entered = Event(), Event()
-    calls: list[int] = []
-    delivered: list[int] = []
-
-    @w.workflow("pause", "Resume the same suspended request")
-    async def script(
-        env: w.WorkflowEnv[int], plan: Plan, tun: w.Live[Tunables]
-    ) -> None:
-        iterations = env.iterations()
-        try:
-            iteration = next(iterations)
-
-            def acquire(ctx: CallContext) -> int:
-                calls.append(ctx.epoch)
-                if len(calls) == 1:
-                    entered.set()
-                    ready.set()
-                    assert ctx.scope.stop.event.wait(30), (
-                        "Pause must reach the active operation"
-                    )
-                    return -1
-                assert not ctx.scope.stop.is_set()
-                return 42
-
-            result = await iteration.call(acquire)
-            assert isinstance(result, w.Completed)
-            delivered.append(result.value)
-            assert not result.stop_requested
-        finally:
-            iterations.close()
-
-    start(engine, paths, script)
-    thread, statuses = worker(engine, ready)
-    try:
-        assert ready.wait(30), "The worker must enter its operation or settle"
-        assert entered.is_set(), statuses
-        engine.pause("run")
-        until(
-            lambda: (
-                (status := engine.status()) is not None and status.lifecycle == "paused"
-            ),
-            "paused operation",
-        )
-        assert delivered == []
-        engine.resume("run")
-        thread.join(30)
-    finally:
-        if thread.is_alive():
-            engine.stop("run")
-            thread.join(30)
-    assert not thread.is_alive()
-    assert delivered == [42]
-    assert calls == [0, 1]
-    assert statuses[-1].lifecycle == "done"
 
 
 def test_answers_are_bound_to_the_original_request_id(rig: Rig) -> None:

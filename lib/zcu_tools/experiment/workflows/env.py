@@ -59,8 +59,8 @@ class _Attempt:
 class Displays:
     """Retain named progress bars until the run's producer has drained.
 
-    progress is a concrete runtime factory. Named bars survive operation retries
-    and Pause. The engine closes them at terminal; Plots remains host-owned.
+    progress is a concrete runtime factory. Named bars survive operations and
+    Ask. The engine closes them at terminal; Plots remains host-owned.
     """
 
     def __init__(self, progress: ProgressFactory) -> None:
@@ -116,10 +116,9 @@ class EnvHooks:
     """Keep iteration storage and lifecycle policy in the execution owner.
 
     directory lazily mirrors the explicit receiver scope. commit snapshots a model
-    before record publication. boundary acknowledges suspension or raises the
-    original control I/O error. stopping reads explicit cancellation; question
-    marks Ask suspension/return. next_attempt returns the nearest iteration's
-    birth number (zero outside iterations) and its actual attempt number, including retries;
+    before record publication. boundary raises the original control I/O error;
+    question marks Ask suspension/return. next_attempt returns the nearest
+    iteration's birth number (zero outside iterations) and its call number;
     operation_finished persists their facts; device_setup retains the requested
     full typed settings.
     """
@@ -127,7 +126,6 @@ class EnvHooks:
     directory: Callable[[Scope], Path]
     commit: Callable[[Scope, BaseModel], None]
     boundary: Callable[[], None]
-    stopping: Callable[[], bool]
     question: Callable[[Literal["waiting", "answered"]], None]
     next_attempt: Callable[[Scope], tuple[int, int]]
     operation_finished: Callable[[Scope, OperationFacts], None]
@@ -177,7 +175,7 @@ class WorkflowEnv[C](Scope):
 
     @property
     def started_at(self) -> datetime:
-        """Return the original aware UTC run start, unchanged by Resume."""
+        """Return the original aware UTC run start throughout this run."""
         return self._started_at
 
     def read_identity(self) -> RunIdentity:
@@ -210,12 +208,11 @@ class WorkflowEnv[C](Scope):
     ) -> Completed[T]:
         """Run fn(ctx) in the executor and deliver its unchanged value.
 
-        ctx is the host CallContext: explicit operation scope and starting epoch.
+        ctx is the host CallContext with the explicit operation scope.
         Use closures for other capabilities. Child-cancelled work starts with its
         stopped token and cooperatively returns a partial/empty value.
-        Every exception propagates unchanged into the author. Pause keeps this
-        await pending: interrupted attempts restart with the same callable;
-        naturally completed attempts wait for Resume without being repeated.
+        The callable runs once. Every exception propagates unchanged into the
+        author; cooperative child cancellation delivers its returned value.
         Root stop raises ordinary ScriptCancelled before new work or after drain.
         Completed.facts is the same completion-time OperationFacts written to
         journal and commit, including iteration birth, attempt and stopped.
@@ -232,68 +229,44 @@ class WorkflowEnv[C](Scope):
         *,
         name: str | None = None,
     ) -> Completed[T]:
-        while True:
-            attempts: list[_Attempt] = []
+        attempts: list[_Attempt] = []
 
-            def invoke(ctx: CallContext, attempts: list[_Attempt] = attempts) -> T:
-                return self._invoke(scope, fn, attempts, ctx)
+        def invoke(ctx: CallContext) -> T:
+            return self._invoke(scope, fn, attempts, ctx)
 
-            completions: list[CallResult[T]] = []
-            cancelled: ScriptCancelled | None = None
-            self._hooks.boundary()
-            try:
-                result = await self._host.call(
-                    invoke, scope=scope, name=name, on_completed=completions.append
-                )
-            except ScriptCancelled as error:
-                if not completions:
-                    raise
-                result = completions[0]
-                cancelled = error
-            except BaseException as error:
-                if attempts:  # Executor admission can fail before an attempt starts.
-                    self._record_attempt(
-                        scope,
-                        kind,
-                        attempts[0],
-                        "raised",
-                        f"{type(error).__name__}: {error}",
-                    )
+        completions: list[CallResult[T]] = []
+        cancelled: ScriptCancelled | None = None
+        self._hooks.boundary()
+        try:
+            result = await self._host.call(
+                invoke, scope=scope, name=name, on_completed=completions.append
+            )
+        except ScriptCancelled as error:
+            if not completions:
                 raise
-            attempt = attempts[0]
-            # Descendant cancellation does not set the operation stop bit.
-            # Use the atomic host snapshot, never a later control-state read.
-            attempt.stopped = result.stopped
-            discard = (
-                result.epoch != self._host.epoch
-                and result.stopped
-                and not self._hooks.stopping()
-            )
-            facts = self._complete_attempt(scope, kind, attempt, discard=discard)
-            if cancelled is not None:
-                raise cancelled
-            self._hooks.boundary()
-            await self._host.wait_until_resumed()
-            if self.cancelled:
-                raise ScriptCancelled()
-            if discard:
-                continue
-            return Completed(result.result, result.stop_requested, facts)
-
-    def _complete_attempt(
-        self,
-        scope: Scope,
-        kind: OperationKind,
-        attempt: _Attempt,
-        *,
-        discard: bool,
-    ) -> OperationFacts:
-        """Classify the immutable completion snapshot before any cancel exception."""
-        if discard:
-            return self._record_attempt(
-                scope, kind, attempt, "discarded", "Pause interrupted this attempt"
-            )
-        return self._record_attempt(scope, kind, attempt, "completed")
+            result = completions[0]
+            cancelled = error
+        except BaseException as error:
+            if attempts:  # Executor admission can fail before an attempt starts.
+                self._record_attempt(
+                    scope,
+                    kind,
+                    attempts[0],
+                    "raised",
+                    f"{type(error).__name__}: {error}",
+                )
+            raise
+        attempt = attempts[0]
+        # Descendant cancellation does not set the operation stop bit.
+        # Use the atomic host snapshot, never a later control-state read.
+        attempt.stopped = result.stopped
+        facts = self._record_attempt(scope, kind, attempt, "completed")
+        if cancelled is not None:
+            raise cancelled
+        self._hooks.boundary()
+        if self.cancelled:
+            raise ScriptCancelled()
+        return Completed(result.result, result.stop_requested, facts)
 
     def _invoke[T](
         self,
@@ -356,9 +329,9 @@ class WorkflowEnv[C](Scope):
         nearest iteration birth number, attempt and stopped bit.
         Every core exception propagates unchanged into the author.
         Child cancellation delivers a partial/empty record. Root stop raises
-        ScriptCancelled after completion recording. Pause retries the captured cfg
-        with a new plot collection. Each attempt finishes before delivery or
-        discard; the next attempt releases the previous presentation. A core
+        ScriptCancelled after completion recording. The callable runs once.
+        Each operation finishes its plots before delivery; the next operation
+        releases the previous presentation. A core
         exception remains primary if finish also fails (cleanup adds a note).
         A finish-only failure propagates instead of delivering Completed.
         Framework journal/commit envelopes retain attempt facts and snapshots;
@@ -406,7 +379,7 @@ class WorkflowEnv[C](Scope):
         """Apply a captured full settings model with cooperative operation stop.
 
         The device owner revalidates fields and enforces limits. Errors propagate
-        unchanged. Pause retries the same captured settings. Child cancellation
+        unchanged. The device is invoked once. Child cancellation
         still invokes the device with a stopped token; root stop rejects new work.
         Completed.facts records this setup attempt with device_snapshot=None;
         no snapshot read is required.
@@ -423,8 +396,8 @@ class WorkflowEnv[C](Scope):
         """Wait for an aware deadline through call; Stop cooperatively returns.
 
         A naive deadline raises ValueError. A past target returns immediately.
-        Pause retries the same deadline, not a new relative delay. Completed.facts
-        records this wait attempt with device_snapshot=None and its stop bit.
+        The clock is invoked once. Completed.facts records this wait attempt
+        with device_snapshot=None and its stop bit.
         """
         if target.tzinfo is None or target.utcoffset() is None:
             raise ValueError("Wait target must be timezone-aware")
@@ -449,7 +422,7 @@ class WorkflowEnv[C](Scope):
             self._hooks.question("answered")
 
     def execute_commit(self, scope: Scope, record: BaseModel) -> None:
-        """Publish this receiver's snapshot synchronously, without waiting for Resume."""
+        """Publish this receiver's snapshot synchronously, including during cleanup."""
         self._hooks.commit(scope, record)
 
     @property

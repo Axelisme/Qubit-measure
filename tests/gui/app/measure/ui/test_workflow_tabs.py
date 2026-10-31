@@ -350,7 +350,7 @@ def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
     _shot(driver, tmp_path, "fork-cancelled")
 
 
-def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
+def test_running_close_lock_and_badge_navigation(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
     _ready(driver)
@@ -377,12 +377,6 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.click(object_name="workflow.badge")
     _shot(driver, tmp_path, "06-badge-navigation")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
-    driver.click("Pause")
-    qt_until(lambda: _status(driver, "paused"), label="native pause gate")
-    _shot(driver, tmp_path, "07-paused")
-    driver.click_tooltip("Close synthetic (1)")
-    _shot(driver, tmp_path, "08-paused-close-refused")
-    assert driver.tabs("synthetic (1)").captions == ("synthetic (1)", "synthetic (2)")
     driver.select_tab("Tunables")
     _shot(driver, tmp_path, "08a-tunables")
     driver.enter_text(value="0.5", object_name="form.input.gain")
@@ -390,9 +384,6 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.click("Apply")
     _shot(driver, tmp_path, "09-tunables-applied")
     assert driver.observe(object_name="workflow.message").text == "Applied revision 1"
-    driver.click("Resume")
-    qt_until(lambda: _status(driver, "running"), label="resumed")
-    _shot(driver, tmp_path, "10-resumed")
     driver.click("Stop")
     qt_until(lambda: _status(driver, "cancelled"), label="stop delivered")
     _shot(driver, tmp_path, "11-stopped")
@@ -406,8 +397,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     ("state", "expected"),
     [
         ("idle", {"Refresh", "Start"}),
-        ("running", {"Pause", "Stop"}),
-        ("paused", {"Resume", "Stop"}),
+        ("running", {"Stop"}),
         ("waiting", {"Stop"}),
     ],
 )
@@ -428,10 +418,6 @@ def test_run_state_shows_only_meaningful_controls(
             lambda: _status(driver, "paused" if state == "waiting" else "running"),
             label="control scenario start delivery",
         )
-    if state == "paused":
-        driver.click("Pause")
-        # Pause interrupts the wait and retains the invocation at its native gate.
-        qt_until(lambda: _status(driver, "paused"), label="control scenario paused")
     _ask_shot(driver, tmp_path, f"controls-02-{state}")
     try:
         assert _controls(driver) == expected

@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-10-31（單次 operation）
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -50,7 +50,7 @@ EnginePorts 注入 clock、devices、WorkflowPlots、progress factory 與 contex
 共用 ScriptHost 執行作者 coroutine、finally 與 executor drain，全部結束後才允許 replacement Start。
 
 `await scope.call(fn)` 在 executor 執行 `fn(CallContext)`，回 Completed[T]。
-CallContext 提供本次 operation 的 Scope 與起跑 epoch。其他能力由 closure 顯式傳入。
+CallContext 提供本次 operation 的 Scope。其他能力由 closure 顯式傳入。
 `Completed.value` 是原始值，`stop_requested` 記本次 operation 收到停止請求。
 Host 記錄本次 operation、祖先或子孫的 selector cancel，並在完成時讀 operation 自己的 stop bit。
 取消無關 sibling 不標記本次 operation。停止 iteration 會標記它之後出生的 operation，新 iteration 不繼承。
@@ -65,12 +65,10 @@ Cfg 必須是 `zcu_tools.cfg_model.ConfigBase`。每次 attempt 深複製原 cap
 
 `scope.get_device_cfg(name)` live-read detached 完整設定。
 `await scope.setup_device(name, cfg)` 把完整 capture 與 operation stop bit 交給 device owner。
-`await scope.wait_until(target)` 接 aware 絕對 deadline，Pause 重試同一 deadline。
+`await scope.wait_until(target)` 接 aware 絕對 deadline，呼叫 clock 一次。
 這兩種 operation 不要求 device snapshot。Driver 的驗證、限制與 I/O 錯誤照原 cause 傳播。
 
-Pause 停止目前 operation、增加 epoch 並關 gate，不停止 iteration。
-被打斷且 stale 的 attempt 留 discarded 事實。Resume 重跑同 callable 與原 capture。
-自然完成的結果只等待 gate，不重跑。框架不重新執行整個 workflow。
+每個 operation 只呼叫一次。框架不丟棄合作停止的回傳值，也不自動重跑 callable。
 
 `Engine.cancel(run_id, selector, expected=None)` 回 CancelResult，不等待 cleanup。
 Root cancel 在 Host lock 內設 bit 並記第一次 typed ack，loop wake 只排程，不等待。
@@ -95,7 +93,7 @@ GUI Stop 與 Engine.stop 共用此 owner。清理例外或 control I/O failure �
 作者 child 用 `<label>-<seq:06d>`，內建 child 用 `<kind>-<seq:06d>`。
 例如 operation:T1#1 的目錄是 `operation-000001`。Name 留在 path 與信封，不進目錄名。
 
-`scope.commit(record)` 同步提交一個 BaseModel 快照，不經 pause gate。
+`scope.commit(record)` 同步提交一個 BaseModel 快照。
 每個 scope 只能提交一次，第二次 raise ValueError。Root commit 寫 data_root/record.json。
 作者一開始建可變 record，未取得欄位為 None，再逐步填結果。
 每點用 try/finally，只在 finally 提交一次。`continue`、根取消與真實錯誤都經過這個位置。
@@ -108,7 +106,7 @@ Manifest 為每種 model 保存一次資訊用 JSON schema，不作 runtime vali
 Encoder 將非有限值轉 null。只有作者 record/summary 序列化可降級 repr，必要 metadata 與 I/O failure 不降級。
 
 作者自行保存 RunRecord、圖與其他原始檔，並在 record 記相對檔名。
-Saver 錯誤沿作者例外路徑傳播。Pause 或 Stop 不回滾檔案，框架不追蹤或刪除作者檔案。
+Saver 錯誤沿作者例外路徑傳播。Stop 不回滾檔案，框架不追蹤或刪除作者檔案。
 Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_with_metadata。
 此函式將 RunMetadata 裝入 RunRecord.metadata，保存入口只接 record，native 輸出通用 Container。
 Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
@@ -130,7 +128,7 @@ Name 是作者傳給 run／call 的 operation label，未命名或舊記錄為 N
 舊 journal 與 record 的 `acquisitions` key 在載入時忽略，不轉換或寫回。
 ProgramBuilder 的 acquire retry 與 data-driven early stop 由日誌記錄，不由 operation 推斷。
 Kind 是 run、call、setup_device 或 wait_until。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
-Attempt 在該 iteration 中從一開始，包含 Pause retries，不隨 commit 重置。
+Attempt 在該 iteration 中從一開始，每個 operation 增加一次，不隨 commit 重置。
 Stopped 是完成時 operation 自己的 bit，Completed.stop_requested 另含 Host 對子孫發出的取消請求。
 Outcome 是 completed、discarded 或 raised。只有 run 有 pre-call device snapshot。
 
@@ -148,7 +146,7 @@ Wrong model、錯誤欄位、stale 或重複 ID 不消耗新問題。QuestionMis
 Accepted answer 的記憶體交接留在 control callback，journal I/O 留在 callback 之外。
 
 `env.plots` 保留 workflow 趨勢圖。每次 scope.run 使用相同 presentation host 的獨立 operation Plots。
-返回、丟棄或失敗都先 finish，下一 attempt release 舊 operation。Core 與 finish 同時失敗時保留 core cause 並附 cleanup note。
+返回或失敗都先 finish，下一 attempt release 舊 operation。Core 與 finish 同時失敗時保留 core cause 並附 cleanup note。
 WorkflowPlots.figures 將 workflow 圖與目前 operation/<name> 圖投影給 pane/MCP。
 Workflow 圖不得使用 operation/ 前綴。保存圖時從 Completed.value.result 重畫，不依賴 live 圖位置。
 Progress bars 由 env 保留，execution owner 在 producer drain 後逐一嘗試 close，再發布終態。

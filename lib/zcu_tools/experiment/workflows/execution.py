@@ -25,7 +25,6 @@ from .journal import (
     DeviceSetup,
     OperationFinished,
     Paused,
-    PauseRequested,
     QuestionAnswered,
     RecordCommitted,
     Resumed,
@@ -128,7 +127,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._artifacts.directory,
                 self._commit,
                 self._boundary,
-                self._stopping,
                 self._question_boundary,
                 self._next_attempt,
                 self._operation_finished,
@@ -266,10 +264,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         with self._lock:
             if self._pending_error is not None:
                 raise self._pending_error
-            if self._lifecycle == "pausing":
-                self._artifacts.append(Paused(self._call_seq, self._commit_seq))
-                self._artifacts.set_lifecycle("paused")
-                self._lifecycle = "paused"
 
     def _question_boundary(self, phase: Literal["waiting", "answered"]) -> None:
         self._flush_answers()
@@ -288,53 +282,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 )
                 self._artifacts.set_lifecycle("running")
                 self._lifecycle = "running"
-
-    def _stopping(self) -> bool:
-        with self._lock:
-            return self._stop_requested
-
-    def pause(self) -> RunStatus:
-        """Record Pause intent, then acknowledge host control outside the lock."""
-        try:
-            with self._lock:
-                if self._lifecycle == "pausing":
-                    return self.status()
-                if self._lifecycle != "running":
-                    raise InvalidRunState("pause", self._lifecycle)
-                self._artifacts.append(
-                    PauseRequested(self._ports.clock.now(), self._call_seq)
-                )
-                self._artifacts.set_lifecycle("pausing")
-                self._lifecycle = "pausing"
-        except InvalidRunState:
-            raise
-        except Exception as error:
-            self._control_failure(error)
-            raise
-        self._host.pause()
-        return self.status()
-
-    def resume(self) -> RunStatus:
-        """Open the existing worker's pause gate; an Ask requires an answer instead."""
-        try:
-            with self._lock:
-                if (
-                    self._lifecycle != "paused"
-                    or self._host.pending_question is not None
-                ):
-                    raise InvalidRunState("resume", self._lifecycle)
-                self._artifacts.append(
-                    Resumed(self._commit_seq, self._tunables.revision)
-                )
-                self._artifacts.set_lifecycle("running")
-                self._lifecycle = "running"
-        except InvalidRunState:
-            raise
-        except Exception as error:
-            self._control_failure(error)
-            raise
-        self._host.resume()
-        return self.status()
 
     def _request_stop(self) -> bool:
         """Record and latch Stop under the owner lock; refuse terminal owners.

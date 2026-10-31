@@ -29,8 +29,9 @@ from __future__ import annotations
 # Point file paths use the shared parameters.yaml/library.yaml document names.
 # Global/point readiness, active three files, installed-file reload and point creation.
 # Writeback destinations report entry_name/nullable point without a kind field.
-WIRE_VERSION = 135
+# Workflow Pause/Resume controls are removed.
+WIRE_VERSION = 136
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 168
+GUI_VERSION = 169

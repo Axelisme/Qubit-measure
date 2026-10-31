@@ -118,20 +118,6 @@ def build_workflow_tools(ctx: MeasureToolContext) -> ToolTable:
             },
             ("tab_id", "run_id"),
         ),
-        "workflow_pause": _tool(
-            ctx,
-            "workflow.pause",
-            "Request cooperative Pause by native run_id, retaining the operation and RUN lease.",
-            {"run_id": _STRING},
-            ("run_id",),
-        ),
-        "workflow_resume": _tool(
-            ctx,
-            "workflow.resume",
-            "Resume the same native run, operation and lease in the worker.",
-            {"run_id": _STRING},
-            ("run_id",),
-        ),
         "workflow_stop": _tool(
             ctx,
             "workflow.stop",

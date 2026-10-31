@@ -13,7 +13,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.scope import Scope, ScriptCancelled
 from zcu_tools.experiment.workflows import Live, WorkflowEnv, saved_run
 
-from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, paused, running
+from ._engine_fakes import Cfg, Plan, Rig, Tunables, completed, running
 
 
 class Collection(BaseModel):
@@ -173,33 +173,6 @@ def test_root_cancel_raises_script_cancelled_and_runs_finally_without_error(
     assert [record.encoded_record.value for record in rig.engine.records("run")] == [
         {"value": 3, "status": "collecting"}
     ]
-
-
-def test_paused_commit_publishes_synchronously_but_new_work_waits_for_resume(
-    rig: Rig,
-) -> None:
-    committed = Event()
-    called = Event()
-
-    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        rig.engine.pause("run")
-        env.commit(Collection(value=7))
-        committed.set()
-        await env.call(lambda ctx: called.set())
-
-    rig.start(script)
-    with running(rig) as future:
-        assert committed.wait(10), (
-            "Author reaches synchronous commit after pause acknowledgement"
-        )
-        assert [
-            record.encoded_record.value for record in rig.engine.records("run")
-        ] == [{"value": 7, "status": "collecting"}]
-        assert not called.is_set()
-        paused(rig)
-        rig.engine.resume("run")
-        assert future.result(timeout=10).lifecycle == "done"
-    assert called.is_set()
 
 
 def test_operation_facts_use_iteration_birth_not_commit_count(rig: Rig) -> None:

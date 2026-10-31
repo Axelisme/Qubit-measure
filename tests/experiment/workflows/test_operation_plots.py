@@ -21,7 +21,6 @@ from ._engine_fakes import (
     Rig,
     Tunables,
     completed,
-    paused,
     running,
     until,
 )
@@ -84,64 +83,6 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
         np.testing.assert_array_equal(
             rig.plots["trend"].axes[0].lines[0].get_ydata(), [1.0]
         )
-    finally:
-        rig.close()
-
-
-def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
-    tmp_path: Path,
-) -> None:
-    host = Presentation()
-    rig = Rig(tmp_path, native=True, plot_host=host)
-    entered = Event()
-    attempts: list[Plots] = []
-    configs: list[Cfg] = []
-    delivered: list[int] = []
-
-    def acquire(cfg: Cfg, *, context: RunContext) -> int:
-        attempts.append(context.plots)
-        configs.append(cfg.model_copy(deep=True))
-        create_trace(context.plots, "measurement", "Delay", "Signal")
-        if len(attempts) == 1:
-            entered.set()
-            assert context.scope.stop.event.wait(10), "Pause must stop acquisition"
-            cfg.value = -1
-            return -1
-        return cfg.value
-
-    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
-        iterations = env.iterations()
-        try:
-            iteration = next(iterations)
-            create_trace(env.plots, "trend", "Iteration", "Value")
-            result = completed(await iteration.run(acquire, Cfg(value=9)))
-            delivered.append(result.value.result)
-            iteration.commit(Point(value=result.value.result))
-            iteration = next(iterations)
-        finally:
-            iterations.close()
-
-    try:
-        rig.start(script)
-        with running(rig) as future:
-            until(lambda: entered.is_set() or future.done(), "core operation entry")
-            assert entered.is_set(), future.result() if future.done() else None
-            rig.engine.pause("run")
-            paused(rig)
-            assert delivered == []
-            rig.engine.resume("run")
-            final = future.result(timeout=10)
-        assert final.lifecycle == "done", final.reason
-        assert delivered == [9]
-        assert configs == [Cfg(value=9), Cfg(value=9)]
-        assert all(plots["measurement"] in host.final for plots in attempts)
-        assert attempts[0] is not attempts[1]
-        assert attempts[0]["measurement"] in host.released
-        assert tuple(rig.plots) == ("trend",)
-        assert [op.outcome for op in rig.engine.records("run")[0].operations] == [
-            "discarded",
-            "completed",
-        ]
     finally:
         rig.close()
 
