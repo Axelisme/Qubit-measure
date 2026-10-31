@@ -683,8 +683,27 @@ class RepeatTimelineEnter(Macro):
         self.reference = TimelineRepeatEnter(book, parent, counter)
         self.accumulator = LoopTimelineEnter(book, parent, counter)
         self.constant = False
+        self.counter = counter
+        self.iterations: int | str = 0
+        self.maximum: int | None = None
+        self.counter_writers: tuple[Macro, ...] = ()
 
     def preprocess(self, prog) -> None:
+        self.defined = prog._time_bounds.defined.copy()
+        if self.counter is not None:
+            maximum = self.maximum
+            if maximum is None and isinstance(self.iterations, str):
+                # Only a certified count supplies an implicit finite index range.
+                # Arbitrary author counts retain their runtime-only contract.
+                if not prog._time_bounds.author_source(self.iterations):
+                    maximum = prog._time_bounds.describe(prog, self.iterations).maximum
+            if maximum is not None:
+                prog._time_bounds.register(
+                    self.counter,
+                    CycleBounds(0, max(0, maximum - 1)),
+                    self.counter_writers,
+                    (),
+                )
         incoming = self.book.end(self.parent, placement=True)
         self.constant = (
             self.tail_sync
@@ -769,6 +788,7 @@ class RepeatTimelineExit(Macro):
     ):
         self.entry = entry
         self.iterations = iterations
+        self.minimum = minimum
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
@@ -787,6 +807,8 @@ class RepeatTimelineExit(Macro):
             self.reference.preprocess(prog)
         else:
             self.accumulator.preprocess(prog)
+        if self.minimum == 0:
+            prog._time_bounds.defined.intersection_update(self.entry.defined)
 
     def translate(self, prog) -> None:
         pass

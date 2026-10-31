@@ -821,6 +821,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         fixed = FixedRepeatLoop(name, n) if isinstance(n, int) else None
         if fixed is None:
             self.open_inner_loop(name, name, n, range_hint=range_hint)
+            entry.iterations = n
+            entry.maximum = range_hint[1] if range_hint is not None else None
+            entry.counter_writers = (self.macro_list[-1],)
         else:
             self.append_macro(fixed)
         self.append_macro(RepeatTimelineBody(entry))
@@ -853,6 +856,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)
+                entry.counter_writers = (*entry.counter_writers, self.macro_list[-1])
             elif fixed is not None:
                 self.append_macro(fixed.closing)
             self.append_macro(RepeatTimelineCapture(entry))
