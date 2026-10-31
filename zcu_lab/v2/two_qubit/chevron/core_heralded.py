@@ -112,7 +112,9 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         """Acquire optional reset → herald → B11 → drive → double Xπ → terminal.
 
         Both reads emit one mux object with separate tags. Return all 81-class
-        counts, including completed partial rounds. Check context.scope.stop.
+        counts, including completed rounds on cooperative cancellation.
+        Acquisition exceptions propagate unchanged. The stop signal carries only
+        stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)

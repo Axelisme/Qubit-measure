@@ -61,7 +61,7 @@ L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次�
 `experiment.script_host.ScriptHost` 共用於 recipe 與 workflow。Caller 以 catalog 實名建立根 Scope 並交給 host，`host.root` 就是該物件。
 
 - `run(coroutine)` 在 caller worker 執行一次作者 coroutine，等 finally 與 executor drain 後返回或 raise。
-- `await call(fn, *, scope=None, name=None, on_completed=None)` 在 executor 執行 fn。未填 scope 時，operation child 掛根；明填時掛該顯式 parent。回傳 CallResult 的 epoch、partial_result、stopped 是 fn 完成時的事實。
+- `await call(fn, *, scope=None, name=None, on_completed=None)` 在 executor 執行 fn。未填 scope 時，operation child 掛根；明填時掛該顯式 parent。回傳 CallResult 的 epoch、stop_requested、stopped 是 fn 完成時的事實。`stop_requested` 記單次 operation 的停止請求，不是結果完整性。
 - on_completed 是 framework recording hook。fn 正常返回後，host 在作者 worker、operation 尚存活時呼叫一次 hook，再檢查根取消。Hook 同步、不 await、不重入；fn 或 hook 的真實例外原樣傳播。這讓 journal 與 recipe Run facts 在根取消時仍保留完成資料。
 - `await ask(question)` 回具名 Answer，公開唯一 request id。錯誤、遲到或重複答案不消耗問題。根取消使 await raise ScriptCancelled，不向作者交付 Optional。
 - `control(fn)` 與 cancel／pause／resume／answer 共用 loop 控制序列。Fn 只做 memory-only、數微秒級的操作，不 await、不阻塞、不 I/O。
@@ -88,11 +88,19 @@ Iteration generator 的 next 釋放前一趟，close 釋放最後一趟。Host �
 Commit 是同步 snapshot 寫檔，不經 pause gate。它不啟動硬體工作，取消收尾也必須能存已有成果。Async operation／ask 才經 pause gate。Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。Point 的 try/finally 同步 commit 一次，不在 finally await，根 ScriptCancelled 繼續往上傳播。
 
 - 根 workflow／recipe 被取消表示腳本本身停止。下一個 call／ask await raise 普通 Exception 子類 ScriptCancelled，不是 asyncio.CancelledError。進行中的 call 先合作 drain、保留 completion facts，再 raise。真正的 fn、recording hook 或 cleanup 例外優先傳播。
-- 根以下的取消表示等待中的工作被打斷。Acquire 只停一次取得；schedule 停該段後續取得；iteration 跳過目前這一點。後續 sibling 不繼承已釋放 child 的停止。Workflow 交付 Completed(partial_result=True) 或 Failed，由作者決定繼續、返回或重試。
+- 根以下的取消表示等待中的工作被打斷。Acquire 只停一次取得；schedule 停該段後續取得；iteration 跳過目前這一點。後續 sibling 不繼承已釋放 child 的停止。Fn 正常返回時 workflow 交付 Completed，拋錯時原錯誤傳給作者 coroutine，不把 acquire 錯誤轉成 Failed。作者決定攔錯、繼續、返回或重試。
 - run 是 operation 的選擇器別名。Recipe 只接受進行中的 tab.run；analysis／Ask／閒置時回 no run in progress。Operation 可選本地 analysis；其無結果的合作取消回 AnalysisResult(status="failed")，不冒充根取消。
-- 根取消後 finally 仍在原 worker 執行，同步 Save 保持可用。Recipe 終態為 cancelled，report=None，runs 保留 run_id、partial 與每次 Save 收據。ScriptCancelled 不記入 Host.error 或 recipe error；真實錯誤仍保留診斷。
+- 根取消後 finally 仍在原 worker 執行，同步 Save 保持可用。Recipe 終態為 cancelled，report=None，runs 保留 run_id、stop_requested 與每次 Save 收據。ScriptCancelled 不記入 Host.error 或 recipe error；真實錯誤仍保留診斷。
 
-StopSignal 的 set 只停止自己與子孫。Set_error 只記本 scope 第一個錯誤並向下停止，不改祖先 event／error。Release 向上交付 partial／error 事實，operation boundary 截止，不污染後續 sibling。GUI 單次 run 根視為 operation boundary。GUI result_state.partial_result 與 metadata stopped 讀 Run root 的 partial_result，cancel_requested 只記使用者整次 Stop 意圖。
+StopSignal 的 set 只停止自己與子孫，reason 只保存與轉交，不解析。Release 只 detach，不向上交付 partial 或 error。前端在自己的 cancel 呼叫點記錄 stop_requested，不從子層完成狀態反推結果。
+
+`stop_requested` 以單次 core.run 為單位，不是整段 ScriptHost run 的 latch。Host 在 operation 結束時讀自身 token，並記錄這次 operation 執行期間取消的實際 Scope。目標是本身、祖先或子孫時算停止請求，無關 sibling 不算。出生時祖先已停止的 child 會繼承 stop；已結束的 acquire 不污染下次 operation，取消 iteration 則同 iteration 的後續 operation 仍繼承停止。
+
+Scope.cancel 在自己的鎖下匹配唯一目標，再於設 stop 前同步以可選 on_cancel callback 交付該 Scope。Callback 不得阻塞或改樹結構；拋錯就傳原例外、不設 stop，refusal 不呼叫。呼叫端使用這個實際目標，不複製 resolver。這避免 fork 中取消 sibling 時誤記當前 operation，也不改 CancelResult 或 selector 規則。
+
+GUI 按 Stop 或被接受的 selector 選到 run root 時，cancel_requested 記整次 Stop 意圖；core 正常返回仍發布結果，terminal cancelled。只取消子孫且 core 正常返回時 terminal finished。兩者都記 stop_requested，core 拋錯一律 failed。Failed pane 的 source_operation_id 與 stop_requested 屬於該次請求，不代表有 record。Recipe 只用相同 handle 的來源補充停止事實，不借用舊 Run；補充 snapshot 查詢失敗仍傳原 acquisition error。
+
+2026-10-31，使用者對停止通道、欄位改名及 env.call 例外直接傳出的答覆為「Signal可以有reason欄位可以填，但不解析，1同意 2你怎麼做？這能做到？  3可以 4a」。Notebook 的計時器方案與作者擁有 partial 語意的責任見 [[0069]]。單次 operation 的歸屬、sibling 隔離及 GUI root 分類由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的授權裁定，並非使用者逐字指定的技術方案。
 
 Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration。Resume 開 gate。Workflow 丟棄 Pause 造成的 stale stopped attempt，重跑同 request；普通 scope cancel 直接交值。自然完成也等 gate 後交付，不重跑。主動命令仍限控制命令與步驟邊界的 tunables，不支援 Run 中改科學參數或同時等待多來源。
 

@@ -22,7 +22,7 @@ def save_native[Cfg: ConfigBase, Result](
 
     source.value supplies cfg/result; source.facts supplies UTC boundaries,
     iteration, attempt and the pre-operation device snapshot.
-    source.partial_result selects stopped completion when True, complete otherwise.
+    source.stop_requested selects stopped completion when True, complete otherwise.
     identity is env.identity for that workflow run; snapshot is the caller's
     historical entry/point capture. spec supplies the experiment tag and native
     array mapping. Compose existing RunMetadata without capturing new facts.

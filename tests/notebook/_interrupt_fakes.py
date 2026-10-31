@@ -1,5 +1,6 @@
 """Synthetic acquisition at real Schedule/program interruption seams."""
 
+import signal
 from collections.abc import Callable
 from typing import Literal
 
@@ -17,7 +18,7 @@ from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
 
 
 class PartialProgram:
-    """Return one scalar sample, or interrupt before this point's first round."""
+    """Return a scalar sample, requesting stop before the selected point."""
 
     def __init__(self, value: float, *, interrupt: bool) -> None:
 
@@ -35,7 +36,7 @@ class PartialProgram:
     ) -> NDArray[np.complex128]:
         """Emulate program output; the interrupt path returns no completed round."""
         if self.interrupt:
-            raise KeyboardInterrupt("acquire stopped")
+            signal.raise_signal(signal.SIGINT)
         return np.array(self.value, dtype=np.complex128)
 
     def acquire_decimated(self, soc: object, **kwargs: object) -> object:
@@ -44,10 +45,10 @@ class PartialProgram:
 
 
 class RoundInterruptedProgram:
-    """Emit one completed-round partial, then interrupt the same acquire.
+    """Emit one completed-round partial, then request cooperative stop.
 
     The caller requests two rounds. The completed first round contains one
-    measured voltage and two unmeasured NaNs; acquire never normally returns.
+    measured voltage and two unmeasured NaNs; acquire returns the available data.
     """
 
     def acquire(
@@ -59,10 +60,11 @@ class RoundInterruptedProgram:
         progress: bool = False,
         **kwargs: object,
     ) -> NDArray[np.complex128]:
-        """Deliver the partial through the caller's hook, then interrupt."""
+        """Deliver partial data through the hook, then request stop and return."""
         partial = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
         round_hook(1, partial, cancel_flag)
-        raise KeyboardInterrupt("acquire stopped after completed round")
+        signal.raise_signal(signal.SIGINT)
+        return partial
 
     def acquire_decimated(self, soc: object, **kwargs: object) -> object:
         """Reject decimated acquisition, which this contract test does not use."""
@@ -106,7 +108,8 @@ class InterruptedCore(SavingCore):
             else:
                 for index, step in sched.scan("point", range(3)):
                     if self.mode == "software" and index == 1:
-                        raise KeyboardInterrupt("scan body stopped")
+                        signal.raise_signal(signal.SIGINT)
+                        break
                     if self.mode == "program":
                         step.prog_builder(context.soc, context.soccfg).run_program(
                             PartialProgram(float(index + 1), interrupt=index == 1),

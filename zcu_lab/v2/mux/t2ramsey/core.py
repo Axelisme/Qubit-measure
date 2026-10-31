@@ -54,7 +54,6 @@ from zcu_lab.v2.mux.t2ramsey import MuxT2RamseyExp
 
 core = MuxT2RamseyExp()
 result = core.run(cfg, context=context)
-context.scope.stop.raise_if_error()
 source = RunRecord(cfg=cfg, result=result)
 outcomes = core.analyze(source, core.Options(fit_phase=True), plots=analysis_plots)
 ```
@@ -73,9 +72,9 @@ nominal rate. Save/load and analysis still accept this source.
 
 The hardware sweeps delay and averages reps/rounds. Cancellation keeps the mean of
 completed rounds across the whole sweep. With no completed round, IQ stays NaN.
-Call `raise_if_error()` before declaring success, then inspect `is_set()` to
-distinguish cancellation. Acquisition errors preserve their cause even with
-partial data. Build, validation and conversion errors propagate directly.
+Acquisition, build, validation and conversion errors propagate directly.
+A stop request does not classify data completeness; authors decide which
+completed-round averages are usable.
 
 Analysis accepts explicit RunRecord, including cfg=None. `fit_fringe=True`
 selects the existing damped-cosine fitter; False selects exponential decay.
@@ -228,8 +227,8 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         the delay begins after the longest first pulse. Return requested times
         (P,), average complex IQ (K,P), original tone indices, actual MHz detunes
         and source frequencies in participant order. context supplies hardware
-        and plots; check its cancel_signal.raise_if_error() before reporting
-        success. Cancellation keeps completed-round means and NaN for no data.
+        and plots. Cancellation keeps completed-round means and NaN for no data.
+        Acquisition, validation, build and conversion errors propagate.
         """
         # 1. Keep participant order while selecting drives and mux readout tones.
         cfg = MuxT2RamseyCfg.model_validate(config.model_dump())

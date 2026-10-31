@@ -193,16 +193,11 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         stop. Other BufferProtocol implementations keep caller-owned flushing.
         Callback errors propagate, but the scope still closes. Skip the flush
         when the body raises so a callback cannot replace the body exception.
-        Suppress KeyboardInterrupt and record interrupted on this scope's stop
-        signal, preserving buffered data for the caller's partial-result return.
-        Release the child token on every exit, handing completion facts to its
-        parent without setting the parent event. Other exceptions propagate.
+        Propagate every body exception unchanged, including KeyboardInterrupt.
+        Release the child token on every exit, detaching it without changing
+        the parent or reporting completion facts.
         """
         try:
-            if isinstance(exc, KeyboardInterrupt):
-                # Let the caller return buffered partial data after a Notebook stop.
-                self.mark_interrupted(exc)
-                return True
             if exc is None:
                 for buffer in self._buffers:
                     if isinstance(buffer, SignalBuffer):
@@ -392,29 +387,14 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
             # Enrich a prior stop without replacing its status or an earlier cause.
             self._outcome = replace(self._outcome, exception=exception)
 
-    def mark_interrupted(self, exc: BaseException) -> None:
-        """Stop the run after an interrupt without discarding buffered results.
-
-        Record exc on the outcome and shared stop signal only if no prior
-        non-completed outcome exists; otherwise preserve that outcome and cause.
-        """
-        reason = exception_reason(exc)
-        if self._set_outcome("interrupted", reason=reason, exception=exc):
-            self.stop.set_error("interrupted", reason, exc)
-        else:
-            self.stop.set()
-
     def mark_failed(self, exc: BaseException) -> None:
         """Stop the run after a failure without discarding buffered results.
 
-        Record exc on the outcome and shared stop signal only if no prior
-        non-completed outcome exists; otherwise preserve that outcome and cause.
+        Record exc on the author-owned outcome only if no prior non-completed
+        outcome exists; otherwise preserve that outcome and cause.
         """
-        reason = exception_reason(exc)
-        if self._set_outcome("failed", reason=reason, exception=exc):
-            self.stop.set_error("failed", reason, exc)
-        else:
-            self.stop.set()
+        self._set_outcome("failed", reason=exception_reason(exc), exception=exc)
+        self.stop.set()
 
     def _set_outcome(
         self,
@@ -438,7 +418,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         """Return whether the shared stop signal is set and record a stopped run.
 
         Preserve earlier outcomes. If stopped has no cause yet, attach exception
-        when supplied; a normal stop does not set the shared signal's error cause.
+        when supplied. The stop token carries only the request.
         """
         if self.is_stop():
             self._mark_stopped("stop requested", exception=exception)
@@ -446,10 +426,10 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         return False
 
     def prepare_retry_after_failed_attempt(self, attempt: int, retry: int) -> bool:
-        """Reset a failed outcome and shared stop cause if another attempt remains.
+        """Reset a failed outcome and stop bit if another attempt remains.
 
         attempt is the zero-based failed attempt and retry is the allowed retry
-        count. Return False without resetting stopped/interrupted outcomes or an
+        count. Return False without resetting stopped outcomes or an
         exhausted budget. The builder checks external stop before marking failed.
         Partial buffer data is retained for the next attempt.
         """

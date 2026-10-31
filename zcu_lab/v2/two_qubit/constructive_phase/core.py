@@ -126,7 +126,8 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         """Acquire optional reset → B11 → dual drive → double Xπ → terminal.
 
         Return unchanged counts, including completed rounds on cancellation.
-        Rounds accumulate at acquisition. Check context.scope.stop for errors.
+        Rounds accumulate at acquisition. Acquisition exceptions propagate unchanged.
+        The stop signal carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.relative_phase)

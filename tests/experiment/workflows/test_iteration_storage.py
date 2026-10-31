@@ -84,7 +84,7 @@ def test_acquisition_without_writer_returns_run_record_without_committing(
         assert len(outcomes) == 1
         assert outcomes[0].value.cfg == Cfg(value=7)
         assert outcomes[0].value.result == 42
-        assert not outcomes[0].partial_result
+        assert not outcomes[0].stop_requested
         assert rig.engine.records("run") == ()
         assert list(rig.paths.data_root.rglob("*.h5")) == []
     finally:

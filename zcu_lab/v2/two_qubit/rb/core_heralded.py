@@ -156,8 +156,9 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         """Acquire optional reset → herald → paired sequence → terminal.
 
         Compile once per depth/seed/arm. Each host round acquires reps shots with
-        rounds=1 and saves all 81 counts. Unfinished slots stay NaN. The caller
-        checks context.scope.stop for acquisition errors; cfg remains unchanged.
+        rounds=1 and saves all 81 counts. Unfinished slots stay NaN; cfg remains
+        unchanged. Acquisition exceptions propagate unchanged. The stop signal
+        carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         viewer = live_line(

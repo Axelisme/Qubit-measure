@@ -7,6 +7,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.interactive import PluginDefinition, Session
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.plotting.plots import Plots
 
 from .types import AnalyzeRequest, PostAnalyzeRequest
@@ -75,12 +76,13 @@ class InteractiveFrontendEnv(Protocol):
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Submit compute off-owner and return None without waiting for its result.
 
         Call on the UI owner thread. Deliver compute's result, including None,
-        to on_done on that thread; deliver compute exceptions to on_error there.
+        to on_done on that thread; deliver compute Exception or KeyboardInterrupt
+        unchanged to on_error there.
         Submission/admission failures raise synchronously. Completion callback
         failures belong to the runner's callback boundary, not the adapter;
         they are not compute failures and are not rerouted to on_error.

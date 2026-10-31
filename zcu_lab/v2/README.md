@@ -231,7 +231,9 @@ Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
 它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
 Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
-Caller 先呼叫 RunContext.scope.stop.raise_if_error()，不把 failure 的 partial data 報為成功。
+Acquisition 例外原樣傳出；core 回傳的資料由作者決定是否可分析。
+`MuxOnetoneExp.run` 與 `MuxFreqExp.run` 可接 `on_acquire_stop`，在每次外部取消的 acquire 清理後同步通知。
+Mux flux scan 用這個作者 callback 丟棄被取消的當前 flux point，不從 parent stop 推斷子層資料完整度。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## Qubit flux helpers
