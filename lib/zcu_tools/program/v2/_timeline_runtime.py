@@ -620,7 +620,7 @@ class RuntimeMath(TimedMacro):
     @staticmethod
     def covers(end: Time, previous: Time) -> bool:
         """Return whether an existing exact identity/coverage proves end >= previous."""
-        return _known_maximum(end, previous) is end
+        return known_maximum(end, previous) is end
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()
