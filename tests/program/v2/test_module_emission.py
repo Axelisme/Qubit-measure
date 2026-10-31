@@ -56,6 +56,13 @@ def _program(
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
 
 
+def _envelope_shapes(prog: TimelineProgramV2) -> list[tuple[int, ...]]:
+    envelopes = prog.envelopes[0]["envs"]
+    if not isinstance(envelopes, dict):
+        raise TypeError("QICK envelope declarations must be a mapping")
+    return [envelope["data"].shape for envelope in envelopes.values()]
+
+
 def test_same_named_distinct_pulses_keep_distinct_envelopes():
     def pulses(names):
         return [
@@ -75,10 +82,8 @@ def test_same_named_distinct_pulses_keep_distinct_envelopes():
     actual = _program(pulses(("same", "same")))
     fresh = _program(pulses(("first", "second")))
     assert actual.prog_list == fresh.prog_list
-    assert len(actual.envelopes[0]["envs"]) == 2
-    assert [env["data"].shape for env in actual.envelopes[0]["envs"].values()] == [
-        env["data"].shape for env in fresh.envelopes[0]["envs"].values()
-    ]
+    assert len(_envelope_shapes(actual)) == 2
+    assert _envelope_shapes(actual) == _envelope_shapes(fresh)
 
 
 def test_shared_pulse_definitions_deduplicate_in_each_program():

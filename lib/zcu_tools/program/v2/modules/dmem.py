@@ -44,6 +44,8 @@ def _encode_uint32_as_int32(value: int) -> int:
 
 @dataclass(frozen=True)
 class _LookupDeclaration:
+    """Dmem base word address and unpacked semantic table for one compile."""
+
     offset: int
     table: DeclaredTable
 

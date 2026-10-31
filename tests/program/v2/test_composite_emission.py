@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 
+import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import AsmInst, Macro, QickSweep1D, WriteReg
@@ -274,8 +275,8 @@ def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
     assert first.prog_list == fresh.prog_list
     assert shots(first) == shots(fresh)
     assert others[0].prog_list == other_fresh.prog_list
-    assert (
-        others[0].compile_datamem().tolist() == other_fresh.compile_datamem().tolist()
+    np.testing.assert_array_equal(
+        others[0].compile_datamem(), other_fresh.compile_datamem()
     )
     first.compile()
     assert first.prog_list == fresh.prog_list

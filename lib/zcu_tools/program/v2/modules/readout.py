@@ -335,6 +335,8 @@ class Readout:
 
 @dataclass(frozen=True)
 class _ReadoutDeclaration:
+    """Optional register-driven generator template and ADC configuration name."""
+
     runtime_pulse: Pulse | None
     runtime_ro_name: str | None
 

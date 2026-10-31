@@ -63,6 +63,8 @@ class PulseCfg(AbsModuleCfg):
 
 @dataclass(frozen=True)
 class _PulseDeclaration:
+    """Program-local QICK pulse name and its built envelope (including length)."""
+
     pulse_id: str
     waveform: AbsWaveform
 
