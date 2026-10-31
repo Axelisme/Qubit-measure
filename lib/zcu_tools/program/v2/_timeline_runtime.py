@@ -107,8 +107,9 @@ class RuntimeEnd:
     """Relative cycle end stored in register, with inclusive minimum/maximum.
 
     register is a compiler-owned data-register name. minimum/maximum bound the
-    value on every executable path, or are both None for author-owned unbounded
-    time. Arithmetic intermediates may be signed32;
+    value on every executable path. None marks an endpoint not established at
+    compile time; operations propagate unavailable bounds rather than guessing
+    a finite limit. Arithmetic intermediates may be signed32;
     final timeline ends must be nonnegative. covers lists ends proven no later than this
     value, allowing a following sync to consume them without new arithmetic.
     deferred records physical boundaries covered only after an additional proven

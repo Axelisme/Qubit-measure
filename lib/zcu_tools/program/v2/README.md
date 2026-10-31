@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，fork／join 與 reference 推進守衛
+**Last updated:** 2026-10-31，fork／join 與可選 register 時間 bounds
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
