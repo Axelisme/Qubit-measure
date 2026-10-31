@@ -369,8 +369,13 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                         fit.fit_curve,
                         label=f"{label} slope={fit.slope_deg:.5g} ± {fit.slope_error_deg:.2g} deg",
                     )
+        slope_labels = tuple(
+            "unavailable" if value is None else f"{value:.5g}"
+            for value in differences
+        )
         fig.axes[2].set_title(
-            f"ee − gg slopes (deg/gate): F1={differences[0]}, F2={differences[1]}; writeback uses gg"
+            f"ee − gg slopes (deg/gate): F1={slope_labels[0]}, F2={slope_labels[1]}\n"
+            "writeback uses gg"
         )
         for ax, label in zip(
             fig.axes,
