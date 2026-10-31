@@ -34,8 +34,6 @@ class _RunView(Protocol):
     def allow_replacement(self) -> None: ...
     def reserve_execution(self) -> None: ...
     def execute(self) -> RunStatus: ...
-    def pause(self) -> RunStatus: ...
-    def resume(self) -> RunStatus: ...
     def stop(self) -> RunStatus: ...
     def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult: ...
     def answer(self, answer: Answer, *, request_id: str) -> RunStatus: ...
@@ -56,7 +54,7 @@ class Engine[C]:
 
     start validates/persists startup but executes no author code. execute drives
     the entire coroutine synchronously on the caller worker, including retained
-    Ask/Pause waits. Control methods acknowledge loop delivery, not completion.
+    Ask waits. Control methods acknowledge loop delivery, not completion.
     They never hold the Engine lock while waiting on a cross-thread host ack.
     No hardware connections, worker threads or asyncio Tasks are created here.
     Terminal replacement requires actual worker/finally/executor drain.
@@ -101,21 +99,13 @@ class Engine[C]:
     def execute(self, run_id: str) -> RunStatus:
         """Drive the single async author until terminal on this caller worker.
 
-        Pause and Ask keep this call pending. Reentry/reexecution raises
+        Ask keeps this call pending. Reentry/reexecution raises
         InvalidRunState. Exceptions return failed with journal diagnostics.
         """
         with self._lock:
             run = self._current(run_id)
             run.reserve_execution()
         return run.execute()
-
-    def pause(self, run_id: str) -> RunStatus:
-        """Request operation stop and close the pause gate without awaiting drain."""
-        return self._current(run_id).pause()
-
-    def resume(self, run_id: str) -> RunStatus:
-        """Open the same worker's gate; a pending Ask requires answer instead."""
-        return self._current(run_id).resume()
 
     def stop(self, run_id: str) -> RunStatus:
         """Record Stop, set root and wake Ask without awaiting author cleanup."""

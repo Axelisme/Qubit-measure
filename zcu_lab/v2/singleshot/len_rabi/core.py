@@ -101,9 +101,11 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         in us and complex IQ shaped (Nlength, shots), not averaged populations.
         Later analysis jointly fits Rabi dynamics and readout distributions.
 
-        Only const and flat_top waveforms are supported. cfg.readout supplies
-        an optional circle and radius for live preview. Without a classifier,
-        raw acquisition and joint fitting still work.
+        Const, flat_top and sampled waveforms (cosine, gauss, DRAG) use the
+        same host scan, compiling one program per length. Native arb waveforms
+        raise ValueError before scanning because their length is asset-derived.
+        cfg.readout supplies an optional circle and radius for live preview.
+        Without a classifier, raw acquisition and joint fitting still work.
         Acquisition requires exactly one readout channel and raises on an
         unexpected shot-buffer shape.
         """
@@ -113,9 +115,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         cfg = deepcopy(cfg)
         classifier = rabi_preview_classifier(cfg.readout)
 
-        assert cfg.qub_pulse.waveform.style in ["const", "flat_top"], (
-            "This method only supports const and flat_top pulse style"
-        )
+        if cfg.qub_pulse.waveform.style == "arb":
+            raise ValueError("Arb waveform length is asset-derived and cannot be swept")
         lengths = sweep2array(
             cfg.length,
             "time",

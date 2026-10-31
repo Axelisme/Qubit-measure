@@ -103,7 +103,8 @@ Load Data selects a native file or saved run and preserves current Form inputs.
 The selected source fixes the historical pulse, binding and writeback destination.
 Live plots update the full sweep after each completed round. Stop retains the
 completed-round average across all points. If no round completes, signals remain NaN.
-Partial data from a failed operation retains its failure status.
+Acquisition errors propagate, and that run publishes no new record.
+A stop request does not determine whether returned data is usable for analysis.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
 Read each Writeback destination, value, quality and uncertainty.

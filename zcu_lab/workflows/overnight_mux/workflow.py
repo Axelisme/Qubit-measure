@@ -245,7 +245,7 @@ async def overnight_mux[C](  # noqa: PLR0915  # tolerated: workflow flow reads t
     Iteration cancellation skips remaining work; Stop/errors propagate after
     finally commits collected fields, then appends one sample per participant
     to the captured entry when result_path is set. Append failures propagate
-    without undoing commits or earlier rows. Pause retains local progress. Pair starts
+    without undoing commits or earlier rows. Each operation runs once. Pair starts
     follow max(now, previous completed pair's actual start + interval), matching
     overnight. Trends retain scalars only and are not automatically saved.
     """

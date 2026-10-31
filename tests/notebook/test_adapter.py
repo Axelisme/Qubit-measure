@@ -14,7 +14,6 @@ from zcu_tools.device import DeviceManager, FakeDevice
 from zcu_tools.experiment import AcquisitionEvidence, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.notebook import NotebookAdapter, NotebookExperiment
 from zcu_tools.notebook import adapter as adapter_module
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
@@ -196,7 +195,7 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     second_device = FakeDevice(fast_mode=True)
     manager.drop_device("flux")
     manager.register_device("flux", second_device)
-    core.contexts[0].scope.stop.set_error("failed", "old run", None)
+    core.contexts[0].scope.stop.set(reason="old run")
 
     first_evidence = adapter.acquisition_for(first)
     second = adapter.run(cfg)
@@ -218,7 +217,6 @@ def test_run_isolates_config_and_replaces_only_current_records() -> None:
     assert first_context.plots is not second_context.plots
     assert first_context.scope.stop is not second_context.scope.stop
     assert not second_context.scope.stop.is_set()
-    assert second_context.scope.stop.error is None
     assert first_context.devices["flux"] is first_device
     assert second_context.devices["flux"] is second_device
     assert first_context.soc is soc and second_context.soc is soc
@@ -288,7 +286,7 @@ def test_run_requires_device_manager_before_starting_operation() -> None:
     assert adapter.last_run is None
 
 
-@pytest.mark.parametrize("failure", ["core", "finish", "signal-failed"])
+@pytest.mark.parametrize("failure", ["core", "finish"])
 def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     core = _Core()
     host = _Host()
@@ -302,18 +300,9 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     previous_analysis_presentation = adapter.analysis_presentation
     core.fail_run = failure == "core"
     host.fail_present = failure == "finish"
-    if failure.startswith("signal-"):
-        core.signal_outcome = "failed"
     cfg = _Cfg(scale=9.0)
-    error_type = ScheduleOutcomeError if failure.startswith("signal-") else ValueError
-
-    with pytest.raises(error_type, match="failed") as raised:
+    with pytest.raises(ValueError, match="failed"):
         adapter.run(cfg)
-
-    if isinstance(raised.value, ScheduleOutcomeError):
-        assert raised.value.status == core.signal_outcome
-        assert isinstance(raised.value.__cause__, OSError)
-        assert str(raised.value.__cause__) == "Device unavailable"
 
     assert cfg.scale == 9.0
     assert adapter.last_run is previous_run
@@ -328,22 +317,21 @@ def test_failed_run_preserves_current_run_and_analysis(failure: str) -> None:
     )
 
 
-@pytest.mark.parametrize("outcome", ["stopped", "interrupted"])
-def test_stopped_partial_run_is_committed(outcome: str) -> None:
+def test_core_stop_request_does_not_override_returned_record() -> None:
     core = _Core()
     host = _Host()
     adapter = NotebookAdapter(
         soc=object(), soccfg=object(), device_manager=DeviceManager(), host=host
     )(core)
     previous = adapter.run(_Cfg(scale=5.0))
-    core.signal_outcome = "stopped" if outcome == "stopped" else "interrupted"
+    core.request_stop = True
 
     partial = adapter.run(_Cfg(scale=9.0))
 
     assert partial is adapter.last_run
     assert partial is not previous
     assert partial.result == 9.0
-    assert adapter.acquisition_for(partial).completion == "stopped"
+    assert adapter.acquisition_for(partial).completion == "complete"
     assert core.contexts[-1].scope.stop.is_set()
     assert host.released == []
 

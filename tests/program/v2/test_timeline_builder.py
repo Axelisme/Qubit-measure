@@ -12,6 +12,7 @@ import pytest
 from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
 from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.modules.readout import (
@@ -21,8 +22,62 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
-from tests.program.v2.timing_support import shots, waves
+from tests.program.v2.simulation.time_observations import time_us
+from tests.program.v2.timing_support import recompile, shots, waves
+
+
+@pytest.mark.parametrize("hint", [None, (0, 2)])
+@pytest.mark.parametrize("tail_sync", [False, True])
+def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
+    hint, tail_sync
+):
+    builder = v2.TimelineBuilder(
+        v2.make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0
+    )
+    builder.add_loop("depth", 2)
+    builder.emit(v2.LoadValue("load_count", [0, 2], "depth", "count"))
+    builder.delay_by_timeline()
+    pulses = [
+        v2.Pulse.Cfg(
+            ch=1,
+            nqz=1,
+            freq=200,
+            gain=gain,
+            waveform=ConstWaveformCfg(length=length),
+        )
+        for gain, length in [(0.1, 0.04), (0.2, 0.08)]
+    ]
+    with builder.repeat("gate_index", "count", range_hint=hint):
+        builder.emit(v2.LoadValue("gate", [0, 1], "gate_index", "gate"))
+        builder.emit(v2.ComputedPulse("gate_pulse", val_reg="gate", pulses=pulses))
+        if tail_sync:
+            builder.delay_by_timeline()
+    prog = builder.build()
+
+    # The two waveforms quantize to 15/31 generator clocks, then 17/35
+    # tProc cycles. The zero-count point must not inherit the previous shot.
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [[], [0, 17]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, 52] * 2
+
+    env = white_noise(std_adc=0, n_gens=2, routes=((1, 0),))
+    try:
+        request = build_compiled_request(
+            prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
+        )
+        assert request.materialize_point(0).events == ()
+        events = request.materialize_point(1).events
+        assert [event.gain for event in events] == pytest.approx([0.1, 0.2], abs=1e-4)
+        assert [
+            time_us(request.time_base, event.start_ticks) for event in events
+        ] == pytest.approx([0, 17 / 430.08])
+        assert [
+            time_us(request.time_base, event.duration_ticks) for event in events
+        ] == pytest.approx([15 / 384, 31 / 384])
+    finally:
+        env.devices.close_all_devices()
 
 
 @pytest.mark.parametrize(
@@ -115,6 +170,35 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
     assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
     prog.compile()
     assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
+
+
+def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(
+    mock_soccfg,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0, reps=2)
+    builder.add_loop("scan", 3)
+    drive = _pulse("drive")
+    builder.fork("default", into="external")
+    builder.timeline_inc(100 / 430.08, timeline="external")
+    builder.emit(drive)
+    builder.delay_by_timeline()
+    with builder.repeat("r", "scan", range_hint=(0, 2)):
+        builder.timeline_inc(15 / 430.08)
+        builder.delay_by_timeline()
+    with builder.branch(by="scan", align_timeline=False, timeline="external") as branch:
+        with branch.case(0):
+            builder.timeline_inc(5 / 430.08)
+        with branch.case(2):
+            builder.timeline_inc(15 / 430.08)
+    builder.emit(drive, timeline="external")
+
+    prog = builder.build()
+    assert [waves(shot) for shot in shots(prog)] == [[0, 105], [0, 100], [0, 115]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in shots(prog)] == [
+        148,
+        143,
+        158,
+    ] * 2
 
 
 def test_builder_forwards_author_register_time_hint(mock_soccfg):
@@ -854,6 +938,105 @@ def _pulse(name, ch=1, *, pulse_id: str | None = None):
     )
 
 
+def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
+    mock_soccfg,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    frequency = builder.add_sweep(
+        "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
+    )
+    duration = builder.add_sweep(
+        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+    )
+    for name, length in (("prepare", 77 / 384), ("drive", duration)):
+        builder.emit(
+            v2.Join(
+                *(
+                    v2.Pulse(
+                        f"{name}_{ch}",
+                        v2.PulseCfg(
+                            ch=ch,
+                            nqz=1,
+                            freq=100,
+                            gain=0.5,
+                            waveform=ConstWaveformCfg(length=0.1),
+                            post_delay=4.3 / 430.08,
+                        ),
+                        length=length,
+                        freq=frequency,
+                    )
+                    for ch in (0, 1)
+                )
+            )
+        )
+    builder.build()
+
+
+@pytest.mark.parametrize("extra_post_cycles", [0, 1])
+def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
+    mock_soccfg,
+    extra_post_cycles,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, reps=2, initial_delay=0, relax_delay=0)
+    frequency = builder.add_sweep(
+        "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
+    )
+    duration = builder.add_sweep(
+        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+    )
+    for name, length in (
+        ("prepare", 77 / 384),
+        ("drive", duration),
+        ("contrast", 77 / 384),
+    ):
+        builder.emit(
+            v2.Join(
+                *(
+                    v2.Pulse(
+                        f"{name}_{ch}",
+                        v2.PulseCfg(
+                            ch=ch,
+                            nqz=1,
+                            freq=100,
+                            gain=0.5,
+                            waveform=ConstWaveformCfg(length=0.1),
+                            post_delay=(
+                                4.3
+                                + (
+                                    extra_post_cycles
+                                    if name == "drive" and ch == 1
+                                    else 0
+                                )
+                            )
+                            / 430.08,
+                        ),
+                        length=length,
+                        freq=frequency,
+                    )
+                    for ch in (0, 1)
+                )
+            )
+        )
+    prog = builder.build()
+    # The swept fabric length uses k=8 upper conversion: 430.08/384=28/25,
+    # W=287. Each aggregate ceils (n*287 + ceil(4.3*256))/256 once.
+    # These literal ends include the permitted upper-conversion error, rather
+    # than the old exact-grid table, and keep both channels' physical coverage.
+    drive_ends = [
+        end + extra_post_cycles for end in [84, 164, 244, 323, 403, 482, 562, 642, 721]
+    ]
+    expected_waves = [[0, 0, 91, 91, 91 + end, 91 + end] for end in drive_ends]
+    expected_ends = [182 + end for end in drive_ends]
+    for _ in range(2):
+        scheduled = shots(prog)
+        assert [waves(shot) for shot in scheduled] == expected_waves * 6
+        assert [shot.body_end_cycle - shot.start_cycle for shot in scheduled] == (
+            expected_ends * 6
+        )
+        # Invalidate QICK's binary cache to exercise a fresh compile, not a no-op.
+        recompile(prog)
+
+
 def test_builder_join_and_native_outputs_match_native(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     readout = _readout()
@@ -947,7 +1130,11 @@ def test_builder_preserves_borrowed_selector_and_shared_pulse_templates(mock_soc
     fresh = build(modules(), padded=True)
     assert actual.prog_list == fresh.prog_list
     np.testing.assert_array_equal(actual.compile_datamem(), fresh.compile_datamem())
-    first.compile()
+    padded_timing = shots(actual)
+    recompile(first)
+    assert shots(actual) == padded_timing
+    recompile(actual)
+    assert shots(actual) == padded_timing
     assert first.prog_list == build(modules()).prog_list
 
     class Native(v2.TimelineProgramV2):

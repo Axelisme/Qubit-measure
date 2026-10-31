@@ -12,6 +12,7 @@ import pytest
 from zcu_tools.datafile import save
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import (
     RestoredRun,
     metadata_from_container,
@@ -399,7 +400,7 @@ def test_run_finished_calls_refresh_tab(cf):
     )
 
 
-@pytest.mark.parametrize("source", ["run", "cancelled", "load"])
+@pytest.mark.parametrize("source", ["run", "stopped", "load"])
 def test_result_commit_survives_analysis_preparation_failure(
     cf, monkeypatch, source, tmp_path
 ):
@@ -411,12 +412,14 @@ def test_result_commit_survives_analysis_preparation_failure(
     metadata = historical_metadata().model_copy(
         update={"experiment": RecordingAdapter.spec.tag}
     )
-    loaded = RunRecord(RecordingCfg(), RecordingResult(), metadata)
+    loaded = RunRecord(
+        RecordingCfg(), RecordingResult(), metadata.model_dump(mode="json")
+    )
 
     def run(cfg: RecordingCfg, *, context: RunContext):
-        if source == "cancelled":
+        if source == "stopped":
             entered.set()
-            # Cancellation assertions release the accepted run in finally.
+            # Stop assertions release the accepted run in finally.
             if not release.wait(30):
                 raise RuntimeError("test did not release partial run")
         return dataclasses.replace(loaded, cfg=cfg)
@@ -437,7 +440,7 @@ def test_result_commit_survives_analysis_preparation_failure(
         entered, release = threading.Event(), threading.Event()
 
         cf.ctrl.run_analyze_control.start_run(tab_id)
-        if source == "cancelled":
+        if source == "stopped":
             try:
                 _wait_for(entered.is_set)
                 cf.ctrl.run_analyze_control.cancel_run()
@@ -447,9 +450,12 @@ def test_result_commit_survives_analysis_preparation_failure(
         assert terminal == [
             RunFinishedPayload(
                 tab_id=tab_id,
-                outcome="cancelled" if source == "cancelled" else "finished",
+                outcome="finished",
             )
         ]
+        assert cf.ctrl.tab_control.get_tab_snapshot(tab_id).run.stop_requested is (
+            source == "stopped"
+        )
         expected_fact = TabContentFact.RUN_RESULT_COMMITTED
         cf.view.notify_diagnostic.assert_any_call(
             "error",
@@ -461,7 +467,7 @@ def test_result_commit_survives_analysis_preparation_failure(
         prepared = prepare_run_data(
             loaded, spec=RecordingAdapter.spec, comment="history"
         )
-        save(path, prepared.to_container(metadata))
+        save(path, prepared.to_container(metadata.model_dump(mode="json")))
         outcome = cf.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
         assert outcome.analysis_error == "analysis defaults unavailable"
         assert outcome.has_analyze_params is False
@@ -471,8 +477,7 @@ def test_result_commit_survives_analysis_preparation_failure(
     if source == "load":
         assert snapshot.run.result is not None
         assert snapshot.run.result.result == loaded.result
-        assert snapshot.run.result.metadata is not None
-        assert snapshot.run.result.metadata.project() == metadata
+        assert RunMetadataContent(snapshot.run.result.metadata).project() == metadata
     assert snapshot.analysis.params is None
     assert snapshot.analysis.result is None
     assert snapshot.post_analysis.result is None
@@ -631,7 +636,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
             parameters=None,
         )
     )
-    loaded = RunRecord(None, object(), historical_metadata())
+    loaded = RunRecord(None, object(), historical_metadata().model_dump(mode="json"))
     adapter = MagicMock()
     # This isolated host collaborator advertises the same Load admission as a value.
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities

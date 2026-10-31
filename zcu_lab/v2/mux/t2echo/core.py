@@ -179,7 +179,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         detune. Return requested total delays (P,), averaged complex IQ (K,P),
         original tone indices, actual detunes and source frequencies (K,).
         context supplies hardware and live plots. Cancellation keeps acquired
-        averages and NaN gaps; call cancel_signal.raise_if_error before success.
+        averages and NaN gaps. Acquisition and program errors propagate.
         """
         # 1. Keep participant order while selecting from the complete tone list.
         cfg = MuxT2EchoCfg.model_validate(config.model_dump())

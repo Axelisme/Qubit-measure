@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import FlowCfg
@@ -84,29 +84,28 @@ def test_schedule_operations_require_context():
 
 
 @pytest.mark.parametrize("loop", ["scan", "repeat"])
-def test_schedule_body_interrupt_preserves_partial_and_marks_signal(loop: str) -> None:
+def test_schedule_body_interrupt_propagates_with_buffer_intact(loop: str) -> None:
     buffer = SignalBuffer(3, dtype=np.float64)
     stop = StopSignal()
     interrupt = KeyboardInterrupt("host body stopped")
-    with Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched:
-        steps = (
-            sched.scan("point", range(3))
-            if loop == "scan"
-            else sched.repeat("point", 3)
-        )
-        for index, step in steps:
-            if index == 1:
-                raise interrupt
-            buffer[step].set(np.array(7.0))
+
+    def run() -> None:
+        with Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched:
+            steps = (
+                sched.scan("point", range(3))
+                if loop == "scan"
+                else sched.repeat("point", 3)
+            )
+            for index, step in steps:
+                if index == 1:
+                    raise interrupt
+                buffer[step].set(np.array(7.0))
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        run()
     np.testing.assert_allclose(buffer.data, [7.0, np.nan, np.nan], equal_nan=True)
-    assert sched.outcome.status == "interrupted"
-    assert sched.outcome.exception is interrupt
+    assert caught.value is interrupt
     assert not stop.is_set()
-    assert sched.stop.is_set()
-    with pytest.raises(ScheduleOutcomeError) as caught:
-        stop.raise_if_error()
-    assert caught.value.status == "interrupted"
-    assert caught.value.__cause__ is interrupt
 
 
 @pytest.mark.parametrize("error", [ValueError("body failure"), SystemExit("exit")])
@@ -119,7 +118,6 @@ def test_schedule_body_other_exception_still_propagates(error: BaseException) ->
         raise error
     assert caught.value is error
     assert sched.outcome.status == "completed"
-    assert stop.error is None
     np.testing.assert_allclose(buffer.data, [7.0, np.nan, np.nan], equal_nan=True)
 
 
@@ -228,29 +226,20 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
             fail_render = True
             raise error
 
-    if interrupted:
+    with pytest.raises(type(error)) as caught_body:
         run()
-        assert sched.outcome.status == "interrupted"
-        assert sched.outcome.exception is error
-        with pytest.raises(ScheduleOutcomeError) as caught:
-            stop.raise_if_error()
-        assert caught.value.__cause__ is error
-    else:
-        with pytest.raises(ValueError, match="body failed") as caught_body:
-            run()
-        assert caught_body.value is error
-        assert sched.outcome.status == "completed"
-        assert stop.error is None
+    assert caught_body.value is error
+    assert sched.outcome.status == "completed"
     np.testing.assert_array_equal(buffer.data, [1.0, 2.0])
 
 
 def test_schedule_step_data_operations_require_context() -> None:
     step = None
-    root = {"child": {"signals": np.full((1,), np.nan)}}
+    root = [{"signals": np.full((1,), np.nan)}]
 
     with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
-        step = next(iter(sched.batch({"child": lambda child: child}).values()))
-        assert step.path == ("child",)
+        _, step = next(sched.scan("point", [0]))
+        assert step.path == (0,)
 
     assert step is not None
     for operation in (

@@ -16,7 +16,12 @@ from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
+from zcu_tools.experiment.metadata import (
+    CfgSnapshot,
+    RunMetadataContent,
+    RunSnapshot,
+    SoftwareProvenance,
+)
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -123,8 +128,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     pane = state.get_tab(tab_id).run
     assert require_record(pane).result is record.result
     assert pane.source_operation_id == token
-    metadata = require_record(pane).metadata
-    assert metadata is not None
+    metadata = RunMetadataContent(require_record(pane).metadata)
     assert metadata.snapshot == snapshot
     assert metadata.experiment == "test/native"
     assert metadata.provenance == provenance
@@ -146,7 +150,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     capture.assert_called_once()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == ("cancelled" if stopped else "finished")
+    assert outcome.status == "finished"
 
 
 def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
@@ -190,7 +194,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     background.run_work()
     pane = state.get_tab(tab_id).run
     assert require_record(pane).result is record.result
-    assert (metadata := require_record(pane).metadata) is not None
+    metadata = RunMetadataContent(require_record(pane).metadata)
     assert metadata.completion == "stopped"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
@@ -208,21 +212,27 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     next_token = service.start_run(inputs, plots=make_plots())
     assert next_token != token
     background.run_work()
-    assert (metadata := require_record(state.get_tab(tab_id).run).metadata) is not None
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert metadata.completion == "complete"
     assert (
         next_outcome := handles.poll(next_token)
     ) is not None and next_outcome.status == "finished"
 
 
-def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
+@pytest.mark.parametrize("frontend_request", [False, True])
+def test_stop_request_without_native_metadata_resets_before_next_run(
+    frontend_request: bool,
+) -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
     record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
 
     def partial(*_args: object, context: RunContext) -> object:
         child = context.scope.branch("acquire")
-        child.stop.set()
+        if frontend_request:
+            assert service.cancel_scope(token, scope="acquire").cancelled
+        else:
+            child.stop.set(reason="author-local stop")
         child.release()
         return record
 
@@ -231,15 +241,15 @@ def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     pane = state.get_tab(tab_id).run
-    assert require_record(pane).metadata is None
-    assert pane.partial_result
+    assert require_record(pane).metadata == {}
+    assert pane.stop_requested is frontend_request
     assert (outcome := handles.poll(token)) is not None and outcome.status == "finished"
     adapter.run.side_effect = None
     adapter.run.return_value = record
     service.start_run(inputs, plots=make_plots())
-    assert not state.get_tab(tab_id).run.partial_result
+    assert not state.get_tab(tab_id).run.stop_requested
     background.run_work()
-    assert not state.get_tab(tab_id).run.partial_result
+    assert not state.get_tab(tab_id).run.stop_requested
 
 
 @pytest.mark.parametrize("provenance_failure", [False, True])
@@ -262,7 +272,6 @@ def test_new_run_clears_old_evidence_and_failure_never_publishes_success(
     service, _gate, background, handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
     background.run_work()
-    assert require_record(state.get_tab(tab_id).run).metadata is not None
     if provenance_failure:
         capture.side_effect = RuntimeError("provenance failed")
     else:
@@ -293,7 +302,7 @@ def test_run_without_native_declaration_or_saved_origin_does_not_invent_evidence
     service, _gate, background, _handles = make_run_service(state)
     service.start_run(inputs, plots=make_plots())
     background.run_work()
-    assert require_record(state.get_tab(tab_id).run).metadata is None
+    assert require_record(state.get_tab(tab_id).run).metadata == {}
     capture.assert_not_called()
 
 
@@ -339,12 +348,11 @@ def test_gui_run_publishes_the_typed_record_and_declared_metadata(
     token = service.start_run(inputs, plots=make_plots())
     background.run_work()
     record = require_record(state.get_tab(tab_id).run)
-    metadata = require_record(state.get_tab(tab_id).run).metadata
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert isinstance(record, RunRecord)
     assert isinstance(record.cfg, SavingCfg)
     assert record.cfg == cfg
     assert record.result is result
-    assert metadata is not None
     assert metadata.experiment == SavingCore.AXES_SPEC.tag
     assert metadata.completion == "complete"
     outcome = handles.poll(token)
@@ -374,10 +382,10 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     assert service.cancel_run()
     assert background.last_on_done is not None
     background.last_on_done(acquired)
-    metadata = require_record(state.get_tab(tab_id).run).metadata
-    assert metadata is not None and metadata.completion == "complete"
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
+    assert metadata.completion == "complete"
     outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "cancelled"
+    assert outcome is not None and outcome.status == "finished"
 
 
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
@@ -410,8 +418,7 @@ def test_run_reads_all_connected_devices_after_lease_before_core() -> None:
     background.run_work()
     assert flux.events == ["read", "write"]
     assert unused.events == ["read"]
-    metadata = require_record(state.get_tab(tab_id).run).metadata
-    assert metadata is not None
+    metadata = RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)
     assert metadata.device_snapshot is not None
     assert metadata.device_snapshot["flux"]["value"] == 0.25
     assert metadata.device_snapshot["unused"]["value"] == 0.6
@@ -480,8 +487,8 @@ def test_run_and_native_save_keep_admitted_device_alias_after_rebinding(
         assert isinstance(result, RunRecord)
         assert result.cfg is not None
         assert result.cfg.dev == {"flux_dev": "yoko1"}
-        metadata = require_record(state.get_tab("tab").run).metadata
-        assert metadata is not None and metadata.snapshot.roles["flux_dev"] == "yoko1"
+        metadata = RunMetadataContent(require_record(state.get_tab("tab").run).metadata)
+        assert metadata.snapshot.roles["flux_dev"] == "yoko1"
         report = session.save()
         path = next(
             item.output.path

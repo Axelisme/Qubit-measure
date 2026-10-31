@@ -311,8 +311,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         the two rows mean probe off/on, not guaranteed pure ground/excited states.
         Use one round with reps=shots, leaving config unchanged.
         context supplies hardware, stop signal and live IQ scatter plots. Missing
-        preparations remain NaN; check context.scope.stop.raise_if_error()
-        before reporting success. Invalid config or program builds raise.
+        preparations remain NaN. Acquisition, config and program errors propagate.
         """
         # 1. Use one raw-shot round and preserve the requested participant order.
         cfg = MuxGECfg.model_validate(config.model_dump())

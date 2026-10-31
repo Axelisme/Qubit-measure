@@ -6,7 +6,6 @@ import numpy as np
 from matplotlib.figure import Figure
 from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
@@ -32,7 +31,7 @@ class ProbeExperiment(Experiment[SavingResult, SavingCfg]):
     def analyze(
         self, source: RunRecord[SavingCfg, SavingResult], options: Any, *, plots: Plots
     ) -> dict[str, object]:
-        if not isinstance(source.metadata, RunMetadataContent) or source.cfg is None:
+        if source.cfg is None:
             raise ValueError("Analysis requires the restored record")
         _, axes = plots.subplots("fit")
         axes.plot(source.result.frequency, source.result.signal.imag)

@@ -7,12 +7,34 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 from zcu_tools import experiment
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 
 if TYPE_CHECKING:
     from zcu_tools.experiment import Scope
     from zcu_tools.experiment.scope import RootKind
+
+
+def test_stop_reason_follows_scope_cancellation_and_late_children() -> None:
+    root = experiment.Scope("run")
+    assert root.stop.reason is None
+    with root.branch("schedule") as schedule:
+        with schedule.branch("acquire") as acquire:
+            receipt = root.cancel("schedule", reason="operator requested stop")
+            assert receipt.cancelled
+            assert schedule.stop.is_set()
+            assert acquire.stop.reason == "operator requested stop"
+        with schedule.branch("acquire") as later:
+            assert later.stop.is_set()
+            assert later.stop.reason == "operator requested stop"
+        assert schedule.stop.reason == "operator requested stop"
+    assert not root.stop.is_set()
+    assert root.stop.reason is None
+
+    root.stop.set(reason="caller shutdown")
+    assert root.stop.reason == "caller shutdown"
+    root.stop.clear_stop()
+    assert not root.stop.is_set()
+    assert root.stop.reason == "caller shutdown"
 
 
 def make_root() -> Scope:
@@ -126,7 +148,7 @@ def test_full_path_disambiguates_equal_sequences_under_different_parents() -> No
         ]
         assert root.cancel("run/right#1/operation#1").cancelled
         assert selected.cancelled
-        assert not left.stop.partial_result
+        assert not left.cancelled
 
 
 @pytest.mark.parametrize("kind", ["workflow", "recipe", "run"])
@@ -140,6 +162,20 @@ def test_full_live_leaf_path_selects_a_named_root_without_children(
     assert result.cancelled
     assert root.cancelled
     assert result.active_path == path
+
+
+@pytest.mark.parametrize("kind", ["workflow", "recipe", "run"])
+@pytest.mark.parametrize("name", [None, "synthetic"])
+def test_root_kind_selector_stops_root_with_live_acquire(
+    kind: RootKind,
+    name: str | None,
+) -> None:
+    root = experiment.Scope(kind, name=name)
+    with root.branch("acquire") as acquire:
+        result = root.cancel(kind)
+        assert result.cancelled
+        assert root.cancelled
+        assert acquire.cancelled
 
 
 def test_release_is_idempotent_and_closed_scope_rejects_new_children() -> None:
@@ -167,27 +203,6 @@ def test_cancel_is_descendant_only_and_born_cancelled_is_author_visible() -> Non
         assert refused.reason == "sequence mismatch"
 
 
-def test_error_and_partial_release_stop_at_operation_boundary() -> None:
-    root = make_root()
-    cause = OSError("readout failed")
-    with root.child("point") as point:
-        with point.branch("operation") as operation:
-            with operation.branch("schedule") as schedule:
-                with schedule.branch("acquire") as acquire:
-                    acquire.stop.set_error("failed", "readout failed", cause)
-                assert schedule.stop.partial_result
-                assert not schedule.cancelled
-            assert operation.stop.partial_result
-            assert not operation.cancelled
-            with pytest.raises(ScheduleOutcomeError) as caught:
-                operation.stop.raise_if_error()
-            assert caught.value.exception is cause
-        assert not point.stop.partial_result
-        assert point.stop.error is None
-    assert not root.stop.partial_result
-    assert root.stop.error is None
-
-
 def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
     root = make_root()
 
@@ -212,15 +227,4 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
         builder.run_program(program, raw2signal_fn=lambda value: value)
         assert schedule.data[0] == 2.0
     assert root.active_path == "run"
-    assert root.stop.partial_result
     assert not root.cancelled
-
-
-def test_gui_run_root_receives_schedule_error_without_cancellation() -> None:
-    root = make_root()
-    with Schedule({}, scope=root) as schedule:
-        schedule.mark_failed(OSError("readout failed"))
-    assert not root.cancelled
-    assert root.stop.partial_result
-    with pytest.raises(ScheduleOutcomeError, match="readout failed"):
-        root.stop.raise_if_error()

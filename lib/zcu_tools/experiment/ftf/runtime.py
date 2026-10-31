@@ -374,6 +374,7 @@ class FTFAcquire:
                 owner.effective_settings,
                 snapshot,
                 template,
+                time_base=acquire.time_base,
                 readout=owner.readout,
                 facts=facts,
             )

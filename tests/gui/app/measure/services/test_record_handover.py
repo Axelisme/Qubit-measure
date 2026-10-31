@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 
 from tests._native_support import native_metadata
@@ -30,10 +31,10 @@ def test_run_publishes_acquisition_metadata_inside_the_record() -> None:
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished", outcome
     record = require_record(state.get_tab(tab_id).run)
-    assert record is not None and record.metadata is not None
+    assert record is not None
     assert record.result is result
-    assert record.metadata.experiment == "test/native"
-    assert record.metadata.snapshot == history.snapshot
-    assert record.metadata.completion == "complete"
-    assert record.metadata.finished_at is not None
-    assert record.metadata.device_snapshot == {}
+    assert RunMetadataContent(record.metadata).experiment == "test/native"
+    assert RunMetadataContent(record.metadata).snapshot == history.snapshot
+    assert RunMetadataContent(record.metadata).completion == "complete"
+    assert RunMetadataContent(record.metadata).finished_at is not None
+    assert RunMetadataContent(record.metadata).device_snapshot == {}

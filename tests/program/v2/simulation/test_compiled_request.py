@@ -16,7 +16,12 @@ from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
-from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation._compiled_support import (
+    clock_invariance_program,
+    program,
+    request,
+)
+from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
 def test_author_dmem_time_materializes_pulse_and_readout_at_runtime_origin():
@@ -33,8 +38,12 @@ def test_author_dmem_time_materializes_pulse_and_readout_at_runtime_origin():
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     point = request(prog, env).materialize_point(0)
-    assert point.events[0].start_us == pytest.approx(40 / 430.08)
-    assert point.readouts[0].trigger_us == pytest.approx((40 / 430.08,))
+    assert time_us(point.time_base, point.events[0].start_ticks) == pytest.approx(
+        40 / 430.08
+    )
+    assert times_us(point.time_base, point.readouts[0].trigger_ticks) == pytest.approx(
+        (40 / 430.08,)
+    )
 
 
 def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
@@ -44,19 +53,104 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert result.loop_dims == (2,)
     assert result.point_dims == ()
     assert result.sequence == 7
+    assert result.time_base.ticks_per_us == 43008
+    assert result.relax_delay_ticks == 4300
+    template = result.templates[0]
+    assert template.events[0].start_ticks.dtype == np.int64
+    assert template.events[0].start_ticks.shape == (1,)
+    assert template.events[0].duration_ticks.tolist() == [4256]
+    assert template.duration_ticks.dtype == np.int64
+    assert template.readouts[0].trigger_ticks.dtype == np.int64
+    assert template.readouts[0].trigger_ticks.shape == (1, 1)
+    assert template.readouts[0].sample_period_ticks == 140
+    assert point.time_base == result.time_base
     (event,) = point.events
     assert event.source == "drive"
-    assert event.start_us == 0
-    assert event.duration_us == pytest.approx(38 / 384)
+    assert event.start_ticks == 0
+    assert event.duration_ticks == 4256
+    assert event.phase_reference_ticks == 0
     assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
     assert event.phase_deg == pytest.approx(30, abs=1e-5)
     assert event.gain == pytest.approx(-0.25, abs=1 / 32766)
     (read,) = point.readouts
     assert read.gen_ch == 0
     assert read.samples == 61
-    assert read.trigger_us == (0,)
+    assert read.trigger_ticks == (0,)
+    assert read.sample_period_ticks == 140
     assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
     assert env.soc.binding.last_request is None
+
+
+def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
+    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    env.soccfg["gens"][1]["f_fabric"] = 512.0
+
+    def build(extra):
+        prog = clock_invariance_program(env.soccfg, extra_generator=extra)
+        return request(prog, env)
+
+    try:
+        original, expanded = build(False), build(True)
+        assert original.time_base.ticks_per_us == 43008
+        assert expanded.time_base.ticks_per_us == 172032
+        a, b = original.templates[0], expanded.templates[0]
+        (event_a,), (event_b,) = a.events, b.events
+        assert event_a.gen_ch == event_b.gen_ch == 0
+        assert event_a.start_ticks.tolist() == [4300]
+        for left, right in (
+            (event_a.start_ticks, event_b.start_ticks),
+            (
+                event_a.start_ticks + event_a.duration_ticks,
+                event_b.start_ticks + event_b.duration_ticks,
+            ),
+            (a.duration_ticks, b.duration_ticks),
+        ):
+            np.testing.assert_array_equal(
+                original.time_base.ns(left).view(np.uint64),
+                expanded.time_base.ns(right).view(np.uint64),
+            )
+        for left, right in (
+            (event_a.frequency_mhz, event_b.frequency_mhz),
+            (event_a.phase_deg, event_b.phase_deg),
+            (event_a.gain, event_b.gain),
+        ):
+            np.testing.assert_array_equal(left.view(np.uint64), right.view(np.uint64))
+        envelope_a = event_a.envelopes[int(event_a.envelope_index[0])]
+        envelope_b = event_b.envelopes[int(event_b.envelope_index[0])]
+        assert envelope_a is not None and envelope_b is not None
+        np.testing.assert_array_equal(
+            original.time_base.ns(
+                np.arange(len(envelope_a.values), dtype=np.int64)
+                * envelope_a.sample_period_ticks
+            ).view(np.uint64),
+            expanded.time_base.ns(
+                np.arange(len(envelope_b.values), dtype=np.int64)
+                * envelope_b.sample_period_ticks
+            ).view(np.uint64),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(envelope_a.values).view(np.uint64),
+            np.asarray(envelope_b.values).view(np.uint64),
+        )
+        ro_a, ro_b = a.readouts[0], b.readouts[0]
+        np.testing.assert_array_equal(
+            original.time_base.ns(
+                ro_a.trigger_ticks[..., None]
+                + np.arange(ro_a.samples, dtype=np.int64) * ro_a.sample_period_ticks
+            ).view(np.uint64),
+            expanded.time_base.ns(
+                ro_b.trigger_ticks[..., None]
+                + np.arange(ro_b.samples, dtype=np.int64) * ro_b.sample_period_ticks
+            ).view(np.uint64),
+        )
+        np.testing.assert_array_equal(
+            ro_a.frequency_mhz.view(np.uint64), ro_b.frequency_mhz.view(np.uint64)
+        )
+        np.testing.assert_array_equal(
+            ro_a.phase_deg.view(np.uint64), ro_b.phase_deg.view(np.uint64)
+        )
+    finally:
+        env.devices.close_all_devices()
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
@@ -103,6 +197,11 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     result = request(prog, env)
     assert result.point_names == ("outer", "scan")
     assert result.point_dims == (2, 3)
+    slot = result.templates[0].events[0]
+    assert slot.start_ticks.dtype == np.int64
+    assert slot.start_ticks.shape == (6,)
+    assert slot.start_ticks.tolist() == [0, 800, 1600, 0, 800, 1600]
+    assert slot.duration_ticks.tolist() == [4256] * 6
     events = [result.materialize_point(i).events[0] for i in range(6)]
     assert [e.frequency_mhz for e in events] == pytest.approx(
         [80, 90, 100, 180, 190, 200], abs=1e-5
@@ -110,7 +209,7 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     assert [e.gain for e in events] == pytest.approx(
         np.tile([3276, 6552, 9828], 2) / 32766
     )
-    assert [e.start_us for e in events] == pytest.approx(
+    assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
         np.tile([0, 8, 16], 2) / 430.08
     )
 
@@ -196,9 +295,9 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     result = request(prog, env)
     events = result.materialize_point(0).events
     assert [e.source for e in events[:2]] == ["one", "two"]
-    assert [e.start_us for e in events[:2]] == pytest.approx(
-        [44 / 430.08, 132 / 430.08]
-    )
+    assert [
+        time_us(result.time_base, e.start_ticks) for e in events[:2]
+    ] == pytest.approx([44 / 430.08, 132 / 430.08])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 
@@ -436,9 +535,12 @@ def test_wave_memory_and_output_coupled_effects_use_prewrite_words(opcode):
         p.pulse(0, "p", t=0.1)
 
     prog, env = program(body, reps=1)
-    events = request(prog, env).materialize_point(0).events
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
     assert [event.gain for event in events] == pytest.approx([100 / 32766] * 2)
-    assert [event.start_us for event in events] == pytest.approx([0, 43 / 430.08])
+    assert [
+        time_us(observed.time_base, event.start_ticks) for event in events
+    ] == pytest.approx([0, 43 / 430.08])
 
 
 def test_wmem_store_initializes_a_new_address_for_native_port_playback():
@@ -618,8 +720,10 @@ def test_ordinary_adc_triggers_are_distinct_output_effects():
     prog = Program(env.soccfg, reps=1, initial_delay=0, relax_delay=0)
     result = request(prog, env)
     reads = result.materialize_point(0).readouts
-    assert reads[0].trigger_us == (0,)
-    assert reads[1].trigger_us == pytest.approx((43 / 430.08,))
+    assert times_us(result.time_base, reads[0].trigger_ticks) == (0,)
+    assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx(
+        (43 / 430.08,)
+    )
 
 
 def test_reps_varying_body_end_is_an_observable_carry_error():

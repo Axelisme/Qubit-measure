@@ -65,6 +65,97 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
+@pytest.mark.parametrize("tail_sync", [False, True])
+@pytest.mark.parametrize("position", ["before_write", "after_zero_path", "branch_path"])
+def test_repeat_table_definition_must_dominate_its_time_consumer(position, tail_sync):
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    def initialize(prog):
+        prog.add_reg("count")
+        prog.add_loop("scan", 2)
+        prog.declare(loader)
+
+    def body(prog):
+        prog.write_reg("count", 0)
+        with prog.repeat("r", "count", range_hint=(0, 2)):
+            if position == "before_write":
+                prog.timeline_inc("loaded")
+            if position == "branch_path":
+                with (
+                    prog.branch(by="scan", align_timeline=False) as branch,
+                    branch.case(0),
+                ):
+                    prog.emit(loader)
+                prog.timeline_inc("loaded")
+            else:
+                prog.emit(loader)
+            if tail_sync:
+                prog.delay_by_timeline()
+        if position == "after_zero_path":
+            prog.timeline_inc("loaded")
+
+    with pytest.raises(ValueError, match="loaded.*unknown or uninitialized"):
+        _program(body, initialize)
+
+
+def test_repeat_table_index_proof_does_not_cover_the_final_counter_value():
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    def body(prog):
+        with prog.repeat("r", "count", range_hint=(2, 2)):
+            prog.emit(loader)
+            prog.timeline_inc("loaded")
+            prog.delay_by_timeline()
+        # The closing shell increments r to 2. Its body index proof cannot
+        # justify another lookup into a two-element table after the loop.
+        prog.emit(loader)
+        prog.timeline_inc("loaded")
+
+    def initialize(prog):
+        _register_initialize(prog, value=2)
+        prog.declare(loader)
+
+    with pytest.raises(ValueError, match="r.*(uninitialized|index dependency)"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("invalid", ["index_range", "counter_writer"])
+def test_repeat_table_index_keeps_range_and_writer_proof(invalid):
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    class CounterWrite(Macro):
+        def translate(self, prog):
+            WriteReg(dst="r", src=0).translate(prog)
+
+    def body(prog):
+        with prog.repeat(
+            "r", "count", range_hint=(0, 3 if invalid == "index_range" else 2)
+        ):
+            prog.emit(loader)
+            prog.timeline_inc("loaded")
+            if invalid == "counter_writer":
+                prog.append_macro(CounterWrite())
+            prog.delay_by_timeline()
+
+    def initialize(prog):
+        _register_initialize(prog, value=2)
+        prog.declare(loader)
+
+    error = (
+        "loaded.*r.*allowed.*0.*1.*actual.*0.*2"
+        if invalid == "index_range"
+        else "r.*unregistered.*write at instruction"
+    )
+    with pytest.raises(ValueError, match=error):
+        _program(body, initialize)
+
+
 def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
     def body(prog):
         with prog.repeat("r", "count", range_hint=(1, 10)):
@@ -84,6 +175,81 @@ def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
         if inst in increments:
             assert prog.prog_list[index - 1]["CMD"] == "WPORT_WR"
     assert sum(i["CMD"] == "WPORT_WR" for i in prog.prog_list) < 33
+
+
+@pytest.mark.parametrize("branch_after", [False, True])
+@pytest.mark.parametrize("actual", [0, 3, 8])
+@pytest.mark.parametrize("hint", [None, (0, 8)])
+def test_external_timeline_places_at_actual_end_after_runtime_control(
+    branch_after, actual, hint
+):
+    def initialize(prog):
+        _register_initialize(prog, actual)
+        prog.add_loop("scan", 3)
+
+    def body(prog):
+        prog.fork("default", into="external")
+        prog.timeline_inc(100 / 430.08, timeline="external")
+        with prog.repeat("r", "count", range_hint=hint):
+            prog.timeline_inc(15 / 430.08)
+            prog.delay_by_timeline()
+        if branch_after:
+            with prog.branch(
+                by="scan", align_timeline=False, timeline="external"
+            ) as branch:
+                with branch.case(0):
+                    prog.timeline_inc(5 / 430.08)
+                with branch.case(2):
+                    prog.timeline_inc(15 / 430.08)
+        prog.pulse(1, "p1", timeline="external")
+
+    result = _shots(_program(body, initialize, reps=2))
+    origin = max(100, actual * 15)
+    offsets = [5, 0, 15] if branch_after else [0, 0, 0]
+    assert [_waves(shot) for shot in result] == [[origin + t] for t in offsets] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        origin + t + 28 for t in offsets
+    ] * 2
+
+
+@pytest.mark.parametrize("branch_after", [False, True])
+def test_external_placement_reuses_runtime_control_storage(branch_after):
+    def initialize(prog):
+        _register_initialize(prog)
+        prog.add_loop("scan", 3)
+
+    def build(place):
+        def body(prog):
+            prog.fork("default", into="external")
+            prog.timeline_inc(100 / 430.08, timeline="external")
+            with prog.repeat("r", "count", range_hint=(0, 8)):
+                prog.timeline_inc(15 / 430.08)
+                prog.delay_by_timeline()
+            if branch_after:
+                with prog.branch(
+                    by="scan", align_timeline=False, timeline="external"
+                ) as branch:
+                    with branch.case(0):
+                        prog.timeline_inc(5 / 430.08)
+                    with branch.case(2):
+                        prog.timeline_inc(15 / 430.08)
+            if place:
+                prog.pulse(1, "p1", timeline="external")
+
+        return _program(body, initialize, reps=2)
+
+    unused, placed = build(False), build(True)
+    assert len(placed.reg_dict) == len(unused.reg_dict) <= 16
+    # Repeat unrolling and Branch may own dispatch words, never time tables.
+    unused_data, placed_data = unused.compile_datamem(), placed.compile_datamem()
+    assert (0 if unused_data is None else len(unused_data)) == (
+        0 if placed_data is None else len(placed_data)
+    )
+    for prog, memory in ((unused, unused_data), (placed, placed_data)):
+        if memory is not None:
+            assert set(int(word) for word in memory) <= {
+                int(str(address).lstrip("&")) for address in prog.labels.values()
+            }
 
 
 def test_repeat_fixed_point_matches_explicit_native_reference_loop():
@@ -771,7 +937,7 @@ def test_register_repeat_wait_consumers_use_actual_remaining_end(consumer):
 
 @pytest.mark.parametrize("operation", ["pulse", "trigger", "emit", "delay"])
 @pytest.mark.parametrize("derive", ["none", "join", "fork"])
-def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_point(
+def test_register_repeat_external_source_allows_placement_after_deriving_point(
     operation, derive
 ):
     from zcu_tools.program.v2.modules.delay import SoftDelay
@@ -802,8 +968,10 @@ def test_register_repeat_wait_source_stays_restricted_after_deriving_schedule_po
         else:
             prog.timeline_inc(0, timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, initialize)
+    (shot,) = _shots(_program(body, initialize))
+    assert _waves(shot) == ([100] if operation == "pulse" else [])
+    expected_end = {"pulse": 128, "trigger": 110, "emit": 105, "delay": 100}[operation]
+    assert (shot.body_end_cycle, shot.end_cycle) == (expected_end, expected_end)
 
 
 def _readout_register_initialize(prog: TimelineProgramV2):
@@ -835,7 +1003,7 @@ def _send_config(
 @pytest.mark.parametrize("runtime_words", [False, True])
 @pytest.mark.parametrize("offset", [0, 5])
 @pytest.mark.parametrize("transition", ["none", "join", "fork", "partial-native"])
-def test_register_repeat_wait_source_rejects_config_placement(
+def test_register_repeat_external_source_allows_config_placement(
     runtime_words, offset, transition
 ):
     def body(prog):
@@ -848,8 +1016,9 @@ def test_register_repeat_wait_source_rejects_config_placement(
             prog.delay(20 / 430.08)
         _send_config(prog, runtime_words, offset, "external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, _readout_register_initialize)
+    (shot,) = _shots(_program(body, _readout_register_initialize))
+    assert _waves(shot) == [100 + offset]
+    assert (shot.body_end_cycle, shot.end_cycle) == (100 + offset,) * 2
 
 
 @pytest.mark.parametrize("runtime_words", [False, True])
@@ -919,7 +1088,7 @@ def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
 
 
 @pytest.mark.parametrize("advance", [20, 69])
-def test_partial_native_advance_keeps_wait_only_source_restricted(advance):
+def test_partial_native_advance_preserves_actual_external_placement(advance):
     def body(prog):
         prog.fork("default", into="external")
         prog.timeline_inc(100 / 430.08, timeline="external")
@@ -929,9 +1098,12 @@ def test_partial_native_advance_keeps_wait_only_source_restricted(advance):
             prog.delay_by_timeline()
         prog.delay(advance / 430.08)
         prog.timeline_inc(0, timeline="external")
+        prog.pulse(1, "p1", timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        _program(body, _register_initialize)
+    (shot,) = _shots(_program(body, _register_initialize))
+    expected_start = max(100, 45 + advance)
+    assert _waves(shot) == [expected_start]
+    assert (shot.body_end_cycle, shot.end_cycle) == (expected_start + 28,) * 2
 
 
 @pytest.mark.parametrize("consumer", ["delay_by_timeline", "native", "repeat"])

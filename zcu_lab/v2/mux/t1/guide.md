@@ -113,7 +113,8 @@ The selected source fixes the historical pulse, binding and writeback destinatio
 Live plots update after each completed round across the full delay axis.
 Cancellation retains completed-round averages across that axis.
 Before the first completed round, signals remain NaN.
-Partial data from a failed operation retains its failure status.
+Acquisition errors propagate, and that run publishes no new record.
+A stop request does not determine whether returned data is usable for analysis.
 Only successful, fully finite rows qualify for calibration candidates.
 Missing captured bindings suppress candidates; inconsistent bindings report an error.
 Read each Writeback destination, value, quality and uncertainty.

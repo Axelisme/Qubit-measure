@@ -11,7 +11,11 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunMetadata, SoftwareProvenance
+from zcu_tools.experiment.metadata import (
+    RunMetadata,
+    RunMetadataContent,
+    SoftwareProvenance,
+)
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise
@@ -61,7 +65,10 @@ def native_save_rpc(
             session.state,
             "tab",
             RunPaneState(
-                result=replace(require_record(tab.run), metadata=session.metadata),
+                result=replace(
+                    require_record(tab.run),
+                    metadata=session.metadata.model_dump(mode="json"),
+                ),
                 storage=None
                 if tab.run.parameters is None
                 else tab.run.parameters.storage,
@@ -424,8 +431,10 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
         assert len(events) == 1 and events[0].kind == "acquired"
         assert events[0].origin == "mcp"
         assert isinstance(events[0].payload, AcquiredPayload)
-        metadata = require_record(session.state.get_tab("tab").run).metadata
-        assert metadata is not None and events[0].payload.run_id == metadata.run_id
+        metadata = RunMetadataContent(
+            require_record(session.state.get_tab("tab").run).metadata
+        )
+        assert events[0].payload.run_id == metadata.run_id
         assert not (session.entry.database_path / "runs").exists()
 
 
@@ -536,7 +545,10 @@ def test_save_rpc_rejects_replaced_sources_even_after_a_fresh_snapshot(
                 session.state,
                 "tab",
                 RunPaneState(
-                    result=replace(require_record(tab.run), metadata=session.metadata),
+                    result=replace(
+                        require_record(tab.run),
+                        metadata=session.metadata.model_dump(mode="json"),
+                    ),
                     storage=None
                     if tab.run.parameters is None
                     else tab.run.parameters.storage,

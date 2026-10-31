@@ -126,7 +126,7 @@ class TimelineSelectedPulse(TimedMacro):
                 f"{selection.register}: selected playback requires a table relation"
             )
         prog._time_bounds.require_selection(prog, selection.relation)
-        origin = self.book.end(self.timeline, placement=True)
+        origin = self.book.end(self.timeline)
         previous = self.book.channel_end(prog, self.source.ch, generator=True)
         offset = placement_time(prog, self.relative_t)
         start: Time

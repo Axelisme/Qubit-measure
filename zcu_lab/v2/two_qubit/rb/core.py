@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -327,7 +328,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
         """Fit saved joint00 count ratios from complete paired seed/round curves.
 
         options controls deterministic paired-seed bootstrap, not acquisition.
-        Malformed counts raise; missing cfg or unidentifiable fits return a reason.
+        Malformed counts raise ValueError. Missing cfg, AnalysisFailed or existing
+        fit ValueError/RuntimeError failures return a reason with count diagnostics.
+        Other exceptions propagate unchanged.
         """
         data, cfg = source.result, source.cfg
         shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
@@ -362,7 +365,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
                     bootstrap_samples=options.bootstrap_samples,
                     bootstrap_seed=options.bootstrap_seed,
                 )
-            except (ValueError, RuntimeError) as exc:
+            except (AnalysisFailed, ValueError, RuntimeError) as exc:
                 # Isolate model failure while retaining measured count diagnostics.
                 reason = str(exc)
             else:

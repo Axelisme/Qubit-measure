@@ -75,7 +75,7 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     soc = environment.soc
     first = envelope(prog, soc, 0)
     assert envelope(prog, soc, 1) is first
-    old_times, old_values = first.sample_us, first.values
+    old_times, old_values = first.sample_period_ticks, first.values
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
     if difference == "samples":
@@ -86,8 +86,17 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
         prog.soccfg["gens"][1]["maxv"] //= 2
     changed = envelope(prog, soc, 2)
     assert changed is not first
-    assert changed != first
-    assert first.sample_us == old_times
+    if difference == "clock":
+        # Doubling the common frequency preserves period ticks, but halves us.
+        changed_request = build_compiled_request(
+            prog, "integrated", soc.binding, 2, routes=soc.routes
+        )
+        assert changed_request.time_base.ticks_per_us == 86016
+        assert changed.sample_period_ticks == first.sample_period_ticks == 7
+        assert changed.values == first.values
+    else:
+        assert changed != first
+    assert first.sample_period_ticks == old_times
     assert first.values == old_values
     assert envelope(prog, soc, 3) is changed
 
@@ -97,13 +106,10 @@ def test_byte_bounded_eviction_keeps_borrowed_envelope_immutable(environment):
     soc = environment.soc
     first = envelope(prog, soc, 0)
     assert envelope(prog, soc, 1) is first
-    original_times, original_values = first.sample_us, first.values
+    original_times, original_values = first.sample_period_ticks, first.values
     # Exceed 32 MiB using the immutable samples alone, independently of the
     # pool's additional key/container accounting. Only retain the first borrow.
-    sample_bytes = sum(
-        sys.getsizeof(t) + sys.getsizeof(v)
-        for t, v in zip(first.sample_us, first.values, strict=True)
-    )
+    sample_bytes = sum(sys.getsizeof(v) for v in first.values)
     count = math.ceil(32 * 1024**2 / sample_bytes) + 2
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
@@ -116,7 +122,7 @@ def test_byte_bounded_eviction_keeps_borrowed_envelope_immutable(environment):
     rebuilt = envelope(prog, soc, count + 2)
     assert rebuilt is not first
     assert rebuilt == first
-    assert first.sample_us == original_times
+    assert first.sample_period_ticks == original_times
     assert first.values == original_values
     np.testing.assert_array_equal(data, original_data)
     assert envelope(prog, soc, count + 3) is rebuilt

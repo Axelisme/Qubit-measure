@@ -13,6 +13,7 @@ from qtpy.QtWidgets import QApplication
 from zcu_tools.datafile import load
 from zcu_tools.experiment import AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -129,9 +130,9 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
         "The record envelope must preserve the adapter's opaque Result"
     )
     handle = tab.run.result
-    metadata = require_record(tab.run).metadata
+    metadata = RunMetadataContent(require_record(tab.run).metadata)
     storage = tab.run.storage
-    assert metadata is not None and storage is not None
+    assert storage is not None
     acquired = storage.ledger.events()
     assert len(acquired) == 1 and acquired[0].origin == "mcp"
     assert isinstance(acquired[0].payload, AcquiredPayload)

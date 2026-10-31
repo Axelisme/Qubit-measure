@@ -16,6 +16,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import FTFSettings, parse_ftf
 from zcu_tools.simulate.evolution import Engine, segment_spans
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import (
     herald_template,
     settings,
@@ -55,8 +56,8 @@ def flux_slot(channel: int, gain: float) -> EventSlot:
     return replace(
         original,
         gen_ch=channel,
-        start_us=np.zeros(2),
-        duration_us=np.full(2, 0.004),
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.full(2, 0.004)),
         frequency_mhz=np.zeros(2),
         phase_deg=np.zeros(2),
         gain=np.full(2, gain),
@@ -76,7 +77,9 @@ def flux_template() -> TimelineTemplate:
 def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     config = flux_settings()
     facts = FTFModelFacts(config, snapshot(0.4))
-    plan = plan_template(config, snapshot(0.4), flux_template(), facts=facts)
+    plan = plan_template(
+        config, snapshot(0.4), flux_template(), facts=facts, time_base=TIME_BASE
+    )
     np.testing.assert_allclose(
         facts.joint.dc_flux, [0.3, 0.24, 0.4], atol=1e-16, rtol=0
     )
@@ -92,7 +95,9 @@ def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     assert plan.batch.segment_boundaries == ((0.0, 2.0, 4.0, 6.0), (0.0, 4.0))
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
     # Fast flux never changes the terminal ADC model's round-DC frequencies.
-    dc_plan = plan_template(config, snapshot(0.4), template(), facts=facts)
+    dc_plan = plan_template(
+        config, snapshot(0.4), template(), facts=facts, time_base=TIME_BASE
+    )
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,
         dc_plan.readouts[0].batch.model.frequencies_ghz,
@@ -104,7 +109,7 @@ def test_filtered_three_loop_waveform_retains_delays_and_tail_until_readout(
     distortion: bool,
 ) -> None:
     config = flux_settings(tau=0.0 if distortion else 2.0, distortion=distortion)
-    plan = plan_template(config, snapshot(), flux_template())
+    plan = plan_template(config, snapshot(), flux_template(), time_base=TIME_BASE)
     waveform = plan.batch.flux_waveform
     assert waveform is not None
     lo, hi = waveform.offsets[:2]
@@ -138,10 +143,10 @@ def test_flux_pulse_envelope_selects_existing_engine_family(
     config = flux_settings(tau=2.0 if kind in ("filtered", "microwave") else 0.0)
     pulse = flux_slot(4, 0.02)
     if kind == "sampled":
-        pulse = replace(pulse, envelopes=(PulseEnvelope((0, 0.002, 0.004), (0, 1, 0)),))
+        pulse = replace(pulse, envelopes=(PulseEnvelope(ticks(0.002), (0, 1, 0)),))
     base = template(tones=1 if kind == "microwave" else 0)
     original = replace(base, events=(pulse, *base.events))
-    plan = plan_template(config, snapshot(), original)
+    plan = plan_template(config, snapshot(), original, time_base=TIME_BASE)
     assert (plan.batch.flux_waveform is None) == (kind == "step")
     if kind == "sampled":
         assert plan.batch.segment_boundaries == ((2.0, 4.0, 6.0), (2.0, 4.0, 6.0))
@@ -194,12 +199,12 @@ def test_cavity_boundaries_merge_with_delayed_flux_events() -> None:
     base = template()
     earlier = replace(
         base.events[-1],
-        start_us=np.zeros(2),
-        duration_us=np.full(2, 0.002),
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=tick_array(np.full(2, 0.002)),
         envelopes=(None,),
     )
     original = replace(base, events=(flux_slot(4, 0.02), earlier, *base.events))
-    plan = plan_template(flux_settings(), snapshot(), original)
+    plan = plan_template(flux_settings(), snapshot(), original, time_base=TIME_BASE)
     assert plan.batch.segment_boundaries == ((0.0, 2.0, 6.0), (0.0, 2.0, 6.0))
 
 
@@ -208,16 +213,17 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
     shifted = replace(
         herald,
         events=tuple(
-            replace(event, start_us=event.start_us + 0.020) for event in herald.events
+            replace(event, start_ticks=event.start_ticks + ticks(0.020))
+            for event in herald.events
         ),
         readouts=tuple(
-            replace(window, trigger_us=window.trigger_us + 0.020)
+            replace(window, trigger_ticks=window.trigger_ticks + ticks(0.020))
             for window in herald.readouts
         ),
     )
     cavity = replace(
         shifted.events[0],
-        start_us=np.array([0.010, 0.012]),
+        start_ticks=tick_array(np.array([0.010, 0.012])),
         envelopes=(None,),
     )
     observed = replace(shifted, events=(cavity, *shifted.events))
@@ -232,7 +238,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
             readouts=tuple(
                 replace(
                     window,
-                    trigger_us=window.trigger_us[:, -1:],
+                    trigger_ticks=window.trigger_ticks[:, -1:],
                     frequency_mhz=window.frequency_mhz[:, -1:],
                     phase_deg=window.phase_deg[:, -1:],
                     generator_channels=window.generator_channels[:, -1:],
@@ -242,9 +248,10 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
         ),
         readout=readout,
         facts=facts,
+        time_base=TIME_BASE,
     )
     projection_only = plan_template(
-        config, snapshot(), observed, readout=readout, facts=facts
+        config, snapshot(), observed, readout=readout, facts=facts, time_base=TIME_BASE
     )
     combined = plan_template(
         config,
@@ -252,6 +259,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
         replace(observed, events=(flux_slot(4, 0.2), *observed.events)),
         readout=readout,
         facts=facts,
+        time_base=TIME_BASE,
     )
     # The delayed 0..4 ns flux pulse must still split at 2 and 6 ns.
     assert all({2.0, 6.0} <= set(nodes) for nodes in flux_only.batch.segment_boundaries)
@@ -308,7 +316,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
 
 
 def test_unbound_flux_configuration_preserves_elementwise_batch_contract() -> None:
-    plan = plan_template(settings(), snapshot(), template(tones=1))
+    plan = plan_template(settings(), snapshot(), template(tones=1), time_base=TIME_BASE)
     batch = plan.batch
     np.testing.assert_array_equal(batch.points, [0, 1])
     np.testing.assert_array_equal(batch.end_ns, [8.0, 10.0])

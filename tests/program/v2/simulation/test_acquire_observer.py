@@ -1,9 +1,15 @@
 """Acquire completion observers run once and cannot break acquisition admission."""
 
 import warnings
+from fractions import Fraction
 
 import pytest
-from zcu_tools.core.simulation import AcquireRequest, EnvironmentSnapshot, RoundSignals
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    EnvironmentSnapshot,
+    RoundSignals,
+    TimeBase,
+)
 from zcu_tools.program.v2.simulation import SimulationBinding
 
 
@@ -32,7 +38,16 @@ def test_completion_observer_sees_all_rounds_and_cannot_mask_execution_failure()
     except ImportError as error:
         raise AssertionError("binding must notify acquire completion") from error
     sequence = binding.begin()
-    request = AcquireRequest("decimated", (1,), 0, (), 1, sequence, binding.rng_version)
+    request = AcquireRequest(
+        "decimated",
+        (1,),
+        0,
+        (),
+        1,
+        sequence,
+        binding.rng_version,
+        time_base=TimeBase(Fraction(1)),
+    )
 
     def acquire():
         try:

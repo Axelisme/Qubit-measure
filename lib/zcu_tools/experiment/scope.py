@@ -11,11 +11,9 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self
 
 from pydantic import BaseModel
 
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDeviceInfo
 
-from .operations import Completed, Failed, MissingCapability, RunFunction, RunIdentity
-from .records import RunRecord
+from .operations import Completed, MissingCapability, RunIdentity
 
 if TYPE_CHECKING:
     from .script_host import CallContext
@@ -106,30 +104,17 @@ class ScopeRuntime(Protocol):
 
     async def execute_call[T](
         self, scope: Scope, fn: Callable[[CallContext], T], *, name: str | None = None
-    ) -> Completed[T] | Failed:
+    ) -> Completed[T]:
         """Execute blocking work under scope and return attempt facts."""
-        ...
-
-    async def execute_run[Cfg: ConfigBase, Result](
-        self,
-        scope: Scope,
-        experiment: RunFunction[Cfg, Result],
-        cfg: Cfg,
-        *,
-        name: str | None = None,
-    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
-        """Execute a core callable with an owned cfg and borrowed RunContext."""
         ...
 
     async def execute_setup(
         self, scope: Scope, name: str, cfg: BaseDeviceInfo
-    ) -> Completed[None] | Failed:
+    ) -> Completed[None]:
         """Apply a captured complete settings model cooperatively."""
         ...
 
-    async def execute_wait(
-        self, scope: Scope, target: datetime
-    ) -> Completed[None] | Failed:
+    async def execute_wait(self, scope: Scope, target: datetime) -> Completed[None]:
         """Wait cooperatively for an aware absolute deadline."""
         ...
 
@@ -145,8 +130,8 @@ class Scope:
     name (run normally has none). A non-None name must be nonempty and contain
     no #, / or :. Invalid kinds/names raise ValueError. stop optionally borrows
     a caller-owned token.
-    Children inherit stop bits at birth. Cancellation travels down, while error
-    and partial completion travel up on release and stop at operation children.
+    Children inherit stop requests at birth. Cancellation travels down;
+    release only detaches children and never reports completion facts.
     Construction/child attach immediately; with or release closes the boundary.
     No current/latest child is registered. All tree operations are thread-safe.
     """
@@ -191,7 +176,7 @@ class Scope:
 
     @property
     def stop(self) -> StopSignal:
-        """The downward bit/error capability for low-level cooperative APIs."""
+        """The downward stop-request capability for low-level cooperative APIs."""
         return self._stop
 
     @property
@@ -250,7 +235,7 @@ class Scope:
             if self._closed:
                 raise RuntimeError("Cannot add children to a released scope")
             # The public constructor accepts roots; specialize its shared state here.
-            child = Scope("run", stop=self.stop.child(boundary=kind == "operation"))
+            child = Scope("run", stop=self.stop.child())
             child._runtime = self._runtime
             child._kind = kind
             child._name = name
@@ -294,40 +279,27 @@ class Scope:
 
     async def call[T](
         self, fn: Callable[[CallContext], T], *, name: str | None = None
-    ) -> Completed[T] | Failed:
+    ) -> Completed[T]:
         """Run fn(CallContext) off-loop under this scope, with optional operation name.
 
-        Acquire failure returns Failed; unexpected errors propagate. Descendant
+        Exceptions propagate unchanged into the author. Descendant
         cancellation delivers partial values, while root cancellation raises
         ScriptCancelled after work drains and completion facts are recorded.
         """
         return await self._capabilities().execute_call(self, fn, name=name)
 
-    async def run[Cfg: ConfigBase, Result](
-        self, experiment: RunFunction[Cfg, Result], cfg: Cfg, *, name: str | None = None
-    ) -> Completed[RunRecord[Cfg, Result]] | Failed:
-        """Run a core (cfg, *, context) callable with a copied cfg, without saving.
-
-        The host captures device settings and supplies borrowed hardware and
-        operation plots. Pause retries the same captured request. Completion
-        carries RunRecord and immutable attempt facts; acquire failure is Failed.
-        """
-        return await self._capabilities().execute_run(self, experiment, cfg, name=name)
-
-    async def setup_device(
-        self, name: str, cfg: BaseDeviceInfo
-    ) -> Completed[None] | Failed:
+    async def setup_device(self, name: str, cfg: BaseDeviceInfo) -> Completed[None]:
         """Apply complete copied settings through the device owner; preserve its errors."""
         return await self._capabilities().execute_setup(self, name, cfg)
 
-    async def wait_until(self, target: datetime) -> Completed[None] | Failed:
+    async def wait_until(self, target: datetime) -> Completed[None]:
         """Wait for an aware absolute deadline; reject naive dates and cooperate on stop."""
         return await self._capabilities().execute_wait(self, target)
 
     def commit(self, record: BaseModel) -> None:
         """Snapshot one BaseModel into this scope's record.json; second commit raises.
 
-        Publication is synchronous and bypasses Pause, including root-cancel cleanup.
+        Publication is synchronous and remains available during root-cancel cleanup.
         Later mutation of record does not change the committed snapshot.
         """
         _validate_record(record)
@@ -357,13 +329,22 @@ class Scope:
             nodes.extend(child._walk())
         return nodes
 
-    def cancel(self, scope: str, *, expected: int | None = None) -> CancelResult:
+    def cancel(
+        self,
+        scope: str,
+        *,
+        expected: int | None = None,
+        reason: str | None = None,
+    ) -> CancelResult:
         """Atomically select and stop a live subtree, never its parent.
 
         Select by kind, kind#N, operation:name, or exact full leaf path.
+        A root kind selects the root even while it has live children.
         run aliases operation outside a run root. Multiple matches refuse with
         reason ambiguous and candidate full paths. Missing/stale selectors
         refuse without stopping anything. Invalid syntax raises ValueError.
+        reason is optional opaque text forwarded to the selected stop subtree;
+        it does not change the acknowledgement's reason or selector matching.
         """
         label, sequence = parse_cancel_scope(scope, expected)
         if label == "run" and self.kind != "run":
@@ -373,7 +354,7 @@ class Scope:
             if self._closed:
                 return CancelResult(False, "scope not active", path)
             nodes = self._walk()
-            if "/" in label or label == self.path:
+            if "/" in label or (label == self.path and self.name is not None):
                 matches = [
                     node for node in nodes if node.path == label and not node._children
                 ]
@@ -394,11 +375,11 @@ class Scope:
                 return CancelResult(
                     False, "ambiguous", path, [node.path for node in matches]
                 )
-            matches[0].stop.set()
+            matches[0].stop.set(reason=reason)
             return CancelResult(True, "scope cancellation requested", path)
 
     def release(self) -> None:
-        """Deliver facts once and detach after children drain; repeat is a no-op.
+        """Detach after children drain; repeat is a no-op.
 
         Closing a boundary with live children raises RuntimeError. A released
         boundary rejects new children and cannot be reentered.

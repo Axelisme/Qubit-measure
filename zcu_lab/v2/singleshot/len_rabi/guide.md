@@ -2,7 +2,11 @@
 
 **Readers:** operator, agent. How to run single-shot length Rabi calibration from the GUI or MCP and interpret the results.
 
-Single-shot Length Rabi: sweeps the qubit-drive pulse length, preserves every raw IQ shot, and derives ground / excited / other population curves during live view and analysis. Runs on real hardware.
+Single-shot Length Rabi sweeps the qubit-drive pulse length, preserves every raw IQ shot, and derives ground / excited / other population curves during live view and analysis. Runs on real hardware.
+
+Const, flat_top and sampled waveforms such as cosine, gauss and DRAG use the same host-side scan. Each length compiles one program and acquires one cloud of Shots raw IQ values. The result has shape (number of lengths, Shots), without averaging across shots or software rounds. Completed length rows survive cancellation; unmeasured rows remain NaN. Analyze uses the existing joint Rabi and readout-distribution fit.
+
+Native arb waveforms have an asset-derived length and raise ValueError before scanning. Choose a waveform with an editable length for this experiment.
 
 ## Parameter sources
 
@@ -32,4 +36,4 @@ A backend-valid joint fit with finite centers, radius and confusion matrix propo
 
 Set Initial State to the predominant state before the swept drive pulse even when the first sweep point is nonzero. Fit phase offset allows a correction within +/-90 degrees of that initial-state direction; the extrapolated zero-length population can then differ from the pre-pulse population. It is disabled by default. A prior singleshot/ge calibration is optional for raw acquisition. A sweep spanning a few pi lengths captures a full oscillation. Review the measured population curves and overlaid joint-fit curves before applying the complete module proposal.
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-01

@@ -272,7 +272,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         Invalid or non-positive lengths fail
         before acquisition. Classification uses the first readout tone's circle classifier.
         """
-        # 1. Resolve the outer scan and quantize positive probe durations.
+        # Copy the cfg and select the classifier before dispatching acquisition.
         cfg = deepcopy(cfg)
         ro_ch = (
             cfg.readout.ro_ch

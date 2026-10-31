@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil、compilation options 與具名時間操作
+**Last updated:** 2026-11-01，timeline ceil、compilation options、外部 timeline 的後續事件與 storage 重用
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -68,8 +68,10 @@ The ordinary profile does not offer mixers, mux channels or weighted readouts.
 selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
 Its generator DDS is 1536 MHz and ADC output is 76.8 MHz. Other channels keep
 the ordinary profile. Neither helper permits arbitrary clock/firmware overrides. These are virtual
-compile capabilities, not a claim about an attached board. Clocks, DDS, memory
-limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
+compile capabilities, not a claim about an attached board. `pfb_channel(soccfg,
+ro_ch, frequency_mhz)` resolves an absolute physical frequency through QICK's
+public readout calculation; callers do not reproduce PFB folding or rounding.
+Clocks, DDS, memory limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
 wiring belongs to `SimulationSoc`; actually using an unwired channel fails.
 
 See [simulation](simulation/README.md) for the shared numeric contract, trusted
@@ -382,9 +384,13 @@ Producer audit 仍只接受相符的初始化、回邊與重設寫入。
 外部 long pulse 可以橫跨 Repeat，但不能在 body 內使用其 timeline。
 沒有 reference 操作時，其他外部結尾不變。
 作者明寫 reference 操作時，外部結尾逐圈按實際推進量 debit，再做 floor 0。
-固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時使用 storage，未消耗的來源保持 wait-only。
-Wait-only 來源可供 delay_by_timeline、join 或 fork 使用，不能直接放 pulse、trigger、config 或 timeline_inc。
-Join 目標與 fork 的新名字從實際 remaining end 建立普通排程點。完全消耗來源後，它也恢復 placement。
+固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時，各圈把實際 debit 寫入 storage。
+Branch 各 case 的結尾不同時，各 case 把自己的結尾寫入 selected-end register。
+離開 Branch 或 Repeat 後，可直接在外部 timeline 放 pulse、trigger、config 或使用 timeline_inc。
+後續事件從實際 remaining end 開始，不採範圍上界，也不要求先 delay_by_timeline、join 或 fork。
+事件沿用 shot 收尾等 consumer 已需要的 storage，透過 s14 放置，不另配事件時間 register。
+沒有後續事件時，不為可能的 placement 預配 register。每 shot／sweep 點仍重設狀態，data register 上限仍為 16。
+時間計算不配置 DMEM。Branch dispatch 的 jump-address table 保留。
 原生 `delay_reg_auto` 可在 Repeat 內使用，仍須遵守其 producer bounds 與未消耗外部結尾的原生契約。
 
 以下 body 明寫入口與每圈同步。每圈先合併局部結尾，再移動 reference：

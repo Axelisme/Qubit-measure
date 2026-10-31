@@ -18,7 +18,7 @@ Choose lowercase `target=f1` or `f2`. Enter a strictly increasing common CZ freq
 
 Spectator I/Xπ, quadrature and frequency are hardware loops. Only gate count stays on the host because it changes the sequence length. X and Y projections use independent shots. Preparation has phase φ. X projection uses φ; Y projection uses φ+90°. Terminal F1/F2 are classified during acquisition into g/e/other.
 
-Saved `sums` has shape `(2,2,Nn,Nf,3,3)`, ordered spectator_states, projection, gate count, frequency, terminal F1, terminal F2. Class order is g/e/other. These float64 values are unnormalized totals, not probabilities or per-shot IQ. Unmeasured points remain NaN. Cancellation preserves completed rounds. Inspect the run stop/error state before treating partial data as successful.
+Saved `sums` has shape `(2,2,Nn,Nf,3,3)`, ordered spectator_states, projection, gate count, frequency, terminal F1, terminal F2. Class order is g/e/other. These float64 values are unnormalized totals, not probabilities or per-shot IQ. Unmeasured points remain NaN. Cancellation preserves completed rounds. Each X/Y projection must total reps × rounds from the saved cfg before it can supply phase or fit data. A finite partial-round total is not complete. Per-frequency fits remain available on the complete frequency prefix, but an incomplete frequency axis prevents crossing selection and writeback. StopSignal carries only a stop request and reason. Acquisition failures propagate from Run as exceptions. A normal return after a stop request may contain partial counts.
 
 ## Read phase and quadratures
 

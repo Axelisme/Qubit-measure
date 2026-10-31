@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。為已註冊的實驗新增 async recipe，串接 Run、保存與 preview。
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-31
 
 Recipe 把 GUI tab 操作串成一個 MCP 流程，量測仍由 adapter 執行。
 這篇接續 [實驗與表單](03-experiment.md)，為 `twotone/power_map` 加入 `power_map` recipe。
@@ -116,6 +116,7 @@ await tab.run()
 try:
     analysis = await tab.analyze("primary", result=FitSummary)
     if analysis.result is None:
+        # Descendant analysis cancellation, not a fitting exception.
         return Report(
             value=None,
             writeback_applied=False,
@@ -136,10 +137,13 @@ finally:
     tab.save()
 ```
 
-預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
+Analyze 的例外交給作者，包含 fitting 的 `AnalysisFailed`，框架不辨識原因。
+作者決定是否捕捉；需要處理這個型別時，從 `zcu_tools.analysis.failure` import。
+未捕捉的例外會使 recipe failed，不會轉成 AnalysisResult 的失敗值。
+範例的 result=None 分支只處理子層分析取消且無結果的情況，
+此時 status="failed"，reason 說明取消原因，Report 用 analysis_failure 保存它。
 每次 Analyze 後先檢查 result，再解參照估計或開始下一個分析。
-失敗時回報 analysis_failure，不詢問或接受 writeback，也不跑相依的 Post。
-Post 失敗時保留已成功的 Primary 估計。程式錯誤仍 raise，不轉成分析失敗值。
+取消而無結果時不詢問或接受 writeback，也不跑相依 Post，先前成功的估計可由作者保留。
 
 Analyze 不自動保存。`tab.save()` 同步保存 raw 與全部已完成階段的 artifacts，沒有 Save handle 要 await。
 如果要先保住 raw，可以在 Run 後再額外 Save 一次。
@@ -153,7 +157,7 @@ Run scope cancel 使 Run 回 partial，之後步驟仍繼續。
 取消 recipe 根則讓下一個 call／ask await raise 普通 `ScriptCancelled`。
 進行中的 Run 先合作 drain，保留 run_id、partial 與完成事實，再 raise。
 Analyze／ask_writeback／session.ask 回非 Optional 物件，不用 None 表示根取消。
-AnalysisResult.result 為 null 是分析失敗值，與根取消的例外不同。
+子層分析取消且無結果時，AnalysisResult.result 為 null；fitting 例外與根取消都不走這個值路徑。
 作者不 catch 根取消，已進入 try 的 finally 仍在同一 worker 同步保存已有結果。
 範例的 `await tab.run()` 在 try 外，根取消在此 raise 不會進入 Save finalizer。
 Drained partial 留在 tab，交由 agent 決定是否另行保存。

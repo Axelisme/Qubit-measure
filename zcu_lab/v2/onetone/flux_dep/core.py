@@ -195,9 +195,8 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
                     rounds=cfg.rounds,
                 )
 
-        # Publish the final map without treating an acquisition error as success.
+        # Publish the final map after a normal or cooperatively stopped return.
         signals_buffer.trigger_update(flush=True)
-        sched.stop.raise_if_error()
         return FluxDepResult(
             values=dev_values,
             freqs=freqs,

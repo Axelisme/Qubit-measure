@@ -192,7 +192,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
-        # 1. Prepare the frequency grid without changing the caller's cfg.
         cfg = deepcopy(config)
         soccfg = context.soccfg
         if cfg.sampling_mode == "linear":

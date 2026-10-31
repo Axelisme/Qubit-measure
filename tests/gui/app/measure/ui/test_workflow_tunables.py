@@ -80,54 +80,14 @@ def test_stopping_locks_tunables_edits_and_submission(stopping_window, tmp_path)
     assert driver.observe(object_name="form.input.gain").text == "0.5"
     assert driver.observe("Apply").enabled
     assert driver.observe("Discard").enabled
-    driver.click("Pause")
-    qt_until(lambda: _status(driver, "paused"), label="cleanup scenario paused")
-    driver.enter_text(value="0.75", object_name="form.input.gain")
-    _shot(driver, tmp_path, "stop-03-paused-editable")
-    assert driver.observe(object_name="form.input.gain").text == "0.75"
     driver.click("Stop")
     qt_until(lambda: _status(driver, "stopping"), label="author cleanup retained")
     _shot(driver, tmp_path, "stop-04-stopping")
-    assert not driver.observe(object_name="workflow.pause_hint").visible
     driver.enter_text(value="0.9", object_name="form.input.gain")
     _shot(driver, tmp_path, "stop-05-edit-refused")
-    assert driver.observe(object_name="form.input.gain").text == "0.75"
+    assert driver.observe(object_name="form.input.gain").text == "0.5"
     assert not driver.observe("Apply").enabled
     assert not driver.observe("Discard").enabled
-
-
-def test_pause_selects_tunables_and_clears_hint_on_resume_or_stop(
-    workflow_window, tmp_path
-):
-    _, window = workflow_window
-    driver = ComponentDriver(window)
-    toggle_tab_family(driver)
-    _open(driver, tmp_path / "pause-01-open.png")
-    driver.click("Start")
-    qt_until(lambda: _status(driver, "running"), label="pause scenario accepted")
-    _shot(driver, tmp_path, "pause-02-running")
-    for action in ("Resume", "Stop"):
-        driver.select_tab("Plan")
-        _shot(driver, tmp_path, f"pause-03-plan-before-{action}")
-        driver.click("Pause")
-        qt_until(lambda: _status(driver, "paused"), label="native pause gate")
-        _shot(driver, tmp_path, f"pause-04-paused-before-{action}")
-        assert driver.tabs("Tunables").current == "Tunables"
-        assert driver.observe(object_name="workflow.pause_hint").visible
-        driver.select_tab("Plan")
-        _shot(driver, tmp_path, f"pause-05-plan-while-paused-before-{action}")
-        assert driver.tabs("Plan").current == "Plan"
-        driver.select_tab("Tunables")
-        _shot(driver, tmp_path, f"pause-06-tunables-before-{action}")
-        driver.click(action)
-        qt_until(
-            lambda expected="running" if action == "Resume" else "cancelled": _status(
-                driver, expected
-            ),
-            label=f"{action} delivered",
-        )
-        _shot(driver, tmp_path, f"pause-07-after-{action}")
-        assert not driver.observe(object_name="workflow.pause_hint").visible
 
 
 def test_discard_restores_latest_applied_tunables(workflow_window, tmp_path):

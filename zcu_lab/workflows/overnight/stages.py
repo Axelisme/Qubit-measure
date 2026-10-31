@@ -100,7 +100,7 @@ class T1Result:
 
     reason is None on acceptance, stopped on partial, otherwise the failure or
     failed gates. file references saved Completed raw, including partials and
-    rejected fits; Failed acquisitions have no file. models holds both diagnostic
+    rejected fits; acquisition exceptions propagate. models holds both diagnostic
     fits after primary-fit success. gates holds numeric acceptance comparisons.
     Unexpected errors propagate without a result; saved raw remains on disk.
     """
@@ -122,7 +122,7 @@ class EchoResult:
 
     reason is None on acceptance, stopped on partial, otherwise the failure or
     failed gates. file references saved Completed raw, including partials and
-    rejected fits; Failed acquisitions have no file. models holds both diagnostic
+    rejected fits; acquisition exceptions propagate. models holds both diagnostic
     fits after primary-fit success. gates holds numeric acceptance comparisons.
     Unexpected errors propagate without a result; saved raw remains on disk.
     """
@@ -220,7 +220,7 @@ async def measure_t1(
     )
     if acquisition.result is None:
         return T1Result(
-            status="rejected" if acquisition.status == "partial" else "failed",
+            status="rejected",
             reason=acquisition.reason,
             file=acquisition.file,
         )
@@ -289,7 +289,7 @@ async def measure_echo(
     )
     if acquisition.result is None:
         return EchoResult(
-            status="rejected" if acquisition.status == "partial" else "failed",
+            status="rejected",
             reason=acquisition.reason,
             file=acquisition.file,
             gain_clamped=tuple(gain_clamped),

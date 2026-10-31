@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         Variable,
         VariableSchema,
     )
+    from .container_nodes import json_text
     from .grouped import load_grouped_labber_data
     from .json_values import json_values_equal
     from .labber_container import read_labber
@@ -68,6 +69,7 @@ __all__ = [
     "load_labber_logs",
     "load_grouped_labber_data",
     "json_values_equal",
+    "json_text",
     "format_ext",
     "reserve_labber_filepath",
 ]
@@ -101,6 +103,7 @@ _EXPORT_MODULES = {
     "load_labber_logs": ".labber_reader",
     "load_grouped_labber_data": ".grouped",
     "json_values_equal": ".json_values",
+    "json_text": ".container_nodes",
     "format_ext": ".paths",
     "reserve_labber_filepath": ".paths",
 }

@@ -94,7 +94,7 @@ def test_classifier_survives_native_conversion_and_data_h5(
     record = RunRecord(
         cfg=cfg,
         result=ReadoutResult(np.array([0.0, 1.0]), np.array([2.0, 3.0])),
-        metadata=native_metadata(SPEC.tag),
+        metadata=native_metadata(SPEC.tag).model_dump(mode="json"),
     )
 
     path = tmp_path / "data.h5"

@@ -17,7 +17,7 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from .timing_support import shots, waves
+from .timing_support import recompile, shots, waves
 
 
 def program(
@@ -571,6 +571,28 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 6
 
 
+def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 1)
+        prog.fork("default", into="external")
+        prog.timeline_inc(100 / 430.08, timeline="external")
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.timeline_inc(15 / 430.08)
+            prog.delay_by_timeline()
+        prog.timeline_inc(80 / 430.08)
+        prog.join("external", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    prog = program(body, reps=2)
+    for _ in range(2):
+        result = shots(prog)
+        # Actual repeats advance 15/30/45; compare the external absolute100
+        # with the new relative80, not the conservative author count bound.
+        assert [waves(s) for s in result] == [[100], [110], [125]] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [128, 138, 153] * 2
+        recompile(prog)
+
+
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
 def test_known_table_time_producer_places_each_selected_value(loader_type):
     loader = loader_type("time", [10, 20, 30], "scan", "loaded")
@@ -606,6 +628,54 @@ def test_runtime_join_uses_pointwise_maximum_and_preserves_later_target():
     result = shots(program(body, initialize=initialize))
     assert [waves(s) for s in result] == [[30], [30], [25]]
     assert [s.body_end_cycle - s.start_cycle for s in result] == [58, 58, 53]
+
+
+def test_runtime_maximum_uses_cartesian_domain_for_independent_table_axes():
+    left = LoadValue("left", [10, 30, 20], "scan", "left_time")
+    right = LoadValue("right", [11, 29], "fine", "right_time")
+
+    def initialize(prog):
+        prog.add_loop("fine", 2)
+        prog.declare(left)
+        prog.declare(right)
+
+    def body(prog):
+        prog.fork("default", into="other")
+        prog.emit(left)
+        prog.emit(right)
+        prog.timeline_inc("left_time")
+        prog.timeline_inc("right_time", timeline="other")
+        prog.join("other", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, initialize=initialize, reps=2))
+    # scan is outer, fine is inner. Zipping the sources loses four legal points.
+    assert [waves(s) for s in result] == [[11], [29], [30], [30], [20], [29]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        39,
+        57,
+        58,
+        58,
+        48,
+        57,
+    ] * 2
+
+
+def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite():
+    loader = LoadValue("time", [10, 30, 20], "scan", "duration", use_existed=True)
+
+    def body(prog):
+        prog.fork("default", into="other")
+        prog.emit(loader)
+        prog.timeline_inc("duration")
+        prog.write_reg("duration", 25)
+        prog.timeline_inc("duration", timeline="other")
+        prog.join("other", into="default")
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, initialize=lambda p: p.declare(loader), reps=2))
+    assert [waves(s) for s in result] == [[25], [30], [25]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [53, 58, 53] * 2
 
 
 def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
@@ -1199,7 +1269,7 @@ def test_register_time_rejects_out_of_range_producer(value):
         program(body)
 
 
-def test_wait_only_source_rejects_register_delay_but_derived_target_works():
+def test_external_source_and_derived_target_allow_register_delay():
     def body(prog):
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
@@ -1212,8 +1282,8 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works():
         prog.timeline_inc("duration", timeline="derived")
         prog.timeline_inc("duration", timeline="external")
 
-    with pytest.raises(ValueError, match="external.*wait"):
-        program(body)
+    result = shots(program(body))
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [101] * 3
 
 
 def test_unknown_register_delay_cannot_be_treated_as_zero():

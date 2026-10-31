@@ -108,9 +108,11 @@ def scalar_cavity_means(env, channel, cavity_indices):
             if e.gen_ch in (0, 13)
             and abs(e.frequency_mhz - window.frequency_mhz[0]) < 0.001
         )
-        times = (window.trigger_us[0] - tone.start_us) * 1000 + np.arange(
-            window.samples
-        ) * 1000 / window.sample_rate_mhz
+        times = request.time_base.ns(
+            window.trigger_ticks[0]
+            - tone.start_ticks
+            + np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks
+        )
         pole = (
             np.pi * 0.001
             + 2j * np.pi * (FREQUENCIES[cavity] - tone.frequency_mhz) / 1000

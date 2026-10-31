@@ -262,6 +262,16 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         ee_variances = np.stack(
             (sigma_variance(ee[0], "f1"), sigma_variance(ee[1], "f2"))
         )
+        # All herald classes establish acquisition completion. The selected
+        # gg/ee totals remain diagnostics, including legitimate zero acceptance.
+        complete = np.isclose(
+            data.sums.sum(axis=(-4, -3, -2, -1)),
+            cfg.reps * cfg.rounds,
+            rtol=8 * np.finfo(float).eps,
+            atol=0,
+        )
+        gg_quadratures = np.where(complete, gg_quadratures, np.nan)
+        ee_quadratures = np.where(complete, ee_quadratures, np.nan)
         gg_phases = tuple(
             tuple(
                 count_phase(
@@ -359,8 +369,12 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                         fit.fit_curve,
                         label=f"{label} slope={fit.slope_deg:.5g} ± {fit.slope_error_deg:.2g} deg",
                     )
+        slope_labels = tuple(
+            "unavailable" if value is None else f"{value:.5g}" for value in differences
+        )
         fig.axes[2].set_title(
-            f"ee − gg slopes (deg/gate): F1={differences[0]}, F2={differences[1]}; writeback uses gg"
+            f"ee − gg slopes (deg/gate): F1={slope_labels[0]}, F2={slope_labels[1]}\n"
+            "writeback uses gg"
         )
         for ax, label in zip(
             fig.axes,

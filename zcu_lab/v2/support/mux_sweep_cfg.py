@@ -9,11 +9,7 @@ from pydantic_core import PydanticCustomError
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import PulseCfg
-from zcu_tools.program.v2.modules import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    MuxReadoutCfg,
-)
+from zcu_tools.program.v2.modules import MuxReadoutCfg
 
 
 class MuxAcquisition(Protocol):
@@ -82,9 +78,9 @@ class MuxDriveToneCfg(ConfigBase):
                 raise ValueError(f"drive.{name} must be fixed and finite")
         if drive.pre_delay < 0 or drive.post_delay < 0:
             raise ValueError("drive delays must be nonnegative")
-        if isinstance(
-            drive.waveform, (ConstWaveformCfg, FlatTopWaveformCfg)
-        ) and isinstance(drive.waveform.length, QickParam):
+        if drive.waveform.style != "arb" and isinstance(
+            drive.waveform.length, QickParam
+        ):
             raise ValueError("drive.waveform.length must be fixed")
 
 

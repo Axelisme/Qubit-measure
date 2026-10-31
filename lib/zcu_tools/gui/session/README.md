@@ -1,6 +1,6 @@
 # gui/session/ — 量測 session core
 
-**Last updated:** 2026-10-29，global selection、新建 point 與 Inspect destination
+**Last updated:** 2026-11-01，Run snapshot 的 JSON metadata
 
 **讀者：** framework-dev。Session 層的資源綁定、operation 與共用對話框分工。
 
@@ -46,7 +46,7 @@ Inspect 的 New 使用所選 Destination 的固定 capture，以其中的同名 
 - **已安裝文件與 Inspect**：`get_installed_file_revisions()` 先列作用中三筆，POINT 時再列 entry 三筆。Watcher 以這份快取監看全部已安裝目錄，100 ms 去抖後批次比對 hash。`read_context(setup=True)` 與 `get_alias_rows(setup=True)` 只讀已安裝的 entry 內容，不讀磁碟候選，也不繞過 holder pending。非作用中的 entry reload 只發布 file status。明確 entry 寫入先更新同一組 cache 與 revision，再發布 `EntryDocumentsChangedPayload`。兩者都不推進 active content version，也不改作用中 point 或舊 capture。Inspect 的乾淨頁面讀新 cache；dirty draft 保留原值與原 revision，提交仍須通過衝突檢查。
 - **Run snapshot** 是依該次 Run 契約捕捉的輸入，接受後不因後續編輯或 refresh 改用新的 cfg。持有 live `SessionEnv` 不等於持有這份不可變證據；SoC、driver 等 live handles 也不作為普通資料整包凍結。
 
-DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 隨 RunMetadata 保存，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。Run 終局後，host 另請 DeviceService 在背景讀一次已連線儀器。成功讀取由 State owner 更新 cache，失敗台保留原 cache，不改寫固定 snapshot、run 終局或 lease。
+DeviceState.info 與 ValueSourceBinder 的 device sources 是已發布 cache，供 dialog、defaults 與 resolve-once 輸入使用，不是 Run 的控制命令或硬體 snapshot。GUI Run 框架在 hardware lease 後、adapter.run 前讀一次全部已連線 device 的 get_info。任一讀取失敗拒絕 Run，不以 cache 補值；無 device 記 `{}`。這份實驗前 snapshot 由 RunMetadata 組裝後，以 JSON 保存到 record.metadata，後續 sweep 或 Save 不重讀、不改寫。實驗層 helpers 操作選定 driver，RunContext 不提供 setters。DeviceService 的獨立手動 setup 與 best-effort poll 保留各自責任，不代替 Run snapshot。Run 終局後，host 另請 DeviceService 在背景讀一次已連線儀器。成功讀取由 State owner 更新 cache，失敗台保留原 cache，不改寫固定 snapshot、run 終局或 lease。
 
 ## 結構
 

@@ -1,12 +1,8 @@
 """Headless workflow hosting through synthetic registrations and shared session."""
 
-from threading import Event
-
 import pytest
 from pydantic import BaseModel, ConfigDict
-from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import (
-    Actor,
     Live,
     RunMismatch,
     WorkflowEnv,
@@ -146,7 +142,7 @@ def test_start_records_tunables_and_stale_run_targets_use_same_headless_owner(tm
     assert control.close(tab)
 
 
-def test_pending_and_paused_run_retain_global_lease_and_reject_tab_close(tmp_path):
+def test_pending_run_retains_global_lease_and_rejects_tab_close(tmp_path):
     control, harness = make_control(tmp_path)
     tab = control.open("synthetic")
     other = control.open("synthetic")
@@ -163,74 +159,6 @@ def test_pending_and_paused_run_retain_global_lease_and_reject_tab_close(tmp_pat
     harness.complete_segment()
     status = control.status(OTHER_RUN_ID)
     assert status is not None and status.lifecycle == "done"
-
-
-def test_pause_resume_stop_share_one_operation_and_keep_tunables_binding(tmp_path):
-    control, harness = make_control(tmp_path)
-    tab = control.open("synthetic")
-    token = control.start(tab, RUN_ID)
-    # Stop before native acceptance, then register a script with a public pause gate.
-    from zcu_tools.gui.app.measure.services.workflow_attachment import (
-        WorkflowAttachment,
-    )
-
-    # Stop the initial pending run without creating files, then use a pausing registration.
-    control.stop(RUN_ID)
-    harness.complete_segment()
-    assert control.close(tab)
-
-    entered = Event()
-
-    def operation(ctx: CallContext) -> None:
-        entered.set()
-        if not ctx.scope.stop.event.wait(30):
-            raise TimeoutError("Scenario did not interrupt the operation")
-
-    @workflow("pausing", "Synthetic retained-worker pause")
-    async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
-        await env.call(operation)
-        env.commit(Native(value=tun.current.value))
-
-    control.configure(
-        (
-            WorkflowAttachment(
-                script=script,
-                plan_model=Values,
-                knobs_model=Values,
-                plan_to_cfg=lambda form, env, snapshot: Native(value=form.value),
-                knobs_to_cfg=lambda form: Native(value=form.value),
-                seed=lambda plan, form: None,
-            ),
-        )
-    )
-    tab = control.open("pausing")
-    token = control.start(tab, RUN_ID)
-    harness.background.start()
-    try:
-        assert entered.wait(5), "The retained operation must start before Pause"
-        control.pause(RUN_ID)
-        harness.wait_for(
-            lambda: (
-                (status := control.status(RUN_ID)) is not None
-                and status.lifecycle == "paused"
-            ),
-            label="native pause gate",
-        )
-        status = control.status(RUN_ID)
-        assert status is not None and status.lifecycle == "paused"
-        assert not control.close(tab)
-        snapshot = control.apply_tunables(
-            RUN_ID, {("value",): 9}, actor=Actor("user", "test")
-        )
-        assert not isinstance(snapshot, FormErrors)
-        assert snapshot.revision == 1
-        assert control.resume(RUN_ID) == token
-    finally:
-        control.stop(RUN_ID)
-        harness.finish_worker()
-    status = control.status(RUN_ID)
-    assert status is not None and status.lifecycle == "cancelled"
-    assert control.close(tab)
 
 
 def test_prepare_forms_recaptures_after_terminal_without_losing_authored_draft(

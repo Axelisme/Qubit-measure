@@ -3,6 +3,7 @@
 import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.workflows import Failed, Live, WorkflowEnv, workflow
 from zcu_tools.gui.app.measure.services.workflow_attachment import WorkflowAttachment
 
@@ -28,7 +29,7 @@ async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> Non
     trend = create_trace(env.plots, "trend", "Iteration", "Workflow trend")
     trend.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
     for stage, iteration in zip((1, 2), env.iterations(), strict=False):
-        outcome = await iteration.run(acquire, PlotCfg(stage=stage))
+        outcome = await run_core(iteration, acquire, PlotCfg(stage=stage))
         if isinstance(outcome, Failed):
             raise RuntimeError(outcome.reason)
         iteration.commit(Native(value=outcome.value.result))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -15,7 +15,11 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunMetadata
+from zcu_tools.experiment.metadata import (
+    RunMetadata,
+    RunMetadataContent,
+    has_native_metadata,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (
@@ -34,7 +38,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
-    NO_RESULT,
     BgResult,
     ExclusionRequest,
     OperationRunner,
@@ -42,6 +45,7 @@ from zcu_tools.gui.session.operation_runner import (
     SettleFn,
 )
 from zcu_tools.gui.session.parameter_capture import capture_parameters
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.scopes import progress_ambient
 from zcu_tools.resources.entry import AcquiredPayload, LedgerEvent, StorageBinding
 
@@ -73,14 +77,12 @@ class _RunOperation:
 
     tab_id: str
     plots: Plots
-    stop_event: threading.Event
-    stop_signal: StopSignal
-    cancel_requested: threading.Event
     origin: CommandOrigin
     adapter_name: str
     storage: StorageBinding | None
     parameters: ParameterContext | None
-    partial_result: bool = False
+    stop_requested: threading.Event = field(default_factory=threading.Event)
+    request_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class RunService:
@@ -88,7 +90,7 @@ class RunService:
     (OffMain-thread strategy with explicit RunContext and ambient progress — ADR-0066).
 
     Uses OperationRunner (ADR-0066) for the lifecycle mechanism; domain
-    policy (cancel-partial interpretation, State writes, facts) stays here.
+    policy (stop requests, State writes, facts) stays here.
     """
 
     # tolerated: Independent lifecycle owners and driver callbacks have no shared domain bundle.
@@ -127,6 +129,7 @@ class RunService:
         # controller can cancel_run() and await the outcome (ADR-0066).
         self._active_token: int | None = None
         self._active_stop: Scope | None = None
+        self._active_operation: _RunOperation | None = None
         # Run plots are view-only, never part of the canonical pane or Save All.
         self._view_plots: dict[str, Plots] = {}
         self._bus.subscribe(TabClosedPayload, self._on_tab_closed)
@@ -154,18 +157,11 @@ class RunService:
         self, op: _RunOperation, bg: BgResult, settle: SettleFn
     ) -> None:
         try:
-            # Schedule failures set the stop flag too, but are not cancellations.
             if bg.ok:
-                if op.cancel_requested.is_set() or op.stop_event.is_set():
-                    self._run_cancelled(op, bg.result, settle)
-                else:
-                    self._run_finished(op, bg.result, settle)
+                self._run_finished(op, bg.result, settle)
                 return
-            if op.cancel_requested.is_set() and op.stop_signal.error is None:
-                self._run_cancelled(op, NO_RESULT, settle)
-            else:
-                error = bg.error or RuntimeError("Run worker failed without an error")
-                self._run_failed(op, error, settle)
+            error = bg.error or RuntimeError("Run worker failed without an error")
+            self._run_failed(op, error, settle)
         finally:
             self._refresh_devices()
 
@@ -184,7 +180,7 @@ class RunService:
                     storage=None if op.parameters is None else op.parameters.storage,
                     source_operation_id=self._active_token,
                     parameters=op.parameters,
-                    partial_result=op.partial_result,
+                    stop_requested=op.stop_requested.is_set(),
                 ),
                 plan_layout=self._plan_layout,
             )
@@ -211,8 +207,6 @@ class RunService:
         return True
 
     def _append_acquired(self, op: _RunOperation, result: RunRecord[Any, Any]) -> None:
-        if result is NO_RESULT:
-            return
         if op.storage is None:
             logger.warning(
                 "Acquired omitted: tab_id=%r has no saved-point storage "
@@ -220,13 +214,14 @@ class RunService:
                 op.tab_id,
             )
             return
-        metadata = result.metadata
-        if metadata is None:
+        document = result.metadata
+        if not has_native_metadata(document):
             logger.warning(
                 "Acquired omitted: tab_id=%r has no native acquisition evidence",
                 op.tab_id,
             )
             return
+        metadata = RunMetadataContent(document)
         if metadata.finished_at is None:
             raise ValueError("Acquired requires an acquisition finish timestamp")
         op.storage.ledger.append(
@@ -248,6 +243,7 @@ class RunService:
         self._state.set_tab_running(tab_id, running=False)
         self._active_token = None
         self._active_stop = None
+        self._active_operation = None
 
     def _run_finished(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
         logger.info(
@@ -262,27 +258,13 @@ class RunService:
         settle(OperationOutcome("finished"))
         self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="finished"))
 
-    def _run_cancelled(self, op: _RunOperation, result: Any, settle: SettleFn) -> None:
-        logger.info("_on_run_cancelled: tab_id=%r", op.tab_id)
-        # A cancelled run may still carry a partial result.
-        if result is NO_RESULT:
-            commit_run(
-                self._state,
-                op.tab_id,
-                RunPaneState(partial_result=op.stop_signal.partial_result),
-                plan_layout=self._plan_layout,
-            )
-            self._discard_plots(op, "Cancelled")
-        elif not self._publish_run_result(op, result, settle):
-            return
-        self._clear_running(op.tab_id)
-        settle(OperationOutcome("cancelled"))
-        self._bus.emit(RunFinishedPayload(tab_id=op.tab_id, outcome="cancelled"))
-
     def _run_failed(
-        self, op: _RunOperation, error: Exception, settle: SettleFn
+        self, op: _RunOperation, error: BackgroundError, settle: SettleFn
     ) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", op.tab_id, error)
+        pane = self._state.get_tab(op.tab_id).run
+        pane.source_operation_id = self._active_token
+        pane.stop_requested = op.stop_requested.is_set()
         self._discard_plots(op, "Failed")
         self._clear_running(op.tab_id)
         settle(OperationOutcome("failed", str(error)))
@@ -352,12 +334,9 @@ class RunService:
         # draft; cleanup happens only after the new empty panes are committed.
         self._prepare_tab_for_run(tab_id)
 
-        # The run root receives completed Schedule errors without being stopped.
-        # ``cancel_requested`` records user intent separately from scope outcomes.
-        stop_event = threading.Event()
-        stop_signal = StopSignal(stop_event)
+        # Request facts belong to the frontend, not the core's stop subtree.
+        stop_signal = StopSignal()
         scope = Scope("run", stop=stop_signal)
-        cancel_requested = threading.Event()
         adapter = inputs.adapter
         request = inputs.request
         cfg = inputs.accepted_cfg.cfg
@@ -370,15 +349,13 @@ class RunService:
         )
 
         def request_cancel() -> None:
-            cancel_requested.set()
-            stop_signal.set()
+            with operation.request_lock:
+                operation.stop_requested.set()
+                stop_signal.set(reason="GUI Run Stop requested")
 
         operation = _RunOperation(
             tab_id=tab_id,
             plots=plots,
-            stop_event=stop_event,
-            stop_signal=stop_signal,
-            cancel_requested=cancel_requested,
             origin=origin,
             adapter_name=inputs.adapter_name,
             storage=inputs.storage,
@@ -419,10 +396,11 @@ class RunService:
             # Progress alone is ambient; execution dependencies are run-owned.
             with progress_ambient(factory):
                 result = adapter.run(cfg, context=context)
-                stop_signal.raise_if_error()
-            # Completion records acquisition progress, not later operation cancellation.
-            operation.partial_result = stop_signal.partial_result
-            completion = "stopped" if operation.partial_result else "complete"
+            # Metadata fixes the requests observed before acquisition returned.
+            with operation.request_lock:
+                completion = (
+                    "stopped" if operation.stop_requested.is_set() else "complete"
+                )
             finished_at = datetime.now(UTC)
             if metadata is not None:
                 metadata = metadata.model_copy(
@@ -431,7 +409,7 @@ class RunService:
                         "completion": completion,
                     }
                 )
-                return replace(result, metadata=metadata)
+                return replace(result, metadata=metadata.model_dump(mode="json"))
             return result
 
         spec = OperationSpec(
@@ -466,6 +444,7 @@ class RunService:
         # Started events are emitted only after begin() succeeds (ADR-0066).
         self._active_token = token
         self._active_stop = scope
+        self._active_operation = operation
         with self._bus.origin(self._handles.event_origin(token)):
             self._bus.emit(RunStartedPayload(tab_id=tab_id))
         return token
@@ -500,25 +479,40 @@ class RunService:
     def cancel_scope(
         self, operation_id: int, scope: str, *, expected: int | None = None
     ) -> CancelResult:
-        """Atomically match a scope in one active Run, without cancelling its owner.
+        """Atomically match and request a stop in one active Run.
 
         Call on the owner thread. A stale/non-Run handle returns scope not active.
         Scope syntax and sequence checks use the shared experiment resolver.
-        Descendant cancellation changes completion facts, not run Stop intent.
+        Accepted requests record stop_requested under the metadata snapshot lock.
+        Normal core return publishes a finished terminal for root and descendant
+        requests alike. Core exceptions remain failed.
+        The reason forwarded to the core is opaque frontend request text.
         """
         parse_cancel_scope(scope, expected)
         signal = self._active_stop
-        if operation_id != self._active_token or signal is None:
+        operation = self._active_operation
+        if operation_id != self._active_token or signal is None or operation is None:
             return CancelResult(False, "scope not active", "")
-        return signal.cancel(scope, expected=expected)
+
+        # The worker snapshots metadata under the same lock, so it cannot miss
+        # an accepted request even if the core returns as soon as stop is set.
+        with operation.request_lock:
+            result = signal.cancel(
+                scope,
+                expected=expected,
+                reason="GUI Run scope cancellation requested",
+            )
+            if result.cancelled:
+                operation.stop_requested.set()
+            return result
 
     def cancel_run(self) -> bool:
         """Request cancellation of the active run; best-effort.
 
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
-        NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
-        and emits its terminal asynchronously (ADR-0066) — the true terminal is
+        NOT a claim that the worker has stopped: a returned record is published
+        with a finished terminal, while an exception remains failed. Terminal is
         observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")

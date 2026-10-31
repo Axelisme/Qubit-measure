@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-30，實驗定義的離線驗收
+**Last updated:** 2026-10-31，Analyze 例外與子層取消
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -90,7 +90,7 @@ Recipe 直接引用分析 owner 的具名 summary，不另宣告 FitQuality、Qu
 
 Run 子層取消回 partial，作者可繼續。根取消使下一個 Run／Analyze／Ask await raise 普通 ScriptCancelled，不是 CancelledError。進行中的 Run 先 drain 並保留 run_id 與 partial facts，再 raise；partial 留在 tab 交 agent 決定是否保存。既有 Run 在 try 外，該 await 被根取消時不進後續 Save finalizer。已進入 try 的流程仍在 finally 同步 Save，不新增取消分支或 Save finalizer。取消終態回 cancelled、report=null 與 runs。
 
-Analyze 預期擬合失敗回 AnalysisResult(result=None, status="failed", reason=...)，任意程式錯誤仍 raise。Recipe 每次 Analyze 後先檢查 result，失敗即回含 analysis_failure 的 report，不 Ask、不接受 writeback、不跑相依 Post。Post 失敗保留 Primary 估計；成功時 analysis_failure=None。
+Analyze 的例外交給作者，包含 fitting 的 AnalysisFailed；框架不辨識原因，也不把例外轉成失敗值。作者決定是否捕捉，未捕捉就使 recipe failed。子層分析取消且無結果時仍可回 AnalysisResult(result=None, status="failed", reason=...)，與 fitting 例外分開。Recipe 在解參照前檢查 result，取消而無結果時回報 reason，不 Ask、不接受 writeback、不跑相依 Post。完整契約見 [recipes README](recipes/README.md)。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 

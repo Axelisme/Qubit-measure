@@ -41,6 +41,7 @@ from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputEr
 from zcu_tools.gui.session.services.context import ContextService
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.entry import JsonObject
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui.app.measure._cfg_fakes import (
@@ -55,7 +56,21 @@ from tests.gui.app.measure._native_save_support import (
 from tests.gui.app.measure._record_support import require_record
 
 
-def test_tab_snapshot_is_single_pure_render_model() -> None:
+@pytest.mark.parametrize(
+    ("metadata", "expected_run_id"),
+    [
+        ({}, None),
+        ({"device_snapshot": {}}, None),
+        ({"run_id": "20261101T000000Z-abc123"}, "20261101T000000Z-abc123"),
+        (
+            {"run_id": "20261101T000000Z-abc123", "completion": "unused-invalid"},
+            "20261101T000000Z-abc123",
+        ),
+    ],
+)
+def test_tab_snapshot_is_single_pure_render_model(
+    metadata: JsonObject, expected_run_id: str | None
+) -> None:
     state = State(
         SessionEnv(
             parameters=parameter_capture(),
@@ -71,7 +86,7 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
             adapter_name="fake",
             adapter=MagicMock(),
             cfg=MagicMock(),
-            run=RunPaneState(result=RunRecord(None, object())),
+            run=RunPaneState(result=RunRecord(None, object(), metadata=metadata)),
             analysis=AnalysisPaneState(result=MagicMock(), params=analyze_params),
             save=SavePaneState(comment="draft note"),
         ),
@@ -90,6 +105,8 @@ def test_tab_snapshot_is_single_pure_render_model() -> None:
     snapshot = service.get_snapshot("tab")
 
     assert snapshot.tab_id == "tab"
+    assert snapshot.run is not None
+    assert snapshot.run.acquisition_run_id == expected_run_id
     assert snapshot.interaction is not None  # render path fills every live field
     assert snapshot.interaction.has_run_result is True
     assert snapshot.interaction.has_active_context is True  # ctx.readiness=ACTIVE
@@ -397,7 +414,7 @@ def test_tab_snapshot_loaded_artifacts_have_no_success_record(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             source_path="existing.hdf5",
             parameters=run.parameters,
             storage=run.storage,
@@ -460,7 +477,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             storage=None if run.parameters is None else run.parameters.storage,
             parameters=run.parameters,
         ),
@@ -474,7 +491,7 @@ def test_tab_snapshot_tracks_actual_success_and_draft_or_result_drift(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(record, metadata=session.metadata),
+            result=replace(record, metadata=session.metadata.model_dump(mode="json")),
             source_path="imported.hdf5",
             parameters=run.parameters,
             storage=run.storage,

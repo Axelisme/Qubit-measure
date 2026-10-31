@@ -41,7 +41,7 @@ from zcu_lab.v2.mux.t1 import MuxT1Cfg, MuxT1Exp, MuxT1ToneCfg
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment import load_run, save_run
-from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.program.v2 import SweepCfg
 
@@ -64,16 +64,15 @@ cfg = MuxT1Cfg(
 )
 core = MuxT1Exp()
 plots = Plots(NonPresentingHost())
-stop = StopSignal()
+scope = Scope("run")
 try:
     result = core.run(
         cfg,
-        context=RunContext(env.soc, env.soccfg, plots, {}, stop),
+        context=RunContext(env.soc, env.soccfg, plots, {}, scope),
     )
-    stop.raise_if_error()
-    source = RunRecord(cfg=cfg, result=result, metadata=metadata)
+    source = RunRecord(cfg=cfg, result=result, metadata=metadata.model_dump(mode="json"))
     fits = core.analyze(source, core.Options(skip=0, dual_exp=False), plots=plots)
-    # Preserve completion separately: stop.is_set() means cancelled, not complete.
+    # scope.stop.is_set() reports a stop request, not data completeness.
     # metadata is caller-captured RunMetadata for this source and its completion.
     save_run(source, destination, spec=MuxT1Exp.AXES_SPEC)
     loaded, snapshot = load_run(destination, spec=MuxT1Exp.AXES_SPEC)
@@ -105,10 +104,9 @@ quantized for nonuniform sampling. `tone_indices` is int64 `(K,)`
 of original active indices. `signals` is complex128 `(K,P)`, ADC-length-normalized
 average I+jQ. The program averages reps and rounds. Cancellation keeps
 completed-round averages across the whole sweep. Before the first completed
-round, signals remain NaN. Acquisition failures retain their cause on `StopSignal`;
-always call `raise_if_error()` before reporting success. A
-partial buffer does not imply success. Admission and construction errors can
-propagate directly.
+round, signals remain NaN. Acquisition, admission and construction errors
+propagate directly. Authors decide whether returned data meets their analysis
+requirements; StopSignal carries only a stop request.
 
 Live plots use `measurement_i` and fit plots use `fit_i`, where `i` is the original
 index, not the label. Analysis reads only the explicit source, permits cfg=None,
@@ -305,7 +303,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         raise ValueError before acquisition. Cancellation retains
         completed-round averages across the sweep, or NaN before any round finishes.
         context supplies offline or hardware handles, plots and a stop signal;
-        check context.scope.stop.raise_if_error() before reporting success.
+        acquisition and program errors propagate.
         """
         cfg = MuxT1Cfg.model_validate(config.model_dump())
         if cfg.sampling == "linear":

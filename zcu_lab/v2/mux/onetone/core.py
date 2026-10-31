@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
@@ -362,16 +363,24 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         )
         return MuxOnetoneAnalysis(outcomes)
 
-    def run(self, config: MuxOnetoneCfg, *, context: RunContext) -> MuxOnetoneResult:
+    def run(
+        self,
+        config: MuxOnetoneCfg,
+        *,
+        context: RunContext,
+        on_acquire_stop: Callable[[], None] | None = None,
+    ) -> MuxOnetoneResult:
         """Reset, read all selected tones together, and repeat at each offset.
 
         config supplies the base readout and common MHz offsets; it is unchanged.
         context supplies connected soc/soccfg, plots and cancellation. The live
         plot shows one magnitude curve per selected tone. Returned complex IQ is
         averaged over reps and rounds, in participants order; unmeasured points
-        stay NaN after a stop. Call context.scope.stop.raise_if_error() to
-        distinguish acquisition failure from a successful or stopped return.
-        Invalid cfg or program settings raise.
+        stay NaN after a stop. Acquisition, cfg and program errors propagate.
+        on_acquire_stop optionally observes each externally stopped acquire once,
+        after its scope and progress cleanup, before it returns. Pure data stop
+        does not call it. Observer exceptions propagate without retry. The
+        observer does not stop later offsets or change the persisted result.
         """
         # 1. Select tones without changing their original indices or base frequencies.
         cfg = deepcopy(config)
@@ -430,7 +439,8 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                     context.soc,
                     rounds=cfg.rounds,
                     options=RunOptions(
-                        converter=partial(averaged_mux_signal, prog, readout_module)
+                        converter=partial(averaged_mux_signal, prog, readout_module),
+                        on_stop=on_acquire_stop,
                     ),
                 )
 

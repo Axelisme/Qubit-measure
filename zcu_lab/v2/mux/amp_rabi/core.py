@@ -66,7 +66,6 @@ Example with validated cfg, RunContext and fresh analysis_plots::
 
     core = MuxAmpRabiExp()
     result = core.run(cfg, context=context)
-    context.scope.stop.raise_if_error()
     source = RunRecord(cfg=cfg, result=result)
     outcomes = core.analyze(source, core.Options(), plots=analysis_plots)
 """
@@ -264,8 +263,8 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         quantized gains in a.u. within [-1, 1]. All gains advance in one shared hardware loop.
         Each completed round updates the full sweep's live plots. Cancellation
         keeps completed-round averages, or NaN if no round completes.
-        Call context.scope.stop.raise_if_error() before reporting success;
-        the caller also finishes/releases plots. Invalid cfg/build errors propagate.
+        Acquisition and cfg/build errors propagate. The caller finishes/releases
+        plots and decides whether returned data can be analyzed.
         """
         # Prepare each gain grid and select readout tones in participant order.
         cfg = MuxAmpRabiCfg.model_validate(config.model_dump())

@@ -5,13 +5,13 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
     decay_time_bounds,
     fit_decay,
 )
-from zcu_tools.experiment import AnalysisFailed
 from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Result, t1_signal2real

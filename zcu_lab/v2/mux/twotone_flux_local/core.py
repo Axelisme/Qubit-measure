@@ -34,7 +34,9 @@ class TwotoneFluxLocalExp(Experiment[MuxFluxResult, TwotoneFluxLocalCfg]):
         """Run config without mutation using context's drivers, board and Stop.
 
         Return tone-major maps in absolute MHz and native DC coordinates.
-        Stop discards only the unfinished flux point; driver errors propagate.
+        Cancelling an inner acquire leaves that point NaN and scans the next.
+        Cancelling the Run scope stops the scan and retains completed points.
+        Driver and acquisition errors propagate.
         Sources remain at the final written value. No output is enabled here.
         """
         return run_flux_scan(config, context=context)

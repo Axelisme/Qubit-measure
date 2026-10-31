@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-10-27，interactive range find
+**Last updated:** 2026-10-31，Analyze 例外與子層取消
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -100,6 +100,7 @@ await tab.run()
 try:
     analysis = await tab.analyze("primary", result=FitSummary)
     if analysis.result is None:
+        # Descendant analysis cancellation, not a fitting exception.
         return Report(
             value=None,
             writeback_applied=False,
@@ -126,13 +127,18 @@ finally:
 可照著操作的完整骨架見 [Recipe 撰寫](../v2/measure-authoring.md#recipe-撰寫)。
 `report_number` 只把不可估計或非有限的 fit scalar 轉成 null，不改擬合或 writeback 政策。
 
-預期擬合失敗回 `AnalysisResult(result=None, status="failed", reason=...)`。
-範例的 Report 宣告 nullable value、writeback_applied 與 nullable analysis_failure。
-有分析的 recipe 都在每次 Analyze 後檢查 result。
-失敗時回報原因，不詢問或接受 writeback，也不跑相依的 Post。
-成功時 analysis_failure 為 null。Primary 成功而 Post 失敗時，報告保留 Primary 的估計。
-Mux 頂層分析失敗回空 tones；單 tone 失敗仍由 owner 保留該 tone 的原因，其他 tone 繼續。
-Owner 的程式錯誤、record 與 postprocessing 錯誤仍向上傳播，不以空報告掩蓋。
+Analyze 回傳就發布結果，拋錯就把原錯誤交給作者，不依例外型別或原因分類。
+Fitting 的 `AnalysisFailed` 也會向上傳播；作者如需處理，從
+`zcu_tools.analysis.failure` import，並自行決定是否捕捉，未捕捉就使 recipe failed。
+Record 與 postprocessing 的錯誤同樣向上傳播，不以空報告掩蓋。
+逐 tone 的失敗隔離與 summary 內容由分析 owner 決定，recipe 不替 owner 分類。
+
+範例的 `AnalysisResult.result=None` 分支只處理子層分析取消且沒有結果的情況，
+此時 status="failed"，reason 說明取消原因；它不是 fitting 例外的交付方式。
+Report 的 nullable value、writeback_applied 與 nullable analysis_failure 由作者宣告，
+此範例用 analysis_failure 保存取消原因，成功時為 null。
+在解參照 result 或開始下一個分析前先檢查 result。
+取消而無結果時不詢問或接受 writeback，也不跑相依 Post；先前成功的估計仍可由作者保留。
 
 `tab.save()` 同步保存 raw data 與全部已完成階段的 artifacts。
 Analyze 不會自動保存。各 recipe 在已有 Run 結果後進入 `try/finally`，收尾只 save 一次。
@@ -156,7 +162,7 @@ Run scope cancel 只停止正在取得資料的 Run，回傳 partial，recipe �
 進行中的 Run 先合作 drain，runtime 保留 run_id、partial 與完成事實，再 raise。
 這是普通例外，不是 `asyncio.CancelledError`。
 `tab.analyze` 與 `tab.ask_writeback` 都回非 Optional 物件，不用 None 表示根取消。
-AnalysisResult.result 的 null 表示該分析沒有成功結果，與根取消的例外不同。
+子層分析取消且無結果時，AnalysisResult.result 為 null；fitting 例外與根取消都不走這個值路徑。
 作者不 catch 根取消。已進入 try 的 `finally` 仍在原 worker 同步 Save。
 本目錄的 `await tab.run()` 保持在 try 外，根取消在此 raise 時不進入 Save finalizer。
 Drained partial 留在 tab，交由 agent 決定是否另行保存。

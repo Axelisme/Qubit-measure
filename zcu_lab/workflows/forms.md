@@ -80,9 +80,9 @@ Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不�
 ## 單一 run 與 remote
 
 Headless tab owner 將 fixed context/storage、typed cached device mapping、software provenance 與 native plan 交給該 run 的 controller。
-Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 `await env.run(core.run, cfg)` acquisition。
-Pause 保留 operation、lease、plan、accepted input、capture 與 Plots。Resume 保留同一 workflow coroutine，重試被 Pause 中斷的 operation，不在 Resume 讀硬體。
-Device actual snapshot 只在每次 env.run callback 前讀取；native 保存使用該次 Completed.facts。
+Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 `await run_core(scope, core.run, cfg)` acquisition。
+每個 operation 只呼叫一次。Ask 等答時保留 operation、lease、plan、accepted input、capture 與 Plots。
+run_core 只在每次 core callback 前讀取 device actual snapshot，寫入該次 RunRecord.metadata；native 保存保留該快照。
 Stop 等 producer 返回與 terminal delivery 後才 finish。Busy tab 拒絕 close；replacement Start 或成功 close 才 release presentation，不 disconnect 共用硬體。
 
 GUI、RPC、MCP 呼同一 WorkflowControlFacet，不另存 run。tab_id 識別 opened draft owner，run_id 識別 native run。
@@ -98,7 +98,7 @@ Tunables 使用 retained binding 的唯一 state/env。Complex tag 與 whole tup
 Tuning view 直接呈現 Host 的唯一 FormState，GUI Apply 與 RPC workflow.tunables 共用 facet.apply_tunables。
 兩者整批提交當下普通值，不保存另一個 draft revision guard。
 只有成功才更新 accepted input/base 並清 local text；invalid input 留在 shared draft，RPC 保留 field path/message。
-Running 或 paused 都可 Apply。作者下次讀 `tun.current` 時取得新 revision；已捕捉的 operation request 不變。
+Running 或 waiting 都可 Apply。作者下次讀 `tun.current` 時取得新 revision；已捕捉的 operation request 不變。
 
 Records RPC 直接投影 Engine committed records；point 現在含獨立 stage 與 enabled measurements。
 Live/summary 只建立 enabled lifetime 圖。具名圖/PNG 沿 retained Plots 與 owner-thread renderer，status-only 不渲染。

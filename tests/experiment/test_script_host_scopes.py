@@ -58,10 +58,10 @@ def test_cancel_scope_preserves_parent_and_next_iteration_starts_clean(
         "active_path": "workflow:test/iteration#1/operation#1/schedule#1/acquire#1",
     }
     assert acquisitions == [True, scope != "acquire"]
-    assert [(item.partial_result, item.stopped) for item in completions] == [
-        (True, scope in {"operation", "run", "iteration", "workflow"}),
-        (scope in {"iteration", "workflow"}, scope in {"iteration", "workflow"}),
-        (scope == "workflow", scope == "workflow"),
+    assert [item.stopped for item in completions] == [
+        scope in {"operation", "run", "iteration"},
+        scope == "iteration",
+        False,
     ]
     assert host.status == ("cancelled" if scope == "workflow" else "completed")
     assert host.active_path == "workflow:test"
@@ -99,10 +99,32 @@ def test_stale_segment_and_expected_refuse_current_acquire_without_stopping_pare
 
     async def script() -> None:
         result = await host.call(operation)
-        assert result.partial_result
+
         assert not result.stopped
 
     host.run(script())
+
+
+def test_idle_parent_cancel_is_inherited_only_by_its_later_operations() -> None:
+    host = ScriptHost(Scope("workflow", name="test"))
+    completions: list[CallResult[bool]] = []
+
+    async def script() -> None:
+        with host.root.branch("iteration") as iteration:
+            assert host.cancel("iteration").cancelled
+            completions.append(
+                await host.call(lambda ctx: ctx.scope.cancelled, scope=iteration)
+            )
+        with host.root.branch("iteration") as iteration:
+            completions.append(
+                await host.call(lambda ctx: ctx.scope.cancelled, scope=iteration)
+            )
+
+    host.run(script())
+    assert [(item.result, item.stopped) for item in completions] == [
+        (True, True),
+        (False, False),
+    ]
 
 
 def test_root_has_no_sequence_and_inactive_label_returns_current_path() -> None:

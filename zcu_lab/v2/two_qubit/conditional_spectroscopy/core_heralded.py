@@ -139,8 +139,9 @@ class SpectroscopyHeraldedExp(
     ) -> SpectroscopyHeraldedResult:
         """Accumulate all herald/terminal counts across acquisition rounds.
 
-        Optional DC settings are not restored. Completed rounds survive stop;
-        check the operation stop signal for transport errors.
+        Optional DC settings are not restored. Completed rounds survive
+        cooperative cancellation. Acquisition exceptions propagate unchanged.
+        The stop signal carries only stop requests and reason text.
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)

@@ -77,7 +77,7 @@ def test_default_analysis_params_retain_result_source(
     metadata = historical_metadata()
     if loaded:
         pane = RunPaneState(
-            result=replace(result, metadata=metadata),
+            result=replace(result, metadata=metadata.model_dump(mode="json")),
             source_path="native.h5",
             parameters=saved,
         )
