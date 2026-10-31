@@ -191,14 +191,14 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
             builder.emit(rabi_pulse)
-            builder.sync()
+            builder.delay_by_timeline()
             with builder.branch(by="reset_sel", align_timeline=False) as cases:
                 with cases.case(1):
                     builder.emit(tested_reset)
                 with cases.case(2):
                     builder.emit(tested_reset)
                     builder.emit(rabi_pulse)
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(Readout("readout", cfg.readout))
 
             # 4. Retain cumulative class counts, including completed partial rounds.

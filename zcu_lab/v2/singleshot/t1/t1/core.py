@@ -162,14 +162,14 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder.add_loop("ge", 2)
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
-            builder.sync()
+            builder.delay_by_timeline()
             with (
                 builder.branch(by="ge", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.sync()
-            builder.delay_timeline(delay)
+            builder.delay_by_timeline()
+            builder.timeline_inc(delay)
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
             axis = Classify(
@@ -209,13 +209,13 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             )
             if cfg.reset is not None:
                 builder.emit(Reset("reset", cfg.reset))
-            builder.sync()
+            builder.delay_by_timeline()
             with (
                 builder.branch(by="ge", align_timeline=False) as cases,
                 cases.case(1),
             ):
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.sync()
+            builder.delay_by_timeline()
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             builder.emit(Readout("readout", cfg.readout))
             program = builder.build()

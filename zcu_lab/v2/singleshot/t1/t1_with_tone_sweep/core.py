@@ -344,13 +344,13 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                 builder.add_loop("delay", len(lengths))
                 if cfg.reset is not None:
                     builder.emit(Reset("reset", cfg.reset))
-                builder.sync()
+                builder.delay_by_timeline()
                 with (
                     builder.branch(by="ge", align_timeline=False) as cases,
                     cases.case(1),
                 ):
                     builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-                builder.sync()
+                builder.delay_by_timeline()
                 builder.emit(
                     TableLengthPulse(
                         "probe_pulse",
