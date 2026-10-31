@@ -581,17 +581,18 @@ def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
         prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
         prog.delay(20 / 430.08)
         with prog.branch(by="scan", align_timeline=True) as branch:
-            for index in range(3):
-                with branch.case(index):
-                    prog.delay_timeline((5 + 5 * index) / 430.08)
+            with branch.case(0):
+                prog.delay_timeline(QickSweep1D("scan", 5 / 430.08, 35 / 430.08))
+            with branch.case(1):
+                prog.delay_timeline(25 / 430.08)
         prog.pulse(0, "p0", timeline="default")
 
     prog = program(body)
-    assert [waves(s) for s in shots(prog)] == [[35], [35], [45]]
+    assert [waves(s) for s in shots(prog)] == [[45], [45], [65]]
     memory = prog.compile_datamem()
     # Three IR dispatch destinations are allowed; no additional time words.
     assert memory is not None and len(memory) == 3
-    assert set(int(word) for word in memory) <= set(prog.labels.values())
+    assert set(int(word) for word in memory) <= {int(str(address).lstrip("&")) for address in prog.labels.values()}
 
 
 def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
