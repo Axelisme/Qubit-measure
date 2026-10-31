@@ -267,6 +267,11 @@ class TimelineAdvance(TimedMacro):
     def _finish_selected(self, event: SelectedEventEnd, duration: Time) -> RuntimeEnd:
         if isinstance(duration, RuntimeEnd):
             raise ValueError("selected post aggregate requires a scalar or swept post")
+        if isinstance(duration, (float, int)) and duration == 0 and all(
+            isinstance(post, (float, int)) and post == 0 for post in event.posts
+        ):
+            # The physical selection already materialized this exact aggregate.
+            return self.book.math.cycles(event.rounded[0])
         offsets = tuple(
             offset + post + duration
             for offset, post in zip(event.offsets, event.posts, strict=True)
