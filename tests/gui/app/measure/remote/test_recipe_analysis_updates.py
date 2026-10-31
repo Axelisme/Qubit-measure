@@ -1,11 +1,25 @@
 """Recipe analysis parameters cross the native tracked owner boundary."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.gui.app.measure.adapter import Analysis, AnalyzeRequest
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
+from zcu_tools.mcp.measure.session import GuiRpcError
+from zcu_tools.plotting.plots import Plots
+
+from tests.gui.app.measure._synthetic import (
+    SampleAdapter,
+    SampleAnalysis,
+    SampleCfg,
+    SampleParams,
+    SampleResult,
+)
 
 from ._helpers import mcp_client
 from ._recipe_analysis_adapter import RecipePicker
@@ -24,6 +38,46 @@ class Picked(BaseModel):
 class Report(BaseModel):
     half: float
     written: int
+
+
+@pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError])
+def test_analyze_errors_reach_recipe_author_with_original_message(
+    fx, tmp_path: Path, request: pytest.FixtureRequest, error_type: type[Exception]
+) -> None:
+    message = "synthetic analyze could not produce a result"
+
+    def analyze(
+        req: AnalyzeRequest[RunRecord[SampleCfg, SampleResult], SampleParams],
+        *,
+        plots: Plots,
+    ) -> SampleAnalysis:
+        raise error_type(message)
+
+    fx.registry.register(
+        "synthetic/failing-analysis",
+        replace(SampleAdapter, analysis=Analysis(fn=analyze)),
+    )
+    observed: list[str] = []
+
+    @recipe("analyze-error", "Let the author handle any analyze failure")
+    async def analyze_error(session: RecipeSession, inputs: Inputs) -> Report:
+        tab = session.open_tab("synthetic/failing-analysis")
+        await tab.run()
+        try:
+            await tab.analyze("primary", result=Picked)
+        except GuiRpcError as error:
+            observed.append(str(error))
+        else:
+            raise AssertionError("Analyze failure must raise to its author")
+        return Report(half=0.0, written=0)
+
+    _, call = mcp_client(
+        fx.service.port, tmp_path, request=request, recipes=(analyze_error,)
+    )
+    call("connect", {"port": fx.service.port})
+    result = call("analyze-error", {})
+    assert result["status"] == "completed", result
+    assert observed == [message]
 
 
 def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answer(
