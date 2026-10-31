@@ -11,6 +11,7 @@ from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
     CycleVariable,
+    cycle_variable,
     LinearTime,
     TimeChoice,
     TimeExpression,
@@ -137,7 +138,7 @@ class DeferredCoverage:
     cycles: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class RuntimeEnd:
     """Relative cycle end stored in register, with inclusive minimum/maximum.
 
@@ -156,24 +157,40 @@ class RuntimeEnd:
     """
 
     register: str
-    minimum: int | None
-    maximum: int | None
-    covers: tuple["Time", ...] = ()
-    deferred: tuple[DeferredCoverage, ...] = ()
-    expression: TimeExpression | None = None
+    covers: tuple["Time", ...]
+    deferred: tuple[DeferredCoverage, ...]
+    expression: TimeExpression
 
-    def __post_init__(self) -> None:
-        if self.expression is None:
-            value = (
-                LinearTime(self.minimum)
-                if self.minimum is not None and self.minimum == self.maximum
-                else LinearTime(
-                    terms=(
-                        (CycleVariable(self.register, self.minimum, self.maximum), 1),
-                    )
-                )
+    def __init__(
+        self,
+        register: str,
+        minimum: int | None = None,
+        maximum: int | None = None,
+        covers: tuple["Time", ...] = (),
+        deferred: tuple[DeferredCoverage, ...] = (),
+        expression: TimeExpression | None = None,
+    ) -> None:
+        # Endpoints seed a fresh producer only. Existing algebra is authoritative.
+        if expression is None:
+            expression = (
+                LinearTime(minimum)
+                if minimum is not None and minimum == maximum
+                else LinearTime(terms=((cycle_variable(register, minimum, maximum), 1),))
             )
-            object.__setattr__(self, "expression", value)
+        object.__setattr__(self, "register", register)
+        object.__setattr__(self, "covers", covers)
+        object.__setattr__(self, "deferred", deferred)
+        object.__setattr__(self, "expression", expression)
+
+    @property
+    def minimum(self) -> int | None:
+        """Return the expression's lower cycle bound, or None for unknown time."""
+        return None if unbounded_time(self.expression) else projected_expression_bounds(self.expression).minimum
+
+    @property
+    def maximum(self) -> int | None:
+        """Return the expression's upper cycle bound, or None for unknown time."""
+        return None if unbounded_time(self.expression) else projected_expression_bounds(self.expression).maximum
 
 
 def runtime_expression(value: RuntimeEnd) -> TimeExpression:
@@ -230,7 +247,7 @@ def parameter_expression(
         count = prog.loop_dict[name]
         if count > 1:
             if name not in axes:
-                axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+                axes[name] = cycle_variable(name, 0, count - 1, ((name, count),))
             terms.append((axes[name], round(span * factor / (count - 1))))
     return LinearTime(round(value.start * factor), tuple(terms))
 
@@ -275,7 +292,7 @@ def source_expression(prog, name: str) -> TimeExpression:
     if name in prog.loop_dict:
         count = prog.loop_dict[name]
         if name not in book.cycle_axes:
-            book.cycle_axes[name] = CycleVariable(name, 0, count - 1, ((name, count),))
+            book.cycle_axes[name] = cycle_variable(name, 0, count - 1, ((name, count),))
         return LinearTime(terms=((book.cycle_axes[name], 1),))
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
@@ -284,7 +301,7 @@ def source_expression(prog, name: str) -> TimeExpression:
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:
         return LinearTime(limits.minimum)
-    return LinearTime(terms=((CycleVariable(name, limits.minimum, limits.maximum), 1),))
+    return LinearTime(terms=((cycle_variable(name, limits.minimum, limits.maximum), 1),))
 
 
 def bounded_source_expression(
@@ -306,7 +323,7 @@ def bounded_source_expression(
         else LinearTime(
             terms=(
                 (
-                    CycleVariable(
+                    cycle_variable(
                         name,
                         minimum,
                         maximum,
@@ -332,12 +349,12 @@ def lookup_expression(
     axes = expression_axes(index)
     points = evaluate_time(index, axes)
     if points is None:
-        return LinearTime(terms=((CycleVariable(name, min(values), max(values)), 1),))
+        return LinearTime(terms=((cycle_variable(name, min(values), max(values)), 1),))
     selected = np.asarray(values, dtype=np.int64)[points]
     lower, upper = int(selected.min()), int(selected.max())
     if lower == upper:
         return LinearTime(lower)
-    variable = CycleVariable(
+    variable = cycle_variable(
         name,
         lower,
         upper,
@@ -554,7 +571,7 @@ class RuntimeMath(TimedMacro):
         if points is None:
             raise RuntimeError("native conversion lost its producer points")
         values = points // 256
-        variable = CycleVariable(
+        variable = cycle_variable(
             "fabric conversion",
             int(values.min()),
             int(values.max()),
@@ -668,13 +685,13 @@ class RuntimeMath(TimedMacro):
     ) -> RuntimeEnd:
         if all(
             variable not in inputs
-            and len(variable.axes) == 1
-            and variable.points is None
+            and len(variable.producer.axes) == 1
+            and variable.producer.points is None
             for variable, _ in expression.terms
         ):
             spans: dict[str, int] = {}
             for variable, coefficient in expression.terms:
-                axis, count = variable.axes[0]
+                axis, count = variable.producer.axes[0]
                 spans[axis] = spans.get(axis, 0) + coefficient * (count - 1)
             return self.cycles(
                 QickParam(expression.constant, spans) / get_fclk(self.prog)
@@ -683,26 +700,24 @@ class RuntimeMath(TimedMacro):
         for variable, coefficient in expression.terms:
             if variable in inputs:
                 term = inputs[variable]
-            elif variable.reconstruction is not None:
-                term = self.reconstruct(variable.reconstruction, inputs)
+            elif variable.producer.reconstruction is not None:
+                term = self.reconstruct(variable.producer.reconstruction, inputs)
                 term = replace(
                     term,
-                    minimum=variable.minimum,
-                    maximum=variable.maximum,
                     expression=LinearTime(terms=((variable, 1),)),
                 )
-            elif variable.fixed_point is not None:
+            elif variable.producer.fixed_point is not None:
                 term = self._reconstruct_fixed_point(variable, inputs)
-            elif variable.selection is not None:
-                index, words = variable.selection
+            elif variable.producer.selection is not None:
+                index, words = variable.producer.selection
                 selected = self.reconstruct(index, inputs)
                 term = self.selected_end(
                     selected.register,
                     tuple(word / get_fclk(self.prog) for word in words),
                     selector_expression=index,
                 )
-            elif len(variable.axes) == 1 and variable.points is None:
-                axis, count = variable.axes[0]
+            elif len(variable.producer.axes) == 1 and variable.producer.points is None:
+                axis, count = variable.producer.axes[0]
                 term = self.cycles(
                     QickParam(0, {axis: count - 1}) / get_fclk(self.prog)
                 )
@@ -725,9 +740,9 @@ class RuntimeMath(TimedMacro):
     def _reconstruct_fixed_point(
         self, variable: CycleVariable, inputs: dict[CycleVariable, RuntimeEnd]
     ) -> RuntimeEnd:
-        if variable.fixed_point is None:
+        if variable.producer.fixed_point is None:
             raise RuntimeError("fixed-point producer has no numerator")
-        numerator, shift = variable.fixed_point
+        numerator, shift = variable.producer.fixed_point
         raw = self.reconstruct(numerator, inputs)
         if raw.minimum is None or raw.maximum is None:
             raise RuntimeError("fixed-point reconstruction lost bounds")
@@ -1167,18 +1182,13 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
-        if (
-            left.minimum is not None
-            and right.maximum is not None
-            and left.minimum >= right.maximum
-        ):
-            return a
-        if (
-            right.minimum is not None
-            and left.maximum is not None
-            and right.minimum >= left.maximum
-        ):
-            return b
+        difference = add_time(runtime_expression(left), scale_time(runtime_expression(right), -1))
+        if not unbounded_time(difference):
+            limits = projected_expression_bounds(difference)
+            if limits.minimum >= 0:
+                return a
+            if limits.maximum <= 0:
+                return b
         if (
             left.minimum is None
             or left.maximum is None

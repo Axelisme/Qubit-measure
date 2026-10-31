@@ -1,6 +1,8 @@
 """Compile-time cycle algebra, independent of register allocation and emission."""
 
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 
 import numpy as np
 from numpy.typing import NDArray
@@ -23,36 +25,110 @@ class CycleIntervalGrid:
     maximum: NDArray[np.int64]
 
 
-@dataclass(frozen=True, eq=False)
-class CycleVariable:
-    """One integer-cycle runtime value, identified by object identity.
+@dataclass(frozen=True)
+class VariableRange:
+    """One source's directed cycle endpoints and deviation from their line.
 
-    name identifies the producer for diagnostics, not equality. minimum and
-    maximum are inclusive signed-cycle bounds, or both None for an author-owned
-    runtime value with no compile-time bounds. Separate writes to a recycled
-    register must use separate variables. axes lists the legal loop dimensions
-    in row-major order. points holds exact values on that grid. With one axis
-    and no points, the value is that loop's zero-based index. Empty axes and no
-    points denotes a bounds-only unknown source. interval_points optionally
-    stores row-major lower/upper grids for a nonlinear unknown result whose
-    known loop coordinates must survive later arithmetic; these are not actual
-    point values and never authorize an exact-slack guard. reconstruction retains
-    exact integer producer algebra when a lookup has an affine declared mapping;
-    None means that no such reconstruction has been established. selection retains
-    a declared lookup mapping and its immutable index algebra for exact runtime
-    conditional selection without a new data-memory table.
+    source is a loop name for a one-loop producer, otherwise a fresh identity.
+    start/end follow iteration order, not numerical order. None marks an
+    unbounded source. deviation_minimum/maximum enclose the signed distance
+    from the endpoint line, in exact fractional cycles; affine sources use zero.
     """
 
-    name: str
-    minimum: int | None
-    maximum: int | None
+    source: str | object
+    start: int | None
+    end: int | None
+    deviation_minimum: Fraction = Fraction(0)
+    deviation_maximum: Fraction = Fraction(0)
+
+
+@dataclass(frozen=True)
+class CycleProducer:
+    """Immutable runtime recipe, separate from the range used by proofs.
+
+    axes/points retain exact integer values in row-major loop order for Repeat
+    reduction and exact-value getters. One axis without points is its loop index.
+    interval_points retains unknown-input envelopes for Repeat accumulation.
+    reconstruction is integer algebra for an affine lookup; selection is the
+    captured selector and declared words. fixed_point holds numerator and shift.
+    None means that recipe is unavailable, never that a range is unbounded.
+    """
+
     axes: tuple[tuple[str, int], ...] = ()
     points: tuple[int, ...] | None = None
     interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None
     reconstruction: "TimeExpression | None" = None
     selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
-    # Checked numerator algebra and arithmetic shift for k=8 runtime lengths.
     fixed_point: "tuple[TimeExpression, int] | None" = None
+
+
+@dataclass(frozen=True, eq=False)
+class CycleVariable:
+    """One immutable runtime value with diagnostic name, range and recipe.
+
+    Object identity distinguishes writes even when register names are recycled.
+    bounds is the sole proof representation; producer never supplies bounds to
+    expression consumers. minimum/maximum project that representation in cycles.
+    """
+
+    name: str
+    bounds: VariableRange
+    producer: CycleProducer
+
+    @property
+    def minimum(self) -> int | None:
+        """Return the conservative integer lower bound, or None when unbounded."""
+        r = self.bounds
+        if r.start is None or r.end is None:
+            return None
+        return math.ceil(min(r.start, r.end) + r.deviation_minimum)
+
+    @property
+    def maximum(self) -> int | None:
+        """Return the conservative integer upper bound, or None when unbounded."""
+        r = self.bounds
+        if r.start is None or r.end is None:
+            return None
+        return math.floor(max(r.start, r.end) + r.deviation_maximum)
+
+
+def cycle_variable(
+    name: str,
+    minimum: int | None,
+    maximum: int | None,
+    axes: tuple[tuple[str, int], ...] = (),
+    points: tuple[int, ...] | None = None,
+    *,
+    interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None,
+    reconstruction: "TimeExpression | None" = None,
+    selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None,
+    fixed_point: "tuple[TimeExpression, int] | None" = None,
+) -> CycleVariable:
+    """Capture a producer's range once, without evaluating expression grids.
+
+    A known one-loop sequence shares that loop's ID. Its directed endpoints and
+    exact deviations are computed only along that source. Unknown values and
+    multi-loop nonlinear results receive independent IDs, even with bounds.
+    Recipe metadata survives independently for runtime reconstruction.
+    """
+    source: str | object = object()
+    start, end = minimum, maximum
+    low = high = Fraction(0)
+    if len(axes) == 1 and interval_points is None:
+        source = axes[0][0]
+        if points is not None:
+            start, end = points[0], points[-1]
+            if len(points) > 1:
+                deviations = [
+                    Fraction(value - start) - Fraction((end - start) * i, len(points) - 1)
+                    for i, value in enumerate(points)
+                ]
+                low, high = min(deviations), max(deviations)
+    return CycleVariable(
+        name,
+        VariableRange(source, start, end, low, high),
+        CycleProducer(axes, points, interval_points, reconstruction, selection, fixed_point),
+    )
 
 
 @dataclass(frozen=True)
@@ -86,7 +162,11 @@ TimeExpression = LinearTime | TimeChoice
 
 
 def expression_bounds(value: TimeExpression) -> CycleBounds:
-    """Bound cycles after cancellation, without assuming independent max paths."""
+    """Group directed endpoints by source ID, then add coefficient deviations.
+
+    Different sources are independent. Any surviving unbounded term raises
+    ValueError. This rule never enumerates a loop grid, including for max paths.
+    """
     if isinstance(value, TimeChoice):
         limits = [expression_bounds(item) for item in value.alternatives]
         select = max if value.maximum else min
@@ -94,15 +174,21 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
             select(limit.minimum for limit in limits),
             select(limit.maximum for limit in limits),
         )
-    lower = upper = value.constant
+    groups: dict[str | object, tuple[int, int]] = {}
+    lower = upper = Fraction(value.constant)
     for variable, coefficient in value.terms:
-        if variable.minimum is None or variable.maximum is None:
+        r = variable.bounds
+        if r.start is None or r.end is None:
             raise ValueError("runtime-only time has no compile-time bounds")
-        endpoints = coefficient * variable.minimum, coefficient * variable.maximum
-        lower += min(endpoints)
-        upper += max(endpoints)
-    return CycleBounds(lower, upper)
-
+        start, end = groups.get(r.source, (0, 0))
+        groups[r.source] = start + coefficient * r.start, end + coefficient * r.end
+        deviations = coefficient * r.deviation_minimum, coefficient * r.deviation_maximum
+        lower += min(deviations)
+        upper += max(deviations)
+    for start, end in groups.values():
+        lower += min(start, end)
+        upper += max(start, end)
+    return CycleBounds(math.ceil(lower), math.floor(upper))
 
 def unbounded_time(value: TimeExpression) -> bool:
     """Return whether surviving identities lack author or producer bounds."""
@@ -120,7 +206,7 @@ def time_variables(value: TimeExpression) -> tuple[CycleVariable, ...]:
 
 def expression_axes(value: TimeExpression) -> dict[str, int]:
     """Return only the loop dimensions used by this expression's producers."""
-    return dict(axis for variable in time_variables(value) for axis in variable.axes)
+    return dict(axis for variable in time_variables(value) for axis in variable.producer.axes)
 
 
 def evaluate_time(
@@ -147,13 +233,13 @@ def evaluate_time(
         if variable.minimum == variable.maximum:
             result = result + coefficient * variable.minimum
             continue
-        if not variable.axes or variable.interval_points is not None:
+        if not variable.producer.axes or variable.producer.interval_points is not None:
             return None
-        local = dict(variable.axes)
+        local = dict(variable.producer.axes)
         points = (
             np.arange(variable.maximum + 1, dtype=np.int64)
-            if variable.points is None
-            else np.asarray(variable.points, dtype=np.int64).reshape(
+            if variable.producer.points is None
+            else np.asarray(variable.producer.points, dtype=np.int64).reshape(
                 tuple(local.values())
             )
         )
@@ -195,14 +281,14 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
     constant = value.constant
     terms = []
     for variable, coefficient in value.terms:
-        if variable.interval_points is not None:
+        if variable.producer.interval_points is not None:
             index = int(upper == (coefficient > 0))
-            points = variable.interval_points[index]
-            endpoint = CycleVariable(
-                variable.name, min(points), max(points), variable.axes, points
+            points = variable.producer.interval_points[index]
+            endpoint = cycle_variable(
+                variable.name, min(points), max(points), variable.producer.axes, points
             )
             terms.append((endpoint, coefficient))
-        elif variable.axes:
+        elif variable.producer.axes:
             terms.append((variable, coefficient))
         else:
             endpoint = (
@@ -215,17 +301,8 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
 
 
 def projected_expression_bounds(value: TimeExpression) -> CycleBounds:
-    """Bound tProc cycles over legal points, preserving known-axis correlation.
-
-    Unknown inputs use conservative endpoints, not actual extrema. Raise
-    RuntimeError if an unknown survives interval substitution.
-    """
-    exact = exact_bounds(value)
-    if exact is not None:
-        return exact
-    grids = interval_arrays(value, expression_axes(value))
-    return CycleBounds(int(grids.minimum.min()), int(grids.maximum.max()))
-
+    """Project cycles through the common directed-source range rule."""
+    return expression_bounds(value)
 
 def slack_variables(value: TimeExpression) -> list[str]:
     """Name unknown sources and known producers on axes that change the tail."""
@@ -243,9 +320,9 @@ def slack_variables(value: TimeExpression) -> list[str]:
             for v in time_variables(value)
             if v.minimum != v.maximum
             and (
-                not v.axes
-                or v.interval_points is not None
-                or any(name in changing for name, _ in v.axes)
+                not v.producer.axes
+                or v.producer.interval_points is not None
+                or any(name in changing for name, _ in v.producer.axes)
             )
         }
     )
@@ -258,7 +335,7 @@ def point_time(
     lower, upper = int(points.min()), int(points.max())
     if lower == upper:
         return LinearTime(lower)
-    variable = CycleVariable(
+    variable = cycle_variable(
         name, lower, upper, tuple(axes.items()), tuple(int(v) for v in points.flat)
     )
     return LinearTime(terms=((variable, 1),))
@@ -291,7 +368,7 @@ def reduce_loop_time(
     if points is not None:
         return point_time(name, remaining, reduce(points))
     if unbounded_time(value):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
+        return LinearTime(terms=((cycle_variable(name, None, None), 1),))
     grids = interval_arrays(value, axes)
     return interval_time(name, remaining, reduce(grids.minimum), reduce(grids.maximum))
 
@@ -303,7 +380,7 @@ def interval_time(
     lower, upper = np.broadcast_arrays(lower, upper)
     if np.array_equal(lower, upper):
         return point_time(name, axes, lower)
-    variable = CycleVariable(
+    variable = cycle_variable(
         name,
         int(lower.min()),
         int(upper.max()),
@@ -343,7 +420,7 @@ def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression
     if a is not None and b is not None:
         return point_time(name, axes, a * b)
     if unbounded_time(left) or unbounded_time(right):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
+        return LinearTime(terms=((cycle_variable(name, None, None), 1),))
     left_grids = interval_arrays(left, axes)
     right_grids = interval_arrays(right, axes)
     products = [
@@ -392,7 +469,7 @@ def select_time(
         sorted({v.name for value in (selector, *values) for v in time_variables(value)})
     )
     if any(unbounded_time(value) for value in (selector, *values)):
-        return LinearTime(terms=((CycleVariable(name, None, None), 1),))
+        return LinearTime(terms=((cycle_variable(name, None, None), 1),))
     grids = [interval_arrays(value, axes) for value in values]
     lower_grids = [grid.minimum for grid in grids]
     upper_grids = [grid.maximum for grid in grids]

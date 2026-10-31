@@ -7,6 +7,7 @@ from qick.asm_v2 import QickParam, WriteReg
 
 from ._timeline_expression import (
     CycleVariable,
+    cycle_variable,
     LinearTime,
     TimeExpression,
     add_time,
@@ -410,7 +411,7 @@ class TimelineBook:
         if isinstance(iterations, str) and maximum is None:
             return self.source_expressions.get(
                 iterations,
-                LinearTime(terms=((CycleVariable(iterations, None, None), 1),)),
+                LinearTime(terms=((cycle_variable(iterations, None, None), 1),)),
             )
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
@@ -495,7 +496,7 @@ class TimelineBook:
             and macro.dst in prog._time_bounds.author_writes
         ):
             self.source_expressions[macro.dst] = LinearTime(
-                terms=((CycleVariable(macro.dst, None, None), 1),)
+                terms=((cycle_variable(macro.dst, None, None), 1),)
             )
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
@@ -532,7 +533,7 @@ class TimelineBook:
                 self.source_expressions.pop(macro.dst, None)
             else:
                 self.source_expressions[macro.dst] = LinearTime(
-                    terms=((CycleVariable(macro.dst, None, None), 1),)
+                    terms=((cycle_variable(macro.dst, None, None), 1),)
                 )
             return
         self.source_expressions[macro.dst] = add_time(

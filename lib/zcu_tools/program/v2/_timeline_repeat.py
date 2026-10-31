@@ -6,6 +6,7 @@ from qick.asm_v2 import Macro, WriteReg
 
 from ._timeline_expression import (
     CycleVariable,
+    cycle_variable,
     LinearTime,
     TimeExpression,
     add_time,
@@ -48,7 +49,7 @@ class LoopTimelineEnter(Macro):
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
-        progress = CycleVariable(storage.register, 0, None)
+        progress = cycle_variable(storage.register, 0, None)
         origin = RuntimeEnd(
             storage.register,
             0,
