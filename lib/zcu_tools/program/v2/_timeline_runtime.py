@@ -841,6 +841,11 @@ class RuntimeMath(TimedMacro):
                 )
                 inst["IF"] = "Z"
             self.operations.append(AsmInst(inst=inst, addr_inc=1))
+        # Candidate conversions have been consumed by the selection writes.
+        # Their immutable expressions survive; their storage is no longer live.
+        for candidate in candidates:
+            if isinstance(candidate, RuntimeEnd):
+                self.claimed.discard(candidate.register)
         return RuntimeEnd(
             register,
             lower,
