@@ -297,13 +297,22 @@ def test_scalar_adc_aggregate_ceil_applies_noise_tolerance(post_ticks, end):
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
 
 
-def test_runtime_cross_grid_length_sweep_fails_without_implicit_time_table():
+def test_runtime_cross_grid_length_sweep_ceil_without_implicit_time_table():
     pulse = Pulse(
         "cross_grid",
         _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0),
     )
-    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([pulse], lambda p: p.emit(pulse), lambda p: p.add_loop("scan", 3))
+    tail = Pulse("tail", _pulse_cfg(1, length=10 / 384, pre=0, post=0))
+
+    def body(prog):
+        prog.emit(pulse)
+        prog.emit(tail)
+
+    prog = _program([pulse, tail], body, lambda p: p.add_loop("scan", 3))
+    # W=287: ceil([39,77,115]*287/256) = [44,87,129].
+    assert [waves(shot) for shot in shots(prog)] == [[0, 44], [0, 87], [0, 129]] * 2
+    assert prog.compile_datamem() is None
+    assert not any(i["CMD"] in {"ARITH", "DIV"} for i in prog.prog_list)
 
 
 def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
