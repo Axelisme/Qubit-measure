@@ -211,7 +211,11 @@ class TimelineAdvance(TimedMacro):
                 self.book.math.source(self.duration, self.range_hint, author=True)
             )
         else:
-            duration = step_time(prog, self.duration) if self.aligned else self.duration
+            duration = (
+                step_time(prog, self.duration)
+                if self.aligned or isinstance(self.duration, QickParam)
+                else self.duration
+            )
         previous = self.book.end(self.timeline, placement=True)
         events = self._events(previous)
         end = self._finish(prog, events[0], duration)
@@ -325,7 +329,7 @@ class TimelineAdvance(TimedMacro):
         if name != "t":
             raise RuntimeError("timeline advances expose only the t parameter")
         if isinstance(self.resolved_time, RuntimeEnd):
-            raise RuntimeError("runtime timeline end is not an affine time parameter")
+            return self.book.math.time_parameter(self.resolved_time)
         return (
             self.resolved_time
             if isinstance(self.resolved_time, QickParam)
