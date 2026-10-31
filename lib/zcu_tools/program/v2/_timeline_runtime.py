@@ -298,7 +298,11 @@ def lookup_expression(
     if lower == upper:
         return LinearTime(lower)
     variable = CycleVariable(
-        name, lower, upper, tuple(axes.items()), tuple(int(v) for v in selected.flat),
+        name,
+        lower,
+        upper,
+        tuple(axes.items()),
+        tuple(int(v) for v in selected.flat),
         reconstruction=reconstruction,
     )
     return LinearTime(terms=((variable, 1),))
@@ -439,14 +443,18 @@ class RuntimeMath(TimedMacro):
         self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
     ) -> RuntimeEnd:
         if all(
-            variable not in inputs and len(variable.axes) == 1 and variable.points is None
+            variable not in inputs
+            and len(variable.axes) == 1
+            and variable.points is None
             for variable, _ in expression.terms
         ):
             spans: dict[str, int] = {}
             for variable, coefficient in expression.terms:
                 axis, count = variable.axes[0]
                 spans[axis] = spans.get(axis, 0) + coefficient * (count - 1)
-            return self.cycles(QickParam(expression.constant, spans) / get_fclk(self.prog))
+            return self.cycles(
+                QickParam(expression.constant, spans) / get_fclk(self.prog)
+            )
         result = self.cycles(expression.constant / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
             if variable in inputs:
@@ -455,7 +463,9 @@ class RuntimeMath(TimedMacro):
                 term = self.reconstruct(variable.reconstruction, inputs)
             elif len(variable.axes) == 1 and variable.points is None:
                 axis, count = variable.axes[0]
-                term = self.cycles(QickParam(0, {axis: count - 1}) / get_fclk(self.prog))
+                term = self.cycles(
+                    QickParam(0, {axis: count - 1}) / get_fclk(self.prog)
+                )
             else:
                 raise RuntimeError(
                     f"{variable.name}: integer time expression lost its runtime producer"
@@ -645,21 +655,32 @@ class RuntimeMath(TimedMacro):
         register = self.allocate()
         for index, operand in enumerate(operands):
             inst = {
-                "CMD": "REG_WR", "DST": self.prog._get_reg(register),
+                "CMD": "REG_WR",
+                "DST": self.prog._get_reg(register),
                 "SRC": "imm" if isinstance(operand, int) else "op",
             }
             inst["LIT" if isinstance(operand, int) else "OP"] = (
-                f"#{operand}" if isinstance(operand, int) else self.prog._get_reg(operand)
+                f"#{operand}"
+                if isinstance(operand, int)
+                else self.prog._get_reg(operand)
             )
             if index:
-                self.operations.append(AsmInst(inst={
-                    "CMD": "TEST", "OP": f"{self.prog._get_reg(selector)} - #{index}",
-                    "UF": "1",
-                }, addr_inc=1))
+                self.operations.append(
+                    AsmInst(
+                        inst={
+                            "CMD": "TEST",
+                            "OP": f"{self.prog._get_reg(selector)} - #{index}",
+                            "UF": "1",
+                        },
+                        addr_inc=1,
+                    )
+                )
                 inst["IF"] = "Z"
             self.operations.append(AsmInst(inst=inst, addr_inc=1))
         return RuntimeEnd(
-            register, lower, upper,
+            register,
+            lower,
+            upper,
             expression=select_time(
                 source_expression(self.prog, selector),
                 tuple(time_expression(self.prog, value) for value in candidates),

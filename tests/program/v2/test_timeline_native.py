@@ -135,9 +135,12 @@ def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
 
 def test_fractional_event_start_and_trigger_width_ceil_once():
     def body(prog):
-        prog.send_readoutconfig(0, "ro", t=0.2 / 430.08, timeline="default", tag="config")
-        prog.trigger([0], t=0.2 / 430.08, width=0.2 / 430.08,
-                     timeline="default", tag="edge")
+        prog.send_readoutconfig(
+            0, "ro", t=0.2 / 430.08, timeline="default", tag="config"
+        )
+        prog.trigger(
+            [0], t=0.2 / 430.08, width=0.2 / 430.08, timeline="default", tag="edge"
+        )
         prog.sync()
         prog.pulse(0, "pulse", timeline="default", tag="after")
 

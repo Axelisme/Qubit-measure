@@ -28,14 +28,18 @@ def _static_ticks(prog, value: float | QickParam) -> int | None:
     return round(value * get_fclk(prog))
 
 
-def _pulse_static_cycles(prog, ch: int, name: str, start: float | QickParam) -> Fraction | None:
+def _pulse_static_cycles(
+    prog, ch: int, name: str, start: float | QickParam
+) -> Fraction | None:
     ticks = _static_ticks(prog, start)
     length = prog.pulses[name].get_length()
     if ticks is None or isinstance(length, QickParam) and length.is_sweep():
         return None
     scalar = length.start if isinstance(length, QickParam) else length
     clock = prog.soccfg["gens"][ch]["f_fabric"]
-    return Fraction(ticks) + Fraction(round(scalar * clock)) * Fraction(str(get_fclk(prog))) / Fraction(str(clock))
+    return Fraction(ticks) + Fraction(round(scalar * clock)) * Fraction(
+        str(get_fclk(prog))
+    ) / Fraction(str(clock))
 
 
 def _trigger_static_cycles(
@@ -48,7 +52,10 @@ def _trigger_static_cycles(
     for ch in ros:
         samples = prog.ro_chs[ch]["length"]
         clock = prog.soccfg["readouts"][ch]["f_output"]
-        duration = max(duration, Fraction(samples) * Fraction(str(get_fclk(prog))) / Fraction(str(clock)))
+        duration = max(
+            duration,
+            Fraction(samples) * Fraction(str(get_fclk(prog))) / Fraction(str(clock)),
+        )
     return Fraction(ticks) + duration
 
 
@@ -156,7 +163,9 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 else placement_time(prog, self.relative_t)
             )
             self.event_end = EventEnd(
-                end, offset + prog.pulses[self.name].get_length(), (finish,),
+                end,
+                offset + prog.pulses[self.name].get_length(),
+                (finish,),
                 _pulse_static_cycles(prog, self.ch, self.name, offset),
             )
             self.book.set_end(self.timeline, finish)
@@ -166,7 +175,11 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             if limits is not None:
                 self.record(prog, limits[1], limits[0])
             return
-        t = end if self.relative_t == "auto" else end + placement_time(prog, self.relative_t)
+        t = (
+            end
+            if self.relative_t == "auto"
+            else end + placement_time(prog, self.relative_t)
+        )
         previous_end = prog.get_timestamp(gen_ch=self.ch)
         self.source.t = t
         self.source.preprocess(prog)
@@ -183,7 +196,9 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         actual_end = actual_t + prog.pulses[self.name].get_length()
         finish = align_end(prog, actual_end)
         self.event_end = EventEnd(
-            0.0, actual_end, (finish,),
+            0.0,
+            actual_end,
+            (finish,),
             _pulse_static_cycles(prog, self.ch, self.name, actual_t),
         )
         self.book.set_end(self.timeline, finish)
@@ -283,7 +298,9 @@ class TimelinePlacedTrigger(Trigger):
                 self.book.math.add(duration, offset)
                 if isinstance(duration, RuntimeEnd)
                 else offset + duration,
-                static_cycles=_trigger_static_cycles(prog, self.ros, offset, self.get_time_param("width")),
+                static_cycles=_trigger_static_cycles(
+                    prog, self.ros, offset, self.get_time_param("width")
+                ),
             )
             self.book.set_end(self.timeline, end)
             return
@@ -299,8 +316,11 @@ class TimelinePlacedTrigger(Trigger):
             self.book.record_native(prog, ch, ro_end, generator=False)
             end = self.book.math.maximum(end, ro_end)
         self.event_end = EventEnd(
-            0.0, end,
-            static_cycles=_trigger_static_cycles(prog, self.ros, actual_t, self.get_time_param("width")),
+            0.0,
+            end,
+            static_cycles=_trigger_static_cycles(
+                prog, self.ros, actual_t, self.get_time_param("width")
+            ),
         )
         self.book.set_end(
             self.timeline,

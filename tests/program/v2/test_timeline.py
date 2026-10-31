@@ -71,8 +71,12 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps():
     # Two scalar operations add one tick each. Native sweep starts at zero
     # and truncates its 1.2-tick step to one, giving 0,1,2,3.
     assert [_waves(s) for s in _shots(prog)] == [[2], [3], [4], [5]]
-    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx([2, 3, 4, 5])
-    assert prog.get_time_param("pulse", "t", as_array=True) * 430.08 == pytest.approx([2, 3, 4, 5])
+    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx(
+        [2, 3, 4, 5]
+    )
+    assert prog.get_time_param("pulse", "t", as_array=True) * 430.08 == pytest.approx(
+        [2, 3, 4, 5]
+    )
     assert prog.compile_datamem() is None
 
 

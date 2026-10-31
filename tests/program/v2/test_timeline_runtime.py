@@ -140,7 +140,9 @@ def test_author_register_hint_controls_same_channel_overlap_proof(hint):
 
 @pytest.mark.parametrize("as_array", [False, True])
 @pytest.mark.parametrize("operation", ["delay", "pulse", "config", "trigger"])
-def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(operation, as_array):
+def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(
+    operation, as_array
+):
     def initialize(prog):
         prog.add_dmem([40])
         prog.declare_readout(0, length=4 / 307.2)
@@ -171,7 +173,9 @@ def test_known_affine_register_getter_returns_actual_time_without_rescheduling()
 
     prog = program(body, initialize=lambda p: p.declare(loader))
     before = shots(prog)
-    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx([5, 10, 15])
+    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx(
+        [5, 10, 15]
+    )
     value = prog.get_time_param("end", "t")
     assert value.to_array({"scan": 3}) * 430.08 == pytest.approx([5, 10, 15])
     assert shots(prog) == before
@@ -592,7 +596,9 @@ def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
     memory = prog.compile_datamem()
     # Three IR dispatch destinations are allowed; no additional time words.
     assert memory is not None and len(memory) == 3
-    assert set(int(word) for word in memory) <= {int(str(address).lstrip("&")) for address in prog.labels.values()}
+    assert set(int(word) for word in memory) <= {
+        int(str(address).lstrip("&")) for address in prog.labels.values()
+    }
 
 
 def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():

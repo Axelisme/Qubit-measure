@@ -165,12 +165,20 @@ def _pulse_cfg(length: float, *, ch: int = 0) -> PulseCfg:
 
 
 def test_integer_candidate_selection_uses_only_author_waveform_table():
-    pulse = ComputedPulse("selected_integer", val_reg="selector", pulses=[
-        _pulse_cfg(25 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
-        _pulse_cfg(50 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
-    ])
-    prog = _program(make_mock_soccfg(1, 0), [pulse], lambda p: p.emit(pulse),
-                    lambda p: p.add_loop("selector", 2))
+    pulse = ComputedPulse(
+        "selected_integer",
+        val_reg="selector",
+        pulses=[
+            _pulse_cfg(25 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+            _pulse_cfg(50 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+        ],
+    )
+    prog = _program(
+        make_mock_soccfg(1, 0),
+        [pulse],
+        lambda p: p.emit(pulse),
+        lambda p: p.add_loop("selector", 2),
+    )
     result = shots(prog)
     assert [waves(s) for s in result] == [[0]] * 4
     assert [s.body_end_cycle - s.start_cycle for s in result] == [28, 56] * 2

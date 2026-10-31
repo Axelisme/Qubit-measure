@@ -273,19 +273,31 @@ def test_scalar_static_cross_grid_ceil_keeps_small_positive_post():
 
 
 def test_scalar_adc_aggregate_ceil_keeps_small_positive_post():
-    readout = PulseReadout("precise_adc", PulseReadoutCfg(
-        gen_ch=0, nqz=1, freq=1000, gain=0.5,
-        waveform=ConstWaveformCfg(length=3 / 384), pre_delay=0,
-        post_delay=5e-11 / 430.08, ro_ch=0, ro_length=10 / 307.2,
-        trig_offset=0,
-    ))
+    readout = PulseReadout(
+        "precise_adc",
+        PulseReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=3 / 384),
+            pre_delay=0,
+            post_delay=5e-11 / 430.08,
+            ro_ch=0,
+            ro_length=10 / 307.2,
+            trig_offset=0,
+        ),
+    )
     prog = _program([readout], lambda p: p.emit(readout))
     # Ten ADC samples are exactly14 tProc ticks, followed by a positive post.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [15] * 2
 
 
 def test_runtime_cross_grid_length_sweep_fails_without_implicit_time_table():
-    pulse = Pulse("cross_grid", _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0))
+    pulse = Pulse(
+        "cross_grid",
+        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0),
+    )
     with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
         _program([pulse], lambda p: p.emit(pulse), lambda p: p.add_loop("scan", 3))
 
@@ -466,7 +478,11 @@ def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
     assert memory is not None
     assert len(memory) == 2045
     # Native start rounds43.68 to44; native step truncates42.56 to42.
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [44, 86, 128] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        44,
+        86,
+        128,
+    ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [53, 95, 137] * 2
 
 
@@ -497,8 +513,6 @@ def test_crossing_fractional_generator_and_adc_ends_add_post_before_ceil():
         _program([readout, tail], body, lambda prog: prog.add_loop("scan", 3))
 
 
-
-
 @pytest.mark.parametrize("kind", ["two", "bath"])
 def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
     cavity = _pulse_cfg(
@@ -517,7 +531,11 @@ def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
 
     # Non-affine fabric-to-tProc runtime conversion is owned by the next conversion stage.
     with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
-        _program([reset], lambda prog: prog.emit(reset), lambda prog: prog.add_loop("scan", 3))
+        _program(
+            [reset],
+            lambda prog: prog.emit(reset),
+            lambda prog: prog.add_loop("scan", 3),
+        )
 
 
 @pytest.mark.parametrize("origin", [0, 40])
