@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 
+import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import AsmInst, Macro, QickSweep1D, WriteReg
@@ -249,6 +250,39 @@ def _runtime_selected(kind: str, *, pre_delay: float = 0.01) -> Module:
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
+def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
+    soccfg = make_mock_soccfg(1, 0)
+    shared = _runtime_selected(kind)
+    others = []
+
+    def build(pulse, *, padded=False, interleave=False):
+        def initialize(prog):
+            prog.add_loop("index", 2)
+            if padded:
+                prog.add_dmem([91, 83, 79])
+                prog.declare(Pulse("padding", _pulse_cfg(0.3)))
+
+        def body(prog):
+            if interleave:
+                others.append(build(shared, padded=True))
+            prog.emit(pulse)
+
+        return _program(soccfg, [pulse], body, initialize)
+
+    first = build(shared, interleave=True)
+    fresh = build(_runtime_selected(kind))
+    other_fresh = build(_runtime_selected(kind), padded=True)
+    assert first.prog_list == fresh.prog_list
+    assert shots(first) == shots(fresh)
+    assert others[0].prog_list == other_fresh.prog_list
+    np.testing.assert_array_equal(
+        others[0].compile_datamem(), other_fresh.compile_datamem()
+    )
+    first.compile()
+    assert first.prog_list == fresh.prog_list
+
+
+@pytest.mark.parametrize("kind", ["computed", "table"])
 def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
     pulse = _runtime_selected(kind)
 
@@ -257,9 +291,12 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
         prog.add_reg("index")
 
     def body(prog):
-        with prog.repeat("twice", 2), prog.branch(by="path") as branch:
+        with (
+            prog.repeat("twice", 2),
+            prog.branch(by="path", align_timeline=False) as branch,
+        ):
             for index in (0, 1):
-                with branch.case():
+                with branch.case(index):
                     prog.write_reg("index", index)
                     prog.emit(pulse)
 
@@ -489,9 +526,9 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         prog.write_reg("origin", 100)
         prog.delay_timeline("origin", timeline="default")
         prog.emit(pulse)
-        with prog.branch(by="path") as branch:
-            for amount in (60, 59):
-                with branch.case():
+        with prog.branch(by="path", align_timeline=False) as branch:
+            for index, amount in enumerate((60, 59)):
+                with branch.case(index):
                     prog.delay_timeline(amount / 430.08, timeline="default")
         prog.emit(following)
 
@@ -687,10 +724,10 @@ def _change_selection(prog, loader, other, change):
     elif change == "translate":
         prog.append_macro(_OverwriteSelected())
     elif change == "constant_branch":
-        with prog.branch(by="path") as branch:
-            with branch.case():
+        with prog.branch(by="path", align_timeline=True) as branch:
+            with branch.case(0):
                 prog.write_reg("length", 89)
-            with branch.case():
+            with branch.case(1):
                 pass
     elif change == "constant_backedge":
         with prog.repeat("overwrite", 2):

@@ -93,6 +93,15 @@ class ProgramTrace:
     def _make_readout_entry(f_output: float = _FCLK) -> dict[str, Any]:
         return {"f_output": f_output}
 
+    @contextmanager
+    def source_scope(self, name: str) -> Generator[None]:
+        """Record the diagnostic boundaries emitted by a legacy Module."""
+        self.meta_macro(type="SOURCE_START", name=name)
+        try:
+            yield
+        finally:
+            self.meta_macro(type="SOURCE_END", name=name)
+
     def set_reg_map(self, reg_map: dict[str, str]) -> None:
         self.reg_resolver = lambda name: reg_map.get(name, name)
 

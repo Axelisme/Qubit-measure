@@ -1,6 +1,6 @@
 # IR architecture guide
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-30，resolved loop sweep and table definitions
 
 **讀者：** framework-dev。QICK ASM V2 的 IR 分層、分析與 lowering 契約。
 
@@ -10,7 +10,8 @@
 
 1. `IRLinker` ([linker.py](linker.py))
    - 負責 `list[Instruction]` 與 `prog_list + labels + meta_infos` 的互轉。
-   - `link()` 是唯一會寫入 `P_ADDR` 與 `LINE` 的地方。
+   - `position()` 統一計算 word address、assembler line 與 end cursor，拒絕重複 label。它回傳保留 input reference 的 `PositionedInstruction` views，不建立 snapshot。
+   - `link()` 序列化這些位置，是唯一會寫入 `P_ADDR` 與 `LINE` 的地方。Compile snapshot 直接讀取位置 views，再自行 defensive-copy payload。
 2. `IRLexer` ([factory.py](factory.py))
    - 負責 `list[Instruction] ↔ list[BasicBlockNode | MetaInst]`。
    - `MetaInst` 在 chunked stream 中獨立於 `BasicBlockNode` 存在。
@@ -30,6 +31,54 @@
 [labels.py](labels.py) 擁有 label value objects 與名稱配置。
 硬體角色性常量集中在 [hw_semantics.py](hw_semantics.py)，避免 magic string 散落各處。
 [analysis.py](analysis.py) 提供 cost/size 估算 helper 與 liveness 工具，pass 端優先使用。
+
+## Pre-optimization compile snapshot
+
+`program.compiled_stream` returns a `CompiledStream` after successful compilation
+on both `ModularProgramV2` and `TimelineProgramV2`. Its `records` tuple preserves
+logical instructions, labels and metadata before the optimizer consumes them.
+Each `CompiledRecord.p_addr` is a pre-optimization program-memory word offset,
+not an optimized address. Metadata and labels can share positions.
+
+`record.instruction` returns a detached typed IR deep copy on each access.
+Changing that copy cannot change the snapshot, program or optimizer. Consumers
+should read each record once per request build and retain the copies for
+pre-decoding, rather than reading the property per lane or loop iteration.
+Saved snapshots survive recompilation. QICK cached `compile()` calls retain the
+current snapshot. Set public `binprog = None` before `compile()` to rebuild;
+the accessor raises `RuntimeError` while no compiled binary is available.
+This compiler artifact contains no simulation state or frontend dependency.
+
+The snapshot includes zero-word source scopes and native QICK loop annotations.
+`SOURCE_START` / `SOURCE_END` carry a Module diagnostic name or a native pulse
+source in `name`. Scopes nest; the innermost active scope labels each output,
+and its end restores the enclosing source. Native pulse sources use the explicit
+`tag`, or `native:pulse:<ordinal>` with a one-based call ordinal. Tagged native
+calls also advance the ordinal. Module lowering uses `source_scope(name)` and
+its internal pulse calls neither allocate native sources nor advance ordinals.
+Each actual recompile resets these scopes and ordinals.
+
+`MarkedOpenLoop` / `MarkedCloseLoop` preserve the four `LOOP_*` records. Their
+`info["native"] is True` declares that existing QICK instructions own the shell,
+including waveform/register sweep increments and resets. `LOOP_START` also
+records resolved `counter_reg`, trip count `n`, and `range_hint=None`.
+Its `sweeps` dict has `registers` and `waves` maps. Registers use canonical
+addresses; waves use zero-based WMEM word addresses and field indexes 0..5
+(freq, phase, env, gain, length, conf). Each field contains integer `start` and
+per-loop-iteration `step` words from resolved QICK definitions. Inner IR loops
+emit empty maps. Native `tables` maps WMEM word/field indexes to DMEM word
+offsets for declared deterministic hooks. The tables contain rotated exec-after
+values: point zero retains initial WMEM, later points read offset + index - 1,
+and the last table word restores the initial field. The waveform macro owns
+target resolution. Loop producers collect only the resolved numeric definitions.
+`LOOP_BODY_START` follows native counter initialization; `LOOP_BODY_END` precedes
+native sweep updates/backedge; `LOOP_END` follows the complete closing shell.
+The compiler snapshots the full logical stream, then gives the optimizer a new
+sequence excluding exactly `SOURCE_START` / `SOURCE_END` and these four native
+loop annotations. It keeps all instructions and labels. Unflagged structured
+loops and branches still use the existing IR parser/lowering. Unknown metadata
+still fails there. `TIMING_BOUNDARY` continues through the anchor/link path;
+`body_start` / `body_end` exclude final QICK shot wait/delay operations.
 
 ## Compiled timing analysis
 

@@ -1,4 +1,8 @@
-"""Semantic loop/table scheduling through real program acquisition."""
+"""Semantic loop/table scheduling through real program acquisition.
+
+Remove the scalar diagnostic reset parameter when the Module-tree interpreter
+is deleted. Keep the acquisition case on the public acquisition route.
+"""
 
 import numpy as np
 import pytest
@@ -16,7 +20,11 @@ from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     TablePulseReadout,
 )
-from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
+from zcu_tools.program.v2.modules.reset import (
+    BathResetCfg,
+    PulseResetCfg,
+    TwoPulseResetCfg,
+)
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
@@ -92,25 +100,29 @@ def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquir
     scan = ScanWith("scan", [0, 1, 2], val_reg="count").add_content(
         Repeat("repeat", "count", range_hint=(0, 2)).add_content(drive().build("drive"))
     )
-    wait = LoadValue("wait", [43], idx_reg="reps", val_reg="cycles")
+    wait = LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles")
     modules = [
         wait,
         scan,
         DelayAuto("wait_loaded", t="cycles"),
         receiver().build("readout"),
     ]
-    request, prog, env = acquire(modules)
-    assert [e.source for e in request.materialize_point(0).events] == [
-        "drive",
-        "drive",
-        "drive",
-        "readout",
-    ]
-    assert request.materialize_point(0).events[-1].start_us == pytest.approx(
-        0.4, abs=0.015
-    )
+    request, prog, env = acquire(modules, sweep=[("shot", 2)])
+    assert request.point_dims == (2,)
+    for point, readout_start in enumerate([0.4, 0.5]):
+        timeline = request.materialize_point(point)
+        assert [e.source for e in timeline.events] == [
+            "drive",
+            "drive",
+            "drive",
+            "readout",
+        ]
+        assert timeline.events[-1].start_us == pytest.approx(readout_start, abs=0.015)
     prog.acquire(env.soc, progress=False)
-    assert request_of(env).materialize_point(0) == request.materialize_point(0)
+    for point in range(2):
+        assert request_of(env).materialize_point(point) == request.materialize_point(
+            point
+        )
 
 
 def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
@@ -127,6 +139,7 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         request.materialize_point(p).events
         for p in range(int(np.prod(request.point_dims)))
     ):
+        assert events[0].source == "length"
         assert events[0].duration_us == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
         assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
@@ -175,7 +188,15 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
     waits = [0.15, 0.35] if branches == 1 else [0.2, 0.35]
     for point, expected_wait in enumerate(waits):
         events = request.materialize_point(point).events
-        first_event = next(e for e in events if e.source == "first_template")
+        actual_sources = [event.source for event in events]
+        expected_sources = (
+            (["reset"] if preceding_pulse else [])
+            + ["first"] * (3 if flat_top else 1)
+            + (["second"] if branches == 2 else [])
+            + ["readout"]
+        )
+        assert actual_sources == expected_sources
+        first_event = next(e for e in events if e.source == "first")
         readout = next(e for e in events if e.gen_ch == 0)
         assert first_event.start_us == pytest.approx(origin + 0.02, abs=0.003)
         if branches == 2:
@@ -227,7 +248,7 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
     ] == pytest.approx([100, 200], abs=1e-4)
 
 
-def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_shortcuts():
+def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
     env = white_noise(std_adc=0)
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
@@ -236,22 +257,33 @@ def test_table_readout_initial_template_exec_after_and_outer_wrap_are_not_index_
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    request, prog, env = acquire([readout], sweep=[("axis", 2)], reps=1)
-    assert [
-        events[0].frequency_mhz
-        for events in (
-            request.materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
+    prog = ModularProgramV2(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
+    ):
+        prog.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
+
+
+@pytest.mark.parametrize(
+    ("kind", "count"), [("single", 1), ("parallel", 2), ("bath", 3)]
+)
+def test_reset_request_events_keep_authored_wrapper_name(kind, count):
+    cavity = drive()
+    qubit = drive().model_copy(update={"ch": 0})
+    if kind == "single":
+        cfg = PulseResetCfg(pulse_cfg=cavity)
+    elif kind == "parallel":
+        cfg = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
+    else:
+        cfg = BathResetCfg(
+            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive()
         )
-    ] == pytest.approx([100, 300], abs=1e-4)
-    prog.acquire(env.soc, progress=False)
-    assert [
-        events[0].frequency_mhz
-        for events in (
-            request_of(env).materialize_point(p).events
-            for p in range(int(np.prod(request.point_dims)))
-        )
-    ] == pytest.approx([100, 300], abs=1e-4)
+    request, _, _ = acquire([cfg.build("authored_reset"), receiver().build("readout")])
+    assert [event.source for event in request.materialize_point(0).events] == [
+        *(["authored_reset"] * count),
+        "readout",
+    ]
 
 
 def test_reset_wrappers_expand_only_actual_parallel_pulses():
@@ -269,7 +301,61 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     )
 
 
-def test_join_cross_branch_register_dependency_rejected_before_backend():
+def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
+    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    pulses = [
+        PulseCfg(
+            ch=ch,
+            nqz=1,
+            freq=80,
+            gain=0.2,
+            pre_delay=0.01,
+            post_delay=0.02,
+            waveform=ConstWaveformCfg(length=QickParam(0.05, {"length": 0.1})),
+        )
+        for ch in (1, 2)
+    ]
+    reset = TwoPulseResetCfg(pulse1_cfg=pulses[0], pulse2_cfg=pulses[1])
+    readout = PulseReadoutCfg(
+        gen_ch=0,
+        ro_ch=0,
+        nqz=1,
+        freq=100,
+        gain=0.1,
+        waveform=ConstWaveformCfg(length=0.2),
+        pre_delay=0.01,
+        post_delay=0.02,
+        trig_offset=0.03,
+        ro_length=0.1,
+    )
+    try:
+        prog = ModularProgramV2(
+            env.soccfg,
+            modules=[reset.build("reset"), readout.build("readout")],
+            sweep=[("length", 3)],
+        )
+        prog.acquire(env.soc, progress=False)
+        request = request_of(env)
+        timelines = [request.materialize_point(point) for point in range(3)]
+        # Machine scheduling emits literal tProc timestamps 84, 93 and 181.
+        # The two swept waveforms remain 19, 38 and 57 generator clocks long.
+        for point, timeline in enumerate(timelines):
+            assert [event.source for event in timeline.events] == [
+                "reset",
+                "reset",
+                "readout",
+            ]
+            assert [
+                event.duration_us for event in timeline.events[:2]
+            ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
+            assert timeline.events[-1].start_us == pytest.approx(84 / 430.08)
+            assert timeline.readouts[0].trigger_us == pytest.approx((93 / 430.08,))
+            assert timeline.duration_us == pytest.approx(181 / 430.08)
+    finally:
+        env.devices.close_all_devices()
+
+
+def test_reps_counter_lookup_in_join_rejected_before_backend():
     modules = [
         Join(
             LoadValue("writer", [0], "reps", "selection"),
@@ -279,12 +365,14 @@ def test_join_cross_branch_register_dependency_rejected_before_backend():
     ]
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     prog = ModularProgramV2(env.soccfg, modules=modules)
-    with pytest.raises(ValueError, match="Join.*register.*selection"):
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
+    ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
-def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
+def test_reps_counter_word_lookup_rejected_before_backend():
     modules = [
         LoadWord("raw", [1], "reps", "cycles"),
         DelayAuto("invalid_wait", t="cycles"),
@@ -292,6 +380,8 @@ def test_unknown_word_consumer_fails_with_module_coordinate_and_register():
     ]
     env = white_noise(std_adc=0)
     prog = ModularProgramV2(env.soccfg, modules=modules)
-    with pytest.raises(ValueError, match="DelayAuto.*invalid_wait.*reps.*cycles.*word"):
+    with pytest.raises(
+        ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
+    ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds

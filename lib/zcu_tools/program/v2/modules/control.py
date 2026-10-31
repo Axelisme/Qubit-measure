@@ -82,8 +82,28 @@ class Repeat(Module):
             mod.init(prog)
 
     def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
+        self,
+        prog: ModularProgramV2,
+        t: float | QickParam = 0.0,
+        *,
+        internal_modules: tuple[Module, ...] = (),
     ) -> float | QickParam:
+        """Run the loop at t us and return its reference-relative blocking end.
+
+        prog must have initialized this Repeat. internal_modules identifies, by
+        object identity, children owned by the caller's semantic Module. These
+        helpers run directly without a source scope, retaining the current owner.
+        Other children emit with their own scope and restore that owner afterward.
+        The default empty tuple keeps every child as an authored emission.
+        Repeated occurrences of one object share its classification. A specified
+        object outside sub_modules raises ValueError before any program emission.
+        Loop count, scheduling and iteration metadata do not depend on ownership.
+        """
+        if any(
+            not any(helper is child for child in self.sub_modules)
+            for helper in internal_modules
+        ):
+            raise ValueError("internal_modules must identify this Repeat's children")
         logger.debug(
             "Repeat.run: name='%s', counter_reg='%s', n='%s', t=%s",
             self.name,
@@ -107,7 +127,10 @@ class Repeat(Module):
 
         cur_t = 0.0
         for mod in self.sub_modules:
-            cur_t = mod.run(prog, cur_t)
+            if any(mod is helper for helper in internal_modules):
+                cur_t = mod.run(prog, cur_t)
+            else:
+                cur_t = mod.emit(prog, cur_t)
         prog.delay(t=cur_t)
         prog.delay_auto(t=0.0)
 
@@ -129,8 +152,11 @@ class Branch(Module):
 
     On TimelineProgramV2, declare registers the children and lower uses native
     branch/case control with compare_reg as the sweep selector. Children execute
-    in order on the selected timeline, and each case closes its actual end
-    without padding to other cases. Measurement feedback is not supported.
+    in order on the selected timeline. align_timeline=True joins case ends per
+    timeline, using static max or exact runtime pointwise max. Reference does
+    not advance and no wait is inserted. Later emissions resume at the joined
+    end. Reference-moving children and case-local Repeat fail at build.
+    Measurement feedback is not supported.
 
     Legacy init/run selection uses a dispatch-table island:
 
@@ -172,14 +198,15 @@ class Branch(Module):
     ) -> None:
         """Emit the sweep-selected case on timeline (default when None).
 
-        Preserve empty cases and child order. Native case closing advances
-        reference to the selected path's end, without cross-case padding.
+        Preserve empty cases and child order. Use align_timeline=True to join
+        all case ends per timeline, without advancing reference. Native
+        reference-moving children and case-local Repeat raise ValueError.
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """
-        with prog.branch(by=self.compare_reg) as cases:
-            for branch in self.branches:
-                with cases.case():
+        with prog.branch(by=self.compare_reg, align_timeline=True) as cases:
+            for index, branch in enumerate(self.branches):
+                with cases.case(index):
                     for mod in branch:
                         prog.emit(mod, timeline=timeline)
 
@@ -209,7 +236,7 @@ class Branch(Module):
                     prog.debug_macro(
                         f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                     )
-                cur_t = mod.run(prog, cur_t)
+                cur_t = mod.emit(prog, cur_t)
 
             # Swept-duration branches cannot be balanced with one scalar tail delay.
             if isinstance(cur_t, QickParam):

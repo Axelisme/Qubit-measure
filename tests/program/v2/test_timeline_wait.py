@@ -600,9 +600,9 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
             self.trigger(ros=[0], t=60 / 430.08, width=1 / 430.08)
             self.emit(delays)
             if branch:
-                with self.branch(by="scan") as cases:
+                with self.branch(by="scan", align_timeline=False) as cases:
                     for case in range(2):
-                        with cases.case():
+                        with cases.case(case):
                             self.delay_timeline("delay_cycles")
                             self.delay_timeline(case * 5 / 430.08)
             else:
@@ -806,9 +806,9 @@ class MixedWaitProgram(TimelineProgramV2):
         """Emit the recipe's budgeted unequal Branch and fixed/runtime Repeats."""
         recipe = self.recipe
         if len(self.gaps) == 1 or recipe.read_at == "branch":
-            with self.branch(by="axis0") as branch:
-                for delay in recipe.branch_delays:
-                    with branch.case():
+            with self.branch(by="axis0", align_timeline=True) as branch:
+                for index, delay in enumerate(recipe.branch_delays):
+                    with branch.case(index):
                         if recipe.read_at == "branch":
                             self.read()
                         self.delay_timeline(delay / 430.08)

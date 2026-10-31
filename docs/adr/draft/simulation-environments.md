@@ -134,21 +134,26 @@ Raw 與 decimated 每 shot 先抽一條完整 outcome history，各 event 再抽
 
 Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.projection_weight_floor` 都接受有限 `0 <= floor < 1`，預設 `1e-9`。每次投影後剪掉低於 floor 的全域 history 權重，按比例正規化存活權重並記錄剪枝量。零不剪枝；某點沒有存活 outcome 時 raise `ValueError`，指名 point 與 floor，不保留最大 outcome 作後備。沒有 projective read 的 template 保留原 raw、integrated、decimated 輸出。Continuation density 與完整 preparation 重用的區別見 [[0078]]。
 
-### Module frontend 與小介面依賴
+### Compiled frontend 與小介面依賴
 
-原生 program macro 的 C 階段 frontend 遷移尚未實作，A 階段不切換本節的現行 Module frontend。
-2026-10-29 已採用的 C 遷移範圍涵蓋原生操作與 emission／module 型別，要求現有每種 module 的 macro 形式可模擬，且現有可模擬實驗不能失去支援。
-Runtime timeline 已列入 B，但不擴大 A 的靜態證明與只能等待模型。
-C 改讀編譯結果與向量直譯方案仍在討論，編譯結果模擬原型不是已採用架構。
-新 builder 與實驗遷移排在 C 之後，不屬於 A。分工與階段邊界見 [[0083]]。
+C 已交付 `ModularProgramV2` 與 `TimelineProgramV2` 共用的 compiled simulation frontend。
+IR compiler 發布具型別、不可變、與 simulation 無關的優化前 snapshot；producer 提供 loop／branch／source 與 body 邊界及 resolved sweep／table definitions。
+Frontend 讀取 detached instructions 並核對結構，不回讀 Module tree，也不從 jump 反推結構。
+Sweep points 是獨立向量 lanes，reps 只保留次數；shot 內的非 sweep loops 依標記迭代，不展開指令流。
+跨 point／rep 的狀態延續在建立 request 前拒絕，不提供 ordered fallback。
+支援範圍依 instruction effects 判定，未知效果在 backend 前拒絕，不是通用 tProc ISA emulator。
+`SimulationAcquireMixin` 對 `SimulationSoc` 使用唯一 compiled request builder，傳入 SoC routes；其他 SoC 保留 QICK acquire。
+Builder 輸出 detached numeric requests，舊 Module-tree frontend 已移除，沒有 selector、legacy oracle 或 fallback。
+Owner 決策與日期引文見 [[0083]]，snapshot 與 admission 細節分別見 [IR README](../../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot) 及 [simulation README](../../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
+Builder 已交付；大量實驗遷移與 D 的 legacy program／init／run 移除仍未交付。
 
-2026-10-14，使用者選擇「我也認為保持Module語義的解析比較可行」，並對 execution context／分段求解回答「可以」。Frontend 解釋 Module 語意，持有局部 register、sweep／loop、table 與時間排程 context，不建立通用 tProc ISA emulator 或全域 register table。未知操作與未定義 register 明確失敗。
+2026-10-14，使用者選擇「我也認為保持Module語義的解析比較可行」，並對 execution context／分段求解回答「可以」。這是原 Module 語意 frontend 的歷史依據，已由 [[0083]] 的 compiled frontend 決策取代，不再規範現行 acquisition 如何解析控制流。
 
 同日，使用者指定放置：「採用建議，然後考慮到這個模擬機制高度依賴program的Module，所以我認為其位置應該可以放在program/v2中的子模塊，但其他program模塊不可以依賴他，這樣方便維護的同時保持解耦。」隨後澄清：「那也可以只依賴Mixin，不是不能依賴，而是耦合度要小到只有幾個接口」。以澄清為準，不禁止所有依賴。
 
-Frontend 與 mixin 可在 program/v2 專用子模組；一般 program 只用公開 mixin 與少量契約，不直接操作 interpreter／engine internals。物理 backend 留在數值 owner，YAML 與組裝不移入 program。實作時新增 import contract 限制繞過公開入口的直接依賴，但允許入口正常委派內部；不得新增或放寬 ignore_imports。
+Frontend 與 mixin 位於 program/v2 專用子模組；一般 program 只用公開 mixin 與少量契約，不直接操作 interpreter／engine internals。物理 backend 留在數值 owner，YAML 與組裝不移入 program。`program-simulation-entry` contract 限制繞過公開入口的直接依賴，允許入口正常委派內部，不新增或放寬 ignore_imports。
 
-第一版涵蓋確定性巢狀控制、ScanWith、table-driven pulse／readout 與具名 raw-word consumers。LoadValue 壓縮不改語意；ComputedPulse 保留最大候選排程；TableLengthPulse 使用實際選中長度；TablePulseReadout 保留 init、loop-after 更新及回繞。Join 不支援跨支路 register 相依。Reset 只發實際事件，不強設 ground，FTF 不新增 BathReset reservoir 物理。
+現行 frontend 依編譯指令效果處理確定性巢狀控制、table-driven pulse／readout 與 raw-word consumers，不按 Module 類別選解析器。TablePulseReadout 保留 exec-after 更新及回繞，TableLengthPulse 保留實際選中長度。Reset 仍只發實際事件，不強設 ground。FTF 不新增 BathReset reservoir 物理。
 
 Timeline 分開 pulse events 與 ADC windows，保留量化座標、signed complex samples／sample axis、carrier、phase reference、通道與來源。Frontend 不讀物理參數或選 solver 步長；backend 不解釋 Module 類別。不同控制路徑有對應 timeline，相同控制可共用不可變資料。
 
@@ -355,7 +360,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 ## 交付狀態與限制
 
-- Program 提供具名環境 binding、Module timeline 與 request／signal 契約。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。模擬的 raw compile hooks 明確拒絕。
+- Program 提供具名環境 binding、compiled timeline 與 request／signal 契約。C 已切換 compiled frontend 並移除舊 Module-tree simulation frontend，未移除 `ModularProgramV2` 或舊 init／run。指令效果的 admission 見上節。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
 - Single、six、FTF 提供中途 projective readout、同 shot herald／終端關聯與部分 ADC 觀測。Rank-1 DC 投影及 CTMC 不回饋是模型近似，不代表正式規模數值驗收或 production 認證。
 - Evolution 提供預設快速分段算法及有界 routing facts。數值 preparation 只活在一次 evolve，見 [[0078]]。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。Routing 預算不是 process RAM 上限。

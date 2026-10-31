@@ -65,7 +65,7 @@ class EnvelopePool:
         """Retain an owned immutable envelope, evicting least recently used entries.
 
         envelope must contain built-in float sample times and complex values,
-        as produced by TimelineInterpreter. Replacing a key releases the old
+        as produced by the compiled frontend. Replacing a key releases the old
         pool reference only. Oversize entries are not retained.
         """
         previous = self._entries.pop(key, None)

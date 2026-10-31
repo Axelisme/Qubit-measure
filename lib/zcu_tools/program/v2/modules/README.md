@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-31
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -22,7 +22,12 @@ without leaking hardware register choreography into experiment classes.
 Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
-同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
+同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
+各 program 以 module 物件身分持有 pulse／waveform、runtime readout、table offset 與 loader 的宣告結果。
+重新 compile 只重建該 program 的資源，不覆寫其他 program 的宣告。
+`Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
+舊 module 的 tag 與 block_mode 不控制新路徑。
+Legacy init／run 仍將狀態放在 module 上，不提供此跨 program 重用契約。
 
 Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
 Lowering 不用 `total_length` 重建時間，也不移動 reference。
@@ -48,7 +53,10 @@ PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用
 時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
 未列出的 module 不因 legacy 可用就表示可直接 emit。
 
-Branch 保留 selector 與 case 次序，每個 case 只同步自身使用的 timeline，不補成共同最長長度。
+Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(index)`，None 是空 case。
+Lowering 選擇 align_timeline=True，按 timeline 合併各 case 結尾，靜態取 max，runtime 取精確逐點 max。
+Branch 只改結尾、不推進 reference，case 內的 native reference 操作與 Repeat 在 build 時報錯。
+後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
 Module Join 發射平行 sequences，保留每個 sequence 內的 Module 次序，並合併實際 end。
 Program emission owner 依 lowered operations 彙總 reference effects，將唯一會推進 reference 的 sequence 移到最後。
 零個推進型 sequence 保留次序，兩個以上或未知 reference effect 都拒絕。
@@ -111,6 +119,35 @@ returns the concrete module from `cfg.build(name)`, not an instance of the
 factory class. `Reset(name, None)` returns `None` (no reset). Module sequences
 in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
 `ScanWith` skip `None` entries without emitting setup or timed operations.
+
+## Constructor overrides
+
+Constructors accept `**overrides: Unpack[...]` using the exported `total=False`
+TypedDicts `PulseOverrides`, `PulseReadoutOverrides`, `PulseResetOverrides`,
+`TwoPulseResetOverrides` and `BathResetOverrides`. `ResetOverrides` lists the
+factory's combined keys. Pyright checks keyword names and values. At runtime,
+unknown or wrong-variant keys raise `TypeError`, even when their value is `None`.
+Constructors copy cfg before applying overrides through its existing `set_param` routing. Numeric values and QICK sweep parameters use the same units
+and waveform restrictions as `set_param`. `None` keeps the cfg value, including
+zero-valued settings. The caller's cfg is unchanged. Registry hashing, read-axis
+owners and lowering all use the effective cfg retained by the module.
+
+| Constructor | Override keywords |
+| --- | --- |
+| `Pulse` / `PulseReset` | `freq`, `gain`, `phase`, `length` |
+| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `length`, `ro_length` |
+| `TwoPulseReset` | `gain1`, `gain2`, `freq1`, `freq2`, `length` (both pulses) |
+| `BathReset` | `qub_gain`, `qub_freq`, `qub_length`, `res_gain`, `res_freq`, `res_length`, `pi2_phase` |
+
+`Reset` forwards the keywords for its selected variant. Frequencies are MHz,
+lengths are us, phases are degrees and gains are normalized. `MuxReadout` does
+not accept override keywords; `Readout` with mux cfg rejects non-None overrides.
+Unsupported waveform length sweeps raise `ValueError` at construction.
+Accepting a `ro_length` sweep value does not mean QICK can compile an ADC-window
+sweep. That existing compile error is unchanged, just as with `set_param`.
+
+`cfg.set_param(name, value)` remains available and mutates that cfg. Use a
+caller-owned copy when deliberately updating cfg before constructing modules.
 
 ## Dmem Tables
 
@@ -280,6 +317,17 @@ register and instruction position. Ordinary scalar and uint32 word consumers
 keep their existing contracts.
 
 ## Design Boundaries
+
+Legacy programs and composite Modules call `Module.emit(prog, t)` after `init`.
+It runs the existing `run` behavior inside `prog.source_scope(module.name)`.
+Each author-provided child emission gets its own nested diagnostic source, even
+when pulse registration shares a waveform or `PulseCfg`. Ending a child restores
+its parent source. Internal helpers run directly under their semantic owner's
+source. `ScanWith` keeps its loop and loader under the scan owner while authored
+children retain their own scopes. Anonymous `Join` scheduling keeps an empty
+source, and its table-pulse children retain their author names without separate
+blocking waits. These annotations add no machine instructions. The snapshot and
+optimizer-input distinction is defined in [IR compile snapshot](../ir/README.md#pre-optimization-compile-snapshot).
 
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken

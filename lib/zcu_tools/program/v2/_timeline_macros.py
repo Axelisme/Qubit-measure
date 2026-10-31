@@ -6,10 +6,9 @@
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from qick.asm_v2 import (
-    CloseLoop,
     CondJump,
     Delay,
     Jump,
@@ -23,6 +22,7 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex
+from ._timeline_expression import CycleVariable, time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -39,12 +39,20 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     align_end,
+    known_maximum,
+    source_expression,
     step_time,
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
-from ._timeline_state import RepeatFrame, RepeatFrameSnapshot, TimelineBook
+from ._timeline_state import (
+    BranchProvenance,
+    RepeatFrame,
+    RepeatFrameSnapshot,
+    TimelineBook,
+)
 from .macro.delay import DelayRegAuto
+from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
 from .modules.util import get_fclk
@@ -661,6 +669,12 @@ class PreparedTimelineMacro(TimedMacro):
         )
 
     def preprocess(self, prog) -> None:
+        if self.book.used is not None and isinstance(
+            self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)
+        ):
+            raise ValueError(
+                "branch cases cannot advance reference; use delay_timeline instead"
+            )
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
         previous_origin = prog._time_origin
@@ -715,7 +729,7 @@ class PreparedTimelineMacro(TimedMacro):
         return self.source.get_time_param(name)
 
 
-class FixedRepeatLoop(OpenLoop):
+class FixedRepeatLoop(MarkedOpenLoop):
     """Native fixed loop paired with the exact writer that closes its counter.
 
     index is Repeat-owned metadata; closing is the native matching backedge.
@@ -727,7 +741,7 @@ class FixedRepeatLoop(OpenLoop):
     def __init__(self, name: str, count: int):
         super().__init__(name=name, n=count)
         self.index = FixedLoopIndex(name, name, count)
-        self.closing = CloseLoop()
+        self.closing = MarkedCloseLoop()
 
 
 class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
@@ -779,20 +793,26 @@ class BranchCases:
 
     def __init__(self, prog):
         self.prog = prog
-        self.cases: list[list[Macro]] = []
+        self.cases: dict[int, list[Macro]] = {}
         self.active = False
 
     @contextmanager
-    def case(self) -> Generator[None]:
-        """Append one sweep-selected case; nested case() calls raise ValueError."""
+    def case(self, index: int) -> Generator[None]:
+        """Record the zero-based selector point; omitted points do nothing.
+
+        Cases may be declared in any order. Duplicate indices and nested cases
+        raise ValueError. Non-integer or out-of-range indices fail at compile.
+        """
         if self.active:
             raise ValueError("branch.case cannot overlap another case")
+        if index in self.cases:
+            raise ValueError(f"duplicate branch case index: {index}")
         self.active = True
         start = len(self.prog.macro_list)
         try:
             yield
         finally:
-            self.cases.append(self.prog.macro_list[start:])
+            self.cases[index] = self.prog.macro_list[start:]
             del self.prog.macro_list[start:]
             self.active = False
 
@@ -810,13 +830,47 @@ def _same_times(values: Sequence[Time]) -> bool:
     )
 
 
+@dataclass
+class BranchCaseState:
+    """Retain one prepared path for timeline/native end and proof merging.
+
+    ends maps live timeline names to reference-relative ends; waiting contains
+    wait-only names and used contains names accessed by this case. runtime_gens
+    and runtime_ros hold runtime native channel tails, while gens and ros hold
+    their static QICK timestamps. provenance pairs register/channel expressions.
+    frames captures active Repeat guard and advance state. defined contains
+    registers with certified producers at this case exit. All containers are
+    detached snapshots; native times use us and RuntimeEnd stores cycle bounds.
+    """
+
+    ends: dict[str, Time]
+    waiting: set[str]
+    used: set[str]
+    runtime_gens: dict[int, RuntimeEnd]
+    runtime_ros: dict[int, RuntimeEnd]
+    gens: dict[int, float | QickParam]
+    ros: dict[int, float | QickParam]
+    provenance: BranchProvenance
+    frames: list[RepeatFrameSnapshot]
+    defined: set[str]
+
+
 class TimelineBranch(Macro):
     def __init__(
-        self, book: TimelineBook, by: str, cases: list[list[Macro]], name: str
+        self,
+        book: TimelineBook,
+        by: str,
+        cases: dict[int, list[Macro]],
+        name: str,
+        *,
+        align_timeline: bool,
     ):
         self.book = book
         self.by = by
-        self.cases = cases
+        self.align_timeline = align_timeline
+        self.indexed_cases = cases
+        # Producer and parallel-effect audits visit declared bodies before prepare.
+        self.cases: list[list[Macro]] = list(cases.values())
         self.name = name
         self.prepared: list[list[PreparedTimelineMacro]] = []
 
@@ -825,9 +879,15 @@ class TimelineBranch(Macro):
             raise ValueError(
                 f"{self.by}: Branch requires a sweep selector, not measurement feedback"
             )
-        if len(self.cases) != prog.loop_dict[self.by]:
-            raise ValueError("Branch must provide one case per selector point")
+        count = prog.loop_dict[self.by]
+        for index in self.indexed_cases:
+            if type(index) is not int or not 0 <= index < count:
+                raise ValueError(
+                    f"{self.by}: branch case index {index!r} must be an integer in 0..{count - 1}"
+                )
+        self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
         initial = self.book.ends.copy()
+        self._capture_entry(prog, initial)
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
@@ -840,12 +900,12 @@ class TimelineBranch(Macro):
         initial_defined = prog._time_bounds.defined.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
+        self.book.pinned.update(
+            value.register
+            for value in [*self.entry_inputs.values(), *self.captured_ends]
+        )
         frames = self._save_frames()
-        definitions: list[set[str]] = []
-        results: list[dict[str, Time]] = []
-        native_gens: list[dict[int, Time]] = []
-        native_ros: list[dict[int, Time]] = []
-        paths: list[list[RepeatFrameSnapshot]] = []
+        states: list[BranchCaseState] = []
         self.prepared = []
         for case in self.cases:
             self._restore_frames(frames)
@@ -860,58 +920,132 @@ class TimelineBranch(Macro):
                 self.book.native_timestamp(prog, value, gen_ch=ch)
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
-            self.prepared.append(self._prepare_case(prog, case, initial.keys()))
-            results.append({name: self.book.ends[name] for name in initial})
-            definitions.append(prog._time_bounds.defined.copy())
-            native_gens.append(
-                {
-                    ch: self.book.channel_end(prog, ch, generator=True)
-                    for ch in prog.gen_chs
-                }
-            )
-            native_ros.append(
-                {
-                    ch: self.book.channel_end(prog, ch, generator=False)
-                    for ch in prog.ro_chs
-                }
-            )
-            paths.append(self._save_frames())
+            self.prepared.append(self._prepare_case(prog, case))
+            states.append(self._capture_case(prog))
             self.book.pinned.update(prog._timeline_live_registers())
-            if outer_used is not None:
-                outer_used.update(self.book.used & initial.keys())
-        self._merge_frames(prog, paths)
-        prog._time_bounds.defined = set.intersection(*definitions)
+        states = self._record_case_sources(prog, states)
+        if outer_used is not None:
+            outer_used.update(
+                set.union(*(state.used & initial.keys() for state in states))
+            )
+        self._merge_frames(prog, [state.frames for state in states])
+        prog._time_bounds.defined = set.intersection(
+            *(state.defined for state in states)
+        )
+        results = [{name: state.ends[name] for name in initial} for state in states]
         self.book.finish_branch_sources(prog, self.by)
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
+        self.result_math = RuntimeMath(prog)
+        used = set.union(*(state.used & initial.keys() for state in states))
+        self._merge_ends(prog, initial, results, used)
+        self._merge_native(
+            prog,
+            [{**state.gens, **state.runtime_gens} for state in states],
+            results,
+            generator=True,
+        )
+        self._merge_native(
+            prog,
+            [{**state.ros, **state.runtime_ros} for state in states],
+            results,
+            generator=False,
+        )
+        self.book.pinned = saved_pins
+
+    def _capture_entry(self, prog, initial: dict[str, Time]) -> None:
+        self.entry_math = RuntimeMath(prog)
+        self.entry_inputs: dict[CycleVariable, RuntimeEnd] = {}
+        if self.align_timeline:
+            for register in prog._time_bounds.defined:
+                expression = source_expression(prog, register)
+                self.book.source_expressions.setdefault(register, expression)
+                for variable in time_variables(expression):
+                    if not variable.axes and variable.points is None:
+                        self.entry_inputs[variable] = self.entry_math.snapshot(
+                            RuntimeEnd(
+                                variable.name,
+                                variable.minimum,
+                                variable.maximum,
+                                expression=expression,
+                            )
+                        )
+        self.captured_ends = [
+            self.entry_math.snapshot(end)
+            for end in initial.values()
+            if self.align_timeline and isinstance(end, RuntimeEnd)
+        ]
+
+    def _merge_ends(
+        self,
+        prog,
+        initial: dict[str, Time],
+        results: list[dict[str, Time]],
+        used: set[str],
+    ) -> None:
         self.book.ends = {}
         for name in initial:
             values = [result[name] for result in results]
-            self.book.ends[name] = self._merge_values(prog, values)
-            if not _same_times(values):
-                self.book.waiting.add(name)
-        self._merge_native(prog, native_gens, results, generator=True)
-        self._merge_native(prog, native_ros, results, generator=False)
-        self.book.pinned = saved_pins
+            if name not in used:
+                self.book.ends[name] = initial[name]
+            elif not self.align_timeline:
+                self.book.ends[name] = self._merge_values(prog, values, force=True)
+            elif any(isinstance(value, RuntimeEnd) for value in values):
+                self.book.ends[name] = self.result_math.reconstruct_maximum(
+                    values, self.entry_inputs, self.captured_ends
+                )
+            else:
+                end = values[0]
+                for value in values[1:]:
+                    end = self.result_math.maximum(end, value)
+                self.book.ends[name] = end
 
-    def _prepare_case(
-        self, prog, case: list[Macro], incoming
-    ) -> list[PreparedTimelineMacro]:
+    def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
             macro.preprocess(prog)
-        local = self.book.ends.keys() - incoming
-        used = (self.book.used or set()) | local
-        closer = PreparedTimelineMacro(
-            self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
-        )
-        closer.preprocess(prog)
-        prepared.append(closer)
-        self.book.record_branch_sources(prog)
         return prepared
 
-    def _merge_values(self, prog, values: list[Time]) -> Time:
-        if _same_times(values):
+    def _capture_case(self, prog) -> BranchCaseState:
+        return BranchCaseState(
+            self.book.ends.copy(),
+            self.book.waiting.copy(),
+            (self.book.used or set()).copy(),
+            self.book.runtime_gens.copy(),
+            self.book.runtime_ros.copy(),
+            {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs},
+            {ch: prog.get_timestamp(ro_ch=ch) for ch in prog.ro_chs},
+            self.book.snapshot_branch_provenance(prog),
+            self._save_frames(),
+            prog._time_bounds.defined.copy(),
+        )
+
+    def _record_case_sources(
+        self, prog, states: list[BranchCaseState]
+    ) -> list[BranchCaseState]:
+        finished = []
+        for state in states:
+            self._restore_case(prog, state)
+            self.book.record_branch_sources(prog)
+            finished.append(self._capture_case(prog))
+        return finished
+
+    def _restore_case(self, prog, state: BranchCaseState) -> None:
+        self._restore_frames(state.frames)
+        self.book.ends, self.book.waiting = state.ends.copy(), state.waiting.copy()
+        self.book.used = state.used.copy()
+        self.book.runtime_gens = state.runtime_gens.copy()
+        self.book.runtime_ros = state.runtime_ros.copy()
+        prog._time_bounds.defined = state.defined.copy()
+        for ch, value in state.gens.items():
+            self.book.native_timestamp(prog, value, gen_ch=ch)
+        for ch, value in state.ros.items():
+            self.book.native_timestamp(prog, value, ro_ch=ch)
+        self.book.source_expressions = state.provenance.sources.copy()
+        self.book.native_expressions = state.provenance.native.copy()
+
+    def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
+        if not force and _same_times(values):
             return values[0]
         limits = [time_bounds(prog, value) for value in values]
         merged = RuntimeEnd(
@@ -941,7 +1075,8 @@ class TimelineBranch(Macro):
                 (
                     name
                     for name in self.book.ends
-                    if all(
+                    if not self.align_timeline
+                    and all(
                         _same_times([snapshot[ch], result[name]])
                         for snapshot, result in zip(snapshots, results, strict=True)
                     )
@@ -955,6 +1090,12 @@ class TimelineBranch(Macro):
             )
             if isinstance(value, RuntimeEnd):
                 channels[ch] = value
+            for name, end in self.book.ends.items():
+                if isinstance(end, RuntimeEnd) and all(
+                    known_maximum(result[name], snapshot[ch]) is result[name]
+                    for snapshot, result in zip(snapshots, results, strict=True)
+                ):
+                    self.book.ends[name] = replace(end, covers=(*end.covers, value))
             self.book.native_timestamp(
                 prog,
                 time_bounds(prog, value)[1],
@@ -1010,6 +1151,7 @@ class TimelineBranch(Macro):
                 )
 
     def translate(self, prog) -> None:
+        self.entry_math.translate(prog)
         prog.record_meta(
             type="BRANCH_START", name=self.name, info={}, regs={"compare_reg": self.by}
         )
@@ -1036,3 +1178,4 @@ class TimelineBranch(Macro):
             Jump(label=f"{self.name}_end").translate(prog)
         prog.record_meta(type="BRANCH_END", name=self.name, info={}, regs={})
         Label(label=f"{self.name}_end").translate(prog)
+        self.result_math.translate(prog)

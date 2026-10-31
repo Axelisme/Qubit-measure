@@ -203,13 +203,123 @@ def test_native_register_reference_advance_preserves_unconsumed_end():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [68] * 3
 
 
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("inside_repeat", [False, True])
+def test_static_branch_joins_case_maximum_and_allows_next_placement(
+    align_timeline, inside_repeat
+):
+    def body(prog):
+        prog.fork("default", into="untouched")
+        prog.delay_timeline(7 / 430.08, timeline="untouched")
+
+        def selected():
+            with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+                with branch.case(0):
+                    prog.delay_timeline(10 / 430.08)
+                with branch.case(2):
+                    prog.delay_timeline(30 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+
+        if inside_repeat:
+            with prog.repeat("twice", 2):
+                selected()
+        else:
+            selected()
+        prog.pulse(1, "p1", timeline="untouched")
+
+    result = shots(program(body))
+    # Cases end at 10/0/30, so default resumes at 30 on every point.
+    # No closing reference advance may shift untouched's independent cycle 7.
+    starts = [30, 30, 30] if align_timeline else [10, 0, 30]
+    expected = (
+        [[start, start * 2 + 28, max(7, 2 * (start + 28))] for start in starts]
+        if inside_repeat
+        else [[start, 7] for start in starts]
+    )
+    assert [waves(s) for s in result] == expected
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1))
+        for row, start in zip(expected, starts, strict=True)
+    ]
+
+
+@pytest.mark.parametrize("explicit_join", [False, True])
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_branch_local_forks_are_discarded_unless_explicitly_joined(
+    explicit_join, align_timeline
+):
+    def body(prog):
+        prog.fork("default", into=["p", "q", "untouched"])
+        prog.delay_timeline(9 / 430.08, timeline="untouched")
+        with (
+            prog.branch(by="scan", align_timeline=align_timeline) as branch,
+            branch.case(1),
+        ):
+            prog.delay_timeline(20 / 430.08, timeline="p")
+            prog.delay_timeline(40 / 430.08, timeline="q")
+            prog.fork("p", into="local")
+            prog.fork("local", into="leaf")
+            prog.delay_timeline(80 / 430.08, timeline="leaf")
+            if explicit_join:
+                prog.join("leaf", into="q")
+                prog.join("local", into="q")
+        prog.pulse(0, "p0", timeline="p")
+        prog.pulse(1, "p1", timeline="q")
+        prog.sync(timeline="untouched")
+        prog.pulse(0, "p0", t=200 / 430.08)
+
+    result = shots(program(body))
+    # leaf ends at 20+80=100. Discarded: p=20,q=40. Explicit: p=20,q=100.
+    # Untouched stays at 9, so the native pulse after its sync is at 209.
+    selected = [20, 100 if explicit_join else 40, 209]
+    expected = (
+        [selected] * 3 if align_timeline else [[0, 0, 209], selected, [0, 0, 209]]
+    )
+    assert [waves(s) for s in result] == expected
+
+
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("inside_repeat", [False, True])
+def test_runtime_branch_joins_pointwise_without_advancing_reference(
+    align_timeline, inside_repeat
+):
+    loader = LoadValue("time", [10, 20, 30], "scan", "loaded")
+
+    def body(prog):
+        def selected():
+            with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+                with branch.case(0):
+                    prog.emit(loader)
+                    prog.delay_timeline("loaded")
+                with branch.case(1):
+                    prog.delay_timeline(25 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+            # Unmanaged output must still see the incoming reference.
+            prog.pulse(1, "p1", t=0)
+
+        if inside_repeat:
+            with prog.repeat("twice", 2):
+                selected()
+        else:
+            selected()
+
+    result = shots(program(body, initialize=lambda p: p.declare(loader)))
+    starts = [25, 25, 30] if align_timeline else [10, 25, 0]
+    expected = (
+        [[start, 0, 2 * start + 28, start + 28] for start in starts]
+        if inside_repeat
+        else [[start, 0] for start in starts]
+    )
+    assert [waves(s) for s in result] == expected
+
+
 def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.branch(by="scan") as branch:
+        with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((10 + 10 * i) / 430.08)
                     prog.pulse(0, "p0", timeline="default")
         prog.join("external", into="default")
@@ -223,9 +333,9 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
 
 def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
     def body(prog):
-        with prog.branch(by="scan") as branch:
+        with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     if i == 1:
                         prog.fork("default", into="local")
                         prog.delay_timeline(20 / 430.08, timeline="local")
@@ -234,15 +344,16 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body))
-    assert [waves(s) for s in result] == [[10], [20], [30]]
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [38, 48, 58]
+    # Discard unjoined local end 20; default case ends 10/0/30 give True max=30.
+    assert [waves(s) for s in result] == [[30]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
 
 def test_branch_local_names_expire_even_when_every_case_forks_same_name():
     def body(prog):
-        with prog.branch(by="scan") as branch:
-            for _ in range(3):
-                with branch.case():
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            for index in range(3):
+                with branch.case(index):
                     prog.fork("default", into="local")
         prog.delay_timeline(0, timeline="local")
 
@@ -264,14 +375,16 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
                 "duration" if register_count else 2,
                 range_hint=(1, 3) if register_count else None,
             ),
-            prog.branch(by="scan") as branch,
+            prog.branch(by="scan", align_timeline=True) as branch,
         ):
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((5 + 5 * i) / 430.08)
 
     result = shots(program(body, reps=2))
-    expected = [28, 28, 45] if register_count else [28, 28, 30]
+    # Branch duration is max(5,10,15)=15. Fixed count 2 ends at 30;
+    # counts 1/2/3 end at 15/30/45, joined with the external pulse end 28.
+    expected = [28, 30, 45] if register_count else [30, 30, 30]
     assert [waves(s) for s in result] == [[0]] * 6
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected * 2
     assert [s.end_cycle - s.start_cycle for s in result] == expected * 2
@@ -296,9 +409,9 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", 2), prog.branch(by="scan") as branch:
-            for _ in range(3):
-                with branch.case():
+        with prog.repeat("r", 2), prog.branch(by="scan", align_timeline=True) as branch:
+            for index in range(3):
+                with branch.case(index):
                     prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
         prog.delay_timeline(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")
@@ -314,9 +427,9 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
 @pytest.mark.parametrize("overlap", [False, True])
 def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overlap):
     def body(prog):
-        with prog.repeat("r", 2), prog.branch(by="scan") as branch:
+        with prog.repeat("r", 2), prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.pulse(0, "p0", timeline="default")
                     if i == 2:
                         prog.pulse(0, "p0", t=35 / 430.08)
@@ -328,9 +441,10 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
             program(body)
     else:
         result = shots(program(body))
-        assert [waves(s) for s in result] == [[0, 28], [0, 28], [0, 35, 63, 98]]
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [56, 56, 126]
-        assert [s.end_cycle - s.start_cycle for s in result] == [56, 56, 126]
+        # Safe case 2 ends at 28+35=63, which is every iteration's duration.
+        assert [waves(s) for s in result] == [[0, 63], [0, 63], [0, 35, 63, 98]]
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [126] * 3
+        assert [s.end_cycle - s.start_cycle for s in result] == [126] * 3
 
 
 def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding():
@@ -351,9 +465,9 @@ def test_long_pulse_crosses_branch_without_conservative_shell_padding():
     def body(prog):
         prog.fork("default", into="external")
         prog.pulse(1, "p1", timeline="external")
-        with prog.branch(by="scan") as branch:
+        with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((5 + 5 * i) / 430.08)
 
     result = shots(program(body))
@@ -471,6 +585,38 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
     assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
 
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("overwrite_before_branch", [False, True])
+@pytest.mark.parametrize("external_cycles", [100, 2])
+def test_branch_uses_captured_runtime_entry_after_register_repeat(
+    align_timeline, overwrite_before_branch, external_cycles
+):
+    def body(prog):
+        prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
+        prog.fork("default", into="external")
+        prog.delay_timeline(external_cycles / 430.08, timeline="external")
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(1 / 430.08)
+        prog.fork("external", into="working")
+        if overwrite_before_branch:
+            prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
+        with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+            with branch.case(0):
+                prog.delay_timeline(5 / 430.08, timeline="working")
+                prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
+            with branch.case(2):
+                prog.delay_timeline(15 / 430.08, timeline="working")
+        prog.pulse(0, "p0", timeline="working")
+
+    result = shots(program(body))
+    # Repeat advances 3. External100 leaves97; external2 floors to0.
+    if external_cycles == 100:
+        expected = [[115]] * 3 if align_timeline else [[105], [100], [115]]
+    else:
+        expected = [[18]] * 3 if align_timeline else [[8], [3], [18]]
+    assert [waves(s) for s in result] == expected
+
+
 class OverwriteTime(Macro):
     def translate(self, prog):
         WriteReg(dst="duration", src=1).translate(prog)
@@ -490,9 +636,9 @@ def test_unregistered_translate_writer_invalidates_constant_time_proof(location)
         if location == "after":
             prog.append_macro(OverwriteTime())
         elif location == "case":
-            with prog.branch(by="scan") as branch:
+            with prog.branch(by="scan", align_timeline=True) as branch:
                 for i in range(3):
-                    with branch.case():
+                    with branch.case(i):
                         if i == 1:
                             prog.append_macro(OverwriteTime())
         elif location == "backedge":
@@ -513,20 +659,13 @@ def test_register_time_rejects_out_of_range_producer(value):
         program(body)
 
 
-@pytest.mark.parametrize("control", ["branch", "repeat"])
-def test_wait_only_source_rejects_register_delay_but_derived_target_works(control):
+def test_wait_only_source_rejects_register_delay_but_derived_target_works():
     def body(prog):
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        if control == "repeat":
-            with prog.repeat("r", "duration", range_hint=(1, 3)):
-                prog.delay_timeline(10 / 430.08)
-        else:
-            with prog.branch(by="scan") as branch:
-                for i in range(3):
-                    with branch.case():
-                        prog.delay_timeline((10 + 10 * i) / 430.08)
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
+            prog.delay_timeline(10 / 430.08)
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
         prog.delay_timeline("duration", timeline="external")
@@ -554,9 +693,9 @@ def test_register_source_is_snapshotted_before_subsequent_registered_writes():
 
 def test_time_producer_must_be_initialized_on_every_branch_path():
     def body(prog):
-        with prog.branch(by="scan") as branch:
+        with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     if i != 1:
                         prog.write_reg("duration", 10)
         prog.delay_timeline("duration")
@@ -639,9 +778,9 @@ def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
                 lookup(prog)
                 prog.write_reg("duration", 3)
         elif where == "branch":
-            with prog.branch(by="scan") as branch:
+            with prog.branch(by="scan", align_timeline=True) as branch:
                 for i in range(3):
-                    with branch.case():
+                    with branch.case(i):
                         prog.write_reg("duration", 3 if i == 2 else 0)
                         lookup(prog)
         else:

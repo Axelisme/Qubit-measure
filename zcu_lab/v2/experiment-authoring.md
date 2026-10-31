@@ -190,9 +190,28 @@ class DelayCfg(ConfigBase):
     acquire_retry: int = 0
 ```
 
-Module 建構時用 keyword 覆寫掃描量的介面**尚未提供，隨 D＋B1 提供**。
-未來例如 `Pulse("probe", cfg.probe, freq=freq)`，不修改 cfg，`None` 表示沿用 cfg。
-目前仍用既有 `set_param` 路徑，不把這個未來片段當成可執行 API。
+Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
+`None` 表示沿用 cfg。以下例子在 builder 上建立頻率 sweep，再交給 Pulse：
+
+```python
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, make_mock_soccfg
+from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse
+
+pulse_cfg = Pulse.Cfg(
+    ch=0, nqz=1, freq=100.0, gain=0.2,
+    waveform=ConstWaveformCfg(length=0.1),
+)
+builder = TimelineBuilder(make_mock_soccfg())
+freq = builder.add_sweep("freq", SweepCfg(start=100.0, stop=102.0, step=1.0, expts=3))
+builder.emit(Pulse("probe", pulse_cfg, freq=freq))
+program = builder.build()
+```
+
+Pulse 支援 `freq`、`gain`、`phase`、`length`。PulseReadout 支援 `freq`、`gain`、`length`、`ro_length`。
+Reset 各變體的參數見 [module 建構參數表](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
+不支援 length sweep 的 waveform 仍會報錯，MuxReadout 不接受覆寫。
+接受 `ro_length` sweep 值不代表 QICK 支援 ADC window sweep，編譯會保留既有錯誤。
+既有 `set_param` 仍可用，但它會修改呼叫它的 cfg，應只用在自己持有的 cfg 副本上。
 
 ### 存檔軸用關鍵字，固定座標不塞進 Result
 
@@ -729,10 +748,10 @@ with Schedule(config, signals, scope=context.scope) as sched:
     )
 ```
 
-**每個 program 或 build 都要建立全新的 module 物件。** 不把已被 built program 使用的
-module 傳給另一個 program，也不從 cache 拿出 module 重新 build。
-目前宣告結果仍保存在 module 上，跨 program 共用會混入前一個 program 的資源狀態。
-將宣告狀態搬進 program 是後續工作。
+同一 module 物件可以傳給多個 `TimelineBuilder` 或原生 `TimelineProgramV2`。
+每個 program 依 module 物件身分保存宣告結果，重新 compile 時配置自己的資源。
+錄製或編譯後不要修改 module 或它的 cfg。不同掃描設定仍要建立不同 module。
+Legacy `ModularProgramV2` 仍在 module 上保存宣告狀態，不適用這個重用契約。
 同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
 重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
 相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
@@ -778,9 +797,42 @@ builder.sync()
 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
 `repeat` 的預設母 timeline 都遵守這條規則。
 `fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
-`branch` 只有 `by` 參數，例如 `with builder.branch(by="scan") as cases:`。
+`branch` 必填 `by` 與 `align_timeline`，例如 `with builder.branch(by="scan", align_timeline=True) as cases:`。
+Case 用 `with cases.case(index):` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
+未宣告的點不發射動作，重複、非整數或超界 index 報 ValueError。
 Case 內仍對原 builder 呼叫 emit，省略名字時沿用當下 timeline 範圍。
-Case 只同步自身使用的 timeline 與局部 fork，不把不等長 case 補成共同長度。
+每個 case 從 branch 入口的結尾與 reference 開始。
+`align_timeline=True` 按 timeline 對各 case 結尾做 join，靜態取 max，runtime 取精確逐點 max。
+True 需要每個 case 的結尾能從 branch 入口狀態算出。
+`align_timeline=False` 保留實際執行 case 的 runtime 結尾，未使用的 timeline 不變。
+兩種都不推進共用 reference、不自動 sync，後續可在同一 timeline 繼續發射。
+Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
+Case 內 Repeat 也在 build 時報錯，須移到 branch 外。Repeat 內放 branch 仍合法。
+Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 delay_timeline 寫在 with 區塊前或後。
+局部 fork 名字在 case 結束後失效。沒有 join 的局部結尾直接丟棄，不合回祖先，也不報錯。
+
+兩顆 qubit 的準備 pulse 放在各自 fork 的 timeline，才能同時發射。
+以下 body 片段使用本次 build 預先建立的 `x180_f1`、`x180_f2` 與 `readout`。
+若有 reset 或 herald，先 emit 它們，再同步完成時間：
+
+```python
+builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e, outer
+builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e, inner
+# Emit optional reset and herald here.
+builder.sync()  # wait for herald/reset to finish before the branch-selected preparation
+builder.fork("default", into=["f1", "f2"])
+with builder.timeline("f1"):
+    with builder.branch(by="prepared_f1", align_timeline=True) as cases:
+        with cases.case(1):
+            builder.emit(x180_f1)
+with builder.timeline("f2"):
+    with builder.branch(by="prepared_f2", align_timeline=True) as cases:
+        with cases.case(1):
+            builder.emit(x180_f2)
+builder.join("f1", "f2", into="default")
+builder.emit(readout, tag="terminal")
+```
+
 Repeat 內只可使用母 timeline 及其局部 fork，不能操作另一條外部 timeline。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
@@ -835,7 +887,7 @@ Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用�
 
 Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
 預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
-這次建構建立新的 readout，不重用前一個 built program 的物件。
+範例建立新的 readout，也可以重用設定不變的 module；宣告結果由各 program 持有。
 
 ```python
 trace_builder = TimelineBuilder(context.soccfg, reps=1)
