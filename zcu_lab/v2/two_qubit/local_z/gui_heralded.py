@@ -17,8 +17,12 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from .analysis import LocalZAnalysis
-from .core_heralded import LocalZHeraldedCfg, LocalZHeraldedExp, LocalZHeraldedResult
+from .core_heralded import (
+    LocalZHeraldedAnalysis,
+    LocalZHeraldedCfg,
+    LocalZHeraldedExp,
+    LocalZHeraldedResult,
+)
 from .form import phase_form
 
 LocalZHeraldedRun: TypeAlias = RunRecord[LocalZHeraldedCfg, LocalZHeraldedResult]
@@ -31,13 +35,13 @@ def make_form(ctx: FormContext) -> Form[LocalZHeraldedCfg]:
 
 def _analyze(
     req: AnalyzeRequest[LocalZHeraldedRun, None], *, plots: Plots
-) -> LocalZAnalysis:
+) -> LocalZHeraldedAnalysis:
     """Fit only saved cfg/counts, never current Form, aliases or library."""
     return LocalZHeraldedExp().analyze(req.run_result, None, plots=plots)
 
 
 def _get_writeback_items(
-    req: WritebackRequest[LocalZHeraldedRun, LocalZAnalysis],
+    req: WritebackRequest[LocalZHeraldedRun, LocalZHeraldedAnalysis],
 ) -> Sequence[WritebackItem]:
     """Propose one component-named pair only when both target fits are valid.
 
@@ -64,7 +68,7 @@ def _get_writeback_items(
     return [
         ParameterWriteback(
             target_name="$coupler.ext.cz_phase",
-            description="B00 heralded linear-model logical corrections (deg); source F1/F2 identities, correction = −slope",
+            description="Herald gg weighted-fit logical corrections (deg); source F1/F2 identities, correction = −slope",
             proposed_value={
                 "f1": cfg.roles.f1,
                 "f2": cfg.roles.f2,

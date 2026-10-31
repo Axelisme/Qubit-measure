@@ -10,7 +10,6 @@ from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import Classify
 from zcu_tools.program.v2.modules import MuxReadout
 from zcu_tools.program.v2.modules.readout import circle_classifier
 
@@ -34,20 +33,6 @@ def validate_classifiers(readout: MuxReadout.Cfg, roles: JointRoles) -> None:
             ) from exc
         if classifier.radius is None:
             raise ValueError(f"{role}: circle radius required; run GE Post")
-
-
-def readout_axes(roles: JointRoles, *, heralded: bool) -> list[Classify]:
-    """Return terminal F1/F2 axes, preceded by herald F1/F2 when heralded.
-
-    Tone positions come from the captured full mux mapping. Resolve this list
-    with shot_sums only after building the program with these emission tags.
-    """
-    labels = ("herald", "terminal") if heralded else ("terminal",)
-    return [
-        Classify(label, tone)
-        for label in labels
-        for tone in (roles.f1_tone, roles.f2_tone)
-    ]
 
 
 def joint_probabilities(counts: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -77,14 +62,17 @@ def sigma(
 
 
 def terminal_counts(
-    sums: NDArray[np.float64], *, heralded: bool
+    sums: NDArray[np.float64],
+    herald: tuple[Literal["g", "e", "other"], Literal["g", "e", "other"]],
 ) -> NDArray[np.float64]:
-    """Select herald (g,g) from 81 counts, or return non-heralded 9 counts.
+    """Select terminal (...,3,3) counts for the named herald (F1,F2) classes.
 
-    Leading scan dimensions are retained; this is a view, not a new acquisition
-    or renormalization. Herald (g,g) means classified acceptance, not purity.
+    sums ends in herald F1/F2 then terminal F1/F2, each g/e/other. Leading
+    scan dimensions remain unchanged. This returns a view without normalization.
+    Invalid class names raise ValueError. Unmeasured NaNs propagate.
     """
-    return sums[..., 0, 0, :, :] if heralded else sums
+    f1, f2 = (("g", "e", "other").index(state) for state in herald)
+    return sums[..., f1, f2, :, :]
 
 
 def herald_probabilities(sums: NDArray[np.float64]) -> NDArray[np.float64]:

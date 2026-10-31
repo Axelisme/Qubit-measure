@@ -704,8 +704,9 @@ class MuxReadout(AbsReadout):
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare tones/routes without enabling legacy raw-IQ collection.
 
-        Incompatible wiring, duplicate routes and illegal rounded durations raise
-        ValueError naming this module. QICK frequency/format errors propagate.
+        Incompatible wiring and illegal rounded durations raise ValueError.
+        Identical resources can be shared; inconsistent ADC/generator settings
+        name both modules and their fields. QICK frequency/format errors propagate.
         """
         self._declare_resources(prog)
 
@@ -730,8 +731,11 @@ class MuxReadout(AbsReadout):
         prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
 
     def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self._validate_generator(prog)
-        self._validate_readouts(prog)
+        from ..timeline import TimelineProgramV2
+
+        allow_shared = isinstance(prog, TimelineProgramV2)
+        self._validate_generator(prog, allow_shared=allow_shared)
+        self._validate_readouts(prog, allow_shared=allow_shared)
         cfg = self.cfg
         prog.declare_gen(
             ch=cfg.gen_ch,
@@ -757,11 +761,16 @@ class MuxReadout(AbsReadout):
             mask=list(range(len(cfg.tones))),
             length=cfg.length,
         )
-        prog.protect_readout_routes(
-            self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
-        )
+        # Timeline declarations are immutable already; legacy programs need
+        # explicit protection to prevent QICK from overwriting these routes.
+        if not allow_shared:
+            prog.protect_readout_routes(
+                self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
+            )
 
-    def _validate_generator(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _validate_generator(
+        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
+    ) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -777,7 +786,7 @@ class MuxReadout(AbsReadout):
             raise ValueError(
                 f"{self.name}.gen_ch: generator {ch} requires mixmux8 mixer/gain/phase capacity"
             )
-        if ch in prog.gen_chs:
+        if ch in prog.gen_chs and not allow_shared:
             raise ValueError(
                 f"{self.name}.gen_ch: generator route {ch} already declared"
             )
@@ -787,7 +796,9 @@ class MuxReadout(AbsReadout):
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _validate_readouts(
+        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
+    ) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
@@ -795,7 +806,11 @@ class MuxReadout(AbsReadout):
         for i, tone in enumerate(self.cfg.tones):
             ch = tone.ro_ch
             where = f"{self.name}.tones[{i}].ro_ch: ADC {ch}"
-            if ch >= len(readouts) or ch in channels or ch in prog.ro_chs:
+            if (
+                ch >= len(readouts)
+                or ch in channels
+                or (ch in prog.ro_chs and not allow_shared)
+            ):
                 raise ValueError(f"{where} missing or duplicate readout route")
             ro = readouts[ch]
             if (

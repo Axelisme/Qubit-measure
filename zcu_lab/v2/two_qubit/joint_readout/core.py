@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, field_serializer, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -23,27 +22,24 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    Classify,
     Pulse,
     Reset,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
-from zcu_tools.program.v2.modules.readout import circle_classifier
+from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
 from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
-    readout_axes,
-    terminal_counts,
     validate_classifiers,
 )
-from .._timeline import emit_readout_prefix
 
-BRANCH_LABELS = ("00", "01", "10", "11")
+PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
+PREPARED_LABELS = tuple(f"{f1},{f2}" for f1, f2 in PREPARED_STATES)
 OUTCOME_LABELS = tuple(
     f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
@@ -85,17 +81,6 @@ class GECenters(ConfigBase):
         if not np.isfinite(self.g) or not np.isfinite(self.e) or self.g == self.e:
             raise ValueError("GE centers must be finite and distinct")
         return self
-
-
-def tone_centers(readout: MuxReadoutCfg, tone_index: int) -> GECenters:
-    """Read one original tone's circle centers in normalized raw ADC units.
-
-    readout is the saved full mux cfg; tone_index is the role's original tone
-    position, not an ADC number. Missing/linear classifiers raise ValueError.
-    Radius is not required. No capture, live library or manual override is read.
-    """
-    classifier = circle_classifier(readout, ro_ch=readout.tones[tone_index].ro_ch)
-    return GECenters(g=classifier.g_center, e=classifier.e_center)
 
 
 class JointReadoutCfg(ConfigBase):
@@ -154,15 +139,17 @@ class JointReadoutCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class JointReadoutResult:
-    """branches is int64 [0,1,2,3]; sums is float64 (4,3,3) raw counts.
+    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3) counts.
 
-    Branch order is nominal 00/01/10/11, F1 first. Class axes are terminal F1,
+    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
+    Class axes are terminal F1,
     terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
     remain NaN. Completed rounds survive cancellation. Check the RunContext stop
     signal for acquisition errors rather than interpreting partial data as success.
     """
 
-    branches: NDArray[np.int64]
+    prepared_f1: NDArray[np.int64]
+    prepared_f2: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
@@ -179,124 +166,18 @@ class JointReadoutAnalysis:
     acquired_shots: NDArray[np.float64]
 
 
-def build_program(
-    cfg: JointReadoutCfg, soccfg: QickConfig, branch: int, *, heralded: bool
-) -> TimelineProgramV2:
-    """Compile one nominal 00/01/10/11 branch; branch must be in 0..3.
-
-    Every call creates fresh modules. Emit reset if configured, herald if
-    requested, F1 Xπ for bit 1 then F2 Xπ for bit 0, then terminal. The two
-    readouts reuse one mux module with separate tags. No acquisition occurs.
-    """
-    if branch not in range(4):
-        raise ValueError("branch must be in 0..3")
-    validate_classifiers(cfg.readout, cfg.roles)
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
-    if branch & 2:
-        builder.emit(Pulse("x180_f1", cfg.x180_f1))
-    if branch & 1:
-        builder.emit(Pulse("x180_f2", cfg.x180_f2))
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: JointReadoutCfg, *, context: RunContext, heralded: bool
-) -> NDArray[np.float64]:
-    """Run four branches and return unchanged float64 summed counts.
-
-    Shape is (4,3,3), or (4,3,3,3,3) with herald. Live P(g,g) derives from
-    accumulated terminal counts, selecting herald (g,g) for the heralded version.
-    Schedule owns a cfg copy, retries and cancellation; host does not loop rounds.
-    """
-    validate_classifiers(config.readout, config.roles)
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "Nominal preparation (00, 01, 10, 11)",
-        "Terminal P(g,g)" if not heralded else "Terminal P(g,g) | herald (g,g)",
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, heralded=heralded)
-        viewer.update(
-            np.arange(4, dtype=np.float64), joint_probabilities(counts)[..., 0, 0]
-        )
-
-    shape = (4, 3, 3, 3, 3) if heralded else (4, 3, 3)
-    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        for branch, step in sched.scan("branch", list(range(4))):
-            prog = build_program(step.cfg, context.soccfg, branch, heralded=heralded)
-            step.run_acquire_summed(
-                prog,
-                context.soc,
-                processor=shot_sums(
-                    prog, readout_axes(step.cfg.roles, heralded=heralded)
-                ),
-                rounds=step.cfg.rounds,
-                options=RunOptions(),
-            )
-    return buffer.array
-
-
 def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult:
-    """Load summed counts; missing sums in old raw-IQ files raises ValueError."""
+    """Load two-axis sums; old raw-IQ or single-axis files raise ValueError."""
     sums = data.variable("sums")
+    if sums.z.shape != (2, 2, 3, 3):
+        raise ValueError(
+            "Joint readout requires two preparation axes and sums (2,2,3,3)"
+        )
     return JointReadoutResult(
-        branches=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64)
+        prepared_f1=sums.axes[3].astype(np.int64),
+        prepared_f2=sums.axes[2].astype(np.int64),
+        sums=sums.z.astype(np.float64),
     )
-
-
-def analyze_counts(result: JointReadoutResult, *, plots: Plots) -> JointReadoutAnalysis:
-    """Plot four nominal preparation rows against nine terminal joint classes.
-
-    No saved cfg or IQ reclassification is needed. All completed counts,
-    including partial acquisitions, enter the row normalization. Zero accepted
-    shots give NaN probabilities, not a fabricated distribution.
-    """
-    if not np.array_equal(result.branches, np.arange(4)) or result.sums.shape != (
-        4,
-        3,
-        3,
-    ):
-        raise ValueError("Joint readout requires branches [0,1,2,3] and sums (4,3,3)")
-    answer = JointReadoutAnalysis(
-        counts=result.sums.reshape(4, 9),
-        matrix=joint_probabilities(result.sums).reshape(4, 9),
-        acquired_shots=result.sums.sum(axis=(-2, -1)),
-    )
-    fig, axes = plots.subplots("matrix", figsize=(12, 5))
-    image = axes.imshow(
-        np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
-    )
-    for row in range(4):
-        for col in range(9):
-            value = answer.matrix[row, col]
-            label = (
-                f"{value:.3f}\nn={answer.counts[row, col]:g}"
-                if np.isfinite(value)
-                else "No shots"
-            )
-            axes.text(col, row, label, ha="center", va="center", fontsize=8)
-    axes.set(
-        xticks=range(9),
-        xticklabels=OUTCOME_LABELS,
-        yticks=range(4),
-        yticklabels=BRANCH_LABELS,
-        xlabel="Observed terminal class (F1, F2)",
-        ylabel="Nominal I/Xπ preparation",
-        title="Preparation → observed outcome; includes preparation and readout effects",
-    )
-    fig.colorbar(image, ax=axes, label="Row-normalized probability")
-    fig.tight_layout()
-    return answer
 
 
 class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
@@ -311,9 +192,15 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                         VariableAxisSpec.generated_arange("terminal_f2", ""),
                         VariableAxisSpec.generated_arange("terminal_f1", ""),
                         VariableAxisSpec(
-                            "Nominal preparation",
+                            "Prepared F2 (0=g, 1=e)",
                             "",
-                            field_name="branches",
+                            field_name="prepared_f2",
+                            dtype=np.int64,
+                        ),
+                        VariableAxisSpec(
+                            "Prepared F1 (0=g, 1=e)",
+                            "",
+                            field_name="prepared_f1",
                             dtype=np.int64,
                         ),
                     ),
@@ -327,7 +214,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             ),
             result_type=JointReadoutResult,
             cfg_type=JointReadoutCfg,
-            cfg_schema_version="4.0",
+            cfg_schema_version="5.0",
             tag="two_qubit/joint_readout",
             result_builder=restore_result,
         )
@@ -338,12 +225,72 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
     ) -> JointReadoutResult:
         """Acquire optional reset → I/Xπ preparation → terminal joint counts.
 
-        Return (4,3,3) summed counts, not per-shot IQ or probabilities. All rounds
+        Return (2,2,3,3) summed counts, not per-shot IQ or probabilities. All rounds
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
         """
+
+        validate_classifiers(config.readout, config.roles)
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Nominal preparation (gg, ge, eg, ee)",
+            "Terminal P(g,g)",
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            viewer.update(
+                np.arange(4, dtype=np.float64),
+                joint_probabilities(sums)[..., 0, 0].reshape(4),
+            )
+
+        buffer = SignalBuffer((2, 2, 3, 3), dtype=np.float64, on_update=update_view)
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=config.reps,
+                initial_delay=config.initial_delay,
+                relax_delay=config.relax_delay,
+            )
+            builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
+            builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
+            readout = MuxReadout("readout", config.readout)
+            x180_f1 = Pulse("x180_f1", config.x180_f1)
+            x180_f2 = Pulse("x180_f2", config.x180_f2)
+            if config.reset is not None:
+                builder.emit(Reset("reset", config.reset))
+            # wait for herald/reset to finish before the branch-selected preparation
+            builder.sync()
+            builder.fork("default", into=["f1", "f2"])
+            with (
+                builder.timeline("f1"),
+                builder.branch(by="prepared_f1", align_timeline=True) as cases,
+                cases.case(1),  # F1 prepared in e
+            ):
+                builder.emit(x180_f1)
+            with (
+                builder.timeline("f2"),
+                builder.branch(by="prepared_f2", align_timeline=True) as cases,
+                cases.case(1),  # F2 prepared in e
+            ):
+                builder.emit(x180_f2)
+            builder.join("f1", "f2", into="default")
+            builder.emit(readout, tag="terminal")
+            prog = builder.build()
+            axes = [
+                Classify("terminal", config.roles.f1_tone),
+                Classify("terminal", config.roles.f2_tone),
+            ]
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                processor=shot_sums(prog, axes),
+                rounds=config.rounds,
+                options=RunOptions(),
+            )
         return JointReadoutResult(
-            np.arange(4, dtype=np.int64),
-            acquire_counts(config, context=context, heralded=False),
+            prepared_f1=np.arange(2, dtype=np.int64),
+            prepared_f2=np.arange(2, dtype=np.int64),
+            sums=buffer.array,
         )
 
     def analyze(
@@ -355,4 +302,48 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
     ) -> JointReadoutAnalysis:
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options
-        return analyze_counts(source.result, plots=plots)
+        result = source.result
+        if (
+            not np.array_equal(result.prepared_f1, np.arange(2))
+            or not np.array_equal(result.prepared_f2, np.arange(2))
+            or result.sums.shape != (2, 2, 3, 3)
+        ):
+            raise ValueError(
+                "Joint readout requires prepared_f1/prepared_f2 [0,1] "
+                "and sums (2,2,3,3)"
+            )
+        answer = JointReadoutAnalysis(
+            counts=result.sums.reshape(4, 9),
+            matrix=joint_probabilities(result.sums).reshape(4, 9),
+            acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(4),
+        )
+        fig, axes = plots.subplots("matrix", figsize=(12, 5))
+        image = axes.imshow(
+            np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
+        )
+        for row in range(4):
+            for col in range(9):
+                value = answer.matrix[row, col]
+                label = (
+                    f"{value:.3f}\nn={answer.counts[row, col]:g}"
+                    if np.isfinite(value)
+                    else "No shots"
+                )
+                axes.text(col, row, label, ha="center", va="center", fontsize=8)
+        axes.set(
+            xticks=range(9),
+            xticklabels=OUTCOME_LABELS,
+            yticks=range(4),
+            yticklabels=[
+                f"{label}; n={shots:g}"
+                for label, shots in zip(
+                    PREPARED_LABELS, answer.acquired_shots, strict=True
+                )
+            ],
+            xlabel="Observed terminal class (F1, F2)",
+            ylabel="Nominal I/Xπ preparation; acquired shots",
+            title="Preparation → observed outcome; includes preparation and readout effects",
+        )
+        fig.colorbar(image, ax=axes, label="Row-normalized probability")
+        fig.tight_layout()
+        return answer

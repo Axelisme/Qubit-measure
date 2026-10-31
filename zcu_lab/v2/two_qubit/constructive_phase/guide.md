@@ -53,7 +53,8 @@ These figures include preparation and readout errors.
 They do not measure gate fidelity or resolve physical leakage by themselves.
 There are no mean-IQ diagnostics or saved IQ clouds.
 
-Each finite nonempty duration trace uses the existing undamped cosine fit.
+Each fully acquired duration trace with nonzero selected counts uses an
+undamped cosine fit.
 Rates below 1 divided by the saved duration span are unresolved.
 Failed or degenerate fits report a reason rather than a zero rate.
 Inspect fit_quality and the measured traces against the model.
@@ -75,7 +76,8 @@ Every class axis is ordered g, e, other.
 Rounds accumulate during acquisition without normalization.
 File size does not grow with repetitions or rounds.
 Completed rounds survive cancellation; unmeasured points remain NaN.
-A point with acquired partial rounds contributes its actual available counts.
+Partial rounds remain visible.
+Fits require all requested shots at every point of a duration trace.
 Always check the execution status before accepting partial results.
 
 Load leaves the current Form unchanged. Analysis uses the saved cfg and counts.
@@ -97,3 +99,26 @@ Use `two_qubit/constructive_phase_heralded` for the version conditioned on a gro
 After amplitude/frequency selection, measure conditional phase and local Z.
 Repeat calibration after changing pulse shapes or the pair's working point.
 Validate the actual FTF control chain separately from offline compile checks.
+
+## Notebook
+
+Use the adapter with a complete saved or operator-reviewed cfg.
+`point_view` is the bound PointView for the save destination.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.constructive_phase.core import ConstructivePhaseExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(ConstructivePhaseExp())
+record = exp.run(cfg)
+exp.analyze(None)
+exp.save_run(point_view, source=record)
+```
+
+The coordinate is a hardware sweep. Constant and flat-top pulse durations also
+use a hardware sweep in the same program. Sampled cosine, Gaussian and DRAG
+waveforms reject swept lengths, so only their duration uses a host loop.
+
+Fits use count-weighted binomial errors. Endpoint probabilities use
+Jeffreys-smoothed variance so observations at zero or one retain finite weight.

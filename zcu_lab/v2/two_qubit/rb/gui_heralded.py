@@ -1,4 +1,4 @@
-"""Measure attachment for ground-ground heralded paired RB."""
+"""Measure attachment for paired RB with joint gg/ee return-survival fits."""
 
 from pathlib import Path
 from typing import TypeAlias
