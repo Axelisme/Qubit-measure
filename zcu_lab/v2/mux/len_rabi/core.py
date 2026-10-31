@@ -348,6 +348,8 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             for drive, timeline in zip(drives, timelines, strict=True):
                 builder.emit(drive, timeline=timeline)
             builder.join(*timelines, into="default")
+            # Consume this point's common end before readout to release runtime registers.
+            builder.sync()
             readout_module = MuxReadout("readout", readout)
             builder.emit(readout_module)
             prog = builder.build()
