@@ -1263,6 +1263,8 @@ class RuntimeMath(TimedMacro):
         if not safe:
             return self._masked_select(left, right, maximum=maximum, target=target)
         destination = self.allocate() if target is None else target
+        if destination == right.register:
+            left, right = right, left
         self.operations.append(
             AsmInst(
                 inst={

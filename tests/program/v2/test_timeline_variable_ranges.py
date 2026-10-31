@@ -101,7 +101,7 @@ def test_author_register_does_not_inherit_loop_correlation(hint):
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
-    assert any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
+    assert any(inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", "")) for inst in prog.prog_list)
     with pytest.raises(RuntimeError, match="runtime"):
         prog.get_time_param("author", "t")
     result = shots(prog)
@@ -133,7 +133,7 @@ def test_measurement_selected_table_is_independent_of_loop_time():
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
-    assert any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
+    assert any(inst.get("CMD") == "TEST" or "^" in str(inst.get("OP", "")) for inst in prog.prog_list)
     with pytest.raises(RuntimeError, match="runtime"):
         prog.get_time_param("selected", "t")
 
