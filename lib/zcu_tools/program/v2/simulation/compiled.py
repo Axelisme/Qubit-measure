@@ -704,7 +704,9 @@ def build_compiled_request(
     clocks = [float(prog.tproccfg["f_time"])]
     for ch in prog.gen_chs:
         cfg = prog.soccfg["gens"][ch]
-        clocks.extend((float(cfg["f_fabric"]), float(cfg["f_fabric"]) * int(cfg["samps_per_clk"])))
+        clocks.extend(
+            (float(cfg["f_fabric"]), float(cfg["f_fabric"]) * int(cfg["samps_per_clk"]))
+        )
     clocks.extend(float(prog.soccfg["readouts"][ch]["f_output"]) for ch in prog.ro_chs)
     time_base = TimeBase.from_clocks(clocks)
     outputs = Outputs(prog, prod(dims), routes, binding.envelope_pool, time_base)
@@ -737,7 +739,8 @@ def build_compiled_request(
         names,
         prog.loop_dict["reps"],
         (template,),
-        int(prog.us2cycles(prog.relax_delay)) * time_base.period_ticks(prog.tproccfg["f_time"]),
+        int(prog.us2cycles(prog.relax_delay))
+        * time_base.period_ticks(prog.tproccfg["f_time"]),
         time_base=time_base,
         charge_requirements=charge_requirements,
     )

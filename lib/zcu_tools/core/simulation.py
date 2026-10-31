@@ -628,7 +628,11 @@ class AcquireRequest:
                     for slot in template.readouts
                 )
                 return PointTimeline(
-                    coordinates, events, readouts, int(template.duration_ticks[local]), self.time_base
+                    coordinates,
+                    events,
+                    readouts,
+                    int(template.duration_ticks[local]),
+                    self.time_base,
                 )
         raise ValueError("no template covers point")
 

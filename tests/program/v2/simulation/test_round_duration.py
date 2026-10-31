@@ -2,9 +2,8 @@
 
 import time
 from dataclasses import replace
-from threading import Event
-
 from fractions import Fraction
+from threading import Event
 
 import numpy as np
 import pytest
@@ -12,8 +11,8 @@ from zcu_tools.core.simulation import (
     AcquireRequest,
     EnvironmentSnapshot,
     RoundSignals,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import ModularProgramV2, make_mock_soccfg
@@ -67,7 +66,9 @@ def request_for(binding: SimulationBinding, sequence: int) -> AcquireRequest:
         point_names=("scan",),
         reps=10,
         templates=(
-            TimelineTemplate(np.array([0, 2]), (), (), np.array([2000, 15000], dtype=np.int64)),
+            TimelineTemplate(
+                np.array([0, 2]), (), (), np.array([2000, 15000], dtype=np.int64)
+            ),
             TimelineTemplate(np.array([1]), (), (), np.array([3000], dtype=np.int64)),
         ),
     )

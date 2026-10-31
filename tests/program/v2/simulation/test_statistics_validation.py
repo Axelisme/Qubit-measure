@@ -2,9 +2,7 @@
 
 import re
 from copy import deepcopy
-from fractions import Fraction
 from dataclasses import replace
-
 from fractions import Fraction
 
 import numpy as np
@@ -12,11 +10,11 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     AcquireRequest,
-    TimeBase,
     ChannelStatistics,
     ReadoutWindow,
     RoundStatistics,
     SamplingIdentity,
+    TimeBase,
 )
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.simulation import IntegratedRound

@@ -14,8 +14,11 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
 
 from tests.program.v2.simulation.support import raw_of, request_of
-from tests.program.v2.simulation.time_observations import envelope_times_us, time_us, times_us
-
+from tests.program.v2.simulation.time_observations import (
+    envelope_times_us,
+    time_us,
+    times_us,
+)
 
 
 def readout(name="readout", *, channel=0, samples=31, waveform=None):
@@ -73,9 +76,9 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     assert values.real.min() == pytest.approx(-0.2, abs=1 / 32766)
     assert np.max(np.abs(values)) < 0.23  # never normalize this to a unit peak
     assert values[0].imag == pytest.approx(0.1, abs=1 / 32766)
-    assert np.interp(0.025, envelope_times_us(observed.time_base, envelope), values.real) == pytest.approx(
-        -0.05, abs=0.003
-    )
+    assert np.interp(
+        0.025, envelope_times_us(observed.time_base, envelope), values.real
+    ) == pytest.approx(-0.05, abs=0.003)
     assert event.gain == pytest.approx(0.4, abs=1 / 32766)
     # Changing the asset after preparation does not mutate the detached request.
     np.savez(path, time=[0, 0.05, 0.1], idata=[0, 0, 0], qdata=[0, 0, 0])
@@ -167,8 +170,12 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
         ["a", "b"],
     ]
     assert (
-        times_us(request.time_base, request.materialize_point(1).readouts[0].trigger_ticks)[0]
-        > times_us(request.time_base, request.materialize_point(1).readouts[1].trigger_ticks)[0]
+        times_us(
+            request.time_base, request.materialize_point(1).readouts[0].trigger_ticks
+        )[0]
+        > times_us(
+            request.time_base, request.materialize_point(1).readouts[1].trigger_ticks
+        )[0]
     )
 
 

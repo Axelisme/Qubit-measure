@@ -15,7 +15,6 @@ from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import times_us
 
 
-
 def test_offline_board_declares_mock_identity():
     env = white_noise(std_adc=0)
     assert env.soc.is_mock is True
@@ -180,7 +179,15 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
         "second",
         "third",
     ]
-    assert np.all(np.diff(times_us(request.time_base, request.materialize_point(0).readouts[0].trigger_ticks)) > 0)
+    assert np.all(
+        np.diff(
+            times_us(
+                request.time_base,
+                request.materialize_point(0).readouts[0].trigger_ticks,
+            )
+        )
+        > 0
+    )
     assert len(seen) == 2
     assert traces.shape == (2, 3, request.readouts[0].samples, 2)
     np.testing.assert_array_equal(traces[:, :, 0, 0], [[5, 6, 7], [8, 9, 10]])

@@ -159,9 +159,15 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
     assert first != second
     if difference == "clock":
         np.testing.assert_array_equal(first.values, second.values)
-        np.testing.assert_array_equal(np.array(envelope_times_us(request.time_base, first)) / 2, envelope_times_us(request.time_base, second))
+        np.testing.assert_array_equal(
+            np.array(envelope_times_us(request.time_base, first)) / 2,
+            envelope_times_us(request.time_base, second),
+        )
     elif difference == "maxv":
-        np.testing.assert_array_equal(envelope_times_us(request.time_base, first), envelope_times_us(request.time_base, second))
+        np.testing.assert_array_equal(
+            envelope_times_us(request.time_base, first),
+            envelope_times_us(request.time_base, second),
+        )
         np.testing.assert_array_equal(np.array(first.values) * 2, second.values)
     else:
         assert any(value.imag != 0 for value in second.values)

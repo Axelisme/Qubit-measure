@@ -17,8 +17,8 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
-from tests.program.v2.simulation.time_observations import time_us
 
+from tests.program.v2.simulation.time_observations import time_us
 
 
 @pytest.fixture
@@ -185,9 +185,9 @@ def test_repeated_request_preserves_numeric_controls(environment, case):
                 else:
                     assert event.gain == pytest.approx(gain, abs=1e-4)
                 if case != "computed_flat_top":
-                    assert time_us(request.time_base, event.duration_ticks) == pytest.approx(
-                        0.055 if inner == 0 else 0.1, abs=0.003
-                    )
+                    assert time_us(
+                        request.time_base, event.duration_ticks
+                    ) == pytest.approx(0.055 if inner == 0 else 0.1, abs=0.003)
             if case == "computed_tables":
                 second = [
                     event
@@ -195,7 +195,9 @@ def test_repeated_request_preserves_numeric_controls(environment, case):
                     if event.source == "second_gate"
                 ]
                 assert len(second) == len(gates)
-                assert time_us(request.time_base, second[0].start_ticks) > time_us(request.time_base, gates[0].start_ticks) + time_us(request.time_base, gates[0].duration_ticks)
+                assert time_us(request.time_base, second[0].start_ticks) > time_us(
+                    request.time_base, gates[0].start_ticks
+                ) + time_us(request.time_base, gates[0].duration_ticks)
 
 
 def test_next_request_reads_current_compiled_pulse_content(environment):

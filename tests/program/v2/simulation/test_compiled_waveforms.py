@@ -8,7 +8,6 @@ from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.time_observations import envelope_times_us, time_us
 
 
-
 def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
     def initialize(p):
         p.add_envelope(
@@ -24,7 +23,9 @@ def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
     assert event.envelope is not None
     assert event.envelope.sample_period_ticks == 7
     assert event.duration_ticks == 336
-    assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx((0, 1 / 6144))
+    assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx(
+        (0, 1 / 6144)
+    )
     assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / 32766)
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(3 / 384)
 
@@ -49,7 +50,9 @@ def test_ordinary_generator_serializes_commands_in_instruction_order(
     prog, env = program(body, reps=1)
     observed = request(prog, env)
     events = observed.materialize_point(0).events
-    assert [time_us(observed.time_base, e.start_ticks) for e in events] == pytest.approx(expected)
+    assert [
+        time_us(observed.time_base, e.start_ticks) for e in events
+    ] == pytest.approx(expected)
 
 
 def test_adjacent_ordinary_commands_keep_the_exact_shared_boundary():
@@ -67,7 +70,11 @@ def test_adjacent_ordinary_commands_keep_the_exact_shared_boundary():
     first, second = observed.materialize_point(0).events
     assert first.start_ticks == 0
     assert first.duration_ticks == second.start_ticks == 2800
-    assert time_us(observed.time_base, first.duration_ticks) == time_us(observed.time_base, second.start_ticks) == 25 / 384
+    assert (
+        time_us(observed.time_base, first.duration_ticks)
+        == time_us(observed.time_base, second.start_ticks)
+        == 25 / 384
+    )
 
 
 def test_flat_top_segments_are_adjacent_without_delaying_another_generator():
@@ -93,10 +100,12 @@ def test_flat_top_segments_are_adjacent_without_delaying_another_generator():
     prog, env = program(body, initialize, reps=1)
     observed = request(prog, env)
     events = observed.materialize_point(0).events
-    assert [time_us(observed.time_base, e.start_ticks) for e in events] == pytest.approx([0, 3 / 384, 41 / 384, 0])
-    assert [time_us(observed.time_base, e.duration_ticks) for e in events] == pytest.approx(
-        np.array([3, 38, 3, 38]) / 384
-    )
+    assert [
+        time_us(observed.time_base, e.start_ticks) for e in events
+    ] == pytest.approx([0, 3 / 384, 41 / 384, 0])
+    assert [
+        time_us(observed.time_base, e.duration_ticks) for e in events
+    ] == pytest.approx(np.array([3, 38, 3, 38]) / 384)
 
 
 @pytest.mark.parametrize("outsel", ["zero", "dds", "product"])
@@ -256,4 +265,6 @@ def test_wave_register_readback_and_wmem_field_widths_are_distinct():
     assert [e.gain for e in events] == pytest.approx(
         np.array([16777223, 65545, 7, 9]) / 32766
     )
-    assert [time_us(observed.time_base, e.duration_ticks) for e in events] == pytest.approx([38 / 384] * 4)
+    assert [
+        time_us(observed.time_base, e.duration_ticks) for e in events
+    ] == pytest.approx([38 / 384] * 4)

@@ -25,9 +25,6 @@ from .clock import SimulationTiming
 from .result import IntegratedRound
 
 
-
-
-
 @dataclass(frozen=True)
 class SimulationProvenance:
     """Binding identity and versions, with only identifier intended for publication.

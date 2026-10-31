@@ -20,7 +20,6 @@ from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
-
 def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     prog, env = program(lambda p: p.pulse(0, "p", tag="drive"))
     result = request(prog, env)
@@ -198,9 +197,9 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     result = request(prog, env)
     events = result.materialize_point(0).events
     assert [e.source for e in events[:2]] == ["one", "two"]
-    assert [time_us(result.time_base, e.start_ticks) for e in events[:2]] == pytest.approx(
-        [44 / 430.08, 132 / 430.08]
-    )
+    assert [
+        time_us(result.time_base, e.start_ticks) for e in events[:2]
+    ] == pytest.approx([44 / 430.08, 132 / 430.08])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 
@@ -441,7 +440,9 @@ def test_wave_memory_and_output_coupled_effects_use_prewrite_words(opcode):
     observed = request(prog, env)
     events = observed.materialize_point(0).events
     assert [event.gain for event in events] == pytest.approx([100 / 32766] * 2)
-    assert [time_us(observed.time_base, event.start_ticks) for event in events] == pytest.approx([0, 43 / 430.08])
+    assert [
+        time_us(observed.time_base, event.start_ticks) for event in events
+    ] == pytest.approx([0, 43 / 430.08])
 
 
 def test_wmem_store_initializes_a_new_address_for_native_port_playback():
@@ -622,7 +623,9 @@ def test_ordinary_adc_triggers_are_distinct_output_effects():
     result = request(prog, env)
     reads = result.materialize_point(0).readouts
     assert times_us(result.time_base, reads[0].trigger_ticks) == (0,)
-    assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx((43 / 430.08,))
+    assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx(
+        (43 / 430.08,)
+    )
 
 
 def test_reps_varying_body_end_is_an_observable_carry_error():

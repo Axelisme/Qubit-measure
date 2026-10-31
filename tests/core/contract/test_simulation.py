@@ -19,8 +19,15 @@ def test_request_rejects_noninteger_or_out_of_range_time_arrays(duration, error)
     template = simulation.TimelineTemplate(np.array([0]), (), (), duration)
     with pytest.raises(error):
         simulation.AcquireRequest(
-            "decimated", (1,), 0, (), 1, 0, "test",
-            templates=(template,), time_base=simulation.TimeBase(Fraction(1)),
+            "decimated",
+            (1,),
+            0,
+            (),
+            1,
+            0,
+            "test",
+            templates=(template,),
+            time_base=simulation.TimeBase(Fraction(1)),
         )
 
 
@@ -55,7 +62,9 @@ def template_request():
         events=(
             event,
             replace(
-                event, active=np.array([True, True]), start_ticks=np.array([8, 16], dtype=np.int64)
+                event,
+                active=np.array([True, True]),
+                start_ticks=np.array([8, 16], dtype=np.int64),
             ),
         ),
         readouts=(readout,),

@@ -12,8 +12,8 @@ from zcu_tools.core.simulation import (
     EventSlot,
     PulseEnvelope,
     ReadoutSlot,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 
 from ..base import MyProgramV2
@@ -41,9 +41,7 @@ class _EventValues:
     active: BoolArray
 
 
-def _overlaps_window(
-    event: EventSlot, start: IntArray, duration: int
-) -> BoolArray:
+def _overlaps_window(event: EventSlot, start: IntArray, duration: int) -> BoolArray:
     """Select active events with strictly positive acquisition-window overlap."""
     return (
         event.active
@@ -107,9 +105,7 @@ class Outputs:
         # Absolute effective ticks stay separate from frequency/phase values.
         # Guards reject pending FIFO state across shots.
         self.configs: dict[int, list[_Config]] = {}
-        self.reads: dict[int, list[_Read]] = {
-            ch: [] for ch in prog.ro_chs
-        }
+        self.reads: dict[int, list[_Read]] = {ch: [] for ch in prog.ro_chs}
         # Retain absolute tProc cycles for config admission without
         # subtracting and readding the per-shot origin.
         self.trigger_ticks: dict[int, list[IntArray]] = {ch: [] for ch in prog.ro_chs}
@@ -191,10 +187,12 @@ class Outputs:
         if kind == "ro":
             updates = self.configs.setdefault(ch, [])
             if updates:
-                previous = np.maximum.reduce([
-                    np.where(row.active, row.start, np.iinfo(np.int64).min)
-                    for row in updates
-                ])
+                previous = np.maximum.reduce(
+                    [
+                        np.where(row.active, row.start, np.iinfo(np.int64).min)
+                        for row in updates
+                    ]
+                )
                 start = np.maximum(start, previous)
             frequency = (words[:, 0] % 2**32).astype(np.float64)
             updates.append(
@@ -420,11 +418,13 @@ class Outputs:
             if np.any(indexes[active] != index):
                 raise ValueError("lane-dependent trigger layout")
             while len(self.reads[ch]) <= index:
-                self.reads[ch].append(_Read(
-                    np.zeros(self.size, dtype=np.int64),
-                    np.zeros(self.size, dtype=np.float64),
-                    np.zeros(self.size, dtype=np.float64),
-                ))
+                self.reads[ch].append(
+                    _Read(
+                        np.zeros(self.size, dtype=np.int64),
+                        np.zeros(self.size, dtype=np.float64),
+                        np.zeros(self.size, dtype=np.float64),
+                    )
+                )
                 self.trigger_ticks[ch].append(np.zeros(self.size, dtype=np.int64))
             self.trigger_ticks[ch][index][self.points[active]] = timestamp[active]
             read = self.reads[ch][index]
@@ -528,10 +528,12 @@ class Outputs:
         for ch, rows in self.configs.items():
             prologue = self.prologue_configs.get(ch, 0)
             if len(rows) > prologue and np.any(
-                np.maximum.reduce([
-                    np.where(row.active, row.start, np.iinfo(np.int64).min)
-                    for row in rows[prologue:]
-                ])
+                np.maximum.reduce(
+                    [
+                        np.where(row.active, row.start, np.iinfo(np.int64).min)
+                        for row in rows[prologue:]
+                    ]
+                )
                 > self._ticks(machine.ref, self.prog.tproccfg["f_time"])
             ):
                 raise ValueError(
@@ -580,7 +582,11 @@ class Outputs:
         ) + ((position, tone),)
 
     def _runtime_frequencies(
-        self, ch: int, starts: IntArray, frequencies: NDArray[np.float64], routes: IntArray
+        self,
+        ch: int,
+        starts: IntArray,
+        frequencies: NDArray[np.float64],
+        routes: IntArray,
     ) -> NDArray[np.float64]:
         result = np.full(starts.shape, np.nan, dtype=np.float64)
         first_carrier = np.zeros(starts.shape, dtype=np.float64)

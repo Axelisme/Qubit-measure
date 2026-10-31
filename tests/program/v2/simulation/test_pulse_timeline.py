@@ -18,8 +18,11 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 
 from tests.program.v2.simulation.support import request_of
-from tests.program.v2.simulation.time_observations import envelope_times_us, time_us, times_us
-
+from tests.program.v2.simulation.time_observations import (
+    envelope_times_us,
+    time_us,
+    times_us,
+)
 
 
 @pytest.mark.parametrize(
@@ -66,31 +69,47 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     events = request.materialize_point(0).events
     drive = next(event for event in events if event.gen_ch == 1)
     receiver = next(event for event in events if event.gen_ch == 0)
-    assert time_us(request.time_base, drive.start_ticks) == pytest.approx(0.5, abs=0.003)
-    assert time_us(request.time_base, receiver.start_ticks) == pytest.approx(0.6, abs=0.005)
-    drive_end = max(time_us(request.time_base, e.start_ticks) + time_us(request.time_base, e.duration_ticks) for e in events if e.gen_ch == 1)
-    assert drive_end - time_us(request.time_base, drive.start_ticks) == pytest.approx(0.25, abs=0.006)
+    assert time_us(request.time_base, drive.start_ticks) == pytest.approx(
+        0.5, abs=0.003
+    )
+    assert time_us(request.time_base, receiver.start_ticks) == pytest.approx(
+        0.6, abs=0.005
+    )
+    drive_end = max(
+        time_us(request.time_base, e.start_ticks)
+        + time_us(request.time_base, e.duration_ticks)
+        for e in events
+        if e.gen_ch == 1
+    )
+    assert drive_end - time_us(request.time_base, drive.start_ticks) == pytest.approx(
+        0.25, abs=0.006
+    )
     assert drive.gain == pytest.approx(-0.4, abs=1 / 32766)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)
-    assert time_us(request.time_base, drive.phase_reference_ticks) == time_us(request.time_base, receiver.phase_reference_ticks) == 0
+    assert (
+        time_us(request.time_base, drive.phase_reference_ticks)
+        == time_us(request.time_base, receiver.phase_reference_ticks)
+        == 0
+    )
     origin = math.ceil(0.5 * 430.08) / 430.08
     offset = math.ceil(0.1 * 430.08) / 430.08
     trigger = origin + round((offset + 0.02) * 430.08) / 430.08
-    assert times_us(request.time_base, request.materialize_point(0).readouts[0].trigger_ticks)[0] == pytest.approx(
-        trigger
-    )
+    assert times_us(
+        request.time_base, request.materialize_point(0).readouts[0].trigger_ticks
+    )[0] == pytest.approx(trigger)
     assert request.readouts[0].samples == prog.ro_chs[0]["length"]
-    assert (
-        request.readouts[0].samples / (1 / time_us(request.time_base, request.readouts[0].sample_period_ticks))
-        > time_us(request.time_base, receiver.duration_ticks)
-    )
+    assert request.readouts[0].samples / (
+        1 / time_us(request.time_base, request.readouts[0].sample_period_ticks)
+    ) > time_us(request.time_base, receiver.duration_ticks)
     assert drive.source == "drive"
     if waveform.style == "const":
         assert drive.envelope is None  # unity envelope, signed gain stays separate
     else:
         envelope = drive.envelope
         assert envelope is not None
-        assert len(envelope_times_us(request.time_base, envelope)) == len(envelope.values)
+        assert len(envelope_times_us(request.time_base, envelope)) == len(
+            envelope.values
+        )
         assert np.all(np.diff(envelope_times_us(request.time_base, envelope)) > 0)
         assert max(abs(v) for v in envelope.values) <= 1.001
         if waveform.style == "drag":

@@ -13,12 +13,24 @@ from zcu_tools.core.simulation import AcquireRequest, TimeBase, TimelineTemplate
 def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int) -> None:
     # Each point is within the ns bound; the whole round may exceed int64.
     request = AcquireRequest(
-        "decimated", (reps, 3), 0, (), 1, 0, "test",
+        "decimated",
+        (reps, 3),
+        0,
+        (),
+        1,
+        0,
+        "test",
         time_base=TimeBase(Fraction(3, 2)),
-        point_dims=(3,), point_names=("scan",), reps=reps,
+        point_dims=(3,),
+        point_names=("scan",),
+        reps=reps,
         templates=(
-            TimelineTemplate(np.array([0, 2]), (), (), np.array([2, 5], dtype=np.int64)),
-            TimelineTemplate(np.array([1]), (), (), np.array([4_000_000_000_000], dtype=np.int64)),
+            TimelineTemplate(
+                np.array([0, 2]), (), (), np.array([2, 5], dtype=np.int64)
+            ),
+            TimelineTemplate(
+                np.array([1]), (), (), np.array([4_000_000_000_000], dtype=np.int64)
+            ),
         ),
         relax_delay_ticks=1,
     )
