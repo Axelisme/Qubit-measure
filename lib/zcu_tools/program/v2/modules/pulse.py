@@ -161,12 +161,21 @@ class Pulse(Module):
         """
         if self.cfg is None:
             return 0.0
-        length = self.waveform.length
+        from ..timeline import TimelineProgramV2
+
+        waveform = (
+            prog.get_module_state(self, _PulseDeclaration).waveform
+            if isinstance(prog, TimelineProgramV2)
+            else self.waveform
+        )
+        length = waveform.length
         if isinstance(length, QickParam) and length.is_sweep():
             loops = {name: count for name, count, _, _ in prog.loops}
             generator_cycles = QickParam(0.0)
             # Registered segments include quantized flat-top ramps and FIR tails.
-            for name in prog.list_pulse_waveforms(self.pulse_id, exclude_special=False):
+            for name in prog.list_pulse_waveforms(
+                self.pulse_name(prog), exclude_special=False
+            ):
                 wave_length = prog.waves[prog.wave2idx[name]].length
                 if isinstance(wave_length, QickRawParam):
                     # Step a copy so QICK's later compile keeps sole ownership.
@@ -413,9 +422,7 @@ class TableLengthPulse(Module):
         """
         del tag  # ModuleEmission owns the occurrence tag.
         relation = self._length_loader.lower_selected(prog)
-        name = self._template.pulse_id
-        if name is None:
-            raise ValueError(f"{self.name}: undeclared runtime pulse template")
+        name = self._template.pulse_name(prog)
         prog.pulse_from_length_reg(
             self.cfg.ch,
             name,

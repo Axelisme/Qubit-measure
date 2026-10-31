@@ -176,7 +176,7 @@ def test_default_emit_only_moves_end_until_sync(sync):
         prog.emit(pulse)
         if sync:
             prog.sync()
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([pulse], body))
     assert [_waves(s) for s in shots] == [[0, 43 if sync else 0]] * 2
@@ -248,9 +248,9 @@ def test_delay_emit_does_not_move_reference_and_does_not_receil(delay_type):
 
     def body(prog):
         prog.emit(delay)
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.sync()
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([delay, pulse], body))
     # ceil(.504*430.08)=217, not218.
@@ -263,7 +263,7 @@ def test_wrong_pulse_time_is_detected_by_independent_timing_expectation():
 
     def body(prog):
         prog.emit(pulse)
-        prog.pulse(0, pulse.pulse_id, t=1)
+        prog.pulse(0, pulse.pulse_name(prog), t=1)
 
     shot = _shots(_program([pulse], body))[0]
     with pytest.raises(AssertionError):
@@ -394,12 +394,12 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
         prog.fork("default", into="other")
         prog.delay_timeline(40 / 430.08)
         prog.delay_timeline(60 / 430.08, timeline="other")
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         if consumer == "native":
             prog.delay_reg_auto("wait_cycles")
         else:
             prog.emit(auto)
-        prog.pulse(0, pulse.pulse_id, t=1 / 430.08, timeline="default")
+        prog.pulse(0, pulse.pulse_name(prog), t=1 / 430.08, timeline="default")
         prog.pulse(1, "native", timeline="other")
 
     def initialize(prog):
@@ -432,7 +432,7 @@ def test_runtime_guard_rejects_unknown_custom_time_producer(timeline, end):
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.delay_timeline(end, timeline=timeline)
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
 
     with pytest.raises(ValueError, match="wait_cycles.*unknown.*producer"):
@@ -523,9 +523,9 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
         prog.delay_timeline(
             QickSweep1D("scan", 60 / 430.08, 86 / 430.08), timeline=timeline
         )
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
-        prog.pulse(0, pulse.pulse_id, t=1 / 430.08, timeline=timeline, tag="after")
+        prog.pulse(0, pulse.pulse_name(prog), t=1 / 430.08, timeline=timeline, tag="after")
 
     prog = _program([pulse], body, initialize)
     assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(1)

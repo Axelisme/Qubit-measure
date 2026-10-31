@@ -631,8 +631,7 @@ class TablePulseReadout(AbsReadout):
         self._readout.lower(prog, timeline=timeline, tag=tag)
 
     def _append_updates(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        pulse_id = self._readout.pulse.pulse_id
-        assert pulse_id is not None
+        pulse_id = self._readout.pulse.pulse_name(prog)
         prog.append_loop_after(
             self.idx_reg,
             PatchWmemFromDmem(
@@ -640,14 +639,14 @@ class TablePulseReadout(AbsReadout):
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._freq_loader.val_reg,
-                dmem_offset=self._freq_loader.offset,
+                dmem_offset=self._freq_loader.dmem_offset(prog),
             ),
             PatchWmemFromDmem(
                 name=self._readout.adc_name,
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._ro_freq_loader.val_reg,
-                dmem_offset=self._ro_freq_loader.offset,
+                dmem_offset=self._ro_freq_loader.dmem_offset(prog),
             ),
         )
 

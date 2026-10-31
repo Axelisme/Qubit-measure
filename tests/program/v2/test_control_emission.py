@@ -372,7 +372,7 @@ def test_module_join_rejects_unknown_native_pulse_reference_effect_before_compil
             prog.declare(template)
 
         def lower(self, prog, *, timeline, tag):
-            prog.append_macro(CustomPulse(ch=0, name=template.pulse_id, t=0))
+            prog.append_macro(CustomPulse(ch=0, name=template.pulse_name(prog), t=0))
 
     joined = Join(CustomOutput("custom_output", 0), _pulse("b", 1))
     with pytest.raises(
@@ -406,7 +406,7 @@ def test_module_join_preserves_annotated_native_pulse_effects(exchange):
     native = _NativeSequence(
         "native_output",
         lambda prog: prog.append_macro(
-            SourcePulse(ch=1, name=template.pulse_id, t=0, source_name="native")
+            SourcePulse(ch=1, name=template.pulse_name(prog), t=0, source_name="native")
         ),
     )
     choice = Branch("scan", _pulse("a", 0), None, None)
@@ -539,7 +539,7 @@ def test_module_join_exchange_checks_persistent_wave_words(shared_wave):
         return _NativeSequence(
             "patch",
             lambda prog: prog.append_macro(
-                PatchWmemFromRegs(name=template.pulse_id, freq_reg="frequency")
+                PatchWmemFromRegs(name=template.pulse_name(prog), freq_reg="frequency")
             ),
         )
 

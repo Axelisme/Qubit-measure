@@ -84,9 +84,9 @@ class ComputedPulse(Module):
         del tag  # ModuleEmission owns the occurrence tag.
         relation = self._address_loader.lower_selected(prog)
         choices = tuple(
-            PlaybackChoice(pulse.pulse_id, pulse.cfg.post_delay)
+            PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules
-            if pulse.pulse_id is not None and pulse.cfg is not None
+            if pulse.cfg is not None
         )
         prog.pulse_by_reg(
             self.ref_cfg.ch,
@@ -140,11 +140,11 @@ class ComputedPulse(Module):
         base_idxs: list[int] = []
         for pulse_mod in self.pulse_modules:
             wave_names = prog.list_pulse_waveforms(
-                pulse_mod.pulse_id, exclude_special=False
+                pulse_mod.pulse_name(prog), exclude_special=False
             )
             if len(wave_names) != self._stride:
                 raise ValueError(
-                    f"ComputedPulse candidate {pulse_mod.pulse_id!r} expected "
+                    f"ComputedPulse candidate {pulse_mod.pulse_name(prog)!r} expected "
                     f"{self._stride} waveform(s) (style={self.ref_cfg.waveform.style}), "
                     f"got {len(wave_names)}"
                 )
