@@ -381,6 +381,39 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     assert drives[-1][-2].cycle == drives[-1][-1].cycle
 
 
+def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg):
+    builder = v2.TimelineBuilder(
+        mock_soccfg, reps=2, initial_delay=0, relax_delay=0
+    )
+    length = builder.add_sweep(
+        "length", v2.SweepCfg(start=0.1, stop=0.3, expts=3)
+    )
+    builder.emit(
+        v2.Pulse(
+            "drive",
+            v2.PulseCfg(
+                ch=0, nqz=1, freq=1000, gain=0.2,
+                waveform=ConstWaveformCfg(length=0.1),
+            ),
+            length=length,
+        )
+    )
+    for index in range(20):
+        name = f"offset_{index}"
+        builder.fork("default", into=name)
+        builder.timeline_inc((index + 1) / 430.08, timeline=name)
+    prog = builder.build()
+
+    assert len(prog.reg_dict) <= 16
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [[0]] * 6
+    # Native lengths are 38, 76, 114 fabric cycles. The k=8 upper
+    # conversion gives 43, 86, 128 tProc cycles, plus the largest offset.
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        63, 106, 148
+    ] * 2
+
+
 def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     """Record three parallel groups and mux readout without a reference advance."""
     soccfg = make_mux_mock_soccfg(4, 3, gen_ch=1, ro_chs=(1, 2))
