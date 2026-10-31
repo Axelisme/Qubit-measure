@@ -122,7 +122,10 @@ class TimeBase:
         # Both operands are exactly representable in float64. Only the final
         # IEEE division rounds, including for noninteger rational time bases.
         if isinstance(ticks, np.ndarray):
-            return np.divide(ticks * scale, self.ticks_per_us.numerator)
+            # An explicit output preserves ndarray type even for shape ().
+            result = np.empty(ticks.shape, dtype=np.float64)
+            np.divide(ticks * scale, self.ticks_per_us.numerator, out=result)
+            return result
         return (int(ticks) * scale) / self.ticks_per_us.numerator
 
     def _validate_ticks(self, ticks: int | np.int64 | NDArray[np.int64]) -> None:
