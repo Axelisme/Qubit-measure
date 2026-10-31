@@ -446,7 +446,10 @@ class TimelineBook:
 
     def observe_write(self, prog, macro) -> None:
         """Keep current producer identities and known arithmetic points in sync."""
-        if isinstance(getattr(macro, "dst", None), str) and macro.dst in prog._time_bounds.author_writes:
+        if type(macro) is WriteRegOp:
+            self._observe_alu(prog, macro)
+            return
+        if type(macro) is not WriteReg and isinstance(getattr(macro, "dst", None), str) and macro.dst in prog._time_bounds.author_writes:
             self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
         if type(macro) is WriteReg:
             if isinstance(macro.src, int):
@@ -455,8 +458,6 @@ class TimelineBook:
                 self.source_expressions[macro.dst] = source_expression(prog, macro.src)
             else:
                 self.source_expressions.pop(macro.dst, None)
-        elif type(macro) is WriteRegOp:
-            self._observe_alu(prog, macro)
 
     def _known_source(self, prog, name: str) -> bool:
         register = prog.reg_dict.get(name)
@@ -468,6 +469,7 @@ class TimelineBook:
 
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
         if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
+            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
             return
         right = macro.rhs
         if isinstance(right, int):
@@ -475,6 +477,7 @@ class TimelineBook:
         elif isinstance(right, str) and self._known_source(prog, right):
             rhs = source_expression(prog, right)
         else:
+            self.source_expressions[macro.dst] = LinearTime(terms=((CycleVariable(macro.dst, None, None), 1),))
             return
         self.source_expressions[macro.dst] = add_time(
             source_expression(prog, macro.lhs),

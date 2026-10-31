@@ -181,9 +181,13 @@ builder.emit(drive)  # Uses default again.
 `sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
 可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
-Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，中間值也須能證明符合 signed 32-bit range，否則編譯報錯。
+Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
 每個 sweep／shot 重新建立所需狀態。`delay_timeline("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
-Register 時間須有原生常數、sweep 或 framework table／長度 producer 的 bounds，不能把任意 custom Macro 初值當成證明。
+作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
+`range_hint=(lo, hi)` 可選，單位是整數 tProc cycles，表示作者保證的非負閉區間，不增加硬體 range check。
+沒有可用 bounds 時，編譯器在 runtime 計算 max，不證明該段同 channel 不重疊，溢位也由作者負責。
+原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
+未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
 Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
 Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。
 只有時間 consumer 啟用這些前置條件。證明涵蓋全部已登記 writes，不能用 lookup 後的合法 index 覆蓋先前非法讀取。
@@ -277,8 +281,8 @@ Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat
 Wait-only parent 不能用內部 fork 繞過 placement 限制。
 每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
 
-Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
-`range_hint=(minimum, maximum)`。Int n 不接受 range_hint。
+Register n 使用既有 register 名字，可選擇提供作者保證的非負整數閉區間
+`range_hint=(minimum, maximum)`。省略時逐圈使用實際值扣除 external end，不證明迴圈回邊的同 channel overlap。Int n 不接受 range_hint。
 Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
 未知 count 或 case advance 以 runtime storage 逐圈扣除實際執行路徑，並對每個 external end 做 floor 0。
 相同且可靜態表示的 Branch paths 保留 static，不因出現 Branch 就物化。
@@ -315,6 +319,8 @@ Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 `sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
 Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
+未知 ADC tail 經同步可證消耗時，收尾常數 WAIT 使用 0。
+若 ADC tail 仍未知，build 報錯並列出 ADC，提示提供 range_hint 或在結尾前明寫同步。收尾不使用 variable WAIT，也不假造上界。
 這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
 能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
 已知點的 `slack=max-min` 大於 0 時會 warning。

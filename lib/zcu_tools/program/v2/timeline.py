@@ -642,10 +642,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Scalars and QickParam use us; the complete end plus t is ceiled to
         tProc cycles. In an emission, pending actual output ends are included
         before adding t as the owner post-delay. A string names an
-        existing nonnegative cycle register with compiler-known producer bounds.
-        Wait-only targets, unknown bounds and possible signed overflow raise
-        ValueError during compilation. tag exposes static ends as parameter 't';
-        runtime ends have no affine get_time_param value.
+        existing nonnegative integer-cycle register, including author-calculated
+        values. range_hint optionally guarantees an inclusive (lo, hi) cycle
+        range. With no known range, maxima execute at runtime; same-channel
+        overlap and signed overflow are the author's responsibility. Certified
+        producers and explicit hints retain finite-range checks. Hints on scalar
+        times and invalid ranges raise ValueError. Wait-only targets still fail
+        compilation. tag exposes static ends as 't'; runtime-only ends raise
+        RuntimeError from get_time_param rather than returning a bound.
         """
         if range_hint is not None:
             if not isinstance(t, str):
@@ -793,8 +797,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         establish placement targets and full consumption restores placement. Only
         parent and locally forked names may be used inside. name is
         the native loop/counter name. n is a nonnegative integer or existing
-        register name. Register counts require an author-guaranteed closed
-        nonnegative integer range_hint; integer counts forbid range_hint. No
+        register name. Register counts optionally accept an author-guaranteed
+        closed nonnegative integer range_hint; integer counts forbid it. An
+        unhinted count uses runtime debits without a backedge overlap proof. No
         hardware range check is added. Invalid counts/ranges raise ValueError;
         unknown/inaccessible names fail during compile. Zero counts still sync
         the parent but discard body operations. Register-valued timeline delays
