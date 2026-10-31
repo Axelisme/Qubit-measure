@@ -373,7 +373,8 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         fig, axes = plots.subplots("quadratures", figsize=(10, 5))
         for (herald, values), t, (q, projection) in product(
             (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
-            range(2), enumerate(("X", "Y"))
+            range(2),
+            enumerate(("X", "Y")),
         ):
             axes.plot(
                 cfg.gate_counts,

@@ -345,7 +345,8 @@ class ConditionalPhaseHeraldedExp(
         )
         for (herald, points), (b, state), (j, n) in product(
             (("gg", phases), ("ee", ee_phases)),
-            enumerate(("g", "e")), enumerate(data.gate_counts)
+            enumerate(("g", "e")),
+            enumerate(data.gate_counts),
         ):
             label = f"{herald} spectator {state} n={n}"
             fig.axes[0].plot(
@@ -357,9 +358,7 @@ class ConditionalPhaseHeraldedExp(
             fig.axes[1].plot(
                 data.frequencies,
                 [
-                    np.nan
-                    if p.logical_phase_deg is None
-                    else p.logical_phase_deg
+                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
                     for p in points[b][j]
                 ],
                 ".-",
@@ -403,7 +402,9 @@ class ConditionalPhaseHeraldedExp(
         fig, axes = plots.subplots("quadratures", figsize=(11, 6))
         for (herald, values), (b, state), (q, projection), (j, n) in product(
             (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
-            enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
+            enumerate(("g", "e")),
+            enumerate(("X", "Y")),
+            enumerate(data.gate_counts),
         ):
             axes.plot(
                 data.frequencies,
