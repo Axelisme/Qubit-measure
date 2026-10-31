@@ -177,7 +177,6 @@ def test_native_load_uses_recorded_parameters_without_prevalidating_unused_metad
     assert tab.run.parameters is not None
     assert tab.run.parameters.value("$source_qubit.rate") == 7.0
     record = require_record(tab.run)
-    assert record.metadata is not None
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
         getattr(RunMetadataContent(record.metadata), defect)
     with pytest.raises(ValueError, match="metadata"):
@@ -466,7 +465,6 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     assert loaded.has_analyze_params
     assert loaded.analysis_source_issue is None
     assert tab.run.analysis_source_issue == loaded.analysis_source_issue
-    assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is not None and tab.run.parameters.target is None
     assert tab.run.storage is None
@@ -819,7 +817,7 @@ def test_unselected_entry_load_and_save_use_recorded_history(
         assert outcome.result_type == "RunRecord"
         assert isinstance(require_record(tab.run), RunRecord)
         metadata = RunMetadataContent(require_record(tab.run).metadata)
-        assert metadata is not None and metadata.project() == metadata_from_container(
+        assert metadata.project() == metadata_from_container(
             stored
         )
         assert tab.run.source_path == str(path)

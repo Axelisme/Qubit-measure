@@ -418,7 +418,6 @@ def test_accepted_retains_run_identity_with_or_without_save(
         service = WritebackService(control, arb_names=lambda: ())
         tab = native.state.get_tab("tab")
         captured = control.read_context()
-        assert require_record(tab.run).metadata is not None
         source_run_id = require_metadata(tab.run).run_id
         draft = service.create_draft(
             [ParameterWriteback("general.ext.flux_value", "Flux", proposed_value=2.0)],

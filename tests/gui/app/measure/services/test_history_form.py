@@ -41,7 +41,6 @@ def test_open_history_retains_native_data_when_factory_has_no_source(
         assert snapshot.run is not None
         record = snapshot.run.result
         assert isinstance(record, RunRecord)
-        assert record.metadata is not None
         assert RunMetadataContent(record.metadata).project() == metadata
         assert isinstance(record.result, SavingResult)
         np.testing.assert_allclose(

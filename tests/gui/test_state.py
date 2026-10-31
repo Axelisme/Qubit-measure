@@ -15,6 +15,8 @@ from zcu_tools.experiment.metadata import (
     SoftwareProvenance,
 )
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.artifacts import SaveReport
+from zcu_tools.resources.entry import JsonObject
 from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -237,6 +239,17 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     assert tab.analysis.result is None
     assert tab.analysis.plots is None  # stale analysis presentation is cleared
     assert tab.analysis.params is None
+
+
+@pytest.mark.parametrize("metadata", [{}, {"device_snapshot": {}}])
+def test_save_report_requires_native_metadata_before_publication(metadata: JsonObject):
+    state = State(_make_ctx())
+    _add_tab(state, "t1", _make_adapter())
+    state.get_tab("t1").run.result = RunRecord(None, object(), metadata=metadata)
+    with pytest.raises(ValueError, match="historical RunMetadata"):
+        state.commit_save_report("t1", SaveReport("20261101T000000Z-abc123", ()))
+    assert state.get_tab("t1").run.confirmed_run_id is None
+    assert state.version.get("tab:t1:save") == 0
 
 
 def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():

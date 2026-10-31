@@ -213,6 +213,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
+    require_record(session.state.get_tab("tab").run).metadata["author_notes"] = {"quality": [1, None]}
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
     assert (
@@ -232,6 +233,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
         / "data.h5"
     )
     stored = load(native.output.path)
+    assert stored.docs["metadata"]["author_notes"] == {"quality": [1, None]}
     assert metadata_from_container(stored).run_id == session.metadata.run_id
     assert metadata_from_container(stored).started_at == session.metadata.started_at
     assert metadata_from_container(stored).snapshot == session.metadata.snapshot
@@ -591,16 +593,24 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     assert other.ledger.events() == ()
 
 
+@pytest.mark.parametrize("missing", ["empty", "device_only", "completion", "provenance"])
 def test_missing_native_evidence_rejects_before_operation_or_files(
-    native_session: NativeSaveSession,
+    native_session: NativeSaveSession, missing: str,
 ) -> None:
     session = native_session
+    document = session.metadata.model_dump(mode="json")
+    if missing == "empty":
+        document.clear()
+    elif missing == "device_only":
+        document = {"device_snapshot": {}}
+    else:
+        document.pop(missing)
     commit_run(
         session.state,
         "tab",
         RunPaneState(
             result=replace(
-                require_record(session.state.get_tab("tab").run), metadata={}
+                require_record(session.state.get_tab("tab").run), metadata=document
             )
         ),
         plan_layout=session.save_service.plan_layout,
@@ -611,8 +621,9 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
         for artifact in section.artifacts
         for member in artifact.members
     )
-    with pytest.raises(FailedPreconditionError):
+    with pytest.raises(FailedPreconditionError) as caught:
         session.control.save_data("tab", origin=GUI_ORIGIN)
+    assert caught.value.reason_code == "storage_unavailable"
     assert not session.state.is_tab_busy("tab")
     assert session.completions == []
     assert session.entry.ledger.events() == ()
@@ -682,7 +693,6 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.outputs[0].output.path == first.outputs[0].output.path
     assert second.outputs[1].output.path != first.outputs[1].output.path
     metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
-    assert metadata is not None
     assert len(session.entry.ledger.events()) == 2
 
 
@@ -887,7 +897,6 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert data.members[0].outputs[1].path == second.outputs[1].output.path
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
     metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
-    assert metadata is not None
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     commit_run(session.state, "tab", RunPaneState())
     assert session.state.get_tab("tab").run.confirmed_run_id is None

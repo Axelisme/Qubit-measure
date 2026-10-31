@@ -31,7 +31,7 @@ def test_run_publishes_acquisition_metadata_inside_the_record() -> None:
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished", outcome
     record = require_record(state.get_tab(tab_id).run)
-    assert record is not None and record.metadata is not None
+    assert record is not None
     assert record.result is result
     assert RunMetadataContent(record.metadata).experiment == "test/native"
     assert RunMetadataContent(record.metadata).snapshot == history.snapshot

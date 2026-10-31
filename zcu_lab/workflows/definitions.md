@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱 coherence、MIST 與 overnight workflow 的校準、分析和保存契約。
 
-**Last updated:** 2026-10-27，coherence stage 硬體時間估計契約
+**Last updated:** 2026-11-01，RunRecord metadata JSON
 
 本 package 擁有具體 workflow 的 cfg 組裝、校準、分析、區域 history 與 point record。
 每個 workflow 是一個 async 函式。Engine 執行 await operations，記錄 tunables revision，並保存作者明確提交的 record。`registry.build_registry` 回傳 workflow 與表單的註冊清單，scripts 組合根將它交給 lib 宿主；import 不啟動量測。
@@ -223,7 +223,7 @@ ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不�
 Workflow 在 iteration.run 返回 Completed 後呼既有 exact-path native writer，fit 拒絕仍保存 raw。
 Point 引用是相對該目錄的 filename，不保證檔案完整或仍存在。Pause／Stop 可能留下未提交檔案。
 Writer 收 `Completed[RunRecord]`，從 value 取得 cfg/result，從 facts 取得 acquisition 時間與 device snapshot。
-Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，不捕捉新事實。
+Caller 顯式傳入 `env.identity` 與歷史 `RunSnapshot`。Saver 只組裝既有 `RunMetadata`，再將 JSON dump 放入 record.metadata，不捕捉新事實。
 H5 run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。Completed.stop_requested 決定 complete 或 stopped，experiment 取 persistence spec.tag。
 Provenance 取 workflow identity，不逐 operation 捕捉。Lab 不建立 AcquisitionEvidence。
 Framework 只保存 manifest、journal 與 best-effort record.json。

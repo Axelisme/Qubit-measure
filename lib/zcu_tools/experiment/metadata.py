@@ -137,7 +137,7 @@ class RunMetadata(BaseModel):
     means unrecorded and {} means no connected devices.
     The envelope is frozen; nested mappings remain mutable. Save revalidates
     even unchecked model_copy updates. Unknown doc fields are not projected into
-    the live model; Container retains them for lossless rewrites.
+    the live model; RunRecord retains the original JSON document when saving.
     """
 
     model_config = ConfigDict(

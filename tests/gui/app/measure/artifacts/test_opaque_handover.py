@@ -132,7 +132,7 @@ def test_registered_opaque_handle_acquires_analyzes_and_hands_over_items(
     handle = tab.run.result
     metadata = RunMetadataContent(require_record(tab.run).metadata)
     storage = tab.run.storage
-    assert metadata is not None and storage is not None
+    assert storage is not None
     acquired = storage.ledger.events()
     assert len(acquired) == 1 and acquired[0].origin == "mcp"
     assert isinstance(acquired[0].payload, AcquiredPayload)

@@ -36,7 +36,6 @@ def test_save_merges_acquisition_and_point_metadata_into_the_handed_record(
     assert call is not None
     record = call.kwargs.get("record")
     assert isinstance(record, RunRecord), "Artifact persistence must receive the record"
-    assert record.metadata is not None
     assert record.result is source.result
     assert RunMetadataContent(record.metadata).run_id == evidence.run_id
     assert RunMetadataContent(record.metadata).started_at == evidence.started_at.isoformat()

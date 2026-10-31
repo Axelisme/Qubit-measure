@@ -41,7 +41,6 @@ def test_record_metadata_uses_workflow_identity_and_delivered_attempt(
         snapshot=history.snapshot,
     )
     assert record.result is source.result
-    assert record.metadata is not None
     assert RunMetadataContent(record.metadata).run_id == "0123456789abcdef0123456789abcdef-000003-7"
     assert RunMetadataContent(record.metadata).experiment == "synthetic/trace"
     assert RunMetadataContent(record.metadata).snapshot == history.snapshot
@@ -77,13 +76,9 @@ def test_descendant_cancellation_is_saved_as_stopped(tmp_path: Path) -> None:
         experiment_tag=core.AXES_SPEC.tag,
         snapshot=history.snapshot,
     )
-    assert record.metadata is not None
     assert RunMetadataContent(record.metadata).completion == "stopped"
     path = tmp_path / "descendant.h5"
     save_run(record, path, spec=core.AXES_SPEC)
     restored = load_run_with_metadata(path, spec=core.AXES_SPEC)
-    assert restored.metadata is not None
-    assert record.metadata is not None
     assert RunMetadataContent(restored.metadata).project() == RunMetadataContent(record.metadata).project()
-    assert restored.metadata is not None
     assert RunMetadataContent(restored.metadata).run_id == "0123456789abcdef0123456789abcdef-000003-7"

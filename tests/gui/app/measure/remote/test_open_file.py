@@ -73,7 +73,6 @@ def test_open_file_loads_without_soc_with_result(app, path):
     np.testing.assert_array_equal(
         record.result.signal, np.array([1 + 2j, 3 - 4j, 5 + 6j]) * gain
     )
-    assert record.metadata is not None
     assert RunMetadataContent(record.metadata).project() == historical_metadata()
     snapshot = call(sock, "tab.snapshot", {"tab_id": tab})["result"]["tabs"][0]
     assert snapshot["run_id"] is None

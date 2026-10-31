@@ -472,7 +472,6 @@ def test_result_commit_survives_analysis_preparation_failure(
     if source == "load":
         assert snapshot.run.result is not None
         assert snapshot.run.result.result == loaded.result
-        assert snapshot.run.result.metadata is not None
         assert RunMetadataContent(snapshot.run.result.metadata).project() == metadata
     assert snapshot.analysis.params is None
     assert snapshot.analysis.result is None

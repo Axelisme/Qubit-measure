@@ -438,10 +438,7 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     save_run(record, path, spec=experiment.AXES_SPEC)
     loaded, snapshot = load_run(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
-    assert loaded.metadata is not None
-    assert record.metadata is not None
     assert RunMetadataContent(loaded.metadata).project() == RunMetadataContent(record.metadata).project()
-    assert record.metadata is not None
     assert snapshot == RunMetadataContent(record.metadata).snapshot
     np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
     np.testing.assert_allclose(loaded.result.signal, record.result.signal)
@@ -506,7 +503,6 @@ def test_same_major_nested_unknown_cfg_is_projected_but_before_validator_sees_ra
 ) -> None:
     record = single_record()
     prepared = prepare_run_data(record, spec=SINGLE, comment="")
-    assert record.metadata is not None
     container = prepared.to_container(record.metadata)
     raw = {
         "nested": {"count": 3, "forbidden_future" if forbidden else "future": 9},
@@ -537,7 +533,7 @@ def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(
     assert prepared.labber_metadata.tags == [SINGLE.tag]
     assert prepared.cfg.cfg_type == "NativeCfg"
     assert prepared.cfg.schema_version == "3.2"
-    assert record.cfg is not None and record.metadata is not None
+    assert record.cfg is not None
     assert prepared.cfg.values == record.cfg.model_dump(mode="json")
     assert list(tmp_path.iterdir()) == []
     native, labber = tmp_path / "native.h5", tmp_path / "labber.h5"
@@ -660,7 +656,6 @@ def test_full_metadata_load_preserves_historical_evidence(
     save_run(record, path, spec=SINGLE)
     loaded = load_run_with_metadata(path, spec=SINGLE)
     old_loaded, snapshot = load_run(path, spec=SINGLE)
-    assert loaded.metadata is not None
     assert RunMetadataContent(loaded.metadata).project() == metadata
     assert snapshot == metadata.snapshot
     assert loaded.cfg == old_loaded.cfg == record.cfg
@@ -689,7 +684,6 @@ def restorable_run(
             cfg_schema_version=SINGLE.cfg_schema_version,
         )
     record = single_record()
-    assert record.metadata is not None
     prepared = prepare_run_data(record, spec=spec, comment="historical")
     return prepared.to_container(record.metadata), spec
 
@@ -862,9 +856,6 @@ def test_native_wrappers_share_cfg_fallback_and_keep_history(
         record = load_run_with_metadata(path, spec=spec)
     with pytest.warns(CfgUnavailableWarning, match=issue):
         old_record, snapshot = load_run(path, spec=spec)
-    assert record.metadata is not None
-    assert record.metadata is not None
-    assert old_record.metadata is not None
     assert RunMetadataContent(record.metadata).project() == RunMetadataContent(old_record.metadata).project()
     assert RunMetadataContent(record.metadata).project().model_dump(mode="json") == stored.docs["metadata"]
     assert snapshot == RunMetadataContent(record.metadata).snapshot
@@ -885,7 +876,6 @@ def test_restore_run_returns_the_record_and_cfg_diagnostic(
     restored = restore_run(stored, spec=spec)
     assert restored.cfg_issue is None
     assert restored.record.cfg == NativeCfg()
-    assert restored.record.metadata is not None
     assert (
         RunMetadataContent(restored.record.metadata).project().model_dump(mode="json")
         == stored.docs["metadata"]

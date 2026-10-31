@@ -24,5 +24,4 @@ def require_target(parameters: ParameterContext) -> ContextTarget:
 
 def require_metadata(pane: RunPaneState) -> RunMetadata:
     metadata = require_record(pane).metadata
-    assert metadata is not None, "Run has no metadata"
     return RunMetadata.model_validate(metadata)

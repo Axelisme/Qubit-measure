@@ -91,7 +91,8 @@ A finite fit is not a calibration-quality guarantee.
 
 ## Native source persistence
 
-`save_run(source, path, metadata=...)` stores full cfg, inactive tones, original
+`save_run(source, path, spec=MuxT2RamseyExp.AXES_SPEC)` validates source.metadata
+against RunMetadata and stores full cfg, inactive tones, original
 indices, shared requested delay, IQ, actual detunes and source frequencies.
 Time and frequency use seconds and Hz on disk, us and MHz in memory.
 `save_run` writes only native data and returns None. `save(source, path)` is

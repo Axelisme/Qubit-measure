@@ -187,7 +187,6 @@ def test_record_detaches_cfg_and_metadata_but_shares_result() -> None:
     result = Signal(np.array([4000.0, 5000.0]), np.array([1j, 2j]))
     record = experiment.RunRecord(cfg, result, metadata=metadata)
     assert record.metadata == metadata
-    assert record.metadata is not None
     assert record.metadata is not metadata
     assert record.cfg is not cfg
     assert record.result is result
@@ -223,7 +222,6 @@ def test_native_round_trip_keeps_record_metadata_and_container_docs(
     np.testing.assert_array_equal(container.vars["signal"].axes[0].values, [4e9, 5e9])
     np.testing.assert_allclose(container.vars["signal"].values, [0.001j, 0.002j])
     restored = experiment.load_run_with_metadata(path, spec=declaration())
-    assert restored.metadata is not None
     assert experiment.RunMetadata.model_validate(restored.metadata) == metadata
     assert restored.cfg == record.cfg
     np.testing.assert_allclose(restored.result.values, record.result.values)
@@ -256,7 +254,6 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
     )
     before = path.read_bytes()
     restored = experiment.load_run_with_metadata(path, spec=declaration())
-    assert restored.metadata is not None
     assert experiment.RunMetadata.model_validate(restored.metadata) == metadata
     assert read_run_metadata(path) == metadata
     assert path.read_bytes() == before
@@ -336,7 +333,6 @@ def test_native_load_defers_unused_metadata_but_use_projection_and_save_reject(
     before = path.read_bytes()
     restored = experiment.load_run_with_metadata(path, spec=declaration())
     np.testing.assert_allclose(restored.result.values, [1j])
-    assert restored.metadata is not None
     assert metadata_owner.RunMetadataContent(restored.metadata).experiment == "test/metadata"
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
         getattr(metadata_owner.RunMetadataContent(restored.metadata), defect)

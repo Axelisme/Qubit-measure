@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -110,7 +110,7 @@ Encoder 將非有限值轉 null。只有作者 record/summary 序列化可降級
 作者自行保存 RunRecord、圖與其他原始檔，並在 record 記相對檔名。
 Saver 錯誤沿作者例外路徑傳播。Pause 或 Stop 不回滾檔案，框架不追蹤或刪除作者檔案。
 Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_with_metadata。
-此函式將 RunMetadata 裝入 RunRecord.metadata，保存入口只接 record，native 輸出通用 Container。
+此函式以 RunMetadata 組內容，再將 `model_dump(mode="json")` 放入 RunRecord.metadata。保存入口只接 record，native 輸出通用 Container。
 Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
 Completed.stop_requested 決定 complete 或 stopped，不用 facts.stopped 代替。
 

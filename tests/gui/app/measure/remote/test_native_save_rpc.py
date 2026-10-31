@@ -426,7 +426,7 @@ def test_native_run_rpc_records_mcp_acquired_without_save(
         assert events[0].origin == "mcp"
         assert isinstance(events[0].payload, AcquiredPayload)
         metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
-        assert metadata is not None and events[0].payload.run_id == metadata.run_id
+        assert events[0].payload.run_id == metadata.run_id
         assert not (session.entry.database_path / "runs").exists()
 
 

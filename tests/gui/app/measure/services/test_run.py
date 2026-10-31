@@ -194,7 +194,7 @@ def test_run_metadata_fixes_parameter_capture_before_worker_execution(
     state.set_context(replace(state.session_env, parameters=later))
     background.run_work()
     record = state.get_tab(tab_id).run.result
-    assert record is not None and record.metadata is not None
+    assert record is not None
     snapshot = RunMetadataContent(record.metadata).parameter_snapshot
     assert snapshot is not None
     restored = restore_parameters(snapshot)

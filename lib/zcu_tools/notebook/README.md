@@ -1,6 +1,6 @@
 # `zcu_tools.notebook`
 
-**Last updated:** 2026-10-31（SIGINT 合作停止）
+**Last updated:** 2026-11-01，RunRecord metadata JSON
 
 **讀者：** lab-author。Notebook 實驗入口、互動分析與支援模組導覽。
 
@@ -52,6 +52,7 @@ Record 的校準欄位由 caller 在量測前捕捉。接受時明傳當時的�
 ```python
 from copy import deepcopy
 
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_lab.v2.support.flux import record_flux_frame
 from zcu_lab.v2.support.measure.record_frame import captured_qubit_flux
 
@@ -60,8 +61,8 @@ captured_flux = captured_qubit_flux(parameters, qubit)
 source = exp.run(cfg)
 saved = exp.save_run(point, source=source)
 # Analyze source and obtain t1_us. Later point edits do not change captured_flux.
-metadata = source.metadata
-if metadata is not None and metadata.device_snapshot is not None:
+metadata = RunMetadataContent(source.metadata)
+if metadata.device_snapshot is not None:
     devices = deepcopy(dict(metadata.device_snapshot))
     frame = record_flux_frame(captured_flux, devices)
     saved.accept(records={qubit: {
@@ -115,7 +116,7 @@ Caller 負責明確的 setup 與資源關閉。Run 不重新組裝或刷新 cfg�
 
 Notebook Run 在使用者的程序內同步執行，資源由 caller 擁有。入口只借用 drivers，不新增 lease、lock 或 registry。Driver mapping 只固定名稱到 instance，不是資源 lease。Hardware lease 後的 snapshot 時機只適用 GUI。
 
-Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各讀一次 get_info 作為 snapshot。這一步只讀不寫。任一台失敗拒絕 Run，不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。保存沿 RunMetadata.device_snapshot 到既有 data.h5 `/device`，Save 不重讀硬體或取下一輪值。
+Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各讀一次 get_info 作為 snapshot。這一步只讀不寫。任一台失敗拒絕 Run，不進 core、不以 cache 補值；無 device 記 `{}`。Snapshot 表示實驗前狀態，後續 sweep 不覆寫。SavedRun 將 RunMetadata 的 JSON dump 放入 record.metadata，保存到 data.h5 的 `docs/metadata.device_snapshot`，Save 不重讀硬體或取下一輪值。
 
 `acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，core 正常回傳後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Completion 依 adapter 本次是否送過停止請求記為 stopped 或 complete，不讀 core 或子 scope 的完成事實。子 scope 取消不會自動將 Notebook record 標為 stopped。
 

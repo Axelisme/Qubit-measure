@@ -7,7 +7,7 @@ from shutil import rmtree
 import numpy as np
 import pytest
 from zcu_tools.datafile import load
-from zcu_tools.experiment.metadata import RunMetadataContent, RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
