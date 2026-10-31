@@ -366,7 +366,6 @@ def _policy_poll(
         "external_stop",
         "before_data",
         "interrupt",
-        "failure",
     ],
 )
 def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
@@ -410,7 +409,6 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
             "external_stop": "stopped",
             "before_data": "stopped",
             "interrupt": "interrupted",
-            "failure": "failed",
         }.get(ending, "completed")
         assert schedule.outcome.status == expected_status
         if ending == "data_stop":

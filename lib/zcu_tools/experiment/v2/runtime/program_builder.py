@@ -170,10 +170,11 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
 
     All acquire methods write each converted completed round before checking
     stop_condition, then write the final converted result. Data-driven stop is
-    acquire-local; external stop, interrupt and exhausted failure retain partial
-    data (unwritten slots stay NaN) and record the Schedule outcome. They return
-    the slot's live array rather than raising producer errors. Progress bars close
-    before return, including on interruption or failure.
+    acquire-local; external stop and interrupt return the slot's partial live
+    array (unwritten slots stay NaN) and record the Schedule outcome. Producer
+    failures propagate unchanged after the explicit retry budget is exhausted;
+    concurrent cancellation prevents retry but does not suppress a failure.
+    Progress bars close before return or propagation.
     """
 
     def __init__(

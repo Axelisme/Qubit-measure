@@ -128,7 +128,9 @@ class AcquireOptions:
     """Policy shared by integrated and decimated program acquisition.
 
     retry is a non-negative number of extra attempts, default zero, including
-    shot overrun (AcquisitionContractError). Zero never retries. Each retry
+    shot overrun (AcquisitionContractError). Zero never retries. Exhausted
+    producer failures propagate unchanged, even if cancellation was also requested.
+    Each retry
     reruns all rounds on the same program with
     fresh producer buffers; overrun discards the failed attempt's slot data.
     External cancellation and interruption are never retried. progress
@@ -223,9 +225,10 @@ class AcquisitionRunner:
         and final raw payload to the slot shape. options selects retry, progress
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
-        Producer failure, interrupt or cancellation records the Schedule outcome
-        and retains partial data; overrun restores the pre-acquire slot. All
-        producer failures use the explicit retry budget, including zero retries.
+        Interrupt or cancellation records the Schedule outcome and returns partial
+        data. Producer failures use the explicit retry budget, including zero
+        retries, then propagate unchanged. A concurrent stop prevents retry but
+        does not suppress the failure. Overrun restores the pre-acquire slot.
         Conversion/update errors propagate without retry.
         """
         require_positive_rounds(rounds)
@@ -270,15 +273,13 @@ class AcquisitionRunner:
                 except KeyboardInterrupt as exc:
                     self._schedule.mark_interrupted(exc)
                     break
-                # tolerated: Native acquisition failures retain partial data and may be retried.
+                # tolerated: Retry producer failures; exhausted errors propagate unchanged.
                 except Exception as exc:  # noqa: BLE001
-                    # The producer reports first-round cancellation with an exception.
-                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
-                    if self._schedule.check_stop_requested(exception=cause):
-                        break
+                    if self._schedule.check_stop_requested(exception=exc):
+                        raise
                     if not observation.retry_after(exc, retry, slot, initial_signal):
                         self._schedule.mark_failed(exc)
-                        break
+                        raise
                     continue
 
                 if self._schedule.check_stop_requested():

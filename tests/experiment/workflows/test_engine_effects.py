@@ -626,18 +626,14 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     observed = start_call(rig, operation)
     final = rig.engine.execute("run")
-    if source == "acquire":
-        assert final.lifecycle == "done", final.reason
-        assert isinstance(observed[0], Failed)
-        assert "acquire failed" in observed[0].reason
-        assert attempts == ["build", "acquire", "acquire"]
-    else:
-        assert final.lifecycle == "failed"
-        assert final.reason == f"OSError: {source} failed"
-        assert observed == []
-        assert attempts == (
-            ["build"] if source == "build" else ["build", "acquire", "conversion"]
-        )
+    assert final.lifecycle == "failed"
+    assert final.reason == f"OSError: {source} failed"
+    assert observed == []
+    assert attempts == {
+        "build": ["build"],
+        "acquire": ["build", "acquire", "acquire"],
+        "conversion": ["build", "acquire", "conversion"],
+    }[source]
 
 
 @pytest.mark.parametrize("first_round_stop", [False, True])
