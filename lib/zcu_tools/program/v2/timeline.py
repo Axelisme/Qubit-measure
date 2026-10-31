@@ -55,7 +55,7 @@ from .sweep import SweepCfg
 from .utils import sweep2param
 
 
-def _repeat_minimum(name: str, n: int | str, range_hint: tuple[int, int] | None) -> int:
+def _repeat_minimum(name: str | None, n: int | str, range_hint: tuple[int, int] | None) -> int:
     """Validate the public count contract and return its guaranteed minimum."""
     if isinstance(n, str):
         if n == name:
@@ -650,7 +650,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if range_hint is not None:
             if not isinstance(t, str):
                 raise ValueError("range_hint requires a register time")
-            _repeat_minimum("time", t, range_hint)
+            _repeat_minimum(None, t, range_hint)
         selected = timeline if timeline is not None else self._timeline_default
         self.append_macro(
             TimelineAdvance(

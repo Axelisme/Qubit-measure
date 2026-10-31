@@ -130,7 +130,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.source.t = t
         self.source.preprocess(prog)
         actual_t = self.source.get_time_param("t")
-        if _bounds(actual_t - previous_end)[0] < -1e-12:
+        if optional_time_bounds(prog, previous) is not None and _bounds(actual_t - previous_end)[0] < -1e-12:
             raise ValueError(
                 f"{self.timeline}: channel {self.ch} pulse overlap; cannot prove "
                 "start >= previous end at every sweep point; use delay_timeline"
@@ -142,6 +142,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.book.set_end(self.timeline, finish)
         if isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish
+        else:
+            self.book.runtime_gens.pop(self.ch, None)
         self.book.record_native(prog, self.ch, finish, generator=True)
 
 
