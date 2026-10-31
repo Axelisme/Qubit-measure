@@ -5,7 +5,9 @@ from zcu_tools.experiment.script_host import CallContext, PendingQuestion
 from .declaration import WorkflowRegistry, WorkflowScript, workflow
 from .display import Dense, assemble_rows, assemble_scalars
 from .engine import Engine
-from .env import RunFunction, WorkflowEnv
+from zcu_tools.experiment.operations import RunFunction
+
+from .env import WorkflowEnv
 from .models import (
     Actor,
     CommittedRecord,
