@@ -320,11 +320,15 @@ class TimelineAdvance(TimedMacro):
                 if isinstance(event.origin, RuntimeEnd)
                 else round(event.origin * get_fclk(prog))
             )
-            exact = (
-                static_cycles
-                + origin
-                + Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
+            ticks = duration * get_fclk(prog)
+            nearest = round(ticks)
+            # Normalize native integer-cycle float noise, never a positive subcycle.
+            duration_cycles = (
+                Fraction(nearest)
+                if nearest != 0 and abs(ticks - nearest) <= 1e-10
+                else Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
             )
+            exact = static_cycles + origin + duration_cycles
             result: Time = -(-exact.numerator // exact.denominator) / get_fclk(prog)
         else:
             result = fractional if self.aligned else align_end(prog, fractional)
