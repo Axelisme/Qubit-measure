@@ -132,7 +132,7 @@ class TimeBase:
                 raise TypeError("tick arrays must have int64 dtype")
             outside = np.any(ticks < -limit) or np.any(ticks > limit)
         else:
-            if not isinstance(ticks, (int, np.int64)) or isinstance(ticks, bool):
+            if type(ticks) not in (int, np.int64):
                 raise TypeError("ticks must be integers")
             _check_int64(int(ticks))
             outside = ticks < -limit or ticks > limit

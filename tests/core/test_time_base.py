@@ -4,7 +4,6 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-
 from zcu_tools.core import simulation
 
 
@@ -38,8 +37,12 @@ def test_ns_rounds_exact_grid_once_without_changing_array_shape(
     ).reshape(2, 3)
 
     assert time_base.ns(composed).shape == (2, 3)
-    np.testing.assert_array_equal(time_base.ns(composed).view(np.uint64), expected.view(np.uint64))
-    np.testing.assert_array_equal(time_base.ns(absolute).view(np.uint64), expected.view(np.uint64))
+    np.testing.assert_array_equal(
+        time_base.ns(composed).view(np.uint64), expected.view(np.uint64)
+    )
+    np.testing.assert_array_equal(
+        time_base.ns(absolute).view(np.uint64), expected.view(np.uint64)
+    )
     assert time_base.ns(-212).hex() == (-expected[0, 0]).item().hex()
     assert time_base.ns(0) == 0.0
     assert time_base.ns(np.array([], dtype=np.int64)).shape == (0,)
@@ -91,9 +94,9 @@ def test_fixture_ticks_obey_the_same_exact_range(frequency: Fraction) -> None:
 
 @pytest.mark.parametrize("clock", [0.0, -1.0, float("inf"), float("nan")])
 def test_clock_frequencies_must_be_positive_and_finite(clock: float) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="positive|finite"):
         simulation.TimeBase.from_clocks((clock,))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="positive|finite"):
         simulation.TimeBase(Fraction(1)).period_ticks(clock)
 
 
@@ -107,7 +110,7 @@ def test_unrepresentable_time_bases_fail_at_construction(frequency: Fraction) ->
 
 
 def test_common_clock_build_validates_input_and_intermediate_ranges() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least one clock"):
         simulation.TimeBase.from_clocks(())
     with pytest.raises(OverflowError):
         simulation.TimeBase.from_clocks((1e20,))
@@ -116,12 +119,12 @@ def test_common_clock_build_validates_input_and_intermediate_ranges() -> None:
     with pytest.raises(OverflowError):
         simulation.TimeBase.from_clocks((2147483647.0, 4294967291.0, 3.0))
     for frequency in (Fraction(0), Fraction(-1)):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="positive"):
             simulation.TimeBase(frequency)
 
 
 def test_fixture_times_must_be_finite() -> None:
     time_base = simulation.TimeBase(Fraction(1))
     for time_us in (float("inf"), float("nan")):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="finite"):
             time_base.ticks(time_us)

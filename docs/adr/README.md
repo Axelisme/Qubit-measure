@@ -59,6 +59,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Analysis / Simulation / Waveform
 
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：TimeBase 擁有有理數公共頻率、格點與範圍檢查、scalar／array 的單次正確捨入；採用整數 request 與 replay 升版，第二階段物理建模留待後議。TimeBase 已實作，其餘遷移接續完成。
+
 - [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。所有模擬器納入每次 acquisition 固定、預設關閉的損耗漂移；Engine preparation 限一次 evolve，single 跨損耗保留結構並重建 rates，FTF 漂移時重建完整 facts，routing facts 與 acquire-local CavityAverageCache 各有獨立 lifetime。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；pair lifetime 與 manifold model T1 的區別、T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
