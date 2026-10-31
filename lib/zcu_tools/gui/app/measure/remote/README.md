@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-10-31，analyze error propagation，wire 135／GUI 168
+**Last updated:** 2026-11-01，GUI run stop terminal，wire 135／GUI 168
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 

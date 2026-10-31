@@ -29,7 +29,8 @@ Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acq
 `RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 將它放進當次 RunMetadata，後續切換 point 不改這份分析環境。
 RunService 自己記錄 Stop 與成功的 selector cancel，交付 stop_requested。
 Core 正常回傳就發布並標 finished，不區分 root 或子孫停止。拋錯就 failed 並顯示錯誤。
-Stop 與被接受的 selector cancel 以 stop_requested 記錄，存檔 completion 為 stopped。
+Stop 與被接受的 selector cancel 以 stop_requested 記錄。
+Core 回傳前接受的請求使存檔 completion 為 stopped。
 它不讀 StopSignal 的完成或錯誤事實。
 
 Load 只使用檔內 experiment tag、資料與參數快照，不讀 live point 或先驗完整 RunMetadata。缺快照使用空參數內容；壞快照由 owner 報錯，Load 保留原 pane 並回傳指名來源檔的 LoadDataError。未用的歷史 metadata 欄位延後到使用或完整投影時驗證。Analyze 與 interactive analysis 固定 detached metadata，將裝置證據 reader 交給 draft。Post 延續 Primary 的 reader，不在啟動時投影裝置設定。真正讀取 draft.device_snapshot 時仍由 experiment owner 驗證並回報欄位路徑。
