@@ -404,6 +404,29 @@ def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
     ] * 2
 
 
+@pytest.mark.parametrize("align", [False, True])
+def test_branch_merge_preserves_runtime_cross_grid_length_producer(align):
+    selector = LoadValue("selector", [0, 1, 0], "scan", "selected")
+    pulse = Pulse("drive", _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0))
+    other = Pulse("other", _pulse_cfg(length=35 / 384, pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
+
+    def body(prog):
+        prog.emit(selector)
+        with prog.branch(by="selected", align_timeline=align) as cases:
+            with cases.case(0):
+                prog.emit(pulse)
+            with cases.case(1):
+                prog.emit(other)
+        prog.emit(tail)
+
+    prog = _program([selector, pulse, other, tail], body, lambda p: p.add_loop("scan", 3))
+    ends = [44, 87 if align else 40, 129]
+    assert [waves(shot) for shot in shots(prog)] == [[0, end] for end in ends] * 2
+    data = prog.compile_datamem()
+    assert data is not None and len(data) == 3  # Only the explicit selector table.
+
+
 def test_runtime_cross_grid_product_overflow_fails_at_build():
     # Native waveform words fit 16 bits, and the final end fits signed32.
     # Only the required fixed-point product overflows, before ASR8.
