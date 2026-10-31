@@ -142,7 +142,9 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
             e for e in result.materialize_point(index).events if e.source != "carrier"
         ]
         expected = [0, 43, 86, 129, 172] if index == 0 else [172 if align else 43]
-        assert [e.start_us * 430.08 for e in events] == pytest.approx(expected)
+        assert [time_us(result.time_base, e.start_ticks) * 430.08 for e in events] == (
+            pytest.approx(expected)
+        )
         assert [e.iterations for e in events[:-1]] == (
             [(("outer", o), ("inner", i)) for o in range(2) for i in range(2)]
             if index == 0

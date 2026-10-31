@@ -294,7 +294,7 @@ def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_ge
         assert read.frequency_mhz == pytest.approx((100, 200), abs=1e-5)
         assert read.generator_channels == (0, second_gen)
         assert read.samples == 61
-        assert len(read.trigger_us) == 2
+        assert len(read.trigger_ticks) == 2
     finally:
         env.devices.close_all_devices()
 
