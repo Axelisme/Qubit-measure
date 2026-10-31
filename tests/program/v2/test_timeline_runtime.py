@@ -102,6 +102,44 @@ def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(produc
     ] * 2
 
 
+@pytest.mark.parametrize("hint", [None, (10, 12)])
+def test_author_register_hint_controls_same_channel_overlap_proof(hint):
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 10)
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", t=0)
+        prog.delay_timeline("duration", timeline="other", range_hint=hint)
+        prog.pulse(0, "p0", timeline="other")
+
+    if hint is not None:
+        with pytest.raises(ValueError, match="channel 0.*overlap"):
+            program(body)
+    else:
+        assert [waves(s) for s in shots(program(body))] == [[0, 10], [0, 11], [0, 12]]
+
+
+@pytest.mark.parametrize("operation", ["delay", "pulse", "config", "trigger"])
+def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(operation):
+    def initialize(prog):
+        prog.add_dmem([40])
+        prog.declare_readout(0, length=4 / 307.2)
+        prog.add_readoutconfig(0, "ro", freq=100)
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.delay_timeline("duration", tag="runtime" if operation == "delay" else None)
+        if operation == "pulse":
+            prog.pulse(0, "p0", timeline="default", tag="runtime")
+        elif operation == "config":
+            prog.send_readoutconfig(0, "ro", timeline="default", tag="runtime")
+        elif operation == "trigger":
+            prog.trigger([0], timeline="default", tag="runtime")
+
+    prog = program(body, initialize=initialize)
+    with pytest.raises(RuntimeError, match="runtime"):
+        prog.get_time_param("runtime", "t")
+
+
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)

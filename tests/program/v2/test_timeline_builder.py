@@ -25,6 +25,17 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+def test_builder_forwards_author_register_time_hint(mock_soccfg):
+    from zcu_tools.program.v2.modules import LoadValue
+
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.add_loop("scan", 3)
+    builder.emit(LoadValue("time", [10, 20, 30], "scan", "duration"))
+    builder.delay_timeline("duration", range_hint=(10, 30))
+    builder.emit(_pulse("drive"))
+    assert [waves(s) for s in shots(builder.build())] == [[10], [20], [30]]
+
+
 def _readout(name="read", *, gain: float | QickParam = 0.5):
     return PulseReadout(
         name,
