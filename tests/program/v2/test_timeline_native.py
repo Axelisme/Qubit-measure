@@ -159,9 +159,16 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
         prog.pulse(0, "pulse", timeline="default", tag="after")
 
     prog = _program(body, lambda p: p.add_loop("scan", 4))
-    assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx([0, 1, 2, 3])
-    assert prog.get_time_param("edge", "width", as_array=True) * 430.08 == pytest.approx([0, 1, 2, 3])
-    assert [[e.cycle - s.start_cycle for e in s.events if e.kind == "wave"] for s in _shots(prog)] == [[173], [174], [175], [176]]
+    assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx(
+        [0, 1, 2, 3]
+    )
+    assert prog.get_time_param(
+        "edge", "width", as_array=True
+    ) * 430.08 == pytest.approx([0, 1, 2, 3])
+    assert [
+        [e.cycle - s.start_cycle for e in s.events if e.kind == "wave"]
+        for s in _shots(prog)
+    ] == [[173], [174], [175], [176]]
     assert prog.compile_datamem() is None
 
 
