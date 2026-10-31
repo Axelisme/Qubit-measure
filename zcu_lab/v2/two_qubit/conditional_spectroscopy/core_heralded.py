@@ -143,15 +143,23 @@ class SpectroscopyHeraldedExp(
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
-        dc_values = np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
+        dc_values = (
+            np.array([0.0])
+            if config.dc_device is None
+            else sweep2array(config.dc_values)
+        )
         viewers = {
             (d, f1, f2): live_line(
-                context.plots, f"measurement_dc_{d}_actual_{f1}_{f2}",
-                "Common probe frequency (MHz)", "P_e (gg F1/F2, ee F1/F2)",
+                context.plots,
+                f"measurement_dc_{d}_actual_{f1}_{f2}",
+                "Common probe frequency (MHz)",
+                "P_e (gg F1/F2, ee F1/F2)",
                 title=f"Actual initial state ({f1},{f2}) before probe · DC {dc:g}",
                 num_lines=4,
             )
-            for d, dc in enumerate(dc_values) for f1 in range(2) for f2 in range(2)
+            for d, dc in enumerate(dc_values)
+            for f1 in range(2)
+            for f2 in range(2)
         }
 
         def update_view(sums: NDArray[np.float64]) -> None:
@@ -162,23 +170,37 @@ class SpectroscopyHeraldedExp(
             ee_f1 = marginal_probabilities(ee, "f1")[..., 1]
             ee_f2 = marginal_probabilities(ee, "f2")[..., 1]
             for (d, f1, f2), viewer in viewers.items():
-                viewer.update(frequencies, np.stack((
-                    gg_f1[d, f1, f2], gg_f2[d, f1, f2],
-                    ee_f1[d, 1-f1, 1-f2], ee_f2[d, 1-f1, 1-f2],
-                )))
+                viewer.update(
+                    frequencies,
+                    np.stack(
+                        (
+                            gg_f1[d, f1, f2],
+                            gg_f2[d, f1, f2],
+                            ee_f1[d, 1 - f1, 1 - f2],
+                            ee_f2[d, 1 - f1, 1 - f2],
+                        )
+                    ),
+                )
 
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3, 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         with Schedule(config, buffer, scope=context.scope) as sched:
             # DC stays on the host because each point sets an external instrument.
             for dc_value, step in sched.scan("dc", dc_values.tolist()):
                 if config.dc_device is not None:
-                    set_flux(context.devices[config.dc_device], dc_value,
-                             unit=config.dc_unit, stop=context.scope.stop)
+                    set_flux(
+                        context.devices[config.dc_device],
+                        dc_value,
+                        unit=config.dc_unit,
+                        stop=context.scope.stop,
+                    )
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps, initial_delay=config.initial_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
                     relax_delay=config.relax_delay,
                 )
                 builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
@@ -201,28 +223,38 @@ class SpectroscopyHeraldedExp(
                         with cases.case(1):
                             builder.emit(x180_f2)
                 builder.join("f1", "f2", into="default")
-                builder.emit(Join(
-                    Pulse("probe_f1", config.drive.f1, freq=frequency),
-                    Pulse("probe_f2", config.drive.f2, freq=frequency),
-                ))
+                builder.emit(
+                    Join(
+                        Pulse("probe_f1", config.drive.f1, freq=frequency),
+                        Pulse("probe_f2", config.drive.f2, freq=frequency),
+                    )
+                )
                 if config.contrast:
                     builder.emit(Pulse("contrast_f1", config.x180_f1))
                     builder.emit(Pulse("contrast_f2", config.x180_f2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("herald", config.roles.f1_tone),
-                        Classify("herald", config.roles.f2_tone),
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("herald", config.roles.f1_tone),
+                            Classify("herald", config.roles.f2_tone),
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         return SpectroscopyHeraldedResult(
-            dc_values, np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
-            frequencies, buffer.array,
+            dc_values,
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            frequencies,
+            buffer.array,
         )
 
     def analyze(
@@ -248,14 +280,22 @@ class SpectroscopyHeraldedExp(
             or not np.array_equal(data.prepared_f1, np.arange(2))
             or not np.array_equal(data.prepared_f2, np.arange(2))
             or data.frequencies.shape != frequencies.shape
-            or not np.allclose(data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0)
+            or not np.allclose(
+                data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+            )
             or data.sums.shape != (len(dc), 2, 2, len(frequencies), 3, 3, 3, 3)
         ):
-            raise ValueError("Heralded spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3,3,3)")
-        finite = np.all(np.isfinite(data.sums) & (data.sums >= 0), axis=(-4, -3, -2, -1))
+            raise ValueError(
+                "Heralded spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3,3,3)"
+            )
+        finite = np.all(
+            np.isfinite(data.sums) & (data.sums >= 0), axis=(-4, -3, -2, -1)
+        )
         missing = np.all(np.isnan(data.sums), axis=(-4, -3, -2, -1))
         if not np.all(finite | missing):
-            raise ValueError("Heralded spectroscopy contains invalid or partially missing counts")
+            raise ValueError(
+                "Heralded spectroscopy contains invalid or partially missing counts"
+            )
         acquired = data.sums.sum(axis=(-4, -3, -2, -1))
         gg_counts = terminal_counts(data.sums, ("g", "g"))
         ee_counts = terminal_counts(data.sums, ("e", "e"))
@@ -264,24 +304,45 @@ class SpectroscopyHeraldedExp(
         for d, value in enumerate(dc):
             for target, role in enumerate(("F1", "F2")):
                 fig, _ = plots.subplots(
-                    f"spectra_dc_{d}_{role.lower()}", nrows=2, ncols=2, figsize=(11, 7),
-                    squeeze=False, layout="constrained",
+                    f"spectra_dc_{d}_{role.lower()}",
+                    nrows=2,
+                    ncols=2,
+                    figsize=(11, 7),
+                    squeeze=False,
+                    layout="constrained",
                 )
-                fig.suptitle(f"{role} P_e · DC {value:g} {cfg.dc_unit if cfg.dc_device else '(inactive)'}"
-                             f" · double Xπ contrast {cfg.contrast}")
+                fig.suptitle(
+                    f"{role} P_e · DC {value:g} {cfg.dc_unit if cfg.dc_device else '(inactive)'}"
+                    f" · double Xπ contrast {cfg.contrast}"
+                )
                 for f1 in range(2):
                     for f2 in range(2):
                         ax = fig.axes[2 * f1 + f2]
-                        ax.plot(frequencies, gg.excitation[d, f1, f2, :, target],
-                                label=f"herald gg, nominal ({f1},{f2})")
-                        ax.plot(frequencies, ee.excitation[d, 1-f1, 1-f2, :, target],
-                                linestyle="--", label=f"herald ee, nominal ({1-f1},{1-f2})")
-                        ax.set(title=f"Actual initial state ({f1},{f2}) before probe",
-                               xlabel="Common probe frequency (MHz)", ylabel=f"{role} P_e", ylim=(0, 1))
+                        ax.plot(
+                            frequencies,
+                            gg.excitation[d, f1, f2, :, target],
+                            label=f"herald gg, nominal ({f1},{f2})",
+                        )
+                        ax.plot(
+                            frequencies,
+                            ee.excitation[d, 1 - f1, 1 - f2, :, target],
+                            linestyle="--",
+                            label=f"herald ee, nominal ({1 - f1},{1 - f2})",
+                        )
+                        ax.set(
+                            title=f"Actual initial state ({f1},{f2}) before probe",
+                            xlabel="Common probe frequency (MHz)",
+                            ylabel=f"{role} P_e",
+                            ylim=(0, 1),
+                        )
                         ax.legend(fontsize="small")
         fig, _ = plots.subplots(
-            "shots", nrows=len(dc), ncols=4, figsize=(16, 3 * len(dc)),
-            squeeze=False, layout="constrained",
+            "shots",
+            nrows=len(dc),
+            ncols=4,
+            figsize=(16, 3 * len(dc)),
+            squeeze=False,
+            layout="constrained",
         )
         fig.suptitle("Shots per point · nominal preparation · partial counts included")
         gg_shots = gg_counts.sum(axis=(-2, -1))
@@ -289,31 +350,55 @@ class SpectroscopyHeraldedExp(
         for d, value in enumerate(dc):
             for f1 in range(2):
                 for f2 in range(2):
-                    ax = fig.axes[4*d + 2*f1 + f2]
+                    ax = fig.axes[4 * d + 2 * f1 + f2]
                     ax.plot(frequencies, acquired[d, f1, f2], label="All 81 classes")
                     ax.plot(frequencies, gg_shots[d, f1, f2], label="Selected gg")
                     ax.plot(frequencies, ee_shots[d, f1, f2], label="Selected ee")
-                    ax.axhline(cfg.reps * cfg.rounds, color="gray", linestyle="--", label="Requested")
-                    ax.set(title=f"DC {value:g} · nominal ({f1},{f2}) · complete={gg.complete[d, f1, f2]}",
-                           xlabel="Common probe frequency (MHz)", ylabel="Shots")
+                    ax.axhline(
+                        cfg.reps * cfg.rounds,
+                        color="gray",
+                        linestyle="--",
+                        label="Requested",
+                    )
+                    ax.set(
+                        title=f"DC {value:g} · nominal ({f1},{f2}) · complete={gg.complete[d, f1, f2]}",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel="Shots",
+                    )
                     ax.legend(fontsize="small")
         herald = herald_probabilities(data.sums)
         fig, _ = plots.subplots(
-            "herald", nrows=len(dc), ncols=4, figsize=(16, 3 * len(dc)),
-            squeeze=False, layout="constrained",
+            "herald",
+            nrows=len(dc),
+            ncols=4,
+            figsize=(16, 3 * len(dc)),
+            squeeze=False,
+            layout="constrained",
         )
-        outcomes = [f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")]
-        fig.suptitle("Herald distribution; gg is pass fraction, not ground-state purity")
+        outcomes = [
+            f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+        ]
+        fig.suptitle(
+            "Herald distribution; gg is pass fraction, not ground-state purity"
+        )
         for d, value in enumerate(dc):
             for f1 in range(2):
                 for f2 in range(2):
-                    ax = fig.axes[4*d + 2*f1 + f2]
+                    ax = fig.axes[4 * d + 2 * f1 + f2]
                     image = ax.pcolormesh(
-                        frequencies, np.arange(9), herald[d, f1, f2].reshape(-1, 9).T,
-                        shading="nearest", vmin=0, vmax=1,
+                        frequencies,
+                        np.arange(9),
+                        herald[d, f1, f2].reshape(-1, 9).T,
+                        shading="nearest",
+                        vmin=0,
+                        vmax=1,
                     )
-                    ax.set(title=f"DC {value:g} · nominal ({f1},{f2})",
-                           xlabel="Common probe frequency (MHz)", ylabel="Herald class (F1, F2)",
-                           yticks=range(9), yticklabels=outcomes)
+                    ax.set(
+                        title=f"DC {value:g} · nominal ({f1},{f2})",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel="Herald class (F1, F2)",
+                        yticks=range(9),
+                        yticklabels=outcomes,
+                    )
                     fig.colorbar(image, ax=ax, label="Herald probability")
         return SpectroscopyHeraldedAnalysis(gg, ee, herald, herald[..., 0, 0])

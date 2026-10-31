@@ -207,34 +207,52 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
-        dc_values = np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
+        dc_values = (
+            np.array([0.0])
+            if config.dc_device is None
+            else sweep2array(config.dc_values)
+        )
         viewers = {
             (d, f1, f2): live_line(
-                context.plots, f"measurement_dc_{d}_prep_{f1}_{f2}",
-                "Common probe frequency (MHz)", "P_e (F1 line 1, F2 line 2)",
-                title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}", num_lines=2,
+                context.plots,
+                f"measurement_dc_{d}_prep_{f1}_{f2}",
+                "Common probe frequency (MHz)",
+                "P_e (F1 line 1, F2 line 2)",
+                title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
+                num_lines=2,
             )
-            for d, dc in enumerate(dc_values) for f1 in range(2) for f2 in range(2)
+            for d, dc in enumerate(dc_values)
+            for f1 in range(2)
+            for f2 in range(2)
         }
 
         def update_view(sums: NDArray[np.float64]) -> None:
             f1_pe = marginal_probabilities(sums, "f1")[..., 1]
             f2_pe = marginal_probabilities(sums, "f2")[..., 1]
             for (d, f1, f2), viewer in viewers.items():
-                viewer.update(frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2])))
+                viewer.update(
+                    frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
+                )
 
         buffer = SignalBuffer(
             (len(dc_values), 2, 2, len(frequencies), 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         with Schedule(config, buffer, scope=context.scope) as sched:
             # DC stays on the host because each point sets an external instrument.
             for dc_value, step in sched.scan("dc", dc_values.tolist()):
                 if config.dc_device is not None:
-                    set_flux(context.devices[config.dc_device], dc_value,
-                             unit=config.dc_unit, stop=context.scope.stop)
+                    set_flux(
+                        context.devices[config.dc_device],
+                        dc_value,
+                        unit=config.dc_unit,
+                        stop=context.scope.stop,
+                    )
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps, initial_delay=config.initial_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
                     relax_delay=config.relax_delay,
                 )
                 builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
@@ -256,26 +274,36 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         with cases.case(1):
                             builder.emit(x180_f2)
                 builder.join("f1", "f2", into="default")
-                builder.emit(Join(
-                    Pulse("probe_f1", config.drive.f1, freq=frequency),
-                    Pulse("probe_f2", config.drive.f2, freq=frequency),
-                ))
+                builder.emit(
+                    Join(
+                        Pulse("probe_f1", config.drive.f1, freq=frequency),
+                        Pulse("probe_f2", config.drive.f2, freq=frequency),
+                    )
+                )
                 if config.contrast:
                     builder.emit(Pulse("contrast_f1", config.x180_f1))
                     builder.emit(Pulse("contrast_f2", config.x180_f2))
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         return SpectroscopyResult(
-            dc_values, np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
-            frequencies, buffer.array,
+            dc_values,
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            frequencies,
+            buffer.array,
         )
 
     def analyze(
@@ -298,53 +326,99 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             or not np.array_equal(data.prepared_f1, np.arange(2))
             or not np.array_equal(data.prepared_f2, np.arange(2))
             or data.frequencies.shape != frequencies.shape
-            or not np.allclose(data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0)
+            or not np.allclose(
+                data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+            )
             or data.sums.shape != (len(dc), 2, 2, len(frequencies), 3, 3)
         ):
-            raise ValueError("Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)")
+            raise ValueError(
+                "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
+            )
         answer = summarize_spectra(
             data.sums, data.sums.sum(axis=(-2, -1)), cfg.reps * cfg.rounds
         )
         for target, role in enumerate(("F1", "F2")):
             fig, _ = plots.subplots(
-                f"spectra_{role.lower()}", nrows=2, ncols=2, figsize=(11, 7),
-                squeeze=False, layout="constrained",
+                f"spectra_{role.lower()}",
+                nrows=2,
+                ncols=2,
+                figsize=(11, 7),
+                squeeze=False,
+                layout="constrained",
             )
             fig.suptitle(f"{role} P_e · double Xπ contrast {cfg.contrast}")
             for f1 in range(2):
                 for f2 in range(2):
                     ax = fig.axes[2 * f1 + f2]
                     for d, value in enumerate(dc):
-                        ax.plot(frequencies, answer.excitation[d, f1, f2, :, target],
-                                label=f"DC {value:g} {cfg.dc_unit}" if cfg.dc_device else "DC inactive")
-                    ax.set(title=f"Nominal preparation ({f1},{f2})",
-                           xlabel="Common probe frequency (MHz)", ylabel=f"{role} P_e", ylim=(0, 1))
+                        ax.plot(
+                            frequencies,
+                            answer.excitation[d, f1, f2, :, target],
+                            label=f"DC {value:g} {cfg.dc_unit}"
+                            if cfg.dc_device
+                            else "DC inactive",
+                        )
+                    ax.set(
+                        title=f"Nominal preparation ({f1},{f2})",
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel=f"{role} P_e",
+                        ylim=(0, 1),
+                    )
                     ax.legend(fontsize="small")
             if cfg.dc_device is not None:
                 fig, _ = plots.subplots(
-                    f"map_{role.lower()}", nrows=2, ncols=2, figsize=(11, 7),
-                    squeeze=False, layout="constrained",
+                    f"map_{role.lower()}",
+                    nrows=2,
+                    ncols=2,
+                    figsize=(11, 7),
+                    squeeze=False,
+                    layout="constrained",
                 )
                 for f1 in range(2):
                     for f2 in range(2):
                         ax = fig.axes[2 * f1 + f2]
-                        image = ax.pcolormesh(frequencies, dc, answer.excitation[:, f1, f2, :, target],
-                                              shading="nearest", vmin=0, vmax=1)
+                        image = ax.pcolormesh(
+                            frequencies,
+                            dc,
+                            answer.excitation[:, f1, f2, :, target],
+                            shading="nearest",
+                            vmin=0,
+                            vmax=1,
+                        )
                         fig.colorbar(image, ax=ax, label=f"{role} P_e")
-                        ax.set(title=f"Nominal preparation ({f1},{f2})",
-                               xlabel="Common probe frequency (MHz)",
-                               ylabel=f"{cfg.dc_device} ({cfg.dc_unit})")
-        fig, _ = plots.subplots("shots", nrows=2, ncols=2, figsize=(11, 7),
-                                squeeze=False, layout="constrained")
+                        ax.set(
+                            title=f"Nominal preparation ({f1},{f2})",
+                            xlabel="Common probe frequency (MHz)",
+                            ylabel=f"{cfg.dc_device} ({cfg.dc_unit})",
+                        )
+        fig, _ = plots.subplots(
+            "shots",
+            nrows=2,
+            ncols=2,
+            figsize=(11, 7),
+            squeeze=False,
+            layout="constrained",
+        )
         fig.suptitle("Acquired shots per point · partial counts included")
         for f1 in range(2):
             for f2 in range(2):
                 ax = fig.axes[2 * f1 + f2]
                 for d, value in enumerate(dc):
-                    ax.plot(frequencies, answer.acquired_shots[d, f1, f2],
-                            label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}")
-                ax.axhline(cfg.reps * cfg.rounds, color="gray", linestyle="--", label="Requested shots")
-                ax.set(title=f"Nominal preparation ({f1},{f2})", xlabel="Common probe frequency (MHz)",
-                       ylabel="Shots")
+                    ax.plot(
+                        frequencies,
+                        answer.acquired_shots[d, f1, f2],
+                        label=f"DC {value:g}; complete={answer.complete[d, f1, f2]}",
+                    )
+                ax.axhline(
+                    cfg.reps * cfg.rounds,
+                    color="gray",
+                    linestyle="--",
+                    label="Requested shots",
+                )
+                ax.set(
+                    title=f"Nominal preparation ({f1},{f2})",
+                    xlabel="Common probe frequency (MHz)",
+                    ylabel="Shots",
+                )
                 ax.legend(fontsize="small")
         return answer

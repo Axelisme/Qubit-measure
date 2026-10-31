@@ -42,7 +42,9 @@ def summarize_spectra(
     missing = np.all(np.isnan(counts), axis=(-2, -1))
     if not np.all(finite | missing):
         raise ValueError("Spectroscopy contains invalid or partially missing counts")
-    if not np.all(np.isnan(acquired_shots) | (np.isfinite(acquired_shots) & (acquired_shots >= 0))):
+    if not np.all(
+        np.isnan(acquired_shots) | (np.isfinite(acquired_shots) & (acquired_shots >= 0))
+    ):
         raise ValueError("Acquired shots must be nonnegative totals or NaN")
     excitation = np.stack(
         [marginal_probabilities(counts, target)[..., 1] for target in ("f1", "f2")],
