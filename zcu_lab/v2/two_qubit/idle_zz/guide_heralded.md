@@ -31,6 +31,7 @@ Terminal 分析回傳聯合 fit 的 magnitude、signed frequency、covariance er
 ## Notebook
 
 `cfg` 使用與表單相同的 IdleZZHeraldedCfg。
+`point_view` 是儲存目的地已綁定的 `PointView`。保存時以本次 `run()` 回傳的 `record` 作為 `source`。
 
 ```python
 from zcu_tools.notebook import NotebookAdapter
@@ -38,7 +39,7 @@ from zcu_lab.v2.two_qubit.idle_zz.core_heralded import IdleZZHeraldedExp
 
 nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
 exp = nb_adapter(IdleZZHeraldedExp())
-exp.run(cfg)
+record = exp.run(cfg)
 exp.analyze(None)
-exp.save_run("idle_zz_heralded")
+exp.save_run(point_view, source=record)
 ```
