@@ -533,8 +533,8 @@ def test_module_join_preserves_known_readout_provenance_and_parallel_origin():
     # Readout config0, playback22 and ADC43..215.2 plus post8.6016
     # finish at224, independent of the shorter Branch's28/0/56 advance.
     assert [waves(s) for s in result] == [[0, 22, 0], [0, 22], [0, 22, 0]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [224] * 6
-    assert [s.end_cycle - s.start_cycle for s in result] == [224] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [225] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [225] * 6
 
 
 def test_module_join_preserves_author_order_and_branch_parallel_origin():

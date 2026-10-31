@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from qick.asm_v2 import AsmInst, CondJump, Jump, Label, Macro, QickParam, TimedMacro, WriteReg
+from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
@@ -668,26 +668,36 @@ class RuntimeMath(TimedMacro):
         are rejected by align_end rather than replaced by an upper bound.
         """
         candidates = tuple(align_end(self.prog, value) for value in values)
-        operands = tuple(self.cycles(value) for value in candidates)
-        lower = min(value.minimum for value in operands if value.minimum is not None)
-        upper = max(value.maximum for value in operands if value.maximum is not None)
+        limits = [time_bounds(self.prog, value) for value in candidates]
+        lower = min(round(lo * get_fclk(self.prog)) for lo, _ in limits)
+        upper = max(round(hi * get_fclk(self.prog)) for _, hi in limits)
         self.check(lower, upper)
+        operands: list[int | str] = []
+        for value in candidates:
+            if isinstance(value, QickParam) and value.is_sweep():
+                operands.append(self.cycles(value).register)
+            else:
+                scalar = value.start if isinstance(value, QickParam) else value
+                if isinstance(scalar, RuntimeEnd):
+                    operands.append(scalar.register)
+                else:
+                    operands.append(round(scalar * get_fclk(self.prog)))
         register = self.allocate()
-        book = self.prog._timeline_book
-        prefix = f"_timeline_select_{book.selection_count}"
-        book.selection_count += 1
         for index, operand in enumerate(operands):
-            if index < len(operands) - 1:
-                self.operations.append(CondJump(
-                    arg1=selector, op="-", arg2=index, test="NZ",
-                    label=f"{prefix}_{index}",
-                ))
-            self.operations.append(WriteReg(dst=register, src=operand.register))
-            if index < len(operands) - 1:
-                self.operations.extend((
-                    Jump(label=f"{prefix}_end"), Label(label=f"{prefix}_{index}"),
-                ))
-        self.operations.append(Label(label=f"{prefix}_end"))
+            inst = {
+                "CMD": "REG_WR", "DST": self.prog._get_reg(register),
+                "SRC": "imm" if isinstance(operand, int) else "op",
+            }
+            inst["LIT" if isinstance(operand, int) else "OP"] = (
+                f"#{operand}" if isinstance(operand, int) else self.prog._get_reg(operand)
+            )
+            if index:
+                self.operations.append(AsmInst(inst={
+                    "CMD": "TEST", "OP": f"{self.prog._get_reg(selector)} - #{index}",
+                    "UF": "1",
+                }, addr_inc=1))
+                inst["IF"] = "Z"
+            self.operations.append(AsmInst(inst=inst, addr_inc=1))
         return RuntimeEnd(
             register, lower, upper,
             expression=select_time(
@@ -1103,7 +1113,9 @@ class RuntimeMath(TimedMacro):
         try:
             for operation in self.operations:
                 # Control lowering owns s15/flags, not compiler time storage.
-                self.prog._timeline_math_active = not isinstance(operation, (CondJump, Jump, Label))
+                self.prog._timeline_math_active = not (
+                    isinstance(operation, AsmInst) and operation.inst["CMD"] == "TEST"
+                )
                 operation.translate(prog)
         finally:
             prog._timeline_math_active = previous
