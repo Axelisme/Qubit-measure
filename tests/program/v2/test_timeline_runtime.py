@@ -102,6 +102,23 @@ def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(produc
     ] * 2
 
 
+@pytest.mark.parametrize("producer", ["alu", "dmem"])
+@pytest.mark.parametrize("hint", [None, (6, 6)])
+def test_author_register_overwrite_after_constant_accepts_optional_hint(producer, hint):
+    def body(prog):
+        prog.write_reg("duration", 1)
+        if producer == "alu":
+            prog.write_reg_op("duration", "duration", "+", 5)
+        else:
+            prog.read_dmem("duration", 0)
+        prog.delay_timeline("duration", range_hint=hint)
+        prog.pulse(0, "p0", timeline="default")
+
+    result = shots(program(body, initialize=lambda prog: prog.add_dmem([6])))
+    assert [waves(s) for s in result] == [[6]] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [34] * 3
+
+
 @pytest.mark.parametrize("hint", [None, (10, 12)])
 def test_author_register_hint_controls_same_channel_overlap_proof(hint):
     def body(prog):
