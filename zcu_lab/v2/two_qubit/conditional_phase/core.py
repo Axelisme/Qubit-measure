@@ -8,7 +8,6 @@ from typing import Annotated, ClassVar, Literal, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -29,17 +28,18 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 
-from .._drive import DualLineCfg, dual_line_drive
+from .._drive import DualLineCfg
 from .._readout import JointRoles
-from .._sums import sigma, terminal_counts, validate_classifiers
-from .analysis import ConditionalPhaseAnalysis, analyze_phase
+from .._sums import sigma, validate_classifiers
+from .analysis import ConditionalPhaseAnalysis, fit_phase_slopes, gate_count_alias_reason, phase_points
+from .._phase import sigma_variance
+from .crossing import phase_crossings
 
 
 class ConditionalPhaseCfg(ConfigBase):
@@ -132,7 +132,7 @@ class ConditionalPhaseCfg(ConfigBase):
         ),
     ]
     gate_counts: list[Annotated[int, Field(strict=True, ge=1)]] = Field(
-        default_factory=lambda: [1, 3, 5], min_length=1
+        default_factory=lambda: [1, 2, 3], min_length=2
     )
 
     @model_validator(mode="after")
@@ -156,6 +156,9 @@ class ConditionalPhaseCfg(ConfigBase):
             )
         if len(set(self.gate_counts)) != len(self.gate_counts):
             raise ValueError("Gate counts must be unique")
+        reason = gate_count_alias_reason(np.array(self.gate_counts, dtype=np.int64))
+        if reason is not None:
+            raise ValueError(reason)
         return self
 
 
@@ -163,147 +166,16 @@ class ConditionalPhaseCfg(ConfigBase):
 class ConditionalPhaseResult:
     """Summed counts with branch × quadrature × n × frequency leading axes.
 
-    branches=[0,1] denote spectator I/Xπ; quadratures=[0,1] denote X/Y.
+    spectator_states=[0,1] denote spectator I/Xπ; quadratures=[0,1] denote X/Y.
     sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
-    branches: NDArray[np.int64]
+    spectator_states: NDArray[np.int64]
     quadratures: NDArray[np.int64]
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class ConditionalPhasePoint:
-    """One host-scan coordinate; quadrature 0/1 is X/Y, gate_count is train length.
-
-    branch 0/1 is spectator I/Xπ; frequency is the common CZ frequency in MHz.
-    """
-
-    branch: int
-    quadrature: int
-    gate_count: int
-    frequency: float
-
-
-def build_program(
-    cfg: ConditionalPhaseCfg,
-    soccfg: QickConfig,
-    point: ConditionalPhasePoint,
-    *,
-    heralded: bool,
-) -> TimelineProgramV2:
-    """Compile optional reset → optional herald → preparation → CZ train → projection → terminal.
-
-    Each call creates fresh modules. Herald and terminal emit one mux object.
-    Input cfg is unchanged; invalid scan coordinates or classifiers raise ValueError.
-    No acquisition occurs.
-    """
-    validate_classifiers(cfg.readout, cfg.roles)
-    if point.branch not in (0, 1) or point.quadrature not in (0, 1):
-        raise ValueError("branch and quadrature must be 0 or 1")
-    if point.gate_count not in cfg.gate_counts:
-        raise ValueError("gate_count must be in the configured scan")
-    target = cfg.x90_f1 if cfg.target == "f1" else cfg.x90_f2
-    spectator = cfg.x180_f2 if cfg.target == "f1" else cfg.x180_f1
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    if point.branch:
-        builder.emit(Pulse("spectator", spectator))
-    builder.emit(Pulse("prepare_target", target))
-    for gate in range(point.gate_count):
-        builder.emit(
-            dual_line_drive(
-                cfg.drive,
-                frequency=point.frequency,
-                name=f"cz_{gate}",
-            )
-        )
-    builder.emit(
-        Pulse(
-            "projection",
-            target.with_updates(phase=target.phase + 90 * point.quadrature),
-        )
-    )
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: ConditionalPhaseCfg, *, context: RunContext, heralded: bool
-) -> NDArray[np.float64]:
-    """Acquire the host scan; return unnormalized 9/81-class float64 sums.
-
-    Completed rounds accumulate at acquisition and survive cancellation. Live
-    quadratures use terminal counts, conditioned on herald (g,g) when requested.
-    Schedule owns the cfg copy; no host round axis or per-shot storage remains.
-    """
-    validate_classifiers(config.readout, config.roles)
-    frequencies = sweep2array(config.frequency)
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "Common CZ frequency (MHz)",
-        "Target sigma" + (" | herald (g,g)" if heralded else ""),
-        num_lines=4 * len(config.gate_counts),
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
-        values = sigma(counts, config.target).reshape(-1, len(frequencies))
-        viewer.update(frequencies, values)
-
-    shape = (2, 2, len(config.gate_counts), len(frequencies)) + (
-        (3, 3, 3, 3) if heralded else (3, 3)
-    )
-    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        for branch, branch_step in sched.scan("branch", [0, 1]):
-            for quadrature, projection_step in branch_step.scan("quadrature", [0, 1]):
-                for n, count_step in projection_step.scan(
-                    "gate_count", sched.cfg.gate_counts
-                ):
-                    for frequency, step in count_step.scan(
-                        "frequency", frequencies.tolist()
-                    ):
-                        point = ConditionalPhasePoint(branch, quadrature, n, frequency)
-                        prog = build_program(
-                            step.cfg, context.soccfg, point, heralded=heralded
-                        )
-                        step.run_acquire_summed(
-                            prog,
-                            context.soc,
-                            processor=shot_sums(
-                                prog,
-                                [
-                                    Classify(label, tone)
-                                    for label in (
-                                        ("herald", "terminal")
-                                        if heralded
-                                        else ("terminal",)
-                                    )
-                                    for tone in (
-                                        step.cfg.roles.f1_tone,
-                                        step.cfg.roles.f2_tone,
-                                    )
-                                ],
-                            ),
-                            rounds=step.cfg.rounds,
-                            options=RunOptions(),
-                        )
-    buffer.trigger_update(flush=True)
-    return buffer.array
 
 
 def restore_result(
@@ -312,7 +184,7 @@ def restore_result(
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
     return ConditionalPhaseResult(
-        branches=sums.axes[5].astype(np.int64),
+        spectator_states=sums.axes[5].astype(np.int64),
         quadratures=sums.axes[4].astype(np.int64),
         gate_counts=sums.axes[3].astype(np.int64),
         frequencies=sums.axes[2].astype(np.float64),
@@ -349,7 +221,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Spectator I or Xπ", "", field_name="branches", dtype=np.int64
+                        "Spectator I or Xπ", "", field_name="spectator_states", dtype=np.int64
                     ),
                 ),
                 z=VariableZSpec(
@@ -362,7 +234,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ),
         result_type=ConditionalPhaseResult,
         cfg_type=ConditionalPhaseCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="two_qubit/conditional_phase",
         result_builder=restore_result,
     )
@@ -370,13 +242,75 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
     def run(
         self, config: ConditionalPhaseCfg, *, context: RunContext
     ) -> ConditionalPhaseResult:
-        """Acquire optional reset and the original sequence; save summed counts."""
+        """Acquire hardware spectator/quadrature/frequency scans per host train.
+
+        Counts retain spectator_states × quadrature × gate_count × frequency.
+        cfg stays unchanged; acquisition accumulates rounds without averaging.
+        """
+        validate_classifiers(config.readout, config.roles)
+        frequencies = sweep2array(config.frequency)
+        viewer = live_line(
+            context.plots, "measurement", "Common CZ frequency (MHz)", "Target sigma",
+            num_lines=4 * len(config.gate_counts),
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            counts = np.moveaxis(sums, 0, 2)
+            values = sigma(counts, config.target)
+            viewer.update(frequencies, values.reshape(-1, len(frequencies)))
+
+        buffer = SignalBuffer(
+            (len(config.gate_counts), 2, 2, len(frequencies), 3, 3),
+            dtype=np.float64, on_update=update_view,
+        )
+        target = config.x90_f1 if config.target == "f1" else config.x90_f2
+        spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            # gate_count changes sequence structure, so only this axis stays on host.
+            for n, step in sched.scan("gate_count", config.gate_counts):
+                builder = TimelineBuilder(
+                    context.soccfg, reps=config.reps,
+                    initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                )
+                builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ
+                quadrature = builder.add_sweep(
+                    "quadrature", SweepCfg(start=0, stop=90, expts=2, step=90)
+                )
+                frequency = builder.add_sweep("frequency", config.frequency)
+                prepare = Pulse("prepare_target", target)
+                x180 = Pulse("spectator_x180", spectator)
+                projection = Pulse(
+                    "projection", target, phase=target.phase + quadrature
+                )
+                drive = Join(
+                    Pulse("cz_f1", config.drive.f1, freq=frequency),
+                    Pulse("cz_f2", config.drive.f2, freq=frequency),
+                )
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                with builder.branch(by="spectator_states", align_timeline=True) as cases:
+                    with cases.case(1):
+                        builder.emit(x180)
+                builder.emit(prepare)
+                for _ in range(n):
+                    builder.emit(drive)
+                builder.emit(projection)
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                step.run_acquire_summed(
+                    prog, context.soc,
+                    processor=shot_sums(prog, [
+                        Classify("terminal", config.roles.f1_tone),
+                        Classify("terminal", config.roles.f2_tone),
+                    ]),
+                    rounds=config.rounds, options=RunOptions(),
+                )
+        buffer.trigger_update(flush=True)
         return ConditionalPhaseResult(
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            np.array(config.gate_counts, dtype=np.int64),
-            sweep2array(config.frequency),
-            acquire_counts(config, context=context, heralded=False),
+            np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
+            np.array(config.gate_counts, dtype=np.int64), frequencies,
+            np.moveaxis(buffer.array, 0, 2),
         )
 
     def analyze(
@@ -386,8 +320,71 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         *,
         plots: Plots,
     ) -> ConditionalPhaseAnalysis:
-        """Analyze saved cfg and classified quadratures; never read current Form."""
+        """Fit per-gate slopes from complete counts and select a unique π crossing."""
         del options
-        if source.cfg is None:
+        cfg, data = source.cfg, source.result
+        if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        return analyze_phase(source.cfg, source.result, plots=plots)
+        frequencies = sweep2array(cfg.frequency)
+        if data.frequencies.shape != frequencies.shape or not np.allclose(
+            data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
+        ):
+            raise ValueError("Conditional phase frequency axis must match saved cfg")
+        for actual, expected in (
+            (data.spectator_states, np.arange(2)),
+            (data.quadratures, np.arange(2)),
+            (data.gate_counts, np.array(cfg.gate_counts)),
+        ):
+            if not np.array_equal(actual, expected):
+                raise ValueError("Conditional phase count axes must match saved cfg")
+        if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
+            raise ValueError("Expected spectator × quadrature × n × frequency × 3 × 3 counts")
+        quadratures = sigma(data.sums, cfg.target)
+        acquired = data.sums.sum(axis=(-2, -1))
+        variances = sigma_variance(data.sums, cfg.target)
+        phases = phase_points(quadratures)
+        fitted = fit_phase_slopes(
+            data.gate_counts, quadratures[None], variances[None], acquired[None]
+        )
+        conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
+        crossings = phase_crossings(data.frequencies, conditional)
+        reasons = [reason for state in fitted.reasons for reason in state if reason]
+        reason = "; ".join(dict.fromkeys(reasons)) if reasons else crossings.reason
+        answer = ConditionalPhaseAnalysis(
+            phases, quadratures, acquired, tuple(cfg.gate_counts),
+            tuple(float(f) for f in data.frequencies), fitted, conditional, crossings,
+            crossings.frequencies_mhz[0] if reason is None else None, reason,
+        )
+
+        fig, _ = plots.subplots("phase", nrows=3, figsize=(10, 10), layout="constrained")
+        fig.suptitle(f"{cfg.target.upper()} target · actual spectator g/e")
+        for b, state in enumerate(("g (I)", "e (Xπ)")):
+            for j, n in enumerate(data.gate_counts):
+                fig.axes[0].plot(data.frequencies, [p.contrast for p in phases[b][j]],
+                                 ".-", label=f"{state} n={n}")
+                fig.axes[1].plot(data.frequencies,
+                    [np.nan if p.logical_phase_deg is None else p.logical_phase_deg for p in phases[b][j]],
+                    ".-", label=f"{state} n={n}")
+        fig.axes[2].plot(data.frequencies, conditional, ".-", label="Fitted slope_e − slope_g")
+        for crossing in crossings.frequencies_mhz:
+            fig.axes[2].plot(crossing, -180, "x", label="Per-gate π crossing")
+        fig.axes[2].axhline(-180, color="gray", linestyle="--")
+        fig.axes[2].set_title(reason or f"Unique fitted crossing: {answer.frequency_mhz:g} MHz")
+        for ax, label in zip(fig.axes, ("Contrast", "Logical phase (deg)", "Conditional phase (deg/gate)"), strict=True):
+            ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
+            ax.legend(fontsize="small", ncols=2)
+        fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+        for b, state in enumerate(("g", "e")):
+            for q, projection in enumerate(("X", "Y")):
+                for j, n in enumerate(data.gate_counts):
+                    axes.plot(data.frequencies, quadratures[b, q, j],
+                              ".-", label=f"{state} {projection} n={n}")
+        axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
+        axes.legend(fontsize="small", ncols=3)
+        fig, axes = plots.subplots("slopes", figsize=(10, 5))
+        for b, state in enumerate(("g", "e")):
+            axes.errorbar(data.frequencies, fitted.slopes_deg[b], yerr=fitted.errors_deg[b],
+                          fmt=".-", label=f"Actual spectator {state}")
+        axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
+        axes.legend()
+        return answer
