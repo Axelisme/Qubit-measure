@@ -1,4 +1,4 @@
-"""Ground-ground heralded two-target local Z."""
+"""Independent gg/ee heralded two-target local Z."""
 
 from dataclasses import dataclass
 from itertools import product
@@ -89,7 +89,7 @@ class LocalZHeraldedAnalysis(LocalZAnalysis):
 
 
 class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
-    """Analyze classified X/Y projections conditioned on herald (g,g)."""
+    """Compare independent classified gg/ee local-Z slopes; write back gg."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[LocalZHeraldedResult, LocalZHeraldedCfg]] = (
         GroupedAxesSpec(

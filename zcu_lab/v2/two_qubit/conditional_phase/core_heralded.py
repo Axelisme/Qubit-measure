@@ -1,4 +1,4 @@
-"""Ground-ground heralded conditional phase."""
+"""Joint gg/ee heralded conditional phase."""
 
 from dataclasses import dataclass
 from itertools import product
@@ -106,7 +106,7 @@ class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
 class ConditionalPhaseHeraldedExp(
     Experiment[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]
 ):
-    """Analyze classified X/Y projections conditioned on herald (g,g)."""
+    """Joint-fit classified gg/ee X/Y projections by actual spectator state."""
 
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[ConditionalPhaseHeraldedResult, ConditionalPhaseHeraldedCfg]

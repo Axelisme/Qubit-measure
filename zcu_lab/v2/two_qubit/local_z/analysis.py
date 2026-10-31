@@ -18,7 +18,7 @@ class LocalZTargetFit:
     unwrapped_deg/fit_curve have Nn entries, or None when any phase is missing.
     slope_deg is logical Bloch accrual per CZ; correction_deg is its negative,
     never rewrapped. intercept_deg is the preparation/projection offset.
-    slope_error_deg is the 1σ count-propagated weighted-fit covariance.
+    slope_error_deg is the 1σ error from the count-propagated fit covariance.
     fit_quality holds residual/relative uncertainty diagnostics without a gate.
     Unavailable fits retain None values and reason, never a substituted zero.
     """
@@ -86,6 +86,12 @@ def fit_target(
         weighted, y / np.sqrt(variances_deg2), rcond=None
     )[0]
     curve = intercept + slope * n
+    if (
+        not np.all(np.isfinite([slope, intercept]))
+        or not np.all(np.isfinite(covariance))
+        or not np.all(np.isfinite(curve))
+    ):
+        return LocalZTargetFit(reason="Nonfinite weighted fit or covariance uncertainty")
     quality = compute_fit_quality(
         y,
         curve,

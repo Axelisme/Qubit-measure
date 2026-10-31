@@ -36,11 +36,11 @@ from zcu_tools.program.v2.modules import Join, MuxReadout
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
-from .._phase import sigma_variance
 from .._readout import JointRoles
 from .._sums import sigma, validate_classifiers
 from .analysis import (
     ConditionalPhaseAnalysis,
+    count_quadratures,
     fit_phase_slopes,
     fitted_crossings,
     gate_count_alias_reason,
@@ -365,9 +365,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
             )
-        quadratures = sigma(data.sums, cfg.target)
-        acquired = data.sums.sum(axis=(-2, -1))
-        variances = sigma_variance(data.sums, cfg.target)
+        statistics = count_quadratures(data.sums, cfg.target)
+        quadratures, acquired, variances = statistics.values, statistics.acquired, statistics.variances
         phases = phase_points(quadratures)
         fitted = fit_phase_slopes(
             data.gate_counts, quadratures[None], variances[None], acquired[None]
