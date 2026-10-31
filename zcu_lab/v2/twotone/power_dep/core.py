@@ -11,7 +11,14 @@ from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    GainSweep,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import minus_background
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -117,18 +124,21 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # Acquire a complete spectrum at each fixed drive gain.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
 
                 freq_sweep = cfg.freq
                 freq_param = builder.add_sweep("freq", freq_sweep)
 
                 # Reset and initialize before each probe; read out its response.
 
-                builder.emit(Reset('reset', cfg.reset))
-                builder.emit(Pulse('init_pulse', cfg.init_pulse))
-                builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param, gain=step.value))
-                builder.emit(Readout('readout', cfg.readout))
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.emit(
+                    Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param, gain=step.value)
+                )
+                builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(prog, soc, rounds=cfg.rounds)
 

@@ -6,10 +6,10 @@ from typing import TypeAlias
 from pydantic import BaseModel, Field
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.utils import make_sweep
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.experiment.utils import make_sweep
 
 from .core import CPMG_Cfg, CPMG_Exp, CPMG_Result, CPMGAnalysis, CPMGAnalyzeOptions
 from .form import CPMGInput, make_form
@@ -63,7 +63,9 @@ def _run(inp: CPMGInput, *, context: RunContext) -> RunRecord[CPMG_Cfg, CPMG_Res
         pi_pulse=inp.pi_pulse,
         readout=inp.readout,
         count=inp.count,
-        delay=make_sweep(start=inp.min_length_us, stop=inp.max_length_us, expts=inp.length_points),
+        delay=make_sweep(
+            start=inp.min_length_us, stop=inp.max_length_us, expts=inp.length_points
+        ),
         detune_ratio=inp.detune_ratio,
         earlystop_snr=inp.earlystop_snr,
     )

@@ -237,21 +237,30 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         pi2_pulse = cfg.pi2_pulse
         pi_pulse = cfg.pi_pulse
 
-        times = np.array(cfg.times, dtype=np.int64)
+        times = np.array(cfg.count, dtype=np.int64)
 
-        windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
+        windows = (
+            [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
+        )
         if len(windows) != len(times):
             raise ValueError("Provide one delay window or one per pi-pulse count")
         if len({window.expts for window in windows}) != 1:
             raise ValueError("All delay windows must have the same number of points")
-        lengths = np.array([
-            sweep2array(window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)})
-            for window, count in zip(windows, times, strict=True)
-        ])
+        lengths = np.array(
+            [
+                sweep2array(
+                    window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)}
+                )
+                for window, count in zip(windows, times, strict=True)
+            ]
+        )
         length_idxs = np.arange(windows[0].expts, dtype=np.int64)
 
         # Reject timing that cannot fit the preparation and refocusing pulses.
-        min_interval = min(window.start / (2 * count) for window, count in zip(windows, times, strict=True))
+        min_interval = min(
+            window.start / (2 * count)
+            for window, count in zip(windows, times, strict=True)
+        )
         if min_interval < 0.5 * (  # the first and last delays are half of the interval
             pi2_pulse.waveform.length + pi_pulse.waveform.length
         ):
@@ -302,10 +311,16 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
                 delay_sweep = windows[idx]
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 delay = builder.add_sweep("delay", delay_sweep)
-                detune_param = 360 * detune_ratio * sweep2param(
-                    "delay", make_sweep(start=0, step=1, expts=delay_sweep.expts)
+                detune_param = (
+                    360
+                    * detune_ratio
+                    * sweep2param(
+                        "delay", make_sweep(start=0, step=1, expts=delay_sweep.expts)
+                    )
                 )
                 interval = delay / (2 * time)
 
@@ -324,17 +339,27 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 builder.emit(Pulse("last_pi_pulse", pi_pulse), timeline="last_refocus")
                 builder.delay_timeline(interval + 0.5 * dpulse_len)
                 builder.sync()
-                builder.emit(Pulse(
-                    "pi2_projection", pi2_pulse, phase=pi2_pulse.phase + detune_param
-                ))
+                builder.emit(
+                    Pulse(
+                        "pi2_projection",
+                        pi2_pulse,
+                        phase=pi2_pulse.phase + detune_param,
+                    )
+                )
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(
-                    prog, soc, rounds=cfg.rounds,
-                    options=RunOptions(stop_condition=snr_checker(
-                        signals_buffer[step], earlystop_snr,
-                        lambda x: rotate2real(x).real, after_check=update_snr,
-                    )),
+                    prog,
+                    soc,
+                    rounds=cfg.rounds,
+                    options=RunOptions(
+                        stop_condition=snr_checker(
+                            signals_buffer[step],
+                            earlystop_snr,
+                            lambda x: rotate2real(x).real,
+                            after_check=update_snr,
+                        )
+                    ),
                     **(acquire_kwargs or {}),
                 )
 

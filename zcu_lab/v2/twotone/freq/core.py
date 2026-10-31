@@ -181,19 +181,32 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             freq_sweep = cfg.freq
             freq_param = builder.add_sweep("freq", freq_sweep)
 
             # Reset and initialize before the FPGA-swept probe, then read out.
 
-            builder.emit(Reset('reset', cfg.reset))
-            builder.emit(Pulse('init_pulse', cfg.init_pulse))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param))
-            builder.emit(Readout('readout', cfg.readout))
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(prog, soc, rounds=cfg.rounds, options=RunOptions(retry=cfg.acquire_retry, stop_condition=snr_checker(signals_buffer.at(), cfg.earlystop_snr, lambda data: rotate2real(data).real)))
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda data: rotate2real(data).real,
+                    ),
+                ),
+            )
 
         return FreqResult(
             freqs=freqs,

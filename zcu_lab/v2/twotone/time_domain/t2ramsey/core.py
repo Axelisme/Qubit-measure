@@ -150,22 +150,40 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             on_update=lambda data: viewer.update(lengths, t2ramsey_signal2real(data)),
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             length_sweep = cfg.delay
             length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
 
             # 3. Let coherence evolve freely, then project with the phase ramp.
 
-            builder.emit(Reset('reset', cfg.reset))
-            builder.emit(Pulse('pi2_pulse1', cfg.pi2_pulse))
-            builder.emit(Delay('t2_delay', delay=length_param))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
+            builder.emit(Delay("t2_delay", delay=length_param))
             builder.sync()
-            builder.emit(Pulse(name='pi2_pulse2', cfg=cfg.pi2_pulse.with_updates(phase=cfg.pi2_pulse.phase + detune_param)))
-            builder.emit(Readout('readout', cfg.readout))
+            builder.emit(
+                Pulse(
+                    name="pi2_pulse2",
+                    cfg=cfg.pi2_pulse.with_updates(
+                        phase=cfg.pi2_pulse.phase + detune_param
+                    ),
+                )
+            )
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(prog, soc, rounds=cfg.rounds, options=RunOptions(retry=cfg.acquire_retry, stop_condition=snr_checker(signals_buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real)))
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real
+                    ),
+                ),
+            )
 
         # Keep measured IQ separate from fitted coherence times and fringe frequency.
         return T2RamseyResult(

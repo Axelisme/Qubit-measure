@@ -18,7 +18,14 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2
+from zcu_tools.program.v2 import (
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -157,10 +164,14 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 options=RunOptions(
                     retry=cfg.acquire_retry,
-                    stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, rabi_signal2real),
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, rabi_signal2real
+                    ),
                 ),
             )
         return LenRabiResult(lengths=lengths, signals=signals.array)
@@ -180,10 +191,13 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
         signals = SignalBuffer(
             (cfg.rounds, len(lengths)),
-            on_update=lambda data: viewer.update(lengths, rabi_signal2real(average_round(data))),
+            on_update=lambda data: viewer.update(
+                lengths, rabi_signal2real(average_round(data))
+            ),
         )
         check_snr = snr_checker(
-            signals.at(), cfg.earlystop_snr,
+            signals.at(),
+            cfg.earlystop_snr,
             lambda data: rabi_signal2real(average_round(data)),
         )
         with Schedule(None, signals, scope=context.scope) as sched:
@@ -200,7 +214,9 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                         builder.emit(Readout("readout", cfg.readout))
                         programs[length_key] = builder.build()
                     step.run_acquire(
-                        programs[length_key], context.soc, rounds=1,
+                        programs[length_key],
+                        context.soc,
+                        rounds=1,
                         options=RunOptions(retry=cfg.acquire_retry),
                     )
                 if check_snr():
@@ -238,7 +254,12 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         real_signals = real_signals[~nan_mask]
 
         # 2. Fit this length scan with the user's envelope and phase choices.
-        fit = fit_rabi(lens, real_signals, decay=options.decay, init_phase=None if options.fit_phase else 0.0)
+        fit = fit_rabi(
+            lens,
+            real_signals,
+            decay=options.decay,
+            init_phase=None if options.fit_phase else 0.0,
+        )
         pi_len = fit.pi_x
         pi_len_err = fit.pi_x_err
         pi2_len = fit.pi2_x

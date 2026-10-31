@@ -125,17 +125,24 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         # 2. Scan gains on the host; sweep tone duration inside each program.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
 
                 length_sweep = cfg.length
                 length_param = builder.add_sweep("length", length_sweep)
 
-
-                builder.emit(Reset('reset', cfg.reset))
-                builder.emit(Pulse('pi_pulse', cfg.pi_pulse))
-                builder.emit(Pulse("test_pulse", cfg.test_pulse, length=length_param, gain=step.value))
-                builder.emit(Readout('readout', cfg.readout))
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.emit(
+                    Pulse(
+                        "test_pulse",
+                        cfg.test_pulse,
+                        length=length_param,
+                        gain=step.value,
+                    )
+                )
+                builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
                 step.run_acquire(prog, soc, rounds=cfg.rounds)
 

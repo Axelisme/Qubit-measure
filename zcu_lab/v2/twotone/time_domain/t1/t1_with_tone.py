@@ -105,17 +105,17 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-
             # 2. Sweep the tone after excitation, then acquire the readout IQ.
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             length_sweep = cfg.length
             length_param = builder.add_sweep("length", length_sweep)
 
-
-            builder.emit(Reset('reset', cfg.reset))
-            builder.emit(Pulse(name='pi_pulse', cfg=cfg.pi_pulse))
-            builder.emit(Pulse(name='test_pulse', cfg=cfg.test_pulse))
-            builder.emit(Readout('readout', cfg.readout))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse(name="pi_pulse", cfg=cfg.pi_pulse))
+            builder.emit(Pulse(name="test_pulse", cfg=cfg.test_pulse))
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 

@@ -138,17 +138,28 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain_sweep = cfg.gain
             gain_param = builder.add_sweep("gain", gain_sweep)
 
-            builder.emit(Reset('reset', cfg.reset))
-            builder.emit(Pulse('init_pulse', cfg.init_pulse))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain_param))
-            builder.emit(Readout('readout', cfg.readout))
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(prog, soc, rounds=cfg.rounds, options=RunOptions(retry=cfg.acquire_retry, stop_condition=snr_checker(signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real)))
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
+                    ),
+                ),
+            )
 
         return AmpRabiResult(amps=gains, signals=signals_buffer.array)
 

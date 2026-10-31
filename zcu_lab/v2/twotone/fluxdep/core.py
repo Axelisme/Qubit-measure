@@ -143,16 +143,23 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                 )
 
                 # Reset and initialize before each frequency-swept probe and readout.
-                builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
                 freq_sweep = cfg.freq
                 freq_param = builder.add_sweep("freq", freq_sweep)
 
-                builder.emit(Reset('reset', cfg.reset))
-                builder.emit(Pulse('init_pulse', cfg.init_pulse))
+                builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param))
-                builder.emit(Readout('readout', cfg.readout))
+                builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-                step.run_acquire(prog, soc, options=RunOptions(retry=cfg.fail_retry), rounds=cfg.rounds)
+                step.run_acquire(
+                    prog,
+                    soc,
+                    options=RunOptions(retry=cfg.fail_retry),
+                    rounds=cfg.rounds,
+                )
 
         return FreqFluxResult(
             values=dev_values,

@@ -27,7 +27,6 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     DelayAuto,
     LoadValue,
     Pulse,
@@ -141,7 +140,11 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         viewer = live_line(
-            context.plots, "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+            context.plots,
+            "measurement",
+            "Time (us)",
+            "Amplitude",
+            title="T1 relaxation",
         )
         signals = SignalBuffer(
             (len(lengths),),
@@ -159,10 +162,14 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 options=RunOptions(
                     retry=cfg.acquire_retry,
-                    stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, t1_signal2real),
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                    ),
                 ),
             )
         return T1Result(times=lengths, signals=signals.array)
@@ -180,20 +187,29 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             builder.add_loop("delay", len(lengths))
-            builder.emit(LoadValue(
-                "load_t1_delay", values=list(table.cycles),
-                idx_reg="delay", val_reg="t1_delay_cycle", auto_compress=False,
-            ))
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(table.cycles),
+                    idx_reg="delay",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            )
             builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
             sched.run_acquire(
-                prog, context.soc, rounds=cfg.rounds,
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
                 options=RunOptions(
                     retry=cfg.acquire_retry,
-                    stop_condition=snr_checker(signals.at(), cfg.earlystop_snr, t1_signal2real),
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                    ),
                 ),
             )
         return T1Result(times=lengths, signals=signals.array)

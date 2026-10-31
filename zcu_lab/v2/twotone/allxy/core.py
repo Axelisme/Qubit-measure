@@ -15,7 +15,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset
+from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -241,14 +241,34 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
 
             # Load each gate pair, reset, then play gate 1 -> gate 2 -> readout.
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
-            builder.add_loop('allxy_idx', len(ALLXY_SEQUENCE))
-            builder.emit(LoadValue('load_gate1_idx', values=ALLXY_GATE1_IDX, idx_reg='allxy_idx', val_reg='gate_idx1'))
-            builder.emit(LoadValue('load_gate2_idx', values=ALLXY_GATE2_IDX, idx_reg='allxy_idx', val_reg='gate_idx2'))
-            builder.emit(Reset('reset', cfg=cfg.reset))
-            builder.emit(ComputedPulse('gate1', val_reg='gate_idx1', pulses=gate_pulses))
-            builder.emit(ComputedPulse('gate2', val_reg='gate_idx2', pulses=gate_pulses))
-            builder.emit(Readout('readout', cfg=cfg.readout))
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("allxy_idx", len(ALLXY_SEQUENCE))
+            builder.emit(
+                LoadValue(
+                    "load_gate1_idx",
+                    values=ALLXY_GATE1_IDX,
+                    idx_reg="allxy_idx",
+                    val_reg="gate_idx1",
+                )
+            )
+            builder.emit(
+                LoadValue(
+                    "load_gate2_idx",
+                    values=ALLXY_GATE2_IDX,
+                    idx_reg="allxy_idx",
+                    val_reg="gate_idx2",
+                )
+            )
+            builder.emit(Reset("reset", cfg=cfg.reset))
+            builder.emit(
+                ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses)
+            )
+            builder.emit(
+                ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses)
+            )
+            builder.emit(Readout("readout", cfg=cfg.readout))
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)
 

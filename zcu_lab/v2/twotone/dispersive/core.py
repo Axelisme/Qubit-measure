@@ -183,14 +183,16 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
 
         # Sweep readout frequency for both preparations in the same FPGA program.
         with Schedule(None, signals_buffer, scope=context.scope) as sched:
-            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             freq_sweep = cfg.freq
             freq_param = builder.add_sweep("freq", freq_sweep)
 
-            builder.add_loop('ge', 2)
+            builder.add_loop("ge", 2)
 
-            builder.emit(Reset('reset', cfg.reset))
-            builder.emit(Pulse('init_pulse', cfg.init_pulse))
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
             with builder.branch(by="ge", align_timeline=False) as cases:
                 with cases.case(1):
                     builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
