@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-30，Branch 與平行 Module Join
+**Last updated:** 2026-10-31，compiled simulation acquisition
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -118,7 +118,8 @@ The cfg-based APIs delegate to these same word decoders.
 `initial_delay` 的型別為 `float`，不接受 `None`。
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
-Builder 與模擬 frontend 尚未切換，既有 acquire 擴充仍由共同基底提供。
+Builder 尚未遷移。`SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
+既有 acquire 擴充仍由共同基底提供。
 
 每條 timeline 只保存相對 reference 的結尾。
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。

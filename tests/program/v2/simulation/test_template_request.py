@@ -319,7 +319,8 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
         reps=2,
     )
     with pytest.raises(
-        ValueError, match="^simulation requires reps not to change the timeline$"
+        ValueError,
+        match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)",
     ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -377,7 +378,7 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
         reps=2,
     )
     with pytest.raises(
-        ValueError, match="^simulation requires reps not to change the timeline$"
+        ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
     ):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds

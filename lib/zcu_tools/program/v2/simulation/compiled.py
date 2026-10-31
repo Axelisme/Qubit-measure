@@ -685,7 +685,7 @@ def build_compiled_request(
     malformed/missing loop definitions, cross-shot state or pending config carry,
     and ambiguous routing raise ValueError
     with instruction type, pre-optimization position and available source/loops.
-    Acquisition still uses the separate Module frontend until its migration.
+    SimulationSoc acquisition uses this builder for native and Modular programs.
     """
     prog.compile()
     records, loops, branches = predecode(prog)

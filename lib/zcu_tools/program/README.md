@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-30，native IQ 與 processor-only herald 契約
+**Last updated:** 2026-10-31，compiled simulation acquisition
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -8,7 +8,7 @@
 
 ## Program 層定位
 
-`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。它保留原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。Builder 與模擬 frontend 尚未切換。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。它保留原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。Builder 尚未遷移。`SimulationSoc` acquisition 透過 compiled frontend 執行兩種 program 的受支援 instruction effects。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
 
 ## Native acquisition
 

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-30, independent compiled lanes and shot-state admission
+**Last updated:** 2026-10-31, compiled acquisition entry
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -95,7 +95,9 @@ mutable in the shot, even when later updates have equal values. Pending FIFO
 updates cannot carry across points/reps.
 This timing rule is a simulation model, not a sample-exact hardware claim.
 
-This builder is not the acquire frontend. `_simulation_call` still uses the Module tree.
+`SimulationAcquireMixin` calls this builder for both `TimelineProgramV2` and
+`ModularProgramV2`, passing the bound SoC's routes. Other SoC objects keep the
+original QICK acquisition path.
 The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
 native sweep/reps shells, marked inner loops and register-selected branches.
 Body boundaries distinguish acquisition axes from body-local Repeat counters,
@@ -183,8 +185,8 @@ registered with an error; they do not prevent GUI exit or trigger automatic retr
 ## Compact timelines and statistics
 
 Each sweep point has one interpreted timeline per acquire, not one per shot.
-The adapter interprets the Module tree in vector mode and emits templates,
-partitioning the grid only where event structure differs. Reps and rounds repeat
+The adapter interprets the pre-optimization compiled stream over independent
+scan lanes and emits numeric templates. Reps and rounds repeat
 the same controls. A timeline that depends on rep index fails fast with no
 per-shot fallback.
 
@@ -210,28 +212,28 @@ points or reps.
 `core.simulation` owns immutable numeric records. No Module, driver, GUI object
 or callback crosses this boundary; `RoundRequest.cancel` is a read-only `is_set()`
 query, not a callback. Time is us, frequency MHz, phase degrees and
-gain normalized DAC amplitude. The frontend interprets exact supported Module
-classes, not arbitrary tProcessor instructions. Unknown subclasses, raw program setup/body/cleanup or make_program overrides, raw loop
-hooks and undefined or
-incorrectly typed registers fail before the backend produces any data. Errors
-identify the concrete Module type/name, loop coordinates and relevant register.
+gain normalized DAC amplitude. The frontend accepts supported instruction effects
+from native operations, Module lowering and raw assembly, including NOP hooks.
+It rejects measurement-dependent jumps, unmarked jumps, body waits/resyncs,
+tProc clock reads and cross-shot state carry before backend execution.
+Errors identify the instruction class, pre-optimization position and available
+loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
-TablePulseReadout, Join and the existing reset wrappers. Join interleaves branches
-in the same static minimum-time order as hardware emission and rejects
-cross-branch register dependencies. Reset wrappers emit actual pulses only;
-they do not reset a quantum state. LoadValue compression does not affect semantic
-values. LoadWord keeps uint32 patterns until a named readout frequency/gain
-consumer decodes them; scalar delay/count consumers cannot reinterpret words.
+TablePulseReadout, Join and the existing reset wrappers. Join preserves compiled
+emission order. Its register effects follow the same shot-local and live-in rules
+as other instructions. Reset wrappers emit actual pulses only; they do not reset
+a quantum state. LoadValue compression does not affect semantic values.
+LoadWord preserves uint32 words; each compiled consumer applies its operand semantics.
 
-The frontend interprets the Module tree once over a NumPy grid of non-reps
-points. `AcquireRequest.templates` partitions that grid into structural classes.
+The frontend predecodes the compiled stream once over a NumPy grid of non-reps
+points. `AcquireRequest.templates` covers that grid with numeric slots.
 Each event slot has point arrays for quantized timing, carrier, phase, signed gain,
-envelope selection and activity. Repeat expands to its fixed count or register
-range bound, with inactive slots beyond each point's count. Branch selections
-partition templates. Generator and per-read ADC routing checks use these templates.
-Any consumed parameter that depends on reps raises before backend execution.
+envelope selection and activity. Marked inner loops execute with active-lane masks
+and retain nested iteration coordinates. Branches select lanes using compiled
+registers and flags. Generator and per-read ADC routing checks use these templates.
+Reps remain request metadata; their shell cannot update other shot state.
 
 `materialize_point(point)` expands one point into a detached `PointTimeline` for
 diagnostics. `PulseEvent` retains signed gain, carrier MHz, phase degrees, source,

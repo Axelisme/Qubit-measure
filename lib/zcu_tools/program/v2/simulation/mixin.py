@@ -374,7 +374,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             self._simulation_active = True
             try:
                 request = build_compiled_request(
-                    self,
+                    self._program(),
                     mode,
                     soc.binding,
                     sequence,
