@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality
-from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, SharedFitResult, fit_shared
-from collections.abc import Sequence
+from zcu_tools.analysis.fitting.shared import (
+    FitTrace,
+    ParameterSpec,
+    SharedFitResult,
+    fit_shared,
+)
 from zcu_tools.cfg_model import ConfigBase
 
 from ...twotone.irb.analysis import IRBAnalysis
+
 
 class RBOptions(ConfigBase):
     """Analysis-only reproducible paired-seed bootstrap settings.
@@ -104,15 +110,20 @@ def paired_means(survival: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def validate_axes(
-    axes: tuple[NDArray[np.int64], ...], expected: tuple[Sequence[int] | NDArray[np.int64], ...],
+    axes: tuple[NDArray[np.int64], ...],
+    expected: tuple[Sequence[int] | NDArray[np.int64], ...],
 ) -> None:
     """Require persisted axis identities to match the saved configuration."""
-    if any(not np.array_equal(actual, wanted) for actual, wanted in zip(axes, expected, strict=True)):
+    if any(
+        not np.array_equal(actual, wanted)
+        for actual, wanted in zip(axes, expected, strict=True)
+    ):
         raise ValueError("RB count axes do not match saved cfg")
 
 
 def seed_statistics(
-    survival: NDArray[np.float64], totals: NDArray[np.float64],
+    survival: NDArray[np.float64],
+    totals: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Average paired rounds equally inside seeds, returning (seed,arm,depth).
 
@@ -128,17 +139,30 @@ def seed_statistics(
     means = np.full(survival.shape[:-1], np.nan)
     variances = np.full_like(means, np.nan)
     variance = np.full_like(survival, np.nan)
-    np.divide(np.maximum(survival * (1 - survival), 0.25 / np.maximum(totals, 1)),
-              totals, out=variance, where=totals > 0)
-    np.divide(np.where(valid, survival, 0).sum(axis=-1), nrounds[None, :, None],
-              out=means, where=nrounds[None, :, None] > 0)
-    np.divide(np.where(valid, variance, 0).sum(axis=-1), nrounds[None, :, None] ** 2,
-              out=variances, where=nrounds[None, :, None] > 0)
+    np.divide(
+        np.maximum(survival * (1 - survival), 0.25 / np.maximum(totals, 1)),
+        totals,
+        out=variance,
+        where=totals > 0,
+    )
+    np.divide(
+        np.where(valid, survival, 0).sum(axis=-1),
+        nrounds[None, :, None],
+        out=means,
+        where=nrounds[None, :, None] > 0,
+    )
+    np.divide(
+        np.where(valid, variance, 0).sum(axis=-1),
+        nrounds[None, :, None] ** 2,
+        out=variances,
+        where=nrounds[None, :, None] > 0,
+    )
     return means.transpose(1, 2, 0), variances.transpose(1, 2, 0)
 
 
 def aggregate_seeds(
-    means: NDArray[np.float64], variances: NDArray[np.float64],
+    means: NDArray[np.float64],
+    variances: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Equal-seed mean and propagated binomial standard error, shape (2,depth).
 
@@ -148,17 +172,23 @@ def aggregate_seeds(
     kept = np.isfinite(means).all(axis=(1, 2))
     count = int(kept.sum())
     if count < 2:
-        raise ValueError("Need at least two seeds with complete reference/interleaved pairs per herald")
+        raise ValueError(
+            "Need at least two seeds with complete reference/interleaved pairs per herald"
+        )
     return means[kept].mean(axis=0), np.sqrt(variances[kept].sum(axis=0)) / count
 
 
-def decay_model(depth: NDArray[np.float64], p: float, amplitude: float, offset: float) -> NDArray[np.float64]:
+def decay_model(
+    depth: NDArray[np.float64], p: float, amplitude: float, offset: float
+) -> NDArray[np.float64]:
     """Return A*p**depth+B in probability coordinates."""
     return amplitude * np.power(p, depth) + offset
 
 
 def fit_joint_decay(
-    depths: NDArray[np.int64], means: NDArray[np.float64], errors: NDArray[np.float64],
+    depths: NDArray[np.int64],
+    means: NDArray[np.float64],
+    errors: NDArray[np.float64],
 ) -> tuple[SharedFitResult, NDArray[np.float64]]:
     """Fit (herald,arm,depth) curves, one decay per arm, own A/B per herald.
 
@@ -176,26 +206,39 @@ def fit_joint_decay(
             curve = means[herald, arm]
             amplitude = float(curve[0] - curve[-1])
             names = (f"p_{arm}", f"A_{herald}_{arm}", f"B_{herald}_{arm}")
-            parameters.extend((
-                ParameterSpec(names[1], amplitude, limits=(-1.0, 1.0)),
-                ParameterSpec(names[2], float(curve[-1]), limits=(0.0, 1.0)),
-            ))
+            parameters.extend(
+                (
+                    ParameterSpec(names[1], amplitude, limits=(-1.0, 1.0)),
+                    ParameterSpec(names[2], float(curve[-1]), limits=(0.0, 1.0)),
+                )
+            )
             traces.append(FitTrace(xs, curve, decay_model, names, errors[herald, arm]))
     fit = fit_shared(traces, parameters)
-    if not fit.diagnostics.valid or not np.isfinite(fit.covariance).all() or fit.diagnostics.hesse_failed:
+    if (
+        not fit.diagnostics.valid
+        or not np.isfinite(fit.covariance).all()
+        or fit.diagnostics.hesse_failed
+    ):
         raise ValueError("IRB joint decay fit is unidentifiable or non-decaying")
     curves = np.empty_like(means)
     for herald in range(2):
         for arm in range(2):
             curves[herald, arm] = decay_model(
-                xs, fit.values[f"p_{arm}"], fit.values[f"A_{herald}_{arm}"], fit.values[f"B_{herald}_{arm}"],
+                xs,
+                fit.values[f"p_{arm}"],
+                fit.values[f"A_{herald}_{arm}"],
+                fit.values[f"B_{herald}_{arm}"],
             )
     return fit, curves
 
 
 def bootstrap_joint_error(
-    depths: NDArray[np.int64], seed_means: NDArray[np.float64],
-    seed_variances: NDArray[np.float64], *, samples: int, seed: int,
+    depths: NDArray[np.int64],
+    seed_means: NDArray[np.float64],
+    seed_variances: NDArray[np.float64],
+    *,
+    samples: int,
+    seed: int,
 ) -> tuple[float, float, int]:
     """95% d=4 ratio CI from paired seed-identity draws across both heralds.
 
@@ -211,7 +254,10 @@ def bootstrap_joint_error(
     for _ in range(samples):
         draw = rng.choice(identities, size=len(identities), replace=True)
         try:
-            statistics = [aggregate_seeds(seed_means[h, draw], seed_variances[h, draw]) for h in range(2)]
+            statistics = [
+                aggregate_seeds(seed_means[h, draw], seed_variances[h, draw])
+                for h in range(2)
+            ]
             means = np.array([item[0] for item in statistics])
             uncertainty = np.array([item[1] for item in statistics])
             fit, _ = fit_joint_decay(depths, means, uncertainty)

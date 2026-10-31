@@ -72,4 +72,3 @@ class CZPhasePair(ConfigBase):
             raise ValueError(
                 "CZ phase pair identities must match source F1/F2 in order"
             )
-
