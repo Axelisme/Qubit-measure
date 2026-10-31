@@ -107,7 +107,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             if self.relative_t == "auto":
                 start = end
             else:
-                start = self.book.math.add(end, self.relative_t)
+                start = self.book.math.add(end, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
@@ -130,7 +130,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             if limits is not None:
                 self.record(prog, limits[1], limits[0])
             return
-        t = end if self.relative_t == "auto" else end + self.relative_t
+        t = end if self.relative_t == "auto" else placement_time(prog, end + self.relative_t)
         previous_end = prog.get_timestamp(gen_ch=self.ch)
         self.source.t = t
         self.source.preprocess(prog)
@@ -168,7 +168,7 @@ class TimelinePlacedConfig(ConfigReadout):
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, self.relative_t)
+            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.event_end = EventEnd(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.source.t = self.book.math.preprocess_time(start)
@@ -176,7 +176,7 @@ class TimelinePlacedConfig(ConfigReadout):
             self.source.t_regs["t"] = start.register
             self.book.set_end(self.timeline, self.book.math.maximum(0.0, start))
             return
-        self.source.t = origin + self.relative_t
+        self.source.t = placement_time(prog, origin + self.relative_t)
         self.source.preprocess(prog)
         self.event_end = EventEnd(0.0, self.source.get_time_param("t"))
         self.book.set_end(
@@ -219,8 +219,9 @@ class TimelinePlacedTrigger(Trigger):
 
     def preprocess(self, prog) -> None:
         origin = self.book.end(self.timeline, placement=True)
+        self.width = placement_time(prog, self.width)
         if isinstance(origin, RuntimeEnd):
-            start = self.book.math.add(origin, self.relative_t)
+            start = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.runtime_start = start
             self.t = self.book.math.preprocess_time(start)
             super().preprocess(prog)
@@ -245,7 +246,7 @@ class TimelinePlacedTrigger(Trigger):
             )
             self.book.set_end(self.timeline, end)
             return
-        self.t = origin + self.relative_t
+        self.t = placement_time(prog, origin + self.relative_t)
         super().preprocess(prog)
         actual_t = self.get_time_param("t")
         end: Time = actual_t + self.get_time_param("width")

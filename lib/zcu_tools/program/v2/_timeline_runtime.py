@@ -77,8 +77,11 @@ def align_end(prog, value: float | QickParam) -> "Time":
 
 
 def placement_time(prog, value: float | QickParam) -> float | QickParam:
-    """Resolve QICK nearest-cycle placement, including scalar and sweep steps."""
-    return step_time(prog, value if isinstance(value, QickParam) else QickParam(value))
+    """Ceil scalar placement; author sweeps retain native start/step quantization."""
+    if isinstance(value, QickParam) and value.is_sweep():
+        return step_time(prog, value)
+    scalar = value.start if isinstance(value, QickParam) else value
+    return ceil_tick(scalar * get_fclk(prog)) / get_fclk(prog)
 
 
 def step_time(prog, value: float | QickParam) -> float | QickParam:
