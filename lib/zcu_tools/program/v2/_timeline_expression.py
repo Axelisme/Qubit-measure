@@ -975,9 +975,9 @@ def plan_time_choice(
             return [atom(value)]
         for entry in captured:
             delta = add_time(value, scale_time(entry, -1))
-            lo, _ = expression_limits(delta)
-            if isinstance(delta, TimeVariable) and lo is not None and lo >= 0:
-                return [_linear_add(atom(entry), linear(delta))]
+            lo, hi = expression_limits(delta)
+            if lo is not None and lo == hi:
+                return [_linear_add(atom(entry), TimeVariable(lo))]
         if isinstance(value, TimeAbs) and value.runtime.kind == ("max" if maximum else "min"):
             return [item for operand in value.runtime.operands for item in candidates(operand)]
         if isinstance(value, TimeVariable) and value.constant == 0 and len(value.terms) == 1:
