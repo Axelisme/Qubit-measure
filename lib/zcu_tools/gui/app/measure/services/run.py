@@ -34,7 +34,6 @@ from zcu_tools.gui.expected_error import FailedPreconditionError
 from zcu_tools.gui.session.context_types import CommandOrigin
 from zcu_tools.gui.session.operation_handles import OperationHandles, OperationOutcome
 from zcu_tools.gui.session.operation_runner import (
-    NO_RESULT,
     BgResult,
     ExclusionRequest,
     OperationRunner,
@@ -207,8 +206,6 @@ class RunService:
         return True
 
     def _append_acquired(self, op: _RunOperation, result: RunRecord[Any, Any]) -> None:
-        if result is NO_RESULT:
-            return
         if op.storage is None:
             logger.warning(
                 "Acquired omitted: tab_id=%r has no saved-point storage "
@@ -514,8 +511,8 @@ class RunService:
 
         Returns True when a live run token existed and was signalled (the request
         was issued), False when no run was in flight (a graceful no-op). This is
-        NOT a claim that the worker has stopped: the worker self-judges 'cancelled'
-        and emits its terminal asynchronously (ADR-0066) — the true terminal is
+        NOT a claim that the worker has stopped: a returned record is published
+        with a cancelled terminal, while an exception remains failed. Terminal is
         observed via the GUI's operation.await RPC or the MCP wait(op) tool.
         """
         logger.info("cancel_run")

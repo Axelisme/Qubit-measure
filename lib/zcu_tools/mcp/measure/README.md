@@ -434,7 +434,7 @@ Recipe 不建隱式 iteration，路徑直接由 recipe:<name> 掛 operation#N。
 
 Host loop 只在 execution worker。作者 task 不被 cancel，阻塞操作由 executor 合作 drain。
 每個 operation 都有顯式 Scope child，底層讀 scope.stop。根已停止時不再開始新的 await operation。
-`set_error` 只記本 scope 第一個錯誤並向下停止，不改祖先或後續兄弟。
+Core 的錯誤沿 operation 傳出，不把 stop token 當成錯誤通道。
 跨 thread 的 cancel／answer／control 經同一 loop 控制序列與 acknowledgement。
 Acknowledgement 不是 operation drain 的證明。
 `control(fn)` 的公開 memory-only callback ABI 見
