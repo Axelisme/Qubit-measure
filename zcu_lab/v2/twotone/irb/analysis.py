@@ -134,7 +134,7 @@ def analyze_irb(
             continue
         fidelities.append(float((1 + boot_ps[1] / boot_ps[0]) / 2))
     if len(fidelities) < 0.9 * bootstrap_samples:
-        raise ValueError(
+        raise AnalysisFailed(
             f"Unstable bootstrap: {len(fidelities)}/{bootstrap_samples} valid fits"
         )
     low, high = np.quantile(fidelities, [0.025, 0.975])
