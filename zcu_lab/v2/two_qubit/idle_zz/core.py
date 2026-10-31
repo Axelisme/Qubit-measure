@@ -307,7 +307,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 ):
                     builder.emit(spectator)
                 builder.emit(pi2)
-                builder.delay_timeline(delay)
+                builder.timeline_inc(delay)
                 builder.emit(projection)
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
