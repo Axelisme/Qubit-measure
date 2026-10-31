@@ -262,6 +262,22 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
     assert path.read_bytes() == before
 
 
+def test_native_round_trip_preserves_author_metadata(tmp_path: Path) -> None:
+    document = historical_metadata().model_dump(mode="json")
+    document["author_notes"] = {"sequence": [1, None, "calibration"], "enabled": True}
+    source = experiment.RunRecord(
+        ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=document
+    )
+    first = tmp_path / "first.h5"
+    second = tmp_path / "second.h5"
+    experiment.save_run(source, first, spec=declaration())
+    restored = experiment.load_run_with_metadata(first, spec=declaration())
+    experiment.save_run(restored, second, spec=declaration())
+    assert restored.metadata == document
+    assert load(first).docs["metadata"] == document
+    assert load(second).docs["metadata"] == document
+
+
 def test_native_save_requires_record_metadata(tmp_path: Path) -> None:
     record = experiment.RunRecord(
         ConfigBase(),
