@@ -16,7 +16,9 @@ F1 and F2 each require a circle classifier **with radius** in their readout tone
 
 ## Sequence and acquisition
 
-Each branch starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. Branch order is 00, 01, 10, 11, with F1 first. Branch 11 applies F1 Xπ then F2 Xπ. A single program sweeps all four preparations using a hardware loop and four named cases. The gg case emits no Xπ. Each case keeps its own duration before terminal readout. Without reset, preparations act on the thermal ensemble.
+Each shot starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. One program sweeps two hardware axes, `prepared_f1` outside `prepared_f2`. Each axis uses 0 for g (I) and 1 for e (Xπ), giving row order gg, ge, eg, ee.
+
+After reset finishes, the program forks into F1 and F2 timelines. Each timeline has an aligned branch that emits its Xπ only for case 1; case 0 is empty. Both Xπ pulses start together for ee. The timelines join before terminal readout, so all preparations have the same readout start time. Without reset, preparations act on the thermal ensemble.
 
 `reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
 
@@ -26,13 +28,13 @@ The live plot shows terminal P(g,g) from accumulated counts for each nominal bra
 
 ## Saved data and analysis
 
-Result stores `prepared_states=[0,1,2,3]` for named states gg, ge, eg, ee and float64 `sums` with shape `(4,3,3)`. The last axes are terminal F1 and F2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
+Result stores integer axes `prepared_f1=[0,1]` and `prepared_f2=[0,1]` (0=g, 1=e), and float64 `sums` with shape `(2,2,3,3)`. F1 is the outer preparation axis. The last axes are terminal F1 and F2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
 
 FIT shows a 4×9 count and row-normalized probability matrix. Columns are F1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds. Each row label shows its acquired shot count.
 
 The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
 
-Old raw-IQ files lack `sums` and fail Load explicitly. There is no conversion from saved IQ or old probabilities. Analyze uses only saved counts and needs no current library or cfg lookup.
+Old raw-IQ files lack `sums` and fail Load explicitly. Files with the old single preparation axis also fail Load. There is no conversion from saved IQ or old probabilities. Analyze uses only saved counts and needs no current library or cfg lookup.
 
 ## Heralded alternative
 

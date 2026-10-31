@@ -98,15 +98,17 @@ class JointReadoutHeraldedCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class JointReadoutHeraldedResult:
-    """prepared_states is int64 [0,1,2,3]; sums is float64 (4,3,3,3,3).
+    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3,3,3).
 
-    Nominal preparations are gg/ge/eg/ee. Class axes are herald F1/F2 then
+    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
+    Class axes are herald F1/F2 then
     terminal F1/F2, each g/e/other. Counts include all herald classes without
     normalization. Unmeasured points are NaN; completed rounds survive stop.
     The RunContext still reports cancellation or acquisition failure.
     """
 
-    prepared_states: NDArray[np.int64]
+    prepared_f1: NDArray[np.int64]
+    prepared_f2: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
@@ -138,10 +140,16 @@ class JointReadoutHeraldedAnalysis:
 def restore_result(
     data: GroupedLoadData[JointReadoutHeraldedCfg],
 ) -> JointReadoutHeraldedResult:
-    """Restore 81-class sums; old raw-IQ files without sums raise ValueError."""
+    """Load two-axis 81-class sums; old raw-IQ/single-axis files raise ValueError."""
     sums = data.variable("sums")
+    if sums.z.shape != (2, 2, 3, 3, 3, 3):
+        raise ValueError(
+            "Heralded joint readout requires two preparation axes "
+            "and sums (2,2,3,3,3,3)"
+        )
     return JointReadoutHeraldedResult(
-        prepared_states=sums.axes[4].astype(np.int64),
+        prepared_f1=sums.axes[5].astype(np.int64),
+        prepared_f2=sums.axes[4].astype(np.int64),
         sums=sums.z.astype(np.float64),
     )
 
@@ -163,9 +171,15 @@ class JointReadoutHeraldedExp(
                     VariableAxisSpec.generated_arange("herald_f2", ""),
                     VariableAxisSpec.generated_arange("herald_f1", ""),
                     VariableAxisSpec(
-                        "Nominal preparation",
+                        "Prepared F2 (0=g, 1=e)",
                         "",
-                        field_name="prepared_states",
+                        field_name="prepared_f2",
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        "Prepared F1 (0=g, 1=e)",
+                        "",
+                        field_name="prepared_f1",
                         dtype=np.int64,
                     ),
                 ),
@@ -189,7 +203,7 @@ class JointReadoutHeraldedExp(
     ) -> JointReadoutHeraldedResult:
         """Acquire optional reset → herald → named I/Xπ preparation → terminal.
 
-        Both reads reuse one mux object. Return raw (4,3,3,3,3) counts for every
+        Both reads reuse one mux object. Return raw (2,2,3,3,3,3) counts for every
         herald class. Rounds accumulate at acquisition; cfg remains unchanged.
         """
 
@@ -204,10 +218,10 @@ class JointReadoutHeraldedExp(
         def update_view(sums: NDArray[np.float64]) -> None:
             viewer.update(
                 np.arange(4, dtype=np.float64),
-                joint_probabilities(terminal_counts(sums, ("g", "g")))[..., 0, 0],
+                joint_probabilities(terminal_counts(sums, ("g", "g")))[..., 0, 0].reshape(4),
             )
 
-        buffer = SignalBuffer((4, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
+        buffer = SignalBuffer((2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
         with Schedule(config, buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -215,23 +229,26 @@ class JointReadoutHeraldedExp(
                 initial_delay=config.initial_delay,
                 relax_delay=config.relax_delay,
             )
-            builder.add_loop("prepared_states", len(PREPARED_STATES))
+            builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
+            builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
             readout = MuxReadout("readout", config.readout)
             x180_f1 = Pulse("x180_f1", config.x180_f1)
             x180_f2 = Pulse("x180_f2", config.x180_f2)
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset))
             builder.emit(readout, tag="herald")
-            with builder.branch(by="prepared_states") as cases:
-                for f1, f2 in PREPARED_STATES:
-                    with cases.case():
-                        if f1 == "e":
-                            builder.emit(x180_f1)
-                        if f2 == "e":
-                            builder.emit(x180_f2)
-            # Each case ends at its own duration. Consume that end before readout,
-            # without padding the shorter preparation paths.
+            # wait for herald/reset to finish before the branch-selected preparation
             builder.sync()
+            builder.fork("default", into=["f1", "f2"])
+            with builder.timeline("f1"):
+                with builder.branch(by="prepared_f1", align_timeline=True) as cases:
+                    with cases.case(1):  # F1 prepared in e
+                        builder.emit(x180_f1)
+            with builder.timeline("f2"):
+                with builder.branch(by="prepared_f2", align_timeline=True) as cases:
+                    with cases.case(1):  # F2 prepared in e
+                        builder.emit(x180_f2)
+            builder.join("f1", "f2", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
@@ -247,7 +264,11 @@ class JointReadoutHeraldedExp(
                 rounds=config.rounds,
                 options=RunOptions(),
             )
-        return JointReadoutHeraldedResult(np.arange(4, dtype=np.int64), buffer.array)
+        return JointReadoutHeraldedResult(
+            prepared_f1=np.arange(2, dtype=np.int64),
+            prepared_f2=np.arange(2, dtype=np.int64),
+            sums=buffer.array,
+        )
 
     def analyze(
         self,
@@ -265,33 +286,20 @@ class JointReadoutHeraldedExp(
         """
         del options
         result = source.result
-        if not np.array_equal(
-            result.prepared_states, np.arange(4)
-        ) or result.sums.shape != (
-            4,
-            3,
-            3,
-            3,
-            3,
+        if (
+            not np.array_equal(result.prepared_f1, np.arange(2))
+            or not np.array_equal(result.prepared_f2, np.arange(2))
+            or result.sums.shape != (2, 2, 3, 3, 3, 3)
         ):
             raise ValueError(
-                "Heralded joint readout requires prepared_states [0,1,2,3] "
-                "and sums (4,3,3,3,3)"
+                "Heralded joint readout requires prepared_f1/prepared_f2 [0,1] "
+                "and sums (2,2,3,3,3,3)"
             )
 
         # Herald ee starts with both qubits excited. The same I/Xπ preparation
         # reaches the complementary state, so align nominal ee/eg/ge/gg to gg/ge/eg/ee.
-        ee_order = [
-            PREPARED_STATES.index(
-                (
-                    "e" if f1 == "g" else "g",
-                    "e" if f2 == "g" else "g",
-                )
-            )
-            for f1, f2 in PREPARED_STATES
-        ]
-        gg = terminal_counts(result.sums, ("g", "g"))
-        ee = terminal_counts(result.sums, ("e", "e"))[ee_order]
+        gg = terminal_counts(result.sums, ("g", "g")).reshape(4, 3, 3)
+        ee = terminal_counts(result.sums, ("e", "e"))[::-1, ::-1].reshape(4, 3, 3)
         # Cancellation may leave only one route to an actual state measured.
         # Retain that route's counts; preserve NaN when neither was measured.
         available_counts = np.stack((gg, ee))
@@ -300,8 +308,8 @@ class JointReadoutHeraldedExp(
         counts = np.stack((gg, ee, combined))
         matrices = joint_probabilities(counts).reshape(3, 4, 9)
         selected_shots = counts.sum(axis=(-2, -1))
-        herald_matrix = herald_probabilities(result.sums)
-        acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1))
+        herald_matrix = herald_probabilities(result.sums).reshape(4, 3, 3)
+        acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1)).reshape(4)
 
         fig, _axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
         axes = fig.axes

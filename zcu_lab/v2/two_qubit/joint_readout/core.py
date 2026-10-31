@@ -139,15 +139,17 @@ class JointReadoutCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class JointReadoutResult:
-    """prepared_states is int64 [0,1,2,3]; sums is float64 (4,3,3) counts.
+    """prepared_f1/f2 are int64 [0,1]; sums is float64 (2,2,3,3) counts.
 
-    Preparation order is nominal gg/ge/eg/ee, F1 first. Class axes are terminal F1,
+    Preparation indices are 0=g, 1=e; F1 is outer, giving gg/ge/eg/ee.
+    Class axes are terminal F1,
     terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
     remain NaN. Completed rounds survive cancellation. Check the RunContext stop
     signal for acquisition errors rather than interpreting partial data as success.
     """
 
-    prepared_states: NDArray[np.int64]
+    prepared_f1: NDArray[np.int64]
+    prepared_f2: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
@@ -165,10 +167,14 @@ class JointReadoutAnalysis:
 
 
 def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult:
-    """Load summed counts; missing sums in old raw-IQ files raises ValueError."""
+    """Load two-axis sums; old raw-IQ or single-axis files raise ValueError."""
     sums = data.variable("sums")
+    if sums.z.shape != (2, 2, 3, 3):
+        raise ValueError("Joint readout requires two preparation axes and sums (2,2,3,3)")
     return JointReadoutResult(
-        prepared_states=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64)
+        prepared_f1=sums.axes[3].astype(np.int64),
+        prepared_f2=sums.axes[2].astype(np.int64),
+        sums=sums.z.astype(np.float64),
     )
 
 
@@ -184,9 +190,15 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                         VariableAxisSpec.generated_arange("terminal_f2", ""),
                         VariableAxisSpec.generated_arange("terminal_f1", ""),
                         VariableAxisSpec(
-                            "Nominal preparation",
+                            "Prepared F2 (0=g, 1=e)",
                             "",
-                            field_name="prepared_states",
+                            field_name="prepared_f2",
+                            dtype=np.int64,
+                        ),
+                        VariableAxisSpec(
+                            "Prepared F1 (0=g, 1=e)",
+                            "",
+                            field_name="prepared_f1",
                             dtype=np.int64,
                         ),
                     ),
@@ -211,7 +223,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
     ) -> JointReadoutResult:
         """Acquire optional reset → I/Xπ preparation → terminal joint counts.
 
-        Return (4,3,3) summed counts, not per-shot IQ or probabilities. All rounds
+        Return (2,2,3,3) summed counts, not per-shot IQ or probabilities. All rounds
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
         """
 
@@ -226,10 +238,10 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         def update_view(sums: NDArray[np.float64]) -> None:
             viewer.update(
                 np.arange(4, dtype=np.float64),
-                joint_probabilities(sums)[..., 0, 0],
+                joint_probabilities(sums)[..., 0, 0].reshape(4),
             )
 
-        buffer = SignalBuffer((4, 3, 3), dtype=np.float64, on_update=update_view)
+        buffer = SignalBuffer((2, 2, 3, 3), dtype=np.float64, on_update=update_view)
         with Schedule(config, buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
@@ -237,22 +249,25 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 initial_delay=config.initial_delay,
                 relax_delay=config.relax_delay,
             )
-            builder.add_loop("prepared_states", len(PREPARED_STATES))
+            builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
+            builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
             readout = MuxReadout("readout", config.readout)
             x180_f1 = Pulse("x180_f1", config.x180_f1)
             x180_f2 = Pulse("x180_f2", config.x180_f2)
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset))
-            with builder.branch(by="prepared_states") as cases:
-                for f1, f2 in PREPARED_STATES:
-                    with cases.case():
-                        if f1 == "e":
-                            builder.emit(x180_f1)
-                        if f2 == "e":
-                            builder.emit(x180_f2)
-            # Each case ends at its own duration. Consume that end before readout,
-            # without padding the shorter preparation paths.
+            # wait for herald/reset to finish before the branch-selected preparation
             builder.sync()
+            builder.fork("default", into=["f1", "f2"])
+            with builder.timeline("f1"):
+                with builder.branch(by="prepared_f1", align_timeline=True) as cases:
+                    with cases.case(1):  # F1 prepared in e
+                        builder.emit(x180_f1)
+            with builder.timeline("f2"):
+                with builder.branch(by="prepared_f2", align_timeline=True) as cases:
+                    with cases.case(1):  # F2 prepared in e
+                        builder.emit(x180_f2)
+            builder.join("f1", "f2", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
@@ -266,7 +281,11 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 rounds=config.rounds,
                 options=RunOptions(),
             )
-        return JointReadoutResult(np.arange(4, dtype=np.int64), buffer.array)
+        return JointReadoutResult(
+            prepared_f1=np.arange(2, dtype=np.int64),
+            prepared_f2=np.arange(2, dtype=np.int64),
+            sums=buffer.array,
+        )
 
     def analyze(
         self,
@@ -278,20 +297,19 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options
         result = source.result
-        if not np.array_equal(
-            result.prepared_states, np.arange(4)
-        ) or result.sums.shape != (
-            4,
-            3,
-            3,
+        if (
+            not np.array_equal(result.prepared_f1, np.arange(2))
+            or not np.array_equal(result.prepared_f2, np.arange(2))
+            or result.sums.shape != (2, 2, 3, 3)
         ):
             raise ValueError(
-                "Joint readout requires prepared_states [0,1,2,3] and sums (4,3,3)"
+                "Joint readout requires prepared_f1/prepared_f2 [0,1] "
+                "and sums (2,2,3,3)"
             )
         answer = JointReadoutAnalysis(
             counts=result.sums.reshape(4, 9),
             matrix=joint_probabilities(result.sums).reshape(4, 9),
-            acquired_shots=result.sums.sum(axis=(-2, -1)),
+            acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(4),
         )
         fig, axes = plots.subplots("matrix", figsize=(12, 5))
         image = axes.imshow(
