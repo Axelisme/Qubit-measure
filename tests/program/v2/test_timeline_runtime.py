@@ -344,7 +344,7 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body))
-    # The local end 20 joins default's case ends 10 and 30: max=30.
+    # Discard unjoined local end 20; default case ends 10/0/30 give True max=30.
     assert [waves(s) for s in result] == [[30]] * 3
     assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
 
