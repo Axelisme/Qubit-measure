@@ -1,11 +1,10 @@
 # tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import TypedDict, override
 
-import numpy as np
 from qick.asm_v2 import (
     AsmV2,
     ConfigReadout,
@@ -13,7 +12,6 @@ from qick.asm_v2 import (
     OpenLoop,
     Pulse,
     QickParam,
-    QickProgramV2,
     QickRawParam,
     Trigger,
 )
