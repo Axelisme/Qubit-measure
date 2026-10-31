@@ -563,6 +563,29 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
     assert [waves(s) for s in result] == expected
 
 
+def test_aligned_branch_reconstructs_case_local_nonaffine_author_table():
+    loader = LoadValue("time", [10, 30, 20], "scan", "loaded")
+
+    def body(prog):
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            with branch.case(0):
+                prog.emit(loader)
+                prog.delay_timeline("loaded")
+            with branch.case(1):
+                prog.delay_timeline(25 / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    prog = program(body, initialize=lambda p: p.declare(loader))
+    assert [waves(s) for s in shots(prog)] == [[25], [30], [25]]
+    memory = prog.compile_datamem()
+    # Three declared data words plus three IR jump destinations, no time copy.
+    assert memory is not None and len(memory) == 6
+    assert memory[:3].tolist() == [10, 30, 20]
+    assert set(int(word) for word in memory[3:]) <= {
+        int(str(address).lstrip("&")) for address in prog.labels.values()
+    }
+
+
 def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
     def body(prog):
         prog.fork("default", into="external")
