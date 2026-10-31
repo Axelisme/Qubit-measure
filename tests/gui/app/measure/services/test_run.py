@@ -3,8 +3,8 @@
 Static preconditions (context readiness, committed-cfg validity, soc capability)
 are GuardService's responsibility (see test_guard.py). RunService only handles
 the dynamic boundary: tab-busy, lease acquisition, bg submit, and — since
-ADR-0066 — the cancel *interpretation* of bg's done/failed (it owns the
-stop_event, so it relabels finished vs cancelled here).
+ADR-0066 — frontend Stop request facts and core return/error delivery.
+Errors remain failed even after Stop; returned records remain publishable.
 
 Stage 2c: RunService is now an OperationRunner client. Tests use a shared
 FakeRunner helper that captures the last spec so callbacks can be driven
@@ -22,7 +22,6 @@ from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
     ContextReadiness,
@@ -56,8 +55,6 @@ from tests.gui.app.measure._synthetic import (
 )
 
 from ._run_support import (
-    ConstructorFailingProgram,
-    NoopModule,
     last_run_finished_payload,
     make_inputs,
     make_plots,
@@ -222,14 +219,15 @@ def test_cancelled_run_without_data_keeps_no_previous_source(
     state.set_context(replace(state.session_env, parameters=q2))
     inputs = make_inputs(state, tab_id, adapter)
     service, _gate, background, _handles = make_run_service(state)
-    service.start_run(inputs, plots=make_plots())
+    token = service.start_run(inputs, plots=make_plots())
     service.cancel_run()
     assert background.last_on_error is not None
     background.last_on_error(RuntimeError("interrupted"))
 
     assert tab.run.result is None
     assert tab.run.parameters is None
-    assert tab.run.source_operation_id is None
+    assert tab.run.source_operation_id == token
+    assert tab.run.stop_requested
     assert not state.is_tab_running(tab_id)
 
 
@@ -432,59 +430,6 @@ def test_run_failed_emits_outcome_failed_with_message():
     assert payload.error_message == "boom"
 
 
-@pytest.mark.parametrize("source", ["build", "producer"])
-def test_schedule_failure_reports_failed_not_cancelled(source: str):
-    state, tab_id, adapter = make_state()
-    message = "builder boom" if source == "build" else "producer boom"
-
-    class ProducerFailingProgram:
-        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
-            raise RuntimeError(message)
-
-        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
-            raise NotImplementedError
-
-    program_cls = (
-        ConstructorFailingProgram if source == "build" else ProducerFailingProgram
-    )
-
-    def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
-        with Schedule(
-            {},
-            SignalBuffer((1,), dtype=np.float64),
-            scope=context.scope,
-        ) as sched:
-            _ = (
-                sched.prog_builder(
-                    "soc",
-                    "soccfg",
-                    program_cls=program_cls,
-                )
-                .add(NoopModule("readout"))
-                .build_and_acquire()
-            )
-        return RunRecord(None, object())
-
-    adapter.run.side_effect = run_with_schedule_failure
-    svc, _gate, bg, handles = make_run_service(state)
-    token = svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
-
-    bg.run_work()
-
-    payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "failed"
-    assert payload.error_message == message
-    outcome = handles.poll(token)
-    assert outcome is not None
-    assert outcome.status == "failed"
-    assert outcome.error == message
-    assert state.get_tab(tab_id).run.result is None
-    assert not state.is_tab_running(tab_id)
-
-
 def test_cancel_run_sets_operation_stop_event():
     state, tab_id, adapter = make_state()
     svc, gate, _bg, handles = make_run_service(state)
@@ -540,7 +485,8 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
                 stop_event=context.scope.stop.event,
             )
         if len(contexts) == 1:
-            context.scope.stop.set_error("failed", "first run failed", None)
+            context.scope.stop.set(reason="author stopped first run")
+            raise RuntimeError("first run failed")
         return RunRecord(None, object())
 
     adapter.run.side_effect = run_flux
@@ -563,7 +509,8 @@ def test_each_run_freezes_driver_mapping_and_owns_fresh_cancellation() -> None:
     assert second_outcome is not None and second_outcome.status == "finished"
     assert second_device.get_value() == 0.5
     assert contexts[0].scope.stop is not contexts[1].scope.stop
-    assert contexts[1].scope.stop.error is None
+    assert not contexts[1].scope.stop.is_set()
+    assert contexts[1].scope.stop.reason is None
     assert contexts[0].plots is not contexts[1].plots
     assert not gate.has_active(OperationKind.RUN)
 
@@ -585,7 +532,7 @@ def test_run_cancelled_with_partial_result_reports_cancelled_and_keeps_result():
     assert not state.is_tab_running(tab_id)
 
 
-def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
+def test_run_error_after_stop_reports_failed_and_keeps_no_result():
     state, tab_id, adapter = make_state()
     svc, _gate, bg, _ = make_run_service(state)
     svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
@@ -596,7 +543,8 @@ def test_run_cancelled_without_result_reports_cancelled_and_keeps_no_result():
     bg.last_on_error(RuntimeError("interrupted"))
 
     payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "cancelled"
+    assert payload.outcome == "failed"
+    assert payload.error_message == "interrupted"
     assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
@@ -666,7 +614,36 @@ def test_bg_error_without_cancel_reports_failed():
     assert payload.error_message == "boom"
 
 
-def test_bg_error_after_cancel_reports_cancelled_without_result():
+@pytest.mark.parametrize("requested", [False, True])
+@pytest.mark.parametrize("fails", [False, True])
+def test_frontend_stop_preserves_core_return_or_failure(requested: bool, fails: bool):
+    state, tab_id, adapter = make_state()
+    service, _gate, background, handles = make_run_service(state)
+    record = RunRecord(None, object())
+
+    def acquire(*_args: Any, context: RunContext) -> RunRecord[ConfigBase, object]:
+        if requested:
+            assert service.cancel_run()
+        if fails:
+            raise RuntimeError("core failure after request")
+        return record
+
+    adapter.run.side_effect = acquire
+    token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
+    background.run_work()
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == (
+        "failed" if fails else "cancelled" if requested else "finished"
+    )
+    pane = state.get_tab(tab_id).run
+    assert pane.result is (None if fails else record)
+    assert pane.stop_requested is requested
+    payload = last_run_finished_payload(background.events)
+    assert payload.error_message == ("core failure after request" if fails else None)
+
+
+def test_bg_error_after_cancel_reports_failed_without_result():
     state, tab_id, adapter = make_state()
     svc, _gate, bg, _ = make_run_service(state)
     svc.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
@@ -676,5 +653,6 @@ def test_bg_error_after_cancel_reports_cancelled_without_result():
     bg.last_on_error(RuntimeError("interrupted"))
 
     payload = last_run_finished_payload(bg.events)
-    assert payload.outcome == "cancelled"
+    assert payload.outcome == "failed"
+    assert payload.error_message == "interrupted"
     assert state.get_tab(tab_id).run.result is None

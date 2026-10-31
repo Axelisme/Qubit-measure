@@ -93,7 +93,8 @@ class FTFReadoutPlan:
     channel is the logical ADC index. batch contains this receiver's calibrated
     model, grids and point-to-content mapping. Observed mux events retain only
     incident carriers in the ADC's profile PFB channel; same-channel carriers
-    superpose. Unobserved events keep their pulses and empty grids.
+    superpose. Observed empty channels emit receiver offset and noise only.
+    Unobserved events keep their pulses and empty grids.
     """
 
     channel: int
@@ -362,15 +363,6 @@ def _mux_channel_contents(
                 or pfb_channel(profile, channel, pulse.frequency_ghz * 1000)
                 in addressed
             )
-            if addressed and not pulses:
-                frequencies = ", ".join(
-                    f"{grid.demodulation_frequency_ghz * 1000:g}"
-                    for grid in event.grids
-                )
-                raise ValueError(
-                    f"FTF mux ADC {channel} demod {frequencies} MHz, "
-                    f"PFB channel {next(iter(addressed))} has no in-channel carrier"
-                )
             row.append(replace(event, pulses=pulses))
         selected.append(tuple(row))
     return replace(content, events=tuple(selected))
@@ -415,8 +407,8 @@ def plan_template(
     same-channel superposition. Each logical event selects independently. Grids
     in one event spanning different PFB channels raise ValueError. An addressed
     single carrier is unchanged; off-channel carriers are excluded even alone.
-    An observed mux event without an in-channel carrier raises ValueError naming
-    the ADC, demodulation frequencies and PFB channel. Unobserved events retain
+    An observed mux event without an in-channel carrier retains empty pulses
+    and emits receiver background offset and noise only. Unobserved events retain
     their pulses and empty grids without emitting data.
     Program common-origin carrier phases convert to pulse-local phases in the first
     terminal carrier's model reference frame; ADC demodulation remains absolute-time.

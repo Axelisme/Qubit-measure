@@ -13,7 +13,7 @@ from __future__ import annotations
 # Writeback acceptance checks all pane IDs, then writes current owner drafts.
 # Scope status/cancel replies include live_paths and ambiguous candidates.
 # Analysis work failures carry failure_kind; current-draft writeback remains unchanged.
-# result_state.partial_result preserves inner cancellation independently of root Stop.
+# result_state.stop_requested records frontend Stop and selector cancel requests.
 # Writeback receipts, validated recipe batches, all-tone diagnostics and analysis recovery.
 # value.read identifies unregistered sources with a structured reason and path.
 # Record writeback uses record IDs/kinds and written.records; no sample aliases.
@@ -29,8 +29,8 @@ from __future__ import annotations
 # Point file paths use the shared parameters.yaml/library.yaml document names.
 # Global/point readiness, active three files, installed-file reload and point creation.
 # Writeback destinations report entry_name/nullable point without a kind field.
-WIRE_VERSION = 133
+WIRE_VERSION = 134
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 166
+GUI_VERSION = 167

@@ -47,6 +47,7 @@ from zcu_tools.gui.session.library_entry import (
     new_library_entry,
     open_library_entry,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.connection import (
     ConnectRequest,
     SoCConnectionService,
@@ -927,7 +928,7 @@ class Controller:
         self,
         compute: Callable[[], object],
         on_done: Callable[[object], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         """Run captured interactive computation off-main; deliver on the owner loop."""
         self._background_svc.submit(

@@ -51,15 +51,17 @@ class CallResult[T]:
     """One executor completion with an immutable control snapshot.
 
     result is fn's unchanged payload. epoch is the attempt's starting epoch.
-    partial_result snapshots cancellation of the operation or its completed
-    descendant scopes, not the payload's own data completeness. stopped snapshots
-    only the operation token's own stop bit. Both facts and pause have one lock
-    ordering; pause after this snapshot cannot retroactively mark completion.
+    stop_requested records the operation's stop bit or a host cancellation of
+    this operation, an ancestor or a descendant during this attempt. Unrelated
+    sibling cancellation does not mark it. It does not assess data completeness.
+    stopped snapshots only the operation token's own stop bit. Both facts and
+    pause have one lock ordering; pause after this snapshot cannot retroactively
+    mark completion.
     """
 
     result: T
     epoch: int
-    partial_result: bool
+    stop_requested: bool
     stopped: bool
 
 
@@ -96,6 +98,7 @@ class ScriptHost:
         self._on_change = on_change
         self._root = scope
         self._active: Scope | None = None
+        self._active_stop_requested = False
         self._epoch = 0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._owner: int | None = None
@@ -224,14 +227,20 @@ class ScriptHost:
         if ancestor is not self._root:
             raise ValueError("Call scope must belong to this host")
         token = parent.branch("operation", name=name)
-        self._active = token
+        with self._lock:
+            self._active = token
+            self._active_stop_requested = False
         context = CallContext(token, self._epoch)
 
         def invoke() -> CallResult[T]:
             value = fn(context)
             with self._lock:
+                stopped = token.cancelled
                 return CallResult(
-                    value, context.epoch, token.stop.partial_result, token.cancelled
+                    value,
+                    context.epoch,
+                    stopped or self._active_stop_requested,
+                    stopped,
                 )
 
         try:
@@ -242,7 +251,8 @@ class ScriptHost:
                 raise ScriptCancelled()
             return result
         finally:
-            self._active = None
+            with self._lock:
+                self._active = None
             token.release()
 
     async def ask[A: Answer](self, question: Question[A]) -> A:
@@ -330,6 +340,7 @@ class ScriptHost:
                 self._paused = True
                 self._epoch += 1
                 if self._active is not None:
+                    self._active_stop_requested = True
                     self._active.stop.set()
                 if self._gate is not None and not self._root.cancelled:
                     self._gate.clear()
@@ -372,9 +383,23 @@ class ScriptHost:
         def stop() -> CancelResult:
             if self._done.is_set():
                 return CancelResult(False, "scope not active", self.active_path)
-            return self._root.cancel(selector, expected=expected)
+            with self._lock:
+                return self._root.cancel(
+                    selector, expected=expected, on_cancel=self._record_cancel
+                )
 
         return self._command(stop, allow_idle=True)
+
+    def _record_cancel(self, target: Scope) -> None:
+        if self._active is None:
+            return
+        active_path, target_path = self._active.path, target.path
+        if (
+            active_path == target_path
+            or active_path.startswith(target_path + "/")
+            or target_path.startswith(active_path + "/")
+        ):
+            self._active_stop_requested = True
 
     def _cancel_root(
         self, selector: str | None, *, expected: int | None
@@ -387,9 +412,13 @@ class ScriptHost:
                     return CancelResult(False, "sequence mismatch", self.active_path)
                 self._root.stop.set()
             else:
-                result = self._root.cancel(selector, expected=expected)
+                result = self._root.cancel(
+                    selector, expected=expected, on_cancel=self._record_cancel
+                )
                 if not result.cancelled:
                     return result
+            if self._active is not None:
+                self._active_stop_requested = True
             if self._root_ack is None:
                 self._root_ack = CancelResult(
                     True, "scope cancellation requested", self._root.path

@@ -328,7 +328,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_native_run_stop_records_usable_result_but_failure_does_not(
+def test_native_run_core_stop_returns_record_but_exception_does_not(
     native_session: NativeSaveSession,
     monkeypatch: pytest.MonkeyPatch,
     failure: bool,
@@ -362,9 +362,9 @@ def test_native_run_stop_records_usable_result_but_failure_does_not(
         assert events == ()
         assert session.state.get_tab("tab").run.result is None
     else:
-        assert terminal.outcome == outcome.status == "cancelled"
+        assert terminal.outcome == outcome.status == "finished"
         metadata = require_record(session.state.get_tab("tab").run).metadata
-        assert metadata is not None and metadata.completion == "stopped"
+        assert metadata is not None and metadata.completion == "complete"
         assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
         assert events[0].payload.run_id == metadata.run_id
     assert not (session.entry.database_path / "runs").exists()

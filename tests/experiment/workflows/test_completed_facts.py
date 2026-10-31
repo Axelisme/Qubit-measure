@@ -106,7 +106,7 @@ def test_completed_facts_match_journal_and_commit_scope(
         assert isinstance(outcome, Completed)
         assert hasattr(outcome, "facts"), "Completed must expose its operation facts"
         assert outcome.facts.kind == kind
-        assert outcome.facts.stopped is outcome.partial_result is False
+        assert outcome.facts.stopped is outcome.stop_requested is False
         assert outcome.facts.outcome == "completed"
         assert outcome.facts.reason is None
         assert outcome.facts.started_at == outcome.facts.finished_at == START

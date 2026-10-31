@@ -30,6 +30,7 @@ from zcu_tools.gui.plotting import FigureContainer, get_figure_container
 from zcu_tools.gui.plotting.explicit import QtPlotHost
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.plotting.plots import Plots
 
 from tests._plotting import create_trace
@@ -60,9 +61,9 @@ def _run_worker(qapp: QApplication, work: Callable[[], int]) -> int:
     loop, timer = QEventLoop(), QTimer()
     timer.setSingleShot(True)
     timer.timeout.connect(loop.quit)
-    outcomes: list[int | Exception] = []
+    outcomes: list[int | BackgroundError] = []
 
-    def completed(value: int | Exception) -> None:
+    def completed(value: int | BackgroundError) -> None:
         outcomes.append(value)
         loop.quit()
 
@@ -72,7 +73,7 @@ def _run_worker(qapp: QApplication, work: Callable[[], int]) -> int:
         loop.exec()
         assert len(outcomes) == 1
         result = outcomes[0]
-        if isinstance(result, Exception):
+        if not isinstance(result, int):
             raise result
         return result
     finally:

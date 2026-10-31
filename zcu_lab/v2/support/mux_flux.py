@@ -335,9 +335,8 @@ def run_flux_scan(
             )
         if context.scope.stop.event.wait(cfg.settle):
             break
-        acquired = _acquire_spectrum(spectrum, context=context)
-        context.scope.stop.raise_if_error()
-        if context.scope.stop.partial_result:
+        acquired, stopped = _acquire_spectrum(spectrum, context=context)
+        if stopped or context.scope.stop.is_set():
             break
         _require_finite_spectrum(
             acquired,
@@ -378,15 +377,27 @@ def _require_finite_spectrum(
 
 def _acquire_spectrum(
     spectrum: MuxOnetoneCfg | MuxFreqCfg, *, context: RunContext
-) -> NDArray[np.complex128]:
+) -> tuple[NDArray[np.complex128], bool]:
     # Outer maps own presentation. Retire each inner producer before the next
     # flux point so repeated spectra do not reuse live axes or open extra tabs.
     plots = Plots(NonPresentingHost())
     inner = replace(context, plots=plots)
+    stopped = False
+
+    def on_acquire_stop() -> None:
+        nonlocal stopped
+        stopped = True
+
     try:
         if isinstance(spectrum, MuxOnetoneCfg):
-            return MuxOnetoneExp().run(spectrum, context=inner).signals.T
-        return MuxFreqExp().run(spectrum, context=inner).signals
+            result = MuxOnetoneExp().run(
+                spectrum, context=inner, on_acquire_stop=on_acquire_stop
+            )
+            return result.signals.T, stopped
+        result = MuxFreqExp().run(
+            spectrum, context=inner, on_acquire_stop=on_acquire_stop
+        )
+        return result.signals, stopped
     finally:
         plots.finish(present=False)
         plots.release()

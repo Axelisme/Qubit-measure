@@ -59,6 +59,7 @@ from zcu_tools.gui.app.dispersive.services.viz import (
     update_sample_dots,
 )
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 
 from .error_messages import friendly_fit_message, friendly_io_message
@@ -542,7 +543,7 @@ class PipelinePanelWidget(QWidget):
         frac = (rf_ghz - self._rf_lo_ghz) / span
         return min(max(int(round(frac * _RF_TICKS)), 0), _RF_TICKS)
 
-    def _on_preprocess_failed(self, exc: Exception) -> None:
+    def _on_preprocess_failed(self, exc: BackgroundError) -> None:
         logger.exception("preprocess worker failed", exc_info=exc)
         self._preprocess_btn.setEnabled(True)
         self._end_progress()
@@ -738,7 +739,7 @@ class PipelinePanelWidget(QWidget):
         self._show_tab(self._tune_canvas)
         self._sync_enabled()
 
-    def _on_tune_failed(self, exc: Exception) -> None:
+    def _on_tune_failed(self, exc: BackgroundError) -> None:
         logger.exception("predict worker failed", exc_info=exc)
         self._tune_btn.setEnabled(True)
         self._end_progress()
@@ -799,7 +800,7 @@ class PipelinePanelWidget(QWidget):
         self._g_slider.setValue(int(round(1e3 * result.g)))
         self._rf_slider.setValue(self._rf_tick_for(result.bare_rf))
 
-    def _on_auto_tune_failed(self, exc: Exception) -> None:
+    def _on_auto_tune_failed(self, exc: BackgroundError) -> None:
         logger.exception("auto-tune worker failed", exc_info=exc)
         self._end_progress()
         self._sync_auto_tune_enabled()

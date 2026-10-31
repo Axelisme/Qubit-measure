@@ -11,12 +11,13 @@ embedded in the work thunk.
 
 from __future__ import annotations
 
+import sys
 import threading
 
 import pytest
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
 from zcu_tools.gui.session.adapters.qt_owner_scheduler import QtOwnerScheduler
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError
 from zcu_tools.gui.session.scopes import progress_ambient
 
 from tests.gui._qt_waits import qt_until
@@ -92,7 +93,7 @@ def test_none_result_is_delivered_not_swallowed(qapp):
 def test_dedicated_delivers_error(qapp):
     bg = _bg()
     boom = RuntimeError("boom")
-    errs: list[Exception] = []
+    errs: list[BackgroundError] = []
 
     def work() -> object:
         raise boom
@@ -102,10 +103,41 @@ def test_dedicated_delivers_error(qapp):
     assert errs == [boom]
 
 
+@pytest.mark.parametrize("run_in_pool", [False, True])
+def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
+    qapp, monkeypatch: pytest.MonkeyPatch, run_in_pool: bool
+) -> None:
+    unhandled: list[BaseException] = []
+    monkeypatch.setattr(
+        sys, "excepthook", lambda _kind, exc, _tb: unhandled.append(exc)
+    )
+    bg = _bg()
+    error = KeyboardInterrupt("core interrupted")
+    delivered: list[tuple[BaseException, int]] = []
+    succeeded: list[object] = []
+
+    def work() -> None:
+        raise error
+
+    bg.submit(
+        work,
+        run_in_pool=run_in_pool,
+        on_done=succeeded.append,
+        on_error=lambda exc: delivered.append((exc, threading.get_ident())),
+    )
+    # Submitted work has no blocker. Drain also waits for the owner delivery.
+    assert bg.quiesce(timeout_ms=30_000)
+    assert len(delivered) == 1
+    assert delivered[0][0] is error
+    assert delivered[0][1] == threading.get_ident()
+    assert succeeded == []
+    assert unhandled == []
+
+
 def test_pool_delivers_error(qapp):
     bg = _bg()
     boom = ValueError("pool boom")
-    errs: list[Exception] = []
+    errs: list[BackgroundError] = []
 
     def work() -> object:
         raise boom

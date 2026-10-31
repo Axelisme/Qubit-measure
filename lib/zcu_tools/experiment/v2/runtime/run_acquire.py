@@ -48,12 +48,18 @@ class RunOptions(Generic[T_Raw]):
     sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
     requesting an explicit converter. Converter and live update exceptions
     propagate without retry or a failed acquisition outcome.
+    on_stop optionally observes external cancellation once per cooperative return,
+    after acquire scope release and progress cleanup, before returning the signal
+    view. It also runs when already stopped before acquisition. Pure data stop,
+    producer/converter/update failures and KeyboardInterrupt do not call it.
+    Observer exceptions propagate unchanged without retry or outcome changes.
     """
 
     retry: int = 0
     progress: bool = False
     stop_condition: StopCondition | None = None
     converter: Callable[[T_Raw], SignalArray] | None = None
+    on_stop: Callable[[], None] | None = None
 
 
 def _adapt_run_options(
@@ -69,6 +75,7 @@ def _adapt_run_options(
             retry=selected.retry,
             progress=selected.progress,
             stop_condition=selected.stop_condition,
+            on_stop=selected.on_stop,
         ),
     )
 
@@ -130,8 +137,9 @@ class RunAcquisitionMixin(ABC):
     no scope, slot or outcome state. Each run call writes converted data into
     that owner's default slot and triggers live updates, retries producer errors
     and applies acquire-local data stops. It requires an active Schedule and a
-    writable SignalBuffer slot. Cancellation/interruption return partial data
-    with a Schedule outcome. Exhausted producer errors propagate unchanged;
+    writable SignalBuffer slot. Cancellation returns partial data with a
+    Schedule outcome. KeyboardInterrupt propagates unchanged without retry.
+    Exhausted producer errors propagate unchanged;
     conversion/update errors propagate without retry.
     """
 
@@ -163,7 +171,7 @@ class RunAcquisitionMixin(ABC):
         ValueError requesting an explicit converter. Final-axis IQ becomes complex.
         Native qick_options are forwarded. rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
@@ -201,7 +209,7 @@ class RunAcquisitionMixin(ABC):
         repetition, read and sample axes. Native qick_options are forwarded.
         rounds defaults to one and must be a positive
         integer excluding bool. Return the live slot, including partial data on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         Converter and update errors propagate without retry.
         """
         owner = self._acquisition_owner
@@ -239,7 +247,7 @@ class RunAcquisitionMixin(ABC):
         cumulative and final sums directly without averaging. Native qick_options
         are forwarded. rounds defaults to one and must be a positive integer
         excluding bool. Return the live slot, retaining completed rounds on
-        cancellation/interruption. Exhausted producer errors propagate unchanged.
+        cancellation. KeyboardInterrupt and exhausted producer errors propagate unchanged.
         None producer results, conversion and update failures propagate without retry.
         """
         owner = self._acquisition_owner

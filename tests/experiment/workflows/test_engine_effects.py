@@ -109,32 +109,42 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
     ).read_text() == "30:9"
 
 
-def test_schedule_failure_is_recoverable(rig: Rig) -> None:
+def test_call_delivers_the_original_experiment_exception_to_the_author(
+    rig: Rig,
+) -> None:
     cause = OSError("acquire disconnected")
 
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            schedule.mark_failed(cause)
+        with Schedule(Cfg(), buffer, scope=ctx.scope):
+            raise cause
         return 99
 
-    observed = start_call(rig, acquire)
+    caught: list[OSError] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        try:
+            await env.call(acquire)
+        except OSError as error:
+            caught.append(error)
+        assert (await env.call(lambda ctx: 99)).value == 99
+
+    rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    assert len(observed) == 1
-    assert isinstance(observed[0], Failed)
-    assert "acquire disconnected" in observed[0].reason
+    assert caught == [cause]
+    assert caught[0] is cause
     assert rig.engine.records("run") == ()
     facts = [
         TypeAdapter(OperationFacts).validate_python(event["operation"])
         for event in rig.events()
         if event["kind"] == "operation_finished"
     ]
-    assert len(facts) == 1
-    assert (facts[0].iteration, facts[0].attempt, facts[0].outcome) == (1, 1, "failed")
+    assert [fact.outcome for fact in facts] == ["raised", "completed"]
+    assert (facts[0].iteration, facts[0].attempt) == (0, 1)
     assert facts[0].stopped is False
-    assert facts[0].reason == observed[0].reason
+    assert facts[0].reason == "OSError: acquire disconnected"
     assert facts[0].device_snapshot is None
 
 
@@ -168,7 +178,6 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
             else:
                 schedule.set_stop()
             assert not ctx.scope.stop.is_set()
-            assert ctx.scope.stop.error is None
         return 99
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -182,14 +191,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
             else:
                 observed.append(await iteration.call(operation))
             observed.append(
-                await iteration.call(
-                    lambda ctx: (
-                        0
-                        if ctx.scope.stop.partial_result
-                        or ctx.scope.stop.error is not None
-                        else 7
-                    )
-                )
+                await iteration.call(lambda ctx: 0 if ctx.scope.cancelled else 7)
             )
         finally:
             iterations.close()
@@ -202,11 +204,11 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         assert attempts == [1, 1]
     else:
         first = completed(observed[0])
-        assert (first.value, first.partial_result) == (99, True)
+        assert (first.value, first.stop_requested) == (99, False)
         assert first.facts.stopped is False
-        assert first.facts.outcome == "partial"
+        assert first.facts.outcome == "completed"
     second = completed(observed[-1])
-    assert (second.value, second.partial_result) == (7, False)
+    assert (second.value, second.stop_requested) == (7, False)
     assert second.facts.stopped is False
     assert second.facts.outcome == "completed"
     facts = [
@@ -217,7 +219,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     assert [
         (fact.iteration, fact.attempt, fact.outcome, fact.stopped) for fact in facts
     ] == [
-        (1, 1, "raised" if failed else "partial", False),
+        (1, 1, "raised" if failed else "completed", False),
         (1, 2, "completed", False),
     ]
     if not failed:
@@ -225,24 +227,16 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     assert facts[1] == second.facts
 
 
-@pytest.mark.parametrize("source", ["outside", "other_signal"])
-def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
-    rig: Rig, source: str
-) -> None:
+def test_unhandled_exception_fails_run(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         cause = OSError("disconnected")
-        if source == "outside":
-            raise cause
-        other = StopSignal()
-        other.set_error("failed", "foreign failure", cause)
-        other.raise_if_error()
-        return 0
+        raise cause
 
     observed = start_call(rig, acquire)
     final = rig.engine.execute("run")
     assert final.lifecycle == "failed"
     assert observed == []
-    reason = "disconnected" if source == "outside" else "foreign failure"
+    reason = "disconnected"
     assert reason in str(final.reason)
     facts = [
         TypeAdapter(OperationFacts).validate_python(event["operation"])
@@ -256,20 +250,27 @@ def test_arbitrary_exception_or_foreign_schedule_error_fails_run(
     assert facts[0].device_snapshot is None
 
 
-def test_schedule_interrupt_returns_partial_not_acquire_failure(rig: Rig) -> None:
+def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         with Schedule(Cfg(), scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
-    observed = start_call(rig, acquire)
+    caught: list[KeyboardInterrupt] = []
+
+    async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
+        try:
+            await env.call(acquire)
+        except KeyboardInterrupt as error:
+            caught.append(error)
+
+    rig.start(script)
     final = rig.engine.execute("run")
     assert final.lifecycle == "done", final.reason
-    outcome = completed(observed[0])
-    assert (outcome.value, outcome.partial_result) == (7, True)
+    assert len(caught) == 1
 
 
-def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
+def test_stop_keeps_stop_requested_and_later_calls_see_stopped_tokens(rig: Rig) -> None:
     entered = Event()
     outcomes: list[Completed[int]] = []
     stops: list[bool] = []
@@ -300,7 +301,7 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
         rig.engine.cancel("run", scope="iteration")
         final = future.result(timeout=10)
     assert final.lifecycle == "done"
-    assert [(outcome.value, outcome.partial_result) for outcome in outcomes] == [
+    assert [(outcome.value, outcome.stop_requested) for outcome in outcomes] == [
         (7, True),
         (0, True),
     ]
@@ -311,8 +312,8 @@ def test_stop_keeps_partial_result_and_later_calls_see_stopped_tokens(rig: Rig) 
         (1, 1),
         (1, 2),
     ]
-    assert all(outcome.facts.stopped is outcome.partial_result for outcome in outcomes)
-    assert all(outcome.facts.outcome == "partial" for outcome in outcomes)
+    assert all(outcome.facts.stopped is outcome.stop_requested for outcome in outcomes)
+    assert all(outcome.facts.outcome == "completed" for outcome in outcomes)
     journal_facts = [
         TypeAdapter(OperationFacts).validate_python(event["operation"])
         for event in rig.events()
@@ -367,7 +368,7 @@ def test_wait_pause_retries_original_deadline_without_restarting_author(
     ]
     assert facts[0].reason == "Pause interrupted this attempt"
     assert outcomes[0].facts == facts[1]
-    assert outcomes[0].partial_result is False
+    assert outcomes[0].stop_requested is False
 
 
 def test_setup_pause_retries_captured_full_cfg_with_fresh_operation_token(
@@ -433,7 +434,7 @@ def test_acquisition_pause_keeps_captured_cfg_while_apply_updates_live_revisions
             cfg = Cfg(value=tun.current.value)
             captures.append(cfg)
             outcome = completed(await iteration.run(acquire, cfg))
-            assert not outcome.partial_result
+            assert not outcome.stop_requested
             delivered.append(outcome.value.result)
             # Before commit, a later operation must not inherit Pause's stop bit.
             assert not completed(
@@ -584,7 +585,7 @@ def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> Non
     assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     outcome = completed(observed[0])
-    assert (outcome.value, outcome.partial_result) == (7, False)
+    assert (outcome.value, outcome.stop_requested) == (7, False)
 
 
 @pytest.mark.parametrize("source", ["build", "acquire", "conversion"])
@@ -675,7 +676,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     assert final.lifecycle == "done", final.reason
     assert len(observed) == 1
     outcome = completed(observed[0])
-    assert (outcome.value, outcome.partial_result) == (99, True)
+    assert (outcome.value, outcome.stop_requested) == (99, True)
 
 
 def test_active_tunables_journal_failure_stops_operation_and_retains_original_cause(
