@@ -33,8 +33,8 @@ T_Raw_co = TypeVar("T_Raw_co", covariant=True)
 class RunOptions(Generic[T_Raw]):
     """Policy for Schedule run acquisition and slot conversion.
 
-    retry is the nonnegative number of extra attempts (default zero). Shot
-    overrun gets at least one retry and restores the pre-acquire slot. External
+    retry is the nonnegative number of extra attempts (default zero), including
+    shot overrun. Zero never retries. Overrun restores the pre-acquire slot. External
     stop and interruption never retry. progress=False hides native acquisition
     progress; the rounds bar uses label "rounds" and remains visible only at the
     root. stop_condition is a no-argument callback run after each completed round

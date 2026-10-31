@@ -112,9 +112,9 @@ def default_decimated_raw2signal_fn(
 class AcquireOptions:
     """Policy shared by integrated and decimated program acquisition.
 
-    retry is a non-negative number of extra attempts, default zero. Shot
-    overrun (AcquisitionContractError) uses max(retry, 1) extra attempts, even
-    when retry is zero. Each retry reruns all rounds on the same program with
+    retry is a non-negative number of extra attempts, default zero, including
+    shot overrun (AcquisitionContractError). Zero never retries. Each retry
+    reruns all rounds on the same program with
     fresh producer buffers; overrun discards the failed attempt's slot data.
     External cancellation and interruption are never retried. progress
     defaults to hiding native acquisition progress. progress_label names the
@@ -154,8 +154,7 @@ class _AcquireProgress:
         overrun = isinstance(error, AcquisitionContractError)
         if overrun:
             slot.set(initial_signal)
-        retry_limit = max(retry, 1) if overrun else retry
-        if self.attempts > retry_limit:
+        if self.attempts > retry:
             return False
         reason = "shot_overrun" if overrun else type(error).__name__
         logger.warning(
@@ -210,8 +209,9 @@ class AcquisitionRunner:
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
         Producer failure, interrupt or cancellation records the Schedule outcome
-        and retains partial data; overrun restores the pre-acquire slot and allows
-        at least one retry. Conversion/update errors propagate without retry.
+        and retains partial data; overrun restores the pre-acquire slot. All
+        producer failures use the explicit retry budget, including zero retries.
+        Conversion/update errors propagate without retry.
         """
         require_positive_rounds(rounds)
         retry = options.retry
@@ -231,7 +231,7 @@ class AcquisitionRunner:
         )
         observation = _AcquireProgress(pbar)
         try:
-            for _ in range(max(retry, 1) + 1):
+            for _ in range(retry + 1):
                 if self._schedule.check_stop_requested():
                     break
                 pbar.reset()
