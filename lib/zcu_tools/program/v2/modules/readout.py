@@ -328,8 +328,24 @@ class Readout:
 
     Cfg: TypeAlias = ReadoutCfg
 
-    def __new__(cls, name: str, cfg: AbsReadoutCfg) -> AbsReadout:
-        return cfg.build(name)
+    def __new__(
+        cls, name: str, cfg: AbsReadoutCfg, *,
+        freq: float | QickParam | None = None,
+        gain: float | QickParam | None = None,
+        length: float | QickParam | None = None,
+        ro_length: float | QickParam | None = None,
+    ) -> AbsReadout:
+        """Build a detached readout with optional MHz/gain/us overrides.
+
+        None keeps cfg. Pulse readout accepts freq, gain, length and ro_length;
+        mux rejects non-None overrides with ValueError. Waveform set_param
+        restrictions propagate. The caller's cfg is never modified.
+        """
+        effective = deepcopy(cfg)
+        for knob, value in dict(freq=freq, gain=gain, length=length, ro_length=ro_length).items():
+            if value is not None:
+                effective.set_param(knob, value)
+        return effective.build(name)
 
 
 class PulseReadout(AbsReadout):
@@ -345,6 +361,10 @@ class PulseReadout(AbsReadout):
         gain_val: str | None = None,
         freq_val: str | None = None,
         ro_freq_val: str | None = None,
+        freq: float | QickParam | None = None,
+        gain: float | QickParam | None = None,
+        length: float | QickParam | None = None,
+        ro_length: float | QickParam | None = None,
     ) -> None:
         """Capture a flat readout and optional hardware-word register inputs.
 
@@ -352,10 +372,16 @@ class PulseReadout(AbsReadout):
         gain_val names a hardware gain-word register; freq_val/ro_freq_val are
         paired generator/ADC frequency-word registers, already lowered for mixer
         and downconversion sign. Unspecified registers use cfg scalar/sweep values.
-        init must precede run. Invalid QICK settings fail during initialization.
+        freq (MHz), gain (normalized), length and ro_length (us) override the
+        copied cfg via set_param. None keeps cfg; unsupported waveform length
+        sweeps raise ValueError. init must precede run. Invalid QICK settings
+        fail during initialization.
         """
         self.name = name
         self.cfg = deepcopy(cfg)
+        for knob, value in dict(freq=freq, gain=gain, length=length, ro_length=ro_length).items():
+            if value is not None:
+                self.cfg.set_param(knob, value)
         self.gain_val = gain_val
         self.freq_val = freq_val
         self.ro_freq_val = ro_freq_val
