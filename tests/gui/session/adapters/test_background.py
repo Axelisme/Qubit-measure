@@ -11,6 +11,7 @@ embedded in the work thunk.
 
 from __future__ import annotations
 
+import sys
 import threading
 
 import pytest
@@ -104,8 +105,10 @@ def test_dedicated_delivers_error(qapp):
 
 @pytest.mark.parametrize("run_in_pool", [False, True])
 def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
-    qapp, run_in_pool: bool
+    qapp, monkeypatch: pytest.MonkeyPatch, run_in_pool: bool
 ) -> None:
+    unhandled: list[BaseException] = []
+    monkeypatch.setattr(sys, "excepthook", lambda _kind, exc, _tb: unhandled.append(exc))
     bg = _bg()
     error = KeyboardInterrupt("core interrupted")
     delivered: list[tuple[BaseException, int]] = []
@@ -124,6 +127,7 @@ def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
     assert delivered[0][0] is error
     assert delivered[0][1] == threading.get_ident()
     assert succeeded == []
+    assert unhandled == []
 
 
 def test_pool_delivers_error(qapp):
