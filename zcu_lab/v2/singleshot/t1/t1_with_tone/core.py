@@ -169,7 +169,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         supplies hardware, plots and cancellation. Uniform mode requires SweepCfg;
         non-uniform lengths must stay distinct on the probe generator's grid.
         """
-        # 1. Quantize durations without changing the caller's pulse settings.
+        # Copy pulse settings and resolve the shared readout classification.
         cfg = deepcopy(cfg)
         pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
@@ -181,21 +181,21 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         axis = Classify(
             "readout", tone=None if pulse_readout else 0, classifier=classifier
         )
-        soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
-            length_sweep = cfg.length
-            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-            lengths = sweep2array(
-                length_sweep,
-                "time",
-                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
-            )
-        else:
-            lengths = materialize_nonuniform_t1_pulse_lengths(
-                cfg.length,
-                soccfg=soccfg,
-                gen_ch=cfg.probe_pulse.ch,
-            )
+            return self._run_uniform(cfg, axis, context=context)
+        return self._run_non_uniform(cfg, axis, context=context)
+
+    def _run_uniform(
+        self, cfg: T1WithToneCfg, axis: Classify, *, context: RunContext
+    ) -> T1WithToneResult:
+        soc, soccfg = context.soc, context.soccfg
+        length_sweep = cfg.length
+        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
+        )
 
         init_g, init_e = self._make_viewers(context.plots)
 
@@ -204,92 +204,108 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             init_g.update(lengths, populations[:, 0].T)
             init_e.update(lengths, populations[:, 1].T)
 
-        if cfg.uniform:
-            buffer = SignalBuffer(
-                (len(lengths), 2, 3), dtype=np.float64, on_update=plot_fn
+        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=plot_fn)
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            inner_length_sweep = sched.cfg.length
+            assert isinstance(inner_length_sweep, SweepCfg), (
+                "uniform mode requires SweepCfg"
             )
-            with Schedule(cfg, buffer, scope=context.scope) as sched:
-                inner_length_sweep = sched.cfg.length
-                assert isinstance(inner_length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
-                )
-                sched.cfg.probe_pulse.set_param(
-                    "length", sweep2param("length", inner_length_sweep)
-                )
+            sched.cfg.probe_pulse.set_param(
+                "length", sweep2param("length", inner_length_sweep)
+            )
 
-                # 2a. Sweep tone duration and I/pi preparation inside each shot round.
-                builder = (
-                    sched.prog_builder(
+            # 2a. Sweep tone duration and I/pi preparation inside each shot round.
+            builder = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add(
+                    Reset("reset", sched.cfg.reset),
+                    Pulse("init_pulse", sched.cfg.init_pulse),
+                    Branch("ge", [], Pulse("pi_pulse", sched.cfg.pi_pulse)),
+                    Pulse("probe_pulse", sched.cfg.probe_pulse),
+                    Readout("readout", sched.cfg.readout),
+                )
+                .declare_sweep("length", inner_length_sweep)
+                .declare_sweep("ge", 2)
+            )
+            program = builder.build()
+            builder.run_program_summed(
+                program,
+                processor=shot_sums(program, [axis]),
+                sums2signal_fn=lambda sums: sums,
+                rounds=cfg.rounds,
+            )
+        counts = buffer.array
+
+        return T1WithToneResult(lengths=lengths, counts=counts)
+
+    def _run_non_uniform(
+        self, cfg: T1WithToneCfg, axis: Classify, *, context: RunContext
+    ) -> T1WithToneResult:
+        soc, soccfg = context.soc, context.soccfg
+        lengths = materialize_nonuniform_t1_pulse_lengths(
+            cfg.length,
+            soccfg=soccfg,
+            gen_ch=cfg.probe_pulse.ch,
+        )
+
+        init_g, init_e = self._make_viewers(context.plots)
+
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
+            init_g.update(lengths, populations[:, 0].T)
+            init_e.update(lengths, populations[:, 1].T)
+
+        # 2b. Repeat host scans, reusing one compiled program per duration.
+        rounds = cfg.rounds
+        run_cfg = cfg.model_copy(deep=True)
+        run_cfg.rounds = 1
+        round_buffer = SignalBuffer(
+            (rounds, len(lengths), 2, 3),
+            dtype=np.float64,
+            on_update=lambda data: plot_fn(_sum_rounds(data)),
+        )
+        programs: dict[float, ModularProgramV2] = {}
+        with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
+            for _, rep in sched.repeat("round", rounds):
+                for length, step in rep.scan("length", lengths.tolist()):
+                    step.cfg.probe_pulse.set_param("length", length)
+                    builder = step.prog_builder(
                         soc,
                         soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
+                    ).add(
+                        Reset("reset", step.cfg.reset),
+                        Pulse("init_pulse", step.cfg.init_pulse),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
                     )
-                    .add(
-                        Reset("reset", sched.cfg.reset),
-                        Pulse("init_pulse", sched.cfg.init_pulse),
-                        Branch("ge", [], Pulse("pi_pulse", sched.cfg.pi_pulse)),
-                        Pulse("probe_pulse", sched.cfg.probe_pulse),
-                        Readout("readout", sched.cfg.readout),
-                    )
-                    .declare_sweep("length", inner_length_sweep)
-                    .declare_sweep("ge", 2)
-                )
-                program = builder.build()
-                builder.run_program_summed(
-                    program,
-                    processor=shot_sums(program, [axis]),
-                    sums2signal_fn=lambda sums: sums,
-                    rounds=cfg.rounds,
-                )
-            counts = buffer.array
-        else:
-            # 2b. Repeat host scans, reusing one compiled program per duration.
-            rounds = cfg.rounds
-            run_cfg = cfg.model_copy(deep=True)
-            run_cfg.rounds = 1
-            round_buffer = SignalBuffer(
-                (rounds, len(lengths), 2, 3),
-                dtype=np.float64,
-                on_update=lambda data: plot_fn(_sum_rounds(data)),
-            )
-            programs: dict[float, ModularProgramV2] = {}
-            with Schedule(run_cfg, round_buffer, scope=context.scope) as sched:
-                for _, rep in sched.repeat("round", rounds):
-                    for length, step in rep.scan("length", lengths.tolist()):
-                        step.cfg.probe_pulse.set_param("length", length)
-                        builder = step.prog_builder(
-                            soc,
-                            soccfg,
-                            reps=step.cfg.reps,
-                            relax_delay=step.cfg.relax_delay,
-                        ).add(
-                            Reset("reset", step.cfg.reset),
-                            Pulse("init_pulse", step.cfg.init_pulse),
-                            Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        )
-                        # A zero-duration point still prepares and reads out, but
-                        # must not create a zero-cycle generator pulse.
-                        if length > 0.0:
-                            builder = builder.add(
-                                Pulse("probe_pulse", step.cfg.probe_pulse)
-                            )
+                    # A zero-duration point still prepares and reads out, but
+                    # must not create a zero-cycle generator pulse.
+                    if length > 0.0:
                         builder = builder.add(
-                            Readout("readout", step.cfg.readout)
-                        ).declare_sweep("ge", 2)
-                        length_key = float(length)
-                        if length_key not in programs:
-                            programs[length_key] = builder.build()
-                        program = programs[length_key]
-                        _ = builder.run_program_summed(
-                            program,
-                            processor=shot_sums(program, [axis]),
-                            sums2signal_fn=lambda sums: sums,
-                            rounds=1,
+                            Pulse("probe_pulse", step.cfg.probe_pulse)
                         )
+                    builder = builder.add(
+                        Readout("readout", step.cfg.readout)
+                    ).declare_sweep("ge", 2)
+                    length_key = float(length)
+                    if length_key not in programs:
+                        programs[length_key] = builder.build()
+                    program = programs[length_key]
+                    _ = builder.run_program_summed(
+                        program,
+                        processor=shot_sums(program, [axis]),
+                        sums2signal_fn=lambda sums: sums,
+                        rounds=1,
+                    )
 
-            # 3. Sum acquired host rounds; preserve NaN for missing lengths.
-            counts = _sum_rounds(round_buffer.array)
+        # 3. Sum acquired host rounds; preserve NaN for missing lengths.
+        counts = _sum_rounds(round_buffer.array)
 
         return T1WithToneResult(lengths=lengths, counts=counts)
 
