@@ -24,10 +24,10 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
-    RepeatTimelineBody,
-    RepeatTimelineCapture,
     RepeatLoweringEnter,
     RepeatLoweringExit,
+    RepeatTimelineBody,
+    RepeatTimelineCapture,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -631,8 +631,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         overlap and signed overflow are the author's responsibility. Certified
         producers and explicit hints retain finite-range checks. Hints on scalar
         times and invalid ranges raise ValueError. External timelines after branch
-        or Repeat use their actual runtime end. tag exposes static ends as 't'; runtime-only ends raise
-        RuntimeError from get_time_param rather than returning a bound.
+        or Repeat use their actual runtime end. tag exposes static ends as 't'.
+        Runtime-only ends raise RuntimeError from get_time_param rather than
+        returning a bound.
         """
         if range_hint is not None:
             if not isinstance(t, str):
