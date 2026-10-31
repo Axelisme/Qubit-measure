@@ -53,6 +53,12 @@ class CycleAxis:
     values: CycleValues | None
     producer: CycleProducer
 
+    def __post_init__(self) -> None:
+        if self.values is not None:
+            values = self.values.copy()
+            values.flags.writeable = False
+            object.__setattr__(self, "values", values)
+
 
 def cycle_axis(
     name: str,
@@ -70,8 +76,6 @@ def cycle_axis(
             producer.points if producer.points is not None else range(count),
             dtype=np.int64,
         )
-    if points is not None:
-        points.flags.writeable = False
     return CycleAxis(name, identity, minimum, maximum, points, producer)
 
 

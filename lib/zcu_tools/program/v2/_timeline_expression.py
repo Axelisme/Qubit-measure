@@ -4,6 +4,7 @@ import math
 from dataclasses import dataclass, field
 from fractions import Fraction
 from functools import cached_property, lru_cache
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -37,7 +38,7 @@ class TimeOperation:
     values; coefficient is used only by scale.
     """
 
-    kind: str
+    kind: Literal["max", "min", "add", "scale"]
     operands: tuple["TimeExpression", ...]
     coefficient: Scalar = 1
 
