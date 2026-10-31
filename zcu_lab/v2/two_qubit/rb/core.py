@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -28,10 +26,9 @@ from zcu_tools.program.v2 import (
     Pulse,
     Reset,
     TimelineBuilder,
-    TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadout
+from zcu_tools.program.v2.modules import Join, MuxReadout
 
 from zcu_lab.v2.support import live_line
 
@@ -39,11 +36,12 @@ from .._drive import DualLineCfg
 from .._readout import JointRoles
 from .._sums import (
     joint_probabilities,
-    terminal_counts,
     validate_classifiers,
 )
-from .analysis import RBAnalysis, RBOptions, analyze_rb
-from .program import CZPhasePair, sequence_modules
+from .analysis import RBAnalysis, RBOptions, estimate_d4, paired_means, validate_axes
+from ...twotone.irb.analysis import analyze_irb
+from zcu_tools.analysis.fitting import compute_fit_quality
+from .program import CZPhasePair
 from .sequence import TwoQubitGate, make_paired_sequences
 
 
@@ -164,108 +162,6 @@ class RBResult:
     sums: NDArray[np.float64]
 
 
-def build_program(
-    cfg: RBCfg,
-    soccfg: QickConfig,
-    gates: Sequence[TwoQubitGate],
-    *,
-    heralded: bool,
-) -> TimelineProgramV2:
-    """Compile playback gates with optional reset, optional herald and terminal.
-
-    gates comes from sequence.make_paired_sequences, including its own recovery.
-    sequence_modules owns pulse translation and fresh zero-origin virtual frames.
-    Every build creates fresh modules; the two tagged reads reuse one mux object.
-    No acquisition occurs. Invalid role classifiers fail before compilation.
-    """
-    validate_classifiers(cfg.readout, cfg.roles)
-    builder = TimelineBuilder(
-        soccfg,
-        reps=cfg.reps,
-        initial_delay=cfg.initial_delay,
-        relax_delay=cfg.relax_delay,
-    )
-    readout = MuxReadout("readout", cfg.readout)
-    if cfg.reset is not None:
-        builder.emit(Reset("reset", cfg.reset))
-    if heralded:
-        builder.emit(readout, tag="herald")
-    for module in sequence_modules(
-        gates,
-        x90_f1=cfg.x90_f1,
-        x90_f2=cfg.x90_f2,
-        drive=cfg.drive,
-        phase_pair=cfg.phase_pair,
-    ):
-        builder.emit(module)
-    builder.emit(readout, tag="terminal")
-    return builder.build()
-
-
-def acquire_counts(
-    config: RBCfg, *, context: RunContext, heralded: bool
-) -> NDArray[np.float64]:
-    """Acquire each arm's host rounds separately, preserving raw count slots.
-
-    Return (depth,seed,2,round,3,3), or four trailing class axes for herald.
-    Compile once per depth/seed/arm and always acquire with rounds=1.
-    Live curves show joint00 from accumulated counts over seeds and rounds.
-    Cancellation leaves unfinished slots NaN; callers check context.scope.stop
-    for acquisition errors. The input cfg and sequence identities stay unchanged.
-    """
-    validate_classifiers(config.readout, config.roles)
-    viewer = live_line(
-        context.plots,
-        "measurement",
-        "Random Clifford depth",
-        "Joint00 survival" if not heralded else "Joint00 survival | herald (g,g)",
-        num_lines=2,
-    )
-
-    def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
-        # Unmeasured rounds do not contribute to the cumulative count ratio.
-        totals = np.nansum(counts, axis=(1, 3))
-        viewer.update(np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T)
-
-    class_shape = (3, 3, 3, 3) if heralded else (3, 3)
-    buffer = SignalBuffer(
-        (len(config.depths), len(config.seeds), 2, config.rounds, *class_shape),
-        dtype=np.float64,
-        on_update=update_view,
-    )
-    with Schedule(config, buffer, scope=context.scope) as sched:
-        cfg = sched.cfg
-        for depth, depth_step in sched.scan("depth", cfg.depths):
-            for seed, seed_step in depth_step.scan("seed", cfg.seeds):
-                pair = make_paired_sequences(depth, seed)
-                for arm, arm_step in seed_step.scan("arm", [0, 1]):
-                    sequence = (pair.reference, pair.interleaved)[arm]
-                    prog = build_program(
-                        cfg, context.soccfg, sequence.gates, heralded=heralded
-                    )
-                    processor = shot_sums(
-                        prog,
-                        [
-                            Classify(label, tone)
-                            for label in (
-                                ("herald", "terminal") if heralded else ("terminal",)
-                            )
-                            for tone in (cfg.roles.f1_tone, cfg.roles.f2_tone)
-                        ],
-                    )
-                    for _, round_step in arm_step.repeat("round", cfg.rounds):
-                        round_step.run_acquire_summed(
-                            prog,
-                            context.soc,
-                            processor=processor,
-                            rounds=1,
-                            options=RunOptions(),
-                        )
-    buffer.trigger_update(flush=True)
-    return buffer.array
-
-
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
     """Restore counts; old per-shot IQ files fail because sums is missing."""
     sums = data.variable("sums")
@@ -317,12 +213,76 @@ class RBExp(Experiment[RBResult, RBCfg]):
         Each host round acquires reps shots with rounds=1, not a host average.
         Return fixed raw count slots; cfg and saved sequence identities are unchanged.
         """
+        validate_classifiers(config.readout, config.roles)
+        viewer = live_line(
+            context.plots, "measurement", "Random Clifford depth",
+            "Joint00 survival", num_lines=2,
+        )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            totals = np.nansum(sums, axis=(1, 3))
+            viewer.update(np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T)
+
+        buffer = SignalBuffer(
+            (len(config.depths), len(config.seeds), 2, config.rounds, 3, 3),
+            dtype=np.float64, on_update=update_view,
+        )
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
+            for depth, depth_step in sched.scan("depth", config.depths):
+                for seed, seed_step in depth_step.scan("seed", config.seeds):
+                    pair = make_paired_sequences(depth, seed)
+                    for arm, arm_step in seed_step.scan("arm", [0, 1]):
+                        sequence = (pair.reference, pair.interleaved)[arm]
+                        builder = TimelineBuilder(
+                            context.soccfg, reps=config.reps,
+                            initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                        )
+                        readout = MuxReadout("readout", config.readout)
+                        if config.reset is not None:
+                            builder.emit(Reset("reset", config.reset))
+
+                        # The recovery makes the net logical operation identity.
+                        # Positive logical Z advances a frame; X uses base minus frame.
+                        frames = [0.0, 0.0]
+                        pulses = (config.x90_f1, config.x90_f2)
+                        for index, gate in enumerate(sequence.gates):
+                            if gate in (TwoQubitGate.Z90_Q0, TwoQubitGate.Z90_Q1):
+                                role = 0 if gate == TwoQubitGate.Z90_Q0 else 1
+                                frames[role] = (frames[role] + 90.0) % 360.0
+                            elif gate in (TwoQubitGate.X90_Q0, TwoQubitGate.X90_Q1):
+                                role = 0 if gate == TwoQubitGate.X90_Q0 else 1
+                                pulse = pulses[role]
+                                builder.emit(Pulse(
+                                    f"gate_{index}_x90_f{role + 1}", pulse,
+                                    phase=(float(pulse.phase) - frames[role]) % 360.0,
+                                ))
+                            elif gate == TwoQubitGate.CZ:
+                                builder.emit(Join(
+                                    Pulse(f"gate_{index}_cz_f1", config.drive.f1),
+                                    Pulse(f"gate_{index}_cz_f2", config.drive.f2),
+                                ))
+                                frames[0] = (frames[0] + config.phase_pair.correction_f1_deg) % 360.0
+                                frames[1] = (frames[1] + config.phase_pair.correction_f2_deg) % 360.0
+                            else:
+                                raise ValueError(f"Unknown two-qubit gate: {gate!r}")
+                        builder.emit(readout, tag="terminal")
+                        prog = builder.build()
+                        processor = shot_sums(prog, [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ])
+                        for _, round_step in arm_step.repeat("round", config.rounds):
+                            round_step.run_acquire_summed(
+                                prog, context.soc, processor=processor, rounds=1,
+                                options=RunOptions(),
+                            )
+        buffer.trigger_update(flush=True)
         return RBResult(
             np.array(config.depths, dtype=np.int64),
             np.array(config.seeds, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
-            np.arange(config.rounds, dtype=np.int64),
-            acquire_counts(config, context=context, heralded=False),
+            np.arange(2, dtype=np.int64), np.arange(config.rounds, dtype=np.int64),
+            buffer.array,
         )
 
     def analyze(
@@ -337,4 +297,60 @@ class RBExp(Experiment[RBResult, RBCfg]):
         options controls deterministic paired-seed bootstrap, not acquisition.
         Malformed counts raise; missing cfg or unidentifiable fits return a reason.
         """
-        return analyze_rb(source, options, plots=plots)
+        data, cfg = source.result, source.cfg
+        shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
+        survival = np.full(shape, np.nan)
+        acquired = np.zeros(shape, dtype=np.bool_)
+        means = np.full((2, len(data.depths)), np.nan)
+        curves = means.copy()
+        estimate = None
+        quality = None
+        reason = None
+        if cfg is None:
+            reason = "RB analysis requires saved cfg; current Form is not a substitute"
+        else:
+            validate_axes((data.depths, data.seeds, data.arms, data.rounds), (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)))
+            if data.sums.shape != (*shape, 3, 3):
+                raise ValueError("Expected RB sums shape (depth,seed,arm,round,3,3)")
+            counts = data.sums
+            acquired = np.all(np.isfinite(counts), axis=(-2, -1))
+            missing = np.all(np.isnan(counts), axis=(-2, -1))
+            if not np.all(acquired | missing) or np.any(counts < 0):
+                raise ValueError("RB sums contains invalid counts or a partial round")
+            joint00 = joint_probabilities(counts)[..., 0, 0]
+            paired = (acquired & np.isfinite(joint00)).all(axis=(0, 2))
+            survival = np.where(paired[None, :, None, :], joint00, np.nan)
+            means = paired_means(survival)
+            try:
+                fit = analyze_irb(
+                    data.depths,
+                    survival.transpose(3, 1, 2, 0).astype(np.complex128),
+                    bootstrap_samples=options.bootstrap_samples,
+                    bootstrap_seed=options.bootstrap_seed,
+                )
+            except (ValueError, RuntimeError) as exc:
+                # Isolate model failure while retaining measured count diagnostics.
+                reason = str(exc)
+            else:
+                estimate = estimate_d4(fit)
+                quality = (
+                    compute_fit_quality(fit.mean_signals[0], fit.fit_signals[0], {}, None),
+                    compute_fit_quality(fit.mean_signals[1], fit.fit_signals[1], {}, None),
+                )
+                # Restore probability coordinates, not the decay ratio.
+                sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
+                curves = sign * fit.fit_signals
+        answer = RBAnalysis(survival, acquired, means, curves, estimate, quality, reason)
+        fig, ax = plots.subplots("fit", figsize=(9, 6))
+        for arm, label in enumerate(("Reference", "CZ interleaved")):
+            (line,) = ax.plot(data.depths, answer.mean_survival[arm], "o", label=label)
+            if answer.estimate is not None:
+                ax.plot(data.depths, answer.fit_survival[arm], color=line.get_color())
+        ax.set(xlabel="Random Clifford depth", ylabel="Same-shot joint00 survival")
+        ax.legend()
+        if answer.reason is not None:
+            ax.set_title(f"No RB estimate: {answer.reason}")
+        else:
+            ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
+        fig.tight_layout()
+        return answer

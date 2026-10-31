@@ -38,7 +38,7 @@ Set `reset` to an accepted reset cfg to emit it before every sequence.
 The default `None` emits no reset. The independent
 [`two_qubit/rb_heralded`](guide_heralded.md) experiment adds a herald read
 between optional reset and the sequence. Both versions use the same paired
-sequence construction and decay analysis.
+sequence construction. The heralded version jointly fits gg and ee return survival.
 
 ## Sequences and cost
 
@@ -128,3 +128,21 @@ Gate-dependent noise, coherent errors and nonexponential decay can bias the
 interleaved ratio beyond its statistical interval. Inspect the curves and those limitations before
 interpreting a CZ error. This experiment provides diagnostic estimates only;
 physical calibration acceptance is manual.
+
+## Notebook
+
+Use a validated `RBCfg` as `cfg`. Supply the notebook's existing hardware
+handles, device manager and destination `point_view`.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.rb.core import RBExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(RBExp())
+record = exp.run(cfg)
+analysis = exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```
+
+The adapter owns the run record and plots for each operation.
