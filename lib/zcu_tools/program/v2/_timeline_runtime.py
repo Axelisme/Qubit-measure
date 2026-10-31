@@ -914,7 +914,7 @@ class RuntimeMath(TimedMacro):
             expression = self.prog._timeline_book.source_expressions.get(name)
             if expression is None:
                 expression = RuntimeEnd(name).expression
-            return RuntimeEnd(name, expression=author_time_source(expression))
+            return RuntimeEnd(name, expression=author_time_source(name, expression))
         expression = (
             bounded_source_expression(self.prog, name, limits.minimum, limits.maximum)
             if range_hint is not None

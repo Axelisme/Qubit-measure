@@ -81,9 +81,10 @@ def expression_bounds(value: TimeExpression) -> CycleBounds:
 
 
 @lru_cache(maxsize=4096)
-def author_time_source(value: TimeExpression) -> TimeExpression:
+def author_time_source(name: str, value: TimeExpression) -> TimeExpression:
     """Apply the author's nonnegative cycle contract only at a time entrance.
 
+    name is the existing source register; value is its immutable signed proof.
     An unbounded signed source keeps its original immutable identity and recipe.
     The cached time-domain view has lower bound zero and no finite upper bound;
     its producer reads the captured original, without changing signed data uses.
@@ -93,7 +94,7 @@ def author_time_source(value: TimeExpression) -> TimeExpression:
     if lo is not None or hi is not None:
         return value
     axis = cycle_axis(
-        "author time", 0, None, CycleProducer(reconstruction=value)
+        name, 0, None, CycleProducer(reconstruction=value)
     )
     return TimeVariable(terms=((axis, 1),))
 
@@ -943,7 +944,7 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
 class _ChoiceRecipes:
     """Linearize original recipes while keeping captured storage opaque."""
 
-    def __init__(self, captured: tuple[TimeExpression, ...], maximum: bool):
+    def __init__(self, captured: tuple[TimeExpression, ...], *, maximum: bool):
         self.captured = captured
         self.maximum = maximum
         self.atoms: dict[TimeExpression, CycleAxis] = {}
@@ -1015,7 +1016,7 @@ def plan_time_choice(
     Other atoms retain their original integer producer, never Abs proof terms.
     Coefficients use the N-input mode, breaking ties toward smaller magnitude.
     """
-    recipes = _ChoiceRecipes(captured, maximum)
+    recipes = _ChoiceRecipes(captured, maximum=maximum)
     lines = [line for value in values for line in recipes.candidates(value)]
     if not lines:
         raise ValueError("time choice requires at least one value")

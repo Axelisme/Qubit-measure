@@ -109,6 +109,33 @@ def test_join_eliminates_every_provably_dominated_candidate(extra):
     assert not any(inst.get("CMD") == "REG_WR" and inst.get("IF") in ("S", "NS") for inst in prog.prog_list)
 
 
+def test_join_compares_negative_residuals_with_a_proven_signed32_difference():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("i", 2)
+            self.add_loop("j", 2)
+            self.add_loop("case", 5)
+
+        def _body(self, cfg):
+            left = QickSweep1D("i", 0, 1_000_000_000 / 430.08)
+            right = QickSweep1D("j", 0, 1_000_000_000 / 430.08)
+            with self.branch(by="case", align_timeline=True) as branch:
+                for index, duration in enumerate(
+                    [2 * left, 2 * right, left + right, left + right + 1 / 430.08, left + right + 2 / 430.08]
+                ):
+                    with branch.case(index):
+                        self.delay_timeline(duration)
+
+    prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        end for end in (2, 2_000_000_000, 2_000_000_000, 2_000_000_002) for _ in range(5)
+    ]
+    # S=L+M leaves L-M and M-L, with negative legal values. Their difference
+    # stays in [-2e9, 2e9], so two flag comparisons are safe without a mask.
+    assert sum(inst.get("CMD") == "REG_WR" and inst.get("IF") == "S" for inst in prog.prog_list) == 2
+    assert not any("^" in str(inst.get("OP", "")) for inst in prog.prog_list)
+
+
 class AllocateDuration(Macro):
     def preprocess(self, prog):
         prog.add_reg("duration")

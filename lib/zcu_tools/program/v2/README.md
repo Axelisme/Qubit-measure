@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，軸分量、Abs 範圍證明與 runtime recipe
+**Last updated:** 2026-11-01，N 路合流、公共部分與旗標選值
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -228,11 +228,14 @@ builder.emit(drive)  # Uses default again.
 `sync(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
 原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
 可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
-Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
+Runtime 合流用 TEST 與條件 register 寫回，算術使用移位與加減。
+End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
 每個 sweep／shot 重新建立所需狀態。`delay_timeline("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
 作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
 `range_hint=(lo, hi)` 可選，單位是整數 tProc cycles，表示作者保證的非負閉區間，不增加硬體 range check。
-沒有可用 bounds 時，編譯器在 runtime 計算 max，不證明該段同 channel 不重疊，溢位也由作者負責。
+沒有已知 bounds 且沒有 hint 時，時間入口依作者的非負契約使用下界 0，上界仍未知。
+這個時間視圖保留原來源的捕獲 recipe，不改 signed 非時間資料，也不加硬體檢查。
+仍需要 max 時，編譯器在 runtime 計算，不證明該段同 channel 不重疊，溢位也由作者負責。
 原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
 未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
 
@@ -247,7 +250,18 @@ Runtime 算術只用無 flag 的 ABS／ASR／加減。End 限於 `0..2**31-1`，
 退回只影響證明，不改執行值，也不把保守 slack 當成實際差距來拒絕 relax_delay。
 不可變節點快取範圍，支配判斷以正規化相減式快取結果。
 Runtime 結尾、支配、重疊與 overflow 都從運算式取界，不另存結尾 min/max。
-Runtime recipe 保留原整數候選與捕獲值，每個 join 只物化一次實際 max。
+所有 timeline 合流共用 N 路 max/min 的 runtime recipe planner。
+Planner 展平原 recipe 的同向候選，將捕獲進入點當作不透明變數。
+它以每個變數在 N 式中最常見的係數抽出公共部分 S，平手選絕對值較小的係數。
+相同變數餘項只留最大常數，min 則留最小常數。
+正規化差值的界剔除被任一候選支配的餘項。
+S 與每個剩餘項各算一次，再做 k−1 次實際選值，最後加回 S。
+
+兩路 max 使用 `TEST x−y`、複製 x、`if(S)` 寫入 y，共 3 條指令。
+x 已可覆寫時省去複製，剩 2 條。k 路選值共用結果 register，成本為 `1+2(k−1)` 條。
+這個成本不包含候選求值與加回 S。Min 使用 `if(NS)`。
+Compiler 先用差值界證明 signed32 安全，證明不了時以 sign-corrected mask 選值，不依賴溢位後的 S。
+TEST 更新旗標後由硬體 hazard 單元等待，不插入 NOP，也不使用外部 F/NF。
 後續操作讀取捕獲的 register，不從 Abs 證明式重建 max 或重讀已覆寫的來源。
 編譯期分量與誤差不配置時間 DMEM。
 
