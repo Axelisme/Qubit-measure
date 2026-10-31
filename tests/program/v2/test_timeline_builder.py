@@ -25,6 +25,34 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+@pytest.mark.parametrize("frontend", ["builder", "native"])
+@pytest.mark.parametrize("operation", ["timeline_inc", "delay_by_timeline"])
+def test_named_time_operations_keep_end_and_reference_separate(
+    mock_soccfg, frontend, operation
+):
+    pulse = _pulse("drive")
+
+    def body(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
+        program.emit(pulse)
+        program.fork("default", into="work")
+        if operation == "timeline_inc":
+            program.timeline_inc(100 / 430.08, timeline="work")
+            program.emit(pulse, timeline="work", tag="after")
+        else:
+            program.emit(v2.Delay("gap", 100 / 430.08), timeline="work")
+            program.delay_by_timeline(timeline="work")
+            program.emit(pulse, tag="after")
+
+    prog = _compile_scoped(mock_soccfg, frontend, body, (pulse,))
+    (shot,) = shots(prog)
+    assert waves(shot) == [0, 143]
+    assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
+    expected_offset = 143 if operation == "timeline_inc" else 0
+    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(
+        expected_offset
+    )
+
+
 @pytest.mark.parametrize("sync_at_end", [False, True])
 def test_builder_repeat_keeps_author_reference_advances(mock_soccfg, sync_at_end):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
