@@ -225,19 +225,11 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
             fail_render = True
             raise error
 
-    if interrupted:
+    with pytest.raises(type(error)) as caught_body:
         run()
-        assert sched.outcome.status == "interrupted"
-        assert sched.outcome.exception is error
-        with pytest.raises(ScheduleOutcomeError) as caught:
-            stop.raise_if_error()
-        assert caught.value.__cause__ is error
-    else:
-        with pytest.raises(ValueError, match="body failed") as caught_body:
-            run()
-        assert caught_body.value is error
-        assert sched.outcome.status == "completed"
-        assert stop.error is None
+    assert caught_body.value is error
+    assert sched.outcome.status == "completed"
+    assert stop.error is None
     np.testing.assert_array_equal(buffer.data, [1.0, 2.0])
 
 

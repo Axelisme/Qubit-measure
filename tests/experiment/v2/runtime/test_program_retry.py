@@ -326,26 +326,50 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
     np.testing.assert_allclose(result, np.array([4.0]))
 
 
-def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retrying():
+def test_build_and_acquire_propagates_keyboard_interrupt_without_retrying():
     InterruptingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
-        result = (
+    with (
+        pytest.raises(KeyboardInterrupt),
+        Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched,
+    ):
+        (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
             )
         )
-        assert sched.is_stop() is True
-        assert sched.outcome.status == "interrupted"
-        assert isinstance(sched.outcome.exception, KeyboardInterrupt)
-        np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
 
     assert len(InterruptingProgram.instances) == 1
     assert InterruptingProgram.instances[0].acquire_count == 1
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+
+
+@pytest.mark.parametrize("phase", ["producer", "converter"])
+def test_run_acquire_propagates_same_interrupt_without_retry(phase: str) -> None:
+    interrupt = KeyboardInterrupt("acquisition interrupted")
+    attempts = 0
+
+    class Program:
+        def acquire(self, *_args: object, **_kwargs: object) -> list[NDArray[np.float64]]:
+            nonlocal attempts
+            attempts += 1
+            if phase == "producer":
+                raise interrupt
+            return [np.array([[[1.0, 0.0]]])]
+
+    def convert(_raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        raise interrupt
+
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        Schedule(_cfg(), SignalBuffer((1,)), scope=Scope("run")) as sched,
+    ):
+        sched.run_acquire(Program(), object(), options=RunOptions(retry=3, converter=convert))
+    assert caught.value is interrupt
+    assert attempts == 1
 
 
 def test_build_and_acquire_first_round_stop_returns_nan_partial(
