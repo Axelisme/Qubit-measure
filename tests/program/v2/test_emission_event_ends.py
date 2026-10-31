@@ -267,7 +267,9 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
 
 @pytest.mark.parametrize("post_ticks, end", [(5e-11, 28), (2e-10, 29)])
 def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
-    pulse = Pulse("precise", _pulse_cfg(length=25 / 384, pre=0, post=post_ticks / 430.08))
+    pulse = Pulse(
+        "precise", _pulse_cfg(length=25 / 384, pre=0, post=post_ticks / 430.08)
+    )
     prog = _program([pulse], lambda p: p.emit(pulse))
     # Exact 28-tick playback plus post: only the tail outside tolerance adds a tick.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2

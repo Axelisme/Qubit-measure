@@ -61,7 +61,9 @@ def test_timeline_pulses_are_serial_but_native_pulse_stays_at_reference(timeline
 
 
 @pytest.mark.parametrize("subcycle, scalar_end", [(0.2, 2), (5e-11, 0), (2e-10, 2)])
-def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(subcycle, scalar_end):
+def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(
+    subcycle, scalar_end
+):
     def body(prog):
         prog.delay_timeline(subcycle / 430.08)
         prog.delay_timeline(subcycle / 430.08)
