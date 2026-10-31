@@ -145,6 +145,14 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
     paths preserve whatever one-sided bound their alternatives establish.
     """
     if isinstance(value, TimeChoice):
+        variables = time_variables(value)
+        sources = {v.bounds.source for v in variables}
+        if len(sources) == 1 and all(isinstance(source, str) for source in sources):
+            axis = next(iter(sources))
+            if isinstance(axis, str):
+                count = len(variables[0].bounds.deviation_minimum)
+                grids = interval_arrays(value, {axis: count})
+                return int(grids.minimum.min()), int(grids.maximum.max())
         # Bound unknown inputs before the nonlinear range capture. This keeps
         # shared loop coordinates when an independent feedback value survives.
         # Each resulting linear path still uses source_limits, never a grid.
@@ -515,21 +523,7 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
             for other, alternative in enumerate(limits)
         ):
             return unique[index]
-    choice = TimeChoice(unique, maximum)
-    axes = expression_axes(choice)
-    if axes and all(
-        isinstance(variable.bounds.source, str) for variable in time_variables(choice)
-    ):
-        points = evaluate_time(choice, axes)
-        if points is not None:
-            return point_time(", ".join(sorted({v.name for v in time_variables(choice)})), axes, points, reconstruction=choice)
-        grids = [interval_arrays(value, axes) for value in unique]
-        select = np.maximum if maximum else np.minimum
-        lower, upper = grids[0].minimum, grids[0].maximum
-        for grid in grids[1:]:
-            lower, upper = select(lower, grid.minimum), select(upper, grid.maximum)
-        return interval_time(", ".join(sorted({v.name for v in time_variables(choice)})), axes, lower, upper)
-    return choice
+    return TimeChoice(unique, maximum)
 
 
 def substitute_time(
