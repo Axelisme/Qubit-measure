@@ -5,7 +5,13 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-from zcu_tools.core.simulation import EventSlot, PulseEnvelope, ReadoutSlot, TimelineTemplate, TimeBase
+from zcu_tools.core.simulation import (
+    EventSlot,
+    PulseEnvelope,
+    ReadoutSlot,
+    TimeBase,
+    TimelineTemplate,
+)
 from zcu_tools.experiment import readout_plan
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
@@ -335,8 +341,11 @@ def test_readout_grids_endpoints_and_corners_round_absolute_ticks_once(scale):
         sample_period_ticks=140 * scale,
     )
     content = readout_plan.readout_contents(
-        replace(original, readouts=(window,)), readout_plan.ReadoutDrive(0, 2),
-        window, {}, time_base=base,
+        replace(original, readouts=(window,)),
+        readout_plan.ReadoutDrive(0, 2),
+        window,
+        {},
+        time_base=base,
     )
     expected = np.array([float(Fraction(t * 1000, 43008)) for t in (2300, 2440, 2580)])
     np.testing.assert_array_equal(
