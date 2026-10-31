@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -18,8 +19,8 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     TwoPulseReset,
-    sweep2param,
 )
 from zcu_tools.utils.process import (
     SmoothingOptions,
@@ -29,7 +30,7 @@ from zcu_tools.utils.process import (
     smooth_signal_nd,
 )
 
-from zcu_lab.v2.support import live_heatmap, live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -44,6 +45,14 @@ class FreqResult:
 
 
 class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
+    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
+    method: Literal["soft", "hard"] = "soft"
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -60,13 +69,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq1: Annotated[SweepCfg, FieldMeta(label="Freq1", unit="MHz")]
-    freq2: Annotated[SweepCfg, FieldMeta(label="Freq2", unit="MHz")]
-    method: Literal["soft", "hard"] = "soft"
 
 
 @dataclass(frozen=True)
@@ -94,10 +96,10 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     # (freqs2 inner, freqs1 outer). both axes store MHz on disk (disk Hz).
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs2", "Frequency2", "Hz", scale=1e6),
-            AxesSpec.Axis("freqs1", "Frequency1", "Hz", scale=1e6),
+            AxesSpec.Axis("freqs2", label="Frequency2", unit="Hz", scale=1e6),
+            AxesSpec.Axis("freqs1", label="Frequency1", unit="Hz", scale=1e6),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -115,7 +117,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         """
         # 1. Prepare hardware-grid axes without changing the caller's cfg.
         cfg = deepcopy(cfg)
-        soc, soccfg = context.soc, context.soccfg
+        soccfg = context.soccfg
         reset_cfg = cfg.tested_reset
         freqs1 = sweep2array(
             cfg.freq1,
@@ -130,81 +132,105 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         if cfg.method == "soft":
-            # 2. Scan frequency 2 on the host; keep frequency 1 as the inner loop.
-            soft_viewer = live_heatmap_with_line(
-                context.plots,
-                "measurement",
-                "Frequency1 (MHz)",
-                "Frequency2 (MHz)",
-                line_axis=0,
-            )
-            signals_buffer = SignalBuffer(
-                (len(freqs2), len(freqs1)),
-                on_update=lambda data: soft_viewer.update(
-                    freqs1, freqs2, dual_reset_signal2real(data.T)
-                ),
-            )
-            with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-                for freq2, step in sched.scan("freq2", freqs2.tolist()):
-                    step.cfg.tested_reset.set_param("freq2", freq2)
-                    step.cfg.tested_reset.set_param(
-                        "freq1", sweep2param("freq1", step.cfg.freq1)
-                    )
+            return self._run_soft(cfg, freqs1, freqs2, context=context)
+        return self._run_hard(cfg, freqs1, freqs2, context=context)
 
-                    # 3. Prepare, apply the tested reset, and collect averaged IQ.
-                    _ = (
-                        step.prog_builder(
-                            soc,
-                            soccfg,
-                            reps=step.cfg.reps,
-                            relax_delay=step.cfg.relax_delay,
-                        )
-                        .add(
-                            Reset("reset", step.cfg.reset),
-                            Pulse("init_pulse", step.cfg.init_pulse),
-                            TwoPulseReset("tested_reset", step.cfg.tested_reset),
-                            Readout("readout", step.cfg.readout),
-                        )
-                        .declare_sweep("freq1", step.cfg.freq1)
-                        .build_and_acquire(rounds=cfg.rounds)
-                    )
+    def _run_soft(
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> FreqResult:
+        # Host rows are frequency 2; the Result restores frequency-1 rows.
+        soc, soccfg = context.soc, context.soccfg
+        plots = context.plots
+        fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
+        map_ax, line_ax = fig.axes
+        map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
+        line_ax.set_xlabel("Frequency1 (MHz)")
+        viewer = live_heatmap(map_ax)
+        line = live_line(line_ax)
+        line_ax.lines[0].set(label="current line", marker=".", color="C0")
 
-            # Host rows are frequency 2; restore the canonical frequency-1 rows.
-            return FreqResult(freqs1, freqs2, signals_buffer.array.T)
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            real = dual_reset_signal2real(data.T)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=0))
+            current = real[:, valid[-1]] if valid.size else np.full(len(freqs1), np.nan)
+            return (*viewer.set(freqs1, freqs2, real), *line.set(freqs1, current))
 
-        # 2. Sweep both frequencies in hardware, frequency 1 outside frequency 2.
-        hard_viewer = live_heatmap(
-            context.plots, "measurement", "Frequency1 (MHz)", "Frequency2 (MHz)"
+        fig.show()
+        signals_buffer = SignalBuffer(
+            (len(freqs2), len(freqs1)),
+            on_update=update,
         )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            for freq2, step in sched.scan("freq2", freqs2.tolist()):
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                )
+                freq1 = builder.add_sweep("freq1", cfg.freq1)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.emit(
+                    TwoPulseReset(
+                        "tested_reset",
+                        cfg.tested_reset,
+                        freq1=freq1,
+                        freq2=freq2,
+                    )
+                )
+                builder.emit(Readout("readout", cfg.readout))
+                step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
+
+        return FreqResult(freqs1, freqs2, signals_buffer.array.T)
+
+    def _run_hard(
+        self,
+        cfg: FreqCfg,
+        freqs1: NDArray[np.float64],
+        freqs2: NDArray[np.float64],
+        *,
+        context: RunContext,
+    ) -> FreqResult:
+        # Sweep frequency 1 outside frequency 2 in one FPGA program.
+        soc, soccfg = context.soc, context.soccfg
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
+        viewer = live_heatmap(ax)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(freqs1, freqs2, dual_reset_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(freqs1), len(freqs2)),
-            on_update=lambda data: hard_viewer.update(
-                freqs1, freqs2, dual_reset_signal2real(data)
-            ),
+            on_update=update,
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "freq1", sweep2param("freq1", sched.cfg.freq1)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            sched.cfg.tested_reset.set_param(
-                "freq2", sweep2param("freq2", sched.cfg.freq2)
-            )
-
-            # 3. Prepare, apply the tested reset, and collect the averaged IQ map.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
+            freq1 = builder.add_sweep("freq1", cfg.freq1)
+            freq2 = builder.add_sweep("freq2", cfg.freq2)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(
+                TwoPulseReset(
+                    "tested_reset",
+                    cfg.tested_reset,
+                    freq1=freq1,
+                    freq2=freq2,
                 )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    TwoPulseReset("tested_reset", sched.cfg.tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("freq1", sched.cfg.freq1)
-                .declare_sweep("freq2", sched.cfg.freq2)
-                .build_and_acquire(rounds=cfg.rounds)
             )
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return FreqResult(freqs1, freqs2, signals_buffer.array)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -16,11 +15,10 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     GainSweep,
-    Join,
     Pulse,
     Readout,
     Reset,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -39,6 +37,13 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class MistCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    init_pulse: Pulse.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    mist_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    flux_gain: Annotated[GainSweep, FieldMeta(label="flux gain", unit="a.u.")]
+    mist_gain: Annotated[GainSweep, FieldMeta(label="mist gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -55,13 +60,6 @@ class MistCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    init_pulse: Pulse.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    mist_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    flux_gain: Annotated[GainSweep, FieldMeta(label="flux gain", unit="a.u.")]
-    mist_gain: Annotated[GainSweep, FieldMeta(label="mist gain", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -79,10 +77,10 @@ class MistExp(Experiment[MistResult, MistCfg]):
     # reversed(axes) lengths, so mist_gains is the inner axis, flux_gains the outer.
     AXES_SPEC: ClassVar[AxesSpec[MistResult, MistCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("mist_gains", "Mist Pulse Gain", "a.u."),
-            AxesSpec.Axis("flux_gains", "Flux Pulse Gain", "a.u."),
+            AxesSpec.Axis("mist_gains", label="Mist Pulse Gain", unit="a.u."),
+            AxesSpec.Axis("flux_gains", label="Flux Pulse Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=MistResult,
         cfg_type=MistCfg,
         cfg_schema_version="3.0",
@@ -98,7 +96,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         map is not a calibrated state population or transition probability.
         """
         # Quantize both gain axes for their respective generators.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         flux_gain_sweep = cfg.flux_gain
@@ -129,32 +127,27 @@ class MistExp(Experiment[MistResult, MistCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.flux_pulse.set_param(
-                "gain", sweep2param("flux_gain", sched.cfg.flux_gain)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            sched.cfg.mist_pulse.set_param(
-                "gain", sweep2param("mist_gain", sched.cfg.mist_gain)
+            flux_gain = builder.add_sweep("flux_gain", cfg.flux_gain)
+            mist_gain = builder.add_sweep("mist_gain", cfg.mist_gain)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.fork("default", into=["flux", "mist"])
+            builder.emit(
+                Pulse("flux_pulse", cfg.flux_pulse, gain=flux_gain), timeline="flux"
             )
-
-            # Prepare once per shot, apply the two parallel stimuli, then read out.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    Join(
-                        Pulse("flux_pulse", sched.cfg.flux_pulse),
-                        Pulse("mist_pulse", sched.cfg.mist_pulse),
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("flux_gain", sched.cfg.flux_gain)
-                .declare_sweep("mist_gain", sched.cfg.mist_gain)
-                .build_and_acquire(rounds=cfg.rounds)
+            builder.emit(
+                Pulse("mist_pulse", cfg.mist_pulse, gain=mist_gain), timeline="mist"
             )
+            builder.join("flux", "mist", into="default")
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return MistResult(flux_gains, mist_gains, signals_buffer.array)
 
@@ -180,7 +173,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
 
         real_signals = mist_signal2real(signals2D)
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         if options.ac_coeff is not None:
             mist_photons = options.ac_coeff * mist_gains**2
