@@ -284,15 +284,14 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
         if (
             not variable.producer.axes
             or variable.bounds.deviation_minimum != variable.bounds.deviation_maximum
+            or (
+                variable.producer.points is None
+                and not variable.producer.rounding_remainder
+                and (len(variable.producer.axes) != 1 or not isinstance(variable.bounds.source, str))
+            )
         ):
             return None
         local = dict(variable.producer.axes)
-        if (
-            variable.producer.points is None
-            and not variable.producer.rounding_remainder
-            and (len(local) != 1 or not isinstance(variable.bounds.source, str))
-        ):
-            return None
         if variable.producer.rounding_remainder:
             if variable.producer.fixed_point is None:
                 raise RuntimeError("rounding remainder lost its numerator")
