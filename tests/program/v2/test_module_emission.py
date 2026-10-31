@@ -13,7 +13,7 @@ from zcu_tools.program.v2.modules.reset import (
     PulseResetCfg,
     TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2.timing_support import shots as _shots
@@ -54,6 +54,28 @@ def _program(
                 body(self)
 
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
+
+
+def test_same_named_distinct_pulses_keep_distinct_envelopes():
+    def pulses(names):
+        return [
+            Pulse(
+                name,
+                PulseCfg(
+                    ch=0,
+                    nqz=1,
+                    freq=1000,
+                    gain=0.5,
+                    waveform=CosineWaveformCfg(length=length),
+                ),
+            )
+            for name, length in zip(names, (0.1, 0.2), strict=True)
+        ]
+
+    actual = _program(pulses(("same", "same")))
+    fresh = _program(pulses(("first", "second")))
+    assert actual.prog_list == fresh.prog_list
+    assert actual.compile_waves() == fresh.compile_waves()
 
 
 def test_shared_pulse_definitions_deduplicate_in_each_program():
