@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-10-31, analyze error propagation
+**Last updated:** 2026-11-01, GUI run stop terminal
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -372,7 +372,9 @@ RunInputs 固定 admission 的 ParameterContext，RunPaneState 隨 result 保存
 `stop_requested` 表示前端在這次 Run 發出過 Stop 或成功的 selector cancel，包含只取消子層。
 Core 自己設 stop 不改這個欄位。Snapshot 與 wire 的 result_state 交付同一 bool。
 New Run 或非 acquisition replacement 重設為 False。
-Core 回傳就發布 record，core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
+Core 正常回傳就發布 record，GUI 顯示 finished，operation handle 也回 finished。
+Stop、root 與子孫 scope 的取消都不改這個 terminal。
+Core 拋錯就標 failed、不發布 record，Stop 後的錯誤也顯示原訊息。
 RunMetadata.completion 的 stopped 表示 core 回傳前前端發出過停止請求，不判定資料是否完整。
 晚開 FIT、interactive factory、Post 與 WB 讀這份 result source，不讀後來的 tab binding。
 Native Load 保留檔案 metadata，從 parameter_snapshot 還原當次 point、library 與 alias。

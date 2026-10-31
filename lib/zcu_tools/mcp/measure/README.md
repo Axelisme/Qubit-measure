@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-10-31，analyze error propagation
+**Last updated:** 2026-11-01，GUI run stop terminal
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -385,6 +385,11 @@ Generic cancel(op=17) 維持整個 script Stop 語意。
 
 Ack 保留 execution／workflow snapshot，另帶 cancelled、reason、active_path 與 candidates。
 Cancelled=True 表示 owner 已接受命令，不證明 operation 或 cleanup 已 drain，終局仍讀 wait/status。
+GUI 單次 Run 的 core 正常回傳時，`wait(op)` 與 `operation.await` 一律回 finished。
+Stop、未帶 scope 的 `cancel(op)`、root 或子孫 scope 的取消都不改這個 terminal。
+Core 拋錯仍回 failed。`tab.snapshot.result_state.stop_requested` 記錄這次 Run 接受過停止請求，
+存檔 metadata.completion 的 stopped 記錄 core 回傳前接受的請求，不表示資料是否完整。
+Workflow 與 recipe 根停止仍交付 cancelled，不套用 GUI 單次 Run 的 terminal 規則。
 Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root，持久化不進 control callback。
 這個分支的 accepted ack 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token。
 Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled。
