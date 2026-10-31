@@ -231,33 +231,30 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
     offset = QickSweep1D("scan", 7 / 430.08, 8 / 430.08) if swept_offset else 7 / 430.08
-    drives = [
-        TableLengthPulse(
-            f"selected{ch}",
-            PulseCfg(
-                ch=ch,
-                nqz=1,
-                freq=1000,
-                gain=0.5,
-                pre_delay=offset + ch * 40 / 430.08,
-                waveform=ConstWaveformCfg(length=7 / 384),
-            ),
-            lengths=[7 / 384, 11 / 384],
-            idx_reg="scan",
-        )
-        for ch in range(2)
-    ]
+    drive = TableLengthPulse(
+        "selected",
+        PulseCfg(
+            ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            pre_delay=offset,
+            waveform=ConstWaveformCfg(length=7 / 384),
+        ),
+        lengths=[7 / 384, 11 / 384],
+        idx_reg="scan",
+    )
 
     def initialize(prog):
-        for drive in drives:
-            prog.declare(drive)
+        prog.declare(drive)
 
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 100)
         prog.timeline_inc("duration")
         prog.fork("default", into="other")
-        prog.emit(drives[0])
-        prog.emit(drives[1], timeline="other")
+        prog.timeline_inc(40 / 430.08, timeline="other")
+        prog.emit(drive)
+        prog.emit(drive, timeline="other")
 
     prog = program(body, initialize=initialize, points=2)
     expected = [[107, 147], [109, 149]] if swept_offset else [[107, 147], [108, 148]]
