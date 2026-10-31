@@ -22,6 +22,7 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_bounds import CycleBounds, FixedLoopIndex
+from ._timeline_expression import choose_time, time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_outputs import (
@@ -38,8 +39,9 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     align_end,
-    known_maximum,
+    source_expression,
     step_time,
+    time_expression,
     time_bounds,
 )
 from ._timeline_selected import TimelineSelectedPulse
@@ -870,6 +872,23 @@ class TimelineBranch(Macro):
                 )
         self.cases = [self.indexed_cases.get(index, []) for index in range(count)]
         initial = self.book.ends.copy()
+        self.entry_math = RuntimeMath(prog)
+        inputs = {}
+        if self.align_timeline:
+            for register in prog._time_bounds.defined:
+                expression = source_expression(prog, register)
+                self.book.source_expressions.setdefault(register, expression)
+                for variable in time_variables(expression):
+                    if not variable.axes and variable.points is None:
+                        inputs[variable] = self.entry_math.snapshot(
+                            RuntimeEnd(variable.name, variable.minimum, variable.maximum, expression=expression)
+                        )
+            for end in initial.values():
+                for variable in time_variables(time_expression(prog, end)):
+                    if not variable.axes and variable.points is None and variable not in inputs:
+                        inputs[variable] = self.entry_math.snapshot(
+                            RuntimeEnd(variable.name, variable.minimum, variable.maximum)
+                        )
         self.book.begin_branch_sources(prog)
         waiting = self.book.waiting.copy()
         initial_gens = {ch: prog.get_timestamp(gen_ch=ch) for ch in prog.gen_chs}
@@ -921,10 +940,16 @@ class TimelineBranch(Macro):
             if name not in used:
                 self.book.ends[name] = initial[name]
             elif self.align_timeline:
-                end = values[0]
-                for value in values[1:]:
-                    end = self.book.math.maximum(end, value)
-                self.book.ends[name] = end
+                if any(isinstance(value, RuntimeEnd) for value in values):
+                    self.book.ends[name] = self.book.math.reconstruct(
+                        choose_time(*(time_expression(prog, value) for value in values)),
+                        inputs,
+                    )
+                else:
+                    end = values[0]
+                    for value in values[1:]:
+                        end = self.book.math.maximum(end, value)
+                    self.book.ends[name] = end
             else:
                 self.book.ends[name] = self._merge_values(prog, values, force=True)
         self._merge_native(
@@ -1087,6 +1112,7 @@ class TimelineBranch(Macro):
                 )
 
     def translate(self, prog) -> None:
+        self.entry_math.translate(prog)
         prog.record_meta(
             type="BRANCH_START", name=self.name, info={}, regs={"compare_reg": self.by}
         )

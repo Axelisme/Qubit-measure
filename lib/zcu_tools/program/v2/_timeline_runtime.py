@@ -10,6 +10,7 @@ from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
     CycleVariable,
     LinearTime,
+    TimeChoice,
     TimeExpression,
     add_time,
     choose_time,
@@ -362,6 +363,44 @@ class RuntimeMath(TimedMacro):
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
+
+    def reconstruct(
+        self, expression: TimeExpression, inputs: dict[CycleVariable, RuntimeEnd]
+    ) -> RuntimeEnd:
+        """Materialize exact cycle algebra using captured branch-entry inputs.
+
+        Known point grids use the existing timing-table owner. Unknown terms
+        read their immutable entry snapshots, never path-local scratch storage.
+        Every expression variable must be known on that grid or supplied in inputs.
+        """
+        axes = expression_axes(expression)
+        points = evaluate_time(expression, axes)
+        if points is not None:
+            return self.lookup([int(value) for value in points.flat], axes)
+        if isinstance(expression, TimeChoice):
+            values = [self.reconstruct(item, inputs) for item in expression.alternatives]
+            result = values[0]
+            for value in values[1:]:
+                if expression.maximum:
+                    result = self.cycles(self.maximum(result, value))
+                else:
+                    # min(a,b) = a - max(0,a-b), with the same flag-free math.
+                    delta = self.subtract(result, value)
+                    result = self.subtract(result, self.maximum(0.0, delta))
+            return result
+        result = self.cycles(expression.constant / get_fclk(self.prog))
+        for variable, coefficient in expression.terms:
+            term = inputs[variable]
+            magnitude = abs(coefficient)
+            scaled = self.cycles(0.0)
+            while magnitude:
+                if magnitude & 1:
+                    scaled = self.add(scaled, term)
+                magnitude >>= 1
+                if magnitude:
+                    term = self.add(term, term)
+            result = self.add(result, scaled) if coefficient > 0 else self.subtract(result, scaled)
+        return result
 
     def source(self, name: str) -> RuntimeEnd:
         """Describe a certified register at this consumer, retaining known points."""
