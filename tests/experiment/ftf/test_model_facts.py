@@ -139,8 +139,8 @@ def test_multiple_templates_build_one_joint_for_one_evolve(
             events=tuple(
                 replace(
                     event,
-                    start_us=event.start_us[point : point + 1],
-                    duration_us=event.duration_us[point : point + 1],
+                    start_ticks=event.start_ticks[point : point + 1],
+                    duration_ticks=event.duration_ticks[point : point + 1],
                     frequency_mhz=event.frequency_mhz[point : point + 1],
                     phase_deg=event.phase_deg[point : point + 1],
                     gain=event.gain[point : point + 1],
@@ -152,14 +152,14 @@ def test_multiple_templates_build_one_joint_for_one_evolve(
             readouts=tuple(
                 replace(
                     window,
-                    trigger_us=window.trigger_us[point : point + 1],
+                    trigger_ticks=window.trigger_ticks[point : point + 1],
                     frequency_mhz=window.frequency_mhz[point : point + 1],
                     phase_deg=window.phase_deg[point : point + 1],
                     generator_channels=window.generator_channels[point : point + 1],
                 )
                 for window in base.readouts
             ),
-            duration_us=base.duration_us[point : point + 1],
+            duration_ticks=base.duration_ticks[point : point + 1],
         )
         for point in range(2)
     )

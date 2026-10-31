@@ -103,14 +103,14 @@ def prepare_readout(
         next(window for window in template.readouts if window.channel == adc.ro_ch)
         for template in request.templates
     )
-    rate = windows[0].sample_rate_mhz
-    if any(window.sample_rate_mhz != rate for window in windows):
+    period = windows[0].sample_period_ticks
+    if any(window.sample_period_ticks != period for window in windows):
         raise ValueError("single-cavity templates require one ADC sample rate")
     receiver = Receiver(
         adc.gain,
         float(np.deg2rad(adc.phase_deg)),
         np.array(adc.offset_adc),
-        np.array(adc.noise_psd_adc2_ns) / (1000 / rate),
+        np.array(adc.noise_psd_adc2_ns) / request.time_base.ns(period),
         time_of_flight_ns=adc.time_of_flight_ns,
         ripple_depth=adc.background.ripple_depth,
         ripple_period_ghz=adc.background.ripple_period_mhz / 1000,

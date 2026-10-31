@@ -1,7 +1,9 @@
 """Schedule-owned acquisition, independently of program construction."""
 
+import re
 from collections.abc import Callable, Iterator
 from functools import partial
+from typing import Unpack
 
 import numpy as np
 import pytest
@@ -10,7 +12,11 @@ from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
-from zcu_tools.program.acquisition import CancelFlagProtocol
+from zcu_tools.experiment.v2.runtime.acquisition import (
+    AcquireOptions,
+    SynchronousAcquireKeywords,
+)
+from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor
 from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -21,6 +27,187 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
+
+
+class RawProgram:
+    """Synchronous producer exposing the documented raw payload unchanged."""
+
+    def __init__(self, raw: list[NDArray[np.float64]]) -> None:
+        self.raw = raw
+
+    def acquire(
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
+    ) -> list[NDArray[np.float64]]:
+        kwargs["round_hook"](1, self.raw, kwargs["cancel_flag"])
+        return self.raw
+
+    def acquire_decimated(
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
+    ) -> list[NDArray[np.float64]]:
+        return self.acquire(soc, **kwargs)
+
+
+@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
+@pytest.mark.parametrize("retry", [0, 2])
+@pytest.mark.parametrize("cancel_on_failure", [False, True])
+def test_producer_failure_propagates_same_exception_after_explicit_retries(
+    entry: str, mode: str, retry: int, cancel_on_failure: bool
+) -> None:
+    cause = RuntimeError("producer failed")
+    attempts: list[int] = []
+    root = Scope("run")
+    buffer = SignalBuffer((1,))
+
+    def fail() -> None:
+        attempts.append(1)
+        if cancel_on_failure:
+            root.stop.set()
+        raise cause
+
+    class FailingProgram(RawProgram):
+        def acquire(
+            self,
+            soc: object,
+            **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
+        ) -> list[NDArray[np.float64]]:
+            kwargs["round_hook"](1, self.raw, kwargs["cancel_flag"])
+            fail()
+            return self.raw
+
+        def acquire_summed(
+            self,
+            soc: object,
+            *,
+            processor: ShotSumProcessor,
+            rounds: int = 1,
+            step_rounds: bool = False,
+            **qick_options: object,
+        ) -> NDArray[np.float64]:
+            fail()
+            return np.ones((1,))
+
+    program = FailingProgram([np.array([[[3.0, 4.0]]])])
+    sched = Schedule({}, buffer, scope=root)
+
+    def acquire() -> None:
+        if entry == "schedule":
+            options = RunOptions[list[NDArray[np.float64]]](
+                retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
+            )
+            if mode == "integrated":
+                sched.run_acquire(program, object(), options=options)
+            elif mode == "decimated":
+                sched.run_acquire_decimated(program, object(), options=options)
+            else:
+                sched.run_acquire_summed(
+                    program,
+                    object(),
+                    processor=lambda _iq: np.ones((1,)),
+                    options=RunOptions(retry=retry),
+                )
+        else:
+            builder = sched.prog_builder(object(), object())
+            acquire_options = AcquireOptions(retry=retry)
+            if mode == "integrated":
+                builder.run_program(program, options=acquire_options)
+            elif mode == "decimated":
+                builder.run_program_decimated(
+                    program,
+                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]).reshape(1),
+                    options=acquire_options,
+                )
+            else:
+                builder.run_program_summed(
+                    program,
+                    processor=lambda _iq: np.ones((1,)),
+                    sums2signal_fn=lambda raw: raw,
+                    options=acquire_options,
+                )
+
+    with pytest.raises(RuntimeError, match="producer failed") as caught, sched:
+        acquire()
+    assert caught.value is cause
+    assert len(attempts) == (1 if cancel_on_failure else retry + 1)
+    if mode != "summed":
+        np.testing.assert_array_equal(buffer.array, [3 + 4j])
+
+
+@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize(
+    ("mode", "reads"),
+    [("integrated", (1, 2)), ("integrated", (2,)), ("decimated", (1, 1))],
+)
+@pytest.mark.parametrize("explicit_converter", [False, True])
+def test_ambiguous_raw_requires_explicit_converter(
+    entry: str, mode: str, reads: tuple[int, ...], explicit_converter: bool
+) -> None:
+    raw = [np.ones((nreads, 2, 2), dtype=np.float64) for nreads in reads]
+    program = RawProgram(raw)
+    buffer = SignalBuffer((2,))
+
+    def convert(payload: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        return sum((adc.sum(axis=0) for adc in payload), np.zeros((2, 2))).dot([1, 1j])
+
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        if entry == "schedule":
+            run = (
+                schedule.run_acquire
+                if mode == "integrated"
+                else schedule.run_acquire_decimated
+            )
+            acquire = partial(
+                run,
+                program,
+                "soc",
+                options=RunOptions(converter=convert if explicit_converter else None),
+            )
+        else:
+            builder = schedule.prog_builder("soc", "soccfg")
+            run = (
+                builder.run_program
+                if mode == "integrated"
+                else builder.run_program_decimated
+            )
+            acquire = partial(
+                run, program, raw2signal_fn=convert if explicit_converter else None
+            )
+        if explicit_converter:
+            np.testing.assert_array_equal(acquire(), np.full(2, sum(reads) * (1 + 1j)))
+        else:
+            message = rf"ADC.*{len(reads)}.*converter"
+            if mode == "integrated":
+                message = rf"ADC.*{len(reads)}.*read.*{re.escape(str(list(reads)))}.*converter"
+            with pytest.raises(ValueError, match=message):
+                acquire()
+            assert schedule.outcome.status == "completed"
+            assert np.isnan(buffer.array).all()
+
+
+@pytest.mark.parametrize(
+    ("mode", "raw_shape", "signal_shape"),
+    [("integrated", (1, 2, 3, 2), (2, 3)), ("decimated", (2, 3, 4, 2), (2, 3, 4))],
+)
+def test_single_adc_default_converter_preserves_all_signal_axes(
+    mode: str, raw_shape: tuple[int, ...], signal_shape: tuple[int, ...]
+) -> None:
+    raw = np.arange(np.prod(raw_shape), dtype=np.float64).reshape(raw_shape)
+    buffer = SignalBuffer(signal_shape)
+    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+        run = (
+            schedule.run_acquire
+            if mode == "integrated"
+            else schedule.run_acquire_decimated
+        )
+        result = run(RawProgram([raw]), "soc")
+        expected_iq = raw[0] if mode == "integrated" else raw
+        np.testing.assert_array_equal(np.real(result), expected_iq[..., 0])
+        np.testing.assert_array_equal(np.imag(result), expected_iq[..., 1])
+        assert result.shape == signal_shape
 
 
 @pytest.fixture
@@ -50,7 +237,7 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     updates = []
     bars: list[RecordingProgressBar] = []
     buffer = SignalBuffer(
-        (2, 1), on_update=lambda data: updates.append(data.copy()), update_interval=1
+        (2,), on_update=lambda data: updates.append(data.copy()), update_interval=1
     )
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
@@ -58,9 +245,9 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     ):
         for _, step in schedule.scan("point", [10, 20]):
             result = step.run_acquire(program, env.soc, rounds=2)
-            np.testing.assert_array_equal(result, [0j])
+            np.testing.assert_array_equal(result, np.array(0j))
             assert np.shares_memory(result, buffer.array)
-    np.testing.assert_array_equal(buffer.array, [[0j], [0j]])
+    np.testing.assert_array_equal(buffer.array, [0j, 0j])
     assert len(updates) == 6  # Two completed rounds plus final per point.
     assert np.isnan(updates[0][1]).all()
     rounds_bars = [bar for bar in bars if bar.desc == "rounds"]
@@ -163,10 +350,8 @@ def _policy_poll(
             return []
         if ending == "retry" and calls == 1:
             raise RuntimeError("transport unavailable")
-        if ending in {"failure", "interrupt"} and calls == 2:
-            if ending == "interrupt":
-                raise KeyboardInterrupt
-            raise RuntimeError("transport failed after one round")
+        if ending == "interrupt" and calls == 2:
+            raise KeyboardInterrupt
         first = calls == (2 if ending == "retry" else 1)
         iq = [3, 4] if first else [9, 12]
         raw = np.tile(iq, (2, 1)) * program.ro_chs[0]["length"]
@@ -184,7 +369,6 @@ def _policy_poll(
         "external_stop",
         "before_data",
         "interrupt",
-        "failure",
     ],
 )
 def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
@@ -228,7 +412,6 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
             "external_stop": "stopped",
             "before_data": "stopped",
             "interrupt": "interrupted",
-            "failure": "failed",
         }.get(ending, "completed")
         assert schedule.outcome.status == expected_status
         if ending == "data_stop":

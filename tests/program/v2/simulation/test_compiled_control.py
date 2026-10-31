@@ -13,6 +13,7 @@ from zcu_tools.program.v2.modules import LoadValue
 
 from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.support import request_of
+from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
@@ -61,7 +62,7 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
     events = result.materialize_point(0).events
     assert len(events) == 4
     assert [e.source for e in events] == ["repeated"] * 4
-    assert [e.start_us for e in events] == pytest.approx(
+    assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
         [0, 43 / 430.08, 86 / 430.08, 129 / 430.08]
     )
     assert [e.iterations for e in events] == [
@@ -70,7 +71,7 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate():
         (("outer", 1), ("inner", 0)),
         (("outer", 1), ("inner", 1)),
     ]
-    assert result.readouts[0].trigger_us == (0,)
+    assert times_us(result.time_base, result.readouts[0].trigger_ticks) == (0,)
 
 
 def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
@@ -94,9 +95,9 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point():
     for index in range(3):
         events = result.materialize_point(index).events
         assert [e.source for e in events] == ["repeated"] * index + ["final"]
-        assert [e.start_us for e in events] == pytest.approx(
-            [i * 43 / 430.08 for i in range(index + 1)]
-        )
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in events
+        ] == pytest.approx([i * 43 / 430.08 for i in range(index + 1)])
         assert [e.iterations for e in events[:-1]] == [
             (("inner", i),) for i in range(index)
         ]
@@ -125,7 +126,9 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
     for index in range(3):
         events = result.materialize_point(index).events
         assert [e.source for e in events] == [f"case-{index}", "tail"]
-        assert [e.start_us for e in events] == pytest.approx([0, 100 / 430.08])
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in events
+        ] == pytest.approx([0, 100 / 430.08])
 
 
 @pytest.mark.parametrize("register_count", [False, True])
@@ -155,11 +158,20 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
     static = prog.ro_chs[0]["trigs"]
     if count == 1:
         result = request(prog, env)
-        assert len(result.readouts[0].trigger_us) == static == 1
+        assert (
+            len(times_us(result.time_base, result.readouts[0].trigger_ticks))
+            == static
+            == 1
+        )
         if register_count:
             assert result.point_dims == (2,)
             assert [
-                len(result.materialize_point(i).readouts[0].trigger_us)
+                len(
+                    times_us(
+                        result.time_base,
+                        result.materialize_point(i).readouts[0].trigger_ticks,
+                    )
+                )
                 for i in range(2)
             ] == [1, 1]
     elif count == 0 and not register_count:
@@ -221,7 +233,8 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
     prog, env = program(body, initialize, trigger_time=None)
     result = request(prog, env)
     assert [
-        result.materialize_point(i).events[0].start_us for i in range(3)
+        time_us(result.time_base, result.materialize_point(i).events[0].start_ticks)
+        for i in range(3)
     ] == pytest.approx([30 / 430.08, 30 / 430.08, 25 / 430.08])
 
 
@@ -291,7 +304,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == [f"case-{index}"] * 3
         for readout in point.readouts:
-            assert readout.trigger_us == pytest.approx((0, 43 / 430.08, 86 / 430.08))
+            assert times_us(result.time_base, readout.trigger_ticks) == pytest.approx(
+                (0, 43 / 430.08, 86 / 430.08)
+            )
     assert {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()} == static
 
 
