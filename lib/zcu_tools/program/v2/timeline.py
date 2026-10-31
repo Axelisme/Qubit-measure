@@ -466,6 +466,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         not earlier unprotected generator users. Outside module declaration the
         inherited string-owner protection contract is unchanged.
         """
+        # Successful repeated declarations already proved resource equivalence.
+        if gen_ch in self._protected_gen_routes and all(
+            ch in self._protected_ro_routes for ch in ro_chs
+        ):
+            return
         super().protect_readout_routes(owner, gen_ch, ro_chs)
         if self._declaration_module is not None:
             self._resource_owners[("generator", gen_ch)] = self._declaration_module
