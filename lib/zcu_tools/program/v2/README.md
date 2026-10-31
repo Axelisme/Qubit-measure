@@ -36,8 +36,10 @@ The ordinary profile does not offer mixers, mux channels or weighted readouts.
 selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
 Its generator DDS is 1536 MHz and ADC output is 76.8 MHz. Other channels keep
 the ordinary profile. Neither helper permits arbitrary clock/firmware overrides. These are virtual
-compile capabilities, not a claim about an attached board. Clocks, DDS, memory
-limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
+compile capabilities, not a claim about an attached board. `pfb_channel(soccfg,
+ro_ch, frequency_mhz)` resolves an absolute physical frequency through QICK's
+public readout calculation; callers do not reproduce PFB folding or rounding.
+Clocks, DDS, memory limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
 wiring belongs to `SimulationSoc`; actually using an unwired channel fails.
 
 See [simulation](simulation/README.md) for the shared numeric contract, trusted

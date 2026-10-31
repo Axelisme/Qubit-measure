@@ -20,7 +20,7 @@ from zcu_tools.experiment.readout_plan import (
     map_readout_events,
     readout_contents,
 )
-from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
+from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg, pfb_channel
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
@@ -342,25 +342,13 @@ def _mux_channel_contents(
     profile = make_mux_mock_soccfg(
         path.gen_ch + 1, max(channels) + 1, gen_ch=path.gen_ch, ro_chs=channels
     )
-    config = profile["readouts"][channel]
-    sample_rate = float(config["fs"])
-    spacing = float(config["f_dds"]) / 2
-    offset, count = int(config["pfb_ch_offset"]), int(config["pfb_nch"])
-
-    def pfb_channel(frequency_ghz: float) -> int:
-        frequency = frequency_ghz * 1000
-        zone = int(frequency // (sample_rate / 2)) + 1
-        if zone % 2 == 0:
-            frequency = -frequency
-        folded = frequency % sample_rate
-        return (offset + round(folded / spacing)) % count
-
     selected = []
     for events in content.events:
         row = []
         for event in events:
             addressed = {
-                pfb_channel(grid.demodulation_frequency_ghz) for grid in event.grids
+                pfb_channel(profile, channel, grid.demodulation_frequency_ghz * 1000)
+                for grid in event.grids
             }
             if len(addressed) > 1:
                 raise ValueError(
@@ -370,7 +358,8 @@ def _mux_channel_contents(
             pulses = tuple(
                 pulse
                 for pulse in event.pulses
-                if not addressed or pfb_channel(pulse.frequency_ghz) in addressed
+                if not addressed
+                or pfb_channel(profile, channel, pulse.frequency_ghz * 1000) in addressed
             )
             if addressed and not pulses:
                 frequencies = ", ".join(
