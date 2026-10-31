@@ -28,6 +28,7 @@ from ._timeline_expression import (
     scale_time,
     select_time,
     shifted_time,
+    substitute_time,
     unbounded_time,
 )
 from ._timeline_guard import bounds
@@ -839,6 +840,11 @@ class RuntimeMath(TimedMacro):
         common, residuals, atoms = plan_time_choice(
             expressions, maximum=maximum, captured=tuple(bindings)
         )
+        if len(residuals) == 1:
+            selected = substitute_time(add_time(common, residuals[0]), atoms)
+            for value, expression in zip(values, expressions, strict=True):
+                if (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
+                    return value
         sources = {} if inputs is None else inputs.copy()
         for axis, expression in atoms.items():
             if expression in bindings:
