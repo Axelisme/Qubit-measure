@@ -213,14 +213,16 @@ def test_coherence_shell_wait_matches_pointwise_scheduling_oracle(mux, sequence)
     expected_waves = []
     expected_body = []
     remaining = []
-    for gap in (43, 1763.5, 3484):
+    # Author delay sweeps use native start round and truncated step.
+    gaps = (22, 882, 1742) if sequence == "echo" else (43, 1763, 3483)
+    for gap in gaps:
         starts = [0]
         end = 28
         if sequence == "echo":
-            end = math.ceil(end + gap / 2)
+            end += gap
             starts.append(end)
             end += 28
-            end = math.ceil(end + gap / 2)
+            end += gap
         else:
             end = math.ceil(end + gap)
         starts.append(end)

@@ -410,13 +410,7 @@ class RuntimeMath(TimedMacro):
                 if points is not None and int(points.min()) >= 0:
                     if not np.any(points):
                         return captured
-                    return self.add(
-                        captured, self.lookup([int(v) for v in points.flat], axes)
-                    )
-        axes = expression_axes(expression)
-        points = evaluate_time(expression, axes)
-        if points is not None:
-            return self.lookup([int(value) for value in points.flat], axes)
+                    return self.add(captured, self.reconstruct(delta, inputs))
         if isinstance(expression, TimeChoice):
             values = [
                 self.reconstruct(item, inputs, captured_ends)
@@ -438,7 +432,15 @@ class RuntimeMath(TimedMacro):
     ) -> RuntimeEnd:
         result = self.cycles(expression.constant / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
-            term = inputs[variable]
+            if variable in inputs:
+                term = inputs[variable]
+            elif len(variable.axes) == 1 and variable.points is None:
+                axis, count = variable.axes[0]
+                term = self.cycles(QickParam(0, {axis: count - 1}) / get_fclk(self.prog))
+            else:
+                raise RuntimeError(
+                    f"{variable.name}: integer time expression lost its runtime producer"
+                )
             magnitude = abs(coefficient)
             scaled = self.cycles(0.0)
             while magnitude:
@@ -480,9 +482,7 @@ class RuntimeMath(TimedMacro):
             if points is not None and int(points.min()) >= 0:
                 if int(points.min()) == int(points.max()):
                     return self.add(captured, int(points.min()) / get_fclk(self.prog))
-                return self.add(
-                    captured, self.lookup([int(v) for v in points.flat], axes)
-                )
+                return self.add(captured, self.reconstruct(delta, inputs))
         return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
 
     def _captured_delta(
