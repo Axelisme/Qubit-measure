@@ -11,6 +11,8 @@ from numpy.typing import NDArray
 from ._timeline_bounds import CycleBounds
 from ._timeline_range import VariableRange, source_limits
 
+CycleValues = NDArray[np.int64] | NDArray[np.object_]
+
 
 @dataclass(frozen=True)
 class CycleIntervalGrid:
@@ -23,8 +25,8 @@ class CycleIntervalGrid:
     Construction stores arrays without copying or changing them.
     """
 
-    minimum: NDArray[np.int64]
-    maximum: NDArray[np.int64]
+    minimum: CycleValues
+    maximum: CycleValues
 
 
 @dataclass(frozen=True)
@@ -79,7 +81,7 @@ def cycle_variable(
     name: str,
     minimum: int | None,
     maximum: int | None,
-    producer: CycleProducer = CycleProducer(),
+    producer: CycleProducer | None = None,
 ) -> CycleVariable:
     """Capture a producer's range once, without evaluating expression grids.
 
@@ -88,6 +90,7 @@ def cycle_variable(
     multi-loop nonlinear results receive independent IDs, even with bounds.
     Recipe metadata survives independently for runtime reconstruction.
     """
+    producer = CycleProducer() if producer is None else producer
     axes, points, interval_points = producer.axes, producer.points, producer.interval_points
     source: str | object = object()
     start, end = minimum, maximum
@@ -166,9 +169,9 @@ def expression_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction 
         if variables and all(v.minimum is not None and v.maximum is not None for v in variables) and any(
             not isinstance(v.bounds.source, str) or v.bounds.deviation_minimum != v.bounds.deviation_maximum for v in variables
         ):
-            lower = choose_time(*(bound_unknowns(item, upper=False) for item in value.alternatives), maximum=value.maximum)
-            upper = choose_time(*(bound_unknowns(item, upper=True) for item in value.alternatives), maximum=value.maximum)
-            return expression_limits(lower)[0], expression_limits(upper)[1]
+            lower_choice = choose_time(*(bound_unknowns(item, upper=False) for item in value.alternatives), maximum=value.maximum)
+            upper_choice = choose_time(*(bound_unknowns(item, upper=True) for item in value.alternatives), maximum=value.maximum)
+            return expression_limits(lower_choice)[0], expression_limits(upper_choice)[1]
         limits = [expression_limits(item) for item in value.alternatives]
         select = max if value.maximum else min
         lows = [lo for lo, _ in limits if lo is not None]
@@ -218,7 +221,7 @@ def expression_axes(value: TimeExpression) -> dict[str, int]:
 
 def evaluate_time(
     value: TimeExpression, axes: dict[str, int]
-) -> NDArray[np.int64] | None:
+) -> CycleValues | None:
     """Evaluate legal points by broadcasting shared axes; None means unknown input.
 
     axes contains the union of dimensions requested by the caller. Missing
@@ -233,12 +236,12 @@ def evaluate_time(
                 return None
             result = points if result is None else select(result, points)
         return result
-    result = np.asarray(value.constant, dtype=np.int64)
+    result = np.asarray(value.constant, dtype=object if isinstance(value.constant, Fraction) else np.int64)
     for variable, coefficient in value.terms:
         if variable.minimum is None or variable.maximum is None:
             return None
         if variable.minimum == variable.maximum:
-            result = result + coefficient * variable.minimum
+            result = np.add(result, coefficient * variable.minimum)
             continue
         if not variable.producer.axes or variable.producer.interval_points is not None:
             return None
@@ -263,7 +266,7 @@ def evaluate_time(
         order = [name for name in axes if name in local]
         points = points.transpose(tuple(list(local).index(name) for name in order))
         shape = tuple(local.get(name, 1) for name in axes)
-        result = result + coefficient * points.reshape(shape)
+        result = np.add(result, np.multiply(coefficient, points.reshape(shape)))
     return result
 
 
@@ -562,7 +565,9 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         upper = None if any(hi is None for _, hi in limits) else select(hi for _, hi in limits if hi is not None)
         logging.getLogger(__name__).warning("Timeline range fallback: %s branches exceed 64", len(unique))
         variable = cycle_variable(
-            "choice fallback", lower, upper,
+            "choice fallback",
+            None if lower is None else math.floor(lower),
+            None if upper is None else math.ceil(upper),
             CycleProducer(reconstruction=choice, fallback_branches=len(unique)),
         )
         return LinearTime(terms=((variable, 1),))

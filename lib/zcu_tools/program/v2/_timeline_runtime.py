@@ -670,23 +670,9 @@ class RuntimeMath(TimedMacro):
     def _reconstruct_linear(
         self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
     ) -> RuntimeEnd:
-        for variable, coefficient in expression.terms:
-            recipe = variable.producer
-            if recipe.rounding_remainder and recipe.fixed_point is not None:
-                numerator, shift = recipe.fixed_point
-                divisor = 1 << shift
-                copies = -coefficient * divisor
-                if copies != int(copies):
-                    raise RuntimeError("fractional conversion lost its complete quotient")
-                quotient = add_time(
-                    scale_time(numerator, Fraction(1, divisor)),
-                    LinearTime(terms=((variable, Fraction(-1, divisor)),)),
-                )
-                rest = add_time(expression, scale_time(quotient, -copies))
-                converted = self._reconstruct_fixed_point(variable, inputs)
-                scaled = self.multiply(converted, abs(int(copies)))
-                remainder = self.reconstruct(rest, inputs)
-                return self.add(remainder, scaled) if copies > 0 else self.subtract(remainder, scaled)
+        quotient = self._reconstruct_quotients(expression, inputs)
+        if quotient is not None:
+            return quotient
         if all(
             variable not in inputs
             and len(variable.producer.axes) == 1
@@ -746,6 +732,29 @@ class RuntimeMath(TimedMacro):
                 else self.subtract(result, scaled)
             )
         return result
+
+    def _reconstruct_quotients(
+        self, expression: LinearTime, inputs: dict[CycleVariable, RuntimeEnd]
+    ) -> RuntimeEnd | None:
+        """Recover whole integer shifts before reconstructing rational proof terms."""
+        for variable, coefficient in expression.terms:
+            recipe = variable.producer
+            if recipe.rounding_remainder and recipe.fixed_point is not None:
+                numerator, shift = recipe.fixed_point
+                divisor = 1 << shift
+                copies = -coefficient * divisor
+                if copies != int(copies):
+                    raise RuntimeError("fractional conversion lost its complete quotient")
+                quotient = add_time(
+                    scale_time(numerator, Fraction(1, divisor)),
+                    LinearTime(terms=((variable, Fraction(-1, divisor)),)),
+                )
+                rest = add_time(expression, scale_time(quotient, -copies))
+                converted = self._reconstruct_fixed_point(variable, inputs)
+                scaled = self.multiply(converted, abs(int(copies)))
+                remainder = self.reconstruct(rest, inputs)
+                return self.add(remainder, scaled) if copies > 0 else self.subtract(remainder, scaled)
+        return None
 
     def _reconstruct_fixed_point(
         self, variable: CycleVariable, inputs: dict[CycleVariable, RuntimeEnd]
