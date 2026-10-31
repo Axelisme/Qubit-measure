@@ -1,6 +1,7 @@
 """Runtime cycle emission plans with correlated compile-time time expressions."""
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
