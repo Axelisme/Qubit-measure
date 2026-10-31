@@ -3,6 +3,7 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 
 import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
@@ -24,7 +25,6 @@ from ._timeline_expression import (
     unbounded_time,
 )
 from ._timeline_guard import bounds
-from .macro.dmem import DmemLookup, sweep_table_index
 from .macro.write_reg import WriteRegOp
 from .modules.util import get_fclk
 
@@ -73,7 +73,7 @@ def align_end(prog, value: float | QickParam) -> "Time":
     affine = QickParam(start, spans)
     if np.array_equal(rounded, affine.to_array(axes, all_loops=True)):
         return step_time(prog, affine / get_fclk(prog))
-    return prog._timeline_book.math.lookup(rounded.flatten().tolist(), axes)
+    raise ValueError("runtime cross-grid time requires generator/ADC conversion")
 
 
 def placement_time(prog, value: float | QickParam) -> float | QickParam:
@@ -324,6 +324,8 @@ class EventEnd:
     offset: Time
     # The ceiled event boundary, retained only for same-channel no-overlap proof.
     rounded: tuple["Time", ...] = ()
+    # Exact static offset in tProc cycles, retained only inside this operation.
+    static_cycles: Fraction | None = None
 
 
 @dataclass(frozen=True)
@@ -570,48 +572,6 @@ class RuntimeMath(TimedMacro):
             else source_expression(self.prog, name)
         )
         return RuntimeEnd(name, limits.minimum, limits.maximum, expression=expression)
-
-    def lookup(self, values: list[int], axes: dict[str, int]) -> RuntimeEnd:
-        """Materialize exact nonnegative cycle points over native sweep axes.
-
-        values is row-major in axes order, after owner aggregate rounding.
-        The table/index owner supplies native sweep initialization and lookup;
-        its dependencies participate in the same whole-stream timing audit.
-        """
-        lower, upper = min(values), max(values)
-        self.check(lower, upper)
-        if lower < 0:
-            raise ValueError("timeline end must be nonnegative cycles")
-        owner = self.prog._timing_table_owner
-        offset = self.prog.add_timing_dmem(values, owner=owner)
-        register = self.allocate()
-        index = sweep_table_index(
-            self.prog, axes, name=f"_timeline_index_{len(self.prog.reg_dict)}"
-        )
-        operation = DmemLookup(
-            dst=register, index=index, offset=offset, address=self.scratch(3)
-        )
-        proof = self.prog._time_bounds
-        # Native loop counters control how often the swept index advances;
-        # their whole-stream write provenance is part of the bounds proof.
-        proof.register(index, CycleBounds(0, len(values) - 1), (), tuple(axes))
-        limits = {index: CycleBounds(0, len(values) - 1)}
-        proof.register(register, CycleBounds(lower, upper), (operation,), (), limits)
-        proof.capture_inputs(self.prog, register, (), limits)
-        proof.defined.add(register)
-        proof.watch_signed(self.prog, register)
-        self.operations.append(operation)
-        expression = LinearTime(
-            terms=(
-                (
-                    CycleVariable(
-                        register, lower, upper, tuple(axes.items()), tuple(values)
-                    ),
-                    1,
-                ),
-            )
-        )
-        return RuntimeEnd(register, lower, upper, expression=expression)
 
     def _selected_axes(self, values: tuple[float | QickParam, ...]) -> dict[str, int]:
         spans = set().union(

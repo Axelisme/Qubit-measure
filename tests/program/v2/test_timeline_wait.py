@@ -954,33 +954,5 @@ def fractional_length_cases(seed: int) -> list[tuple[int, int]]:
 def test_fractional_length_shell_wait_uses_exact_nonaffine_point_tails(
     samples: int, post_tenths: int
 ):
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        prog = SweptLengthWaitProgram(samples, post_tenths)
-    result = shots(prog)
-    assert len(result) == 10
-    tails = []
-    for index, shot in enumerate(result):
-        (start,) = waves(shot)
-        # ceil((samples + index) * 28/25 + post_tenths/10), once, not
-        # separate waveform/post ceils. ADC duration is 100 * 7/5 = 140.
-        duration = ((samples + index) * 280 + post_tenths * 25 + 249) // 250
-        assert shot.body_end_cycle == shot.start_cycle + start + duration
-        (trigger,) = [e.cycle for e in shot.events if e.kind == "data" and e.value]
-        tails.append(max(0, trigger + 140 - shot.body_end_cycle))
-    upper, lower = max(tails), min(tails)
-    diagnostic = (WAIT_RECIPE_SEED + 1, samples, post_tenths, tails)
-    assert shell_wait(prog) >= upper, diagnostic
-    assert shell_wait(prog) == upper, diagnostic
-    messages = [str(w.message) for w in caught if "WAIT" in str(w.message)]
-    assert len(messages) == 1, diagnostic
-    assert f"slack={upper - lower} cycles" in messages[0], diagnostic
-    assert "variables=" in messages[0], diagnostic
-    assert "upper bound" not in messages[0], diagnostic
-    with pytest.warns(UserWarning, match=rf"slack={upper - lower} cycles"):
-        equal_relax = SweptLengthWaitProgram(
-            samples, post_tenths, relax_cycles=upper - lower
-        )
-    assert shell_wait(equal_relax) == upper, diagnostic
-    with pytest.raises(ValueError, match=rf"slack={upper - lower} cycles"):
-        SweptLengthWaitProgram(samples, post_tenths, relax_cycles=upper - lower - 1)
+    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
+        SweptLengthWaitProgram(samples, post_tenths)

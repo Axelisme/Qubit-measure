@@ -1,5 +1,6 @@
 """Place timeline-managed outputs while retaining native QICK consumers."""
 
+from fractions import Fraction
 from typing import Literal
 
 from qick.asm_v2 import ConfigReadout, Pulse, QickParam, Trigger
@@ -15,6 +16,25 @@ from ._timeline_runtime import (
     placement_time,
 )
 from ._timeline_state import TimelineBook
+from .modules.util import get_fclk
+
+
+def _static_ticks(prog, value: float | QickParam) -> int | None:
+    if isinstance(value, QickParam):
+        if value.is_sweep():
+            return None
+        value = value.start
+    return round(value * get_fclk(prog))
+
+
+def _pulse_static_cycles(prog, ch: int, name: str, start: float | QickParam) -> Fraction | None:
+    ticks = _static_ticks(prog, start)
+    length = prog.pulses[name].get_length()
+    if ticks is None or isinstance(length, QickParam) and length.is_sweep():
+        return None
+    scalar = length.start if isinstance(length, QickParam) else length
+    clock = prog.soccfg["gens"][ch]["f_fabric"]
+    return Fraction(ticks) + Fraction(round(scalar * clock)) * Fraction(str(get_fclk(prog))) / Fraction(str(clock))
 
 
 class TimelineObservedPulse(Pulse):
@@ -121,7 +141,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 else placement_time(prog, self.relative_t)
             )
             self.event_end = EventEnd(
-                end, offset + prog.pulses[self.name].get_length(), (finish,)
+                end, offset + prog.pulses[self.name].get_length(), (finish,),
+                _pulse_static_cycles(prog, self.ch, self.name, offset),
             )
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
@@ -146,7 +167,10 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         self.record(prog, t, actual_t)
         actual_end = actual_t + prog.pulses[self.name].get_length()
         finish = align_end(prog, actual_end)
-        self.event_end = EventEnd(0.0, actual_end, (finish,))
+        self.event_end = EventEnd(
+            0.0, actual_end, (finish,),
+            _pulse_static_cycles(prog, self.ch, self.name, actual_t),
+        )
         self.book.set_end(self.timeline, finish)
         if isinstance(finish, RuntimeEnd):
             self.book.runtime_gens[self.ch] = finish

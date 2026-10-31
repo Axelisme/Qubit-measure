@@ -7,6 +7,7 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from fractions import Fraction
 
 from qick.asm_v2 import (
     CondJump,
@@ -252,8 +253,8 @@ class TimelineAdvance(TimedMacro):
                 lo, hi = _bounds(event.offset - candidate.offset)
                 if lo >= -1e-12 or hi <= 1e-12:
                     larger = event if lo >= -1e-12 else candidate
-                    events[index] = EventEnd(
-                        larger.origin, larger.offset, candidate.rounded + event.rounded
+                    events[index] = replace(
+                        larger, rounded=candidate.rounded + event.rounded
                     )
                     break
             else:
@@ -306,7 +307,12 @@ class TimelineAdvance(TimedMacro):
                 registers.append(value)
             else:
                 fractional += value
-        result: Time = fractional if self.aligned else align_end(prog, fractional)
+        if event.static_cycles is not None and not isinstance(duration, (RuntimeEnd, QickParam)):
+            origin = 0 if isinstance(event.origin, RuntimeEnd) else round(event.origin * get_fclk(prog))
+            exact = event.static_cycles + origin + Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
+            result: Time = -(-exact.numerator // exact.denominator) / get_fclk(prog)
+        else:
+            result = fractional if self.aligned else align_end(prog, fractional)
         for register in registers:
             result = self.book.math.add(register, result)
         if (
