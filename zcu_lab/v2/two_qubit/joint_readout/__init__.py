@@ -8,7 +8,6 @@ from .core import (
     JointReadoutResult,
     JointRoles,
 )
-
 from .core_heralded import (
     JointReadoutHeraldedAnalysis,
     JointReadoutHeraldedCfg,

@@ -29,7 +29,9 @@ def validate_classifiers(readout: MuxReadout.Cfg, roles: JointRoles) -> None:
         try:
             classifier = circle_classifier(readout, ro_ch=readout.tones[tone].ro_ch)
         except ValueError as exc:
-            raise ValueError(f"{role}: circle classifier required; run GE Post. {exc}") from exc
+            raise ValueError(
+                f"{role}: circle classifier required; run GE Post. {exc}"
+            ) from exc
         if classifier.radius is None:
             raise ValueError(f"{role}: circle radius required; run GE Post")
 

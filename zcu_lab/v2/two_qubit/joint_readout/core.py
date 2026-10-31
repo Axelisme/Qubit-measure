@@ -22,18 +22,31 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Reset, TimelineBuilder, TimelineProgramV2, shot_sums
+from zcu_tools.program.v2 import (
+    Pulse,
+    Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
 from zcu_tools.program.v2.modules.readout import circle_classifier
 
 from zcu_lab.v2.support import live_line
 
 from .._readout import JointRoles
-from .._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from .._sums import (
+    joint_probabilities,
+    readout_axes,
+    terminal_counts,
+    validate_classifiers,
+)
 from .._timeline import emit_readout_prefix
 
 BRANCH_LABELS = ("00", "01", "10", "11")
-OUTCOME_LABELS = tuple(f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other"))
+OUTCOME_LABELS = tuple(
+    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+)
 
 
 class GECenters(ConfigBase):
@@ -103,19 +116,30 @@ class JointReadoutCfg(ConfigBase):
     ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset at the start of every shot."),
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
     ] = None
     x180_f1: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F1 Xπ", description="Calibrated F1 x180 pulse on its charge generator."),
+        FieldMeta(
+            label="F1 Xπ",
+            description="Calibrated F1 x180 pulse on its charge generator.",
+        ),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
-        FieldMeta(label="F2 Xπ", description="Calibrated F2 x180 pulse on its charge generator."),
+        FieldMeta(
+            label="F2 Xπ",
+            description="Calibrated F2 x180 pulse on its charge generator.",
+        ),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
-        FieldMeta(label="Mux readout", description="Full mux readout; F1/F2 need circle + radius from GE Post."),
+        FieldMeta(
+            label="Mux readout",
+            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
+        ),
     ]
     roles: JointRoles
 
@@ -168,7 +192,10 @@ def build_program(
         raise ValueError("branch must be in 0..3")
     validate_classifiers(cfg.readout, cfg.roles)
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
     if branch & 2:
@@ -190,13 +217,17 @@ def acquire_counts(
     """
     validate_classifiers(config.readout, config.roles)
     viewer = live_line(
-        context.plots, "measurement", "Nominal preparation (00, 01, 10, 11)",
+        context.plots,
+        "measurement",
+        "Nominal preparation (00, 01, 10, 11)",
         "Terminal P(g,g)" if not heralded else "Terminal P(g,g) | herald (g,g)",
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
         counts = terminal_counts(sums, heralded=heralded)
-        viewer.update(np.arange(4, dtype=np.float64), joint_probabilities(counts)[..., 0, 0])
+        viewer.update(
+            np.arange(4, dtype=np.float64), joint_probabilities(counts)[..., 0, 0]
+        )
 
     shape = (4, 3, 3, 3, 3) if heralded else (4, 3, 3)
     buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
@@ -204,8 +235,11 @@ def acquire_counts(
         for branch, step in sched.scan("branch", list(range(4))):
             prog = build_program(step.cfg, context.soccfg, branch, heralded=heralded)
             step.run_acquire_summed(
-                prog, context.soc,
-                processor=shot_sums(prog, readout_axes(step.cfg.roles, heralded=heralded)),
+                prog,
+                context.soc,
+                processor=shot_sums(
+                    prog, readout_axes(step.cfg.roles, heralded=heralded)
+                ),
                 rounds=step.cfg.rounds,
                 options=RunOptions(),
             )
@@ -220,16 +254,18 @@ def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult
     )
 
 
-def analyze_counts(
-    result: JointReadoutResult, *, plots: Plots
-) -> JointReadoutAnalysis:
+def analyze_counts(result: JointReadoutResult, *, plots: Plots) -> JointReadoutAnalysis:
     """Plot four nominal preparation rows against nine terminal joint classes.
 
     No saved cfg or IQ reclassification is needed. All completed counts,
     including partial acquisitions, enter the row normalization. Zero accepted
     shots give NaN probabilities, not a fabricated distribution.
     """
-    if not np.array_equal(result.branches, np.arange(4)) or result.sums.shape != (4, 3, 3):
+    if not np.array_equal(result.branches, np.arange(4)) or result.sums.shape != (
+        4,
+        3,
+        3,
+    ):
         raise ValueError("Joint readout requires branches [0,1,2,3] and sums (4,3,3)")
     answer = JointReadoutAnalysis(
         counts=result.sums.reshape(4, 9),
@@ -237,19 +273,25 @@ def analyze_counts(
         acquired_shots=result.sums.sum(axis=(-2, -1)),
     )
     fig, axes = plots.subplots("matrix", figsize=(12, 5))
-    image = axes.imshow(np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues")
+    image = axes.imshow(
+        np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
+    )
     for row in range(4):
         for col in range(9):
             value = answer.matrix[row, col]
             label = (
                 f"{value:.3f}\nn={answer.counts[row, col]:g}"
-                if np.isfinite(value) else "No shots"
+                if np.isfinite(value)
+                else "No shots"
             )
             axes.text(col, row, label, ha="center", va="center", fontsize=8)
     axes.set(
-        xticks=range(9), xticklabels=OUTCOME_LABELS,
-        yticks=range(4), yticklabels=BRANCH_LABELS,
-        xlabel="Observed terminal class (F1, F2)", ylabel="Nominal I/Xπ preparation",
+        xticks=range(9),
+        xticklabels=OUTCOME_LABELS,
+        yticks=range(4),
+        yticklabels=BRANCH_LABELS,
+        xlabel="Observed terminal class (F1, F2)",
+        ylabel="Nominal I/Xπ preparation",
         title="Preparation → observed outcome; includes preparation and readout effects",
     )
     fig.colorbar(image, ax=axes, label="Row-normalized probability")
@@ -260,36 +302,56 @@ def analyze_counts(
 class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
     """Measure nine joint classes after each of four nominal preparations."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[JointReadoutResult, JointReadoutCfg]] = GroupedAxesSpec(
-        variables=(
-            VariableSpec(
-                variable="sums",
-                axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Nominal preparation", "", field_name="branches", dtype=np.int64),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[JointReadoutResult, JointReadoutCfg]] = (
+        GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    variable="sums",
+                    axes=(
+                        VariableAxisSpec.generated_arange("terminal_f2", ""),
+                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec(
+                            "Nominal preparation",
+                            "",
+                            field_name="branches",
+                            dtype=np.int64,
+                        ),
+                    ),
+                    z=VariableZSpec(
+                        field_name="sums",
+                        label="Joint class counts",
+                        unit="",
+                        dtype=np.float64,
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Joint class counts", unit="", dtype=np.float64),
             ),
-        ),
-        result_type=JointReadoutResult, cfg_type=JointReadoutCfg,
-        cfg_schema_version="4.0", tag="two_qubit/joint_readout",
-        result_builder=restore_result,
+            result_type=JointReadoutResult,
+            cfg_type=JointReadoutCfg,
+            cfg_schema_version="4.0",
+            tag="two_qubit/joint_readout",
+            result_builder=restore_result,
+        )
     )
 
-    def run(self, config: JointReadoutCfg, *, context: RunContext) -> JointReadoutResult:
+    def run(
+        self, config: JointReadoutCfg, *, context: RunContext
+    ) -> JointReadoutResult:
         """Acquire optional reset → I/Xπ preparation → terminal joint counts.
 
         Return (4,3,3) summed counts, not per-shot IQ or probabilities. All rounds
         accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
         """
         return JointReadoutResult(
-            np.arange(4, dtype=np.int64), acquire_counts(config, context=context, heralded=False)
+            np.arange(4, dtype=np.int64),
+            acquire_counts(config, context=context, heralded=False),
         )
 
     def analyze(
-        self, source: RunRecord[JointReadoutCfg, JointReadoutResult], options: None,
-        *, plots: Plots,
+        self,
+        source: RunRecord[JointReadoutCfg, JointReadoutResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> JointReadoutAnalysis:
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options

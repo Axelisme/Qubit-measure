@@ -97,8 +97,10 @@ class JointReadoutHeraldedExp(
                     ),
                 ),
                 z=VariableZSpec(
-                    field_name="sums", label="Herald and terminal class counts",
-                    unit="", dtype=np.float64,
+                    field_name="sums",
+                    label="Herald and terminal class counts",
+                    unit="",
+                    dtype=np.float64,
                 ),
             ),
         ),
@@ -149,12 +151,17 @@ class JointReadoutHeraldedExp(
         fig, axes = plots.subplots("herald", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
-            vmin=0, vmax=1, cmap="Blues",
+            vmin=0,
+            vmax=1,
+            cmap="Blues",
         )
         axes.set(
-            xticks=range(9), xticklabels=OUTCOME_LABELS,
-            yticks=range(4), yticklabels=BRANCH_LABELS,
-            xlabel="Herald class (F1, F2)", ylabel="Nominal I/Xπ preparation",
+            xticks=range(9),
+            xticklabels=OUTCOME_LABELS,
+            yticks=range(4),
+            yticklabels=BRANCH_LABELS,
+            xlabel="Herald class (F1, F2)",
+            ylabel="Nominal I/Xπ preparation",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")
