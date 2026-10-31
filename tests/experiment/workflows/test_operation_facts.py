@@ -10,6 +10,7 @@ from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment import workflows as w
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost
@@ -33,7 +34,7 @@ class Record(BaseModel):
     value: int
 
 
-def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
+def test_attempt_facts_are_grouped_by_explicit_commits(
     tmp_path: Path,
 ) -> None:
     clock = ManualClock()
@@ -73,7 +74,7 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
         try:
             iteration = next(iterations)
             await iteration.call(lambda ctx: 1)
-            first = await iteration.run(acquire, cfg)
+            first = await run_core(iteration, acquire, cfg)
             assert isinstance(first, w.Completed)
             assert first.value.cfg is not None
             assert first.value.cfg.value == 8
@@ -84,10 +85,10 @@ def test_attempt_facts_are_grouped_by_commit_with_fixed_pre_run_device_state(
             await iteration.setup_device(
                 "flux", FakeDeviceInfo(address="memory", value=7)
             )
-            await iteration.run(acquire, cfg)
+            await run_core(iteration, acquire, cfg)
             iteration.commit(Record(value=2))
             iteration = next(iterations)
-            await iteration.run(acquire, cfg)
+            await run_core(iteration, acquire, cfg)
         finally:
             iterations.close()
 
@@ -129,21 +130,19 @@ def assert_persisted_attempts(paths: w.RunPaths) -> None:
     ] == [
         [
             ("call", 1, "completed"),
-            ("run", 2, "completed"),
+            ("call", 2, "completed"),
             ("wait_until", 3, "completed"),
         ],
-        [("setup_device", 1, "completed"), ("run", 2, "completed")],
+        [("setup_device", 1, "completed"), ("call", 2, "completed")],
     ]
     first_run = envelopes[0]["operations"][1]
-    second_run = envelopes[1]["operations"][1]
-    assert first_run["device_snapshot"]["flux"]["value"] == 0
-    assert second_run["device_snapshot"]["flux"]["value"] == 7
+
     assert first_run["started_at"] == START.isoformat().replace("+00:00", "Z")
     assert first_run["finished_at"] == (
         START + timedelta(seconds=2)
     ).isoformat().replace("+00:00", "Z")
     assert first_run["reason"] is None
-    assert envelopes[0]["operations"][0]["device_snapshot"] is None
+
     journal = [
         json.loads(line)
         for line in (paths.metadata_root / "journal.jsonl").read_text().splitlines()
@@ -153,4 +152,4 @@ def assert_persisted_attempts(paths: w.RunPaths) -> None:
     ]
     assert attempts[:3] == envelopes[0]["operations"]
     assert attempts[3:5] == envelopes[1]["operations"]
-    assert (attempts[5]["kind"], attempts[5]["attempt"]) == ("run", 1)
+    assert (attempts[5]["kind"], attempts[5]["attempt"]) == ("call", 1)

@@ -70,7 +70,7 @@ try:
         cfg,
         context=RunContext(env.soc, env.soccfg, plots, {}, scope),
     )
-    source = RunRecord(cfg=cfg, result=result, metadata=metadata)
+    source = RunRecord(cfg=cfg, result=result, metadata=metadata.model_dump(mode="json"))
     fits = core.analyze(source, core.Options(skip=0, dual_exp=False), plots=plots)
     # scope.stop.is_set() reports a stop request, not data completeness.
     # metadata is caller-captured RunMetadata for this source and its completion.

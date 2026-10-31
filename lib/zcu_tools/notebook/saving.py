@@ -28,7 +28,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, has_native_metadata
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     AcquiredPayload,
@@ -125,7 +125,7 @@ class SavedRun(Generic[CfgT, ResultT]):
             provenance=deepcopy(acquisition.provenance),
             device_snapshot=deepcopy(acquisition.device_snapshot),
         )
-        self._record = replace(source, metadata=metadata)
+        self._record = replace(source, metadata=metadata.model_dump(mode="json"))
         self._figures: dict[str, Figure] = {}
         self._analysis: tuple[AnalysisDocument, ...] = ()
         self._report = SaveReport(acquisition.run_id, ())
@@ -135,9 +135,9 @@ class SavedRun(Generic[CfgT, ResultT]):
     @property
     def _metadata(self) -> RunMetadata:
         metadata = self._record.metadata
-        if metadata is None:
+        if not has_native_metadata(metadata):
             raise ValueError("SavedRun requires record metadata")
-        return metadata.project()
+        return RunMetadata.model_validate(metadata)
 
     @property
     def run_id(self) -> str:

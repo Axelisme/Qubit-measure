@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.measure`
 
-**Last updated:** 2026-11-01, GUI run stop terminal
+**Last updated:** 2026-11-01, neutral run metadata and GUI run stop terminal
 
 **讀者：** framework-dev。量測 GUI 的組裝、分頁、tab admission 與 Run／Load／Save 分工。
 
@@ -56,7 +56,7 @@ only when called. Record proposals contain adapter-owned JSON, with no coordinat
 Each adapter declares `run(inp, *, context) -> RunRecord`, converts its input
 to the actual experiment cfg and invokes the experiment. Even without a
 conversion, the adapter declares a local run returning that record. RunService
-accepts the record and attaches acquisition metadata. It does not wrap a second
+accepts the record and attaches the JSON dump of RunMetadata. It does not wrap a second
 record or replace the returned cfg, including cfg=None, with Form input.
 Save and analysis consume the record's experiment cfg and result. Load restores
 that record through spec and never fills Form from historical cfg. Analysis and
@@ -334,8 +334,8 @@ not whichever question is pending at click time. Submitted is not acceptance.
 Stop releases Ask with None on its existing worker. Control I/O failure retains
 its original cause and fails after worker cleanup. Only terminal owner delivery
 settles the operation and releases RUN.
-The tab injects `WorkflowPlots`. Each native `env.run` attempt receives a fresh
-same-host operation Plots and finishes before returning or being discarded.
+The tab injects `WorkflowPlots`. Each `Scope.call` receives fresh same-host operation Plots. The framework
+finishes them before returning or propagating an error; run_core adapts core calls.
 `WorkflowFigures` tiles workflow figures and the current operation together,
 with up to four figures per page and page controls for larger sets.
 Follow latest starts checked and selects each newly presented or live-refreshed
@@ -382,7 +382,7 @@ Load 接受任意位置的檔案，不讀 live point，也不依 entry 身分選
 缺快照時使用沒有 general、target 或 storage 的空內容，分析可以使用自己的預設值。
 Run／Load 的輸出預覽與 Save 共用 `SaveService.plan_layout`，依目前 roots、記錄的 entry／point 與 adapter stem 計畫 paths。
 正常 Load 後立即有預覽，Analyze／PostAnalyze 後也有預覽，不要求 storage，狀態仍為 Not saved。
-缺 metadata 時只有 artifact/member declarations，沒有輸出預覽。
+Metadata 缺 native schema 必填 key 時只有 artifact/member declarations，沒有輸出預覽。
 預覽只隔離 `MetadataFieldError`，保留 Load 的原始內容；Save 仍完整驗證 metadata。
 缺 entry 名稱使用 unnamed_entry。Point 為 null 的 global 或歷史結果將圖片副本放在 entry 層 figures/，不建立 unnamed_point。Save report 發布實際 paths、成功與失敗。
 Load 不新增 Run token 或量測歷史。

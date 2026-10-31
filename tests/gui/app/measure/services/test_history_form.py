@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.cfg_model import PulseCfg, PulseSpec, Template
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
@@ -40,8 +41,7 @@ def test_open_history_retains_native_data_when_factory_has_no_source(
         assert snapshot.run is not None
         record = snapshot.run.result
         assert isinstance(record, RunRecord)
-        assert record.metadata is not None
-        assert record.metadata.project() == metadata
+        assert RunMetadataContent(record.metadata).project() == metadata
         assert isinstance(record.result, SavingResult)
         np.testing.assert_allclose(
             record.result.signal, [0.9 + 1.8j, 2.7 - 3.6j, 4.5 + 5.4j]

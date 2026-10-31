@@ -182,10 +182,10 @@ def test_cancel_one_acquire_keeps_partial_and_next_acquire_runs_normally(
 
     async def script() -> None:
         result = await host.call(operation)
-        assert result.stop_requested
+        assert not result.stopped
         later = await host.call(lambda ctx: ctx.scope.stop.is_set())
         assert later.result is False
-        assert later.stop_requested is False
+        assert later.stopped is False
 
     host.run(script())
     np.testing.assert_allclose(results[0], [np.nan if before_data else 1.0])
@@ -218,7 +218,7 @@ def test_stop_condition_completes_without_scope_cancellation() -> None:
         assert not ctx.scope.stop.is_set()
 
     async def script() -> None:
-        assert not (await host.call(operation)).stop_requested
+        assert not (await host.call(operation)).stopped
 
     host.run(script())
 

@@ -30,7 +30,7 @@ def write_native_file(
         comment="history",
     )
     metadata = historical_metadata().model_copy(update={"experiment": tag})
-    save(path, prepared.to_container(metadata))
+    save(path, prepared.to_container(metadata.model_dump(mode="json")))
     return metadata
 
 

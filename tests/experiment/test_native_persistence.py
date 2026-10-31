@@ -45,6 +45,7 @@ from zcu_tools.experiment import (
     save_labber,
     save_run,
 )
+from zcu_tools.experiment.metadata import RunMetadataContent
 
 from tests._native_support import native_metadata
 
@@ -259,9 +260,13 @@ def test_fixed_axis_saves_like_field_axis_and_restores_without_field(
     frequency = np.array([4000.0, 5000.0])
     signal = np.array([[1 + 2j, 3 - 4j, 5 + 6j], [7 - 8j, 9 + 10j, 11 - 12j]])
     metadata = native_metadata(fixed_spec.tag)
-    fixed_record = RunRecord(NativeCfg(), SingleResult(frequency, signal), metadata)
+    fixed_record = RunRecord(
+        NativeCfg(), SingleResult(frequency, signal), metadata.model_dump(mode="json")
+    )
     field_record = RunRecord(
-        NativeCfg(), PopulationResult(frequency, np.array([0, 1, 2]), signal), metadata
+        NativeCfg(),
+        PopulationResult(frequency, np.array([0, 1, 2]), signal),
+        metadata.model_dump(mode="json"),
     )
     fixed_path, field_path = tmp_path / "fixed.h5", tmp_path / "field.h5"
     save_run(fixed_record, fixed_path, spec=fixed_spec)
@@ -331,7 +336,7 @@ def test_fixed_axis_shape_mismatch_fails_before_writing(
     source = RunRecord(
         NativeCfg(),
         SingleResult(np.array([4000.0, 5000.0]), np.ones((3, 2))),
-        native_metadata(spec.tag),
+        native_metadata(spec.tag).model_dump(mode="json"),
     )
     path = tmp_path / ("bad.h5" if native else "bad.hdf5")
     save_record = save_run if native else save_labber
@@ -403,7 +408,7 @@ def single_record() -> RunRecord[NativeCfg, SingleResult]:
     return RunRecord(
         NativeCfg(),
         SingleResult(np.array([4000.0, 5000.0]), np.array([2 + 3j, 4 - 5j])),
-        metadata=native_metadata(SINGLE.tag),
+        metadata=native_metadata(SINGLE.tag).model_dump(mode="json"),
     )
 
 
@@ -437,11 +442,11 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     save_run(record, path, spec=experiment.AXES_SPEC)
     loaded, snapshot = load_run(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
-    assert loaded.metadata is not None
-    assert record.metadata is not None
-    assert loaded.metadata.project() == record.metadata.project()
-    assert record.metadata is not None
-    assert snapshot == record.metadata.snapshot
+    assert (
+        RunMetadataContent(loaded.metadata).project()
+        == RunMetadataContent(record.metadata).project()
+    )
+    assert snapshot == RunMetadataContent(record.metadata).snapshot
     np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
     np.testing.assert_allclose(loaded.result.signal, record.result.signal)
     stored = load(path)
@@ -466,7 +471,11 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
         np.array([1.0, 2.0, 3.0]),
         np.array([0.5, 0.3, 0.1]),
     )
-    record = RunRecord(NativeCfg(), result, metadata=native_metadata(GROUPED.tag))
+    record = RunRecord(
+        NativeCfg(),
+        result,
+        metadata=native_metadata(GROUPED.tag).model_dump(mode="json"),
+    )
     path = tmp_path / "grouped.h5"
     experiment = GroupedExperiment()
     save_run(record, path, spec=experiment.AXES_SPEC)
@@ -485,7 +494,11 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
 def test_save_rejects_missing_cfg_or_wrong_tag_without_creating_file(
     tmp_path: Path, cfg: NativeCfg | None
 ) -> None:
-    record = replace(single_record(), cfg=cfg, metadata=native_metadata("wrong/tag"))
+    record = replace(
+        single_record(),
+        cfg=cfg,
+        metadata=native_metadata("wrong/tag").model_dump(mode="json"),
+    )
     with pytest.raises(ValueError, match="cfg|experiment"):
         save_run(record, tmp_path / "invalid.h5", spec=SINGLE)
     assert list(tmp_path.iterdir()) == []
@@ -505,7 +518,6 @@ def test_same_major_nested_unknown_cfg_is_projected_but_before_validator_sees_ra
 ) -> None:
     record = single_record()
     prepared = prepare_run_data(record, spec=SINGLE, comment="")
-    assert record.metadata is not None
     container = prepared.to_container(record.metadata)
     raw = {
         "nested": {"count": 3, "forbidden_future" if forbidden else "future": 9},
@@ -536,7 +548,7 @@ def test_prepare_single_data_feeds_both_formats_with_same_cfg_and_comment(
     assert prepared.labber_metadata.tags == [SINGLE.tag]
     assert prepared.cfg.cfg_type == "NativeCfg"
     assert prepared.cfg.schema_version == "3.2"
-    assert record.cfg is not None and record.metadata is not None
+    assert record.cfg is not None
     assert prepared.cfg.values == record.cfg.model_dump(mode="json")
     assert list(tmp_path.iterdir()) == []
     native, labber = tmp_path / "native.h5", tmp_path / "labber.h5"
@@ -563,6 +575,7 @@ def test_prepared_envelope_isolates_mappings_without_copying_arrays() -> None:
         replace(original.container, vars=variables),
         original.cfg,
         original.labber_metadata,
+        original.experiment_tag,
     )
     variables.clear()
     original.labber_metadata.tags.append("later")
@@ -632,7 +645,9 @@ def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
 
     spec = AxesSpec((), SINGLE.z, ScalarResult, NativeCfg, "test/scalar")
     record = RunRecord(
-        NativeCfg(), ScalarResult(np.array(1j)), metadata=native_metadata(spec.tag)
+        NativeCfg(),
+        ScalarResult(np.array(1j)),
+        metadata=native_metadata(spec.tag).model_dump(mode="json"),
     )
     path = tmp_path / "scalar.h5"
     save_run(record, path, spec=spec)
@@ -653,13 +668,12 @@ def test_full_metadata_load_preserves_historical_evidence(
     metadata = native_metadata(SINGLE.tag).model_copy(
         update={"completion": completion, "started_at": started_at}
     )
-    record = replace(single_record(), metadata=metadata)
+    record = replace(single_record(), metadata=metadata.model_dump(mode="json"))
     path = tmp_path / "historical.h5"
     save_run(record, path, spec=SINGLE)
     loaded = load_run_with_metadata(path, spec=SINGLE)
     old_loaded, snapshot = load_run(path, spec=SINGLE)
-    assert loaded.metadata is not None
-    assert loaded.metadata.project() == metadata
+    assert RunMetadataContent(loaded.metadata).project() == metadata
     assert snapshot == metadata.snapshot
     assert loaded.cfg == old_loaded.cfg == record.cfg
     with pytest.raises(ValueError, match="experiment") as caught:
@@ -687,7 +701,6 @@ def restorable_run(
             cfg_schema_version=SINGLE.cfg_schema_version,
         )
     record = single_record()
-    assert record.metadata is not None
     prepared = prepare_run_data(record, spec=spec, comment="historical")
     return prepared.to_container(record.metadata), spec
 
@@ -860,12 +873,15 @@ def test_native_wrappers_share_cfg_fallback_and_keep_history(
         record = load_run_with_metadata(path, spec=spec)
     with pytest.warns(CfgUnavailableWarning, match=issue):
         old_record, snapshot = load_run(path, spec=spec)
-    assert record.metadata is not None
-    assert record.metadata is not None
-    assert old_record.metadata is not None
-    assert record.metadata.project() == old_record.metadata.project()
-    assert record.metadata.project().model_dump(mode="json") == stored.docs["metadata"]
-    assert snapshot == record.metadata.snapshot
+    assert (
+        RunMetadataContent(record.metadata).project()
+        == RunMetadataContent(old_record.metadata).project()
+    )
+    assert (
+        RunMetadataContent(record.metadata).project().model_dump(mode="json")
+        == stored.docs["metadata"]
+    )
+    assert snapshot == RunMetadataContent(record.metadata).snapshot
     assert record.cfg is old_record.cfg is None
     np.testing.assert_allclose(record.result.signal, [2 + 3j, 4 - 5j])
     np.testing.assert_array_equal(record.result.signal, old_record.result.signal)
@@ -883,9 +899,8 @@ def test_restore_run_returns_the_record_and_cfg_diagnostic(
     restored = restore_run(stored, spec=spec)
     assert restored.cfg_issue is None
     assert restored.record.cfg == NativeCfg()
-    assert restored.record.metadata is not None
     assert (
-        restored.record.metadata.project().model_dump(mode="json")
+        RunMetadataContent(restored.record.metadata).project().model_dump(mode="json")
         == stored.docs["metadata"]
     )
     np.testing.assert_array_equal(restored.record.result.frequency, [4000.0, 5000.0])

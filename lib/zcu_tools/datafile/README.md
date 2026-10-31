@@ -1,6 +1,6 @@
 # zcu_tools.datafile
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。讀寫通用 HDF5 容器，或獨立轉出 Labber。
 
@@ -23,6 +23,8 @@
 同一 variable 的軸名稱不能重複。不同命名空間可以重用名稱。
 每個 var 的 `values` dataset 以 dimension scales 連到 `axes/<axis-name>`。
 數值陣列可以包含 NaN；JSON 不能包含 NaN 或 Infinity。
+`json_text(document)` 不做 I/O，使用 writer 同一 encoder 驗證並編碼完整有限 JSON object。
+Caller 可在建立輸出目錄前使用它，非法值在任意深度都會 raise `ValueError`，原文件不變。
 
 `Container(vars, docs, groups, attrs)` 是讀寫共用的值型別。
 `ContainerAttrs(format_version, producer, kind, extra)` 保存根屬性。

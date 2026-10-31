@@ -54,7 +54,9 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     }
     record = replace(
         tab.run.result,
-        metadata=session.metadata.model_copy(update={"run_id": "replacement"}),
+        metadata=session.metadata.model_copy(
+            update={"run_id": "20261101T000000Z-123abc"}
+        ).model_dump(mode="json"),
     )
     pane = RunPaneState(
         result=record, parameters=tab.run.parameters, storage=tab.run.storage
@@ -77,7 +79,10 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     assert member.key == ArtifactKey("run", "measurement_data", "data")
     assert (
         member.outputs[0].path
-        == session.entry.database_path / "runs" / "saving_replacement" / "data.h5"
+        == session.entry.database_path
+        / "runs"
+        / "saving_20261101T000000Z-123abc"
+        / "data.h5"
     )
 
 
@@ -299,13 +304,13 @@ def test_cleanup_failure_is_logged_without_rollback_or_skipping_other_resources(
         )
         assert tab.run is pane
     elif stage == "analysis":
-        pane = AnalysisPaneState(result="replacement")
+        pane = AnalysisPaneState(result="20261101T000000Z-123abc")
         pane_commit.commit_analysis(
             state, "tab", pane, plan_layout=session.save_service.plan_layout
         )
         assert tab.analysis is pane
     else:
-        pane = PostAnalysisPaneState(result="replacement")
+        pane = PostAnalysisPaneState(result="20261101T000000Z-123abc")
         pane_commit.commit_post_analysis(state, "tab", pane)
         assert tab.post_analysis is pane
         assert good_draft.is_active

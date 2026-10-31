@@ -136,7 +136,7 @@ def test_thread_safe_stop_does_not_wait_and_repeated_stop_is_idempotent(
                 return 4
 
             result = completed(await iteration.call(operation))
-            assert result.stop_requested
+            assert result.facts.stopped
         finally:
             iterations.close()
 

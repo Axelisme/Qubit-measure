@@ -28,7 +28,7 @@ from zcu_tools.resources.entry import (
 from zcu_tools.resources.entry.ledger_models import validate_origin
 from zcu_tools.utils import atomic_replace
 
-from ..metadata import RunMetadata
+from ..metadata import RunMetadata, validate_run_metadata
 from ..records import RunRecord
 from .analysis_document import encode_analysis_document
 from .items import (
@@ -93,7 +93,9 @@ def save_artifacts(
     """Rewrite every selected output, isolate failures, then append one saved event.
 
     record.metadata supplies fixed run/context/acquisition evidence; missing
-    or invalid metadata raises ValueError before writes. layout supplies
+    or invalid schema/nonfinite JSON raises ValueError before writes. Successful
+    DataItems also require their declaration tag to match; analysis-only selections
+    validate schema/JSON without comparing a tag. layout supplies
     exact entry destinations and ledger belongs to that entry. origin is gui,
     notebook or mcp. Validate members,
     but do not preflight path/content conflicts or establish a transaction.
@@ -110,19 +112,21 @@ def save_artifacts(
     Return every output attempt, even when some fail. Ledger append errors
     propagate after the writes, without deleting files or returning a receipt.
     """
-    metadata = record.metadata
-    if metadata is None:
-        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
-    metadata = metadata.project()
+    metadata = validate_run_metadata(record.metadata)
     validate_origin(origin)
     for artifact in artifacts:
         artifact.__post_init__()
+        for member in artifact.members:
+            if isinstance(member, DataItem) and not isinstance(
+                member.data, DataPreparationFailure
+            ):
+                member.data.validate_metadata(record.metadata)
     results: list[OutputResult] = []
     for artifact in artifacts:
         for member in artifact.members:
             outputs = layout.outputs(member.key)
             if isinstance(member, DataItem):
-                attempts = _save_data(member, outputs, metadata)
+                attempts = _save_data(member, outputs, metadata, record.metadata)
             else:
                 attempts = _save_file(member, outputs, figure_encoder)
             results.extend(attempts)
@@ -184,7 +188,10 @@ def _failed(key: ArtifactKey, output: Output, error: Exception) -> OutputResult:
 
 
 def _save_data(
-    member: DataItem, outputs: tuple[Output, ...], metadata: RunMetadata
+    member: DataItem,
+    outputs: tuple[Output, ...],
+    metadata: RunMetadata,
+    document: JsonObject,
 ) -> tuple[OutputResult, ...]:
     if isinstance(member.data, DataPreparationFailure):
         return tuple(
@@ -210,7 +217,7 @@ def _save_data(
                     grouped_layout=member.data.labber_layout,
                 )
             else:
-                save(output.path, member.data.to_container(metadata), replace=True)
+                save(output.path, member.data.to_container(document), replace=True)
         except Exception as error:
             # Isolate this destination; other formats still receive prepared data.
             logging.exception("Failed saving %s", output.path)

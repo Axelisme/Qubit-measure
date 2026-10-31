@@ -11,6 +11,7 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.gui.app.measure.flux_pick_frontend import FluxPickFrontend
 from zcu_tools.gui.app.measure.interactive_flux_pick import FluxPickParams
 from zcu_tools.gui.app.measure.remote.save_types import SaveSnapshotWire
@@ -205,7 +206,7 @@ def test_mcp_interactive_uses_mounted_plugin_and_original_operation(
         "synthetic/magnitude",
         native_source=tmp_path / "source.h5" if terminal == "done" else None,
     )
-    source = require_record(fx.state.get_tab(tab_id).run).metadata
+    source = RunMetadataContent(require_record(fx.state.get_tab(tab_id).run).metadata)
     captured = fx.state.get_tab(tab_id).run.parameters
     active = fx.ctrl.run_analyze_control.get_interactive(tab_id)
     assert active is not None
@@ -372,7 +373,7 @@ def test_mcp_done_writeback_save_and_close_share_the_gui_result(
     tab_id, _, widget = start_mounted(
         fx, window, "synthetic/magnitude", native_source=tmp_path / "source.h5"
     )
-    source = require_record(fx.state.get_tab(tab_id).run).metadata
+    source = RunMetadataContent(require_record(fx.state.get_tab(tab_id).run).metadata)
     captured = fx.state.get_tab(tab_id).run.parameters
     assert source is not None and source.snapshot.point is not None
     assert captured is not None

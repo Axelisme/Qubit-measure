@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-01，GUI run stop terminal
+**Last updated:** 2026-11-01，作者 await 的 run_core 例外
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -494,6 +494,8 @@ Execution ID 是 session-local，不是持久恢復機制；query 不建立新�
 
 所有 `zcu_lab/` async def 都使用同一規則，包含未被呼叫的 helpers。
 只 await env／tab／session 的方法呼叫，或可靜態解析到 lab async 定義的 helper。
+唯一開放的 lib await helper 是 `zcu_tools.experiment.run_core.run_core`，
+包含可靜態解析到此完整路徑的 import alias。其他 lib helper 仍禁止。
 Workflow 可寫 `await helper(env, cfg)`，helper 可再 await 另一個 lab helper；
 helper 內的 await 同樣受檢查。
 工具拒絕 asyncio.*、create_task、gather、wait_for、TaskGroup，
@@ -553,9 +555,9 @@ Figures 與 GUI pane 使用相同投影。Workflow 圖名維持 `<name>`，目�
 
 Records 依 commit_seq 查詢，包含配置 directory、committed_at、實際讀過的 revisions、
 record_type 與 operations。配置目錄順序不等於 commit 順序。Operation facts 包含
-kind、iteration 內 attempt、started_at/finished_at、run 的呼叫前 device_snapshot、
+kind、iteration 內 attempt、started_at/finished_at、
 outcome、reason 與 stopped，另有一基 iteration。這與作者 Completed.facts 使用同一
-OperationFacts 結構。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
+OperationFacts 結構。裝置快照由 run_core 寫入 RunRecord metadata，不在 operation wire facts。這些是 framework 事實，不代表作者已保存所有原始量測檔案。
 Running 或 waiting 都可 Apply；revision 在下一次 tun.current 讀取生效，不追改當前
 operation 的 cfg。每個 operation 只呼叫一次，合作停止的回傳值直接交給作者。
 Status 仍用公開讀取／polling，不新增 lifecycle subscribe。

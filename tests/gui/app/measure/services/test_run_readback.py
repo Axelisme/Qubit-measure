@@ -8,7 +8,7 @@ import pytest
 from qtpy.QtWidgets import QApplication
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunSnapshot
+from zcu_tools.experiment.metadata import RunMetadataContent, RunSnapshot
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
 from zcu_tools.gui.app.measure.registry import Registry
@@ -120,8 +120,10 @@ def test_measure_terminal_reads_back_on_worker_and_commits_on_owner(
         )
         assert not services.operation_gate.has_active("run")
         if not fail_run:
-            metadata = require_record(state.get_tab(tab_id).run).metadata
-            assert metadata is not None and metadata.device_snapshot is not None
+            metadata = RunMetadataContent(
+                require_record(state.get_tab(tab_id).run).metadata
+            )
+            assert metadata.device_snapshot is not None
             assert metadata.device_snapshot["flux"]["value"] == 0.25
             assert metadata.device_snapshot["unused"]["value"] == 0.6
         dialog.show()

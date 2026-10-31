@@ -12,6 +12,7 @@ from typing import TypeAlias
 import numpy as np
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -86,10 +87,10 @@ def _get_writeback_items(
     quality leaves candidates unselected with reasons; users may override.
     This method neither writes nor applies proposals.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:
@@ -120,7 +121,7 @@ def _get_writeback_items(
                 ),
             ]
         )
-        if metadata is not None and devices is not None:
+        if devices is not None:
             frame = record_flux_frame(
                 captured_qubit_flux(req.ctx.parameters, qubit), devices
             )

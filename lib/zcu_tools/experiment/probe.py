@@ -251,7 +251,7 @@ def _acquire(
                 snapshot=RunSnapshot(roles={}),
                 provenance=provenance,
                 device_snapshot=devices,
-            ),
+            ).model_dump(mode="json"),
         )
 
 

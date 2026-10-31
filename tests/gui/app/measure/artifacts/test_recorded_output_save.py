@@ -7,7 +7,7 @@ from shutil import rmtree
 import numpy as np
 import pytest
 from zcu_tools.datafile import load
-from zcu_tools.experiment.metadata import RunMetadataContent, RunSnapshot
+from zcu_tools.experiment.metadata import RunSnapshot
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.artifacts import SaveStatus
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
@@ -40,7 +40,9 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
     commit_run(
         session.state,
         "tab",
-        RunPaneState(result=replace(original, metadata=metadata)),
+        RunPaneState(
+            result=replace(original, metadata=metadata.model_dump(mode="json"))
+        ),
         plan_layout=session.save_service.plan_layout,
     )
     plots = declare_panes(session)
@@ -152,12 +154,11 @@ def test_missing_historical_point_previews_and_saves_entry_figures(
     session = native_session
     document = session.metadata.model_dump(mode="json")
     document["snapshot"].pop("point")
-    metadata = RunMetadataContent(document)
     original = require_record(session.state.get_tab("tab").run)
     commit_run(
         session.state,
         "tab",
-        RunPaneState(result=replace(original, metadata=metadata)),
+        RunPaneState(result=replace(original, metadata=document)),
         plan_layout=session.save_service.plan_layout,
     )
     declare_panes(session, ("fit",))
@@ -197,7 +198,11 @@ def test_save_uses_validated_metadata_for_output_planning(
     )
     # Saving validates model_copy updates, including valid serialized snapshots.
     commit_run(
-        session.state, "tab", RunPaneState(result=replace(original, metadata=metadata))
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(original, metadata=metadata.model_dump(mode="json"))
+        ),
     )
     report = session.save()
     assert all(item.status == "saved" for item in report.outputs)

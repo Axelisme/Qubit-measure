@@ -58,10 +58,10 @@ def test_cancel_scope_preserves_parent_and_next_iteration_starts_clean(
         "active_path": "workflow:test/iteration#1/operation#1/schedule#1/acquire#1",
     }
     assert acquisitions == [True, scope != "acquire"]
-    assert [(item.stop_requested, item.stopped) for item in completions] == [
-        (True, scope in {"operation", "run", "iteration", "workflow"}),
-        (scope in {"iteration", "workflow"}, scope in {"iteration", "workflow"}),
-        (scope == "workflow", scope == "workflow"),
+    assert [item.stopped for item in completions] == [
+        scope in {"operation", "run", "iteration"},
+        scope == "iteration",
+        False,
     ]
     assert host.status == ("cancelled" if scope == "workflow" else "completed")
     assert host.active_path == "workflow:test"
@@ -99,28 +99,10 @@ def test_stale_segment_and_expected_refuse_current_acquire_without_stopping_pare
 
     async def script() -> None:
         result = await host.call(operation)
-        assert result.stop_requested
+
         assert not result.stopped
 
     host.run(script())
-
-
-def test_cancel_unrelated_sibling_does_not_mark_active_operation() -> None:
-    host = ScriptHost(Scope("workflow", name="test"))
-    completions: list[CallResult[None]] = []
-
-    async def script() -> None:
-        with host.root.child("left") as left, host.root.child("right") as right:
-
-            def work(ctx: CallContext) -> None:
-                assert host.cancel("right").cancelled
-                assert right.cancelled
-                assert not ctx.scope.cancelled
-
-            completions.append(await host.call(work, scope=left))
-
-    host.run(script())
-    assert not completions[0].stop_requested
 
 
 def test_idle_parent_cancel_is_inherited_only_by_its_later_operations() -> None:
@@ -139,7 +121,7 @@ def test_idle_parent_cancel_is_inherited_only_by_its_later_operations() -> None:
             )
 
     host.run(script())
-    assert [(item.result, item.stop_requested) for item in completions] == [
+    assert [(item.result, item.stopped) for item in completions] == [
         (True, True),
         (False, False),
     ]

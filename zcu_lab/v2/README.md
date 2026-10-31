@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-01，取數路徑分流慣例與 mux Len Rabi 波形支援
+**Last updated:** 2026-11-01，取數路徑分流與 Run metadata reader
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -267,7 +267,7 @@ Numeric core 不保存 writeback destination，也不發 proposal。
 各 caller 明確選擇 point frame 與 device values 的來源及取值時點。
 Onetone、twotone 與四個 mux fluxdep adapter 在 Analyze 時呼叫
 `support/measure/writeback_helpers.fluxdep_writeback_items`。
-它以 Run 的 ctx.parameters 複製原 frame，以 RunMetadata.device_snapshot 計算新的 offset。
+它以 Run 的 ctx.parameters 複製原 frame，以 `RunMetadataContent(record.metadata).device_snapshot` 計算新的 offset。
 被掃儀器使用擬合 half 與新 period 大小，方向沿用原設定，首次校準採正方向。
 其他儀器保留 period，以 Run-start 值貢獻 flux；缺值視為 0。
 Helper 分開提出帶號 period 與預設勾選的 offset，並在 offset note 列出其他儀器的值、單位與貢獻。

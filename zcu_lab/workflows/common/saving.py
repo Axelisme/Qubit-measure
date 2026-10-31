@@ -1,6 +1,7 @@
 """Save workflow acquisitions using core records and framework operation facts."""
 
 from pathlib import Path
+from typing import Literal
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment.axes_spec import AxesSpec, GroupedAxesSpec
@@ -17,12 +18,14 @@ def save_native[Cfg: ConfigBase, Result](
     spec: AxesSpec[Result, Cfg] | GroupedAxesSpec[Result, Cfg],
     snapshot: RunSnapshot,
     identity: RunIdentity,
+    completion: Literal["complete", "partial", "stopped", "unknown"],
 ) -> None:
     """Save a completed core record with its fixed workflow operation facts.
 
     source.value supplies cfg/result; source.facts supplies UTC boundaries,
-    iteration, attempt and the pre-operation device snapshot.
-    source.stop_requested selects stopped completion when True, complete otherwise.
+    iteration and attempt. source.value.metadata retains the pre-core device
+    snapshot. completion is the caller's explicit acquisition completeness
+    (complete, partial, stopped or unknown), never inferred from control bits.
     identity is env.identity for that workflow run; snapshot is the caller's
     historical entry/point capture. spec supplies the experiment tag and native
     array mapping. Compose existing RunMetadata without capturing new facts.
@@ -30,6 +33,10 @@ def save_native[Cfg: ConfigBase, Result](
     metadata, collision and I/O errors propagate; no overwrite or retry occurs.
     """
     record = record_with_metadata(
-        source, identity=identity, experiment_tag=spec.tag, snapshot=snapshot
+        source,
+        identity=identity,
+        experiment_tag=spec.tag,
+        snapshot=snapshot,
+        completion=completion,
     )
     save_run(record, destination, spec=spec)

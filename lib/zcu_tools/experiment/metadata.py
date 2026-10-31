@@ -21,7 +21,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticUndefined, SchemaValidator
 
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import JsonObject, json_text
 from zcu_tools.format_version import YamlValue
 from zcu_tools.resources.context.library import LibraryContent
 from zcu_tools.resources.entry import ParameterContent
@@ -137,7 +137,7 @@ class RunMetadata(BaseModel):
     means unrecorded and {} means no connected devices.
     The envelope is frozen; nested mappings remain mutable. Save revalidates
     even unchecked model_copy updates. Unknown doc fields are not projected into
-    the live model; Container retains them for lossless rewrites.
+    the live model; RunRecord retains the original JSON document when saving.
     """
 
     model_config = ConfigDict(
@@ -180,6 +180,34 @@ class RunMetadata(BaseModel):
             if parsed.utcoffset() != timedelta(0):
                 raise ValueError("timestamp must be UTC ISO")
         return value
+
+
+def validate_run_metadata(document: JsonObject) -> RunMetadata:
+    """Validate finite JSON and the complete native schema before Save, without I/O.
+
+    Return a typed projection without mutating the document; persist the original,
+    including unknown author keys. Invalid JSON or fields raise ValueError naming
+    /docs/metadata. This does not compare the experiment declaration tag.
+    """
+    try:
+        json_text(document)
+        return RunMetadata.model_validate(document)
+    except (ValueError, TypeError) as error:
+        raise ValueError(f"/docs/metadata: {error}") from error
+
+
+def has_native_metadata(document: Mapping[str, object]) -> bool:
+    """Return whether all native schema required keys are present, without validation.
+
+    Empty or partial author documents are not native evidence. Values remain
+    deferred: each reader validates only the fields it uses, and Save validates
+    the whole schema before I/O.
+    """
+    return all(
+        name in document
+        for name, field in RunMetadata.model_fields.items()
+        if field.is_required()
+    )
 
 
 class MetadataFieldError(ValueError):

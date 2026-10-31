@@ -21,6 +21,7 @@ import pytest
 from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -193,8 +194,8 @@ def test_run_metadata_fixes_parameter_capture_before_worker_execution(
     state.set_context(replace(state.session_env, parameters=later))
     background.run_work()
     record = state.get_tab(tab_id).run.result
-    assert record is not None and record.metadata is not None
-    snapshot = record.metadata.parameter_snapshot
+    assert record is not None
+    snapshot = RunMetadataContent(record.metadata).parameter_snapshot
     assert snapshot is not None
     restored = restore_parameters(snapshot)
     assert restored.value("$source_qubit.rate") == 1.0
@@ -403,7 +404,11 @@ def test_result_commit_failure_settles_run_as_failed(
     if cancel_requested:
         assert svc.cancel_run()
     assert bg.last_on_done is not None
-    bg.last_on_done(RunRecord(None, object(), metadata=historical_metadata()))
+    bg.last_on_done(
+        RunRecord(
+            None, object(), metadata=historical_metadata().model_dump(mode="json")
+        )
+    )
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"

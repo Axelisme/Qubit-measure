@@ -37,6 +37,7 @@ from .metadata import (
     RunMetadataContent,
     RunSnapshot,
     validate_cfg_snapshot,
+    validate_run_metadata,
 )
 from .records import RunRecord
 
@@ -72,13 +73,16 @@ class PreparedRunData:
     container holds SI arrays with NumPy-ordered axes. cfg retains complete JSON
     values and declaration identity. labber_metadata carries raw comment and tags,
     not a cfg envelope. labber_layout is common or independent, from the spec.
-    Construction copies mappings and cfg/metadata but shares large arrays.
+    experiment_tag is the persistence declaration identity, independent of
+    mutable Labber export tags. Construction copies mappings and cfg/metadata
+    but shares large arrays.
     Callers must not mutate arrays during saving. Preparation performs no I/O.
     """
 
     container: Container
     cfg: CfgSnapshot
     labber_metadata: LabberMetadata
+    experiment_tag: str
     labber_layout: Literal["common", "independent"] = "common"
 
     def __post_init__(self) -> None:
@@ -95,19 +99,34 @@ class PreparedRunData:
         object.__setattr__(self, "cfg", deepcopy(self.cfg))
         object.__setattr__(self, "labber_metadata", deepcopy(self.labber_metadata))
 
-    def to_container(self, metadata: RunMetadata | RunMetadataContent) -> Container:
+    def validate_metadata(self, metadata: JsonObject) -> RunMetadata:
+        """Validate native history and its declaration tag without performing I/O.
+
+        Return typed evidence; missing/invalid fields or an experiment mismatch
+        raise ValueError naming /docs/metadata. Extra keys remain in the caller's
+        document for writing, not in this typed projection.
+        """
+        projected = validate_run_metadata(metadata)
+        if projected.experiment != self.experiment_tag:
+            raise ValueError(
+                f"/docs/metadata: experiment {projected.experiment!r} does not match {self.experiment_tag!r}"
+            )
+        return projected
+
+    def to_container(self, metadata: JsonObject) -> Container:
         """Return the prepared arrays with validated docs/cfg and docs/metadata.
 
-        metadata is the saving record's historical evidence. Revalidate even
-        unchecked model_copy updates. Invalid cfg or metadata raises ValueError;
+        metadata is the saving record's JSON document. Validate the native schema
+        and declaration tag while retaining every key. Invalid cfg or metadata
+        raises ValueError;
         no live state is captured, paths chosen or files written. Unknown prepared
         docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
-        metadata = metadata.project()
+        self.validate_metadata(metadata)
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
-        docs["metadata"] = _JSON.validate_python(metadata.model_dump(mode="json"))
+        docs["metadata"] = deepcopy(_JSON.validate_python(metadata))
         return replace(self.container, docs=docs)
 
 
@@ -154,6 +173,7 @@ def prepare_run_data(
         container,
         cfg,
         LabberMetadata(comment=comment, tags=spec.tag),
+        spec.tag,
         spec.labber_layout if isinstance(spec, GroupedAxesSpec) else "common",
     )
 
@@ -202,11 +222,10 @@ def save_run(
     raise FileExistsError unless replace=True. Atomic single-file publication
     and I/O errors belong to datafile. No live state or legacy format is guessed.
     """
-    if source.metadata is None:
-        raise ValueError("RunRecord.metadata is None; cannot save without metadata")
-    if source.metadata.experiment != spec.tag:
+    metadata = validate_run_metadata(source.metadata)
+    if metadata.experiment != spec.tag:
         raise ValueError(
-            f"{destination}: experiment {source.metadata.experiment!r} does not match {spec.tag!r}"
+            f"{destination}: experiment {metadata.experiment!r} does not match {spec.tag!r}"
         )
     prepared = prepare_run_data(source, spec=spec, comment="")
     save(destination, prepared.to_container(source.metadata), replace=replace)
@@ -226,9 +245,7 @@ def load_run(
     CfgUnavailableWarning and leaves valid arrays/metadata available with cfg=None.
     """
     record = load_run_with_metadata(source, spec=spec)
-    if record.metadata is None:
-        raise ValueError(f"{source}: missing metadata")
-    return record, record.metadata.snapshot
+    return record, RunMetadataContent(record.metadata).snapshot
 
 
 def load_run_with_metadata(
@@ -242,7 +259,8 @@ def load_run_with_metadata(
     and document/data validation errors name source; I/O errors propagate.
     Incompatible typed cfg warns and yields cfg=None after successful Result
     reconstruction. No live capture, registry lookup or Labber fallback occurs.
-    The record is not a lossless rewrite envelope; retain Container for that use.
+    Metadata keys are retained; other unknown docs/groups require retaining the
+    original Container for a lossless rewrite.
     """
     container = load(source)
     try:
@@ -333,8 +351,10 @@ def restore_run(
     """Restore typed arrays/cfg/metadata from an already-read Container, without I/O.
 
     Validate the experiment tag, required variables, units/axes/dtypes/shapes and
-    cfg envelope. Keep metadata as detached content, validating other fields only
-    when requested; project() explicitly validates the whole document. Reconstruct and validate Result before concrete cfg validation;
+    cfg envelope. Keep the original metadata JSON detached from the container;
+    readers validate requested fields through RunMetadataContent or the complete
+    document through RunMetadata.model_validate. Reconstruct and validate Result
+    before concrete cfg validation;
     grouped builders receive only loaded arrays. Extra variables/unknown cfg keys
     remain in the Container, not the typed record. Malformed docs or data raise
     ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
@@ -388,7 +408,9 @@ def restore_run(
     cfg, cfg_issue = _restore_cfg(cfg_snapshot, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)
-    return RestoredRun(RunRecord(cfg=cfg, result=result, metadata=metadata), cfg_issue)
+    return RestoredRun(
+        RunRecord(cfg=cfg, result=result, metadata=stored.docs["metadata"]), cfg_issue
+    )
 
 
 def _restore_cfg(

@@ -30,8 +30,9 @@ from __future__ import annotations
 # Global/point readiness, active three files, installed-file reload and point creation.
 # Writeback destinations report entry_name/nullable point without a kind field.
 # Workflow Pause/Resume controls are removed; Ask uses waiting in workflow/recipe status.
-WIRE_VERSION = 136
+# Workflow operation facts carry control evidence; device snapshots live in RunRecord metadata.
+WIRE_VERSION = 137
 
 # Bump for meaningful GUI code changes that need a reload signal.
 # Wire-contract changes bump both versions.
-GUI_VERSION = 169
+GUI_VERSION = 170
