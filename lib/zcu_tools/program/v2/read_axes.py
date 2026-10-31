@@ -13,9 +13,9 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 from ._timeline_macros import (
     ModuleEmission,
     PreparedTimelineMacro,
-    TimelineBranch,
     RepeatTimelineEnter,
     RepeatTimelineExit,
+    TimelineBranch,
     TimeProducer,
 )
 from .macro.readout import ReadoutEmission, readout_control_scope

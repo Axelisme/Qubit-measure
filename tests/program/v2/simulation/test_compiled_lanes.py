@@ -159,7 +159,7 @@ def test_inner_loop_initialization_is_local_to_the_shot_and_visible_after_exit()
 
     def body(p):
         p.sync()
-        with p.repeat('inner', 2):
+        with p.repeat("inner", 2):
             p.write_reg("value", 123)
             p.sync()
         p.read_wmem(p.pulses["p"].get_wavenames()[0])
@@ -195,7 +195,7 @@ def test_inner_loop_definition_must_match_compiled_counter_and_count(key):
     def body(p):
         p.trigger([0], t=0)
         p.sync()
-        with p.repeat('inner', 'count', range_hint=(0, 3)):
+        with p.repeat("inner", "count", range_hint=(0, 3)):
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -235,8 +235,8 @@ def test_conditional_wave_port_only_emits_on_lanes_selected_by_flags():
 def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
     def body(p):
         p.sync()
-        with p.repeat('reads', 2):
-            with p.branch(by='scan', align_timeline=False) as branch:
+        with p.repeat("reads", 2):
+            with p.branch(by="scan", align_timeline=False) as branch:
                 for case in range(2):
                     with branch.case(case) as timeline:
                         p.fork(timeline, into="capture")

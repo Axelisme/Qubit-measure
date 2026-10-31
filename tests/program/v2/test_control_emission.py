@@ -356,7 +356,7 @@ def _advancing_pulse(operation: str, scan: ScanWith) -> Pulse:
                 prog.delay_reg_auto("duration")
             elif operation == "repeat":
                 prog.sync(timeline=timeline)
-                with prog.repeat('inner', 2, timeline=timeline):
+                with prog.repeat("inner", 2, timeline=timeline):
                     prog.delay_timeline(0.1, timeline=timeline)
                     prog.sync(timeline=timeline)
             elif operation == "scan":
@@ -459,7 +459,7 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
         # A register Repeat leaves its unconsumed external end wait-only.
         prog.write_reg("duration", 1)
         prog.sync()
-        with prog.repeat('runtime', 'duration', range_hint=(1, 3)):
+        with prog.repeat("runtime", "duration", range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
             prog.sync()
         prog.emit(joined, timeline="waiting")
@@ -498,7 +498,9 @@ def test_module_join_preserves_repeat_backedge_guards_without_padding(register, 
     def body(prog):
         prog.write_reg("count", 2)
         prog.sync()
-        with prog.repeat('pair', 'count' if register else 2, range_hint=(2, 3) if register else None):
+        with prog.repeat(
+            "pair", "count" if register else 2, range_hint=(2, 3) if register else None
+        ):
             prog.emit(joined)
             prog.sync()
 

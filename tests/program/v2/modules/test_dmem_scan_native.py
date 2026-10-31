@@ -159,7 +159,7 @@ def compile_fixed_lookup(loader: LoadValue, consumer: ScalarConsumer):
 
         def _body(self, cfg):
             self.sync()
-            with self.repeat('scan_count', 3):
+            with self.repeat("scan_count", 3):
                 self.emit(loader)
                 self.emit(consumer)
                 self.sync()

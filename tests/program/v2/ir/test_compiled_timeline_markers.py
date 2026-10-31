@@ -69,9 +69,9 @@ def test_nested_repeats_keep_outer_scan_shot_and_register_count_structure():
 
         def _body(self, cfg: None) -> None:
             self.sync()
-            with self.repeat('fixed', 2):
+            with self.repeat("fixed", 2):
                 self.sync()
-                with self.repeat('variable', 'count', range_hint=(0, 4)):
+                with self.repeat("variable", "count", range_hint=(0, 4)):
                     self.delay_timeline(0.1)
                     self.sync()
                 self.sync()

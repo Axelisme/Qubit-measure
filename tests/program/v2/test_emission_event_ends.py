@@ -555,9 +555,9 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
 
     def body(prog):
         prog.sync()
-        with prog.repeat('outer', 2):
+        with prog.repeat("outer", 2):
             prog.sync()
-            with prog.repeat('inner', 2):
+            with prog.repeat("inner", 2):
                 prog.emit(pulse)
                 prog.sync()
             prog.sync()

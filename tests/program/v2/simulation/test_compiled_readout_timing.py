@@ -1,10 +1,9 @@
 """Runtime readout timing through public native compile/request seams."""
 
-from qick.asm_v2 import Trigger
 from dataclasses import replace
 
 import pytest
-from qick.asm_v2 import QickSweep1D
+from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
@@ -26,12 +25,23 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     def body(p):
         p.pulse(0, "long", t=0)
         p.sync()
-        with p.repeat('inner', 2):
+        with p.repeat("inner", 2):
             p.write_reg_op("mask", "scan", "XOR", "inner")
             bit = p.soccfg["readouts"][0]["trigger_bit"]
             p.write_reg_op("mask", "mask", "SL", bit)
             p.write_reg_op("when", "inner", "SL", 7)
-            p.append_macro(Trigger(ros=[0], tts=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None))
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.sync()
 
     def transform(snapshot):

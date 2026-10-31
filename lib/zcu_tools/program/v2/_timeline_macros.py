@@ -3,12 +3,12 @@
 # tolerated(file-size): Branch/Repeat preparation shares TimelineBook frame and
 # provenance state; snapshot/restore wiring must follow the same preparation order.
 
+import warnings
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from fractions import Fraction
-import warnings
 
 from qick.asm_v2 import (
     CondJump,
@@ -135,7 +135,11 @@ class TimelineRuntimeAdvance(Macro):
             self.book.math.floor(end, advance)
             for end in [
                 *self.book.ends.values(),
-                *(end for frame in [*self.book.repeats, *self.book.loop_timelines] for end in frame.external.values()),
+                *(
+                    end
+                    for frame in [*self.book.repeats, *self.book.loop_timelines]
+                    for end in frame.external.values()
+                ),
             ]
         ]
         if all(
@@ -620,9 +624,17 @@ class RepeatTimelineEnter(Macro):
 
     def preprocess(self, prog) -> None:
         incoming = self.book.end(self.parent, placement=True)
-        self.constant = self.tail_sync and not isinstance(incoming, RuntimeEnd) and _bounds(incoming) == (0.0, 0.0)
+        self.constant = (
+            self.tail_sync
+            and not isinstance(incoming, RuntimeEnd)
+            and _bounds(incoming) == (0.0, 0.0)
+        )
         if self.tail_sync and not self.constant:
-            warnings.warn("Repeat entry is not constant zero; add sync() before the loop to avoid a tail register", UserWarning, stacklevel=2)
+            warnings.warn(
+                "Repeat entry is not constant zero; add sync() before the loop to avoid a tail register",
+                UserWarning,
+                stacklevel=2,
+            )
         if self.constant:
             self.reference.preprocess(prog)
         else:
@@ -635,11 +647,28 @@ class RepeatTimelineEnter(Macro):
 class RepeatTimelineExit(Macro):
     """Close the selected lowering without adding an implicit synchronization."""
 
-    def __init__(self, entry: RepeatTimelineEnter, iterations: int | str, minimum: int, maximum: int | None, axis: str):
+    def __init__(
+        self,
+        entry: RepeatTimelineEnter,
+        iterations: int | str,
+        minimum: int,
+        maximum: int | None,
+        axis: str,
+    ):
         self.entry = entry
         self.iterations = iterations
-        self.accumulator = LoopTimelineExit(entry.accumulator, iterations, minimum, maximum)
-        self.reference = TimelineRepeatExit(entry.book, minimum, maximum, variable=isinstance(iterations, str) and (maximum is None or minimum != maximum), iterations=iterations, axis=axis)
+        self.accumulator = LoopTimelineExit(
+            entry.accumulator, iterations, minimum, maximum
+        )
+        self.reference = TimelineRepeatExit(
+            entry.book,
+            minimum,
+            maximum,
+            variable=isinstance(iterations, str)
+            and (maximum is None or minimum != maximum),
+            iterations=iterations,
+            axis=axis,
+        )
 
     def preprocess(self, prog) -> None:
         if self.entry.constant:

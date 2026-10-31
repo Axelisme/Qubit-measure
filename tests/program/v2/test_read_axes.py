@@ -234,7 +234,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
                     self.emit(ro, tag="selected")
                 if control == "Repeat":
                     self.sync()
-                    with self.repeat('repeat_scope', 2):
+                    with self.repeat("repeat_scope", 2):
                         if inside:
                             self.emit(ro, tag="selected")
                         else:

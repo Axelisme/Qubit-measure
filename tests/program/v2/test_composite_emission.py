@@ -313,8 +313,8 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
 
     def body(prog):
         prog.sync()
-        with prog.repeat('twice', 2):
-            with prog.branch(by='path', align_timeline=False) as branch:
+        with prog.repeat("twice", 2):
+            with prog.branch(by="path", align_timeline=False) as branch:
                 for index in (0, 1):
                     with branch.case(index):
                         prog.write_reg("index", index)
@@ -593,7 +593,7 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
 
     def body(prog):
         prog.sync()
-        with prog.repeat('twice', 2):
+        with prog.repeat("twice", 2):
             prog.write_reg("origin", 100)
             prog.delay_timeline("origin", timeline="default")
             prog.emit(pulse)
@@ -639,7 +639,7 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
         prog.delay_timeline("origin", timeline="default")
         prog.emit(pulse)
         prog.sync()
-        with prog.repeat('twice', 2):
+        with prog.repeat("twice", 2):
             prog.emit(pulse)
             prog.sync()
 
@@ -751,7 +751,7 @@ def _change_selection(prog, loader, other, change):
                 pass
     elif change == "constant_backedge":
         prog.sync()
-        with prog.repeat('overwrite', 2):
+        with prog.repeat("overwrite", 2):
             prog.write_reg("length", 89)
             prog.sync()
     elif change == "constant_reset":

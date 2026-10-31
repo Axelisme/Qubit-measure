@@ -1,11 +1,10 @@
 """Structured compiled control through public compilation and numeric requests."""
 
-from qick.asm_v2 import Trigger
 from dataclasses import replace
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickRawParam
+from qick.asm_v2 import QickRawParam, Trigger
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst, TestInst, WaitInst
 from zcu_tools.program.v2.ir.labels import Label, LabelRef
@@ -193,8 +192,23 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
         if register_count:
             p.emit(loader)
         p.sync()
-        with p.repeat('inner', 'count' if register_count else count, **{'range_hint': (0, 3)} if register_count else {}):
-            p.append_macro(Trigger(ros=[0], tts=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None))
+        with p.repeat(
+            "inner",
+            "count" if register_count else count,
+            **{"range_hint": (0, 3)} if register_count else {},
+        ):
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -231,8 +245,19 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
     def body(p):
         p.emit(loader)
         p.sync()
-        with p.repeat('inner', 'count', range_hint=(1, 3)):
-            p.append_macro(Trigger(ros=[0], tts=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None))
+        with p.repeat("inner", "count", range_hint=(1, 3)):
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -285,8 +310,19 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
     def body(p):
         p.emit(loader)
         p.sync()
-        with p.repeat('inner', 'count', range_hint=(0, 2)):
-            p.append_macro(Trigger(ros=[0], tts=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None))
+        with p.repeat("inner", "count", range_hint=(0, 2)):
+            p.append_macro(
+                Trigger(
+                    ros=[0],
+                    tts=None,
+                    pins=None,
+                    t=0,
+                    width=None,
+                    ddr4=False,
+                    mr=False,
+                    tag=None,
+                )
+            )
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -323,8 +359,8 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
         p.sync()
-        with p.repeat('reads', 3):
-            with p.branch(by='scan', align_timeline=True) as branch:
+        with p.repeat("reads", 3):
+            with p.branch(by="scan", align_timeline=True) as branch:
                 for index in range(3):
                     with branch.case(index) as case:
                         p.fork(case, into="capture")

@@ -24,13 +24,13 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
+    RepeatTimelineEnter,
+    RepeatTimelineExit,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
     TimelineFork,
     TimelineJoin,
-    RepeatTimelineEnter,
-    RepeatTimelineExit,
     TimelineRuntimeAdvance,
     TimelineShellWait,
     TimelineSync,
@@ -811,11 +811,19 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         finally:
             self._timeline_default = previous
             body = self.macro_list[body_start:]
-            entry.tail_sync = bool(body) and type(body[-1]) is TimelineSync and body[-1].timeline == parent
+            entry.tail_sync = (
+                bool(body)
+                and type(body[-1]) is TimelineSync
+                and body[-1].timeline == parent
+            )
             self.append_macro(
                 RepeatTimelineExit(
-                    entry, n, minimum,
-                    range_hint[1] if range_hint is not None else (n if isinstance(n, int) else None),
+                    entry,
+                    n,
+                    minimum,
+                    range_hint[1]
+                    if range_hint is not None
+                    else (n if isinstance(n, int) else None),
                     name,
                 )
             )
