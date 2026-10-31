@@ -131,6 +131,7 @@ def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
     ("carrier_mhz", "companion_mhz", "retained"),
     [
         (6000.0, 6009.599, 2),
+        (6000.0, 6009.6, 2),
         (6000.0, 6009.601, 1),
         (6000.0, 6080.0, 1),
         (7190.0, 7195.0, 2),
