@@ -563,10 +563,11 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
     assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 220] * 2
 
 
+@pytest.mark.parametrize("following_ch", [0, 1])
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("post, advance", [(0, 0), (-60, 60), (-60, 59)])
 def test_equal_runtime_maximum_preserves_both_physical_boundaries(
-    reverse, post, advance
+    reverse, post, advance, following_ch
 ):
     selected = [
         TableLengthPulse(
@@ -579,13 +580,10 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         )
         for ch in (0, 1)
     ]
-    following = [
-        Pulse(
-            f"following_{ch}",
-            _pulse_cfg(39 / 384).model_copy(update={"ch": ch, "pre_delay": 0.0}),
-        )
-        for ch in (0, 1)
-    ]
+    following = Pulse(
+        "following",
+        _pulse_cfg(39 / 384).model_copy(update={"ch": following_ch, "pre_delay": 0.0}),
+    )
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -600,13 +598,11 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         source, target = ("default", "other") if reverse else ("other", "default")
         prog.join(source, into=target)
         prog.delay_timeline(advance / 430.08, timeline=target)
-        prog.fork(target, into=["following_0", "following_1"])
-        for ch, pulse in enumerate(following):
-            prog.emit(pulse, timeline=f"following_{ch}")
+        prog.emit(following, timeline=target)
 
     def build():
         return _program(
-            make_mock_soccfg(2, 0), [*selected, *following], body, initialize
+            make_mock_soccfg(2, 0), [*selected, following], body, initialize
         )
 
     if post + advance < 0:
@@ -619,8 +615,8 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
             # Both selected physical ends are 148/176. Equal numeric aggregate
             # ends must retain both channels' coverage, including the 60-cycle debt.
             assert [waves(s) for s in result] == [
-                [104, 104, 148, 148],
-                [104, 104, 176, 176],
+                [104, 104, 148],
+                [104, 104, 176],
             ] * 2
             assert [s.body_end_cycle - s.start_cycle for s in result] == [192, 220] * 2
             recompile(prog)
