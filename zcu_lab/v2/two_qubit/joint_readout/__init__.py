@@ -1,4 +1,4 @@
-"""Core-only thermal joint readout exports; GUI attachment is explicit."""
+"""Core-only joint readout exports; GUI attachments are explicit."""
 
 from .core import (
     GECenters,
@@ -9,7 +9,18 @@ from .core import (
     JointRoles,
 )
 
+from .core_heralded import (
+    JointReadoutHeraldedAnalysis,
+    JointReadoutHeraldedCfg,
+    JointReadoutHeraldedExp,
+    JointReadoutHeraldedResult,
+)
+
 __all__ = [
+    "JointReadoutHeraldedAnalysis",
+    "JointReadoutHeraldedCfg",
+    "JointReadoutHeraldedExp",
+    "JointReadoutHeraldedResult",
     "GECenters",
     "JointReadoutAnalysis",
     "JointReadoutCfg",

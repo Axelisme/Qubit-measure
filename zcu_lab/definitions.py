@@ -105,6 +105,9 @@ from zcu_lab.v2.two_qubit.idle_zz.gui import DEFINITION as IDLE_ZZ_DEFINITION
 from zcu_lab.v2.two_qubit.joint_readout.gui import (
     DEFINITION as JOINT_READOUT_DEFINITION,
 )
+from zcu_lab.v2.two_qubit.joint_readout.gui_heralded import (
+    DEFINITION as JOINT_READOUT_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
 from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
@@ -257,6 +260,7 @@ ADAPTERS: dict[str, object] = {
     "jpa/auto_optimize": JPA_AUTO_OPTIMIZE_DEFINITION,
     "jpa/check": JPA_CHECK_DEFINITION,
     "two_qubit/joint_readout": JOINT_READOUT_DEFINITION,
+    "two_qubit/joint_readout_heralded": JOINT_READOUT_HERALDED_DEFINITION,
     "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
     "two_qubit/chevron": CHEVRON_DEFINITION,
     "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,

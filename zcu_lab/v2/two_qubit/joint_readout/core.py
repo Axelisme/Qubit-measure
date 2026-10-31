@@ -1,29 +1,39 @@
-"""Thermal I/X preparation and same-shot, full-tone mux readout."""
+"""Four I/Xπ preparation branches with acquisition-side joint classification."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import field_serializer, model_validator
+from pydantic import Field, field_serializer, model_validator
+from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse
+from zcu_tools.program.v2 import Pulse, Reset, TimelineBuilder, TimelineProgramV2, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg
 from zcu_tools.program.v2.modules.readout import circle_classifier
 
 from zcu_lab.v2.support import live_line
 
-from .._readout import JointRoles, collect_joint_shots
+from .._readout import JointRoles
+from .._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from .._timeline import emit_readout_prefix
 
 BRANCH_LABELS = ("00", "01", "10", "11")
+OUTCOME_LABELS = tuple(f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other"))
 
 
 class GECenters(ConfigBase):
@@ -76,324 +86,211 @@ def tone_centers(readout: MuxReadoutCfg, tone_index: int) -> GECenters:
 
 
 class JointReadoutCfg(ConfigBase):
-    """Four thermal preparation branches, with reps shots per software round.
+    """Four nominal thermal I/Xπ branches with optional reset before preparation.
 
-    B00/B01/B10/B11 apply I/Xπ to F1/F2 then acquire one mux read. There is no
-    herald, reset, post-selection or pure-state initialization. All tones are
-    acquired in their original order. roles come from the fixed Open/Reset
-    capture; centers derive from each role's saved readout tone circle.
-    Missing/linear role classifiers fail validation; no radius is needed.
-    Pulses/readout remain editable calibrated inputs.
-    Delays are µs, pulse frequency MHz and phase degrees. No DC device is driven.
-    Keep this original cfg with Result: only the runner copy sets rounds=1.
+    reps is shots per round; rounds accumulate counts on the acquisition side.
+    Delays are us, pulse frequency MHz and phase degrees. roles retain the
+    captured full mux mapping. Only F1/F2 require circle classifiers with GE Post
+    radii. No DC device is driven. readout and pulses are editable calibrated
+    inputs. reset=None emits no reset; otherwise it starts every shot.
     """
 
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
     relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
     ] = 1.0
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset at the start of every shot."),
+    ] = None
     x180_f1: Annotated[
         Pulse.Cfg,
-        FieldMeta(
-            label="F1 Xπ",
-            description="填入 F1 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
-        ),
+        FieldMeta(label="F1 Xπ", description="Calibrated F1 x180 pulse on its charge generator."),
     ]
     x180_f2: Annotated[
         Pulse.Cfg,
-        FieldMeta(
-            label="F2 Xπ",
-            description="填入 F2 x180 slot，先做 amplitude／length Rabi。frequency MHz、gain a.u. within [-1, 1]、duration us。",
-        ),
+        FieldMeta(label="F2 Xπ", description="Calibrated F2 x180 pulse on its charge generator."),
     ]
     readout: Annotated[
         MuxReadout.Cfg,
-        FieldMeta(
-            label="Mux readout",
-            description="填入 full-group mux readout slot。先用 lookback 取得 timing，再做 mux onetone，確認 frequency MHz、gain a.u. within [-1, 1] 與 timing us。",
-        ),
+        FieldMeta(label="Mux readout", description="Full mux readout; F1/F2 need circle + radius from GE Post."),
     ]
     roles: JointRoles
 
-    @property
-    def f1_centers(self) -> GECenters:
-        """Derive F1's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f1_tone)
-
-    @property
-    def f2_centers(self) -> GECenters:
-        """Derive F2's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f2_tone)
-
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
-        """Require independent charge generators and in-range original tones."""
+        """Require distinct charge generators and calibrated F1/F2 role tones."""
         if self.x180_f1.ch == self.x180_f2.ch:
             raise ValueError("F1/F2 Xπ pulses require different charge generators")
-        self.roles.validate_readout(self.readout)
-        _ = self.f1_centers, self.f2_centers
+        validate_classifiers(self.readout, self.roles)
         return self
 
 
 @dataclass(frozen=True)
 class JointReadoutResult:
-    """Raw complex128 IQ (4, rounds*reps, N), all original N tones.
+    """branches is int64 [0,1,2,3]; sums is float64 (4,3,3) raw counts.
 
-    branches is int64 [0,1,2,3] (F1 bit first), shot_indices is int64 in
-    round-major then original program-loop/reps order, and tone_indices is int64
-    [0..N-1]. Normalization is exactly collect_raw_iq's ADC units/sample, with DC
-    offsets retained. Each program has only a reps loop and one read. Unwritten
-    whole rounds remain complex NaN after cancellation. Acquisition rejects
-    nonfinite acquired IQ; a partial sentinel never represents a measured shot.
-    Consumers must check the RunContext stop signal for execution failures.
+    Branch order is nominal 00/01/10/11, F1 first. Class axes are terminal F1,
+    terminal F2, each g/e/other. Rounds add without averaging; unmeasured branches
+    remain NaN. Completed rounds survive cancellation. Check the RunContext stop
+    signal for acquisition errors rather than interpreting partial data as success.
     """
 
     branches: NDArray[np.int64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class JointReadoutAnalysis:
-    """Same-shot counts and row-normalized matrix, both (4,4) float64.
+    """counts and row-normalized matrix are (4,9), including other outcomes.
 
-    Rows are nominal preparations, columns joint outcomes 00/01/10/11. Counts
-    are integer-valued where complete; unanalysed rows are NaN, not measured
-    zeros. acquired_shots includes retained partial raw; analyzed_shots is zero
-    for incomplete branches. complete identifies analysed rows. No radius cut,
-    matrix inversion, independent-error product or quality threshold is used.
+    Columns are F1-major g/e/other pairs; acquired_shots is each row's total.
+    Zero-count or unmeasured rows have NaN probabilities.
     """
 
     counts: NDArray[np.float64]
     matrix: NDArray[np.float64]
-    acquired_shots: NDArray[np.int64]
-    analyzed_shots: NDArray[np.int64]
-    complete: NDArray[np.bool_]
+    acquired_shots: NDArray[np.float64]
 
 
-def _source_shots(
-    source: RunRecord[JointReadoutCfg, JointReadoutResult],
-) -> tuple[JointReadoutCfg, NDArray[np.bool_]]:
-    cfg, data = source.cfg, source.result
-    if cfg is None:
-        raise ValueError(
-            "Joint analysis requires saved cfg and GE centers; current Form/library is not a substitute"
-        )
-    ntones, nshots = len(cfg.readout.tones), cfg.reps * cfg.rounds
-    if (
-        not np.array_equal(data.branches, np.arange(4))
-        or not np.array_equal(data.tone_indices, np.arange(ntones))
-        or not np.array_equal(data.shot_indices, np.arange(nshots))
-        or data.signals.shape != (4, nshots, ntones)
-    ):
-        raise ValueError(
-            "Joint raw axes/shape must match saved cfg: (4, rounds*reps, full tones)"
-        )
-    rounds = data.signals.reshape(4, cfg.rounds, cfg.reps, ntones)
-    acquired = np.all(np.isfinite(rounds), axis=(2, 3))
-    missing = np.all(
-        np.isnan(rounds) & ~np.isinf(rounds.real) & ~np.isinf(rounds.imag), axis=(2, 3)
+def build_program(
+    cfg: JointReadoutCfg, soccfg: QickConfig, branch: int, *, heralded: bool
+) -> TimelineProgramV2:
+    """Compile one nominal 00/01/10/11 branch; branch must be in 0..3.
+
+    Every call creates fresh modules. Emit reset if configured, herald if
+    requested, F1 Xπ for bit 1 then F2 Xπ for bit 0, then terminal. The two
+    readouts reuse one mux module with separate tags. No acquisition occurs.
+    """
+    if branch not in range(4):
+        raise ValueError("branch must be in 0..3")
+    validate_classifiers(cfg.readout, cfg.roles)
+    builder = TimelineBuilder(
+        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay
     )
-    if not np.all(acquired | missing):
-        raise ValueError(
-            "Joint raw contains nonfinite acquired IQ or a partially missing round"
-        )
-    return cfg, acquired
+    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    if branch & 2:
+        builder.emit(Pulse("x180_f1", cfg.x180_f1))
+    if branch & 1:
+        builder.emit(Pulse("x180_f2", cfg.x180_f2))
+    builder.emit(readout, tag="terminal")
+    return builder.build()
 
 
-class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
-    """Measure joint readout outcomes after four thermal I/Xπ preparations."""
+def acquire_counts(
+    config: JointReadoutCfg, *, context: RunContext, heralded: bool
+) -> NDArray[np.float64]:
+    """Run four branches and return unchanged float64 summed counts.
 
-    AXES_SPEC: ClassVar[AxesSpec[JointReadoutResult, JointReadoutCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-            AxesSpec.Axis("branches", "Nominal preparation", "", dtype=np.int64),
-        ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
-        result_type=JointReadoutResult,
-        cfg_type=JointReadoutCfg,
-        cfg_schema_version="3.0",
-        tag="two_qubit/joint_readout",
+    Shape is (4,3,3), or (4,3,3,3,3) with herald. Live P(g,g) derives from
+    accumulated terminal counts, selecting herald (g,g) for the heralded version.
+    Schedule owns a cfg copy, retries and cancellation; host does not loop rounds.
+    """
+    validate_classifiers(config.readout, config.roles)
+    viewer = live_line(
+        context.plots, "measurement", "Nominal preparation (00, 01, 10, 11)",
+        "Terminal P(g,g)" if not heralded else "Terminal P(g,g) | herald (g,g)",
     )
 
-    def run(
-        self, config: JointReadoutCfg, *, context: RunContext
-    ) -> JointReadoutResult:
-        """Measure same-shot mux IQ after nominal 00/01/10/11 preparations.
+    def update_view(sums: NDArray[np.float64]) -> None:
+        counts = terminal_counts(sums, heralded=heralded)
+        viewer.update(np.arange(4, dtype=np.float64), joint_probabilities(counts)[..., 0, 0])
 
-        Starting from thermal populations, apply Xπ to neither role, F2, F1,
-        or F1 then F2, respectively, and acquire one full mux read. There is no
-        reset, heralding or post-selection. Return raw IQ shaped
-        (4, rounds*reps, full tones) in original shot/tone order. Analyze counts
-        joint outcomes; its matrix includes preparation and readout effects,
-        not pure-state assignment probabilities.
-
-        Each completed host round overwrites its own slot; missing rounds stay
-        NaN. cfg is unchanged, and the caller checks cancel_signal.raise_if_error()
-        to distinguish an acquisition failure from a stop.
-        """
-        # Retain each host round and every original tone instead of averaging IQ.
-        cfg = config.model_copy(deep=True, update={"rounds": 1})
-        ntones = len(cfg.readout.tones)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Nominal preparation (00, 01, 10, 11)",
-            "Acquired shots",
-            num_lines=1,
-        )
-
-        def update_view(raw: NDArray[np.complex128]) -> None:
-            acquired = np.all(np.isfinite(raw), axis=-1).sum(axis=(1, 2))
-            viewer.update(np.arange(4, dtype=np.float64), acquired)
-
-        buffer = SignalBuffer(
-            (4, config.rounds, cfg.reps, ntones), on_update=update_view
-        )
-
-        # Prepare each thermal branch independently, then perform one joint read.
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            for branch, step in sched.scan("branch", list(range(4))):
-                builder = step.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=step.cfg.reps,
-                    initial_delay=step.cfg.initial_delay,
-                    relax_delay=step.cfg.relax_delay,
-                )
-                if branch & 2:
-                    builder.add_pulse("x180_f1", cfg.x180_f1)
-                if branch & 1:
-                    builder.add_pulse("x180_f2", cfg.x180_f2)
-                builder.add(MuxReadout("readout", cfg.readout))
-
-                # Reuse this branch sequence and store completed raw rounds separately.
-                prog = builder.build()
-                for _, round_step in step.repeat("round", config.rounds):
-                    _ = round_step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=round_step.cfg.reps,
-                        initial_delay=round_step.cfg.initial_delay,
-                        relax_delay=round_step.cfg.relax_delay,
-                    ).run_program(
-                        prog,
-                        raw2signal_fn=partial(collect_joint_shots, prog),
-                        rounds=round_step.cfg.rounds,
-                    )
-
-        # Preserve round-major shot order when presenting the result.
-        buffer.trigger_update(flush=True)
-        return JointReadoutResult(
-            np.arange(4, dtype=np.int64),
-            np.arange(config.rounds * cfg.reps, dtype=np.int64),
-            np.arange(ntones, dtype=np.int64),
-            buffer.array.reshape(4, config.rounds * cfg.reps, ntones),
-        )
-
-    def analyze(
-        self,
-        source: RunRecord[JointReadoutCfg, JointReadoutResult],
-        options: None,
-        *,
-        plots: Plots,
-    ) -> JointReadoutAnalysis:
-        """Count same-shot joint outcomes and normalize each complete branch row.
-
-        Classify each role by its saved nearest GE center, without a radius cut,
-        then count 00/01/10/11 pairs directly rather than multiplying marginals.
-        Rows are nominal preparations; columns are observed joint outcomes.
-
-        A complete branch requires every expected round. Partial raw survives,
-        but counts/matrix rows stay NaN, with acquired/analyzed sample counts
-        distinguished on the plot and numeric result. Missing cfg, malformed
-        coordinates or invalid acquired data raise ValueError. Thermal content,
-        preparation errors and readout effects remain inseparable in this matrix.
-        """
-        del options
-        cfg, acquired = _source_shots(source)
-        complete = np.all(acquired, axis=1)
-        counts = np.full((4, 4), np.nan)
-        matrix = np.full((4, 4), np.nan)
-        acquired_shots = acquired.sum(axis=1).astype(np.int64) * cfg.reps
-        for branch in np.flatnonzero(complete):
-            shots = source.result.signals[branch]
-            outcomes = np.zeros(shots.shape[0], dtype=np.int64)
-            for tone, centers, weight in (
-                (cfg.roles.f1_tone, cfg.f1_centers, 2),
-                (cfg.roles.f2_tone, cfg.f2_centers, 1),
-            ):
-                values = shots[:, tone]
-                outcomes += weight * (
-                    np.abs(values - centers.e) < np.abs(values - centers.g)
-                )
-            counts[branch] = np.bincount(outcomes, minlength=4)
-            matrix[branch] = counts[branch] / shots.shape[0]
-        answer = JointReadoutAnalysis(
-            counts,
-            matrix,
-            acquired_shots,
-            np.where(complete, acquired_shots, 0),
-            complete,
-        )
-        _plot_matrix(answer, plots)
-        return answer
-
-
-def _plot_matrix(answer: JointReadoutAnalysis, plots: Plots) -> None:
-    fig, axes = plots.subplots("matrix", figsize=(9, 6))
-    image = axes.imshow(
-        np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
-    )
-    for row in range(4):
-        for col in range(4):
-            label = (
-                f"{answer.matrix[row, col]:.3f}\nn={int(answer.counts[row, col])}"
-                if answer.complete[row]
-                else "Not analysed"
+    shape = (4, 3, 3, 3, 3) if heralded else (4, 3, 3)
+    buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
+    with Schedule(config, buffer, scope=context.scope) as sched:
+        for branch, step in sched.scan("branch", list(range(4))):
+            prog = build_program(step.cfg, context.soccfg, branch, heralded=heralded)
+            step.run_acquire_summed(
+                prog, context.soc,
+                processor=shot_sums(prog, readout_axes(step.cfg.roles, heralded=heralded)),
+                rounds=step.cfg.rounds,
+                options=RunOptions(),
             )
-            axes.text(col, row, label, ha="center", va="center", fontsize=9)
-    axes.set(
-        xticks=range(4),
-        xticklabels=BRANCH_LABELS,
-        yticks=range(4),
-        yticklabels=[
-            f"B{label} ({int(n)} acquired)"
-            for label, n in zip(BRANCH_LABELS, answer.acquired_shots, strict=True)
-        ],
-        xlabel="Observed joint outcome (F1, F2)",
-        ylabel="Nominal I/Xπ preparation",
+    return buffer.array
+
+
+def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult:
+    """Load summed counts; missing sums in old raw-IQ files raises ValueError."""
+    sums = data.variable("sums")
+    return JointReadoutResult(
+        branches=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64)
     )
-    axes.set_title(
-        "Nominal preparation → observed outcome, includes thermal population\nIncomplete branches are not analysed; no heralding or inversion"
+
+
+def analyze_counts(
+    result: JointReadoutResult, *, plots: Plots
+) -> JointReadoutAnalysis:
+    """Plot four nominal preparation rows against nine terminal joint classes.
+
+    No saved cfg or IQ reclassification is needed. All completed counts,
+    including partial acquisitions, enter the row normalization. Zero accepted
+    shots give NaN probabilities, not a fabricated distribution.
+    """
+    if not np.array_equal(result.branches, np.arange(4)) or result.sums.shape != (4, 3, 3):
+        raise ValueError("Joint readout requires branches [0,1,2,3] and sums (4,3,3)")
+    answer = JointReadoutAnalysis(
+        counts=result.sums.reshape(4, 9),
+        matrix=joint_probabilities(result.sums).reshape(4, 9),
+        acquired_shots=result.sums.sum(axis=(-2, -1)),
+    )
+    fig, axes = plots.subplots("matrix", figsize=(12, 5))
+    image = axes.imshow(np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues")
+    for row in range(4):
+        for col in range(9):
+            value = answer.matrix[row, col]
+            label = (
+                f"{value:.3f}\nn={answer.counts[row, col]:g}"
+                if np.isfinite(value) else "No shots"
+            )
+            axes.text(col, row, label, ha="center", va="center", fontsize=8)
+    axes.set(
+        xticks=range(9), xticklabels=OUTCOME_LABELS,
+        yticks=range(4), yticklabels=BRANCH_LABELS,
+        xlabel="Observed terminal class (F1, F2)", ylabel="Nominal I/Xπ preparation",
+        title="Preparation → observed outcome; includes preparation and readout effects",
     )
     fig.colorbar(image, ax=axes, label="Row-normalized probability")
     fig.tight_layout()
+    return answer
+
+
+class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
+    """Measure nine joint classes after each of four nominal preparations."""
+
+    AXES_SPEC: ClassVar[GroupedAxesSpec[JointReadoutResult, JointReadoutCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("terminal_f2", ""),
+                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec("Nominal preparation", "", field_name="branches", dtype=np.int64),
+                ),
+                z=VariableZSpec(field_name="sums", label="Joint class counts", unit="", dtype=np.float64),
+            ),
+        ),
+        result_type=JointReadoutResult, cfg_type=JointReadoutCfg,
+        cfg_schema_version="4.0", tag="two_qubit/joint_readout",
+        result_builder=restore_result,
+    )
+
+    def run(self, config: JointReadoutCfg, *, context: RunContext) -> JointReadoutResult:
+        """Acquire optional reset → I/Xπ preparation → terminal joint counts.
+
+        Return (4,3,3) summed counts, not per-shot IQ or probabilities. All rounds
+        accumulate at acquisition. cfg is unchanged; completed rounds survive stop.
+        """
+        return JointReadoutResult(
+            np.arange(4, dtype=np.int64), acquire_counts(config, context=context, heralded=False)
+        )
+
+    def analyze(
+        self, source: RunRecord[JointReadoutCfg, JointReadoutResult], options: None,
+        *, plots: Plots,
+    ) -> JointReadoutAnalysis:
+        """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
+        del options
+        return analyze_counts(source.result, plots=plots)
