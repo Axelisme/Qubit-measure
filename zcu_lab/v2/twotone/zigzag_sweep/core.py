@@ -196,7 +196,8 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                     val_reg="repeat_count",
                 )
             )
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
             builder.sync()
             with builder.repeat(

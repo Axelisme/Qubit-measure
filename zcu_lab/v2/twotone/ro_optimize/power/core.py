@@ -144,7 +144,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             )
             builder.add_loop("ge", 2)
             builder.add_sweep("gain", gain_sweep)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             with (
                 builder.branch(by="ge", align_timeline=True) as cases,
                 cases.case(1),

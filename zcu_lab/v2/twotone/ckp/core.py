@@ -334,7 +334,8 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             builder.add_loop("ge", 2)
             res_freq = builder.add_sweep("res_freq", cfg.res_freq)
             qub_freq = builder.add_sweep("qub_freq", cfg.qub_freq)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             with (
                 builder.branch(by="ge", align_timeline=True) as cases,
                 cases.case(1),

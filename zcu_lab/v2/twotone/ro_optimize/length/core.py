@@ -137,7 +137,8 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 builder.add_loop("ge", 2)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 with (
                     builder.branch(by="ge", align_timeline=True) as cases,
                     cases.case(1),

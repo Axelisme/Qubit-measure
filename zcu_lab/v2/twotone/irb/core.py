@@ -201,7 +201,8 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
                                     val_reg="recovery_gate_1",
                                 )
                             )
-                            builder.emit(Reset("reset", run_cfg.reset))
+                            if run_cfg.reset is not None:
+                                builder.emit(Reset("reset", run_cfg.reset))
                             builder.sync()
                             with builder.repeat(
                                 "rand_gate_idx",

@@ -201,7 +201,8 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                         val_reg="recovery_gate_1",
                     )
                 )
-                builder.emit(Reset("reset", run_cfg.reset))
+                if run_cfg.reset is not None:
+                    builder.emit(Reset("reset", run_cfg.reset))
                 builder.sync()
                 with builder.repeat(
                     "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)

@@ -390,7 +390,8 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                     soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
                 )
                 builder.add_loop("ge", 2)
-                builder.emit(Reset("reset", run_cfg.reset))
+                if run_cfg.reset is not None:
+                    builder.emit(Reset("reset", run_cfg.reset))
                 with (
                     builder.branch(by="ge", align_timeline=True) as cases,
                     cases.case(1),

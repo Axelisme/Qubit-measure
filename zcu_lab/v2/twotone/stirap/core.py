@@ -143,6 +143,26 @@ def restore_result(data: GroupedLoadData[StirapCfg]) -> StirapResult:
     )
 
 
+def _scan_coordinates(scan: DelayScan | AmplitudeScan | DetuningScan) -> tuple[NDArray[np.float64], NDArray[np.float64], str]:
+    """Return requested x/y coordinates and the selected scan's x label."""
+    if scan.kind == "delay":
+        x_sweep, y_sweep = scan.stokes_lead, None
+        x_label = "Stokes lead (us; positive = Stokes first)"
+    elif scan.kind == "amplitude":
+        x_sweep, y_sweep = scan.scale, None
+        x_label = "Common amplitude scale (fixed sigma)"
+    else:
+        x_sweep, y_sweep = scan.pump, scan.stokes
+        x_label = "Pump detuning (MHz)"
+    xs = np.linspace(x_sweep.start, x_sweep.stop, x_sweep.expts)
+    ys = (
+        np.array([0.0])
+        if y_sweep is None
+        else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
+    )
+    return xs, ys, x_label
+
+
 class StirapExp(Experiment[StirapResult, StirapCfg]):
     """Acquire the same two-branch STIRAP sequence under three scan modes."""
 
@@ -181,21 +201,7 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         """
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         scan = cfg.scan
-        if scan.kind == "delay":
-            x_sweep, y_sweep = scan.stokes_lead, None
-            x_label = "Stokes lead (us; positive = Stokes first)"
-        elif scan.kind == "amplitude":
-            x_sweep, y_sweep = scan.scale, None
-            x_label = "Common amplitude scale (fixed sigma)"
-        else:
-            x_sweep, y_sweep = scan.pump, scan.stokes
-            x_label = "Pump detuning (MHz)"
-        xs = np.linspace(x_sweep.start, x_sweep.stop, x_sweep.expts)
-        ys = (
-            np.array([0.0])
-            if y_sweep is None
-            else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
-        )
+        xs, ys, x_label = _scan_coordinates(scan)
         buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
         with Schedule(None, buffer, scope=context.scope) as sched:
             for y, row in sched.scan("stokes_detuning", ys.tolist()):

@@ -119,7 +119,8 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                     val_reg="repeat_count",
                 )
             )
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
             # Legacy repeats flush the reference at entry and after every gate.
             builder.sync()

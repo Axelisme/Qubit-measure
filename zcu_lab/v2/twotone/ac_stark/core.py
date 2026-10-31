@@ -183,7 +183,8 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 freq = builder.add_sweep("freq", cfg.freq)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 # The Stark tone does not block the probe or the following readout.
                 builder.fork("default", into=["stark", "probe"])
                 builder.emit(

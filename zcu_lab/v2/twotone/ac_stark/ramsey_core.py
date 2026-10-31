@@ -154,7 +154,8 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 length = builder.add_sweep("length", cfg.length)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.fork("default", into=["stark", "ramsey"])
                 builder.emit(
                     Pulse("stark_pulse", cfg.stark_pulse, gain=step.value),
