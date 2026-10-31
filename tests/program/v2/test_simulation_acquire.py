@@ -13,6 +13,7 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.v2.builder import TimelineBuilder
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -49,6 +50,50 @@ def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
         reps=reps,
         sweep=sweep,
     )
+
+
+def test_builder_program_acquires_and_sums_tagged_readouts():
+    env = environment(std_adc=0, seed=123)
+    try:
+        builder = TimelineBuilder(
+            env.soccfg, reps=3, initial_delay=0, relax_delay=0.1
+        )
+        builder.add_loop("point", 2)
+        readout = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=env.soccfg.cycles2us(16, ro_ch=0),
+        ).build("readout")
+        builder.emit(readout, tag="herald")
+        builder.emit(readout, tag="signal")
+        prog = builder.build()
+
+        averaged = prog.acquire(env.soc, progress=False)
+        assert averaged[0].shape == (2, 2, 2)
+        np.testing.assert_array_equal(averaged[0], 0)
+        result = prog.acquire_summed(
+            env.soc,
+            processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
+            rounds=2,
+            progress=False,
+        )
+        expected = np.zeros((2, 3, 3))
+        expected[:, 0, 0] = 6
+        np.testing.assert_array_equal(result, expected)
+        request = env.soc.binding.last_request
+        assert request is not None
+        assert request.point_names == ("point",)
+        assert request.reps == 3
+        assert [read.samples for read in request.materialize_point(0).readouts] == [
+            16,
+            16,
+        ]
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_summed_simulation_materializes_joint_shots_and_retains_completed_rounds():
