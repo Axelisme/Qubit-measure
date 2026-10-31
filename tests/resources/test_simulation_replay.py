@@ -178,6 +178,24 @@ def test_replay_rejects_float_time_format_version() -> None:
         )
 
 
+def test_replay_rejects_fractional_values_in_integer_time_arrays() -> None:
+    from zcu_tools.resources.simulation_replay import ReplayAcquire
+
+    timeline = PointTimeline(
+        (), (PulseEvent(0, 0, 1344, 100.0, 0.0, 0.1),), (), 1344,
+        time_base=TIME_BASE,
+    )
+    request = AcquireRequest(
+        "integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE,
+        templates=(single_point_template(timeline),),
+    )
+    fixed = ReplayAcquire(settings=parse_ftf(ftf_document()), request=request, versions=())
+    payload = fixed.model_dump(mode="json")
+    payload["request"]["templates"][0]["events"][0]["start_ticks"]["values"][0] = 0.5
+    with pytest.raises(ValueError, match="int64"):
+        ReplayAcquire.model_validate(payload)
+
+
 def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
     from zcu_tools.resources.simulation_replay import read_replay
 
