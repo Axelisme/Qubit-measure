@@ -198,8 +198,8 @@ class WorkflowEnv[C](Scope):
 
         ctx supplies the explicit operation scope, borrowed soc/soccfg and
         connected drivers (None when unavailable), and fresh operation plots.
-        The framework finishes plots before returning or propagating errors. Child-cancelled work starts with its
-        stopped token and cooperatively returns a partial/empty value.
+        The framework finishes plots before returning or propagating errors.
+        Child-cancelled work starts with its stopped token and cooperatively returns a partial/empty value.
         The callable runs once. Every exception propagates unchanged into the
         author; cooperative child cancellation delivers its returned value.
         Root stop raises ordinary ScriptCancelled before new work or after drain.

@@ -83,6 +83,7 @@ def test_record_metadata_requires_explicit_completion() -> None:
         reason=None,
         stopped=False,
     )
+
     def omit_completion(assemble: Callable[..., object]) -> None:
         assemble(
             workflows.Completed(source, facts),

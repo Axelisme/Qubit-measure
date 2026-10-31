@@ -29,7 +29,8 @@ async def run_core[Cfg: ConfigBase, Result](
 
     scope must have a runtime supplying operation CallContext resources, as
     WorkflowEnv does. experiment may be a bound Experiment.run. cfg must be a
-    ConfigBase; it is deep-copied before operation admission and never mutated.
+    ConfigBase; the helper deep-copies it before admission, leaving the caller's
+    cfg unchanged while the core may mutate its owned copy.
     name is an optional explicit operation label. The returned RunRecord holds
     the core's returned value and cfg at return, with detached pre-call settings
     in metadata["device_snapshot"]. Every connected driver is read once before
