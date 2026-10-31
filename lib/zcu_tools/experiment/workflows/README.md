@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -49,16 +49,18 @@ EnginePorts 注入 clock、devices、WorkflowPlots、progress factory 與 contex
 `Engine.start` 驗證並保存啟動資料，不執行作者。宿主在一個 worker 呼叫一次 `Engine.execute`。
 共用 ScriptHost 執行作者 coroutine、finally 與 executor drain，全部結束後才允許 replacement Start。
 
-`await scope.call(fn)` 在 executor 執行 `fn(CallContext)`，回 Completed[T] | Failed。
+`await scope.call(fn)` 在 executor 執行 `fn(CallContext)`，回 Completed[T]。
 CallContext 提供本次 operation 的 Scope 與起跑 epoch。其他能力由 closure 顯式傳入。
-`Completed.value` 是原始值，`partial_result` 是 operation 或已完成 descendant 的取消事實。
+`Completed.value` 是原始值，`stop_requested` 記本次 operation 收到停止請求。
+Host 記錄本次 operation、祖先或子孫的 selector cancel，並在完成時讀 operation 自己的 stop bit。
+取消無關 sibling 不標記本次 operation。停止 iteration 會標記它之後出生的 operation，新 iteration 不繼承。
 `Completed.facts` 是同時寫入 journal 與 commit 的 immutable OperationFacts。
 任意程式例外直接傳回作者，不降級成 Failed。
 
 `await scope.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result`，包括 bound Experiment.run。
 Cfg 必須是 `zcu_tools.cfg_model.ConfigBase`。每次 attempt 深複製原 capture，建 RunContext 與獨立 operation Plots，借用 soc、soccfg 與 connected drivers。
 呼叫前經 capture_device_snapshot 讀全部 connected drivers。任一讀取失敗就不執行 core。
-回傳是 `Completed[RunRecord[Cfg, Result]] | Failed`，不自動保存 raw 或圖。
+回傳是 `Completed[RunRecord[Cfg, Result]]`，不自動保存 raw 或圖。
 非 ConfigBase 的工作用 call。
 
 `scope.get_device_cfg(name)` live-read detached 完整設定。
@@ -75,7 +77,7 @@ Root cancel 在 Host lock 內設 bit 並記第一次 typed ack，loop wake 只�
 重複 root cancel 回同一 ack，active_path 固定為根路徑。Engine 不另加一輪 loop acknowledgement。
 這個 ack 只代表接受與 token 已 set，終態 future 才代表作者 finally 與 executor 已 drain。
 Acquire 只停一次取得，schedule 停該段，iteration 跳過目前點，run 是 operation 的別名。
-這些子層取消回 partial 或 Failed 值。作者在量測間檢查 `iteration.cancelled`。
+這些子層取消後，core 回傳就交付 Completed，core 拋錯就原樣傳給作者。作者在量測間檢查 `iteration.cancelled`。
 根 Stop 或 workflow cancel 則在下一個 async operation 或 Ask raise 普通 ScriptCancelled。
 進行中的 call 先 drain 並保存 completion facts，再 raise。真實錯誤優先，不被取消覆蓋。
 終態為 cancelled，ScriptCancelled 不記 error。作者 finally 可以同步 commit 已有成果。
@@ -110,7 +112,7 @@ Saver 錯誤沿作者例外路徑傳播。Pause 或 Stop 不回滾檔案，框�
 Lab saver 將 Completed、歷史 snapshot、identity 與 spec.tag 交給 record_with_metadata。
 此函式將 RunMetadata 裝入 RunRecord.metadata，保存入口只接 record，native 輸出通用 Container。
 Native run_id 是 `<identity.run_id>-<facts.iteration:06d>-<facts.attempt>`。
-Completed.partial_result 決定 complete 或 stopped，不用 facts.stopped 代替。
+Completed.stop_requested 決定 complete 或 stopped，不用 facts.stopped 代替。
 
 獨立轉換工具共用 `export.load_trace` 讀具名 native reference，`export.write_outputs` 只寫 Labber。
 `write_outputs(..., save_stem=...)` 把 workflow name、完整 run_id、point、roles、cfg values 與 saved_at 放入共用 SaveContext。
@@ -129,8 +131,8 @@ Name 是作者傳給 run／call 的 operation label，未命名或舊記錄為 N
 ProgramBuilder 的 acquire retry 與 data-driven early stop 由日誌記錄，不由 operation 推斷。
 Kind 是 run、call、setup_device 或 wait_until。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
 Attempt 在該 iteration 中從一開始，包含 Pause retries，不隨 commit 重置。
-Stopped 是完成時 operation 自己的 bit，partial_result 另含 descendant 取消。
-Outcome 是 completed、partial、discarded、failed 或 raised。只有 run 有 pre-call device snapshot。
+Stopped 是完成時 operation 自己的 bit，Completed.stop_requested 另含 Host 對子孫發出的取消請求。
+Outcome 是 completed、discarded 或 raised。只有 run 有 pre-call device snapshot。
 
 Commit 的 operations 保存該 scope 與其 children 的 attempts。未 commit 的 attempt 仍留 journal。
 `saved_run.read_records(run, Model | TypeAdapter(Model))` 走 nested 目錄樹，按 commit_seq 回 SavedRecord tuple。

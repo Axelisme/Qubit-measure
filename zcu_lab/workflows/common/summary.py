@@ -7,7 +7,7 @@ from statistics import fmean, pstdev
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from zcu_tools.experiment.operations import Completed, Failed, OperationFacts
+from zcu_tools.experiment.operations import Completed, OperationFacts
 
 from zcu_lab.workflows.common.calibration_results import StageStatus
 
@@ -215,7 +215,7 @@ class SummaryAccumulator:
 
     planned_points is the fixed plan size; flux_unit is None for a mux run.
     Append one SummaryPoint after each commit. Helpers call observe immediately
-    after an operation returns; Failed has no facts and contributes no timing.
+    after an operation returns; raised operations contribute no delivered timing.
     finish returns mechanical totals without changing scientific acceptance.
     """
 
@@ -224,10 +224,9 @@ class SummaryAccumulator:
     points: list[SummaryPoint] = field(default_factory=list)
     operations: list[OperationFacts] = field(default_factory=list)
 
-    def observe[T](self, outcome: Completed[T] | Failed) -> None:
-        """Retain only delivered Completed facts, including partial results."""
-        if isinstance(outcome, Completed):
-            self.operations.append(outcome.facts)
+    def observe[T](self, outcome: Completed[T]) -> None:
+        """Retain delivered Completed facts, including stop-requested results."""
+        self.operations.append(outcome.facts)
 
     def finish(self) -> RunSummary:
         """Return point totals, stage durations and population statistics."""
@@ -252,7 +251,7 @@ class SummaryAccumulator:
 
 
 def observe_operation[T](
-    summary: SummaryAccumulator | None, outcome: Completed[T] | Failed
+    summary: SummaryAccumulator | None, outcome: Completed[T]
 ) -> None:
     """Pass delivered facts to an optional run accumulator without altering the outcome."""
     if summary is not None:

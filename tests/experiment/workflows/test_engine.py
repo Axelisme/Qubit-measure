@@ -189,7 +189,7 @@ def test_thread_safe_requests_do_not_wait_and_stop_upgrades_pause(rig: Rig) -> N
                 return 4
 
             result = completed(await iteration.call(operation))
-            assert result.partial_result
+            assert result.stop_requested
         finally:
             iterations.close()
 

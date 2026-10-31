@@ -164,7 +164,7 @@ async def measure_ramsey(
     )
     if acquisition.result is None:
         return RamseyResult(
-            status="rejected" if acquisition.status == "partial" else "failed",
+            status="rejected",
             reason=acquisition.reason,
             file=acquisition.file,
             gain_clamped=gain_clamped,

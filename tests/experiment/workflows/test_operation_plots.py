@@ -8,7 +8,7 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.workflows import Completed, Failed, Live, WorkflowEnv
+from zcu_tools.experiment.workflows import Completed, Live, WorkflowEnv
 from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
@@ -146,14 +146,14 @@ def test_pause_resume_reenters_core_factory_with_fresh_plots_and_same_cfg(
         rig.close()
 
 
-@pytest.mark.parametrize("outcome", ["completed", "failed", "raised"])
+@pytest.mark.parametrize("outcome", ["completed", "raised"])
 def test_operation_finishes_before_return_or_failure_delivery(
     tmp_path: Path, outcome: str
 ) -> None:
     rig = Rig(tmp_path, native=True)
     handles: list[LiveUpdate[TraceData]] = []
     attempts: list[Plots] = []
-    delivered: list[Completed[RunRecord[Cfg, int]] | Failed] = []
+    delivered: list[Completed[RunRecord[Cfg, int]]] = []
     errors: list[str] = []
 
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
@@ -161,10 +161,6 @@ def test_operation_finishes_before_return_or_failure_delivery(
         handles.append(create_trace(context.plots, "measurement", "x", "y"))
         if outcome == "raised":
             raise ValueError("core failed")
-        if outcome == "failed":
-            context.scope.stop.set_error(
-                "failed", "acquire failed", OSError("acquire failed")
-            )
         return 3
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -187,9 +183,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
         final = rig.engine.execute("run")
         assert final.lifecycle == "done", final.reason
         assert attempts[0] is not rig.plots
-        if outcome == "failed":
-            assert delivered == [Failed("acquire failed")]
-        elif outcome == "raised":
+        if outcome == "raised":
             assert errors == ["core failed"]
         else:
             assert completed(delivered[0]).value.result == 3

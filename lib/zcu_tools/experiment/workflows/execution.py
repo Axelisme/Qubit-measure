@@ -23,7 +23,6 @@ from .encoding import encode_record
 from .env import EnvHooks, WorkflowEnv
 from .journal import (
     DeviceSetup,
-    ExperimentFailed,
     OperationFinished,
     Paused,
     PauseRequested,
@@ -34,7 +33,6 @@ from .journal import (
     RunMetadata,
     StopRequested,
     TunablesChanged,
-    describe_error,
 )
 from .models import (
     Actor,
@@ -90,7 +88,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._pending_error: Exception | None = None
         self._call_seq: int | None = None
         self._commit_seq = 0
-        self._run_no = 0
         self._records: list[CommittedRecord] = []
         self._revisions: list[int] = []
         self._accepted_answers: list[tuple[PendingQuestion, Answer]] = []
@@ -132,7 +129,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 self._commit,
                 self._boundary,
                 self._stopping,
-                self._experiment_failed,
                 self._question_boundary,
                 self._next_attempt,
                 self._operation_finished,
@@ -296,21 +292,6 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
     def _stopping(self) -> bool:
         with self._lock:
             return self._stop_requested
-
-    def _experiment_failed(
-        self, experiment: str, reason: str, cause: BaseException
-    ) -> None:
-        with self._lock:
-            self._run_no += 1
-            self._artifacts.append(
-                ExperimentFailed(
-                    self._call_seq or 0,
-                    self._run_no,
-                    experiment,
-                    reason,
-                    describe_error(cause),
-                )
-            )
 
     def pause(self) -> RunStatus:
         """Record Pause intent, then acknowledge host control outside the lock."""
