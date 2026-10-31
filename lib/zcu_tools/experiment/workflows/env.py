@@ -268,8 +268,8 @@ class WorkflowEnv[C](Scope):
         iteration, number = self._hooks.next_attempt(scope)
         attempt = _Attempt(iteration, number, started, started, name=ctx.scope.name)
         attempts.append(attempt)
-        plots = self.plots.start_operation()
         try:
+            plots = self.plots.start_operation()
             try:
                 context = replace(
                     ctx,

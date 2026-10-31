@@ -1,6 +1,6 @@
 # `gui.app.measure.remote`
 
-**Last updated:** 2026-11-01，Ask waiting 與 GUI run terminal，wire 137／GUI 170
+**Last updated:** 2026-11-01，operation facts 與 RunRecord metadata，wire 137／GUI 170
 
 **讀者：** framework-dev。量測 GUI 的 RPC 方法、控制權與來源投影契約。
 
@@ -65,9 +65,10 @@ router scaffolding. Typed envelopes live in [`gui.remote.wire`](../../../remote/
 
 ## Workflow operation facts
 
-Workflow records project executor operation identity, timing, device snapshot,
-outcome, reason, stopped state and caller-supplied name. Program acquisition
-observations are not part of this projection. This wire-contract change advances
+Workflow records project executor operation identity, timing, outcome, reason,
+stopped state and caller-supplied name. Device snapshots are in
+`RunRecord.metadata["device_snapshot"]`, not on the operation wire.
+Program acquisition observations are not part of this projection. This wire-contract change advances
 `WIRE_VERSION` to 125 and `GUI_VERSION` to 158 under the rule in `wire_version.py`.
 
 ## Saved results

@@ -1,6 +1,6 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-01，workflow operation evidence
+**Last updated:** 2026-11-01，作者 await 的 run_core 例外
 
 **讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
 
@@ -494,6 +494,8 @@ Execution ID 是 session-local，不是持久恢復機制；query 不建立新�
 
 所有 `zcu_lab/` async def 都使用同一規則，包含未被呼叫的 helpers。
 只 await env／tab／session 的方法呼叫，或可靜態解析到 lab async 定義的 helper。
+唯一開放的 lib await helper 是 `zcu_tools.experiment.run_core.run_core`，
+包含可靜態解析到此完整路徑的 import alias。其他 lib helper 仍禁止。
 Workflow 可寫 `await helper(env, cfg)`，helper 可再 await 另一個 lab helper；
 helper 內的 await 同樣受檢查。
 工具拒絕 asyncio.*、create_task、gather、wait_for、TaskGroup，
