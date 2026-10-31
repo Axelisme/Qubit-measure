@@ -304,7 +304,10 @@ class ConstructivePhaseHeraldedExp(
                 + (" · pass fraction, not purity" if outcome == 0 else ""),
             )
 
-        ee_not_returned = 1.0 - joint_probabilities(terminal_counts(result.sums, ("e", "e")))[..., 1, 1]
+        ee_not_returned = (
+            1.0
+            - joint_probabilities(terminal_counts(result.sums, ("e", "e")))[..., 1, 1]
+        )
         fig, ax = plots.subplots("ee_control", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             durations, coordinates, ee_not_returned, shading="nearest", vmin=0, vmax=1
