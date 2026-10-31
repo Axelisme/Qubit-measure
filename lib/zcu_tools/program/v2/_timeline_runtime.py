@@ -21,6 +21,7 @@ from ._timeline_expression import (
     projected_expression_bounds,
     scale_time,
     select_time,
+    unbounded_time,
 )
 from ._timeline_guard import bounds
 from .macro.dmem import DmemLookup, sweep_table_index
@@ -262,7 +263,9 @@ def bounded_source_expression(
         or name in prog.loop_dict
         or (register is not None and register.init is not None)
     ):
-        return source_expression(prog, name)
+        expression = source_expression(prog, name)
+        if not unbounded_time(expression):
+            return expression
     return (
         LinearTime(minimum)
         if minimum == maximum
