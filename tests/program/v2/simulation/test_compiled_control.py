@@ -6,7 +6,7 @@ import pytest
 from qick.asm_v2 import QickRawParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst, TestInst, WaitInst
-from zcu_tools.program.v2.ir.labels import LabelRef
+from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register
 from zcu_tools.program.v2.modules import LoadValue
 
@@ -327,7 +327,7 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         elif defect == "target":
             index = start + 1
             inst = replace(
-                records[index].instruction, label=LabelRef("_timeline_branch_0_end")
+                records[index].instruction, label=LabelRef(Label("_timeline_branch_0_end"))
             )
         else:
             index = start + 1 if defect == "effect" else end - 1

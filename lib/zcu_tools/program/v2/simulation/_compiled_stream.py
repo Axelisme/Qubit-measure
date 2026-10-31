@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..base import MyProgramV2
+from ..ir.instruction_fields import CondCode
 from ..ir.instructions import (
     BaseInst,
     Instruction,
@@ -266,6 +267,58 @@ class _Scopes:
         }
 
 
+def _branch_jump(
+    target: LabelRef, *, big: bool, condition: CondCode | None = None
+) -> list[BaseInst]:
+    address = Register("s15")
+    result: list[BaseInst] = []
+    if big:
+        result.append(RegWriteInst(dst=address, src=SrcKeyword.LABEL, label=target))
+    result.append(JumpInst(addr=address, if_cond=condition) if big else JumpInst(label=target, if_cond=condition))
+    return result
+
+
+def _branch_dispatch_choices(
+    compare: str, targets: list[LabelRef], header: tuple[DecodedInstruction, ...]
+) -> list[list[BaseInst]]:
+    address = Register("s15")
+    table_labels = [
+        r.instruction.name for r in header if isinstance(r.instruction, LabelInst)
+    ]
+    choices: list[list[BaseInst]] = []
+    for big in (False, True):
+        chain: list[BaseInst] = []
+        for index, target in enumerate(targets):
+            transfer = _branch_jump(target, big=big, condition= "Z" if index < len(targets) - 1 else None)
+            if index < len(targets) - 1:
+                test = TestInst(
+                    AluExpr(Register(compare), AluOp.SUB, Immediate(index)),
+                    uf=True,
+                )
+                transfer.insert(1 if big else 0, test)
+            chain.extend(transfer)
+        choices.append(chain)
+        if len(table_labels) == len(targets):
+            table: list[BaseInst] = [
+                RegWriteInst(
+                    dst=address, src=SrcKeyword.LABEL, label=LabelRef(table_labels[0])
+                )
+            ]
+            table.extend(
+                RegWriteInst(
+                    dst=address,
+                    src=SrcKeyword.OP,
+                    op=AluExpr(address, AluOp.ADD, Register(compare)),
+                )
+                for _ in range(2 if big else 1)
+            )
+            table.append(JumpInst(addr=address))
+            for target in targets:
+                table.extend(_branch_jump(target, big=big))
+            choices.append(table)
+    return choices
+
+
 def _validate_branch(
     records: tuple[DecodedInstruction, ...], branch: StructuredBranch
 ) -> None:
@@ -301,25 +354,13 @@ def _validate_branch(
 
     targets = [entry(a + 1) for a, _ in branch.cases]
     end = entry(branch.end + 1)
-    address = Register("s15")
-
-    def jump(
-        target: LabelRef, big: bool, condition: str | None = None
-    ) -> list[BaseInst]:
-        if big:
-            return [
-                RegWriteInst(dst=address, src=SrcKeyword.LABEL, label=target),
-                JumpInst(addr=address, if_cond=condition),
-            ]
-        return [JumpInst(label=target, if_cond=condition)]
-
     def matches(
         actual: list[DecodedInstruction], choices: list[list[BaseInst]]
     ) -> None:
         prefix = 0
         for choice in choices:
             count = 0
-            for record, expected in zip(actual, choice):
+            for record, expected in zip(actual, choice, strict=False):
                 if record.instruction.to_dict() != expected.to_dict():
                     break
                 count += 1
@@ -328,47 +369,13 @@ def _validate_branch(
             prefix = max(prefix, count)
         fail(actual[min(prefix, len(actual) - 1)] if actual else records[branch.start])
 
-    header = records[branch.start + 1 : branch.cases[0][0]]
-    table_labels = [
-        r.instruction.name for r in header if isinstance(r.instruction, LabelInst)
-    ]
-    choices: list[list[BaseInst]] = []
-    for big in (False, True):
-        chain: list[BaseInst] = []
-        for index, target in enumerate(targets):
-            transfer = jump(target, big, "Z" if index < len(targets) - 1 else None)
-            if index < len(targets) - 1:
-                test = TestInst(
-                    AluExpr(Register(branch.compare), AluOp.SUB, Immediate(index)),
-                    uf=True,
-                )
-                transfer.insert(1 if big else 0, test)
-            chain.extend(transfer)
-        choices.append(chain)
-        if len(table_labels) == len(targets):
-            table: list[BaseInst] = [
-                RegWriteInst(
-                    dst=address, src=SrcKeyword.LABEL, label=LabelRef(table_labels[0])
-                )
-            ]
-            table.extend(
-                RegWriteInst(
-                    dst=address,
-                    src=SrcKeyword.OP,
-                    op=AluExpr(address, AluOp.ADD, Register(branch.compare)),
-                )
-                for _ in range(2 if big else 1)
-            )
-            table.append(JumpInst(addr=address))
-            for target in targets:
-                table.extend(jump(target, big))
-            choices.append(table)
+    choices = _branch_dispatch_choices(branch.compare, targets, records[branch.start + 1 : branch.cases[0][0]])
     matches(effects(branch.start + 1, branch.cases[0][0]), choices)
     for index, (_, last) in enumerate(branch.cases):
         stop = (
             branch.cases[index + 1][0] if index + 1 < len(branch.cases) else branch.end
         )
-        exits = [jump(end, False), jump(end, True)]
+        exits = [_branch_jump(end, big=False), _branch_jump(end, big=True)]
         if index == len(branch.cases) - 1:
             exits.append([])
         matches(effects(last + 1, stop), exits)
