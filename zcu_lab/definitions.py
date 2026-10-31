@@ -91,6 +91,9 @@ from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
     GAIN_DEFINITION as SS_T1_TONE_SWEEP_GAIN_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.chevron.gui import DEFINITION as CHEVRON_DEFINITION
+from zcu_lab.v2.two_qubit.chevron.gui_heralded import (
+    DEFINITION as CHEVRON_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.conditional_phase.gui import (
     DEFINITION as CONDITIONAL_PHASE_DEFINITION,
 )
@@ -99,6 +102,9 @@ from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
 )
 from zcu_lab.v2.two_qubit.constructive_phase.gui import (
     DEFINITION as CONSTRUCTIVE_PHASE_DEFINITION,
+)
+from zcu_lab.v2.two_qubit.constructive_phase.gui_heralded import (
+    DEFINITION as CONSTRUCTIVE_PHASE_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.cz_amplitude.gui import DEFINITION as CZAMPLITUDE_DEFINITION
 from zcu_lab.v2.two_qubit.idle_zz.gui import DEFINITION as IDLE_ZZ_DEFINITION
@@ -263,11 +269,13 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/joint_readout_heralded": JOINT_READOUT_HERALDED_DEFINITION,
     "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
     "two_qubit/chevron": CHEVRON_DEFINITION,
+    "two_qubit/chevron_heralded": CHEVRON_HERALDED_DEFINITION,
     "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
     "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
     "two_qubit/local_z": LOCAL_Z_DEFINITION,
     "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
     "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
+    "two_qubit/constructive_phase_heralded": CONSTRUCTIVE_PHASE_HERALDED_DEFINITION,
     "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
     "fastflux/twotone": TWO_TONE_DEFINITION,
     "fastflux/t1": FAST_FLUX_T1_DEFINITION,

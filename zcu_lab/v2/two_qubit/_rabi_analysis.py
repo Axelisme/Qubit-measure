@@ -1,4 +1,4 @@
-"""Joint-return classification, duration fitting and diagnostic plots."""
+"""Joint-return probabilities, duration fitting and count-derived plots."""
 
 from __future__ import annotations
 
@@ -13,36 +13,43 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 
 from ._rabi_scan import DurationScanCfg, RabiScanResult
+from ._sums import herald_probabilities, joint_probabilities, terminal_counts
 
 
 @dataclass(frozen=True)
 class ReturnData:
-    """Complete-point same-shot joint probabilities and diagnostic IQ.
+    """Count-derived terminal probabilities and fit eligibility.
 
-    populations is (coordinate,duration,4), columns 00/01/10/11. mean_iq is
-    (coordinate,duration,N). Incomplete points stay NaN. complete and acquired_shots
-    are (coordinate,duration); all expected rounds are necessary to analyze a
-    point. No radius cut, matrix inversion or independent marginal product.
+    populations is (Nc,Nd,9), flattened F1/F2 g/e/other order, with P00 first.
+    complete marks finite nonempty selected counts, including partial rounds.
+    acquired_shots is their total (Nc,Nd), NaN for unmeasured points.
+    herald_matrix is (Nc,Nd,3,3) or None for ordinary acquisition.
+    Its (g,g) cell is pass fraction, not ground-state purity.
     """
 
     populations: NDArray[np.float64]
-    mean_iq: NDArray[np.complex128]
     complete: NDArray[np.bool_]
-    acquired_shots: NDArray[np.int64]
+    acquired_shots: NDArray[np.float64]
+    herald_matrix: NDArray[np.float64] | None
 
 
 def joint_return(
-    cfg: DurationScanCfg, data: RabiScanResult, coordinates: NDArray[np.float64]
+    cfg: DurationScanCfg,
+    data: RabiScanResult,
+    coordinates: NDArray[np.float64],
+    *,
+    heralded: bool = False,
 ) -> ReturnData:
-    """Validate saved cfg/raw and classify complete duration points, keeping all shots.
+    """Normalize saved 9-class counts, selecting herald (g,g) when enabled.
 
-    Require source axes (within SI conversion roundoff) and whole finite or whole NaN round slots. Invalid
-    acquired IQ or partial missing rounds raise ValueError. Missing GE centers
-    are rejected by cfg validation, never reconstructed from a current library.
+    Saved coordinate/duration axes and sums shape must match cfg. P00 divides
+    the (g,g) count by all nine terminal counts, including other. Zero totals
+    yield NaN without warnings and cannot be fitted. Completed partial rounds
+    contribute their actual counts; missing points remain NaN.
     """
     durations = sweep2array(cfg.duration)
     nc, nd = len(coordinates), len(durations)
-    nt, ns = len(cfg.readout.tones), cfg.rounds * cfg.reps
+    class_shape = (3, 3, 3, 3) if heralded else (3, 3)
     if (
         data.coordinates.shape != coordinates.shape
         or not np.allclose(
@@ -52,39 +59,17 @@ def joint_return(
         or not np.allclose(
             data.durations, durations, rtol=8 * np.finfo(float).eps, atol=0
         )
-        or not np.array_equal(data.shot_indices, np.arange(ns))
-        or not np.array_equal(data.tone_indices, np.arange(nt))
-        or data.signals.shape != (nc, nd, ns, nt)
+        or data.sums.shape != (nc, nd, *class_shape)
     ):
-        raise ValueError("Rabi raw axes/shape must match saved cfg and full tones")
-    rounds = data.signals.reshape(nc, nd, cfg.rounds, cfg.reps, nt)
-    acquired = np.all(np.isfinite(rounds), axis=(-2, -1))
-    missing = np.all(
-        np.isnan(rounds) & ~np.isinf(rounds.real) & ~np.isinf(rounds.imag),
-        axis=(-2, -1),
-    )
-    if not np.all(acquired | missing):
-        raise ValueError(
-            "Rabi raw contains nonfinite acquired IQ or a partially missing round"
-        )
-    complete = np.all(acquired, axis=-1)
-    populations = np.full((nc, nd, 4), np.nan)
-    mean_iq = np.full((nc, nd, nt), complex(np.nan, np.nan), dtype=np.complex128)
-    for c, d in np.argwhere(complete):
-        shots = data.signals[c, d]
-        outcomes = np.zeros(ns, dtype=np.int64)
-        for tone, centers, weight in (
-            (cfg.roles.f1_tone, cfg.f1_centers, 2),
-            (cfg.roles.f2_tone, cfg.f2_centers, 1),
-        ):
-            values = shots[:, tone]
-            outcomes += weight * (
-                np.abs(values - centers.e) < np.abs(values - centers.g)
-            )
-        populations[c, d] = np.bincount(outcomes, minlength=4) / ns
-        mean_iq[c, d] = shots.mean(axis=0)
+        raise ValueError("Rabi count axes/shape must match saved cfg and class axes")
+    counts = terminal_counts(data.sums, heralded=heralded)
+    totals = counts.sum(axis=(-2, -1))
+    complete = np.all(np.isfinite(counts), axis=(-2, -1)) & (totals > 0)
     return ReturnData(
-        populations, mean_iq, complete, acquired.sum(axis=-1, dtype=np.int64) * cfg.reps
+        joint_probabilities(counts).reshape(nc, nd, 9),
+        complete,
+        totals,
+        herald_probabilities(data.sums) if heralded else None,
     )
 
 
@@ -96,57 +81,49 @@ def plot_return_data(
     map_name: str,
     plots: Plots,
 ) -> None:
-    """Draw joint return map, all outcome curves and complete-point full-tone I/Q.
+    """Draw P00 map, nine terminal return curves and optional herald fractions.
 
-    map_name is the caller's figure name (interference or chevron), not a model
-    selector. No calibration, gate selection or fit is performed here.
+    All curves derive from saved counts. Heralded terminal plots use only
+    herald (g,g); the separate herald maps retain all nine acceptance classes.
+    map_name names the caller's map, not a model or gate-selection policy.
     """
     fig, ax = plots.subplots(map_name, figsize=(9, 6), layout="constrained")
     image = ax.pcolormesh(
-        data.durations,
-        data.coordinates,
-        answer.populations[..., 0],
-        shading="nearest",
-        vmin=0,
-        vmax=1,
+        data.durations, data.coordinates, answer.populations[..., 0],
+        shading="nearest", vmin=0, vmax=1,
     )
     fig.colorbar(image, ax=ax, label="Observed joint P00 after double Xπ")
     ax.set(
-        xlabel="Drive duration (us)",
-        ylabel=coordinate_label,
-        title="Thermal nominal B11 return proxy · not gate fidelity",
+        xlabel="Drive duration (us)", ylabel=coordinate_label,
+        title="Nominal B11 return proxy · not gate fidelity",
     )
+    labels = tuple(f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other"))
     fig, _ = plots.subplots(
-        "return", nrows=2, ncols=2, figsize=(11, 7), squeeze=False, layout="constrained"
+        "return", nrows=3, ncols=3, figsize=(13, 10), squeeze=False, layout="constrained"
     )
     for outcome, ax in enumerate(fig.axes):
-        for coordinate, values in zip(
-            data.coordinates, answer.populations, strict=True
-        ):
+        for coordinate, values in zip(data.coordinates, answer.populations, strict=True):
             ax.plot(data.durations, values[:, outcome], ".-", label=f"{coordinate:g}")
         ax.set(
-            xlabel="Drive duration (us)",
-            ylabel=f"Observed P{outcome:02b}",
-            title=f"Joint {outcome:02b} · all classified shots",
+            xlabel="Drive duration (us)", ylabel=f"Observed P{labels[outcome]}",
+            title=f"Terminal {labels[outcome]} · other retained in denominator",
         )
         if len(data.coordinates) <= 25:
             ax.legend(title=coordinate_label, fontsize="x-small", ncols=2)
-    for tone in data.tone_indices:
+    if answer.herald_matrix is not None:
         fig, _ = plots.subplots(
-            f"iq_tone_{tone}", nrows=2, figsize=(10, 7), layout="constrained"
+            "herald", nrows=3, ncols=3, figsize=(13, 10), squeeze=False, layout="constrained"
         )
-        for ax, values, label in (
-            (fig.axes[0], answer.mean_iq.real, "I"),
-            (fig.axes[1], answer.mean_iq.imag, "Q"),
-        ):
+        for outcome, ax in enumerate(fig.axes):
             image = ax.pcolormesh(
-                data.durations, data.coordinates, values[..., tone], shading="nearest"
+                data.durations, data.coordinates,
+                answer.herald_matrix[..., outcome // 3, outcome % 3],
+                shading="nearest", vmin=0, vmax=1,
             )
-            fig.colorbar(image, ax=ax, label=f"Mean {label} (ADC units/sample)")
+            fig.colorbar(image, ax=ax, label="Herald probability")
             ax.set(
-                xlabel="Drive duration (us)",
-                ylabel=coordinate_label,
-                title=f"Original tone {tone} · {label}",
+                xlabel="Drive duration (us)", ylabel=coordinate_label,
+                title=f"Herald {labels[outcome]}" + (" · pass fraction, not purity" if outcome == 0 else ""),
             )
 
 

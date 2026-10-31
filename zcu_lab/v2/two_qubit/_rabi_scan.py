@@ -1,4 +1,4 @@
-"""Shared configuration and raw results for two-line duration scans."""
+"""Shared inputs, summed-count acquisition and results for two-line duration scans."""
 
 from __future__ import annotations
 
@@ -8,14 +8,20 @@ from typing import Annotated, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import model_validator
+from qick import QickConfig
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
-from zcu_tools.program.v2 import PulseCfg, SweepCfg
-from zcu_tools.program.v2.modules import MuxReadoutCfg
+from zcu_tools.program.v2 import Pulse, PulseCfg, SweepCfg, TimelineBuilder, TimelineProgramV2, shot_sums
+from zcu_tools.program.v2.modules import MuxReadoutCfg, Reset
 
-from ._drive import DualLineCfg
+from zcu_lab.v2.support import live_line
+
+from ._drive import DualLineCfg, dual_line_drive
 from ._readout import JointRoles
-from .joint_readout.core import GECenters, tone_centers
+from ._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from ._timeline import emit_readout_prefix
 
 
 class DurationScanCfg(ConfigBase):
@@ -25,10 +31,15 @@ class DurationScanCfg(ConfigBase):
     drive carries the source pair: common MHz frequency, signed gains, phases
     in degrees, explicit waveforms and timing. Only scalar length-settable
     envelopes are supported; arbitrary assets are not resized. roles are saved
-    capture values. GE centers derive from the saved role-tone circles; missing
-    or linear calibration fails validation. No radius is needed. Every shot is kept.
+    capture values. F1/F2 require circle classifiers with radius from GE Post.
+    reset=None emits no reset; otherwise reset precedes preparation and herald.
+    Acquisition accumulates rounds without storing individual shots.
     """
 
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset before each shot's reads and preparation."),
+    ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -91,27 +102,10 @@ class DurationScanCfg(ConfigBase):
         ),
     ]
 
-    @property
-    def f1_centers(self) -> GECenters:
-        """Derive F1's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f1_tone)
-
-    @property
-    def f2_centers(self) -> GECenters:
-        """Derive F2's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f2_tone)
-
     @model_validator(mode="after")
     def validate_duration_scan(self) -> Self:
         """Reject invalid tones, routes, durations and unscalable waveforms."""
-        self.roles.validate_readout(self.readout)
-        _ = self.f1_centers, self.f2_centers
+        validate_classifiers(self.readout, self.roles)
         if self.drive.f1.ch != self.x180_f1.ch or self.drive.f2.ch != self.x180_f2.ch:
             raise ValueError("Each drive must use its role's calibrated Xπ generator")
         durations = sweep2array(self.duration)
@@ -125,16 +119,97 @@ class DurationScanCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class RabiScanResult:
-    """Raw (coordinate,duration,rounds*reps,N) complex IQ in original tone order.
+    """Coordinates, requested durations in us and unchanged float64 class counts.
 
-    coordinates are relative phase degrees or common MHz frequency, according
-    to the leaf's native AxesSpec. durations are requested us. shot_indices are
-    round-major, tone_indices are original full mux indices. Unwritten whole
-    rounds remain complex NaN; acquired nonfinite IQ is an error, not a sentinel.
+    coordinates are relative phase degrees or common MHz frequency, as named by
+    the leaf AXES_SPEC. sums is (Nc,Nd,3,3), or (Nc,Nd,3,3,3,3) with herald.
+    Class order is g/e/other. Axis order is terminal F1/F2, preceded by herald
+    F1/F2 when present. Unmeasured points remain NaN; completed rounds survive
+    cancellation. There is no shot axis or IQ. Check the RunContext stop signal
+    for execution errors before accepting partial results.
     """
 
     coordinates: NDArray[np.float64]
     durations: NDArray[np.float64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]
+
+
+def build_program(
+    cfg: DurationScanCfg,
+    soccfg: QickConfig,
+    drive: DualLineCfg,
+    duration: float,
+    *,
+    heralded: bool,
+) -> TimelineProgramV2:
+    """Compile optional reset → optional herald → B11 → drive → double Xπ → terminal.
+
+    drive is the coordinate-specific pair, duration is its positive common
+    envelope length in us. Inputs remain unchanged. The same mux object emits
+    herald and terminal. Every build creates fresh modules; invalid classifier,
+    envelope or resource configuration fails before acquisition.
+    """
+    validate_classifiers(cfg.readout, cfg.roles)
+    point_drive = drive.model_copy(deep=True)
+    for pulse in (point_drive.f1, point_drive.f2):
+        pulse.set_param("length", duration)
+    builder = TimelineBuilder(
+        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
+    )
+    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    builder.emit(Pulse("prepare_f1", cfg.x180_f1))
+    builder.emit(Pulse("prepare_f2", cfg.x180_f2))
+    builder.emit(dual_line_drive(point_drive, frequency=float(point_drive.f1.freq)))
+    builder.emit(Pulse("contrast_f1", cfg.x180_f1))
+    builder.emit(Pulse("contrast_f2", cfg.x180_f2))
+    builder.emit(readout, tag="terminal")
+    return builder.build()
+
+
+def acquire_counts(
+    config: DurationScanCfg,
+    coordinates: NDArray[np.float64],
+    drives: list[DualLineCfg],
+    *,
+    context: RunContext,
+    heralded: bool,
+) -> RabiScanResult:
+    """Scan coordinate-specific drives and durations, keeping 9/81-class sums.
+
+    coordinates has one value per drive. Schedule owns cfg copies and stop
+    handling; run_acquire_summed accumulates rounds on the acquisition side.
+    Live traces show P00 per coordinate, conditioned on herald (g,g) if enabled.
+    Counts include other in the denominator. No host round or shot axis is made.
+    """
+    validate_classifiers(config.readout, config.roles)
+    if len(drives) != len(coordinates) or not np.all(np.isfinite(coordinates)):
+        raise ValueError("Each finite coordinate requires one explicit drive pair")
+    durations = sweep2array(config.duration)
+    viewer = live_line(
+        context.plots, "measurement", "Drive duration (us)",
+        "Terminal P00 | herald (g,g)" if heralded else "Terminal P00",
+        num_lines=len(coordinates),
+    )
+
+    def update_view(sums: NDArray[np.float64]) -> None:
+        counts = terminal_counts(sums, heralded=heralded)
+        viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+
+    class_shape = (3, 3, 3, 3) if heralded else (3, 3)
+    buffer = SignalBuffer(
+        (len(coordinates), len(durations), *class_shape),
+        dtype=np.float64, on_update=update_view,
+    )
+    with Schedule(config, buffer, scope=context.scope) as sched:
+        for index, step in sched.scan("coordinate", list(range(len(drives)))):
+            for duration, duration_step in step.scan("duration", durations.tolist()):
+                cfg = duration_step.cfg
+                prog = build_program(cfg, context.soccfg, drives[index], duration, heralded=heralded)
+                duration_step.run_acquire_summed(
+                    prog, context.soc,
+                    processor=shot_sums(prog, readout_axes(cfg.roles, heralded=heralded)),
+                    rounds=cfg.rounds, options=RunOptions(),
+                )
+    buffer.trigger_update(flush=True)
+    return RabiScanResult(coordinates, durations, buffer.array)

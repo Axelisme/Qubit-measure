@@ -19,12 +19,11 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import module_writeback
 
-from .._rabi_scan import RabiScanResult
 from .analysis import ConstructivePhaseAnalysis
-from .core import ConstructivePhaseCfg, ConstructivePhaseExp
+from .core import ConstructivePhaseCfg, ConstructivePhaseExp, ConstructivePhaseResult
 from .form import make_form
 
-ConstructivePhaseRun: TypeAlias = RunRecord[ConstructivePhaseCfg, RabiScanResult]
+ConstructivePhaseRun: TypeAlias = RunRecord[ConstructivePhaseCfg, ConstructivePhaseResult]
 
 
 def _analyze(
@@ -32,7 +31,7 @@ def _analyze(
     *,
     plots: Plots,
 ) -> ConstructivePhaseAnalysis:
-    """Analyze only saved source cfg/raw, never the current Form or library."""
+    """Analyze saved source cfg/counts, never the current Form or library."""
     return ConstructivePhaseExp().analyze(req.run_result, None, plots=plots)
 
 
@@ -73,7 +72,7 @@ def _get_writeback_items(
 
 def run(
     cfg: ConstructivePhaseCfg, *, context: RunContext
-) -> RunRecord[ConstructivePhaseCfg, RabiScanResult]:
+) -> RunRecord[ConstructivePhaseCfg, ConstructivePhaseResult]:
     """Run the experiment and retain its actual configuration."""
     return RunRecord(cfg=cfg, result=ConstructivePhaseExp().run(cfg, context=context))
 
