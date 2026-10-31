@@ -41,7 +41,7 @@ from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
-T_Cfg = TypeVar("T_Cfg", default=None)
+T_Cfg = TypeVar("T_Cfg")
 T_ChildCfg = TypeVar("T_ChildCfg")
 T_Env = TypeVar("T_Env", default=dict[str, Any])
 
