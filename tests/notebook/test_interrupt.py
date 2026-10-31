@@ -176,8 +176,8 @@ def test_timeout_fallback_delivers_keyboard_interrupt(
 
 
 @pytest.mark.skipif(not hasattr(signal, "pthread_kill"), reason="POSIX signal contract")
-def test_real_deadline_targets_main_thread_during_blocking_wait(
-    monkeypatch: pytest.MonkeyPatch,
+def test_controlled_deadline_targets_main_thread_during_blocking_wait(
+    monkeypatch: pytest.MonkeyPatch, timers: list[ManualTimer],
 ) -> None:
     send = signal.pthread_kill
     main_thread = threading.get_ident()
@@ -189,14 +189,56 @@ def test_real_deadline_targets_main_thread_during_blocking_wait(
 
     monkeypatch.setattr(signal, "pthread_kill", deliver)
 
-    def author(context: RunContext) -> None:
-        signal.raise_signal(signal.SIGINT)
-        # The armed deadline must interrupt this C wait; 30s only guards a broken timer.
-        threading.Event().wait(30)
+    condition = threading.Condition()
+    armed = threading.Event()
+    abort = threading.Event()
+    entered_wait: list[bool] = []
+    errors: list[BaseException] = []
+    previous_handler = signal.getsignal(signal.SIGINT)
 
-    adapter = notebook(InterruptCore(author), interrupt_timeout=0.01)
-    with pytest.raises(KeyboardInterrupt):
-        adapter.run(Cfg())
+    def expire_when_waiting() -> None:
+        try:
+            # The submitted author arms the timer while holding condition.
+            assert armed.wait(30)
+            with condition:
+                if abort.is_set():
+                    return
+                # Acquiring this lock proves Condition.wait released it inside
+                # its blocking protocol, not merely that the author will call wait.
+                # No notifier releases the wait before the deadline is delivered.
+                entered_wait.append(True)
+                timers[-1].expire()
+        except BaseException as error:
+            errors.append(error)
+            with condition:
+                condition.notify_all()
+
+    def author(context: RunContext) -> None:
+        with condition:
+            signal.raise_signal(signal.SIGINT)
+            armed.set()
+            # Only the controlled deadline can end this wait; 30s guards deadlock.
+            condition.wait(30)
+        pytest.fail("The deadline must interrupt the blocking wait")
+
+    worker = threading.Thread(target=expire_when_waiting)
+    adapter = notebook(InterruptCore(author))
+    worker.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            adapter.run(Cfg())
+    finally:
+        abort.set()
+        armed.set()
+        with condition:
+            condition.notify_all()
+        worker.join(30)
+        assert not worker.is_alive(), "Deadline delivery must finish before teardown"
+        if errors:
+            raise errors[0]
+    assert entered_wait == [True]
+    assert timers[-1].cancelled
+    assert signal.getsignal(signal.SIGINT) is previous_handler
     assert adapter.last_run is None
     assert len(delivered) == 1
     sender, target, signum = delivered[0]

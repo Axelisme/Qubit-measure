@@ -69,6 +69,9 @@ def stop_window(
     try:
         yield window, fails
     finally:
+        # close drains; it does not cancel. Release the core's stop wait even
+        # when a driver action or screenshot failed before the Stop click.
+        ctrl.run_analyze_control.cancel_run()
         ctrl.close()
         window.deleteLater()
         qapp.processEvents()
