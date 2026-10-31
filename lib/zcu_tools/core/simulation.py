@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from fractions import Fraction
 from math import gcd, lcm, prod
-from typing import Literal, Protocol
+from typing import Literal, Protocol, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +61,25 @@ class TimeBase:
         if period.denominator != 1:
             raise ValueError("clock period is not on the time-base grid")
         return period.numerator
+
+    @overload
+    def ns(self, ticks: int | np.int64) -> float: ...
+
+    @overload
+    def ns(self, ticks: NDArray[np.int64]) -> NDArray[np.float64]: ...
+
+    def ns(
+        self, ticks: int | np.int64 | NDArray[np.int64]
+    ) -> float | NDArray[np.float64]:
+        """Convert integer ticks to correctly rounded float64 nanoseconds.
+
+        Scalars return float; int64 arrays return float64 arrays with identical
+        shape. All arithmetic before the final division is integer arithmetic.
+        """
+        scale = 1000 * self.ticks_per_us.denominator
+        if isinstance(ticks, np.ndarray):
+            return np.divide(ticks * scale, self.ticks_per_us.numerator)
+        return (int(ticks) * scale) / self.ticks_per_us.numerator
 
 
 class CancellationQuery(Protocol):
