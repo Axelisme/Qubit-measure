@@ -272,6 +272,18 @@ def test_scalar_static_cross_grid_ceil_keeps_small_positive_post():
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [29] * 2
 
 
+def test_scalar_adc_aggregate_ceil_keeps_small_positive_post():
+    readout = PulseReadout("precise_adc", PulseReadoutCfg(
+        gen_ch=0, nqz=1, freq=1000, gain=0.5,
+        waveform=ConstWaveformCfg(length=3 / 384), pre_delay=0,
+        post_delay=5e-11 / 430.08, ro_ch=0, ro_length=10 / 307.2,
+        trig_offset=0,
+    ))
+    prog = _program([readout], lambda p: p.emit(readout))
+    # Ten ADC samples are exactly14 tProc ticks, followed by a positive post.
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [15] * 2
+
+
 def test_runtime_cross_grid_length_sweep_fails_without_implicit_time_table():
     pulse = Pulse("cross_grid", _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0))
     with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
