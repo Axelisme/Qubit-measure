@@ -21,16 +21,6 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
     pulse = replace(pulse, set={**pulse.set, "gain": Hidden(0.0)})
     return Form(
         AmpRabiCfg,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "qub_pulse",
-            "readout",
-            "gain",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": pulse,

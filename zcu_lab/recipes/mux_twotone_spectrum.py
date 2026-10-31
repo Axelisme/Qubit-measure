@@ -123,7 +123,7 @@ async def mux_twotone_spectrum(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"tones.{index}.sweep",
+                f"tones.{index}.freq",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
     tab.set("expts", inputs.n)

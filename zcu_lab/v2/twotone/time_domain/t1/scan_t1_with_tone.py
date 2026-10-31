@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support import live_heatmap_with_line
@@ -41,6 +41,12 @@ class ScanT1WithToneResult:
 
 
 class ScanT1WithToneCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    pi_pulse: Pulse.Cfg
+    test_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: Annotated[GainSweep | list[Gain], FieldMeta(label="Gain", unit="a.u.")]
+    length: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -57,12 +63,6 @@ class ScanT1WithToneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    pi_pulse: Pulse.Cfg
-    test_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[GainSweep | list[Gain], FieldMeta(label="Gain", unit="a.u.")]
-    length: SweepCfg
 
 
 @dataclass(frozen=True)
@@ -76,10 +76,10 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
     # inner = times (result_shape, s on disk -> US_TO_S); outer = values (gain, a.u.)
     AXES_SPEC: ClassVar[AxesSpec[ScanT1WithToneResult, ScanT1WithToneCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("times", "Time", "s", 1e-6),
-            AxesSpec.Axis("values", "Readout Gain", "a.u."),
+            AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),
+            AxesSpec.Axis("values", label="Readout Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=ScanT1WithToneResult,
         cfg_type=ScanT1WithToneCfg,
         cfg_schema_version="3.0",
@@ -123,31 +123,29 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         )
 
         # 2. Scan gains on the host; sweep tone duration inside each program.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
-                cfg = step.cfg
-
-                cfg.test_pulse.set_param("gain", step.value)
-                length_sweep = cfg.length
-                length_param = sweep2param("length", length_sweep)
-                cfg.test_pulse.set_param("length", length_param)
-
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", cfg.reset),
-                        Pulse("pi_pulse", cfg.pi_pulse),
-                        Pulse("test_pulse", cfg.test_pulse),
-                        Readout("readout", cfg.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
+
+                length_sweep = cfg.length
+                length_param = builder.add_sweep("length", length_sweep)
+
+                if cfg.reset is not None:
+                    builder.emit(cfg.reset.build("reset"))
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.emit(
+                    Pulse(
+                        "test_pulse",
+                        cfg.test_pulse,
+                        length=length_param,
+                        gain=step.value,
+                    )
+                )
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(prog, soc, rounds=cfg.rounds)
 
         # 3. Preserve gain-major IQ averages and unfinished NaN slots.
         return ScanT1WithToneResult(
@@ -181,7 +179,9 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             if np.any(np.isnan(real_signal)):
                 continue
 
-            t1, t1err, *_ = fit_decay(ts, real_signal)
+            fit = fit_decay(ts, real_signal)
+            t1 = fit.decay_time
+            t1err = fit.decay_time_err
 
             if t1err > 0.3 * t1:
                 continue

@@ -16,19 +16,6 @@ def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
     return Form(
         FreqFluxCfg,
         initial_values=qubit_flux_initial_values,
-        field_order=(
-            "reset",
-            "init_pulse",
-            "qub_pulse",
-            "readout",
-            "flux_dev",
-            "flux_unit",
-            "flux",
-            "freq",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Hidden(),

@@ -16,6 +16,29 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 class CPMGInput(ConfigBase):
     """Captured pulses, pi-pulse counts and a shared total-time window in us."""
 
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Pulse.Cfg
+    pi_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    count: Annotated[
+        list[Annotated[int, Field(strict=True, ge=1)]],
+        Field(min_length=1),
+        FieldMeta(label="Pi pulse counts"),
+    ]
+    detune_ratio: Annotated[
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+    ] = 0.0
+    min_length_us: Annotated[
+        float,
+        Field(gt=0, allow_inf_nan=False),
+        FieldMeta(label="Minimum time", unit="us"),
+    ] = 1.0
+    max_length_us: Annotated[
+        float,
+        Field(gt=0, allow_inf_nan=False),
+        FieldMeta(label="Maximum time", unit="us"),
+    ] = 100.0
+    length_points: Annotated[int, Field(ge=2), FieldMeta(label="Time points")] = 101
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -32,30 +55,7 @@ class CPMGInput(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    pi2_pulse: Pulse.Cfg
-    pi_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    times: Annotated[
-        list[Annotated[int, Field(strict=True, ge=1)]],
-        Field(min_length=1),
-        FieldMeta(label="Pi pulse counts"),
-    ]
-    detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
-    ] = 0.0
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
-    min_length_us: Annotated[
-        float,
-        Field(gt=0, allow_inf_nan=False),
-        FieldMeta(label="Minimum time", unit="us"),
-    ] = 1.0
-    max_length_us: Annotated[
-        float,
-        Field(gt=0, allow_inf_nan=False),
-        FieldMeta(label="Maximum time", unit="us"),
-    ] = 100.0
-    length_points: Annotated[int, Field(ge=2), FieldMeta(label="Time points")] = 101
 
     @model_validator(mode="after")
     def validate_window(self) -> "CPMGInput":
@@ -69,18 +69,6 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
     """Build CPMG counts, shared time window and fixed-capture module defaults."""
     return Form(
         CPMGInput,
-        field_order=(
-            "reset",
-            "pi2_pulse",
-            "pi_pulse",
-            "readout",
-            "times",
-            "detune_ratio",
-            "earlystop_snr",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "pi_pulse": Slot("$qubit.module.x180")
@@ -92,7 +80,7 @@ def make_form(ctx: FormContext) -> Form[CPMGInput]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "times": LogPoints(max=16, points=5, include_zero=False),
+            "count": LogPoints(max=16, points=5, include_zero=False),
             "detune_ratio": 0.1,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

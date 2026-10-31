@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -19,8 +20,8 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     TwoPulseReset,
-    sweep2param,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -40,6 +41,12 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
 
 
 class LengthCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -56,18 +63,13 @@ class LengthCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     # Length stores seconds on disk; Result holds us -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("lengths", "Length", "s", 1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="3.0",
@@ -113,38 +115,35 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
 
         # Retain complex IQ while displaying its common-axis projection.
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Amplitude")
-        signals_buffer = SignalBuffer(
-            (len(lengths),),
-            on_update=lambda data: viewer.update(
-                lengths, reset_length_signal2real(data)
-            ),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Amplitude")
+        viewer = live_line(ax, num_lines=1)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(lengths, reset_length_signal2real(data))
+
+        fig.show()
+        signals_buffer = SignalBuffer((len(lengths),), on_update=update)
 
         # Sweep both durations together before reading out the reset response.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            tested_reset_cfg = sched.cfg.tested_reset
-            pulse1_cfg = tested_reset_cfg.pulse1_cfg
-            pulse2_cfg = tested_reset_cfg.pulse2_cfg
-
-            length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
-            length1_param = sweep2param("length", sched.cfg.length)
-            pulse1_cfg.set_param("length", length1_param)
-            pulse2_cfg.set_param("length", length1_param + length_diff)
-
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    TwoPulseReset("tested_reset", tested_reset_cfg),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("length", sched.cfg.length)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            length = builder.add_sweep("length", cfg.length)
+            tested_reset_cfg = deepcopy(cfg.tested_reset)
+            tested_reset_cfg.pulse1_cfg.set_param("length", length)
+            tested_reset_cfg.pulse2_cfg.set_param("length", length + length_diff)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.delay_by_timeline()
+            builder.emit(TwoPulseReset("tested_reset", tested_reset_cfg))
+            builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return LengthResult(lengths, signals_buffer.array)
 

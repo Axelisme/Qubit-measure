@@ -55,14 +55,4 @@ def make_form(ctx: FormContext) -> Form[MuxOnetoneCfg]:
             "initial_delay": Hidden(),
         },
         fixed_elements=(READOUT_ELEMENTS,),
-        field_order=(
-            "participants",
-            "reset",
-            "readout",
-            "df",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

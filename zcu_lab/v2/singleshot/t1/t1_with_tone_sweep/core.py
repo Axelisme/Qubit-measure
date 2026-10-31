@@ -22,7 +22,6 @@ from zcu_tools.experiment.v2.utils.t1_sampling import (
 )
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Classify,
     GainSweep,
     Pulse,
@@ -30,6 +29,7 @@ from zcu_tools.program.v2 import (
     Reset,
     SweepCfg,
     TableLengthPulse,
+    TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
@@ -142,6 +142,24 @@ class T1WithToneSweepResult:
 
 
 class T1WithToneSweepCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
+    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
+    delay: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Probe length",
+            unit="us",
+            description=(
+                "Enter the probe length range (us); "
+                "every point must be finite and strictly positive."
+            ),
+        ),
+    ]
+    sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -158,24 +176,6 @@ class T1WithToneSweepCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[
-        SweepCfg | list[float],
-        FieldMeta(
-            label="Probe length",
-            unit="us",
-            description=(
-                "Enter the probe length range (us); "
-                "every point must be finite and strictly positive."
-            ),
-        ),
-    ]
-    gain: Annotated[GainSweep | None, FieldMeta(label="Gain", unit="a.u.")] = None
-    freq: Annotated[SweepCfg | None, FieldMeta(label="Frequency", unit="MHz")] = None
 
 
 @dataclass(frozen=True)
@@ -192,16 +192,22 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneSweepResult, T1WithToneSweepCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
-            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
-            AxesSpec.Axis("xs", "Sweep Value", "a.u.", dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
+            ),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis("xs", label="Sweep Value", unit="a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
         data_variable=DataVariable("counts"),
         result_type=T1WithToneSweepResult,
         cfg_type=T1WithToneSweepCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/t1/t1_with_tone_sweep",
     )
 
@@ -225,49 +231,32 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         return sweep_name, xs
 
     def _make_viewers(self, plots: Plots, sweep_name: str):
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
+        figure, _ = plots.subplots(
+            nrows=4, ncols=2, num="measurement", figsize=(12, 10)
+        )
+        # Row-major grid: columns are initial g/e; rows are g/e/other and current.
+        cells = figure.axes
+        heatmaps = []
+        for column in (0, 1):
+            for row in (0, 1, 2):
+                ax = cells[2 * row + column]
+                ax.set(xlabel=sweep_name, ylabel="Time (us)" if column == 0 else "")
+                heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
+        lines = []
+        for column, ax in enumerate(cells[6:]):
+            ax.set(
+                xlabel="Time (us)",
+                ylabel="Population" if column == 0 else "",
+                ylim=(0.0, 1.0),
+            )
+            lines.append(live_line(ax, num_lines=3))
             for line, label in zip(
                 ax.lines, ("Ground", "Excited", "Other"), strict=True
             ):
                 line.set_label(label)
             ax.legend()
-
-        figure, _ = plots.subplots("measurement", nrows=4, ncols=2, figsize=(12, 10))
-        # Row-major 4x2 grid: columns are initial g/e, rows are states g/e/o then current.
-        cells = figure.axes
-        heatmaps = tuple(
-            live_heatmap(
-                plots,
-                "measurement",
-                sweep_name,
-                "Time (us)" if column == 0 else "",
-                uniform=False,
-                clim=(0.0, 1.0),
-                axes=cells[2 * row + column],
-            )
-            for column in (0, 1)
-            for row in (0, 1, 2)
-        )
-        current_g = live_line(
-            plots,
-            "measurement",
-            "Time (us)",
-            "Population",
-            num_lines=3,
-            configure_axes=configure_axes,
-            axes=cells[6],
-        )
-        current_e = live_line(
-            plots,
-            "measurement",
-            "Time (us)",
-            "",
-            num_lines=3,
-            configure_axes=configure_axes,
-            axes=cells[7],
-        )
-        return (*heatmaps, current_g, current_e)
+        figure.show()
+        return (*heatmaps, *lines)
 
     def run(
         self, cfg: T1WithToneSweepCfg, *, context: RunContext
@@ -279,13 +268,12 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         g/e/other counts summed over rounds with axes (outer value, initial g/e, length, state).
         Lengths are in us; missing acquisitions remain NaN.
 
-        Uniform sampling requires a SweepCfg. Non-uniform sampling accepts
-        a SweepCfg or explicit lengths; invalid or non-positive lengths fail
+        cfg.delay supplies a SweepCfg time window for linear or decay sampling.
+        Invalid or non-positive lengths fail
         before acquisition. Classification uses the first readout tone's circle classifier.
         """
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
-        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
             cfg.readout.ro_ch
             if isinstance(cfg.readout, PulseReadoutCfg)
@@ -293,24 +281,22 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=None if pulse_readout else 0, classifier=classifier
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
+            classifier=classifier,
         )
         soc, soccfg = context.soc, context.soccfg
-        if cfg.uniform:
-            length_sweep = cfg.length
-            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+        if cfg.sampling == "linear":
             lengths = sweep2array(
-                length_sweep,
-                "time",
-                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
+                cfg.delay, "time", {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch}
             )
         else:
-            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
             lengths = materialize_nonuniform_t1_pulse_lengths(
-                cfg.length,
-                soccfg=soccfg,
-                gen_ch=cfg.probe_pulse.ch,
+                cfg.delay, soccfg=soccfg, gen_ch=cfg.probe_pulse.ch
             )
         _require_positive_lengths(lengths)
 
@@ -320,18 +306,20 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         current_index = 0
 
-        def plot_fn(counts: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def plot_fn(counts: NDArray[np.float64]):
             populations = counts / counts.sum(axis=-1, keepdims=True)
             i = current_index
-
-            gg_2d.update(xs, lengths, populations[:, 0, :, 0])
-            ge_2d.update(xs, lengths, populations[:, 0, :, 1])
-            go_2d.update(xs, lengths, populations[:, 0, :, 2])
-            g_1d.update(lengths, populations[i, 0].T)
-            eg_2d.update(xs, lengths, populations[:, 1, :, 0])
-            ee_2d.update(xs, lengths, populations[:, 1, :, 1])
-            eo_2d.update(xs, lengths, populations[:, 1, :, 2])
-            e_1d.update(lengths, populations[i, 1].T)
+            return (
+                *gg_2d.set(xs, lengths, populations[:, 0, :, 0]),
+                *ge_2d.set(xs, lengths, populations[:, 0, :, 1]),
+                *go_2d.set(xs, lengths, populations[:, 0, :, 2]),
+                *g_1d.set(lengths, populations[i, 0].T),
+                *eg_2d.set(xs, lengths, populations[:, 1, :, 0]),
+                *ee_2d.set(xs, lengths, populations[:, 1, :, 1]),
+                *eo_2d.set(xs, lengths, populations[:, 1, :, 2]),
+                *e_1d.set(lengths, populations[i, 1].T),
+            )
 
         buffer = SignalBuffer(
             (len(xs), 2, len(lengths), 3),
@@ -340,45 +328,43 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
 
         # 3. Scan gain/frequency on the host; GE and length loops run on-board.
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):
-                if cfg.uniform:
-                    inner_length_sweep = step.cfg.length
-                    assert isinstance(inner_length_sweep, SweepCfg), (
-                        "uniform mode requires SweepCfg"
-                    )
-                step.cfg.probe_pulse.set_param(sweep_name, value)
+                probe_cfg = cfg.probe_pulse.model_copy(deep=True)
+                probe_cfg.set_param(sweep_name, value)
                 current_index = value_idx
 
                 # Read out at each actual probe end, without longest-point padding.
-                builder = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
-                        TableLengthPulse(
-                            "probe_pulse",
-                            step.cfg.probe_pulse,
-                            lengths=lengths,
-                            idx_reg="length",
-                        ),
-                        Readout("readout", step.cfg.readout),
-                    )
-                    .declare_sweep("ge", 2)
-                    .declare_sweep("length", len(lengths))
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
+                builder.add_loop("ge", 2)
+                builder.add_loop("delay", len(lengths))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.delay_by_timeline()
+                with (
+                    builder.branch(by="ge", align_timeline=False) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+                builder.delay_by_timeline()
+                builder.emit(
+                    TableLengthPulse(
+                        "probe_pulse",
+                        probe_cfg,
+                        lengths=lengths,
+                        idx_reg="delay",
+                    )
+                )
+                builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()
-                builder.run_program_summed(
+                step.run_acquire_summed(
                     program,
+                    soc,
                     processor=shot_sums(program, [axis]),
-                    sums2signal_fn=lambda sums: sums,
                     rounds=cfg.rounds,
                 )
 

@@ -86,5 +86,5 @@ def mux_sweep_spec[T: ConfigBase](
         tag=tag,
         result_builder=build,
         result_validator=validate_mux_result,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
     )

@@ -20,9 +20,9 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "length": Range(0.0, relax_delay, expts=101),
+            "delay": Range(0.0, relax_delay, expts=101),
             "relax_delay": relax_delay,
-            "uniform": False,
+            "sampling": "decay",
             "reps": 1000,
             "rounds": 10,
         },
