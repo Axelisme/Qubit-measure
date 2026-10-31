@@ -400,11 +400,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         differing = []
         for field, value in settings.items():
             old = previous[field]
-            equal = (
-                np.array_equal(old, value)
-                if isinstance(old, np.ndarray) and isinstance(value, np.ndarray)
-                else old == value
-            )
+            if isinstance(old, np.ndarray) or isinstance(value, np.ndarray):
+                equal = (
+                    isinstance(old, np.ndarray)
+                    and isinstance(value, np.ndarray)
+                    and np.array_equal(old, value)
+                )
+            else:
+                equal = old == value
             if not equal:
                 differing.append("length (ro_length)" if field == "length" else field)
         if differing:
