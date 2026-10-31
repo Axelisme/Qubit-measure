@@ -225,6 +225,51 @@ def test_runtime_events_load_s14_then_increment_for_shared_origin():
     assert all("TIME" not in i for i in prog.prog_list if i["CMD"] == "WPORT_WR")
 
 
+@pytest.mark.parametrize("swept_offset", [False, True])
+def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_offset):
+    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    offset = QickSweep1D("scan", 7 / 430.08, 9 / 430.08) if swept_offset else 7 / 430.08
+    drives = [
+        TableLengthPulse(
+            f"selected{ch}",
+            PulseCfg(
+                ch=ch,
+                nqz=1,
+                freq=1000,
+                gain=0.5,
+                pre_delay=offset + ch * 40 / 430.08,
+                waveform=ConstWaveformCfg(length=7 / 384),
+            ),
+            lengths=[7 / 384, 11 / 384, 15 / 384],
+            idx_reg="scan",
+        )
+        for ch in range(2)
+    ]
+
+    def initialize(prog):
+        for drive in drives:
+            prog.declare(drive)
+
+    def body(prog):
+        prog.write_reg_op("duration", "scan", "+", 100)
+        prog.timeline_inc("duration")
+        prog.fork("default", into="other")
+        prog.emit(drives[0])
+        prog.emit(drives[1], timeline="other")
+
+    prog = program(body, initialize=initialize, reps=2)
+    expected = [[107, 147], [109, 149], [111, 151]] if swept_offset else [
+        [107, 147], [108, 148], [109, 149]
+    ]
+    assert [waves(s) for s in shots(prog)] == expected * 2
+    writes = [i for i in prog.prog_list if i.get("DST") == "s14"]
+    assert len(writes) == 2
+    assert writes[1]["OP"] == "s14 + #40"
+    assert all("TIME" not in i for i in prog.prog_list if i["CMD"] == "WPORT_WR")
+
+
 @pytest.mark.parametrize("clobber", ["native", "raw"])
 def test_runtime_event_restores_output_time_after_clobber(clobber):
     def body(prog):
