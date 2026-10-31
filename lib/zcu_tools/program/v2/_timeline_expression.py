@@ -146,6 +146,37 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
     return np.asarray(result, dtype=object)
 
 
+def known_time_point(
+    value: TimeExpression, coordinates: dict[object, int]
+) -> Fraction | None:
+    """Evaluate value at one compile-time coordinate in tProc cycles.
+
+    coordinates maps axis IDs to zero-based point indices. Omitted axes use
+    index 0. Return the exact Fraction, or None when a source is not known at
+    compile time. Indices must address stored axis points; out-of-range indices
+    raise IndexError. This read does not change value or allocate a point grid.
+    """
+    if isinstance(value, TimeAbs):
+        result = known_time_point(value.linear, coordinates)
+        if result is None:
+            return None
+        for argument, coefficient in value.absolute:
+            point = known_time_point(argument, coordinates)
+            if point is None:
+                return None
+            result += coefficient * abs(point)
+        return result
+    result = Fraction(0)
+    for axis, component in value.components:
+        if isinstance(component, np.ndarray):
+            result += Fraction(component[coordinates.get(axis.identity, 0)])
+        elif axis.minimum is not None and axis.minimum == axis.maximum:
+            result += component * axis.minimum
+        else:
+            return None
+    return result
+
+
 def ceiled_time(value: TimeExpression) -> TimeExpression:
     """Ceil single-axis components exactly; cross-axis branches get fresh errors."""
     axes = expression_axes(value)

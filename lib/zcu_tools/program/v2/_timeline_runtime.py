@@ -21,6 +21,7 @@ from ._timeline_expression import (
     evaluate_time,
     expression_axes,
     expression_limits,
+    known_time_point,
     point_time,
     projected_expression_bounds,
     scale_time,
@@ -1092,7 +1093,7 @@ class RuntimeMath(TimedMacro):
         """
         expression = runtime_expression(value)
         axes = expression_axes(expression)
-        origin = self._known_time_point(expression, {})
+        origin = known_time_point(expression, {})
         if origin is None:
             raise RuntimeError(
                 "time is runtime-only; cannot evaluate it at compile time"
@@ -1102,7 +1103,7 @@ class RuntimeMath(TimedMacro):
         terms: list[tuple[CycleAxis, Fraction]] = []
         for axis, count in axes.items():
             if count > 1:
-                endpoint = self._known_time_point(expression, {axis: count - 1})
+                endpoint = known_time_point(expression, {axis: count - 1})
                 if endpoint is None:
                     raise RuntimeError(
                         "time is runtime-only; cannot evaluate it at compile time"
@@ -1119,31 +1120,6 @@ class RuntimeMath(TimedMacro):
                 "non-affine runtime time cannot be represented by QickParam"
             )
         return QickParam(start, spans) / get_fclk(self.prog)
-
-    @staticmethod
-    def _known_time_point(
-        value: TimeExpression, coordinates: dict[object, int]
-    ) -> Fraction | None:
-        """Read one known point without allocating a cross-axis proof grid."""
-        if isinstance(value, TimeAbs):
-            result = RuntimeMath._known_time_point(value.linear, coordinates)
-            if result is None:
-                return None
-            for argument, coefficient in value.absolute:
-                point = RuntimeMath._known_time_point(argument, coordinates)
-                if point is None:
-                    return None
-                result += coefficient * abs(point)
-            return result
-        result = Fraction(0)
-        for axis, component in value.components:
-            if isinstance(component, np.ndarray):
-                result += Fraction(component[coordinates.get(axis.identity, 0)])
-            elif axis.minimum is not None and axis.minimum == axis.maximum:
-                result += component * axis.minimum
-            else:
-                return None
-        return result
 
     def allocate(self) -> str:
         live = self.prog._timeline_live_registers()
