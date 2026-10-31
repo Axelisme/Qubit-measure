@@ -137,7 +137,7 @@ class PulseReset(AbsReset):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the reset pulse's resources on prog."""
-        self.init(prog)
+        self.reset_pulse.declare(prog)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -177,7 +177,8 @@ class TwoPulseReset(AbsReset):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare both reset pulses on prog."""
-        self.init(prog)
+        self.reset_pulse1.declare(prog)
+        self.reset_pulse2.declare(prog)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -223,7 +224,9 @@ class BathReset(AbsReset):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the cavity, qubit and final pi/2 pulses on prog."""
-        self.init(prog)
+        self.res_pulse.declare(prog)
+        self.qub_pulse.declare(prog)
+        self.pi2_pulse.declare(prog)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None

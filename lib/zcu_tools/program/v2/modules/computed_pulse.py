@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
@@ -62,7 +62,9 @@ class ComputedPulse(Module):
         int4 flat-top layouts raise ValueError. The selector register is borrowed;
         its bounds and all address writes are audited when consumed as time.
         """
-        base_idxs = self._declare_candidates(prog)
+        base_idxs = self._declare_candidates(
+            prog, declare_pulse=lambda pulse: pulse.declare(prog)
+        )
         self._address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
@@ -98,7 +100,9 @@ class ComputedPulse(Module):
         )
 
     def init(self, prog: ModularProgramV2) -> None:
-        base_idxs = self._declare_candidates(prog)
+        base_idxs = self._declare_candidates(
+            prog, declare_pulse=lambda pulse: pulse.init(prog)
+        )
         self.dmem_offset = prog.add_dmem(base_idxs)
         logger.debug(
             "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
@@ -112,7 +116,10 @@ class ComputedPulse(Module):
         )
 
     def _declare_candidates(
-        self, prog: ModularProgramV2 | TimelineProgramV2
+        self,
+        prog: ModularProgramV2 | TimelineProgramV2,
+        *,
+        declare_pulse: Callable[[Pulse], None],
     ) -> list[int]:
         if self._is_flat_top:
             gen_type = prog.soccfg["gens"][self.ref_cfg.ch].get("type", "")
@@ -124,7 +131,7 @@ class ComputedPulse(Module):
                 )
 
         for pulse_mod in self.pulse_modules:
-            pulse_mod.init(prog)
+            declare_pulse(pulse_mod)
 
         # Collect the starting wmem index for each candidate and store them in
         # a dmem table. This removes the contiguity requirement: candidates may

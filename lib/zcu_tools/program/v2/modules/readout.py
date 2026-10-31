@@ -371,7 +371,15 @@ class PulseReadout(AbsReadout):
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         """Declare the generator, ADC window and fixed/runtime configuration templates."""
-        self.pulse.init(prog)
+        self._declare_resources(prog, declare_pulse=lambda pulse: pulse.init(prog))
+
+    def _declare_resources(
+        self,
+        prog: ModularProgramV2 | TimelineProgramV2,
+        *,
+        declare_pulse: Callable[[Pulse], None],
+    ) -> None:
+        declare_pulse(self.pulse)
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
         prog.add_readoutconfig(
             ch=self.cfg.ro_ch,
@@ -386,7 +394,7 @@ class PulseReadout(AbsReadout):
                 ro_ch=self.cfg.ro_ch,
                 pulse_id=f"{self.name}_runtime_pulse",
             )
-            self._runtime_pulse.init(prog)
+            declare_pulse(self._runtime_pulse)
         if self.ro_freq_val is not None:
             self._runtime_ro_name = f"{self.name}_adc_runtime"
             prog.add_readoutconfig(
@@ -456,7 +464,7 @@ class PulseReadout(AbsReadout):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare generator/ADC templates on prog before emission."""
-        self.init(prog)
+        self._declare_resources(prog, declare_pulse=lambda pulse: pulse.declare(prog))
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None

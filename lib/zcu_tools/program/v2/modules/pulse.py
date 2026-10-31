@@ -90,6 +90,9 @@ class Pulse(Module):
         self.ro_ch = ro_ch
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+        self._declare_resources(prog)
+
+    def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         if self.cfg is None:
             return
 
@@ -191,7 +194,7 @@ class Pulse(Module):
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Register the pulse template on prog; QICK declaration errors propagate."""
-        self.init(prog)
+        self._declare_resources(prog)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
