@@ -509,6 +509,10 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
 class _EventTime(Macro):
     """Write an event offset directly, reusing only a proven current s14 value."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, base: RuntimeEnd, offset: RuntimeEnd | int, expression: TimeExpression):
         self.base = base
         self.offset = offset
@@ -534,6 +538,10 @@ class _EventTime(Macro):
 
 class RuntimeMath(TimedMacro):
     """Prepare integer cycle arithmetic and conditional candidate selection."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, prog):
         super().__init__()

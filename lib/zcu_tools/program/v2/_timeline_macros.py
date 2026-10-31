@@ -66,6 +66,10 @@ from .modules.util import get_fclk
 class TimelineFork(Macro):
     """Copy one declared end to fresh names at this preprocessing position."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: str, targets: tuple[str, ...]):
         self.book = book
         self.source = source
@@ -92,6 +96,10 @@ class TimelineFork(Macro):
 class TimelineJoin(Macro):
     """Merge existing ends without emitting instructions or consuming sources."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, sources: tuple[str, ...], into: str):
         self.book = book
         self.sources = sources
@@ -114,6 +122,10 @@ class TimelineJoin(Macro):
 
 class TimelineRuntimeAdvance(Macro):
     """Guard all ends against the static part of an unknown nonnegative advance."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, source: DelayRegAuto):
         self.book = book
@@ -161,6 +173,10 @@ class TimelineRuntimeAdvance(Macro):
 class TimelineBoundary(Macro):
     """Reset preprocessing state or emit a linked IR timing boundary."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, section: str):
         self.book = book
         self.section = section
@@ -196,6 +212,10 @@ class TimelineBoundary(Macro):
 class TimelineShellWait(Wait):
     """Project only the final WAIT literal, leaving native reference debits alone."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, t: float):
         super().__init__(t=t, auto=True, gens=False, ros=True, no_warn=True)
         self.book = book
@@ -209,6 +229,10 @@ class TimelineShellWait(Wait):
 
 
 class TimelineAdvance(TimedMacro):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self, book, timeline, duration, *, tag=None, aligned=False, range_hint=None
     ):
@@ -389,6 +413,10 @@ class TimelineAdvance(TimedMacro):
 
 
 class TimelineSync(Delay):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,
@@ -427,6 +455,10 @@ class TimelineSync(Delay):
 class TimelineRepeatEnter(Macro):
     """Isolate the constant-zero loop namespace without moving reference."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, timeline: str, counter: str | None = None):
         self.book = book
         self.timeline = timeline
@@ -462,6 +494,10 @@ class TimelineRepeatEnter(Macro):
 
 class TimelineRepeatExit(Macro):
     """Restore outer ends using only the body's explicit reference advances."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(
         self,
@@ -615,6 +651,10 @@ class TimelineRepeatExit(Macro):
 class RepeatTimelineEnter(Macro):
     """Choose one lowering from recorded structure and the incoming end."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, parent: str, counter: str | None):
         self.book = book
         self.parent = parent
@@ -648,6 +688,10 @@ class RepeatTimelineEnter(Macro):
 class RepeatTimelineBody(Macro):
     """Capture an iteration origin only when body clobbers require recovery."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
@@ -664,6 +708,10 @@ class RepeatTimelineBody(Macro):
 class RepeatTimelineCapture(Macro):
     """Capture the pointer after the loop, including the zero-iteration path."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
@@ -679,6 +727,10 @@ class RepeatTimelineCapture(Macro):
 
 class RepeatTimelineExit(Macro):
     """Close the selected lowering without adding an implicit synchronization."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(
         self,
@@ -720,6 +772,10 @@ class ModuleEmission(TimedMacro):
     and tag identifies this occurrence's first timed operation in get_time_param.
     Construction and timing placement are owned by TimelineProgramV2.emit.
     """
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
         super().__init__(tag=tag)
@@ -791,6 +847,10 @@ class ReferenceGuard(Macro):
     ModuleEmission also restores depth when a child fails during preprocessing.
     """
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, timeline: str, *, enter: bool):
         self.book = book
         self.timeline = timeline
@@ -810,6 +870,10 @@ class ReferenceGuard(Macro):
 
 class NativeTimelineDelay(TimedMacro):
     """Keep QICK auto-delay channel selection while consuming runtime tails."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, source: Delay):
         super().__init__(tag=getattr(source, "tag", None))
@@ -844,6 +908,10 @@ class NativeTimelineDelay(TimedMacro):
 
 class PreparedTimelineMacro(TimedMacro):
     """Keep cycle arithmetic at the native operation's execution position."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, book: TimelineBook, source: Macro):
         super().__init__(tag=getattr(source, "tag", None))
@@ -920,6 +988,10 @@ class FixedRepeatLoop(MarkedOpenLoop):
     this loop is nested inside a module emission rather than in loop_dict.
     """
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, name: str, count: int):
         super().__init__(name=name, n=count)
         self.index = FixedLoopIndex(name, name, count)
@@ -936,6 +1008,10 @@ class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):
 
 
 class TimeProducer(Macro):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         register: str,
@@ -1043,6 +1119,10 @@ class BranchCaseState:
 
 
 class TimelineBranch(Macro):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(
         self,
         book: TimelineBook,

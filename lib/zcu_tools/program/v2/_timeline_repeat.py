@@ -49,6 +49,10 @@ class _ReferenceSummary:
 class LoopTimelineEnter(Macro):
     """Initialize one loop accumulator at its execution position, not prologue."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, parent: str, counter: str | None):
         self.book = book
         self.parent = parent
@@ -103,6 +107,10 @@ class LoopTimelineEnter(Macro):
 
 class LoopTimelineExit(Macro):
     """Store the iteration end and expose the whole loop's aggregate provenance."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(
         self,

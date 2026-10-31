@@ -63,6 +63,10 @@ def _trigger_static_cycles(
 class TimelineObservedPulse(Pulse):
     """Delegate native pulse behavior, observing only its public timing inputs."""
 
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, source: Pulse):
         # Directly constructed QICK Pulse macros may omit the optional tag.
         super().__init__(
@@ -221,6 +225,10 @@ class TimelinePlacedPulse(TimelineObservedPulse):
 
 
 class TimelinePlacedConfig(ConfigReadout):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def __init__(self, book: TimelineBook, timeline: str, source: ConfigReadout):
         super().__init__(ch=source.ch, name=source.name, tag=source.tag)
         self.book = book
@@ -262,6 +270,10 @@ class TimelinePlacedConfig(ConfigReadout):
 
 
 class TimelinePlacedTrigger(Trigger):
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
     def get_time_param(self, name: str) -> QickParam:
         if name == "t" and self.runtime_start is not None:
             return self.book.math.time_parameter(self.runtime_start)
