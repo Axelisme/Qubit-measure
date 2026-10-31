@@ -1055,7 +1055,7 @@ def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
     def body(prog):
         prog.sync()
         with prog.repeat('r', 2):
-            prog.append_macro(Pulse(ch=0, name='p0'))  # Native events do not advance default.
+            prog.append_macro(Pulse(ch=0, name='p0', t=0))  # Native events do not advance default.
             prog.delay_timeline(10 / 430.08)
             prog.sync()
 
@@ -1111,7 +1111,7 @@ def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 2):
-                prog.append_macro(Pulse(ch=0, name='p0'))
+                prog.append_macro(Pulse(ch=0, name='p0', t=0))
                 prog.delay_timeline(10 / 430.08)
                 prog.sync()
             prog.sync()
@@ -1135,7 +1135,7 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
         prog.sync()
         with prog.repeat('r', count, range_hint=hint):
             if native_prefix:
-                prog.append_macro(Pulse(ch=0, name='p0'))
+                prog.append_macro(Pulse(ch=0, name='p0', t=0))
                 prog.delay_timeline(28 / 430.08)
             prog.pulse(0, "p0", timeline="default")
             prog.append_macro(Pulse(ch=0, name='p0', t=(56 if native_prefix else 28) / 430.08))
@@ -1206,7 +1206,7 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count', range_hint=(0, 4)):
-                prog.append_macro(Pulse(ch=0, name='p0'))
+                prog.append_macro(Pulse(ch=0, name='p0', t=0))
                 prog.delay_timeline(28 / 430.08)
                 prog.pulse(0, "p0", timeline="default")
                 prog.sync()
@@ -1230,7 +1230,7 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count' if register else 2, range_hint=(1, 3) if register else None):
-                prog.append_macro(Pulse(ch=0, name='p0'))
+                prog.append_macro(Pulse(ch=0, name='p0', t=0))
                 prog.delay_timeline(QickSweep1D("scan", 28 / 430.08, 38 / 430.08))
                 prog.pulse(0, "p0", timeline="default")
                 prog.append_macro(Pulse(ch=0, name='p0', t=QickSweep1D('scan', 56 / 430.08, 66 / 430.08)))
@@ -1266,7 +1266,7 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count' if register else 2, range_hint=(1, 3) if register else None):
-                prog.append_macro(Pulse(ch=0, name='p0'))
+                prog.append_macro(Pulse(ch=0, name='p0', t=0))
                 prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08))
                 prog.sync()
             prog.pulse(0, "p0", t=30 / 430.08, timeline="default")
