@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.experiment.metadata import has_native_metadata, RunMetadataContent
 from zcu_tools.experiment.artifacts import (
     AnalysisItem,
     ArtifactRef,
@@ -19,6 +18,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
+from zcu_tools.experiment.metadata import RunMetadataContent, has_native_metadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.catalog import ExperimentAccess
 from zcu_tools.gui.app.measure.events.completion import (

@@ -9,14 +9,13 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.experiment.artifacts import SaveReport
 from zcu_tools.experiment.metadata import (
     RunMetadata,
     RunSnapshot,
     SoftwareProvenance,
 )
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.artifacts import SaveReport
-from zcu_tools.resources.entry import JsonObject
 from zcu_tools.gui.app.measure.services.pane_commit import commit_analysis, commit_run
 from zcu_tools.gui.app.measure.state import (
     AnalysisPaneState,
@@ -30,6 +29,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.entry import JsonObject
 
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._record_support import require_record

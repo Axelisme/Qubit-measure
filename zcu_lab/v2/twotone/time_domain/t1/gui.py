@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel, Field
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,

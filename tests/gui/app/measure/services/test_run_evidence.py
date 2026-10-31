@@ -11,13 +11,17 @@ import numpy as np
 import pytest
 from pydantic import TypeAdapter
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
 from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.acquisition import new_run_id
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import CfgSnapshot, RunSnapshot, SoftwareProvenance
+from zcu_tools.experiment.metadata import (
+    CfgSnapshot,
+    RunMetadataContent,
+    RunSnapshot,
+    SoftwareProvenance,
+)
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.simulation import white_noise

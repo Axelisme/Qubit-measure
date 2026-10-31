@@ -238,7 +238,9 @@ def test_native_load_ignores_retired_metadata_without_rewriting(
 ) -> None:
     metadata = historical_metadata()
     record = experiment.RunRecord(
-        ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=metadata.model_dump(mode="json")
+        ConfigBase(),
+        Signal(np.array([4000.0]), np.array([1j])),
+        metadata=metadata.model_dump(mode="json"),
     )
     path = tmp_path / "shot-time.h5"
     experiment.save_run(record, path, spec=declaration())
@@ -287,12 +289,16 @@ def test_native_save_requires_complete_metadata_before_io(
     if initial == "device_only":
         document["device_snapshot"] = complete["device_snapshot"]
     elif initial == "missing_completion":
-        document = {key: value for key, value in complete.items() if key != "completion"}
+        document = {
+            key: value for key, value in complete.items() if key != "completion"
+        }
     record = experiment.RunRecord(
         ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=document
     )
     with pytest.raises(ValueError, match="metadata"):
-        experiment.save_run(record, tmp_path / "not-created" / "run.h5", spec=declaration())
+        experiment.save_run(
+            record, tmp_path / "not-created" / "run.h5", spec=declaration()
+        )
     assert list(tmp_path.iterdir()) == []
     record.metadata.update(complete)
     experiment.save_run(record, tmp_path / "complete.h5", spec=declaration())
@@ -333,7 +339,10 @@ def test_native_load_defers_unused_metadata_but_use_projection_and_save_reject(
     before = path.read_bytes()
     restored = experiment.load_run_with_metadata(path, spec=declaration())
     np.testing.assert_allclose(restored.result.values, [1j])
-    assert metadata_owner.RunMetadataContent(restored.metadata).experiment == "test/metadata"
+    assert (
+        metadata_owner.RunMetadataContent(restored.metadata).experiment
+        == "test/metadata"
+    )
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
         getattr(metadata_owner.RunMetadataContent(restored.metadata), defect)
     with pytest.raises(ValueError, match="metadata") as caught:

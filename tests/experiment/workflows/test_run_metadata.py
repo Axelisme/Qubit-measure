@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment import workflows
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_run
 from zcu_tools.experiment.records import RunRecord
 
@@ -41,14 +41,23 @@ def test_record_metadata_uses_workflow_identity_and_delivered_attempt(
         snapshot=history.snapshot,
     )
     assert record.result is source.result
-    assert RunMetadataContent(record.metadata).run_id == "0123456789abcdef0123456789abcdef-000003-7"
+    assert (
+        RunMetadataContent(record.metadata).run_id
+        == "0123456789abcdef0123456789abcdef-000003-7"
+    )
     assert RunMetadataContent(record.metadata).experiment == "synthetic/trace"
     assert RunMetadataContent(record.metadata).snapshot == history.snapshot
     assert RunMetadataContent(record.metadata).started_at == "2026-10-22T01:02:03+00:00"
-    assert RunMetadataContent(record.metadata).finished_at == "2026-10-22T01:02:05+00:00"
-    assert RunMetadataContent(record.metadata).completion == ("stopped" if stopped else "complete")
+    assert (
+        RunMetadataContent(record.metadata).finished_at == "2026-10-22T01:02:05+00:00"
+    )
+    assert RunMetadataContent(record.metadata).completion == (
+        "stopped" if stopped else "complete"
+    )
     assert RunMetadataContent(record.metadata).provenance == history.provenance
-    assert RunMetadataContent(record.metadata).device_snapshot == {"flux": {"value": 0.125}}
+    assert RunMetadataContent(record.metadata).device_snapshot == {
+        "flux": {"value": 0.125}
+    }
     assert source.metadata == {}
 
 
@@ -80,5 +89,11 @@ def test_descendant_cancellation_is_saved_as_stopped(tmp_path: Path) -> None:
     path = tmp_path / "descendant.h5"
     save_run(record, path, spec=core.AXES_SPEC)
     restored = load_run_with_metadata(path, spec=core.AXES_SPEC)
-    assert RunMetadataContent(restored.metadata).project() == RunMetadataContent(record.metadata).project()
-    assert RunMetadataContent(restored.metadata).run_id == "0123456789abcdef0123456789abcdef-000003-7"
+    assert (
+        RunMetadataContent(restored.metadata).project()
+        == RunMetadataContent(record.metadata).project()
+    )
+    assert (
+        RunMetadataContent(restored.metadata).run_id
+        == "0123456789abcdef0123456789abcdef-000003-7"
+    )

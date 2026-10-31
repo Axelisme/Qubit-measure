@@ -12,10 +12,10 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Protocol
 
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.cfg_model import ConfigBase, module_spec_from_raw
 from zcu_tools.core.element import ElementIdentity
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     ModuleWriteback,

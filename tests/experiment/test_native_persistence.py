@@ -12,7 +12,6 @@ import h5py
 import numpy as np
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     Axis as DiskAxis,
@@ -46,6 +45,7 @@ from zcu_tools.experiment import (
     save_labber,
     save_run,
 )
+from zcu_tools.experiment.metadata import RunMetadataContent
 
 from tests._native_support import native_metadata
 
@@ -260,9 +260,13 @@ def test_fixed_axis_saves_like_field_axis_and_restores_without_field(
     frequency = np.array([4000.0, 5000.0])
     signal = np.array([[1 + 2j, 3 - 4j, 5 + 6j], [7 - 8j, 9 + 10j, 11 - 12j]])
     metadata = native_metadata(fixed_spec.tag)
-    fixed_record = RunRecord(NativeCfg(), SingleResult(frequency, signal), metadata.model_dump(mode="json"))
+    fixed_record = RunRecord(
+        NativeCfg(), SingleResult(frequency, signal), metadata.model_dump(mode="json")
+    )
     field_record = RunRecord(
-        NativeCfg(), PopulationResult(frequency, np.array([0, 1, 2]), signal), metadata.model_dump(mode="json")
+        NativeCfg(),
+        PopulationResult(frequency, np.array([0, 1, 2]), signal),
+        metadata.model_dump(mode="json"),
     )
     fixed_path, field_path = tmp_path / "fixed.h5", tmp_path / "field.h5"
     save_run(fixed_record, fixed_path, spec=fixed_spec)
@@ -438,7 +442,10 @@ def test_single_instance_native_round_trip_keeps_cfg_snapshot_and_memory_units(
     save_run(record, path, spec=experiment.AXES_SPEC)
     loaded, snapshot = load_run(path, spec=experiment.AXES_SPEC)
     assert loaded.cfg == record.cfg
-    assert RunMetadataContent(loaded.metadata).project() == RunMetadataContent(record.metadata).project()
+    assert (
+        RunMetadataContent(loaded.metadata).project()
+        == RunMetadataContent(record.metadata).project()
+    )
     assert snapshot == RunMetadataContent(record.metadata).snapshot
     np.testing.assert_array_equal(loaded.result.frequency, record.result.frequency)
     np.testing.assert_allclose(loaded.result.signal, record.result.signal)
@@ -464,7 +471,11 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
         np.array([1.0, 2.0, 3.0]),
         np.array([0.5, 0.3, 0.1]),
     )
-    record = RunRecord(NativeCfg(), result, metadata=native_metadata(GROUPED.tag).model_dump(mode="json"))
+    record = RunRecord(
+        NativeCfg(),
+        result,
+        metadata=native_metadata(GROUPED.tag).model_dump(mode="json"),
+    )
     path = tmp_path / "grouped.h5"
     experiment = GroupedExperiment()
     save_run(record, path, spec=experiment.AXES_SPEC)
@@ -483,7 +494,11 @@ def test_grouped_instance_uses_shared_native_entry_for_different_grids(
 def test_save_rejects_missing_cfg_or_wrong_tag_without_creating_file(
     tmp_path: Path, cfg: NativeCfg | None
 ) -> None:
-    record = replace(single_record(), cfg=cfg, metadata=native_metadata("wrong/tag").model_dump(mode="json"))
+    record = replace(
+        single_record(),
+        cfg=cfg,
+        metadata=native_metadata("wrong/tag").model_dump(mode="json"),
+    )
     with pytest.raises(ValueError, match="cfg|experiment"):
         save_run(record, tmp_path / "invalid.h5", spec=SINGLE)
     assert list(tmp_path.iterdir()) == []
@@ -630,7 +645,9 @@ def test_prepare_scalar_native_data_does_not_add_labber_restrictions(
 
     spec = AxesSpec((), SINGLE.z, ScalarResult, NativeCfg, "test/scalar")
     record = RunRecord(
-        NativeCfg(), ScalarResult(np.array(1j)), metadata=native_metadata(spec.tag).model_dump(mode="json")
+        NativeCfg(),
+        ScalarResult(np.array(1j)),
+        metadata=native_metadata(spec.tag).model_dump(mode="json"),
     )
     path = tmp_path / "scalar.h5"
     save_run(record, path, spec=spec)
@@ -856,8 +873,14 @@ def test_native_wrappers_share_cfg_fallback_and_keep_history(
         record = load_run_with_metadata(path, spec=spec)
     with pytest.warns(CfgUnavailableWarning, match=issue):
         old_record, snapshot = load_run(path, spec=spec)
-    assert RunMetadataContent(record.metadata).project() == RunMetadataContent(old_record.metadata).project()
-    assert RunMetadataContent(record.metadata).project().model_dump(mode="json") == stored.docs["metadata"]
+    assert (
+        RunMetadataContent(record.metadata).project()
+        == RunMetadataContent(old_record.metadata).project()
+    )
+    assert (
+        RunMetadataContent(record.metadata).project().model_dump(mode="json")
+        == stored.docs["metadata"]
+    )
     assert snapshot == RunMetadataContent(record.metadata).snapshot
     assert record.cfg is old_record.cfg is None
     np.testing.assert_allclose(record.result.signal, [2 + 3j, 4 - 5j])

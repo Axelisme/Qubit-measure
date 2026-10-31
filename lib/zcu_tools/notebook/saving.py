@@ -11,7 +11,6 @@ from uuid import uuid4
 from matplotlib.figure import Figure
 from pydantic import TypeAdapter
 
-from zcu_tools.experiment.metadata import has_native_metadata
 from zcu_tools.cfg_model import ConfigBase, ModuleSpec, WaveformSpec
 from zcu_tools.experiment import (
     AcquisitionEvidence,
@@ -29,7 +28,7 @@ from zcu_tools.experiment.artifacts import (
     SaveReport,
     save_artifacts,
 )
-from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot
+from zcu_tools.experiment.metadata import RunMetadata, RunSnapshot, has_native_metadata
 from zcu_tools.format_version import YamlMap
 from zcu_tools.resources.entry import (
     AcquiredPayload,

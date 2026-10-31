@@ -11,10 +11,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import Container, load
 from zcu_tools.experiment import RunRecord
 from zcu_tools.experiment.artifacts import ArtifactRef
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.gui.app.measure.adapter import Adapter, SessionEnv
 from zcu_tools.gui.app.measure.artifacts import (
@@ -213,7 +213,9 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
-    require_record(session.state.get_tab("tab").run).metadata["author_notes"] = {"quality": [1, None]}
+    require_record(session.state.get_tab("tab").run).metadata["author_notes"] = {
+        "quality": [1, None]
+    }
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
     assert (
@@ -593,9 +595,12 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     assert other.ledger.events() == ()
 
 
-@pytest.mark.parametrize("missing", ["empty", "device_only", "completion", "provenance"])
+@pytest.mark.parametrize(
+    "missing", ["empty", "device_only", "completion", "provenance"]
+)
 def test_missing_native_evidence_rejects_before_operation_or_files(
-    native_session: NativeSaveSession, missing: str,
+    native_session: NativeSaveSession,
+    missing: str,
 ) -> None:
     session = native_session
     document = session.metadata.model_dump(mode="json")
@@ -638,7 +643,11 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
         session.state,
         "tab",
         RunPaneState(
-            result=RunRecord(cfg=None, result=object(), metadata=session.metadata.model_dump(mode="json")),
+            result=RunRecord(
+                cfg=None,
+                result=object(),
+                metadata=session.metadata.model_dump(mode="json"),
+            ),
             storage=session.state.get_tab("tab").run.storage,
             parameters=session.state.get_tab("tab").run.parameters,
         ),

@@ -60,7 +60,10 @@ def saving_view(
             session.state,
             tab_id,
             RunPaneState(
-                result=replace(require_record(original.run), metadata=session.metadata.model_dump(mode="json")),
+                result=replace(
+                    require_record(original.run),
+                    metadata=session.metadata.model_dump(mode="json"),
+                ),
                 storage=None
                 if original.run.parameters is None
                 else original.run.parameters.storage,

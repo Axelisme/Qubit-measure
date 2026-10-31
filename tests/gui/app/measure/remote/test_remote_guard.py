@@ -554,7 +554,8 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             tab_id,
             RunPaneState(
                 result=replace(
-                    RunRecord(None, object()), metadata=historical_metadata().model_dump(mode="json")
+                    RunRecord(None, object()),
+                    metadata=historical_metadata().model_dump(mode="json"),
                 ),
                 source_path="loaded.h5",
             ),
@@ -572,7 +573,8 @@ def test_socket_snapshot_exposes_result_replacement(fx) -> None:
             tab_id,
             RunPaneState(
                 result=replace(
-                    RunRecord(None, object()), metadata=historical_metadata().model_dump(mode="json")
+                    RunRecord(None, object()),
+                    metadata=historical_metadata().model_dump(mode="json"),
                 ),
                 source_path="loaded.h5",
             ),

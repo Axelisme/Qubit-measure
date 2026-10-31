@@ -6,8 +6,8 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import AnalyzeRequest, WritebackRequest
 from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
@@ -138,13 +138,13 @@ class AnalyzeService(StagedAnalyzeService):
         adapter = tab.adapter
         captured_inputs = _AnalyzeCapture(
             run_result=req.run_result,
-            run_id=RunMetadataContent(metadata).run_id if "run_id" in metadata else None,
+            run_id=RunMetadataContent(metadata).run_id
+            if "run_id" in metadata
+            else None,
             experiment_name=RunMetadataContent(metadata).experiment
             if "experiment" in metadata
             else tab.adapter_name,
-            device_snapshot=lambda: (
-                RunMetadataContent(metadata).device_snapshot
-            ),
+            device_snapshot=lambda: RunMetadataContent(metadata).device_snapshot,
             context=ctx,
             adapter=adapter,
             params=analyze_params_instance,
@@ -210,13 +210,13 @@ class AnalyzeService(StagedAnalyzeService):
         ctx = replace(self._state.session_env, parameters=tab.run.parameters)
         captured = _AnalyzeCapture(
             run_result=source,
-            run_id=RunMetadataContent(metadata).run_id if "run_id" in metadata else None,
+            run_id=RunMetadataContent(metadata).run_id
+            if "run_id" in metadata
+            else None,
             experiment_name=RunMetadataContent(metadata).experiment
             if "experiment" in metadata
             else tab.adapter_name,
-            device_snapshot=lambda: (
-                RunMetadataContent(metadata).device_snapshot
-            ),
+            device_snapshot=lambda: RunMetadataContent(metadata).device_snapshot,
             context=ctx,
             adapter=tab.adapter,
             params=analyze_params_instance,

@@ -4,9 +4,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.artifacts import SaveReport
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.notebook import NotebookAdapter, saving
 from zcu_tools.plotting.plots import NonPresentingHost
@@ -38,8 +38,14 @@ def test_save_merges_acquisition_and_point_metadata_into_the_handed_record(
     assert isinstance(record, RunRecord), "Artifact persistence must receive the record"
     assert record.result is source.result
     assert RunMetadataContent(record.metadata).run_id == evidence.run_id
-    assert RunMetadataContent(record.metadata).started_at == evidence.started_at.isoformat()
-    assert RunMetadataContent(record.metadata).finished_at == evidence.finished_at.isoformat()
+    assert (
+        RunMetadataContent(record.metadata).started_at
+        == evidence.started_at.isoformat()
+    )
+    assert (
+        RunMetadataContent(record.metadata).finished_at
+        == evidence.finished_at.isoformat()
+    )
     assert RunMetadataContent(record.metadata).provenance == evidence.provenance
     assert RunMetadataContent(record.metadata).snapshot.point == "sweet"
     assert RunMetadataContent(record.metadata).device_snapshot == {}

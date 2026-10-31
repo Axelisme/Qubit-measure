@@ -54,7 +54,9 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     }
     record = replace(
         tab.run.result,
-        metadata=session.metadata.model_copy(update={"run_id": "20261101T000000Z-123abc"}).model_dump(mode="json"),
+        metadata=session.metadata.model_copy(
+            update={"run_id": "20261101T000000Z-123abc"}
+        ).model_dump(mode="json"),
     )
     pane = RunPaneState(
         result=record, parameters=tab.run.parameters, storage=tab.run.storage
@@ -77,7 +79,10 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     assert member.key == ArtifactKey("run", "measurement_data", "data")
     assert (
         member.outputs[0].path
-        == session.entry.database_path / "runs" / "saving_20261101T000000Z-123abc" / "data.h5"
+        == session.entry.database_path
+        / "runs"
+        / "saving_20261101T000000Z-123abc"
+        / "data.h5"
     )
 
 

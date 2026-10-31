@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -314,7 +314,9 @@ def test_native_load_ignores_missing_or_corrupted_external_source(
         RunPaneState(
             result=replace(
                 require_record(tab.run),
-                metadata=session.metadata.model_copy(update={"snapshot": broken}).model_dump(mode="json"),
+                metadata=session.metadata.model_copy(
+                    update={"snapshot": broken}
+                ).model_dump(mode="json"),
             ),
             storage=None if tab.run.parameters is None else tab.run.parameters.storage,
             parameters=tab.run.parameters,
@@ -351,7 +353,9 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(require_record(previous), metadata=metadata.model_dump(mode="json")),
+            result=replace(
+                require_record(previous), metadata=metadata.model_dump(mode="json")
+            ),
             storage=None
             if previous.parameters is None
             else previous.parameters.storage,
@@ -409,7 +413,10 @@ def context_free_load_session(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(require_record(tab.run), metadata=session.metadata.model_dump(mode="json")),
+            result=replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_dump(mode="json"),
+            ),
             storage=tab.run.storage,
             parameters=tab.run.parameters,
         ),
@@ -817,9 +824,7 @@ def test_unselected_entry_load_and_save_use_recorded_history(
         assert outcome.result_type == "RunRecord"
         assert isinstance(require_record(tab.run), RunRecord)
         metadata = RunMetadataContent(require_record(tab.run).metadata)
-        assert metadata.project() == metadata_from_container(
-            stored
-        )
+        assert metadata.project() == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None and tab.run.parameters.target is None

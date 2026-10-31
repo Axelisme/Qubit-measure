@@ -4,11 +4,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fluxdep.line_state import (
     FluxPickInputs,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,

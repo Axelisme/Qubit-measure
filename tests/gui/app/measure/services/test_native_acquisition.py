@@ -8,10 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import SoftwareProvenance
+from zcu_tools.experiment.metadata import RunMetadataContent, SoftwareProvenance
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -289,7 +288,10 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     finally:
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
-    metadata, parameters = RunMetadataContent(require_record(tab.run).metadata), tab.run.parameters
+    metadata, parameters = (
+        RunMetadataContent(require_record(tab.run).metadata),
+        tab.run.parameters,
+    )
     assert parameters is not None
     storage = parameters.capture_storage()
     assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}
@@ -363,7 +365,9 @@ def test_native_run_core_stop_returns_record_but_exception_does_not(
         assert session.state.get_tab("tab").run.result is None
     else:
         assert terminal.outcome == outcome.status == "finished"
-        metadata = RunMetadataContent(require_record(session.state.get_tab("tab").run).metadata)
+        metadata = RunMetadataContent(
+            require_record(session.state.get_tab("tab").run).metadata
+        )
         assert metadata.completion == "complete"
         assert len(events) == 1 and isinstance(events[0].payload, AcquiredPayload)
         assert events[0].payload.run_id == metadata.run_id

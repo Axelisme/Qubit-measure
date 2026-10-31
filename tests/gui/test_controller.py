@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import save
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import (
     RestoredRun,
     metadata_from_container,
@@ -412,7 +412,9 @@ def test_result_commit_survives_analysis_preparation_failure(
     metadata = historical_metadata().model_copy(
         update={"experiment": RecordingAdapter.spec.tag}
     )
-    loaded = RunRecord(RecordingCfg(), RecordingResult(), metadata.model_dump(mode="json"))
+    loaded = RunRecord(
+        RecordingCfg(), RecordingResult(), metadata.model_dump(mode="json")
+    )
 
     def run(cfg: RecordingCfg, *, context: RunContext):
         if source == "cancelled":

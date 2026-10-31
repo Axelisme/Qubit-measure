@@ -18,10 +18,10 @@ from typing import Any
 
 import numpy as np
 import pytest
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.cfg_model import ConfigBase, Expr, Range
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -404,7 +404,11 @@ def test_result_commit_failure_settles_run_as_failed(
     if cancel_requested:
         assert svc.cancel_run()
     assert bg.last_on_done is not None
-    bg.last_on_done(RunRecord(None, object(), metadata=historical_metadata().model_dump(mode="json")))
+    bg.last_on_done(
+        RunRecord(
+            None, object(), metadata=historical_metadata().model_dump(mode="json")
+        )
+    )
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"

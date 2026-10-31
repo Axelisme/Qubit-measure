@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from zcu_tools.experiment.metadata import has_native_metadata, RunMetadataContent
 from zcu_tools.device.base import BaseDevice
 from zcu_tools.experiment.acquisition import (
     capture_device_snapshot,
@@ -16,7 +15,11 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunMetadata
+from zcu_tools.experiment.metadata import (
+    RunMetadata,
+    RunMetadataContent,
+    has_native_metadata,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (

@@ -62,7 +62,11 @@ def test_mux_numeric_tones_and_order_survive_native_and_labber(tmp_path: Path):
         cfg_type=MuxCfg,
         tag="test/mux",
     )
-    record = RunRecord(cfg=cfg, result=result, metadata=native_metadata(spec.tag).model_dump(mode="json"))
+    record = RunRecord(
+        cfg=cfg,
+        result=result,
+        metadata=native_metadata(spec.tag).model_dump(mode="json"),
+    )
     path = tmp_path / "native.h5"
     save_run(record, path, spec=spec)
     restored, _ = load_run(path, spec=spec)

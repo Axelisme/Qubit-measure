@@ -105,7 +105,10 @@ def role_load_session(
             session.state,
             "tab",
             RunPaneState(
-                result=replace(require_record(tab.run), metadata=session.metadata.model_dump(mode="json")),
+                result=replace(
+                    require_record(tab.run),
+                    metadata=session.metadata.model_dump(mode="json"),
+                ),
                 storage=captured.storage,
                 parameters=captured,
             ),

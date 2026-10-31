@@ -434,7 +434,9 @@ def test_accepted_retains_run_identity_with_or_without_save(
         )
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "later-run"}).model_dump(mode="json"),
+            metadata=native.metadata.model_copy(
+                update={"run_id": "later-run"}
+            ).model_dump(mode="json"),
         )
         draft.apply()
         event = native.entry.ledger.events()[-1]
@@ -450,7 +452,15 @@ def test_accepted_retains_run_identity_with_or_without_save(
 @pytest.mark.parametrize("interactive", [False, True])
 @pytest.mark.parametrize(
     "source",
-    ["run", "load", "without_metadata", "context_free", "identity_only", "experiment_only", "device_only"],
+    [
+        "run",
+        "load",
+        "without_metadata",
+        "context_free",
+        "identity_only",
+        "experiment_only",
+        "device_only",
+    ],
 )
 def test_analysis_draft_uses_start_run_identity(
     tmp_path: Path,
@@ -466,7 +476,10 @@ def test_analysis_draft_uses_start_run_identity(
                 native.state,
                 "tab",
                 RunPaneState(
-                    result=replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json")),
+                    result=replace(
+                        require_record(tab.run),
+                        metadata=native.metadata.model_dump(mode="json"),
+                    ),
                     source_path="historical.h5",
                     parameters=tab.run.parameters,
                     storage=tab.run.storage,
@@ -478,21 +491,32 @@ def test_analysis_draft_uses_start_run_identity(
                 tab.run.parameters = None
         elif source in ("identity_only", "experiment_only", "device_only"):
             partial: dict[str, JsonObject] = {
-                "identity_only": {"run_id": native.metadata.run_id, "completion": "unused-invalid"},
+                "identity_only": {
+                    "run_id": native.metadata.run_id,
+                    "completion": "unused-invalid",
+                },
                 "experiment_only": {"experiment": "test/custom", "device_snapshot": {}},
                 "device_only": {"device_snapshot": {"bias": {"value": 0.25}}},
             }
             tab.run.result = replace(require_record(tab.run), metadata=partial[source])
         captured = tab.run.parameters
-        expected = native.metadata.run_id if source in ("run", "load", "identity_only") else None
+        expected = (
+            native.metadata.run_id
+            if source in ("run", "load", "identity_only")
+            else None
+        )
         expected_experiment = (
-            native.metadata.experiment if source in ("run", "load")
-            else "test/custom" if source == "experiment_only"
+            native.metadata.experiment
+            if source in ("run", "load")
+            else "test/custom"
+            if source == "experiment_only"
             else tab.adapter_name
         )
         expected_devices = (
-            {"bias": {"value": 0.25}} if source == "device_only"
-            else {} if source == "experiment_only"
+            {"bias": {"value": 0.25}}
+            if source == "device_only"
+            else {}
+            if source == "experiment_only"
             else None
         )
         seen_analyze: list[
@@ -551,7 +575,9 @@ def test_analysis_draft_uses_start_run_identity(
             service.start_analyze("tab", object(), plots=plots)
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "later-run"}).model_dump(mode="json"),
+            metadata=native.metadata.model_copy(
+                update={"run_id": "later-run"}
+            ).model_dump(mode="json"),
         )
         if interactive:
             assert service.finish_plugin("tab")
@@ -593,7 +619,10 @@ def test_post_analysis_draft_retains_primary_identity(
                 native.state,
                 "tab",
                 RunPaneState(
-                    result=replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json")),
+                    result=replace(
+                        require_record(tab.run),
+                        metadata=native.metadata.model_dump(mode="json"),
+                    ),
                     source_path="historical.h5",
                     parameters=original_capture,
                     storage=tab.run.storage,
@@ -630,7 +659,10 @@ def test_post_analysis_draft_retains_primary_identity(
         )
         if save_before_accept:
             # Save is independent of whether Primary has a native identity.
-            tab.run.result = replace(require_record(tab.run), metadata=native.metadata.model_dump(mode="json"))
+            tab.run.result = replace(
+                require_record(tab.run),
+                metadata=native.metadata.model_dump(mode="json"),
+            )
             native.save()
         seen_requests: list[
             PostAnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneSummary, object]
@@ -698,7 +730,9 @@ def test_post_analysis_draft_retains_primary_identity(
         tab.analysis.writeback_draft = None
         tab.run.result = replace(
             require_record(tab.run),
-            metadata=native.metadata.model_copy(update={"run_id": "terminal-live-run"}).model_dump(mode="json"),
+            metadata=native.metadata.model_copy(
+                update={"run_id": "terminal-live-run"}
+            ).model_dump(mode="json"),
         )
         tab.run.parameters = current
         assert native.background.quiesce()

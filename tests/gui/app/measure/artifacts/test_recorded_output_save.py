@@ -40,7 +40,9 @@ def test_storage_free_save_keeps_declarations_and_publishes_recorded_outputs(
     commit_run(
         session.state,
         "tab",
-        RunPaneState(result=replace(original, metadata=metadata.model_dump(mode="json"))),
+        RunPaneState(
+            result=replace(original, metadata=metadata.model_dump(mode="json"))
+        ),
         plan_layout=session.save_service.plan_layout,
     )
     plots = declare_panes(session)
@@ -196,7 +198,11 @@ def test_save_uses_validated_metadata_for_output_planning(
     )
     # Saving validates model_copy updates, including valid serialized snapshots.
     commit_run(
-        session.state, "tab", RunPaneState(result=replace(original, metadata=metadata.model_dump(mode="json")))
+        session.state,
+        "tab",
+        RunPaneState(
+            result=replace(original, metadata=metadata.model_dump(mode="json"))
+        ),
     )
     report = session.save()
     assert all(item.status == "saved" for item in report.outputs)

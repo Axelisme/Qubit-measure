@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import numpy as np
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.gui.app.measure.adapter import Adapter
 
 from tests.experiment._saving_support import SavingCfg, SavingCore

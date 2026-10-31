@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from qtpy.QtWidgets import QApplication
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.datafile import load
 from zcu_tools.experiment import AxesSpec, Axis, ZSpec
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (

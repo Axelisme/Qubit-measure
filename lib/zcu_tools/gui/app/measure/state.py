@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
-from zcu_tools.experiment.metadata import has_native_metadata
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.metadata import has_native_metadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource

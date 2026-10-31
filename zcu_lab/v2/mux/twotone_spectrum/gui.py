@@ -11,10 +11,10 @@ from typing import TypeAlias
 
 import numpy as np
 from pydantic import BaseModel, Field
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.core.element import ElementIdentity
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
