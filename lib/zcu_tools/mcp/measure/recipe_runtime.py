@@ -102,7 +102,7 @@ class _ScopeReply(BaseModel):
 class _ResultState(BaseModel):
     available: bool
     source_operation_id: str | int | None
-    partial_result: bool
+    stop_requested: bool
 
 
 class _Interaction(BaseModel):
@@ -548,7 +548,7 @@ class RecipeRuntime:
                 self._runs[index] = replace(
                     self._runs[index],
                     run_id=result.run_id,
-                    partial_result=result.partial_result,
+                    stop_requested=result.stop_requested,
                 )
                 self._details[index] = replace(
                     self._details[index], run_id=result.run_id
@@ -852,7 +852,7 @@ class RecipeRuntime:
         return RunResult(
             "completed",
             snapshot.raw_data.run_id,
-            snapshot.result_state.partial_result,
+            snapshot.result_state.stop_requested,
         )
 
     def _analyze(

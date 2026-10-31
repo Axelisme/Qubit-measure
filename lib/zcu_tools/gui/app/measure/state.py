@@ -80,7 +80,7 @@ class RunPaneState:
     storage fixes the Save capability: Run admission or Load request storage.
     None means no Save destination. Native Load may have a different analysis
     target; Save still checks this capability against file history.
-    partial_result is the Run owner's completion-time cancellation fact, even
+    stop_requested is the Run owner's completion-time cancellation fact, even
     without metadata. Non-acquisition replacement and new Run reset it to False.
     """
 
@@ -90,7 +90,7 @@ class RunPaneState:
     confirmed_run_id: str | None = None
     parameters: ParameterContext | None = None
     storage: StorageBinding | None = None
-    partial_result: bool = False
+    stop_requested: bool = False
     # None for readable loaded history or non-Load; otherwise the fixed Load reason.
     analysis_source_issue: str | None = None
 

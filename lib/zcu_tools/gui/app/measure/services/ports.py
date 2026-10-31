@@ -43,7 +43,7 @@ class RunPaneSnapshot:
     it survives failed resaves, but does not survive Run replacement.
     acquisition_run_id is the fixed Run/Load metadata identity before any Save;
     None means no native acquisition metadata, not unsaved data.
-    partial_result is the completed Run's cancellation fact, independent of
+    stop_requested is the completed Run's cancellation fact, independent of
     metadata and terminal operation classification; replacement resets it.
     """
 
@@ -52,7 +52,7 @@ class RunPaneSnapshot:
     source_operation_id: int | None = None
     run_id: str | None = None
     acquisition_run_id: str | None = None
-    partial_result: bool = False
+    stop_requested: bool = False
     # Fixed Load source diagnostic, or None for a readable source/non-Load.
     analysis_source_issue: str | None = None
 
