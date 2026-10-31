@@ -17,7 +17,11 @@ from zcu_tools.gui.session.device_models import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError, OperationKind
+from zcu_tools.gui.session.ports import (
+    BackgroundAdmissionClosedError,
+    BackgroundError,
+    OperationKind,
+)
 from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import on_device_disconnected
