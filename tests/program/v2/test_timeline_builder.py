@@ -41,16 +41,17 @@ def _readout(name="read", *, gain: float | QickParam = 0.5):
     )
 
 
-def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_soccfg):
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_soccfg, align_timeline):
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2, pulse: v2.Pulse):
-        with program.branch(by="scan", align_timeline=True) as branch:
+        with program.branch(by="scan", align_timeline=align_timeline) as branch:
             # Declaration order does not change the selector's zero-based index.
             with branch.case(3):
                 program.emit(pulse)
                 program.emit(pulse)
             with branch.case(1):
                 program.emit(pulse)
-        with program.branch(by="scan", align_timeline=True):
+        with program.branch(by="scan", align_timeline=align_timeline):
             pass  # A branch may leave every point empty.
 
     pulse = _pulse("drive")
@@ -72,12 +73,9 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
     assert actual.prog_list == expected.prog_list
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
     assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
-    assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == [
-        86,
-        86,
-        86,
-        86,
-    ]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == (
+        [86, 86, 86, 86] if align_timeline else [0, 43, 0, 86]
+    )
     actual.compile()
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
 

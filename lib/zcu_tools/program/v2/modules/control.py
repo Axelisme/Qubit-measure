@@ -196,8 +196,9 @@ class Branch(Module):
     ) -> None:
         """Emit the sweep-selected case on timeline (default when None).
 
-        Preserve empty cases and child order. Native case closing advances
-        reference to the selected path's end, without cross-case padding.
+        Preserve empty cases and child order. Use align_timeline=True to join
+        all case ends per timeline, without advancing reference. Native
+        reference-moving children and case-local Repeat raise ValueError.
         tag identifies this emission; children remain separate emissions.
         Invalid selectors, timelines and child lowering failures propagate.
         """

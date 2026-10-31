@@ -456,7 +456,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         events share its current end; actual output ends plus owner post-delay
         determine the ceiled end without moving reference time. Snapshot source
         markers use module.name; nested emissions retain their own labels.
-        Branch/ScanWith retain native path/iteration reference synchronization.
+        Branch joins case ends without moving reference; ScanWith retains
+        iteration reference synchronization.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """
@@ -708,16 +709,24 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     @contextmanager
     def branch(self, *, by: str, align_timeline: bool) -> Generator[BranchCases]:
-        """Select indexed cases and merge static ends without moving reference.
+        """Select indexed sweep cases without advancing the shared reference.
 
-        by is an existing sweep loop name. Use case(index) for zero-based points,
-        in any order. Omitted points execute no actions. Duplicate, non-integer
-        or out-of-range indices raise ValueError.
-        Each used timeline resumes at the static maximum of its case ends.
-        Unjoined local fork ends merge along their lineage into the incoming
-        ancestor, not other timelines. Explicit joins keep their destination.
-        Forked names expire at case exit, even when every case uses the same name.
-        Measurement selectors raise ValueError. Call only while building _body.
+        by names an existing sweep loop. case(index) selects its zero-based point,
+        in any declaration order; omitted points execute no actions. Each case
+        starts with the incoming timeline ends and reference. align_timeline is
+        required: True joins every case end per timeline (static max or exact
+        runtime pointwise max); False retains the executed case end as a runtime
+        value on each used timeline. Unused timelines keep their incoming ends.
+        Both modes allow subsequent placement. Local fork names expire at case
+        exit; unjoined local ends are discarded, not merged into their ancestor.
+        True requires every end to be reconstructible from branch-entry state.
+        Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
+        Repeat in a case raises ValueError; move it outside this branch. Branch
+        inside Repeat is supported. Unconditional actions inside this context
+        raise ValueError; put them before or after the with block.
+        Duplicate, non-integer/out-of-range indices and measurement selectors
+        raise ValueError. Register exhaustion propagates QICK errors unchanged.
+        Call only while building _body.
         """
         if not self._building_body:
             raise ValueError("branch must be called in _body")

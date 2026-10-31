@@ -233,11 +233,12 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeli
 
 
 @pytest.mark.parametrize("explicit_join", [False, True])
-def test_branch_local_forks_merge_only_into_their_unjoined_ancestor(explicit_join):
+@pytest.mark.parametrize("align_timeline", [True, False])
+def test_branch_local_forks_are_discarded_unless_explicitly_joined(explicit_join, align_timeline):
     def body(prog):
         prog.fork("default", into=["p", "q", "untouched"])
         prog.delay_timeline(9 / 430.08, timeline="untouched")
-        with prog.branch(by="scan", align_timeline=True) as branch, branch.case(1):
+        with prog.branch(by="scan", align_timeline=align_timeline) as branch, branch.case(1):
             prog.delay_timeline(20 / 430.08, timeline="p")
             prog.delay_timeline(40 / 430.08, timeline="q")
             prog.fork("p", into="local")
@@ -252,10 +253,11 @@ def test_branch_local_forks_merge_only_into_their_unjoined_ancestor(explicit_joi
         prog.pulse(0, "p0", t=200 / 430.08)
 
     result = shots(program(body))
-    # leaf ends at 20+80=100. Unjoined: p=100,q=40. Explicit: p=20,q=100.
+    # leaf ends at 20+80=100. Discarded: p=20,q=40. Explicit: p=20,q=100.
     # Untouched stays at 9, so the native pulse after its sync is at 209.
-    expected = [20, 100, 209] if explicit_join else [100, 40, 209]
-    assert [waves(s) for s in result] == [expected] * 3
+    selected = [20, 100 if explicit_join else 40, 209]
+    expected = [selected] * 3 if align_timeline else [[0, 0, 209], selected, [0, 0, 209]]
+    assert [waves(s) for s in result] == expected
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
@@ -559,7 +561,8 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
-def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline):
+@pytest.mark.parametrize("overwrite_before_branch", [False, True])
+def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline, overwrite_before_branch):
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")
@@ -567,6 +570,8 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(align_timeline
         with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(1 / 430.08)
         prog.fork("external", into="working")
+        if overwrite_before_branch:
+            prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
         with prog.branch(by="scan", align_timeline=align_timeline) as branch:
             with branch.case(0):
                 prog.delay_timeline(5 / 430.08, timeline="working")

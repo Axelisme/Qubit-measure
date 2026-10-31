@@ -213,16 +213,23 @@ class TimelineBuilder:
         self._record(replay)
 
     def branch(self, *, by: str, align_timeline: bool) -> AbstractContextManager[BuilderBranchCases]:
-        """Record indexed cases, merging static ends without moving reference.
+        """Record indexed cases without advancing the shared reference.
 
-        by names an existing sweep loop. The yielded handle's case(index) records
-        a zero-based point, in any order. Omitted points execute no actions.
-        Used timelines resume at the static maximum of their case ends.
-        Unjoined local fork ends merge into their incoming ancestor; explicit
-        joins keep their chosen destination. Local names expire at case exit.
-        Unknown selectors, invalid indices and timeline errors propagate from the
-        program at build. Calls after build raise ValueError. Close this context
-        before build; its handle expires on exit.
+        by names an existing sweep loop. The yielded handle\'s case(index) records
+        a zero-based point, in any order; omitted points execute no actions.
+        Each case starts with the branch-entry ends and reference. Required
+        align_timeline=True joins case ends per timeline, using static max or
+        exact runtime pointwise max. False keeps the executed case end as a
+        runtime value for each used timeline. Unused timelines remain unchanged.
+        Local fork names expire and unjoined local ends are discarded. True
+        requires all ends to be reconstructible from branch-entry state.
+        Case delay/delay_auto/sync fail at build; use delay_timeline. Repeat in
+        a case fails at build; move it outside the branch. Branch inside Repeat
+        is supported. Unconditional actions in this context fail at build; move
+        them before or after the with block. Unknown selectors, invalid indices,
+        timing and native register-capacity errors propagate from the program.
+        Calls after build raise ValueError. Close before build; the handle
+        expires on exit.
         """
         self._ensure_recording()
         return self._branch(by, align_timeline)
