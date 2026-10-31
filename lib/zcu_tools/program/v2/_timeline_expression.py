@@ -162,7 +162,7 @@ def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
         # Each resulting linear path still uses source_limits, never a grid.
         variables = time_variables(value)
         if variables and all(v.minimum is not None and v.maximum is not None for v in variables) and any(
-            not v.producer.axes or v.producer.interval_points is not None for v in variables
+            not isinstance(v.bounds.source, str) or v.bounds.deviation_minimum != v.bounds.deviation_maximum for v in variables
         ):
             lower = choose_time(*(bound_unknowns(item, upper=False) for item in value.alternatives), maximum=value.maximum)
             upper = choose_time(*(bound_unknowns(item, upper=True) for item in value.alternatives), maximum=value.maximum)
@@ -339,7 +339,7 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
                 variable.name, min(points), max(points), CycleProducer(variable.producer.axes, points)
             )
             terms.append((endpoint, coefficient))
-        elif variable.producer.axes:
+        elif isinstance(variable.bounds.source, str):
             terms.append((variable, coefficient))
         else:
             endpoint = (
