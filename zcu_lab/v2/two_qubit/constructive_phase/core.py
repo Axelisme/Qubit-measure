@@ -326,7 +326,9 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
 
         if analysis.interference is not None:
             phases, squared, dense, curve, maximum_phase = analysis.interference
-            _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
+            _, ax = plots.subplots(
+                "constructive_phase", figsize=(9, 6), layout="constrained"
+            )
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
             ax.plot(dense, curve, label="A + B cosφ + C sinφ")
             ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")

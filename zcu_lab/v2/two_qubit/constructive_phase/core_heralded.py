@@ -232,7 +232,8 @@ class ConstructivePhaseHeraldedExp(
         totals = counts.sum(axis=(-2, -1))
         answer = ReturnData(
             joint_probabilities(counts).reshape(len(coordinates), len(durations), 9),
-            (result.sums.sum(axis=(-4, -3, -2, -1)) == cfg.reps * cfg.rounds) & (totals > 0),
+            (result.sums.sum(axis=(-4, -3, -2, -1)) == cfg.reps * cfg.rounds)
+            & (totals > 0),
             totals,
             herald_probabilities(result.sums),
         )
@@ -358,7 +359,9 @@ class ConstructivePhaseHeraldedExp(
 
         if analysis.interference is not None:
             phases, squared, dense, curve, maximum_phase = analysis.interference
-            _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
+            _, ax = plots.subplots(
+                "constructive_phase", figsize=(9, 6), layout="constrained"
+            )
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
             ax.plot(dense, curve, label="A + B cosφ + C sinφ")
             ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
