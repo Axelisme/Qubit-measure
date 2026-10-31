@@ -650,6 +650,19 @@ def test_duplicate_builder_axes_raise_at_recording(mock_soccfg, first, second):
     ]
 
 
+def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.emit(_readout("first"))
+    builder.emit(_readout("second"))
+    prog = builder.build()
+    assert list(prog.ro_chs) == [0]
+    assert prog.ro_chs[0]["length"] == 61
+    assert prog.ro_chs[0]["trigs"] == 2
+    assert len(waves(shots(prog)[0])) == 2
+    prog.compile()
+    assert prog.ro_chs[0]["trigs"] == 2
+
+
 @pytest.mark.parametrize("resource", ["adc", "register", "register address"])
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, frontend):
