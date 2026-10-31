@@ -326,7 +326,7 @@ class TimelineAdvance(TimedMacro):
             # Apply the shared float-noise policy only to the complete aggregate.
             result: Time = ceil_tick(float(exact)) / get_fclk(prog)
         else:
-            result = fractional if self.aligned else align_end(prog, fractional)
+            result = fractional if self.aligned else align_end(prog, fractional, event.native)
         for register in registers:
             result = self.book.math.add(register, result)
         if (
