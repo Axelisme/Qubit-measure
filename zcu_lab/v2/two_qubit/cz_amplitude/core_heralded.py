@@ -134,7 +134,7 @@ class CZAmplitudeHeraldedExp(
             raise ValueError("Heralded CZ return requires sums (Ns,3,3,3,3)")
         terminal = analyze_return(
             result.scales,
-            terminal_counts(result.sums, heralded=True),
+            terminal_counts(result.sums, ("g", "g")),
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
             plots=plots,

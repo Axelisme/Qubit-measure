@@ -26,9 +26,9 @@ The live plot shows terminal P(g,g) from accumulated counts for each nominal bra
 
 ## Saved data and analysis
 
-Result stores `branches=[0,1,2,3]` and float64 `sums` with shape `(4,3,3)`. The last axes are terminal F1 and F2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
+Result stores `prepared_states=[0,1,2,3]` for named states gg, ge, eg, ee and float64 `sums` with shape `(4,3,3)`. The last axes are terminal F1 and F2, each ordered g/e/other. Counts remain unnormalized. Native persistence generates the class coordinates and saves the actual run cfg. File size does not grow with the shot count.
 
-FIT shows a 4×9 count and row-normalized probability matrix. Columns are F1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds.
+FIT shows a 4×9 count and row-normalized probability matrix. Columns are F1-major joint classes from g,g through other,other. Every class, including other, contributes to the denominator. Zero-count and unmeasured rows give NaN probabilities. Partial acquisitions can still provide distributions from their completed rounds. Each row label shows its acquired shot count.
 
 The matrix includes initial populations, preparation errors and readout effects. It is not a pure-state assignment matrix. FIT offers no correction or writeback. Do not infer gate fidelity or invert this matrix without separate calibration evidence.
 
@@ -36,6 +36,6 @@ Old raw-IQ files lack `sums` and fail Load explicitly. There is no conversion fr
 
 ## Heralded alternative
 
-Open `two_qubit/joint_readout_heralded` for a separate experiment with its own cfg and saved Result. It adds a full mux herald read before preparation, saves all 81 herald/terminal class combinations, and analyzes the terminal distribution only for herald classified g,g. See the [heralded guide](guide_heralded.md).
+Open `two_qubit/joint_readout_heralded` for a separate experiment with its own cfg and saved Result. It adds a full mux herald read before preparation, saves all 81 herald/terminal class combinations, and aligns terminal distributions from herald g,g and e,e by actual preparation. It also adds their counts before normalizing a combined matrix. See the [heralded guide](guide_heralded.md).
 
 Herald pass fraction measures classified acceptance, not ground-state purity. Neither version claims hardware calibration from offline checks. Continue physical calibration with the [FTF bring-up guide](../guide.md).

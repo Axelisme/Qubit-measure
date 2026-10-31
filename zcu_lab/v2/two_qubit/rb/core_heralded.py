@@ -159,7 +159,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     data.seeds,
                     data.arms,
                     data.rounds,
-                    terminal_counts(data.sums, heralded=True),
+                    terminal_counts(data.sums, ("g", "g")),
                 ),
             ),
             options,

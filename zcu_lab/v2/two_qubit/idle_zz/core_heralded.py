@@ -152,7 +152,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 data.dc_values,
                 data.branches,
                 data.delays,
-                terminal_counts(data.sums, heralded=True),
+                terminal_counts(data.sums, ("g", "g")),
             ),
             complete=complete,
             plots=plots,

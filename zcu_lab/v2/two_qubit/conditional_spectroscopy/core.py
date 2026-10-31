@@ -24,6 +24,7 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    Classify,
     Pulse,
     Reset,
     SweepCfg,
@@ -40,11 +41,9 @@ from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles
 from .._sums import (
     marginal_probabilities,
-    readout_axes,
     terminal_counts,
     validate_classifiers,
 )
-from .._timeline import emit_readout_prefix
 from .analysis import SpectroscopyAnalysis, analyze_spectra
 
 BRANCH_LABELS = ("00", "01", "10", "11")
@@ -171,7 +170,11 @@ def build_program(
         initial_delay=cfg.initial_delay,
         relax_delay=cfg.relax_delay,
     )
-    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    readout = MuxReadout("readout", cfg.readout)
+    if cfg.reset is not None:
+        builder.emit(Reset("reset", cfg.reset))
+    if heralded:
+        builder.emit(readout, tag="herald")
     if branch & 2:
         builder.emit(Pulse("prepare_f1", cfg.x180_f1))
     if branch & 1:
@@ -213,7 +216,7 @@ def acquire_counts(
     }
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, heralded=heralded)
+        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
         f1 = marginal_probabilities(counts, "f1")[..., 1]
         f2 = marginal_probabilities(counts, "f2")[..., 1]
         for (d, branch), viewer in viewers.items():
@@ -245,7 +248,11 @@ def acquire_counts(
                         prog,
                         context.soc,
                         processor=shot_sums(
-                            prog, readout_axes(step.cfg.roles, heralded=heralded)
+                            prog, [
+                            Classify(label, tone)
+                            for label in (("herald", "terminal") if heralded else ("terminal",))
+                            for tone in (step.cfg.roles.f1_tone, step.cfg.roles.f2_tone)
+                        ]
                         ),
                         rounds=step.cfg.rounds,
                         options=RunOptions(),

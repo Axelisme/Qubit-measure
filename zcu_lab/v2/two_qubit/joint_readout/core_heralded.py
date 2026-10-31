@@ -1,67 +1,129 @@
-"""Joint readout with a ground-ground herald before each preparation."""
+"""Joint readout with gg and ee herald groups aligned by actual preparation."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field, model_validator
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
-    Experiment,
-    GroupedAxesSpec,
-    GroupedLoadData,
-    VariableAxisSpec,
-    VariableSpec,
+    Experiment, GroupedAxesSpec, GroupedLoadData, VariableAxisSpec, VariableSpec,
     VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
+from zcu_tools.program.v2.modules import MuxReadout
 
-from .._sums import herald_probabilities, terminal_counts
-from .core import (
-    BRANCH_LABELS,
-    OUTCOME_LABELS,
-    JointReadoutAnalysis,
-    JointReadoutCfg,
-    JointReadoutResult,
-    acquire_counts,
-    analyze_counts,
+from zcu_lab.v2.support import live_line
+
+from .._readout import JointRoles
+from .._sums import (
+    herald_probabilities, joint_probabilities, terminal_counts, validate_classifiers,
+)
+
+PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
+PREPARED_LABELS = tuple(f"{f1},{f2}" for f1, f2 in PREPARED_STATES)
+OUTCOME_LABELS = tuple(
+    f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
 )
 
 
-class JointReadoutHeraldedCfg(JointReadoutCfg):
-    """Four branches preceded by optional reset and a full mux herald read.
+class JointReadoutHeraldedCfg(ConfigBase):
+    """Four named I/Xπ preparations preceded by optional reset and mux herald.
 
-    Inherited readout supplies both reads and their g/e/other circle radii.
-    Its post_delay is the wait after herald. reset=None emits no reset.
-    All other fields and units match JointReadoutCfg.
+    reps is shots per round; rounds accumulate counts on the acquisition side.
+    Delays are us, pulse frequency MHz and phase degrees. roles retain the
+    captured full mux mapping. Only F1/F2 require circle classifiers with GE Post
+    radii. No DC device is driven. readout and pulses are editable calibrated
+    inputs. reset=None emits no reset; otherwise it starts every shot. Herald and
+    terminal reuse one mux object; readout post_delay is the wait after herald.
     """
+
+    reps: Annotated[int, FieldMeta(label="Reps")] = Field(default=1, gt=0)
+    rounds: Annotated[int, FieldMeta(label="Rounds")] = Field(default=1, gt=0)
+    initial_delay: Annotated[float, FieldMeta(label="Initial delay", unit="us")] = 1.0
+    relax_delay: Annotated[
+        float, FieldMeta(label="Relax delay", unit="us", decimals=3)
+    ] = 1.0
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(
+            label="Reset", description="Optional reset at the start of every shot."
+        ),
+    ] = None
+    x180_f1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F1 Xπ",
+            description="Calibrated F1 x180 pulse on its charge generator.",
+        ),
+    ]
+    x180_f2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="F2 Xπ",
+            description="Calibrated F2 x180 pulse on its charge generator.",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="Full mux readout; F1/F2 need circle + radius from GE Post.",
+        ),
+    ]
+    roles: JointRoles
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Require distinct charge generators and calibrated F1/F2 role tones."""
+        if self.x180_f1.ch == self.x180_f2.ch:
+            raise ValueError("F1/F2 Xπ pulses require different charge generators")
+        validate_classifiers(self.readout, self.roles)
+        return self
 
 
 @dataclass(frozen=True)
 class JointReadoutHeraldedResult:
-    """branches is int64 [0,1,2,3]; sums is float64 (4,3,3,3,3) raw counts.
+    """prepared_states is int64 [0,1,2,3]; sums is float64 (4,3,3,3,3).
 
-    Class axes are herald F1, herald F2, terminal F1, terminal F2. Each is ordered
-    g/e/other. Rounds add without averaging. Unmeasured branches remain NaN;
-    completed rounds survive cancellation. Check the RunContext stop signal for
-    acquisition errors.
+    Nominal preparations are gg/ge/eg/ee. Class axes are herald F1/F2 then
+    terminal F1/F2, each g/e/other. Counts include all herald classes without
+    normalization. Unmeasured points are NaN; completed rounds survive stop.
+    The RunContext still reports cancellation or acquisition failure.
     """
 
-    branches: NDArray[np.int64]
+    prepared_states: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
 @dataclass(frozen=True)
 class JointReadoutHeraldedAnalysis:
-    """terminal is the 4×9 analysis conditioned on herald classified (g,g).
+    """gg/ee/combined counts and matrices are (4,9), aligned to actual gg/ge/eg/ee.
 
-    herald_matrix is (4,3,3), the herald g/e/other distribution per branch.
-    pass_fraction is its (g,g) cell, shape (4,), not ground-state purity.
-    Empty or unmeasured distributions are NaN.
+    gg_counts selects herald gg. ee_counts reverses nominal preparation using
+    both Xπ flips. combined_counts adds the two counts before normalization;
+    each corresponding matrix normalizes its own rows, including other.
+    selected_shots is (3,4), ordered gg, ee, combined, in actual-state order.
+    acquired_shots is (4,), in nominal-state order, over all herald classes.
+    herald_matrix is (4,3,3) in nominal order; pass_fraction is its gg cell.
+    Empty or unmeasured distributions have NaN probabilities, not zero purity.
     """
 
-    terminal: JointReadoutAnalysis
+    gg_counts: NDArray[np.float64]
+    gg_matrix: NDArray[np.float64]
+    ee_counts: NDArray[np.float64]
+    ee_matrix: NDArray[np.float64]
+    combined_counts: NDArray[np.float64]
+    combined_matrix: NDArray[np.float64]
+    selected_shots: NDArray[np.float64]
+    acquired_shots: NDArray[np.float64]
     herald_matrix: NDArray[np.float64]
     pass_fraction: NDArray[np.float64]
 
@@ -69,17 +131,18 @@ class JointReadoutHeraldedAnalysis:
 def restore_result(
     data: GroupedLoadData[JointReadoutHeraldedCfg],
 ) -> JointReadoutHeraldedResult:
-    """Restore 81-class sums; missing sums in old raw-IQ files raises ValueError."""
+    """Restore 81-class sums; old raw-IQ files without sums raise ValueError."""
     sums = data.variable("sums")
     return JointReadoutHeraldedResult(
-        branches=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
+        prepared_states=sums.axes[4].astype(np.int64),
+        sums=sums.z.astype(np.float64),
     )
 
 
 class JointReadoutHeraldedExp(
     Experiment[JointReadoutHeraldedResult, JointReadoutHeraldedCfg]
 ):
-    """Condition four-branch readout analysis on herald classified (g,g)."""
+    """Measure all herald classes and compare gg/ee preparations by actual state."""
 
     AXES_SPEC: ClassVar[
         GroupedAxesSpec[JointReadoutHeraldedResult, JointReadoutHeraldedCfg]
@@ -93,19 +156,19 @@ class JointReadoutHeraldedExp(
                     VariableAxisSpec.generated_arange("herald_f2", ""),
                     VariableAxisSpec.generated_arange("herald_f1", ""),
                     VariableAxisSpec(
-                        "Nominal preparation", "", field_name="branches", dtype=np.int64
+                        "Nominal preparation", "", field_name="prepared_states",
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
-                    field_name="sums",
-                    label="Herald and terminal class counts",
-                    unit="",
-                    dtype=np.float64,
+                    field_name="sums", label="Herald and terminal class counts",
+                    unit="", dtype=np.float64,
                 ),
             ),
         ),
         result_type=JointReadoutHeraldedResult,
         cfg_type=JointReadoutHeraldedCfg,
+        cfg_schema_version="2.0",
         tag="two_qubit/joint_readout_heralded",
         result_builder=restore_result,
     )
@@ -113,16 +176,54 @@ class JointReadoutHeraldedExp(
     def run(
         self, config: JointReadoutHeraldedCfg, *, context: RunContext
     ) -> JointReadoutHeraldedResult:
-        """Acquire optional reset → herald → I/Xπ preparation → terminal.
+        """Acquire optional reset → herald → named I/Xπ preparation → terminal.
 
-        Both tagged reads emit the same mux object. Return (4,3,3,3,3) raw
-        summed counts for every herald class, not only accepted shots. The cfg
-        is unchanged. Rounds accumulate on the acquisition side.
+        Both reads reuse one mux object. Return raw (4,3,3,3,3) counts for every
+        herald class. Rounds accumulate at acquisition; cfg remains unchanged.
         """
-        return JointReadoutHeraldedResult(
-            np.arange(4, dtype=np.int64),
-            acquire_counts(config, context=context, heralded=True),
+
+        validate_classifiers(config.readout, config.roles)
+        viewer = live_line(
+            context.plots, "measurement", "Nominal preparation (gg, ge, eg, ee)",
+            "Terminal P(g,g) | herald (g,g)",
         )
+
+        def update_view(sums: NDArray[np.float64]) -> None:
+            viewer.update(
+                np.arange(4, dtype=np.float64),
+                joint_probabilities(terminal_counts(sums, ("g", "g")))[..., 0, 0],
+            )
+
+        buffer = SignalBuffer((4, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
+        with Schedule(config, buffer, scope=context.scope) as sched:
+            for prepared, step in sched.scan("prepared_states", list(range(4))):
+                cfg = step.cfg
+                builder = TimelineBuilder(
+                    context.soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
+                )
+                readout = MuxReadout("readout", cfg.readout)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.emit(readout, tag="herald")
+                f1, f2 = PREPARED_STATES[prepared]
+                if f1 == "e":
+                    builder.emit(Pulse("x180_f1", cfg.x180_f1))
+                if f2 == "e":
+                    builder.emit(Pulse("x180_f2", cfg.x180_f2))
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                axes = [
+                    Classify("herald", cfg.roles.f1_tone),
+                    Classify("herald", cfg.roles.f2_tone),
+                    Classify("terminal", cfg.roles.f1_tone),
+                    Classify("terminal", cfg.roles.f2_tone),
+                ]
+                step.run_acquire_summed(
+                    prog, context.soc, processor=shot_sums(prog, axes),
+                    rounds=cfg.rounds, options=RunOptions(),
+                )
+        return JointReadoutHeraldedResult(np.arange(4, dtype=np.int64), buffer.array)
 
     def analyze(
         self,
@@ -131,41 +232,91 @@ class JointReadoutHeraldedExp(
         *,
         plots: Plots,
     ) -> JointReadoutHeraldedAnalysis:
-        """Analyze herald (g,g) terminal counts and plot all nine herald fractions.
+        """Plot gg, ee and count-combined 4×9 distributions and nine herald fractions.
 
-        The terminal matrix uses the ordinary version's analysis. Pass fraction
-        measures classified acceptance, not initial-state purity. No cfg or raw
-        IQ is needed. Zero acceptance gives NaN terminal probabilities.
+        Reorder ee by the actual state after both nominal Xπ preparations.
+        Add raw counts, never group probabilities. Display completed-round
+        partial counts with each row's shot total. Zero totals give NaN.
+        Other herald classes stay saved but do not enter terminal analysis.
         """
         del options
         result = source.result
-        if result.sums.shape != (4, 3, 3, 3, 3):
-            raise ValueError("Heralded joint readout requires sums (4,3,3,3,3)")
-        terminal = analyze_counts(
-            JointReadoutResult(
-                result.branches, terminal_counts(result.sums, heralded=True)
-            ),
-            plots=plots,
-        )
+        if not np.array_equal(result.prepared_states, np.arange(4)) or result.sums.shape != (
+            4, 3, 3, 3, 3,
+        ):
+            raise ValueError(
+                "Heralded joint readout requires prepared_states [0,1,2,3] "
+                "and sums (4,3,3,3,3)"
+            )
+
+        # Herald ee starts with both qubits excited. The same I/Xπ preparation
+        # reaches the complementary state, so align nominal ee/eg/ge/gg to gg/ge/eg/ee.
+        ee_order = [
+            PREPARED_STATES.index((
+                "e" if f1 == "g" else "g",
+                "e" if f2 == "g" else "g",
+            ))
+            for f1, f2 in PREPARED_STATES
+        ]
+        gg = terminal_counts(result.sums, ("g", "g"))
+        ee = terminal_counts(result.sums, ("e", "e"))[ee_order]
+        combined = gg + ee
+        counts = np.stack((gg, ee, combined))
+        matrices = joint_probabilities(counts).reshape(3, 4, 9)
+        selected_shots = counts.sum(axis=(-2, -1))
         herald_matrix = herald_probabilities(result.sums)
-        fig, axes = plots.subplots("herald", figsize=(12, 5))
-        image = axes.imshow(
+        acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1))
+
+        fig, axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
+        for group, (ax, title) in enumerate(zip(
+            axes, ("Herald (g,g)", "Herald (e,e)", "Combined counts"), strict=True,
+        )):
+            image = ax.imshow(
+                np.ma.masked_invalid(matrices[group]), vmin=0, vmax=1, cmap="Blues",
+            )
+            for row in range(4):
+                for col in range(9):
+                    value = matrices[group, row, col]
+                    label = (
+                        f"{value:.3f}\nn={counts[group].reshape(4, 9)[row, col]:g}"
+                        if np.isfinite(value) else "No shots"
+                    )
+                    ax.text(col, row, label, ha="center", va="center", fontsize=7)
+            ax.set(
+                xticks=range(9), xticklabels=OUTCOME_LABELS, yticks=range(4),
+                yticklabels=[
+                    f"{state}; n={shots:g}" for state, shots in zip(
+                        PREPARED_LABELS, selected_shots[group], strict=True,
+                    )
+                ],
+                xlabel="Observed terminal class (F1, F2)",
+                ylabel="Actual preparation; selected shots", title=title,
+            )
+            fig.colorbar(image, ax=ax, label="Row-normalized probability")
+        fig.tight_layout()
+
+        fig, ax = plots.subplots("herald", figsize=(12, 5))
+        image = ax.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
-            vmin=0,
-            vmax=1,
-            cmap="Blues",
+            vmin=0, vmax=1, cmap="Blues",
         )
-        axes.set(
-            xticks=range(9),
-            xticklabels=OUTCOME_LABELS,
-            yticks=range(4),
-            yticklabels=BRANCH_LABELS,
+        ax.set(
+            xticks=range(9), xticklabels=OUTCOME_LABELS, yticks=range(4),
+            yticklabels=[
+                f"{state}; n={shots:g}" for state, shots in zip(
+                    PREPARED_LABELS, acquired_shots, strict=True,
+                )
+            ],
             xlabel="Herald class (F1, F2)",
-            ylabel="Nominal I/Xπ preparation",
+            ylabel="Nominal preparation; acquired shots",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
-        fig.colorbar(image, ax=axes, label="Herald probability")
+        fig.colorbar(image, ax=ax, label="Herald probability")
         fig.tight_layout()
         return JointReadoutHeraldedAnalysis(
-            terminal, herald_matrix, herald_matrix[..., 0, 0]
+            gg_counts=gg.reshape(4, 9), gg_matrix=matrices[0],
+            ee_counts=ee.reshape(4, 9), ee_matrix=matrices[1],
+            combined_counts=combined.reshape(4, 9), combined_matrix=matrices[2],
+            selected_shots=selected_shots, acquired_shots=acquired_shots,
+            herald_matrix=herald_matrix, pass_fraction=herald_matrix[..., 0, 0],
         )

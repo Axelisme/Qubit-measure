@@ -62,7 +62,7 @@ def joint_return(
         or data.sums.shape != (nc, nd, *class_shape)
     ):
         raise ValueError("Rabi count axes/shape must match saved cfg and class axes")
-    counts = terminal_counts(data.sums, heralded=heralded)
+    counts = (terminal_counts(data.sums, ("g", "g")) if heralded else data.sums)
     totals = counts.sum(axis=(-2, -1))
     complete = np.all(np.isfinite(counts), axis=(-2, -1)) & (totals > 0)
     return ReturnData(

@@ -110,7 +110,7 @@ def _source_quadratures(
     shape = (2, 2, len(cfg.gate_counts)) + ((3, 3, 3, 3) if heralded else (3, 3))
     if data.sums.shape != shape:
         raise ValueError(f"Expected summed count shape {shape}, got {data.sums.shape}")
-    return terminal_counts(data.sums, heralded=heralded)
+    return (terminal_counts(data.sums, ("g", "g")) if heralded else data.sums)
 
 
 def _fit_target(

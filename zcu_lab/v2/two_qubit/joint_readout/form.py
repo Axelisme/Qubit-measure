@@ -9,8 +9,9 @@ from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
 from .core import JointReadoutCfg
+from .core_heralded import JointReadoutHeraldedCfg
 
-T_Cfg = TypeVar("T_Cfg", bound=JointReadoutCfg)
+T_Cfg = TypeVar("T_Cfg", JointReadoutCfg, JointReadoutHeraldedCfg)
 
 
 def joint_readout_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:

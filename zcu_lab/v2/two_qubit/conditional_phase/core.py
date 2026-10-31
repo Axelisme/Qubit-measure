@@ -24,6 +24,7 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    Classify,
     Pulse,
     Reset,
     SweepCfg,
@@ -37,8 +38,7 @@ from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg, dual_line_drive
 from .._readout import JointRoles
-from .._sums import readout_axes, sigma, terminal_counts, validate_classifiers
-from .._timeline import emit_readout_prefix
+from .._sums import sigma, terminal_counts, validate_classifiers
 from .analysis import ConditionalPhaseAnalysis, analyze_phase
 
 
@@ -214,7 +214,11 @@ def build_program(
         initial_delay=cfg.initial_delay,
         relax_delay=cfg.relax_delay,
     )
-    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    readout = MuxReadout("readout", cfg.readout)
+    if cfg.reset is not None:
+        builder.emit(Reset("reset", cfg.reset))
+    if heralded:
+        builder.emit(readout, tag="herald")
     if point.branch:
         builder.emit(Pulse("spectator", spectator))
     builder.emit(Pulse("prepare_target", target))
@@ -256,7 +260,7 @@ def acquire_counts(
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, heralded=heralded)
+        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
         values = sigma(counts, config.target).reshape(-1, len(frequencies))
         viewer.update(frequencies, values)
 
@@ -281,7 +285,11 @@ def acquire_counts(
                             prog,
                             context.soc,
                             processor=shot_sums(
-                                prog, readout_axes(step.cfg.roles, heralded=heralded)
+                                prog, [
+                            Classify(label, tone)
+                            for label in (("herald", "terminal") if heralded else ("terminal",))
+                            for tone in (step.cfg.roles.f1_tone, step.cfg.roles.f2_tone)
+                        ]
                             ),
                             rounds=step.cfg.rounds,
                             options=RunOptions(),

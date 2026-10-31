@@ -14,6 +14,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import (
+    Classify,
     Pulse,
     PulseCfg,
     SweepCfg,
@@ -21,7 +22,7 @@ from zcu_tools.program.v2 import (
     TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import MuxReadoutCfg, Reset
+from zcu_tools.program.v2.modules import MuxReadout, MuxReadoutCfg, Reset
 
 from zcu_lab.v2.support import live_line
 
@@ -29,11 +30,9 @@ from ._drive import DualLineCfg, dual_line_drive
 from ._readout import JointRoles
 from ._sums import (
     joint_probabilities,
-    readout_axes,
     terminal_counts,
     validate_classifiers,
 )
-from ._timeline import emit_readout_prefix
 
 
 class DurationScanCfg(ConfigBase):
@@ -174,7 +173,11 @@ def build_program(
         initial_delay=cfg.initial_delay,
         relax_delay=cfg.relax_delay,
     )
-    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    readout = MuxReadout("readout", cfg.readout)
+    if cfg.reset is not None:
+        builder.emit(Reset("reset", cfg.reset))
+    if heralded:
+        builder.emit(readout, tag="herald")
     builder.emit(Pulse("prepare_f1", cfg.x180_f1))
     builder.emit(Pulse("prepare_f2", cfg.x180_f2))
     builder.emit(dual_line_drive(point_drive, frequency=float(point_drive.f1.freq)))
@@ -212,7 +215,7 @@ def acquire_counts(
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = terminal_counts(sums, heralded=heralded)
+        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
         viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
 
     class_shape = (3, 3, 3, 3) if heralded else (3, 3)
@@ -232,7 +235,11 @@ def acquire_counts(
                     prog,
                     context.soc,
                     processor=shot_sums(
-                        prog, readout_axes(cfg.roles, heralded=heralded)
+                        prog, [
+                            Classify(label, tone)
+                            for label in (("herald", "terminal") if heralded else ("terminal",))
+                            for tone in (cfg.roles.f1_tone, cfg.roles.f2_tone)
+                        ]
                     ),
                     rounds=cfg.rounds,
                     options=RunOptions(),

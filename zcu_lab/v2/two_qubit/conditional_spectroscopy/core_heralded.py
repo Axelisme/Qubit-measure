@@ -154,7 +154,7 @@ class SpectroscopyHeraldedExp(
             data.dc_values,
             data.branches,
             data.frequencies,
-            terminal_counts(data.sums, heralded=True),
+            terminal_counts(data.sums, ("g", "g")),
         )
         terminal = analyze_spectra(
             cfg,
