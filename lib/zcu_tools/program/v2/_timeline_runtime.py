@@ -38,11 +38,11 @@ from .modules.util import get_fclk
 
 
 def ceil_tick(ticks: float) -> int:
-    """Ceil cycle values, ignoring floating noise within 1e-10 of an integer."""
+    """Ceil cycles, snapping near integers with rel=1e-12 and abs=1e-10."""
     nearest = round(ticks)
     return (
         nearest
-        if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
+        if math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)
         else math.ceil(ticks)
     )
 
@@ -129,7 +129,14 @@ def step_time(prog, value: float | QickParam) -> float | QickParam:
     # Use QICK public conversion/rounding APIs, never inspect raw sweep internals.
     param = QickParam(value.start, value.spans.copy())
     prog.us2cycles(param)
-    return param.get_rounded(loop_counts=prog.loop_dict)
+    rounded = param.get_rounded(loop_counts=prog.loop_dict)
+    axes = expression_axes(parameter_expression(prog, rounded))
+    if not axes:
+        return rounded.start
+    return QickParam(
+        rounded.start,
+        {name: span for name, span in rounded.spans.items() if name in axes},
+    )
 
 
 @dataclass(frozen=True)

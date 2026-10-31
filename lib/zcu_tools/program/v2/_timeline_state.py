@@ -767,22 +767,14 @@ class TimelineBook:
 
         Known producers use exact legal-point extrema. A bounds-only unknown
         emits an explicitly conservative warning and never triggers the relax
-        guard. This check emits no runtime instructions.
+        guard. Body closure has already consumed unbounded ADC tails at runtime.
+        This check emits no runtime instructions.
         """
         if not prog.ro_chs:
             return
         expression = choose_time(
             *(self.native_expression(prog, ch, generator=False) for ch in prog.ro_chs)
         )
-        if unbounded_time(expression):
-            unknown = [
-                ch
-                for ch in prog.ro_chs
-                if unbounded_time(self.native_expression(prog, ch, generator=False))
-            ]
-            raise ValueError(
-                f"ADC {unknown} ending remains runtime-only; provide range_hint or explicitly sync before the ending"
-            )
         exact = exact_bounds(expression)
         limits = exact or projected_expression_bounds(expression)
         # Keep native timestamps untouched: final_delay must still use its
@@ -801,5 +793,26 @@ class TimelineBook:
                 raise ValueError(f"{message}, relax={relax} cycles")
             warnings.warn(message, UserWarning, stacklevel=2)
 
-    def maximum(self) -> Time:
-        return self.math.join(list(self.ends.values()) or [0.0])
+    def maximum(self, *, close_adc: bool = False) -> Time:
+        """Return the maximum selected relative end as a Time value.
+
+        With close_adc=False, select only the current timeline ends. With
+        close_adc=True, also select actual native ADC ends whose expressions
+        have no compile-time upper bound. True is only for the existing
+        all-timeline shot closure; finite ADC tails stay on the constant shell
+        WAIT and slack-proof path rather than being added as extra candidates.
+
+        Return a float or QickParam when the maximum is statically representable,
+        otherwise a RuntimeEnd for the actual runtime maximum. An empty selection
+        returns zero. This method does not advance reference or debit ends; the
+        caller consumes the returned end when synchronizing.
+        """
+        values = list(self.ends.values())
+        if close_adc:
+            prog = self.math.prog
+            values.extend(
+                self.channel_end(prog, ch, generator=False)
+                for ch in prog.ro_chs
+                if unbounded_time(self.native_expression(prog, ch, generator=False))
+            )
+        return self.math.join(values or [0.0])

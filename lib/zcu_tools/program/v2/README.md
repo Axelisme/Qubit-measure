@@ -1,16 +1,19 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，N 路合流、公共部分與旗標選值
+**Last updated:** 2026-11-01，未知 ADC tail 的 runtime 收尾
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
 ## Timeline rounding
 
 Timeline event starts now ceil to tProc cycles instead of nearest rounding.
-Each operation quantizes its result once. Ceil treats values within 1e-10 tProc
-cycles of the nearest integer as that integer to absorb floating-point conversion
-noise. For example, 119/430.08 us remains 119 cycles; positive tails outside that
-tolerance round up. Static waveform and ADC lengths use rational clock conversion
+Each operation quantizes its result once. Ceil uses
+`math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` to treat values
+near the nearest integer as that integer. This absorbs floating-point conversion
+noise even at large cycle counts. For example, 119/430.08 us remains 119 cycles.
+Near 2³¹ cycles, the relative tolerance can also absorb real fractional tails
+of up to about 0.002 cycle. Positive tails outside both tolerances round up.
+Static waveform and ADC lengths use rational clock conversion
 before the aggregate ceil. Author sweeps retain QICK
 native start rounding and truncated steps; they do not allocate pointwise time
 tables. Runtime cross-grid generator lengths use k=8 fixed-point upper conversion.
@@ -247,6 +250,9 @@ End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
 已知分量是一維 numpy 陣列。只有範圍的分量是獨立未知軸的係數，常數使用大小為 1 的固定軸。
 作者 register 的每次寫入、量測結果選表與取整誤差各自獨立，range_hint 不建立 loop 相關性。
 加減先合併同軸分量並消去零項，再加總各軸的界。證明不建立多維網格。
+已知軸上逐點全等的分量移到 const 軸，原軸從變數中消失。
+靜態結尾因此成為常數時，後續事件用字面值時間，不配置結尾 register。
+Generator fabric 的逐操作 ceil 若留下逐點差異，該軸仍保留。
 同單一已知軸的非線性運算逐點計算。跨軸 ceil 與定點換算保留原式，另加有界取整誤差。
 跨軸 max/min 使用線性部分加有理係數的 Abs 項，允許負係數及巢狀 Abs。
 正規化合併同類項，消去零係數，並在已知符號時化簡 Abs。
@@ -411,11 +417,14 @@ Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeli
 它們不是已分析 instruction effects 的安全入口。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
-`sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。
+ADC tail 沒有編譯期上界時，收尾同步也納入它的實際 runtime 結尾，取最大值推進 reference。
+無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `sync`，不因未知 ADC tail 而 build 報錯。
+作者負責未知時間的重疊與溢位；編譯器不要求補 hint，也不假造上界。
+`sync` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
+已同步消耗的 ADC tail 剩餘量為 0。
 Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
-未知 ADC tail 經同步可證消耗時，收尾常數 WAIT 使用 0。
-若 ADC tail 仍未知，build 報錯並列出 ADC，提示提供 range_hint 或在結尾前明寫同步。收尾不使用 variable WAIT，也不假造上界。
-這些式子只作編譯期記帳，不是第二個 scheduler，也不改 runtime register 或指令。
+有限 ADC tail 保留既有常數上界與 slack 檢查，不因其他 ADC tail 未知而丟掉已知來源資訊。
+這些式子用於編譯期記帳；實際同步仍沿用 runtime register 計算，不是第二個 scheduler。
 能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
 已知點的 `slack=max-min` 大於 0 時會 warning。
 已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。
