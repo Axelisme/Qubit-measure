@@ -645,6 +645,38 @@ class RepeatTimelineEnter(Macro):
         pass
 
 
+class RepeatTimelineBody(Macro):
+    """Capture an iteration origin only when body clobbers require recovery."""
+
+    def __init__(self, entry: RepeatTimelineEnter):
+        self.entry = entry
+
+    def preprocess(self, prog) -> None:
+        if not self.entry.constant:
+            frame = self.entry.accumulator.frame
+            self.entry.book.math.operations.append(WriteReg(dst=frame.origin.register, src="s_out_time"))
+            frame.recording = True
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class RepeatTimelineCapture(Macro):
+    """Capture the pointer after the loop, including the zero-iteration path."""
+
+    def __init__(self, entry: RepeatTimelineEnter):
+        self.entry = entry
+
+    def preprocess(self, prog) -> None:
+        if not self.entry.constant:
+            accumulator = self.entry.accumulator
+            self.entry.book.math.operations.append(WriteReg(dst=accumulator.frame.origin.register, src="s_out_time"))
+            self.entry.book.math.operations.extend(accumulator.post_operations)
+
+    def translate(self, prog) -> None:
+        pass
+
+
 class RepeatTimelineExit(Macro):
     """Close the selected lowering without adding an implicit synchronization."""
 
@@ -848,6 +880,8 @@ class PreparedTimelineMacro(TimedMacro):
                 prog._time_bounds.time_parameters(timing_source)
             prog._time_bounds.activate(self.source)
             self.book.observe_write(prog, self.source)
+            if self.book.loop_timelines and self.book.loop_timelines[-1].recording:
+                self.book.loop_timelines[-1].body_math.append(self.math)
         finally:
             prog._time_origin = previous_origin
             self.book.preparing -= 1

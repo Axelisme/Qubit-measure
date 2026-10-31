@@ -522,6 +522,8 @@ class _EventTime(Macro):
             amount = int(delta[0])
             if amount:
                 WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=amount).translate(prog)
+        elif self.offset == 0:
+            WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
         else:
             WriteRegOp(
                 dst="s_out_time", lhs=self.base.register, op="+",

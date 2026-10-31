@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, replace
 
-from qick.asm_v2 import Macro, WriteReg
+from qick.asm_v2 import AsmInst, Macro, WriteReg
 
 from ._timeline_axis import TimeVariable
 from ._timeline_expression import (
@@ -19,7 +19,9 @@ from ._timeline_expression import (
     unbounded_time,
 )
 from ._timeline_guard import PulseGuard
-from ._timeline_runtime import RuntimeEnd, Time, runtime_expression, time_expression
+from ._timeline_runtime import RuntimeEnd, Time, _EventTime, runtime_expression, time_expression
+from ._timeline_expression import difference_limits
+from .macro.write_reg import WriteRegOp
 from ._timeline_state import LoopTimelineFrame, TimelineBook
 from .modules.util import get_fclk
 
@@ -51,6 +53,8 @@ class LoopTimelineEnter(Macro):
         self.book = book
         self.parent = parent
         self.counter = counter
+        self.simple = False
+        self.post_operations: list[Macro] = []
 
     def preprocess(self, prog) -> None:
         book = self.book
@@ -58,6 +62,7 @@ class LoopTimelineEnter(Macro):
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
+        book.math.operations.append(WriteReg(dst="s_out_time", src=storage.register))
         progress = cycle_axis(storage.register, 0, None)
         origin = RuntimeEnd(
             storage.register,
@@ -134,7 +139,8 @@ class LoopTimelineExit(Macro):
         result = _end(frame.origin.register, result_expression)
         book.math.check_end(result)
         operand = book.math.cycles(finish)
-        book.math.operations.append(WriteReg(dst=result.register, src=operand.register))
+        book.math.operations.append(WriteReg(dst="s_out_time", src=operand.register))
+        simple = self._pointer_body(prog, frame, finish)
         for (generator, ch), initial in frame.initial_channels.items():
             current = book.channel_end(prog, ch, generator=generator)
             native = book.native_expression(prog, ch, generator=generator)
@@ -143,7 +149,8 @@ class LoopTimelineExit(Macro):
             # Each tail has storage initialized before the loop, including n=0.
             tail = frame.entry_math.snapshot(frame.entry_math.cycles(initial))
             last = book.math.cycles(current)
-            book.math.operations.append(WriteReg(dst=tail.register, src=last.register))
+            if not simple:
+                book.math.operations.append(WriteReg(dst=tail.register, src=last.register))
             relative = add_time(
                 native, scale_time(runtime_expression(frame.origin), -1)
             )
@@ -159,6 +166,8 @@ class LoopTimelineExit(Macro):
                     ),
                     multiply_time(last_expression, active),
                 )
+            if simple:
+                self._capture_channel(prog, tail, result, native, time_expression(prog, finish))
             tail = _end(tail.register, last_expression)
             channels = book.runtime_gens if generator else book.runtime_ros
             channels[ch] = tail
@@ -181,6 +190,51 @@ class LoopTimelineExit(Macro):
         book.waiting = frame.waiting
         book.pinned = frame.pinned
 
+    def _pointer_body(self, prog, frame: LoopTimelineFrame, finish: Time) -> bool:
+        """Lower already-prepared straight-line plans without per-iteration storage."""
+        if not self.entry.simple:
+            return False
+        origin = runtime_expression(frame.origin)
+        end = time_expression(prog, finish)
+        duration = difference_limits(end, origin)
+        if duration[0] is None or duration[0] != duration[1]:
+            return False
+        events = [op for math in frame.body_math for op in math.operations if isinstance(op, _EventTime)]
+        offsets = [difference_limits(event.expression, origin) for event in events]
+        if any(lo is None or lo != hi for lo, hi in offsets):
+            return False
+        for generator, ch in frame.initial_channels:
+            native = self.entry.book.native_expression(prog, ch, generator=generator)
+            if native != frame.initial_native[generator, ch]:
+                lo, hi = difference_limits(native, end)
+                if lo is None or lo != hi:
+                    return False
+        for math in frame.body_math:
+            math.operations = [op for op in math.operations if isinstance(op, _EventTime)]
+        for event, (offset, _) in zip(events, offsets):
+            if offset is None:
+                raise RuntimeError("pointer event lost its constant offset")
+            event.base = RuntimeEnd("s_out_time", expression=origin)
+            event.offset = int(offset)
+        last = events[-1].expression if events else origin
+        advance, _ = difference_limits(end, last)
+        if advance is None:
+            raise RuntimeError("pointer end lost its constant increment")
+        self.entry.book.math.operations = [WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=int(advance))]
+        return True
+
+    def _capture_channel(self, prog, tail: RuntimeEnd, result: RuntimeEnd, native: TimeExpression, finish: TimeExpression) -> None:
+        """Derive a final physical tail from the pointer, preserving n=0 tails."""
+        offset, _ = difference_limits(native, finish)
+        if offset is None:
+            raise RuntimeError("pointer channel lost its constant final offset")
+        operations = self.entry.post_operations
+        if self.minimum == 0 and isinstance(self.iterations, str):
+            operations.append(AsmInst(inst={"CMD": "TEST", "OP": prog._get_reg(self.iterations), "UF": "1"}, addr_inc=1))
+            operations.append(AsmInst(inst={"CMD": "REG_WR", "DST": prog._get_reg(tail.register), "SRC": "op", "OP": f"{prog._get_reg(result.register)} + #{int(offset)}", "IF": "NZ"}, addr_inc=1))
+        else:
+            operations.append(WriteRegOp(dst=tail.register, lhs=result.register, op="+", rhs=int(offset)))
+
     def _reference_exit(self, prog, frame: LoopTimelineFrame, finish: Time) -> None:
         """Store exact runtime debits, then restore loop-relative provenance."""
         book = self.entry.book
@@ -188,7 +242,7 @@ class LoopTimelineExit(Macro):
         result = _end(frame.origin.register, summary.end)
         book.math.check_end(result)
         operand = book.math.cycles(finish)
-        book.math.operations.append(WriteReg(dst=result.register, src=operand.register))
+        book.math.operations.append(WriteReg(dst="s_out_time", src=operand.register))
         external = self._reference_external(prog, frame, summary.advance)
         result = self._reference_channels(prog, frame, result, summary)
         self._check_backedge(

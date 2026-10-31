@@ -349,6 +349,8 @@ class LoopTimelineFrame:
     advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
+    body_math: list[RuntimeMath] = field(default_factory=list)
+    recording: bool = False
 
 
 @dataclass(frozen=True)

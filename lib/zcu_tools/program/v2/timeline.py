@@ -26,6 +26,8 @@ from ._timeline_macros import (
     ReferenceGuard,
     RepeatTimelineEnter,
     RepeatTimelineExit,
+    RepeatTimelineBody,
+    RepeatTimelineCapture,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -816,6 +818,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
             self.append_macro(fixed)
+        self.append_macro(RepeatTimelineBody(entry))
         body_start = len(self.macro_list)
         try:
             yield
@@ -826,6 +829,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 bool(body)
                 and type(body[-1]) is TimelineSync
                 and body[-1].timeline == parent
+            )
+            entry.accumulator.simple = all(
+                isinstance(macro, (TimelinePlacedPulse, TimelineAdvance))
+                and macro.timeline == parent
+                for macro in body
             )
             self.append_macro(
                 RepeatTimelineExit(
@@ -842,6 +850,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 self.close_inner_loop(name, name, n)
             elif fixed is not None:
                 self.append_macro(fixed.closing)
+            self.append_macro(RepeatTimelineCapture(entry))
 
     def join(self, *sources: str, into: str) -> None:
         """Merge existing sources and target into target's latest end (us).
