@@ -8,11 +8,11 @@ Single-shot T1-with-tone, probe-gain sweep: at each probe gain it sweeps the wai
 
 The saved `counts` array has axes `(gain, initial state, length, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; length stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
+Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; delay stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
 
 Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a circle classifier with a positive radius on the selected readout (the first tone for Mux); missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 

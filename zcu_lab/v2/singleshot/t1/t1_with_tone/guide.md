@@ -8,11 +8,11 @@ Single-shot T1-with-tone: applies a π pulse and a simultaneous probe tone durin
 
 The saved `counts` array has axes `(length, initial state, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Length stop uses 5 times the tone T1 time scale.
+Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay is 5 * `$qubit.t1`. Delay stop uses 5 times the tone T1 time scale.
 
 Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a circle classifier with a positive radius on the selected readout (the first tone for Mux); missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
 

@@ -8,11 +8,11 @@ Single-shot T1: applies a π pulse, waits for a variable delay, reads out, and c
 
 The saved `counts` array has axes `(delay, initial state, population state)`. The final axis contains class counts `[g,e,other]` summed over acquired rounds, with `population_states=[0,1,2]`. Other counts rejected shots, including ties, rather than a reconstructed remainder. Unmeasured points remain NaN.
 
-Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema remains 3.0 because the configuration fields did not change.
+Live plots and Analyze divide each row by its total count before displaying populations or applying confusion correction. A completed row sums to reps × rounds. Older files without the `counts` variable fail to load with a missing `counts` error. No conversion is provided. The cfg schema is 4.0 after renaming the time window to delay and uniform to sampling.
 
 ## Parameter sources
 
-Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay and length stop are 5 * `$qubit.t1`.
+Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay and delay stop are 5 * `$qubit.t1`.
 
 Classification uses the selected readout module's circle `classifier`. It divides raw ADC sums by integration length without subtracting IQ offset. Run rejects missing calibration or radius and asks for GE Post analysis. Linear has no Other state and cannot supply this three-state T1 measurement. Analyze uses the saved cfg's confusion matrix; old cfg without a classifier skips correction.
 
@@ -34,6 +34,6 @@ T1 appears in the plot title; calibration parameters stay unchanged. Use 'single
 
 ## Recommended
 
-Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts length stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
+Run 'singleshot/ge', apply Primary and Post to the readout module, then Reset this Form to capture that calibration. A delay sweep reaching ~5*T1 lets the decay flatten. Missing T1 starts delay stop and relax delay at 150 us; stored invalid T1 leaves both required and empty. Set 'sampling="linear"' to sweep linearly; leave 'sampling="decay"' to cluster more points along the expected exponential decay while preserving the configured start/stop window and point count. Configure the time window with `delay: SweepCfg`; explicit delay lists are not accepted.
 
 **Last updated:** 2026-10-29
