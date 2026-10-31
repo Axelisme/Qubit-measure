@@ -56,7 +56,9 @@ Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已
 每條路徑寫成一個私有 `_run_*` 方法，各自建立 buffer、`Schedule` 與程式，並在方法內寫出取數流程。
 各路徑回傳同一種 Result，座標與資料沿用相同的軸順序與 shape 契約。
 呼叫端與 `analyze` 只讀這份 Result，不依取數路徑分支。
-若分支只改座標來源，buffer、`Schedule`、程式結構與 host 迴圈都相同，就保留單一路徑。
+程式結構不同就拆成不同路徑。
+即使共用同一個硬體迴圈，只要 delay 機制或 module 組合不同，也要拆分。
+只有座標數值不同、程式結構相同時，才保留單一路徑。
 
 以 [twotone len_rabi/core.py](twotone/rabi/len_rabi/core.py) 為例，`run` 先拒絕原生 arb 波形、複製 cfg，再準備量化長度座標。
 `const`／`flat_top` 交給 `_run_for_flat`，在 FPGA sweep 長度。
