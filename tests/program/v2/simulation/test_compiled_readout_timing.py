@@ -31,8 +31,14 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
         records = []
         for record in snapshot.records:
             inst = record.instruction
-            if isinstance(inst, DportWriteInst) and isinstance(inst.data, ImmValue) and inst.data.value:
-                inst = replace(inst, src="reg", data=Register("r9"), time=Register("r10"))
+            if (
+                isinstance(inst, DportWriteInst)
+                and isinstance(inst.data, ImmValue)
+                and inst.data.value
+            ):
+                inst = replace(
+                    inst, src="reg", data=Register("r9"), time=Register("r10")
+                )
             records.append(CompiledRecord(inst, record.p_addr))
         return CompiledStream(tuple(records))
 

@@ -213,7 +213,11 @@ class Outputs:
             return
         key = (position, 0, self.iterations)
         self._emit(
-            machine, key, ch, source, _EventValues(start, duration, freq, phase, gain, active)
+            machine,
+            key,
+            ch,
+            source,
+            _EventValues(start, duration, freq, phase, gain, active),
         )
         slot = self.events[key]
         candidates = list(slot.envelopes)
@@ -299,7 +303,8 @@ class Outputs:
             self._put(target, np.where(values.active, value, 0), machine)
         slot.active[self.points] = values.active
         self.current_end = np.maximum(
-            self.current_end, np.where(values.active, values.start_us + values.duration_us, 0)
+            self.current_end,
+            np.where(values.active, values.start_us + values.duration_us, 0),
         )
 
     def _envelope(

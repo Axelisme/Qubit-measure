@@ -305,14 +305,30 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
 def test_branch_dispatch_instructions_must_match_marked_cases(defect):
     def transform(snapshot):
         records = list(snapshot.records)
-        start = next(i for i, r in enumerate(records) if isinstance(r.instruction, MetaInst) and r.instruction.type == "BRANCH_START")
-        end = next(i for i, r in enumerate(records) if isinstance(r.instruction, MetaInst) and r.instruction.type == "BRANCH_END")
+        start = next(
+            i
+            for i, r in enumerate(records)
+            if isinstance(r.instruction, MetaInst)
+            and r.instruction.type == "BRANCH_START"
+        )
+        end = next(
+            i
+            for i, r in enumerate(records)
+            if isinstance(r.instruction, MetaInst)
+            and r.instruction.type == "BRANCH_END"
+        )
         if defect == "selector":
-            index = next(i for i in range(start, end) if isinstance(records[i].instruction, TestInst))
+            index = next(
+                i
+                for i in range(start, end)
+                if isinstance(records[i].instruction, TestInst)
+            )
             inst = TestInst(AluExpr(Register("s0"), AluOp.SUB, Immediate(0)), uf=True)
         elif defect == "target":
             index = start + 1
-            inst = replace(records[index].instruction, label=LabelRef("_timeline_branch_0_end"))
+            inst = replace(
+                records[index].instruction, label=LabelRef("_timeline_branch_0_end")
+            )
         else:
             index = start + 1 if defect == "effect" else end - 1
             inst = WaitInst(c_op="time")
@@ -329,9 +345,21 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         p.trigger([0], t=0)
         body(p)
 
-    prog, env = program(triggered_body, lambda p: p.add_loop("scan", 2), trigger_time=None, stream_transform=transform)
-    instruction = {"selector": "TestInst", "target": "RegWriteInst", "effect": "WaitInst", "tail-effect": "WaitInst"}[defect]
-    with pytest.raises(ValueError, match=rf"{instruction}.*preopt.*loops=.*branch dispatch"):
+    prog, env = program(
+        triggered_body,
+        lambda p: p.add_loop("scan", 2),
+        trigger_time=None,
+        stream_transform=transform,
+    )
+    instruction = {
+        "selector": "TestInst",
+        "target": "RegWriteInst",
+        "effect": "WaitInst",
+        "tail-effect": "WaitInst",
+    }[defect]
+    with pytest.raises(
+        ValueError, match=rf"{instruction}.*preopt.*loops=.*branch dispatch"
+    ):
         request(prog, env)
     assert env.soc.binding.last_request is None
     assert env.soc.binding.rounds == ()
