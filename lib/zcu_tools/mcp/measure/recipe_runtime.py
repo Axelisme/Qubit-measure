@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -65,6 +66,9 @@ from zcu_tools.mcp.measure.writeback_recovery import (
     begin_writeback,
     writeback_recovery,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _writeback_failure_receipt(
@@ -837,7 +841,25 @@ class RecipeRuntime:
             self._details[index] = replace(self._details[index], op=started.handle)
         self._analysis_ops.pop((tab, "primary"), None)
         self._analysis_ops.pop((tab, "post"), None)
-        completion = self._await(started.handle, ctx)
+        try:
+            completion = self._await(started.handle, ctx)
+        except Exception:
+            # Failed Runs publish no record, but their frontend request facts
+            # still belong to this operation. Never borrow another Run's facts.
+            try:
+                failed = self._snapshot(tab).result_state
+                source = failed.source_operation_id
+                if (
+                    source is not None
+                    and self._tools.gui.expose_operation(source) == started.handle
+                ):
+                    with self._lock:
+                        self._runs[index] = replace(
+                            self._runs[index], stop_requested=failed.stop_requested
+                        )
+            except Exception:
+                logger.exception("Could not read failed Run request facts")
+            raise
         snapshot = self._snapshot(tab)
         source = snapshot.result_state.source_operation_id
         if (

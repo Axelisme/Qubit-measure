@@ -269,7 +269,9 @@ class RunService:
         self, op: _RunOperation, error: Exception, settle: SettleFn
     ) -> None:
         logger.warning("_on_run_failed: tab_id=%r error=%r", op.tab_id, error)
-        self._state.get_tab(op.tab_id).run.stop_requested = op.stop_requested.is_set()
+        pane = self._state.get_tab(op.tab_id).run
+        pane.source_operation_id = self._active_token
+        pane.stop_requested = op.stop_requested.is_set()
         self._discard_plots(op, "Failed")
         self._clear_running(op.tab_id)
         settle(OperationOutcome("failed", str(error)))

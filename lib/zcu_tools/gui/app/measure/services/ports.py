@@ -38,8 +38,8 @@ class RunPaneSnapshot:
     """Current Run and confirmed persistence identity.
 
     result is the adapter-owned record or None; source_path is the loaded file
-    or None. source_operation_id identifies the publishing acquisition or None
-    after Load. run_id is None until at least one persistent output succeeds;
+    or None. source_operation_id identifies the publishing acquisition or failed
+    Run's request facts, not result availability; None after Load. run_id is None until at least one persistent output succeeds;
     it survives failed resaves, but does not survive Run replacement.
     acquisition_run_id is the fixed Run/Load metadata identity before any Save;
     None means no native acquisition metadata, not unsaved data.

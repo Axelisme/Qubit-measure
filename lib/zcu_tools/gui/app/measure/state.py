@@ -69,7 +69,8 @@ class RunPaneState:
 
     result is the adapter-owned record or None. source_path identifies loaded
     data, not an acquisition destination. source_operation_id identifies the
-    publishing GUI operation. metadata is evidence from Run or native Load, or
+    publishing GUI operation or failed Run's request facts, not result availability.
+    metadata is evidence from Run or native Load, or
     None when no native evidence exists; Load retains the file's original history.
     confirmed_run_id is None until a complete Save report confirms at least one
     persistent output. It survives failed resaves of this Run, but replacement
