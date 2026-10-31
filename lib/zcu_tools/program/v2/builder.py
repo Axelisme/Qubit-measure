@@ -210,7 +210,13 @@ class TimelineBuilder:
         recorded = tuple(actions)
 
         def replay(prog: TimelineProgramV2) -> None:
-            with prog.repeat(name, n, timeline=timeline, range_hint=range_hint, advance_ref=advance_ref):
+            with prog.repeat(
+                name,
+                n,
+                timeline=timeline,
+                range_hint=range_hint,
+                advance_ref=advance_ref,
+            ):
                 for action in recorded:
                     action(prog)
 

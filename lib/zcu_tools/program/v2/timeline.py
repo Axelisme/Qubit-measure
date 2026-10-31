@@ -921,8 +921,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     @contextmanager
     def _repeat_timeline(
-        self, name: str, n: int | str, timeline: str,
-        range_hint: tuple[int, int] | None, minimum: int,
+        self,
+        name: str,
+        n: int | str,
+        timeline: str,
+        range_hint: tuple[int, int] | None,
+        minimum: int,
     ) -> Generator[None]:
         if n == 0:
             start = len(self.macro_list)
@@ -932,7 +936,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             finally:
                 del self.macro_list[start:]
             return
-        entry = LoopTimelineEnter(self._timeline_book, timeline, name if isinstance(n, str) else None)
+        entry = LoopTimelineEnter(
+            self._timeline_book, timeline, name if isinstance(n, str) else None
+        )
         self.append_macro(entry)
         fixed = FixedRepeatLoop(name, n) if isinstance(n, int) else None
         if fixed is None:
@@ -943,7 +949,16 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             with self.timeline(timeline):
                 yield
         finally:
-            self.append_macro(LoopTimelineExit(entry, n, minimum, range_hint[1] if range_hint is not None else (n if isinstance(n, int) else None)))
+            self.append_macro(
+                LoopTimelineExit(
+                    entry,
+                    n,
+                    minimum,
+                    range_hint[1]
+                    if range_hint is not None
+                    else (n if isinstance(n, int) else None),
+                )
+            )
             if isinstance(n, str):
                 self.close_inner_loop(name, name, n)
             elif fixed is not None:

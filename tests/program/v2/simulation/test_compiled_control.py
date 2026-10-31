@@ -54,7 +54,10 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding(align_tim
 def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(advance_ref):
     def body(p):
         p.trigger([0], t=0)
-        with p.repeat("outer", 2, advance_ref=advance_ref), p.repeat("inner", 2, advance_ref=advance_ref):
+        with (
+            p.repeat("outer", 2, advance_ref=advance_ref),
+            p.repeat("inner", 2, advance_ref=advance_ref),
+        ):
             p.pulse(0, "p", timeline="default", tag="repeated")
 
     prog, env = program(body, trigger_time=None)
@@ -75,7 +78,9 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(advance_
 
 
 @pytest.mark.parametrize("advance_ref", [False, True])
-def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(advance_ref):
+def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(
+    advance_ref,
+):
     loader = LoadValue("counts", [0, 1, 2], "scan", "count")
 
     def initialize(p):
@@ -116,7 +121,10 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
         p.trigger([0], t=0)
         with p.branch(by="scan", align_timeline=align) as cases:
             with cases.case(0):
-                with p.repeat("outer", 2, advance_ref=False), p.repeat("inner", 2, advance_ref=False):
+                with (
+                    p.repeat("outer", 2, advance_ref=False),
+                    p.repeat("inner", 2, advance_ref=False),
+                ):
                     p.pulse(1, "drive", tag="repeated")
             with cases.case(1):
                 p.delay_timeline(43 / 430.08)
@@ -125,10 +133,16 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
     prog, env = program(body, initialize, trigger_time=None)
     result = request(prog, env)
     for index in range(2):
-        events = [e for e in result.materialize_point(index).events if e.source != "carrier"]
+        events = [
+            e for e in result.materialize_point(index).events if e.source != "carrier"
+        ]
         expected = [0, 43, 86, 129, 172] if index == 0 else [172 if align else 43]
         assert [e.start_us * 430.08 for e in events] == pytest.approx(expected)
-        assert [e.iterations for e in events[:-1]] == ([(("outer", o), ("inner", i)) for o in range(2) for i in range(2)] if index == 0 else [])
+        assert [e.iterations for e in events[:-1]] == (
+            [(("outer", o), ("inner", i)) for o in range(2) for i in range(2)]
+            if index == 0
+            else []
+        )
     assert result.reps == 2
 
 
@@ -175,7 +189,8 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
             p.emit(loader)
         with p.repeat(
             "inner",
-            "count" if register_count else count, advance_ref=True,
+            "count" if register_count else count,
+            advance_ref=True,
             **({"range_hint": (0, 3)} if register_count else {}),
         ):
             p.trigger([0], t=0)
@@ -301,7 +316,10 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.repeat("reads", 3, advance_ref=True), p.branch(by="scan", align_timeline=True) as branch:
+        with (
+            p.repeat("reads", 3, advance_ref=True),
+            p.branch(by="scan", align_timeline=True) as branch,
+        ):
             for index in range(3):
                 with branch.case(index) as case:
                     p.fork(case, into="capture")

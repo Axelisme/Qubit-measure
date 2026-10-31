@@ -137,7 +137,8 @@ class TimelineSelectedPulse(TimedMacro):
         previous_limits = optional_time_bounds(prog, previous)
         self.book.check_loop_pulse(prog, self.source.ch, start)
         if (
-            start_limits is not None and previous_limits is not None
+            start_limits is not None
+            and previous_limits is not None
             and not (
                 bounds(self.relative_t)[0] >= 0
                 and self.book.math.covers(origin, previous)
@@ -147,7 +148,11 @@ class TimelineSelectedPulse(TimedMacro):
             raise ValueError(
                 f"{self.timeline}: channel {self.source.ch} pulse overlap; cannot prove runtime start >= previous end"
             )
-        self.source.t = self.book.math.preprocess_time(start) if isinstance(start, RuntimeEnd) else start
+        self.source.t = (
+            self.book.math.preprocess_time(start)
+            if isinstance(start, RuntimeEnd)
+            else start
+        )
         self.source.preprocess(prog)
         if isinstance(start, RuntimeEnd):
             self.runtime_start = start

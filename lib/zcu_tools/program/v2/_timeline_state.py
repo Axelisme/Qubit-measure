@@ -341,7 +341,9 @@ class LoopTimelineFrame:
     initial_native: dict[tuple[bool, int], TimeExpression]
     entry_math: RuntimeMath
     pinned: set[str]
-    starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(default_factory=list)
+    starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True)
@@ -406,7 +408,10 @@ class TimelineBook:
     ) -> TimeExpression:
         """Describe count points without requiring a bounds-only count producer."""
         if isinstance(iterations, str) and maximum is None:
-            return self.source_expressions.get(iterations, LinearTime(terms=((CycleVariable(iterations, None, None), 1),)))
+            return self.source_expressions.get(
+                iterations,
+                LinearTime(terms=((CycleVariable(iterations, None, None), 1),)),
+            )
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
             if isinstance(iterations, str) and maximum is not None
@@ -560,16 +565,27 @@ class TimelineBook:
         if not self.loop_timelines:
             return
         expression = time_expression(prog, start)
-        gap = add_time(expression, scale_time(self.native_expression(prog, channel, generator=True), -1))
-        gap = substitute_time(gap, {frame.progress: LinearTime() for frame in self.loop_timelines})
+        gap = add_time(
+            expression,
+            scale_time(self.native_expression(prog, channel, generator=True), -1),
+        )
+        gap = substitute_time(
+            gap, {frame.progress: LinearTime() for frame in self.loop_timelines}
+        )
         if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
-            raise ValueError(f"channel {channel} pulse overlap inside repeat; use delay_timeline")
-        self.loop_timelines[-1].starts.append((channel, expression, tuple(self.case_path)))
+            raise ValueError(
+                f"channel {channel} pulse overlap inside repeat; use delay_timeline"
+            )
+        self.loop_timelines[-1].starts.append(
+            (channel, expression, tuple(self.case_path))
+        )
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
         if self.loop_timelines:
-            raise ValueError("cannot advance reference inside advance_ref=False; use delay_timeline or advance_ref=True instead")
+            raise ValueError(
+                "cannot advance reference inside advance_ref=False; use delay_timeline or advance_ref=True instead"
+            )
         if self.used is not None or self.reference_guards:
             raise ValueError("cannot advance reference; use delay_timeline instead")
 

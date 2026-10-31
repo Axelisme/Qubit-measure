@@ -75,7 +75,10 @@ class TimelineFork(Macro):
         end = self.book.end(self.source)
         if len(set(self.targets)) != len(self.targets) or any(
             name in self.book.ends
-            or any(name in frame.external for frame in [*self.book.repeats, *self.book.loop_timelines])
+            or any(
+                name in frame.external
+                for frame in [*self.book.repeats, *self.book.loop_timelines]
+            )
             for name in self.targets
         ):
             raise ValueError("fork requires new, distinct timeline names")
@@ -1037,8 +1040,11 @@ class TimelineBranch(Macro):
         if self.align_timeline:
             registers = prog._time_bounds.defined | self.book.source_expressions.keys()
             registers |= {
-                macro.iterations for case in self.cases for macro in case
-                if isinstance(macro, LoopTimelineExit) and isinstance(macro.iterations, str)
+                macro.iterations
+                for case in self.cases
+                for macro in case
+                if isinstance(macro, LoopTimelineExit)
+                and isinstance(macro.iterations, str)
             }
             for register in registers:
                 expression = (

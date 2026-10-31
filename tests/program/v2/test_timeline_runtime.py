@@ -666,7 +666,8 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
         with (
             prog.repeat(
                 "r",
-                "duration" if register_count else 2, advance_ref=True,
+                "duration" if register_count else 2,
+                advance_ref=True,
                 range_hint=(1, 3) if register_count else None,
             ),
             prog.branch(by="scan", align_timeline=True) as branch,
@@ -703,7 +704,10 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", 2, advance_ref=True), prog.branch(by="scan", align_timeline=True) as branch:
+        with (
+            prog.repeat("r", 2, advance_ref=True),
+            prog.branch(by="scan", align_timeline=True) as branch,
+        ):
             for index in range(3):
                 with branch.case(index):
                     prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
@@ -721,7 +725,10 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
 @pytest.mark.parametrize("overlap", [False, True])
 def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overlap):
     def body(prog):
-        with prog.repeat("r", 2, advance_ref=True), prog.branch(by="scan", align_timeline=True) as branch:
+        with (
+            prog.repeat("r", 2, advance_ref=True),
+            prog.branch(by="scan", align_timeline=True) as branch,
+        ):
             for i in range(3):
                 with branch.case(i) as case:
                     prog.fork(case, into="raw")

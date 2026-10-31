@@ -494,7 +494,10 @@ def test_module_join_preserves_repeat_backedge_guards_without_padding(register, 
     def body(prog):
         prog.write_reg("count", 2)
         with prog.repeat(
-            "pair", "count" if register else 2, advance_ref=True, range_hint=(2, 3) if register else None
+            "pair",
+            "count" if register else 2,
+            advance_ref=True,
+            range_hint=(2, 3) if register else None,
         ):
             prog.emit(joined)
 

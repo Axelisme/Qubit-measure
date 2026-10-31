@@ -303,7 +303,19 @@ def bounded_source_expression(
     return (
         LinearTime(minimum)
         if minimum == maximum
-        else LinearTime(terms=((CycleVariable(name, minimum, maximum, reconstruction=prog._timeline_book.source_expressions.get(name)), 1),))
+        else LinearTime(
+            terms=(
+                (
+                    CycleVariable(
+                        name,
+                        minimum,
+                        maximum,
+                        reconstruction=prog._timeline_book.source_expressions.get(name),
+                    ),
+                    1,
+                ),
+            )
+        )
     )
 
 
@@ -575,7 +587,10 @@ class RuntimeMath(TimedMacro):
                     result,
                     "SL",
                     amount,
-                    limits=(None if result.minimum is None else result.minimum << amount, None if result.maximum is None else result.maximum << amount),
+                    limits=(
+                        None if result.minimum is None else result.minimum << amount,
+                        None if result.maximum is None else result.maximum << amount,
+                    ),
                     target=result.register,
                 )
                 coefficient <<= amount
@@ -586,7 +601,10 @@ class RuntimeMath(TimedMacro):
                 "+" if sign > 0 else "-",
                 value,
                 # Both operands are multiples of this same native source.
-                limits=(None if value.minimum is None else coefficient * value.minimum, None if value.maximum is None else coefficient * value.maximum),
+                limits=(
+                    None if value.minimum is None else coefficient * value.minimum,
+                    None if value.maximum is None else coefficient * value.maximum,
+                ),
                 target=result.register,
             )
             previous = exponent
@@ -596,7 +614,10 @@ class RuntimeMath(TimedMacro):
                 result,
                 "SL",
                 amount,
-                limits=(None if result.minimum is None else result.minimum << amount, None if result.maximum is None else result.maximum << amount),
+                limits=(
+                    None if result.minimum is None else result.minimum << amount,
+                    None if result.maximum is None else result.maximum << amount,
+                ),
                 target=result.register,
             )
             previous -= amount
@@ -664,7 +685,12 @@ class RuntimeMath(TimedMacro):
                 term = inputs[variable]
             elif variable.reconstruction is not None:
                 term = self.reconstruct(variable.reconstruction, inputs)
-                term = replace(term, minimum=variable.minimum, maximum=variable.maximum, expression=LinearTime(terms=((variable, 1),)))
+                term = replace(
+                    term,
+                    minimum=variable.minimum,
+                    maximum=variable.maximum,
+                    expression=LinearTime(terms=((variable, 1),)),
+                )
             elif variable.fixed_point is not None:
                 term = self._reconstruct_fixed_point(variable, inputs)
             elif variable.selection is not None:
@@ -686,7 +712,11 @@ class RuntimeMath(TimedMacro):
                 )
             scaled = self.multiply(term, abs(coefficient))
             result = (
-                self.add(result, scaled, target=result.register if result.register != "s0" else None)
+                self.add(
+                    result,
+                    scaled,
+                    target=result.register if result.register != "s0" else None,
+                )
                 if coefficient > 0
                 else self.subtract(result, scaled)
             )
@@ -1137,9 +1167,17 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
-        if left.minimum is not None and right.maximum is not None and left.minimum >= right.maximum:
+        if (
+            left.minimum is not None
+            and right.maximum is not None
+            and left.minimum >= right.maximum
+        ):
             return a
-        if right.minimum is not None and left.maximum is not None and right.minimum >= left.maximum:
+        if (
+            right.minimum is not None
+            and left.maximum is not None
+            and right.minimum >= left.maximum
+        ):
             return b
         if (
             left.minimum is None
@@ -1256,8 +1294,12 @@ class RuntimeMath(TimedMacro):
         hi = right.maximum if isinstance(right, RuntimeEnd) else right
         lower_operand, upper_operand = (hi, lo) if subtract else (lo, hi)
         return (
-            None if left.minimum is None or lower_operand is None else left.minimum + (-lower_operand if subtract else lower_operand),
-            None if left.maximum is None or upper_operand is None else left.maximum + (-upper_operand if subtract else upper_operand),
+            None
+            if left.minimum is None or lower_operand is None
+            else left.minimum + (-lower_operand if subtract else lower_operand),
+            None
+            if left.maximum is None or upper_operand is None
+            else left.maximum + (-upper_operand if subtract else upper_operand),
         )
 
     def _unbounded_maximum(

@@ -76,13 +76,22 @@ def test_variable_repeat_shadows_default_without_advancing_reference():
     assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
 
 
-@pytest.mark.parametrize("align,count,hint,outer", [
-    (False, 2, None, 2), (True, 2, None, 2),
-    (False, "count", None, 1), (True, "count", None, 1),
-    (False, "count", (0, 3), 1), (True, "count", (0, 3), 1),
-    (False, "count", None, 2), (False, "count", (0, 3), 2),
-])
-def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(align, count, hint, outer):
+@pytest.mark.parametrize(
+    "align,count,hint,outer",
+    [
+        (False, 2, None, 2),
+        (True, 2, None, 2),
+        (False, "count", None, 1),
+        (True, "count", None, 1),
+        (False, "count", (0, 3), 1),
+        (True, "count", (0, 3), 1),
+        (False, "count", None, 2),
+        (False, "count", (0, 3), 2),
+    ],
+)
+def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
+    align, count, hint, outer
+):
     def initialize(prog):
         _register_initialize(prog)
         prog.add_loop("scan", 2)
@@ -91,8 +100,14 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(alig
         prog.delay_timeline(14 / 430.08)
         with prog.branch(by="scan", align_timeline=align) as cases:
             with cases.case(0):
-                with prog.repeat("outer", outer, advance_ref=False) if outer > 1 else nullcontext():
-                    with prog.repeat("inner", count, advance_ref=False, range_hint=hint):
+                with (
+                    prog.repeat("outer", outer, advance_ref=False)
+                    if outer > 1
+                    else nullcontext()
+                ):
+                    with prog.repeat(
+                        "inner", count, advance_ref=False, range_hint=hint
+                    ):
                         prog.pulse(0, "p0")
             with cases.case(1):
                 prog.delay_timeline(28 / 430.08)
@@ -104,14 +119,21 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(alig
     case0 = [14 + 28 * i for i in range(outer * n)] + [14 + duration]
     case1 = [14 + (duration if align else 28)]
     assert [_waves(s) for s in shots] == [case0, case1] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [42 + duration, 42 + (duration if align else 28)] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [
+        42 + duration,
+        42 + (duration if align else 28),
+    ] * 2
 
 
 @pytest.mark.parametrize("overlap", ["parallel", "backedge", "nested"])
 def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
     def body(prog):
         with prog.repeat("outer", 2, advance_ref=False):
-            with prog.repeat("inner", 2, advance_ref=False) if overlap == "nested" else nullcontext():
+            with (
+                prog.repeat("inner", 2, advance_ref=False)
+                if overlap == "nested"
+                else nullcontext()
+            ):
                 prog.fork("default", into="local")
                 prog.pulse(0, "p0")
                 if overlap == "parallel":
@@ -139,7 +161,9 @@ def test_branch_inside_variable_repeat_retains_iteration_origin(align):
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize))
-    assert [_waves(s) for s in shots] == ([[0, 38, 76]] * 2 if align else [[0, 33, 66], [0, 38, 76]])
+    assert [_waves(s) for s in shots] == (
+        [[0, 38, 76]] * 2 if align else [[0, 33, 66], [0, 38, 76]]
+    )
 
 
 @pytest.mark.parametrize("safe", [False, True])
@@ -180,12 +204,16 @@ def test_variable_repeat_forbids_reference_owner_advances(operation):
 def test_repeat_modes_preserve_swept_parent_and_cross_loop_long_pulse(advance_ref):
     def initialize(prog):
         prog.add_loop("scan", 3)
-        prog.add_pulse(1, "flux", style="const", freq=1000, phase=0, gain=0.5, length=125 / 384)
+        prog.add_pulse(
+            1, "flux", style="const", freq=1000, phase=0, gain=0.5, length=125 / 384
+        )
 
     def body(prog):
         prog.fork("default", into=["drive", "external"])
         prog.pulse(1, "flux", timeline="external")
-        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="drive")
+        prog.delay_timeline(
+            QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="drive"
+        )
         with prog.timeline("drive"):
             with prog.repeat("r", 2, advance_ref=advance_ref):
                 prog.pulse(0, "p0", timeline="drive")
@@ -195,7 +223,9 @@ def test_repeat_modes_preserve_swept_parent_and_cross_loop_long_pulse(advance_re
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize, reps=2))
-    assert [_waves(s) for s in shots] == [[0, t, t + 35, t + 70, 140] for t in [20, 30, 40]] * 2
+    assert [_waves(s) for s in shots] == [
+        [0, t, t + 35, t + 70, 140] for t in [20, 30, 40]
+    ] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 6
 
 
@@ -203,7 +233,14 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    drive = TableLengthPulse("selected", PulseCfg(ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)), lengths=[7 / 384, 11 / 384], idx_reg="scan")
+    drive = TableLengthPulse(
+        "selected",
+        PulseCfg(
+            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)
+        ),
+        lengths=[7 / 384, 11 / 384],
+        idx_reg="scan",
+    )
 
     def initialize(prog):
         prog.add_loop("scan", 2)
@@ -219,7 +256,9 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     assert [_waves(s) for s in _shots(prog)] == [[0, 8, 16], [0, 13, 26]]
     with pytest.raises(RuntimeError, match="runtime-only"):
         prog.get_time_param("inside", "t", as_array=True)
-    assert prog.get_time_param("after", "t", as_array=True) * 430.08 == pytest.approx([16, 26])
+    assert prog.get_time_param("after", "t", as_array=True) * 430.08 == pytest.approx(
+        [16, 26]
+    )
 
 
 @pytest.mark.parametrize("parent", ["default", "drive"])
@@ -788,13 +827,15 @@ def test_nested_register_repeat_preserves_minimum_advance_for_outer_wait_bound(
         prog.delay_timeline(100 / 430.08, timeline="external")
         with prog.repeat(
             "outer",
-            "count" if register_outer else 2, advance_ref=True,
+            "count" if register_outer else 2,
+            advance_ref=True,
             range_hint=(2, 4) if register_outer else None,
         ):
             prog.fork("default", into="local")
             with prog.repeat(
                 "inner",
-                2 if register_outer else "count", advance_ref=True,
+                2 if register_outer else "count",
+                advance_ref=True,
                 timeline="local",
                 range_hint=None if register_outer else (2, 4),
             ):
@@ -858,7 +899,10 @@ def test_wrong_repeat_pulse_offset_is_detected_by_independent_timing_oracle():
 
 def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
     def body(prog):
-        with prog.repeat("outer", 2, advance_ref=True), prog.repeat("inner", 2, advance_ref=True):
+        with (
+            prog.repeat("outer", 2, advance_ref=True),
+            prog.repeat("inner", 2, advance_ref=True),
+        ):
             prog.pulse(0, "p0")
             prog.delay_timeline(10 / 430.08)
 
@@ -892,7 +936,10 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
 @pytest.mark.parametrize("outer,inner", [(2, 1), (1, 2), (2, 2)])
 def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, inner):
     def body(prog):
-        with prog.repeat("outer", outer, advance_ref=True), prog.repeat("inner", inner, advance_ref=True):
+        with (
+            prog.repeat("outer", outer, advance_ref=True),
+            prog.repeat("inner", inner, advance_ref=True),
+        ):
             prog.pulse(0, "p0", timeline="default")
             prog.pulse(0, "p0", t=28 / 430.08)
 
@@ -922,7 +969,10 @@ def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
 
     def body(prog):
         with prog.repeat(
-            "r", "count" if register else 2, advance_ref=True, range_hint=(0, 2) if register else None
+            "r",
+            "count" if register else 2,
+            advance_ref=True,
+            range_hint=(0, 2) if register else None,
         ):
             prog.pulse(0, "p0", timeline="default")
             prog.pulse(0, "p0", t=28 / 430.08)
@@ -939,7 +989,10 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
         _register_initialize(prog, actual)
 
     def body(prog):
-        with prog.repeat("outer", 2, advance_ref=True), prog.repeat("inner", "count", advance_ref=True, range_hint=(0, 4)):
+        with (
+            prog.repeat("outer", 2, advance_ref=True),
+            prog.repeat("inner", "count", advance_ref=True, range_hint=(0, 4)),
+        ):
             prog.pulse(0, "p0")
             prog.delay_timeline(28 / 430.08)
             prog.pulse(0, "p0", timeline="default")
@@ -962,7 +1015,8 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
             prog.repeat("outer", 2, advance_ref=True),
             prog.repeat(
                 "inner",
-                "count" if register else 2, advance_ref=True,
+                "count" if register else 2,
+                advance_ref=True,
                 range_hint=(1, 3) if register else None,
             ),
         ):
@@ -999,7 +1053,8 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
         with prog.repeat("outer", 2, advance_ref=True):
             with prog.repeat(
                 "inner",
-                "count" if register else 2, advance_ref=True,
+                "count" if register else 2,
+                advance_ref=True,
                 range_hint=(1, 3) if register else None,
             ):
                 prog.pulse(0, "p0")

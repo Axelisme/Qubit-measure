@@ -19,15 +19,19 @@ from ._timeline_expression import (
 )
 from ._timeline_guard import PulseGuard
 from ._timeline_runtime import RuntimeEnd, Time, runtime_expression, time_expression
-from .modules.util import get_fclk
 from ._timeline_state import LoopTimelineFrame, TimelineBook
+from .modules.util import get_fclk
 
 
-def _end(register: str, expression: TimeExpression, covers: tuple[Time, ...] = ()) -> RuntimeEnd:
+def _end(
+    register: str, expression: TimeExpression, covers: tuple[Time, ...] = ()
+) -> RuntimeEnd:
     if unbounded_time(expression):
         return RuntimeEnd(register, 0, None, covers=covers, expression=expression)
     limits = projected_expression_bounds(expression)
-    return RuntimeEnd(register, limits.minimum, limits.maximum, covers=covers, expression=expression)
+    return RuntimeEnd(
+        register, limits.minimum, limits.maximum, covers=covers, expression=expression
+    )
 
 
 class LoopTimelineEnter(Macro):
@@ -46,8 +50,12 @@ class LoopTimelineEnter(Macro):
         storage = book.math.snapshot(book.math.cycles(entry))
         progress = CycleVariable(storage.register, 0, None)
         origin = RuntimeEnd(
-            storage.register, 0, None,
-            expression=add_time(time_expression(prog, entry), LinearTime(terms=((progress, 1),))),
+            storage.register,
+            0,
+            None,
+            expression=add_time(
+                time_expression(prog, entry), LinearTime(terms=((progress, 1),))
+            ),
         )
         channels = {
             (generator, ch): book.channel_end(prog, ch, generator=generator)
@@ -57,8 +65,16 @@ class LoopTimelineEnter(Macro):
         external = book.ends.copy()
         del external[self.parent]
         self.frame = LoopTimelineFrame(
-            self.parent, external, book.waiting.copy(), entry, origin, progress,
-            channels, book.snapshot_native_expressions(prog), book.math, book.pinned.copy(),
+            self.parent,
+            external,
+            book.waiting.copy(),
+            entry,
+            origin,
+            progress,
+            channels,
+            book.snapshot_native_expressions(prog),
+            book.math,
+            book.pinned.copy(),
         )
         book.loop_timelines.append(self.frame)
         book.pinned.update(prog._timeline_live_registers())
@@ -73,7 +89,13 @@ class LoopTimelineEnter(Macro):
 class LoopTimelineExit(Macro):
     """Store the iteration end and expose the whole loop's aggregate provenance."""
 
-    def __init__(self, entry: LoopTimelineEnter, iterations: int | str, minimum: int, maximum: int | None):
+    def __init__(
+        self,
+        entry: LoopTimelineEnter,
+        iterations: int | str,
+        minimum: int,
+        maximum: int | None,
+    ):
         self.entry = entry
         self.iterations = iterations
         self.minimum = minimum
@@ -83,14 +105,19 @@ class LoopTimelineExit(Macro):
         book = self.entry.book
         frame = book.loop_timelines.pop()
         finish = book.maximum()
-        duration = add_time(time_expression(prog, finish), scale_time(runtime_expression(frame.origin), -1))
+        duration = add_time(
+            time_expression(prog, finish),
+            scale_time(runtime_expression(frame.origin), -1),
+        )
         count = book.repeat_count(prog, self.iterations, self.minimum, self.maximum)
         total = multiply_time(duration, count)
         result_expression = add_time(time_expression(prog, frame.entry), total)
         self._check_backedge(prog, frame, duration)
         if book.loop_timelines:
             for ch, start, path in frame.starts:
-                book.loop_timelines[-1].starts.append((ch, substitute_time(start, {frame.progress: LinearTime()}), path))
+                book.loop_timelines[-1].starts.append(
+                    (ch, substitute_time(start, {frame.progress: LinearTime()}), path)
+                )
         result = _end(frame.origin.register, result_expression)
         book.math.check_end(result)
         operand = book.math.cycles(finish)
@@ -104,21 +131,36 @@ class LoopTimelineExit(Macro):
             tail = frame.entry_math.snapshot(frame.entry_math.cycles(initial))
             last = book.math.cycles(current)
             book.math.operations.append(WriteReg(dst=tail.register, src=last.register))
-            relative = add_time(native, scale_time(runtime_expression(frame.origin), -1))
-            last_expression = add_time(result_expression, add_time(relative, scale_time(duration, -1)))
+            relative = add_time(
+                native, scale_time(runtime_expression(frame.origin), -1)
+            )
+            last_expression = add_time(
+                result_expression, add_time(relative, scale_time(duration, -1))
+            )
             if self.minimum == 0:
                 active = choose_time(count, LinearTime(1), maximum=False)
                 last_expression = add_time(
-                    multiply_time(frame.initial_native[generator, ch], add_time(LinearTime(1), scale_time(active, -1))),
+                    multiply_time(
+                        frame.initial_native[generator, ch],
+                        add_time(LinearTime(1), scale_time(active, -1)),
+                    ),
                     multiply_time(last_expression, active),
                 )
             tail = _end(tail.register, last_expression)
             channels = book.runtime_gens if generator else book.runtime_ros
             channels[ch] = tail
             book.native_expressions[generator, ch] = last_expression
-            book.native_timestamp(prog, tail, gen_ch=ch if generator else None, ro_ch=None if generator else ch)
+            book.native_timestamp(
+                prog,
+                tail,
+                gen_ch=ch if generator else None,
+                ro_ch=None if generator else ch,
+            )
             gap = add_time(duration, scale_time(relative, -1))
-            if not unbounded_time(gap) and projected_expression_bounds(gap).minimum >= 0:
+            if (
+                not unbounded_time(gap)
+                and projected_expression_bounds(gap).minimum >= 0
+            ):
                 result = replace(result, covers=(*result.covers, tail))
         if book.repeats and not book.loop_timelines:
             self._publish_reference_guards(prog, frame)
@@ -129,12 +171,18 @@ class LoopTimelineExit(Macro):
     def _publish_reference_guards(self, prog, frame: LoopTimelineFrame) -> None:
         book = self.entry.book
         for ch in prog.gen_chs:
-            starts = [substitute_time(start, {frame.progress: LinearTime()}) for channel, start, _ in frame.starts if channel == ch]
+            starts = [
+                substitute_time(start, {frame.progress: LinearTime()})
+                for channel, start, _ in frame.starts
+                if channel == ch
+            ]
             if not starts:
                 continue
             first = choose_time(*starts, maximum=False)
             tail = book.native_expression(prog, ch, generator=True)
-            guard = PulseGuard(ch, unbounded=unbounded_time(first) or unbounded_time(tail))
+            guard = PulseGuard(
+                ch, unbounded=unbounded_time(first) or unbounded_time(tail)
+            )
             if not guard.unbounded:
                 try:
                     lower = book.math.time_parameter(_end("s0", first))
@@ -145,17 +193,32 @@ class LoopTimelineExit(Macro):
                 guard = PulseGuard(ch, shifts=(), floors=(upper,), limits=(lower,))
             book.repeats[-1].pulse_guards[ch].then(guard)
 
-    def _check_backedge(self, prog, frame: LoopTimelineFrame, duration: TimeExpression) -> None:
+    def _check_backedge(
+        self, prog, frame: LoopTimelineFrame, duration: TimeExpression
+    ) -> None:
         if self.maximum is None or self.maximum < 2:
             return
         book = self.entry.book
         for ch, start, path in frame.starts:
-            gap = add_time(add_time(start, duration), scale_time(book.native_expression(prog, ch, generator=True), -1))
-            gap = substitute_time(gap, {f.progress: LinearTime() for f in [*book.loop_timelines, frame]})
+            gap = add_time(
+                add_time(start, duration),
+                scale_time(book.native_expression(prog, ch, generator=True), -1),
+            )
+            gap = substitute_time(
+                gap, {f.progress: LinearTime() for f in [*book.loop_timelines, frame]}
+            )
             for selector, index in reversed(path):
-                gap = select_time(book.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1), tuple(gap if i == index else LinearTime() for i in range(prog.loop_dict[selector])))
+                gap = select_time(
+                    book.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
+                    tuple(
+                        gap if i == index else LinearTime()
+                        for i in range(prog.loop_dict[selector])
+                    ),
+                )
             if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
-                raise ValueError(f"repeat: channel {ch} pulse overlap across backedge; use delay_timeline")
+                raise ValueError(
+                    f"repeat: channel {ch} pulse overlap across backedge; use delay_timeline"
+                )
 
     def translate(self, prog) -> None:
         pass

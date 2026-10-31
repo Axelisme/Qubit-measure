@@ -487,7 +487,9 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
             self.delay_timeline("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
             self.delay_timeline(-200 / 430.08)
-            with self.repeat("repeat", "count_cycles", advance_ref=True, range_hint=(1, 3)):
+            with self.repeat(
+                "repeat", "count_cycles", advance_ref=True, range_hint=(1, 3)
+            ):
                 self.delay_timeline(10 / 430.08)
 
     with pytest.warns(
@@ -514,7 +516,9 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
             self.emit(counts)
             self.write_reg("duration", 10)
             self.trigger(ros=[0], width=1 / 430.08)
-            with self.repeat("inner", "count_cycles", advance_ref=True, range_hint=(0, 1)):
+            with self.repeat(
+                "inner", "count_cycles", advance_ref=True, range_hint=(0, 1)
+            ):
                 self.write_reg("duration", 20)
             self.delay_timeline("duration")
 
@@ -819,7 +823,9 @@ class MixedWaitProgram(TimelineProgramV2):
                 if recipe.read_at == "fixed":
                     self.read()
                 self.delay_timeline(recipe.loop_delay / 430.08)
-            with self.repeat("runtime", "count_cycles", advance_ref=True, range_hint=(0, 3)):
+            with self.repeat(
+                "runtime", "count_cycles", advance_ref=True, range_hint=(0, 3)
+            ):
                 if recipe.read_at == "runtime":
                     self.read()
                 self.delay_timeline(recipe.loop_delay / 430.08)

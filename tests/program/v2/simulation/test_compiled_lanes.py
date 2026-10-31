@@ -230,7 +230,10 @@ def test_conditional_wave_port_only_emits_on_lanes_selected_by_flags():
 
 def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
     def body(p):
-        with p.repeat("reads", 2, advance_ref=True), p.branch(by="scan", align_timeline=False) as branch:
+        with (
+            p.repeat("reads", 2, advance_ref=True),
+            p.branch(by="scan", align_timeline=False) as branch,
+        ):
             for case in range(2):
                 with branch.case(case) as timeline:
                     p.fork(timeline, into="capture")

@@ -148,7 +148,9 @@ def test_branch_rejects_reference_advances_at_build(
             elif operation == "sync":
                 program.sync()
             else:
-                with program.repeat("inner", 0 if operation == "zero-repeat" else 2, advance_ref=True):
+                with program.repeat(
+                    "inner", 0 if operation == "zero-repeat" else 2, advance_ref=True
+                ):
                     program.delay_timeline(0.1)
 
     message = "Repeat.*outside.*branch" if "repeat" in operation else "delay_timeline"
