@@ -19,6 +19,7 @@ from ._timeline_expression import (
     choose_time,
     evaluate_time,
     expression_axes,
+    expression_limits,
     point_time,
     projected_expression_bounds,
     scale_time,
@@ -185,12 +186,12 @@ class RuntimeEnd:
     @property
     def minimum(self) -> int | None:
         """Return the expression's lower cycle bound, or None for unknown time."""
-        return None if unbounded_time(self.expression) else projected_expression_bounds(self.expression).minimum
+        return expression_limits(self.expression)[0]
 
     @property
     def maximum(self) -> int | None:
         """Return the expression's upper cycle bound, or None for unknown time."""
-        return None if unbounded_time(self.expression) else projected_expression_bounds(self.expression).maximum
+        return expression_limits(self.expression)[1]
 
 
 def runtime_expression(value: RuntimeEnd) -> TimeExpression:
@@ -1103,6 +1104,18 @@ class RuntimeMath(TimedMacro):
             )
         if operator == "SL" and isinstance(right, int):
             expression = scale_time(runtime_expression(left), 1 << right)
+        if operator == "ASR" and isinstance(right, int):
+            numerator = runtime_expression(left)
+            axes = expression_axes(numerator)
+            points = evaluate_time(numerator, axes)
+            if points is not None:
+                values = points >> right
+                variable = cycle_variable(
+                    "shifted cycles", int(values.min()), int(values.max()),
+                    tuple(axes.items()), tuple(int(v) for v in values.flat),
+                    fixed_point=(numerator, right),
+                )
+                expression = LinearTime(terms=((variable, 1),))
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
             if right_minimum is not None and right_minimum >= 0:
@@ -1118,10 +1131,15 @@ class RuntimeMath(TimedMacro):
             self.check(result.minimum, result.maximum)
         return result
 
-    @staticmethod
-    def covers(end: Time, previous: Time) -> bool:
-        """Return whether an existing exact identity/coverage proves end >= previous."""
-        return known_maximum(end, previous) is end
+    def covers(self, end: Time, previous: Time) -> bool:
+        """Prove coverage with exact identities or the common source-range rule."""
+        if known_maximum(end, previous) is end:
+            return True
+        difference = add_time(
+            time_expression(self.prog, end), scale_time(time_expression(self.prog, previous), -1)
+        )
+        lower, _ = expression_limits(difference)
+        return lower is not None and lower >= 0
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()
@@ -1184,12 +1202,11 @@ class RuntimeMath(TimedMacro):
             return known
         left, right = self.cycles(a), self.cycles(b)
         difference = add_time(runtime_expression(left), scale_time(runtime_expression(right), -1))
-        if not unbounded_time(difference):
-            limits = projected_expression_bounds(difference)
-            if limits.minimum >= 0:
-                return a
-            if limits.maximum <= 0:
-                return b
+        lower, upper = expression_limits(difference)
+        if lower is not None and lower >= 0:
+            return a
+        if upper is not None and upper <= 0:
+            return b
         if (
             left.minimum is None
             or left.maximum is None
@@ -1237,7 +1254,10 @@ class RuntimeMath(TimedMacro):
             target=work,
         )
         abs_half = self.op(
-            RuntimeEnd(absolute, 0, max(abs(delta.minimum), abs(delta.maximum))),
+            RuntimeEnd(
+                absolute, 0, max(abs(delta.minimum), abs(delta.maximum)),
+                expression=choose_time(runtime_expression(delta), scale_time(runtime_expression(delta), -1)),
+            ),
             "ASR",
             1,
             limits=(0, max(abs(delta.minimum), abs(delta.maximum)) // 2),

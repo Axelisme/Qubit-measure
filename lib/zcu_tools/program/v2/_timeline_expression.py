@@ -1,6 +1,5 @@
 """Compile-time cycle algebra, independent of register allocation and emission."""
 
-import math
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -8,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._timeline_bounds import CycleBounds
+from ._timeline_range import VariableRange, source_limits
 
 
 @dataclass(frozen=True)
@@ -23,23 +23,6 @@ class CycleIntervalGrid:
 
     minimum: NDArray[np.int64]
     maximum: NDArray[np.int64]
-
-
-@dataclass(frozen=True)
-class VariableRange:
-    """One source's directed cycle endpoints and deviation from their line.
-
-    source is a loop name for a one-loop producer, otherwise a fresh identity.
-    start/end follow iteration order, not numerical order. None marks an
-    unbounded source. deviation_minimum/maximum enclose the signed distance
-    from the endpoint line, in exact fractional cycles; affine sources use zero.
-    """
-
-    source: str | object
-    start: int | None
-    end: int | None
-    deviation_minimum: tuple[Fraction, ...] = (Fraction(0),)
-    deviation_maximum: tuple[Fraction, ...] = (Fraction(0),)
 
 
 @dataclass(frozen=True)
@@ -78,18 +61,12 @@ class CycleVariable:
     @property
     def minimum(self) -> int | None:
         """Return the conservative integer lower bound, or None when unbounded."""
-        r = self.bounds
-        if r.start is None or r.end is None:
-            return None
-        return expression_bounds(LinearTime(terms=((self, 1),))).minimum
+        return expression_limits(LinearTime(terms=((self, 1),)))[0]
 
     @property
     def maximum(self) -> int | None:
         """Return the conservative integer upper bound, or None when unbounded."""
-        r = self.bounds
-        if r.start is None or r.end is None:
-            return None
-        return expression_bounds(LinearTime(terms=((self, 1),))).maximum
+        return expression_limits(LinearTime(terms=((self, 1),)))[1]
 
 
 def cycle_variable(
@@ -165,49 +142,38 @@ class TimeChoice:
 TimeExpression = LinearTime | TimeChoice
 
 
-def expression_bounds(value: TimeExpression) -> CycleBounds:
-    """Group directed endpoints by source ID, then add coefficient deviations.
+def expression_limits(value: TimeExpression) -> tuple[int | None, int | None]:
+    """Bound cycles by grouping source IDs, with None for unavailable endpoints.
 
-    Different sources are independent. Any surviving unbounded term raises
-    ValueError. This rule never enumerates a loop grid, including for max paths.
+    Each loop group sums its coefficient-weighted directed line and deviations
+    along that axis only. Different source groups add their bounds. Max/min
+    paths preserve whatever one-sided bound their alternatives establish.
     """
     if isinstance(value, TimeChoice):
-        limits = [expression_bounds(item) for item in value.alternatives]
+        limits = [expression_limits(item) for item in value.alternatives]
         select = max if value.maximum else min
-        return CycleBounds(
-            select(limit.minimum for limit in limits),
-            select(limit.maximum for limit in limits),
+        lows = [lo for lo, _ in limits if lo is not None]
+        highs = [hi for _, hi in limits if hi is not None]
+        return (
+            select(lows) if lows and (value.maximum or len(lows) == len(limits)) else None,
+            select(highs) if highs and (not value.maximum or len(highs) == len(limits)) else None,
         )
     groups: dict[str | object, list[tuple[VariableRange, int]]] = {}
-    lower = upper = value.constant
     for variable, coefficient in value.terms:
-        r = variable.bounds
-        if r.start is None or r.end is None:
-            raise ValueError("runtime-only time has no compile-time bounds")
-        groups.setdefault(r.source, []).append((r, coefficient))
-    for source, terms in groups.items():
-        if isinstance(source, str):
-            count = len(terms[0][0].deviation_minimum)
-            lows = [Fraction(0)] * count
-            highs = [Fraction(0)] * count
-            for r, coefficient in terms:
-                if r.start is None or r.end is None:
-                    raise RuntimeError("bounded source lost its endpoints")
-                for i in range(count):
-                    line = Fraction(r.start) + Fraction((r.end - r.start) * i, max(1, count - 1))
-                    a = coefficient * (line + r.deviation_minimum[i])
-                    b = coefficient * (line + r.deviation_maximum[i])
-                    lows[i] += min(a, b)
-                    highs[i] += max(a, b)
-            lower += math.ceil(min(lows))
-            upper += math.floor(max(highs))
-        else:
-            for r, coefficient in terms:
-                if r.start is None or r.end is None:
-                    raise RuntimeError("bounded source lost its endpoints")
-                endpoints = coefficient * r.start, coefficient * r.end
-                lower += min(endpoints)
-                upper += max(endpoints)
+        groups.setdefault(variable.bounds.source, []).append((variable.bounds, coefficient))
+    lower = upper = value.constant
+    for terms in groups.values():
+        lo, hi = source_limits(terms)
+        lower = None if lower is None or lo is None else lower + lo
+        upper = None if upper is None or hi is None else upper + hi
+    return lower, upper
+
+
+def expression_bounds(value: TimeExpression) -> CycleBounds:
+    """Return finite bounds by the common source rule; unbounded raises ValueError."""
+    lower, upper = expression_limits(value)
+    if lower is None or upper is None:
+        raise ValueError("runtime-only time has no compile-time bounds")
     return CycleBounds(lower, upper)
 
 
@@ -557,13 +523,13 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     ):
         points = evaluate_time(choice, axes)
         if points is not None:
-            return point_time("loop extremum", axes, points, reconstruction=choice)
+            return point_time(", ".join(sorted({v.name for v in time_variables(choice)})), axes, points, reconstruction=choice)
         grids = [interval_arrays(value, axes) for value in unique]
         select = np.maximum if maximum else np.minimum
         lower, upper = grids[0].minimum, grids[0].maximum
         for grid in grids[1:]:
             lower, upper = select(lower, grid.minimum), select(upper, grid.maximum)
-        return interval_time("loop extremum", axes, lower, upper)
+        return interval_time(", ".join(sorted({v.name for v in time_variables(choice)})), axes, lower, upper)
     return choice
 
 
