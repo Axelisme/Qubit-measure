@@ -120,15 +120,18 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                 "Heralding requires a circle classifier with g/e/other; run GE Post"
             )
         cfg = deepcopy(cfg)
-        soccfg = context.soccfg
-        delay_table = None
         if cfg.uniform:
-            if not isinstance(cfg.length, SweepCfg):
-                raise ValueError("uniform mode requires SweepCfg")
-            lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
-        else:
-            delay_table = materialize_nonuniform_t1_delays(cfg.length, soccfg=soccfg)
-            lengths = delay_table.times_us
+            return self._run_uniform(cfg, context=context)
+        return self._run_non_uniform(cfg, context=context)
+
+    def _run_uniform(
+        self, cfg: HeraldingT1Cfg, *, context: RunContext
+    ) -> HeraldingT1Result:
+        """Acquire herald/signal sums with a native linear Delay sweep."""
+        soccfg = context.soccfg
+        if not isinstance(cfg.length, SweepCfg):
+            raise ValueError("uniform mode requires SweepCfg")
+        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
 
         viewer = live_line(
             context.plots, "measurement", "Time (us)", "IQ magnitude (a.u.)"
@@ -146,26 +149,67 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             herald_readout = PulseReadout("herald", cfg.readout)
             signal_readout = PulseReadout("signal", cfg.readout)
 
-            # Load the requested delay, herald, excite, wait, then read signal IQ.
-            if delay_table is None:
-                length_sweep = cfg.length
-                if not isinstance(length_sweep, SweepCfg):
-                    raise ValueError("uniform mode requires SweepCfg")
-                prefix = []
-                delay = Delay("t1_delay", sweep2param("length", length_sweep))
-                sweep: list[tuple[str, SweepCfg | int]] = [("length", length_sweep)]
-            else:
-                prefix = [
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(delay_table.cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    )
-                ]
-                delay = DelayAuto("t1_delay", t="t1_delay_cycle")
-                sweep = [("length_idx", len(delay_table.cycles))]
+            length_sweep = cfg.length
+            if not isinstance(length_sweep, SweepCfg):
+                raise ValueError("uniform mode requires SweepCfg")
+            delay = Delay("t1_delay", sweep2param("length", length_sweep))
+            # Unique readout names resolve the herald and signal shot-sum axes.
+            prog = ModularProgramV2(
+                soccfg,
+                modules=[
+                    herald_readout,
+                    Pulse("pi_pulse", cfg.pi_pulse),
+                    delay,
+                    signal_readout,
+                ],
+                sweep=[("length", length_sweep)],
+                reps=cfg.reps,
+                relax_delay=cfg.relax_delay,
+            )
+            builder = sched.prog_builder(context.soc, soccfg)
+            builder.run_program_summed(
+                prog,
+                rounds=cfg.rounds,
+                processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
+                sums2signal_fn=np.copy,
+            )
+
+        return HeraldingT1Result(lengths, buffer.array)
+
+    def _run_non_uniform(
+        self, cfg: HeraldingT1Cfg, *, context: RunContext
+    ) -> HeraldingT1Result:
+        """Acquire herald/signal sums with LoadValue and register DelayAuto."""
+        soccfg = context.soccfg
+        delay_table = materialize_nonuniform_t1_delays(cfg.length, soccfg=soccfg)
+        lengths = delay_table.times_us
+
+        viewer = live_line(
+            context.plots, "measurement", "Time (us)", "IQ magnitude (a.u.)"
+        )
+        buffer = SignalBuffer(
+            (len(lengths), 3, 3),
+            dtype=np.float64,
+            on_update=lambda data: viewer.update(
+                lengths, np.abs(split_sums(data)[1][..., 0])
+            ),
+        )
+
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            cfg = sched.cfg
+            herald_readout = PulseReadout("herald", cfg.readout)
+            signal_readout = PulseReadout("signal", cfg.readout)
+
+            prefix = [
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(delay_table.cycles),
+                    idx_reg="length_idx",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            ]
+            delay = DelayAuto("t1_delay", t="t1_delay_cycle")
             # Unique readout names resolve the herald and signal shot-sum axes.
             prog = ModularProgramV2(
                 soccfg,
@@ -176,7 +220,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                     delay,
                     signal_readout,
                 ],
-                sweep=sweep,
+                sweep=[("length_idx", len(delay_table.cycles))],
                 reps=cfg.reps,
                 relax_delay=cfg.relax_delay,
             )

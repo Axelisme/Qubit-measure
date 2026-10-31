@@ -306,19 +306,15 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
         context supplies offline or hardware handles, plots and a stop signal;
         acquisition and program errors propagate.
         """
-        # 1. Keep participant order while selecting readout tones from the full cfg.
         cfg = MuxT1Cfg.model_validate(config.model_dump())
+        if cfg.uniform:
+            return self._run_uniform(cfg, context=context)
+        return self._run_non_uniform(cfg, context=context)
+
+    def _run_uniform(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        """Acquire the native linear Delay sweep."""
         indices = list(cfg.participants)
-        delay_table = (
-            None
-            if cfg.uniform
-            else materialize_nonuniform_t1_delays(cfg.delays, soccfg=context.soccfg)
-        )
-        times = (
-            sweep2array(cfg.delays, "none")
-            if delay_table is None
-            else delay_table.times_us
-        )
+        times = sweep2array(cfg.delays, "none")
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[i] for i in indices]
         )
@@ -353,22 +349,86 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
                 initial_delay=sched.cfg.initial_delay,
                 relax_delay=sched.cfg.relax_delay,
             )
-            if delay_table is None:
-                delay = Delay("t1_delay", sweep2param("delay", cfg.delays))
-                builder.declare_sweep("delay", cfg.delays)
-            else:
-                # One shared table drives every participant in the same hardware loop.
-                builder.add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(delay_table.cycles),
-                        idx_reg="delay_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    )
+            delay = Delay("t1_delay", sweep2param("delay", cfg.delays))
+            builder.declare_sweep("delay", cfg.delays)
+            builder.add_reset("reset", cfg.reset).add(
+                Join(*pulses),
+                delay,
+                MuxReadout("readout", readout),
+            )
+            prog = builder.build()
+            # Each completed round supplies the full delay/participant IQ matrix.
+            _ = builder.run_program(
+                prog,
+                raw2signal_fn=partial(averaged_mux_signal, prog),
+                rounds=cfg.rounds,
+                options=AcquireOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=mux_snr_checker(
+                        signals, cfg.earlystop_snr, tone_axis=1
+                    ),
+                ),
+            )
+
+        # 4. Flush live plots and return one IQ row per original selected tone.
+        signals.trigger_update(flush=True)
+        return MuxT1Result(
+            times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
+        )
+
+    def _run_non_uniform(self, cfg: MuxT1Cfg, *, context: RunContext) -> MuxT1Result:
+        """Acquire the shared LoadValue cycle table with register DelayAuto."""
+        indices = list(cfg.participants)
+        delay_table = materialize_nonuniform_t1_delays(
+            cfg.delays, soccfg=context.soccfg
+        )
+        times = delay_table.times_us
+        readout = cfg.readout.with_updates(
+            tones=[cfg.readout.tones[i] for i in indices]
+        )
+
+        # 2. Show each decay on the shared requested or quantized delay axis.
+        viewers = [
+            live_line(
+                context.plots,
+                f"measurement_{i}",
+                "Delay (us)",
+                "Magnitude (a.u.)",
+                title=f"{i}: {cfg.tones[i].name}",
+            )
+            for i in indices
+        ]
+
+        def update(data: NDArray[np.complex128]) -> None:
+            for row, viewer in enumerate(viewers):
+                viewer.update(times, np.abs(data[:, row]))
+
+        # 3. Compile one shared delay loop; pi pulses start together after reset.
+        signals = SignalBuffer((len(times), len(indices)), on_update=update)
+        with Schedule(cfg, signals, scope=context.scope) as sched:
+            pulses = [
+                Pulse(f"drive_{index}", cfg.tones[index].require_drive())
+                for index in indices
+            ]
+            builder = sched.prog_builder(
+                context.soc,
+                context.soccfg,
+                reps=sched.cfg.reps,
+                initial_delay=sched.cfg.initial_delay,
+                relax_delay=sched.cfg.relax_delay,
+            )
+            # One shared table drives every participant in the same hardware loop.
+            builder.add(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(delay_table.cycles),
+                    idx_reg="delay_idx",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
                 )
-                delay = DelayAuto("t1_delay", t="t1_delay_cycle")
-                builder.declare_sweep("delay_idx", len(delay_table.cycles))
+            )
+            delay = DelayAuto("t1_delay", t="t1_delay_cycle")
+            builder.declare_sweep("delay_idx", len(delay_table.cycles))
             builder.add_reset("reset", cfg.reset).add(
                 Join(*pulses),
                 delay,
