@@ -44,6 +44,26 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
     assert pane.source_operation_id == token
 
 
+def test_run_selector_stops_root_with_live_acquire() -> None:
+    state, tab_id, adapter = make_state()
+    service, _gate, background, _handles = make_run_service(state)
+    observed: list[tuple[bool, bool, bool]] = []
+
+    def run(*_args: object, context: RunContext) -> RunRecord[ConfigBase, object]:
+        with context.scope.branch("acquire") as acquire:
+            accepted = service.cancel_scope(token, scope="run")
+            observed.append(
+                (accepted.cancelled, context.scope.cancelled, acquire.cancelled)
+            )
+        return RunRecord(None, object())
+
+    adapter.run.side_effect = run
+    token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
+    background.run_work()
+    assert observed == [(True, True, True)]
+    assert state.get_tab(tab_id).run.stop_requested
+
+
 def test_gui_stop_reaches_already_active_descendants() -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, _handles = make_run_service(state)
