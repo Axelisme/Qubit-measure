@@ -13,9 +13,9 @@ from zcu_tools.program.acquisition import ShotSumProcessor
 from ._timeline_macros import (
     ModuleEmission,
     PreparedTimelineMacro,
+    RepeatTimelineEnter,
+    RepeatTimelineExit,
     TimelineBranch,
-    TimelineRepeatEnter,
-    TimelineRepeatExit,
     TimeProducer,
 )
 from .macro.readout import ReadoutEmission, readout_control_scope
@@ -61,9 +61,9 @@ def _read_macros(
     scopes = [scope]
     for macro in macros:
         source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
-        if isinstance(source, TimelineRepeatEnter):
+        if isinstance(source, RepeatTimelineEnter):
             scopes.append("Repeat")
-        elif isinstance(source, TimelineRepeatExit):
+        elif isinstance(source, RepeatTimelineExit):
             scopes.pop()
         elif isinstance(source, TimelineBranch):
             for case in source.cases:

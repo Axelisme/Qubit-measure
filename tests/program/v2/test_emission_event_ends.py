@@ -554,11 +554,13 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
         prog.add_loop("fine", 3)
 
     def body(prog):
-        with (
-            prog.repeat("outer", 2, advance_ref=True),
-            prog.repeat("inner", 2, advance_ref=True),
-        ):
-            prog.emit(pulse)
+        prog.sync()
+        with prog.repeat("outer", 2):
+            prog.sync()
+            with prog.repeat("inner", 2):
+                prog.emit(pulse)
+                prog.sync()
+            prog.sync()
 
     prog = _program([pulse], body, initialize)
     # Generator grids39/40/41,77/78/79,115/116/117 at ratio28/25.

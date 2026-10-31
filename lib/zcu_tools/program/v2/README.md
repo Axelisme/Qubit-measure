@@ -216,8 +216,10 @@ builder.fork("default", into="drive")
 with builder.timeline("drive"):
     builder.emit(drive)
     builder.delay_timeline(0.1)
-    with builder.repeat("pairs", 2, advance_ref=True):
+    builder.sync()
+    with builder.repeat("pairs", 2):
         builder.emit(drive)
+        builder.sync()
     builder.sync()
 builder.emit(drive)  # Uses default again.
 ```
@@ -317,85 +319,76 @@ False 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 
 兩種都不推進 reference、不自動 sync，後續可在母 timeline 結尾繼續發射。
 未使用的外部 long pulse 可以橫跨 Branch。
 Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，等待改用 delay_timeline。
-Case 內可使用 `repeat(..., advance_ref=False)`。`advance_ref=True` 的入口與回邊推進 reference，因此 build 時報錯，須移到 branch 外。
+Case 內可使用 `repeat(...)`。它的 body 同樣不得推進 reference，包括巢狀 Repeat 內的操作。
 Repeat 內放 branch 仍合法，兩種 align_timeline 都使用上述規則。
 Branch 區塊內、case 外的 emit、fork、join、delay_timeline 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
 隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
 沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
 跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
 
-`repeat(name, n, *, advance_ref, timeline=None, range_hint=None)` 必須明寫 bool `advance_ref`。
-`timeline=None` 選目前範圍，範圍外選 default。兩種模式都只能使用母 timeline 與其局部 fork，離開後局部名字失效。
+`repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
+`timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。
+只可使用母 timeline 與其局部 fork，離開後局部名字失效。
+Repeat 不在入口或回邊自動推進 reference。作者可在 body 明寫 `sync()`、原生 `delay`／`delay_auto` 或巢狀 Repeat。
+Branch case 內仍禁止任何經 owner 推進 reference 的操作，包括 Repeat body 裡的操作。
+`n=0` 保留母 timeline，不執行或宣告 body 內容，也不自行同步入口。
 
-`advance_ref=False` 在進入迴圈的位置，以母 timeline 結尾初始化 cycle register，不放在 prologue。
-範圍內的預設 timeline 改用這個迴圈 timeline，pulse、trigger、config 與 module emit 都從它排程。
-每圈把母 timeline 與局部 fork 的最晚結尾存回累加器，下一圈接著發射。
-離開時母 timeline 保留累積結尾，reference 與其他外部 timeline 不變。
-它可放進 branch case，也可巢狀 False。整個 body 不得經 timeline／module API 推進 reference。
-顯式 sync、原生 delay／delay_auto 與 inner `advance_ref=True` 在 build 報錯，等待請改用 delay_timeline。
-需要推進 reference 時，改選 `advance_ref=True`，而且移到 branch case 與 False 範圍外。
-`n=0` 保留母 timeline，不執行 body。迴圈內事件的時間只在執行時可知，getter 報 RuntimeError。
-固定次數迴圈的累積結尾仍可在編譯期求值，仿射結尾的 getter 回實際量化值。
+編譯器只按已錄製的 body 結構選 lowering，不分析定點，也不重播 preprocess。
+當 body 頂層最後一個操作是對循環 timeline 的 `sync()`，且入口結尾為常數 0，
+不攜帶循環尾端 register。固定圈長直接編成每圈的常數 `TIME inc_ref`。
+其他情況使用 shot-local register 累加器，入口以母 timeline 結尾初始化，每圈存回相對 reference 的最晚結尾。
+中途 sync、只在巢狀區塊末尾 sync、同步其他 timeline 或沒有 sync 都走累加器。
+若 body 以循環 timeline 的 sync 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 sync。
+編譯器不自行插入它。非定點的 register lowering 保留既有 IR 展開與 branch-address DMEM 成本，尚未改成 s14 指針。
 
-`advance_ref=True` 保留推進 reference 的方式。它先同步母 timeline，
-每圈再同步母 timeline 與局部結尾。內部只能用母 timeline，以及從母或局部 timeline
-fork 的名字。退出後母 timeline 為0，局部名字失效，可以重新 fork 同名。
-其他外部長 pulse 可以橫跨 Repeat，但不能在迴圈內使用它的 timeline。
-固定 n 是非負整數，退出時精確扣減外部結尾；n=0 仍同步入口，但不執行 body。
+`n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
+Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。
+省略 hint 時使用實際 count，不證明回邊的同 channel overlap。固定次數不接受 hint。
+每 shot／sweep 點重新初始化循環狀態，局部 counter 不加入 QICK top-level sweep metadata。
 Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
-時間 producer 的 bounds 只接受相符的初始化、回邊與重設寫入，不把 nested loops 加入 QICK 的 top-level sweep metadata。
+Producer audit 仍只接受相符的初始化、回邊與重設寫入。
+累加器內事件的時間可能只在 runtime 可知，getter 會明確報 RuntimeError，不回上界。
+編譯期可知的累積結尾仍可讀取實際量化值。
 
-ScanWith 先載入 scalar，再依序執行 children。同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
-其 native lowering 使用 Repeat metadata，不傳 legacy `range_hint`。
-`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
+外部 long pulse 可以橫跨 Repeat，但不能在 body 內使用其 timeline。
+沒有 reference 操作時，其他外部結尾不變。
+作者明寫 reference 操作時，外部結尾逐圈按實際推進量 debit，再做 floor 0。
+固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時使用 storage，未消耗的來源保持 wait-only。
+Wait-only 來源可供 sync、join 或 fork 使用，不能直接放 pulse、trigger、config 或 delay_timeline。
+Join 目標與 fork 的新名字從實際 remaining end 建立普通排程點。完全消耗來源後，它也恢復 placement。
+原生 `delay_reg_auto` 可在 Repeat 內使用，仍須遵守其 producer bounds 與未消耗外部結尾的原生契約。
 
-Module `Branch` lower 到原生 branch/case。Module `Join` 發射平行 sequences，與只記帳的 `prog.join` 不同。
-Join 為每個 sequence fork 一條 timeline，依作者順序發射，再 join 回母 timeline。
-每個 sequence 保留內部次序，所有 sequence 從共同 origin 開始，不重排。
-Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
-Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯。
-守衛在 reference owner 的推進入口檢查，與 branch case 共用同一個錯誤。
-守衛只保證經 timeline／module API 的推進。
-以 raw `asm_inst` 指令或自訂 Macro 的 translate 推進 reference 時，timeline 記帳與 Join／Reset、branch case、Repeat 檢查不會知道，結果由作者負責。
-普通 Branch 只合併結尾，可以放進 Join。
-Wait-only parent 不能用內部 fork 繞過 placement 限制。
-每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
-
-兩種模式的 Register n 都使用既有 register 名字，可選擇提供作者保證的非負整數閉區間
-`range_hint=(minimum, maximum)`。省略時逐圈使用實際值扣除 external end，不證明迴圈回邊的同 channel overlap。Int n 不接受 range_hint。
-Register 名字不得與以 name 命名的 counter 相同。編譯器不從 register 初值推定 range。
-False 不扣除外部結尾，也不把它們改成 wait-only。以下外部結尾扣除規則只適用 True。
-未知 count 或 case advance 以 runtime storage 逐圈扣除實際執行路徑，並對每個 external end 做 floor 0。
-相同且可靜態表示的 Branch paths 保留 static，不因出現 Branch 就物化。
-原 timeline 禁止繼續發射或 delay_timeline，直到 sync 或原生 reference 推進完整消耗該 end。
-Join 目標與 fork 新名字是普通 timeline，從實際 remaining end 建立排程點，不採 minimum count 的等待上界。
-原 wait-only timeline 上的兩種 readout config 入口也拒絕放置，包含 t=0。
-Join／fork 的普通結果，或 sync／原生推進完整消耗後的來源，可照常放置 config。
-不帶 timeline 的 config 呼叫保留原生行為。
-例如沿用上面的宣告，以下 `_body` 先安排跨 channel 重疊，再重複發射 drive：
+以下 body 明寫入口與每圈同步。每圈先合併局部結尾，再移動 reference：
 
 ```python
 def _body(self, cfg):
-    self.fork("default", into="parallel")
-    self.emit(self.drive, tag="first")  # Channel 0, ordinary default end.
-    self.pulse(1, "native", t=0, timeline="parallel")
-    self.join("parallel", into="default")  # Accounting only.
-    self.sync()  # Both channels have finished before the next group.
-    with self.repeat("pair", 2, advance_ref=True):
+    self.sync()
+    with self.repeat("pair", 2):
         self.fork("default", into="local")
         self.emit(self.drive, timeline="local", tag="repeated")
         self.delay_timeline(0.05, timeline="local")
-    # Parent default is zero. The local name is out of scope.
+        self.join("local", into="default")
+        self.sync()
+    # Parent default is zero. The local name has expired.
 ```
 
-每圈結尾自動對齊 local 的 module 結尾加 0.05 us，不必在迴圈內手動 sync。
-Register 次數改傳既有 register 名字，例如
-`with self.repeat("pair", "n_pair", advance_ref=True, range_hint=(2, 4)):`，body 可沿用上例。
-`n_pair` 須先由作者用公開 register API 準備，執行值必須符合作者保證的閉區間。
+Register 次數可改寫成 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`。
+`n_pair` 須先準備，執行值必須符合作者保證的範圍。Register 超限保留 QICK 原錯誤。
 
-Repeat body 內支援具名 timeline 的 register 時間與各 case 不同的 Branch advance。
-各 case 分別累積 pulse guard，回邊使用全路徑 envelope 證明不重疊。Envelope 只用於證明，不改實際 reference 或 body／shot end。
-Repeat body 內的 DelayAuto(register) 與 delay_reg_auto 仍報錯。迴圈外 consumer 不受這項限制。
+ScanWith 先同步母 timeline，再載入 scalar、依序執行 children，每個 point 結尾明寫 sync。
+同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
+`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
+
+Module Branch lower 到原生 branch/case。Module Join 為各 sequence fork timeline，依作者順序發射，再 join 回母 timeline。
+各 sequence 從共同 origin 開始，不重排，與只記帳的 `prog.join` 不同。
+Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
+原生 delay、delay_auto、sync、register delay 與內含這些操作的 Repeat／ScanWith 在 build 時報錯。
+普通 Branch 只合併結尾，可以放進 Join。
+同 generator 的 physical-end 與全部 case、Repeat backedge guards 保留，不加 padding 或 rewind。
+
+守衛只涵蓋 timeline／module API 的 reference 操作。
+Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeline 記帳，也不受 Join／Reset 或 case 守衛保護，結果由作者負責。
+它們不是已分析 instruction effects 的安全入口。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
 `sync` 保持每點 runtime maximum；shell WAIT 才使用編譯期常數上界。

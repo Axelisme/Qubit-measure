@@ -3,7 +3,15 @@
 from collections.abc import Callable
 
 import pytest
-from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, QickSweep1D, WriteReg
+from qick.asm_v2 import (
+    CloseLoop,
+    Macro,
+    OpenLoop,
+    Pulse,
+    QickParam,
+    QickSweep1D,
+    WriteReg,
+)
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -262,9 +270,11 @@ def test_author_register_duration_in_repeat_debits_actual_iteration_advances(cou
         prog.read_dmem("duration", 0)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", count, advance_ref=True):
+        prog.sync()
+        with prog.repeat("r", count):
             prog.delay_timeline("duration")
             prog.pulse(0, "p0", timeline="default")
+            prog.sync()
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
 
@@ -331,8 +341,10 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(15 / 430.08)
+            prog.sync()
         prog.join("external", into="default")
         prog.pulse(0, "p0", timeline="default")
 
@@ -469,8 +481,10 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(
             prog.pulse(0, "p0", timeline="default")
 
         if inside_repeat:
-            with prog.repeat("twice", 2, advance_ref=True):
+            prog.sync()
+            with prog.repeat("twice", 2):
                 selected()
+                prog.sync()
         else:
             selected()
         prog.pulse(1, "p1", timeline="untouched")
@@ -545,11 +559,13 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
                     prog.delay_timeline(25 / 430.08)
             prog.pulse(0, "p0", timeline="default")
             # Unmanaged output must still see the incoming reference.
-            prog.pulse(1, "p1", t=0)
+            prog.append_macro(Pulse(ch=1, name="p1", t=0))
 
         if inside_repeat:
-            with prog.repeat("twice", 2, advance_ref=True):
+            prog.sync()
+            with prog.repeat("twice", 2):
                 selected()
+                prog.sync()
         else:
             selected()
 
@@ -663,18 +679,17 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
         prog.pulse(1, "p1", timeline="external")
-        with (
-            prog.repeat(
-                "r",
-                "duration" if register_count else 2,
-                advance_ref=True,
-                range_hint=(1, 3) if register_count else None,
-            ),
-            prog.branch(by="scan", align_timeline=True) as branch,
+        prog.sync()
+        with prog.repeat(
+            "r",
+            "duration" if register_count else 2,
+            range_hint=(1, 3) if register_count else None,
         ):
-            for i in range(3):
-                with branch.case(i):
-                    prog.delay_timeline((5 + 5 * i) / 430.08)
+            with prog.branch(by="scan", align_timeline=True) as branch:
+                for i in range(3):
+                    with branch.case(i):
+                        prog.delay_timeline((5 + 5 * i) / 430.08)
+            prog.sync()
 
     result = shots(program(body, reps=2))
     # Branch duration is max(5,10,15)=15. Fixed count 2 ends at 30;
@@ -690,9 +705,11 @@ def test_register_timeline_time_inside_repeat_preserves_legal_pulse_backedge():
 
     def body(prog):
         prog.emit(loader)
-        with prog.repeat("r", 2, advance_ref=True):
+        prog.sync()
+        with prog.repeat("r", 2):
             prog.delay_timeline("loaded")
             prog.pulse(0, "p0", timeline="default")
+            prog.sync()
 
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
     assert [waves(s) for s in result] == [[5, 38], [10, 48], [15, 58]]
@@ -704,13 +721,15 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     def body(prog):
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with (
-            prog.repeat("r", 2, advance_ref=True),
-            prog.branch(by="scan", align_timeline=True) as branch,
-        ):
-            for index in range(3):
-                with branch.case(index):
-                    prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+        prog.sync()
+        with prog.repeat("r", 2):
+            with prog.branch(by="scan", align_timeline=True) as branch:
+                for index in range(3):
+                    with branch.case(index):
+                        prog.delay_timeline(
+                            QickSweep1D("scan", 10 / 430.08, 20 / 430.08)
+                        )
+            prog.sync()
         prog.delay_timeline(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")
 
@@ -725,18 +744,18 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
 @pytest.mark.parametrize("overlap", [False, True])
 def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overlap):
     def body(prog):
-        with (
-            prog.repeat("r", 2, advance_ref=True),
-            prog.branch(by="scan", align_timeline=True) as branch,
-        ):
-            for i in range(3):
-                with branch.case(i) as case:
-                    prog.fork(case, into="raw")
-                    prog.pulse(0, "p0")
-                    if i == 2:
-                        prog.pulse(0, "p0", t=35 / 430.08, timeline="raw")
-                        if not overlap:
-                            prog.delay_timeline(35 / 430.08)
+        prog.sync()
+        with prog.repeat("r", 2):
+            with prog.branch(by="scan", align_timeline=True) as branch:
+                for i in range(3):
+                    with branch.case(i) as case:
+                        prog.fork(case, into="raw")
+                        prog.pulse(0, "p0")
+                        if i == 2:
+                            prog.pulse(0, "p0", t=35 / 430.08, timeline="raw")
+                            if not overlap:
+                                prog.delay_timeline(35 / 430.08)
+            prog.sync()
 
     if overlap:
         with pytest.raises(ValueError, match="overlap"):
@@ -754,8 +773,10 @@ def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding()
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
         prog.pulse(1, "p1", timeline="external")
-        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(5 / 430.08)
+            prog.sync()
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[0]] * 3
@@ -872,8 +893,10 @@ def test_custom_native_subclass_writes_do_not_restrict_non_time_words(custom_wri
 def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
-        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
+            prog.sync()
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body))
@@ -891,8 +914,10 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")
         prog.delay_timeline(external_cycles / 430.08, timeline="external")
-        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(1 / 430.08)
+            prog.sync()
         prog.fork("external", into="working")
         if overwrite_before_branch:
             prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
@@ -940,8 +965,10 @@ def test_unregistered_translate_writer_invalidates_constant_time_proof(location)
                         if i == 1:
                             prog.append_macro(OverwriteTime())
         elif location == "backedge":
-            with prog.repeat("r", 2, advance_ref=True):
+            prog.sync()
+            with prog.repeat("r", 2):
                 prog.append_macro(OverwriteTime())
+                prog.sync()
 
     with pytest.raises(ValueError, match="duration.*unregistered.*instruction"):
         program(body, initialize=initialize)
@@ -962,8 +989,10 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works():
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
-        with prog.repeat("r", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("r", "duration", range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
+            prog.sync()
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
         prog.delay_timeline("duration", timeline="external")
@@ -1073,9 +1102,11 @@ def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
     def body(prog):
         prog.write_reg("duration", 0)
         if where == "backedge":
-            with prog.repeat("r", 2, advance_ref=True):
+            prog.sync()
+            with prog.repeat("r", 2):
                 lookup(prog)
                 prog.write_reg("duration", 3)
+                prog.sync()
         elif where == "branch":
             with prog.branch(by="scan", align_timeline=True) as branch:
                 for i in range(3):

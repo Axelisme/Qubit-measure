@@ -177,28 +177,27 @@ class TimelineBuilder:
         name: str,
         n: int | str,
         *,
-        advance_ref: bool,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> AbstractContextManager[None]:
-        """Record a repeated body; replay program-owned timing rules at build.
+        """Record a scoped loop, replaying program-owned timing at build.
 
-        advance_ref is a required bool. False shadows the default with a
-        shot-local accumulating timeline and preserves reference throughout the
-        body. It permits branch cases and nested False, but rejects sync, native
-        delay/delay_auto and inner True. True advances reference on entry and
-        each iteration, leaving parent zero; it is forbidden in cases.
-        timeline=None selects the scope, or default. Only parent/local forks are
-        accessible; local names expire at exit. Time parameters remain in us.
+        timeline=None selects the scope or default. Times use us. Only the parent
+        and local forks are accessible; local names expire on exit. The loop
+        accumulates its relative end without implicit reference advancement.
+        Explicit sync/delay/delay_auto are allowed outside branch cases and
+        reference-preserving groups. A final top-level sync of the loop timeline
+        with constant-zero entry avoids a tail register; nonzero entry warns
+        to sync before the loop. Nested/other/middle sync retains the accumulator.
         name identifies the counter. n is a nonnegative integer or existing
-        register name. Register counts accept an optional guaranteed closed
-        nonnegative integer range_hint; fixed counts forbid it. Zero discards
-        the body; only True syncs entry. Invalid bool/count/range/timeline uses
-        fail at build. QICK register exhaustion propagates. Recording after build
-        raises ValueError. Close all recording contexts before build.
+        count register. Optional range_hint guarantees a closed nonnegative count
+        range without hardware checks; fixed counts forbid hints. Zero discards
+        the body. Invalid count/hint/timeline raises ValueError at build; QICK
+        register exhaustion propagates. Close contexts before build. Recording
+        after build raises ValueError.
         """
         self._ensure_recording()
-        return self._repeat(name, n, timeline, range_hint, advance_ref=advance_ref)
+        return self._repeat(name, n, timeline, range_hint)
 
     @contextmanager
     def _repeat(
@@ -207,8 +206,6 @@ class TimelineBuilder:
         n: int | str,
         timeline: str | None,
         range_hint: tuple[int, int] | None,
-        *,
-        advance_ref: bool,
     ) -> Generator[None]:
         with self._capture() as actions:
             yield
@@ -220,7 +217,6 @@ class TimelineBuilder:
                 n,
                 timeline=timeline,
                 range_hint=range_hint,
-                advance_ref=advance_ref,
             ):
                 for action in recorded:
                     action(prog)

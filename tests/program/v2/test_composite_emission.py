@@ -312,14 +312,14 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
         prog.add_reg("index")
 
     def body(prog):
-        with (
-            prog.repeat("twice", 2, advance_ref=True),
-            prog.branch(by="path", align_timeline=False) as branch,
-        ):
-            for index in (0, 1):
-                with branch.case(index):
-                    prog.write_reg("index", index)
-                    prog.emit(pulse)
+        prog.sync()
+        with prog.repeat("twice", 2):
+            with prog.branch(by="path", align_timeline=False) as branch:
+                for index in (0, 1):
+                    with branch.case(index):
+                        prog.write_reg("index", index)
+                        prog.emit(pulse)
+            prog.sync()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -592,11 +592,13 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
         prog.add_reg("origin")
 
     def body(prog):
-        with prog.repeat("twice", 2, advance_ref=True):
+        prog.sync()
+        with prog.repeat("twice", 2):
             prog.write_reg("origin", 100)
             prog.delay_timeline("origin", timeline="default")
             prog.emit(pulse)
             prog.delay_timeline(60 / 430.08, timeline="default")
+            prog.sync()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -636,8 +638,10 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
         prog.write_reg("origin", 7)
         prog.delay_timeline("origin", timeline="default")
         prog.emit(pulse)
-        with prog.repeat("twice", 2, advance_ref=True):
+        prog.sync()
+        with prog.repeat("twice", 2):
             prog.emit(pulse)
+            prog.sync()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -746,8 +750,10 @@ def _change_selection(prog, loader, other, change):
             with branch.case(1):
                 pass
     elif change == "constant_backedge":
-        with prog.repeat("overwrite", 2, advance_ref=True):
+        prog.sync()
+        with prog.repeat("overwrite", 2):
             prog.write_reg("length", 89)
+            prog.sync()
     elif change == "constant_reset":
         prog.write_reg("length", 89)
         loader.lower_selected(prog)

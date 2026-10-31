@@ -355,8 +355,10 @@ def _advancing_pulse(operation: str, scan: ScanWith) -> Pulse:
                 prog.write_reg("duration", 10)
                 prog.delay_reg_auto("duration")
             elif operation == "repeat":
-                with prog.repeat("inner", 2, advance_ref=True, timeline=timeline):
+                prog.sync(timeline=timeline)
+                with prog.repeat("inner", 2, timeline=timeline):
                     prog.delay_timeline(0.1, timeline=timeline)
+                    prog.sync(timeline=timeline)
             elif operation == "scan":
                 prog.emit(scan, timeline=timeline)
             else:
@@ -456,8 +458,10 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
         prog.delay_timeline(100 / 430.08, timeline="waiting")
         # A register Repeat leaves its unconsumed external end wait-only.
         prog.write_reg("duration", 1)
-        with prog.repeat("runtime", "duration", advance_ref=True, range_hint=(1, 3)):
+        prog.sync()
+        with prog.repeat("runtime", "duration", range_hint=(1, 3)):
             prog.delay_timeline(10 / 430.08)
+            prog.sync()
         prog.emit(joined, timeline="waiting")
 
     with pytest.raises(ValueError, match="timeline can only wait"):
@@ -493,13 +497,12 @@ def test_module_join_preserves_repeat_backedge_guards_without_padding(register, 
 
     def body(prog):
         prog.write_reg("count", 2)
+        prog.sync()
         with prog.repeat(
-            "pair",
-            "count" if register else 2,
-            advance_ref=True,
-            range_hint=(2, 3) if register else None,
+            "pair", "count" if register else 2, range_hint=(2, 3) if register else None
         ):
             prog.emit(joined)
+            prog.sync()
 
     def compile_program():
         return _program([joined], body, initialize=_declare_registers("count"))

@@ -507,10 +507,12 @@ class ScanWith(Module):
         """
         parent = "default" if timeline is None else timeline
         index = prog.emission_name(self.repeat_mod.name)
-        with prog.repeat(index, self.repeat_mod.n, advance_ref=True, timeline=parent):
+        prog.sync(timeline=parent)
+        with prog.repeat(index, self.repeat_mod.n, timeline=parent):
             self.value_loader.lower_index(prog, index)
             for mod in self.repeat_mod.sub_modules[1:]:
                 prog.emit(mod, timeline=parent)
+            prog.sync(timeline=parent)
 
     def add_content(self, mod: ModuleGroup) -> Self:
         """Append a module or ordered group; skip None entries (no module)."""

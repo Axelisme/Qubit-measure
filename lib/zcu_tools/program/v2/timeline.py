@@ -24,13 +24,13 @@ from ._timeline_macros import (
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
     ReferenceGuard,
+    RepeatTimelineEnter,
+    RepeatTimelineExit,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
     TimelineFork,
     TimelineJoin,
-    TimelineRepeatEnter,
-    TimelineRepeatExit,
     TimelineRuntimeAdvance,
     TimelineShellWait,
     TimelineSync,
@@ -42,7 +42,6 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
-from ._timeline_repeat import LoopTimelineEnter, LoopTimelineExit
 from ._timeline_runtime import RuntimeEnd
 from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
@@ -450,6 +449,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             yield
         finally:
             self._timeline_default = previous
+            self.append_macro(_TimelineScope(self._timeline_book, name))
 
     def emit(
         self, module: Module, *, timeline: str | None = None, tag: str | None = None
@@ -651,6 +651,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 book.record_native(self, gen_ch, val, generator=True)
             if ro_ch is not None:
                 book.record_native(self, ro_ch, val, generator=False)
+            for loop in book.loop_timelines:
+                if gen_ch is not None:
+                    loop.written_channels.add((True, gen_ch))
+                if ro_ch is not None:
+                    loop.written_channels.add((False, ro_ch))
             if book.repeats:
                 frame = book.repeats[-1]
                 if gen_ch is not None:
@@ -676,7 +681,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         time_reg contains nonnegative tProc cycles. Remaining ends debit the
         actual advance using certified producer bounds. No bounds are needed
         when the selected native ends already consume every timeline. This
-        native register reference operation remains forbidden inside Repeat.
+        operation is allowed in Repeat but forbidden in branch cases and
+        reference-preserving module groups, like other reference operations.
         """
         super().delay_reg_auto(time_reg, gens=gens, ros=ros)
         source = self._pop_native(DelayRegAuto)
@@ -715,8 +721,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         exit; unjoined local ends are discarded, not merged into their ancestor.
         True requires every end to be reconstructible from branch-entry state.
         Native delay/delay_auto/sync in cases raise ValueError; use delay_timeline.
-        Repeat with advance_ref=True in a case raises ValueError; use False
-        or move it outside this branch. Branch inside Repeat is supported. Unconditional actions inside this context
+        Repeat may accumulate inside cases; its body obeys the same reference
+        prohibition. Branch inside Repeat is supported. Unconditional actions inside this context
         raise ValueError; put them before or after the with block.
         Duplicate, non-integer/out-of-range indices and measurement selectors
         raise ValueError. Register exhaustion propagates QICK errors unchanged.
@@ -758,107 +764,40 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         name: str,
         n: int | str,
         *,
-        advance_ref: bool,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> Generator[None]:
-        """Repeat a body n times on parent timeline (times remain in us).
+        """Repeat on a scoped, accumulating timeline without implicit sync.
 
-        advance_ref is a required bool. False initializes a shot-local cycle
-        accumulator at the parent end and shadows the default with that loop
-        timeline. Each iteration stores the maximum parent/local end; exit
-        restores the parent at the accumulated end and expires local names.
-        Reference and other outer ends stay unchanged. False may nest in False
-        or branch cases. Its whole body rejects sync, native delay/delay_auto
-        and inner True repeats; use delay_timeline or choose True instead.
-
-        True syncs the parent on entry and closes parent/local ends by advancing
-        reference each iteration. Exit leaves parent zero and rebases outer ends.
-        Runtime counts/path advances leave nonzero outer ends wait-only; use
-        join/fork for placement or fully consume them. True in a case fails.
-        Zero counts discard body operations; only True syncs their entry.
-
-        timeline=None selects the current scope, or default. Only parent and
-        locally forked names are accessible inside either mode. name identifies
-        the native counter. n is a nonnegative integer or existing count register,
-        distinct from name. Optional range_hint=(minimum, maximum) guarantees a
-        closed nonnegative integer count range without hardware checks. Integer
-        counts forbid hints. Unhinted register counts skip backedge proofs.
-        Invalid bool/count/range or inaccessible names raise ValueError at build.
-        Register exhaustion propagates QICK errors. Time parameters use us;
-        runtime-only loop event getters raise RuntimeError, never return bounds.
+        timeline=None selects the surrounding scope or default. Only this parent
+        and local forks are accessible; local names expire at exit. Times use us.
+        Explicit sync/delay/delay_auto may advance reference except in branch
+        cases or reference-preserving module groups, which raise ValueError.
+        A final top-level sync of the loop timeline and constant-zero entry
+        select lowering without a tail register. Otherwise use a shot-local
+        accumulator. A final sync with nonzero entry warns to sync before entry.
+        n is a nonnegative integer or existing count register distinct from name.
+        Optional range_hint guarantees a closed nonnegative integer count range,
+        without runtime checks. Fixed counts forbid hints. Zero discards the body.
+        Unhinted counts skip backedge bounds proofs. Invalid count/hint/name
+        raises ValueError; QICK register exhaustion propagates unchanged.
+        Runtime-only event getters raise RuntimeError, never return bounds.
         """
-        if type(advance_ref) is not bool:
-            raise ValueError("advance_ref must be a bool")
-        if advance_ref and any(cases.active for cases in self._branch_cases):
-            raise ValueError(
-                "move Repeat outside the branch: its entry and backedge advance reference"
-            )
         selected = timeline if timeline is not None else self._timeline_default
-        timeline = selected if selected is not None else "default"
+        parent = selected if selected is not None else "default"
         minimum = _repeat_minimum(name, n, range_hint)
-        if not advance_ref:
-            with self._repeat_timeline(name, n, timeline, range_hint, minimum):
-                yield
-            return
+        start = len(self.macro_list)
+        previous = self._timeline_default
+        self._timeline_default = parent
         if n == 0:
-            self.sync(timeline=timeline)
-            start = len(self.macro_list)
             try:
                 yield
             finally:
+                self._timeline_default = previous
                 del self.macro_list[start:]
             return
-        variable = isinstance(n, str)
-        entry = TimelineRepeatEnter(
-            self._timeline_book, timeline, name if variable else None
-        )
-        self.append_macro(entry)
-        fixed_loop = FixedRepeatLoop(name, n) if isinstance(n, int) else None
-        if fixed_loop is None:
-            self.open_inner_loop(name, name, n, range_hint=range_hint)
-        else:
-            self.append_macro(fixed_loop)
-        try:
-            yield
-        finally:
-            self.append_macro(
-                TimelineRepeatExit(
-                    self._timeline_book,
-                    minimum,
-                    range_hint[1]
-                    if range_hint is not None
-                    else (None if variable else minimum),
-                    variable=variable
-                    and (range_hint is None or minimum != range_hint[1]),
-                    iterations=n,
-                    axis=name,
-                )
-            )
-            if isinstance(n, str):
-                self.close_inner_loop(name, name, n)
-            elif fixed_loop is not None:
-                self.append_macro(fixed_loop.closing)
-
-    @contextmanager
-    def _repeat_timeline(
-        self,
-        name: str,
-        n: int | str,
-        timeline: str,
-        range_hint: tuple[int, int] | None,
-        minimum: int,
-    ) -> Generator[None]:
-        if n == 0:
-            start = len(self.macro_list)
-            try:
-                with self.timeline(timeline):
-                    yield
-            finally:
-                del self.macro_list[start:]
-            return
-        entry = LoopTimelineEnter(
-            self._timeline_book, timeline, name if isinstance(n, str) else None
+        entry = RepeatTimelineEnter(
+            self._timeline_book, parent, name if isinstance(n, str) else None
         )
         self.append_macro(entry)
         fixed = FixedRepeatLoop(name, n) if isinstance(n, int) else None
@@ -866,18 +805,26 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             self.open_inner_loop(name, name, n, range_hint=range_hint)
         else:
             self.append_macro(fixed)
+        body_start = len(self.macro_list)
         try:
-            with self.timeline(timeline):
-                yield
+            yield
         finally:
+            self._timeline_default = previous
+            body = self.macro_list[body_start:]
+            entry.tail_sync = (
+                bool(body)
+                and type(body[-1]) is TimelineSync
+                and body[-1].timeline == parent
+            )
             self.append_macro(
-                LoopTimelineExit(
+                RepeatTimelineExit(
                     entry,
                     n,
                     minimum,
                     range_hint[1]
                     if range_hint is not None
                     else (n if isinstance(n, int) else None),
+                    name,
                 )
             )
             if isinstance(n, str):
