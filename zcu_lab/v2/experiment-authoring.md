@@ -699,11 +699,16 @@ with Schedule(config, signals, scope=context.scope) as sched:
 `add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
 多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
 `LoadValue` 或 `ScanWith`，不要把不等距點轉成 `add_sweep`。
-Builder 的 `emit`、`emit_parallel`、`delay`、`delay_auto`、`delay_timeline`、
+Builder 的 `emit`、`delay`、`delay_auto`、`delay_timeline`、
 `sync`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
 沿用 program 層的同名 API。原生布林控制選項用 keyword，例如
 `builder.delay_auto(0.1, gens=False, ros=True)`。
 `build()` 後 builder 凍結，再記錄動作或再次 build 都會 raise ValueError。
+平行發射用 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
+Module `Join` 封裝相同的 fork／emit／join 操作，不重排 children。
+Join 與 TwoPulseReset／BathReset 的 child 若推進 reference，build 報錯。
+Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat／ScanWith 都受此限制。
+普通 Branch 只合併 timeline 結尾，可以放進 Join。
 
 ### 手寫 TimelineProgramV2
 
@@ -794,7 +799,7 @@ builder.sync()
 名字須先存在，只有 `"default"` 預先存在，其餘須先 `fork`。
 `timeline(name)` 不 fork、不自行 join，離開範圍也不移動 reference。
 省略 `timeline=` 或傳入 `None` 會選目前範圍，顯式名字優先，巢狀範圍離開後還原外層。
-`emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
+`emit`、`pulse`、`trigger`、`delay_timeline`、`sync` 與
 `repeat` 的預設母 timeline 都遵守這條規則。
 `fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
 `branch` 必填 `by` 與 `align_timeline`，例如 `with builder.branch(by="scan", align_timeline=True) as cases:`。

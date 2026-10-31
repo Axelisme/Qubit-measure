@@ -358,6 +358,7 @@ class TimelineBook:
         self.waiting: set[str] = set()
         self.repeats: list[RepeatFrame] = []
         self.native_only = False
+        self.reference_guards = 0
         self.used: set[str] | None = None
 
     def repeat_count(
@@ -493,7 +494,13 @@ class TimelineBook:
             )
         return self.ends[name]
 
+    def require_reference_advance(self) -> None:
+        """Reject reference operations inside branch cases or guarded lowering."""
+        if self.used is not None or self.reference_guards:
+            raise ValueError("cannot advance reference; use delay_timeline instead")
+
     def decrement(self, t: Time, *, observe_pulses: bool = True) -> None:
+        self.require_reference_advance()
         if self.native_only:
             return
         if observe_pulses:

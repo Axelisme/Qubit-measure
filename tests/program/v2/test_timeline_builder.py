@@ -13,7 +13,6 @@ from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program import v2
-from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
@@ -593,7 +592,6 @@ def test_native_add_sweep_declares_axis_and_returns_uniform_parameter(mock_soccf
         "loop",
         "sweep",
         "emit",
-        "parallel",
         "pulse",
         "trigger",
         "delay",
@@ -617,7 +615,6 @@ def test_builder_freezes_after_build(mock_soccfg, operation):
             "later", v2.SweepCfg(start=0, stop=1, step=1, expts=2)
         ),
         "emit": lambda: builder.emit(_readout()),
-        "parallel": lambda: builder.emit_parallel([[_readout()]], timeline="default"),
         "pulse": lambda: builder.pulse(0, "later"),
         "trigger": builder.trigger,
         "delay": lambda: builder.delay(0.1),
@@ -700,39 +697,7 @@ def _pulse(name, ch=1, *, pulse_id: str | None = None):
     )
 
 
-def test_native_parallel_body_allocates_its_own_emission_scope(mock_soccfg):
-    readout, pulse = _readout(), _pulse("drive")
-
-    class Native(v2.TimelineProgramV2):
-        def _initialize(self, cfg):
-            self.declare(readout)
-            self.declare(pulse)
-
-        def _body(self, cfg):
-            self.emit_parallel([[readout], [pulse]], timeline="default", tag="one")
-            self.emit_parallel([[readout], [pulse]], timeline="default", tag="two")
-
-    actual = Native(mock_soccfg, initial_delay=0, relax_delay=0)
-    result = ir.analyze_timing(
-        ir.CompiledTimingInput(actual.prog_list, actual.labels, actual.timing_layout)
-    )
-    assert [
-        event.cycle for event in result.shots[0].events if event.kind == "wave"
-    ] == [
-        # ceil(61 ADC clocks / 307.2 * 430.08 + .05 * 430.08) = 107.
-        0,
-        0,
-        0,
-        107,
-        107,
-        107,
-    ]
-    expected = actual.prog_list.copy()
-    actual.compile()
-    assert actual.prog_list == expected
-
-
-def test_builder_parallel_and_native_outputs_match_native(mock_soccfg):
+def test_builder_join_and_native_outputs_match_native(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     readout = _readout()
     pulse = v2.Pulse(
@@ -746,7 +711,8 @@ def test_builder_parallel_and_native_outputs_match_native(mock_soccfg):
         ),
         pulse_id="native_drive",
     )
-    builder.emit_parallel([[readout], [pulse]], timeline="default", tag="parallel")
+    joined = v2.Join(readout, pulse)
+    builder.emit(joined, tag="parallel")
     builder.sync()
     builder.pulse(1, "native_drive", t=0.1, timeline="default", tag="pulse")
     builder.trigger(
@@ -764,11 +730,10 @@ def test_builder_parallel_and_native_outputs_match_native(mock_soccfg):
 
     class Native(v2.TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare(readout)
-            self.declare(pulse)
+            self.declare(joined)
 
         def _body(self, cfg):
-            self.emit_parallel([[readout], [pulse]], timeline="default", tag="parallel")
+            self.emit(joined, tag="parallel")
             self.sync()
             self.pulse(1, "native_drive", t=0.1, timeline="default", tag="pulse")
             self.trigger(
@@ -1003,16 +968,17 @@ def test_timeline_scope_nested_override_and_restore_match_explicit_program(
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])
-def test_timeline_scope_parallel_native_outputs_and_reference_delays_match_explicit(
+def test_timeline_scope_join_native_outputs_and_reference_delays_match_explicit(
     mock_soccfg, frontend
 ):
     readout, drive = _readout(), _pulse("drive", pulse_id="scoped_drive")
+    joined = v2.Join(readout, drive)
 
     def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         program.fork("default", into="work")
         with program.timeline("work"):
             program.delay_timeline(0.1)
-            program.emit_parallel([[readout], [drive]])
+            program.emit(joined)
             program.pulse(1, "scoped_drive", t=0.1, tag="scoped_pulse")
             program.trigger(ros=[0], t=0.05, tag="scoped_trigger")
             program.delay(0.02, tag="native_delay")
@@ -1023,13 +989,12 @@ def test_timeline_scope_parallel_native_outputs_and_reference_delays_match_expli
 
     class Explicit(v2.TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare(readout)
-            self.declare(drive)
+            self.declare(joined)
 
         def _body(self, cfg):
             self.fork("default", into="work")
             self.delay_timeline(0.1, timeline="work")
-            self.emit_parallel([[readout], [drive]], timeline="work")
+            self.emit(joined, timeline="work")
             self.pulse(1, "scoped_drive", t=0.1, timeline="work", tag="scoped_pulse")
             self.trigger(ros=[0], t=0.05, timeline="work", tag="scoped_trigger")
             self.delay(0.02, tag="native_delay")
@@ -1039,7 +1004,7 @@ def test_timeline_scope_parallel_native_outputs_and_reference_delays_match_expli
             self.pulse(1, "scoped_drive", tag="native_after")
 
     expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
-    actual = _compile_scoped(mock_soccfg, frontend, scoped, (readout, drive))
+    actual = _compile_scoped(mock_soccfg, frontend, scoped, (joined,))
     assert actual.prog_list == expected.prog_list
     actual.compile()
     assert actual.prog_list == expected.prog_list

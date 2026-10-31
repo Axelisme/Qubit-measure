@@ -142,7 +142,7 @@ class TimelineBuilder:
     def timeline(self, name: str) -> AbstractContextManager[None]:
         """Record a scoped default for omitted timeline arguments.
 
-        Applies to emit, emit_parallel, pulse, trigger, delay_timeline, sync and
+        Applies to emit, pulse, trigger, delay_timeline, sync and
         the repeat parent. Branch case emissions use the same default.
         name must exist at replay (default or forked); errors surface at build.
         Explicit names win, nested scopes override and exit restores the prior
@@ -331,31 +331,6 @@ class TimelineBuilder:
         if not any(module is declared for declared in self._modules):
             self._modules.append(module)
             self._initialize_actions.append(lambda prog: prog.declare(module))
-
-    def emit_parallel(
-        self,
-        branches: Sequence[Sequence[Module]],
-        *,
-        timeline: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        """Record ordered branches at one timeline origin and merge their ends.
-
-        None selects the scoped name, or default outside a scope.
-        Each branch is an ordered module sequence; first encounters declare
-        objects in branch/child order. The sequences are captured, modules are
-        borrowed. tag belongs to the first child in author order. Multiple
-        reference-advancing branches or unsafe reordering fail at build under
-        TimelineProgramV2.emit_parallel's contract.
-        """
-        self._ensure_recording()
-        recorded = tuple(tuple(branch) for branch in branches)
-        for branch in recorded:
-            for module in branch:
-                self._declare(module)
-        self._record(
-            lambda prog: prog.emit_parallel(recorded, timeline=timeline, tag=tag)
-        )
 
     def delay(self, t: float | QickParam, tag: str | None = None) -> None:
         """Record native reference advance by t us; tag exposes resolved time."""

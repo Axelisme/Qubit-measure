@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，branch 索引、align_timeline 與 reference 邊界
+**Last updated:** 2026-10-31，fork／join 與 reference 推進守衛
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -124,7 +124,7 @@ Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
 它不接收 SoC，不取數，也不依賴 experiment runtime。
-Builder 依物件身分在第一次 emit／emit_parallel 時記錄 module 宣告。
+Builder 依物件身分在第一次 emit 時記錄 module 宣告。
 同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。
 每個 program 依 module 物件身分保存宣告結果，compile 時重新配置自己的資源。
 Pulse 在各 program 內按定義去重，同名不同 cfg 的 Pulse 使用不同 waveform 名稱。
@@ -146,7 +146,7 @@ Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生�
 `TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
 不同物件衝突時錯誤列出兩個名稱與物件。
 明示 register 借用與 Pulse registry 共用 generator／template 的規則不變。
-Body 可直接呼叫 `emit_parallel`，program 配置其命名 scope；module lowering 內沿用既有 scope。
+Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
 
 每條 timeline 只保存相對 reference 的結尾。
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
@@ -157,7 +157,7 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
-省略 `timeline=` 或傳入 `None` 的 `emit`、`emit_parallel`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
+省略 `timeline=` 或傳入 `None` 的 `emit`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
 `repeat` 省略母 timeline 時也使用此名字。
 顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
 名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
@@ -266,12 +266,16 @@ ScanWith 先載入 scalar，再依序執行 children。同一宣告可重複 emi
 `LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
 
 Module `Branch` lower 到原生 branch/case。Module `Join` 發射平行 sequences，與只記帳的 `prog.join` 不同。
-Join 的 program emission owner 檢查 lowered operations，保留每個 sequence 的內部次序。
-唯一會推進 reference 的 sequence 最後發射，其他 sequences 保持次序，從共同 origin 開始。
-兩個以上推進型 sequences 或未知 reference effects 拒絕編譯。
-需要交換時，owner 證明實際 register 與 wmem 資源沒有 RW、WR、WW 衝突，包含 aliases。
-未知 register/word effects 只在需要交換時拒絕。Wait-only parent 不能用內部 fork 繞過 placement 限制。
-這個 owner 不重排 sequence 內的事件，也不新增 scheduler。每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
+Join 為每個 sequence fork 一條 timeline，依作者順序發射，再 join 回母 timeline。
+每個 sequence 保留內部次序，所有 sequence 從共同 origin 開始，不重排。
+Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
+Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯。
+守衛在 reference owner 的推進入口檢查，與 branch case 共用同一個錯誤。
+守衛只保證經 timeline／module API 的推進。
+以 raw `asm_inst` 指令或自訂 Macro 的 translate 推進 reference 時，timeline 記帳與 Join／Reset、branch case、Repeat 檢查不會知道，結果由作者負責。
+普通 Branch 只合併結尾，可以放進 Join。
+Wait-only parent 不能用內部 fork 繞過 placement 限制。
+每個 generator 的 physical-end 與全部 case、Repeat backedge guards 保持原契約。
 
 Register n 使用既有 register 名字，必須提供作者保證的非負整數閉區間
 `range_hint=(minimum, maximum)`。Int n 不接受 range_hint。

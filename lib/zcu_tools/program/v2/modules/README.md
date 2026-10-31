@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-10-31，fork／join 與 reference 推進守衛
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -57,11 +57,12 @@ Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(inde
 Lowering 選擇 align_timeline=True，按 timeline 合併各 case 結尾，靜態取 max，runtime 取精確逐點 max。
 Branch 只改結尾、不推進 reference，case 內的 native reference 操作與 Repeat 在 build 時報錯。
 後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
-Module Join 發射平行 sequences，保留每個 sequence 內的 Module 次序，並合併實際 end。
-Program emission owner 依 lowered operations 彙總 reference effects，將唯一會推進 reference 的 sequence 移到最後。
-零個推進型 sequence 保留次序，兩個以上或未知 reference effect 都拒絕。
-交換時，owner 以實際 register 與 wmem identity 檢查 RW、WR、WW，包含 register aliases。
-未知 resource effects 拒絕交換。Compiler 配置的 register 不會自動視為 scratch，原有 producer provenance 與翻譯後全流稽核照常執行。
+Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
+它保留 sequence 及內部 Module 的作者次序，不重排。
+Join 與 TwoPulseReset／BathReset 的 child 不得推進 reference。
+Native delay／delay_auto、sync、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯，與 branch case 共用守衛及錯誤。
+普通 Branch 不推進 reference，可以放進 Join。
+原有 producer provenance 與翻譯後全流稽核照常執行。
 同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
 TableLengthPulse Join 保留獨立 generators、共用 index 與相同 table count，逐 index 合併 runtime maximum。
 `prog.join` 只合併既有 timeline ends，不發射 children。
@@ -197,12 +198,6 @@ The processor sums ordered shot-vector outer products across reps, and
 `acquire_summed` adds completed rounds without normalization.
 `split_sums` converts a final IQ axis into counts and complex means.
 Zero or unmeasured NaN counts give NaN means without divide warnings.
-
-`readout.qick_threshold_options(cfg)` accepts a Pulse/Mux cfg or a cfg sequence.
-It converts linear/circle calibration to native QICK projection, without radius
-rejection or confusion correction. Missing, centroid3 or conflicting calibration
-returns empty options for the whole acquisition. The caller must supply every
-program ADC in declaration order; the helper does not inspect the program.
 
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules

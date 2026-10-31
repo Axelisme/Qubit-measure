@@ -18,7 +18,6 @@ from ._timeline_macros import (
     TimelineRepeatExit,
     TimeProducer,
 )
-from ._timeline_parallel import TimelineParallel
 from .macro.readout import ReadoutEmission, readout_control_scope
 from .modular import ModularProgramV2
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
@@ -69,7 +68,7 @@ def _read_macros(
         elif isinstance(source, TimelineBranch):
             for case in source.cases:
                 yield from _read_macros(case, f"Branch {source.name!r}")
-        elif isinstance(source, (ModuleEmission, TimeProducer, TimelineParallel)):
+        elif isinstance(source, (ModuleEmission, TimeProducer)):
             yield from _read_macros(source.macros, scopes[-1])
         else:
             yield source, scopes[-1]

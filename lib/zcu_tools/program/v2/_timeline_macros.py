@@ -162,6 +162,7 @@ class TimelineBoundary(Macro):
             self.book.waiting.clear()
             self.book.repeats.clear()
             self.book.native_only = False
+            self.book.reference_guards = 0
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
             self.book.native_expressions.clear()
@@ -568,6 +569,7 @@ class ModuleEmission(TimedMacro):
     def preprocess(self, prog) -> None:
         """Collect actual ends at a common origin; an advance adds post then rounds."""
         previous_owner = prog._timing_table_owner
+        previous_guards = prog._timeline_book.reference_guards
         prog._timing_table_owner = self.emission_name
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
@@ -601,6 +603,7 @@ class ModuleEmission(TimedMacro):
                 self.finishers.append(finisher)
         finally:
             prog._timing_table_owner = previous_owner
+            prog._timeline_book.reference_guards = previous_guards
 
     def translate(self, prog) -> None:
         """Translate lowered operations through the program's shared compiler."""
@@ -620,6 +623,31 @@ class ModuleEmission(TimedMacro):
             if isinstance(macro, TimedMacro) and macro.list_time_params():
                 return macro.list_time_params()
         return []
+
+
+class ReferenceGuard(Macro):
+    """Mark the start/end of reference-preserving module lowering.
+
+    timeline is the parent placement target. Enter validates it even for empty
+    groups. enter=True starts the protected region; False closes it.
+    ModuleEmission also restores depth when a child fails during preprocessing.
+    """
+
+    def __init__(self, book: TimelineBook, timeline: str, *, enter: bool):
+        self.book = book
+        self.timeline = timeline
+        self.enter = enter
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        if self.enter:
+            self.book.end(self.timeline, placement=True)
+            self.book.reference_guards += 1
+        else:
+            self.book.reference_guards -= 1
+
+    def translate(self, prog) -> None:
+        pass
 
 
 class NativeTimelineDelay(TimedMacro):
@@ -669,12 +697,6 @@ class PreparedTimelineMacro(TimedMacro):
         )
 
     def preprocess(self, prog) -> None:
-        if self.book.used is not None and isinstance(
-            self.source, (Delay, NativeTimelineDelay, TimelineRuntimeAdvance)
-        ):
-            raise ValueError(
-                "branch cases cannot advance reference; use delay_timeline instead"
-            )
         self.math = RuntimeMath(prog)
         previous = self.book.math if self.book.preparing else None
         previous_origin = prog._time_origin
@@ -869,7 +891,7 @@ class TimelineBranch(Macro):
         self.by = by
         self.align_timeline = align_timeline
         self.indexed_cases = cases
-        # Producer and parallel-effect audits visit declared bodies before prepare.
+        # Producer audits visit declared bodies before prepare.
         self.cases: list[list[Macro]] = list(cases.values())
         self.name = name
         self.prepared: list[list[PreparedTimelineMacro]] = []

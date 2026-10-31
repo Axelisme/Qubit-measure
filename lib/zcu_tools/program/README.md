@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-10-31，TimelineBuilder、compiled simulation 與 joint-ADC shot sums
+**Last updated:** 2026-10-31，fork／join 與 readout acquisition
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -18,10 +18,7 @@
 with final axis `[I,Q]`. It retains QICK's `remove_offset` policy and native
 `threshold`/`angle` projection. Projection returns excited fraction in I and
 zero in Q, using QICK's angle sign, offset and equality rules.
-`v2.modules.readout.qick_threshold_options(cfg)` converts stored linear/circle
-calibration to native projection options. The caller opts in and supplies all
-declared ADCs in declaration order. Missing, centroid3 or conflicting
-calibration returns empty options for ordinary IQ.
+Callers supply native projection options explicitly in ADC declaration order.
 
 Host classification uses `acquire_summed` with read axes, not an acquire option.
 `centroid3_classifier(cfg, ro_ch=...)` returns detached g/e/f calibration

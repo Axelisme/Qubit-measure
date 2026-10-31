@@ -23,6 +23,7 @@ from ._timeline_macros import (
     ModuleEmission,
     PreparedTimelineMacro,
     PreparedTimelineOpenLoop,
+    ReferenceGuard,
     TimelineAdvance,
     TimelineBoundary,
     TimelineBranch,
@@ -41,7 +42,6 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
-from ._timeline_parallel import TimelineParallel
 from ._timeline_runtime import RuntimeEnd
 from ._timeline_selected import SelectedPlayback, TimelineSelectedPulse
 from ._timeline_state import TimelineBook
@@ -175,7 +175,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 macro.dependencies,
                 macro.dependency_ranges,
             )
-        if isinstance(macro, (ModuleEmission, TimeProducer, TimelineParallel)):
+        if isinstance(macro, (ModuleEmission, TimeProducer)):
             for child in macro.macros:
                 self._observe_time_producers(child)
         if isinstance(macro, TimelineBranch):
@@ -463,7 +463,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def timeline(self, name: str) -> Generator[None]:
         """Select an existing name for omitted timeline arguments in this scope.
 
-        Applies to emit, emit_parallel, pulse, trigger, delay_timeline, sync and
+        Applies to emit, pulse, trigger, delay_timeline, sync and
         the repeat parent. Branch case emissions use the same default. Nested
         scopes override it and restore it on exit, including exceptions.
         Explicit names win, including default. This neither forks
@@ -518,49 +518,26 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             )
         )
 
-    def emit_parallel(
-        self,
-        branches: Sequence[Sequence[Module]],
-        *,
-        timeline: str | None = None,
-        tag: str | None = None,
-    ) -> None:
-        """Lower ordered Module sequences at one placement origin and merge ends.
+    @contextmanager
+    def reference_guard(self, timeline: str) -> Generator[None]:
+        """Require module lowering to preserve reference time during compilation.
 
-        None selects the scoped name, or default outside a scope.
-        Call from the body or a declared Module's lower. Body calls allocate
-        their own emission naming scope. Each complete branch keeps its
-        internal order. The unique reference-advancing sequence emits last;
-        multiple advancing sequences and unknown reference effects fail.
-        Exchanged branches require independent physical register/word effects.
-        A wait-only parent rejects placement, including empty branches. Existing
-        channel physical-end and structured case/backedge guards still apply.
-        tag belongs to the first child in author order, before any exchange.
+        timeline names the parent placement target, validated even when empty.
+        Use inside lower to protect forked children. Native timestamp advances
+        and runtime timeline debits raise ValueError with the same restriction
+        as branch cases. Raw instructions/custom macro translation bypass
+        reference owners and remain the author's responsibility. This does not
+        fork, join or reorder operations. Outside module lowering raises ValueError.
         """
-        selected = timeline if timeline is not None else self._timeline_default
-        parent = selected if selected is not None else "default"
-        previous_scope = self._emission_scope
-        if previous_scope is None:
-            self._emission_scope = (self._emission_serial, 0)
-            self._emission_serial += 1
-        start = len(self.macro_list)
+        if self._emission_scope is None:
+            raise ValueError("reference_guard requires an active module lower call")
+        self.append_macro(ReferenceGuard(self._timeline_book, timeline, enter=True))
         try:
-            names = [self.emission_name("join_branch") for _ in branches]
-            lowered: list[list[Macro]] = []
-            try:
-                for name, modules in zip(names, branches, strict=True):
-                    branch_start = len(self.macro_list)
-                    for module in modules:
-                        self.emit(module, timeline=name, tag=tag)
-                        tag = None
-                    lowered.append(self.macro_list[branch_start:])
-            finally:
-                del self.macro_list[start:]
-            self.append_macro(
-                TimelineParallel(self._timeline_book, parent, lowered, names)
-            )
+            yield
         finally:
-            self._emission_scope = previous_scope
+            self.append_macro(
+                ReferenceGuard(self._timeline_book, timeline, enter=False)
+            )
 
     def emission_name(self, stem: str) -> str:
         """Allocate an internal register/loop name during a module's lower call.
@@ -709,6 +686,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Ends use a pointwise zero floor. A crossing floor promotes only that
         expression to runtime cycles; signed overflow fails during compile.
         """
+        self._timeline_book.require_reference_advance()
         super().decrement_timestamps(t)
         if t is not None:
             self._timeline_book.decrement(t)
