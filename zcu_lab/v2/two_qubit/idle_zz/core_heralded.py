@@ -17,14 +17,23 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_sweep_dict, sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Classify, Pulse, Reset, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
+
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.device import set_flux
-from zcu_tools.plotting.plots import Plots
 
 from .._sums import herald_probabilities, sigma, terminal_counts, validate_classifiers
-from ._analysis import IdleBranchFit, IdleZZAnalysis, complete_points, fit_traces, sigma_errors, summarize, validate_axes
+from ._analysis import (
+    IdleBranchFit,
+    IdleZZAnalysis,
+    complete_points,
+    fit_traces,
+    sigma_errors,
+    summarize,
+    validate_axes,
+)
 from .core import IdleZZCfg
 
 
@@ -121,7 +130,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         )
     )
 
-    def run(self, config: IdleZZHeraldedCfg, *, context: RunContext) -> IdleZZHeraldedResult:
+    def run(
+        self, config: IdleZZHeraldedCfg, *, context: RunContext
+    ) -> IdleZZHeraldedResult:
         """Acquire reset if set → herald → spectator I/Xπ → target Ramsey → terminal.
 
         Hardware scans spectator_states and delay; DC alone stays on host
@@ -130,34 +141,66 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         validate_classifiers(config.readout, config.roles)
         delay_sweep = round_sweep_dict(config.delay, "time", {"soccfg": context.soccfg})
         delays = sweep2array(delay_sweep)
-        dc_values = np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
-        viewer = live_line(context.plots, "measurement", "Delay (us)", "Target ⟨σ⟩ (gg, −ee; actual spectator g/e)", num_lines=len(dc_values) * 4)
+        dc_values = (
+            np.array([0.0])
+            if config.dc_device is None
+            else sweep2array(config.dc_values)
+        )
+        viewer = live_line(
+            context.plots,
+            "measurement",
+            "Delay (us)",
+            "Target ⟨σ⟩ (gg, −ee; actual spectator g/e)",
+            num_lines=len(dc_values) * 4,
+        )
 
         def update_view(sums: NDArray[np.float64]) -> None:
             gg = sigma(terminal_counts(sums, ("g", "g")), config.target)
             ee = -sigma(terminal_counts(sums, ("e", "e")), config.target)[:, ::-1]
             viewer.update(delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays)))
 
-        buffer = SignalBuffer((len(dc_values), 2, len(delays), 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
+        buffer = SignalBuffer(
+            (len(dc_values), 2, len(delays), 3, 3, 3, 3),
+            dtype=np.float64,
+            on_update=update_view,
+        )
         with Schedule(config, buffer, scope=context.scope) as sched:
             # DC stays on host because it sets an external instrument.
             for dc_value, step in sched.scan("dc", dc_values.tolist()):
                 if config.dc_device is not None:
-                    set_flux(context.devices[config.dc_device], dc_value, unit=config.dc_unit, stop=context.scope.stop)
-                builder = TimelineBuilder(context.soccfg, reps=config.reps, initial_delay=config.initial_delay, relax_delay=config.relax_delay)
+                    set_flux(
+                        context.devices[config.dc_device],
+                        dc_value,
+                        unit=config.dc_unit,
+                        stop=context.scope.stop,
+                    )
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
                 builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ (outer)
                 delay = builder.add_sweep("delay", delay_sweep)
-                spectator_cfg = config.x180_f2 if config.target == "f1" else config.x180_f1
+                spectator_cfg = (
+                    config.x180_f2 if config.target == "f1" else config.x180_f1
+                )
                 pi2_cfg = config.x90_f1 if config.target == "f1" else config.x90_f2
                 spectator = Pulse("spectator_x180", spectator_cfg)
                 pi2 = Pulse("target_pi2", pi2_cfg)
-                projection = Pulse("projection", pi2_cfg, phase=pi2_cfg.phase + 360 * config.detune * delay)
+                projection = Pulse(
+                    "projection",
+                    pi2_cfg,
+                    phase=pi2_cfg.phase + 360 * config.detune * delay,
+                )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
                 builder.sync()  # Herald/reset must finish before spectator preparation.
-                with builder.branch(by="spectator_states", align_timeline=True) as cases:
+                with builder.branch(
+                    by="spectator_states", align_timeline=True
+                ) as cases:
                     with cases.case(1):
                         builder.emit(spectator)
                 builder.emit(pi2)
@@ -171,12 +214,23 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     Classify("terminal", config.roles.f1_tone),
                     Classify("terminal", config.roles.f2_tone),
                 ]
-                step.run_acquire_summed(prog, context.soc, processor=shot_sums(prog, axes), rounds=config.rounds, options=RunOptions())
-        return IdleZZHeraldedResult(dc_values, np.arange(2, dtype=np.int64), delays, buffer.array)
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=config.rounds,
+                    options=RunOptions(),
+                )
+        return IdleZZHeraldedResult(
+            dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
+        )
 
     def analyze(
-        self, source: RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> IdleZZHeraldedAnalysis:
         """Joint-fit gg/ee by actual spectator state, then plot all herald classes.
 
@@ -188,8 +242,17 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         cfg, result = source.cfg, source.result
         if cfg is None:
             raise ValueError("Idle ZZ analysis requires saved cfg")
-        dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
-        validate_axes(result.dc_values, result.spectator_states, result.delays, result.sums, dc_values, cfg.delay.expts)
+        dc_values = (
+            np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
+        )
+        validate_axes(
+            result.dc_values,
+            result.spectator_states,
+            result.delays,
+            result.sums,
+            dc_values,
+            cfg.delay.expts,
+        )
         complete = complete_points(result.sums, cfg.reps * cfg.rounds)
         gg = terminal_counts(result.sums, ("g", "g"))
         # ee starts with spectator e: nominal I is actual e, Xπ is actual g.
@@ -199,14 +262,38 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         for dc_index in range(len(dc_values)):
             for state in result.spectator_states:
                 pair = (
-                    IdleBranchFit(dc_index, int(state), int(np.nansum(gg[dc_index, state])), bool(np.all(complete[dc_index, state])), gg_traces[dc_index, state]),
-                    IdleBranchFit(dc_index, int(state), int(np.nansum(ee[dc_index, state])), bool(np.all(complete[dc_index, 1 - state])), ee_traces[dc_index, state]),
+                    IdleBranchFit(
+                        dc_index,
+                        int(state),
+                        int(np.nansum(gg[dc_index, state])),
+                        bool(np.all(complete[dc_index, state])),
+                        gg_traces[dc_index, state],
+                    ),
+                    IdleBranchFit(
+                        dc_index,
+                        int(state),
+                        int(np.nansum(ee[dc_index, state])),
+                        bool(np.all(complete[dc_index, 1 - state])),
+                        ee_traces[dc_index, state],
+                    ),
                 )
-                a, b = fit_traces(pair, (sigma_errors(gg[dc_index, state], cfg.target), sigma_errors(ee[dc_index, state], cfg.target)), delays=result.delays, detune=cfg.detune)
+                a, b = fit_traces(
+                    pair,
+                    (
+                        sigma_errors(gg[dc_index, state], cfg.target),
+                        sigma_errors(ee[dc_index, state], cfg.target),
+                    ),
+                    delays=result.delays,
+                    detune=cfg.detune,
+                )
                 gg_fits.append(a)
                 ee_fits.append(b)
         terminal = summarize(tuple(gg_fits))
-        dc_label = "DC not swept (inactive coordinate)" if cfg.dc_device is None else f"{cfg.dc_device} ({cfg.dc_unit})"
+        dc_label = (
+            "DC not swept (inactive coordinate)"
+            if cfg.dc_device is None
+            else f"{cfg.dc_device} ({cfg.dc_unit})"
+        )
         for dc_index, dc_value in enumerate(dc_values):
             fig, ax = plots.subplots(f"ramsey_{dc_index}", figsize=(10, 7))
             reasons = []
@@ -215,35 +302,80 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     fit = fits[2 * dc_index + state]
                     state_label = "g" if state == 0 else "e"
                     name = f"{label}, actual spectator {state_label}"
-                    ax.plot(result.delays, sign * fit.trace, ".", label=f"{name}; n={fit.acquired_shots}")
+                    ax.plot(
+                        result.delays,
+                        sign * fit.trace,
+                        ".",
+                        label=f"{name}; n={fit.acquired_shots}",
+                    )
                     if fit.fit_curve is not None:
-                        ax.plot(result.delays, sign * fit.fit_curve, label=f"{name} joint fit |f|={fit.magnitude_mhz:.5g} MHz")
+                        ax.plot(
+                            result.delays,
+                            sign * fit.fit_curve,
+                            label=f"{name} joint fit |f|={fit.magnitude_mhz:.5g} MHz",
+                        )
                     if fit.reason:
                         reasons.append(f"{name}: {fit.reason}")
             zeta = terminal.zeta_mhz[dc_index]
             subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
-            ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩ (gg; −ee)", title=f"Target {cfg.target}; {dc_label}={dc_value:g}; {subtitle}\nShared frequency/decay by actual spectator; ee displayed inverted")
-            ax.text(0.01, -0.2, "\n".join(reasons), transform=ax.transAxes, va="top", fontsize=8)
+            ax.set(
+                xlabel="Delay (us)",
+                ylabel="Target ⟨σ⟩ (gg; −ee)",
+                title=f"Target {cfg.target}; {dc_label}={dc_value:g}; {subtitle}\nShared frequency/decay by actual spectator; ee displayed inverted",
+            )
+            ax.text(
+                0.01,
+                -0.2,
+                "\n".join(reasons),
+                transform=ax.transAxes,
+                va="top",
+                fontsize=8,
+            )
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
         fig, ax = plots.subplots("zeta", figsize=(8, 5))
-        for index, (value, error) in enumerate(zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)):
+        for index, (value, error) in enumerate(
+            zip(terminal.zeta_mhz, terminal.zeta_error_mhz, strict=True)
+        ):
             if value is not None:
                 ax.errorbar(dc_values[index], value, yerr=error, marker="o", color="C0")
         if not any(value is not None for value in terminal.zeta_mhz):
-            ax.text(0.5, 0.5, "ζ unavailable: see branch reasons", transform=ax.transAxes, ha="center")
-        ax.set(xlabel=dc_label, ylabel="ζ = f_e − f_g (MHz)", title="Joint gg/ee single-frequency model; not pure Hamiltonian ZZ")
+            ax.text(
+                0.5,
+                0.5,
+                "ζ unavailable: see branch reasons",
+                transform=ax.transAxes,
+                ha="center",
+            )
+        ax.set(
+            xlabel=dc_label,
+            ylabel="ζ = f_e − f_g (MHz)",
+            title="Joint gg/ee single-frequency model; not pure Hamiltonian ZZ",
+        )
         fig.tight_layout()
         matrix = herald_probabilities(result.sums)
-        labels = [f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")]
+        labels = [
+            f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+        ]
         for dc_index, dc_value in enumerate(dc_values):
             for state in range(2):
                 fig, ax = plots.subplots(f"herald_{dc_index}_{state}", figsize=(9, 5))
                 for outcome, label in enumerate(labels):
-                    ax.plot(result.delays, matrix[dc_index, state].reshape(-1, 9)[:, outcome], label=label)
-                ax.set(xlabel="Delay (us)", ylabel="Herald probability", title=f"DC={dc_value:g}; nominal spectator {'I' if state == 0 else 'Xπ'}", ylim=(0, 1))
+                    ax.plot(
+                        result.delays,
+                        matrix[dc_index, state].reshape(-1, 9)[:, outcome],
+                        label=label,
+                    )
+                ax.set(
+                    xlabel="Delay (us)",
+                    ylabel="Herald probability",
+                    title=f"DC={dc_value:g}; nominal spectator {'I' if state == 0 else 'Xπ'}",
+                    ylim=(0, 1),
+                )
                 ax.legend()
                 fig.suptitle("(g,g) is pass fraction, not ground-state purity")
                 fig.tight_layout()
-        return IdleZZHeraldedAnalysis(terminal, tuple(ee_fits), matrix, matrix[..., 0, 0])
+        return IdleZZHeraldedAnalysis(
+            terminal, tuple(ee_fits), matrix, matrix[..., 0, 0]
+        )

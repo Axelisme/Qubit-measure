@@ -76,16 +76,24 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
     missing = np.all(np.isnan(sums), axis=axes)
     total = sums.sum(axis=axes)
     if not np.all(finite | missing) or np.any(total > expected):
-        raise ValueError("Idle ZZ counts must be nonnegative, within requested shots, or all NaN")
+        raise ValueError(
+            "Idle ZZ counts must be nonnegative, within requested shots, or all NaN"
+        )
     return finite & (total == expected)
 
 
 def fringe(
-    x: NDArray[np.float64], frequency: float, decay: float,
-    offset: float, amplitude: float, phase: float,
+    x: NDArray[np.float64],
+    frequency: float,
+    decay: float,
+    offset: float,
+    amplitude: float,
+    phase: float,
 ) -> NDArray[np.float64]:
     """Return a decay cosine, with µs, MHz and phase in degrees."""
-    return offset + amplitude * np.exp(-x / decay) * np.cos(2 * np.pi * frequency * x + np.deg2rad(phase))
+    return offset + amplitude * np.exp(-x / decay) * np.cos(
+        2 * np.pi * frequency * x + np.deg2rad(phase)
+    )
 
 
 def sigma_errors(counts: NDArray[np.float64], target: str) -> NDArray[np.float64]:
@@ -112,7 +120,9 @@ def sigma_errors(counts: NDArray[np.float64], target: str) -> NDArray[np.float64
 def fit_traces(
     fits: tuple[IdleBranchFit, ...],
     errors: tuple[NDArray[np.float64], ...],
-    *, delays: NDArray[np.float64], detune: float,
+    *,
+    delays: NDArray[np.float64],
+    detune: float,
 ) -> tuple[IdleBranchFit, ...]:
     """Fit traces of one actual spectator state with shared frequency/decay.
 
@@ -128,7 +138,11 @@ def fit_traces(
         reason = "Required branch is incomplete; all delays and rounds are needed"
     elif not all(np.all(np.isfinite(f.trace)) for f in fits):
         reason = "No accepted shots at one or more required delays"
-    elif len(delays) < 6 or span <= 0 or not np.allclose(np.diff(delays), np.diff(delays)[0]):
+    elif (
+        len(delays) < 6
+        or span <= 0
+        or not np.allclose(np.diff(delays), np.diff(delays)[0])
+    ):
         reason = "At least six distinct regularly spaced delays with positive span are needed"
     elif any(np.ptp(f.trace) <= np.finfo(float).eps for f in fits):
         reason = "No identifiable Ramsey contrast"
@@ -141,8 +155,10 @@ def fit_traces(
 
 
 def _fit_complete_traces(
-    fits: tuple[IdleBranchFit, ...], errors: tuple[NDArray[np.float64], ...],
-    delays: NDArray[np.float64], detune: float,
+    fits: tuple[IdleBranchFit, ...],
+    errors: tuple[NDArray[np.float64], ...],
+    delays: NDArray[np.float64],
+    detune: float,
 ) -> tuple[IdleBranchFit, ...]:
     seeds = [fit_decay_fringe(delays, f.trace) for f in fits]
     parameters = [
@@ -153,8 +169,13 @@ def _fit_complete_traces(
     for index, (fit, error, seed) in enumerate(zip(fits, errors, seeds, strict=True)):
         offset, amplitude, _, phase, _ = seed.params
         names = tuple(f"{name}_{index}" for name in ("offset", "amplitude", "phase"))
-        parameters.extend(ParameterSpec(name, float(value)) for name, value in zip(names, (offset, amplitude, phase), strict=True))
-        traces.append(FitTrace(delays, fit.trace, fringe, ("frequency", "decay", *names), error))
+        parameters.extend(
+            ParameterSpec(name, float(value))
+            for name, value in zip(names, (offset, amplitude, phase), strict=True)
+        )
+        traces.append(
+            FitTrace(delays, fit.trace, fringe, ("frequency", "decay", *names), error)
+        )
     shared = fit_shared(traces, parameters)
     frequency = shared.values["frequency"]
     variance = shared.variance("frequency")
@@ -172,13 +193,21 @@ def _fit_complete_traces(
         values = {name: shared.values[name] for name in trace.parameter_names}
         curve = fringe(delays, *values.values())
         indices = [shared.parameter_names.index(name) for name in trace.parameter_names]
-        quality = compute_fit_quality(fit.trace, curve, values, shared.covariance[np.ix_(indices, indices)])
-        answers.append(replace(
-            fit, fit_curve=curve, magnitude_mhz=frequency,
-            signed_mhz=None if reason else float(np.sign(detune) * frequency),
-            error_mhz=error if np.isfinite(error) else None,
-            resolution_mhz=resolution, reason=reason, fit_quality=quality,
-        ))
+        quality = compute_fit_quality(
+            fit.trace, curve, values, shared.covariance[np.ix_(indices, indices)]
+        )
+        answers.append(
+            replace(
+                fit,
+                fit_curve=curve,
+                magnitude_mhz=frequency,
+                signed_mhz=None if reason else float(np.sign(detune) * frequency),
+                error_mhz=error if np.isfinite(error) else None,
+                resolution_mhz=resolution,
+                reason=reason,
+                fit_quality=quality,
+            )
+        )
     return tuple(answers)
 
 
@@ -192,7 +221,12 @@ def summarize(fits: tuple[IdleBranchFit, ...]) -> IdleZZAnalysis:
     errors: list[float | None] = []
     reasons: list[str | None] = []
     for a, b in zip(fits[::2], fits[1::2], strict=True):
-        if a.signed_mhz is None or b.signed_mhz is None or a.error_mhz is None or b.error_mhz is None:
+        if (
+            a.signed_mhz is None
+            or b.signed_mhz is None
+            or a.error_mhz is None
+            or b.error_mhz is None
+        ):
             zetas.append(None)
             errors.append(None)
             reasons.append("; ".join(f.reason for f in (a, b) if f.reason))
@@ -204,9 +238,12 @@ def summarize(fits: tuple[IdleBranchFit, ...]) -> IdleZZAnalysis:
 
 
 def validate_axes(
-    dc_values: NDArray[np.float64], spectator_states: NDArray[np.int64],
-    delays: NDArray[np.float64], sums: NDArray[np.float64],
-    expected_dc: NDArray[np.float64], ndelay: int,
+    dc_values: NDArray[np.float64],
+    spectator_states: NDArray[np.int64],
+    delays: NDArray[np.float64],
+    sums: NDArray[np.float64],
+    expected_dc: NDArray[np.float64],
+    ndelay: int,
 ) -> None:
     """Reject mismatched saved coordinates or class-count dimensions.
 
@@ -222,4 +259,6 @@ def validate_axes(
         or len(np.unique(delays)) != ndelay
         or sums.shape[:3] != (len(expected_dc), 2, ndelay)
     ):
-        raise ValueError("Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes")
+        raise ValueError(
+            "Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes"
+        )
