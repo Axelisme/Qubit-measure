@@ -43,8 +43,10 @@ from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import TimelineBook
 from .macro.delay import DelayRegAuto
 from .macro.dmem import DmemLookup
+from .macro.meta import MetaMacro
 from .macro.pluse_reg import PulseByReg
 from .macro.readout import ReadoutEmission
+from .macro.structure import MarkedCloseLoop, SourcePulse
 from .macro.wmem import (
     ConfigReadoutFromRegs,
     PatchWmemFromDmem,
@@ -74,6 +76,7 @@ _REFERENCE_STABLE = (
     TimelinePlacedTrigger,
     TimelineSelectedPulse,
     Pulse,
+    SourcePulse,
     ConfigReadout,
     Trigger,
     PulseFromRegs,
@@ -89,8 +92,15 @@ _REFERENCE_STABLE = (
     DmemLookup,
     FixedRepeatLoop,
     CloseLoop,
+    MarkedCloseLoop,
     ReadoutEmission,
 )
+
+
+def _annotation(macro: Macro) -> bool:
+    # Only snapshot-only annotations are inert. Other metadata can instruct
+    # the IR optimizer to rebuild control flow, rather than describe it.
+    return type(macro) is MetaMacro and macro.type in ("SOURCE_START", "SOURCE_END")
 
 
 def _advances(macro: Macro) -> bool:
@@ -116,7 +126,9 @@ def _advances(macro: Macro) -> bool:
         return True
     if type(macro) in _REFERENCE_ADVANCE:
         return True
-    if type(macro) in _REFERENCE_STABLE and not _unknown_control_write(macro):
+    if (
+        _annotation(macro) or type(macro) in _REFERENCE_STABLE
+    ) and not _unknown_control_write(macro):
         return False
     raise ValueError(
         f"parallel admission: unknown reference effect of {type(macro).__name__}"
@@ -328,7 +340,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
         TimelinePlacedConfig,
     ):
         return _resource(prog, macro.source)
-    if type(macro) in (
+    if _annotation(macro) or type(macro) in (
         TimelineFork,
         TimelineJoin,
         TimelineAdvance,
@@ -342,6 +354,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
         return _timed_resource(prog, macro.source)
     if type(macro) in (
         Pulse,
+        SourcePulse,
         ConfigReadout,
         PulseFromRegs,
         ConfigReadoutFromRegs,
@@ -353,7 +366,7 @@ def _leaf_resource(prog, macro: Macro) -> _Effects | None:
 
 
 def _timeline_resource(prog, macro) -> _Effects:
-    if type(macro) in (TimelineFork, TimelineJoin):
+    if _annotation(macro) or type(macro) in (TimelineFork, TimelineJoin):
         return _Effects(set(), set(), set())
     if type(macro) is TimelineAdvance:
         return _Effects(

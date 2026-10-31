@@ -10,7 +10,7 @@ from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
-from zcu_tools.program.v2.simulation.frontend import build_request
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 
 @pytest.fixture
@@ -45,22 +45,24 @@ def program(env, *, length=0.1, name="drive"):
     )
 
 
-def envelope(prog, binding, sequence):
-    request = build_request(prog, "integrated", binding, sequence)
-    result = request.templates[0].events[0].envelopes[0]
+def envelope(prog, soc, sequence):
+    request = build_compiled_request(
+        prog, "integrated", soc.binding, sequence, routes=soc.routes
+    )
+    result = request.materialize_point(0).events[0].envelope
     assert result is not None
     return result
 
 
 def test_new_preparations_share_equal_content_not_program_or_name(environment):
-    binding = environment.soc.binding
-    first = envelope(program(environment), binding, 0)
-    second = envelope(program(environment, name="renamed"), binding, 1)
+    soc = environment.soc
+    first = envelope(program(environment), soc, 0)
+    second = envelope(program(environment, name="renamed"), soc, 1)
     assert second is first
     # The environment, not a global cache, owns the pool.
     other = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
     try:
-        independent = envelope(program(other), other.soc.binding, 0)
+        independent = envelope(program(other), other.soc, 0)
         assert independent == first
         assert independent is not first
     finally:
@@ -70,9 +72,9 @@ def test_new_preparations_share_equal_content_not_program_or_name(environment):
 @pytest.mark.parametrize("difference", ["samples", "clock", "maxv"])
 def test_new_preparation_checks_current_compiled_content(environment, difference):
     prog = program(environment)
-    binding = environment.soc.binding
-    first = envelope(prog, binding, 0)
-    assert envelope(prog, binding, 1) is first
+    soc = environment.soc
+    first = envelope(prog, soc, 0)
+    assert envelope(prog, soc, 1) is first
     old_times, old_values = first.sample_us, first.values
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
@@ -82,19 +84,19 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
         prog.soccfg["gens"][1]["f_fabric"] *= 2
     else:
         prog.soccfg["gens"][1]["maxv"] //= 2
-    changed = envelope(prog, binding, 2)
+    changed = envelope(prog, soc, 2)
     assert changed is not first
     assert changed != first
     assert first.sample_us == old_times
     assert first.values == old_values
-    assert envelope(prog, binding, 3) is changed
+    assert envelope(prog, soc, 3) is changed
 
 
 def test_byte_bounded_eviction_keeps_borrowed_envelope_immutable(environment):
     prog = program(environment, length=4.0)
-    binding = environment.soc.binding
-    first = envelope(prog, binding, 0)
-    assert envelope(prog, binding, 1) is first
+    soc = environment.soc
+    first = envelope(prog, soc, 0)
+    assert envelope(prog, soc, 1) is first
     original_times, original_values = first.sample_us, first.values
     # Exceed 32 MiB using the immutable samples alone, independently of the
     # pool's additional key/container accounting. Only retain the first borrow.
@@ -109,12 +111,12 @@ def test_byte_bounded_eviction_keeps_borrowed_envelope_immutable(environment):
     original_data = data.copy()
     for index in range(count):
         data[:, 1] = index + 1
-        envelope(prog, binding, index + 2)
+        envelope(prog, soc, index + 2)
     data[:] = original_data
-    rebuilt = envelope(prog, binding, count + 2)
+    rebuilt = envelope(prog, soc, count + 2)
     assert rebuilt is not first
     assert rebuilt == first
     assert first.sample_us == original_times
     assert first.values == original_values
     np.testing.assert_array_equal(data, original_data)
-    assert envelope(prog, binding, count + 3) is rebuilt
+    assert envelope(prog, soc, count + 3) is rebuilt

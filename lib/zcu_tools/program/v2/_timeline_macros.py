@@ -9,7 +9,6 @@ from copy import deepcopy
 from dataclasses import replace
 
 from qick.asm_v2 import (
-    CloseLoop,
     CondJump,
     Delay,
     Jump,
@@ -45,6 +44,7 @@ from ._timeline_runtime import (
 from ._timeline_selected import TimelineSelectedPulse
 from ._timeline_state import RepeatFrame, RepeatFrameSnapshot, TimelineBook
 from .macro.delay import DelayRegAuto
+from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
 from .modules.util import get_fclk
@@ -715,7 +715,7 @@ class PreparedTimelineMacro(TimedMacro):
         return self.source.get_time_param(name)
 
 
-class FixedRepeatLoop(OpenLoop):
+class FixedRepeatLoop(MarkedOpenLoop):
     """Native fixed loop paired with the exact writer that closes its counter.
 
     index is Repeat-owned metadata; closing is the native matching backedge.
@@ -727,7 +727,7 @@ class FixedRepeatLoop(OpenLoop):
     def __init__(self, name: str, count: int):
         super().__init__(name=name, n=count)
         self.index = FixedLoopIndex(name, name, count)
-        self.closing = CloseLoop()
+        self.closing = MarkedCloseLoop()
 
 
 class PreparedTimelineOpenLoop(PreparedTimelineMacro, OpenLoop):

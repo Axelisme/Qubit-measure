@@ -1,4 +1,5 @@
 from .base import IRCompileMixin
+from .compiled_stream import CompiledRecord, CompiledStream
 from .compiled_timing import (
     CompiledTimingInput,
     ShotTiming,
@@ -11,6 +12,8 @@ from .compiled_timing import (
 
 __all__ = [
     "IRCompileMixin",
+    "CompiledRecord",
+    "CompiledStream",
     "CompiledTimingInput",
     "ShotTiming",
     "TimingAnalysis",

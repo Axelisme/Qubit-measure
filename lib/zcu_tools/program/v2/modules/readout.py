@@ -435,6 +435,7 @@ class PulseReadout(AbsReadout):
             self._run_readout_config_from_regs(prog, runtime_ro_name, t)
 
         if not self._uses_runtime_pulse:
+            # The helper pulse belongs to this semantic readout's source scope.
             self.pulse.run(prog, t)
         else:
             runtime_pulse = self._runtime_pulse

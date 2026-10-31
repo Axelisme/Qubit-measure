@@ -13,11 +13,13 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
+from zcu_tools.program.v2.builder import TimelineBuilder
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
 
@@ -48,6 +50,47 @@ def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
         reps=reps,
         sweep=sweep,
     )
+
+
+def test_builder_program_acquires_and_sums_tagged_readouts():
+    env = environment(std_adc=0, seed=123)
+    try:
+        builder = TimelineBuilder(env.soccfg, reps=3, initial_delay=0, relax_delay=0.1)
+        builder.add_loop("point", 2)
+        readout = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=100.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=env.soccfg.cycles2us(16, ro_ch=0),
+        ).build("readout")
+        builder.emit(readout, tag="herald")
+        builder.emit(readout, tag="signal")
+        prog = builder.build()
+
+        averaged = prog.acquire(env.soc, progress=False)
+        assert averaged[0].shape == (2, 2, 2)
+        np.testing.assert_array_equal(averaged[0], 0)
+        result = prog.acquire_summed(
+            env.soc,
+            processor=shot_sums(prog, [IQ("herald"), IQ("signal")]),
+            rounds=2,
+            progress=False,
+        )
+        expected = np.zeros((2, 3, 3))
+        expected[:, 0, 0] = 6
+        np.testing.assert_array_equal(result, expected)
+        request = env.soc.binding.last_request
+        assert request is not None
+        assert request.point_names == ("point",)
+        assert request.reps == 3
+        (window,) = request.materialize_point(0).readouts
+        assert window.samples == 16
+        assert len(window.trigger_us) == 2
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_summed_simulation_materializes_joint_shots_and_retains_completed_rounds():
@@ -127,6 +170,57 @@ def raw_of(prog):
     if raw is None:
         raise AssertionError("completed acquisition must retain raw buffers")
     return raw
+
+
+@pytest.mark.parametrize("mode", ["integrated", "decimated"])
+def test_native_timeline_acquire_uses_compiled_effects(mode):
+    env = environment(std_adc=0, seed=123, routes=((0, 0),))
+
+    class NativeProgram(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.declare_gen(0, nqz=1)
+            self.add_pulse(
+                0, "probe", style="const", freq=100, phase=30, gain=0.25, length=0.1
+            )
+            self.declare_readout(0, length=env.soccfg.cycles2us(16, ro_ch=0))
+            self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
+
+        def _body(self, cfg):
+            self.send_readoutconfig(0, "ro", t=0)
+            self.pulse(0, "probe", t=0, tag="native-probe")
+            self.trigger([0], t=0)
+
+    try:
+        prog = NativeProgram(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
+        if mode == "integrated":
+            result = prog.acquire(env.soc, progress=False)
+            assert result[0].shape == (1, 2)
+        else:
+            result = prog.acquire_decimated(env.soc, progress=False)
+            assert result[0].shape == (2, 16, 2)
+        np.testing.assert_array_equal(result[0], 0)
+        raw = raw_of(prog)[0]
+        assert raw.shape == (2, 1, 2)
+        assert raw.dtype == np.int64
+        np.testing.assert_array_equal(raw, 0)
+        request = env.soc.binding.last_request
+        assert request is not None
+        assert request.mode == mode
+        assert request.reps == 2
+        assert request.sequence == 0
+        assert len(env.soc.binding.rounds) == 1
+        point = request.materialize_point(0)
+        (event,) = point.events
+        assert event.source == "native-probe"
+        assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
+        assert event.gain == pytest.approx(0.25, abs=1e-4)
+        (readout,) = point.readouts
+        assert readout.channel == 0
+        assert readout.generator_channels == (0,)
+        assert readout.samples == 16
+        assert readout.frequency_mhz == pytest.approx((100,), abs=1e-5)
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_explicit_zero_noise_preserves_shapes_and_raw():
@@ -531,8 +625,12 @@ def test_invalid_std_rejected(std_adc):
 def test_unbound_channel_rejected():
     env = environment(n_gens=2, n_readouts=2, routes=((0, 0),))
     prog = program(env, channels=(1,))
-    with pytest.raises(ValueError, match="bound|route"):
+    with pytest.raises(
+        ValueError,
+        match=r"ADC 1 read 0 point 0: no wired generator route.*candidates=\[\].*wired=\[\].*time=\[",
+    ):
         prog.acquire(env.soc, progress=False)
+    assert not env.soc.binding.rounds
 
 
 def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
@@ -668,7 +766,8 @@ def test_invalid_backend_signals_fail_public_acquire_and_allow_retry(invalid):
     assert env.soc.binding.last_request.sequence == failed_sequence + 1
 
 
-def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
+@pytest.mark.parametrize("ro_length", [0.1, 1.5], ids=["no-carrier", "overlap"])
+def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_length):
     env = environment(std_adc=0)
     cfg = PulseReadoutCfg(
         gen_ch=0,
@@ -677,7 +776,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
         freq=100.0,
         gain=0.1,
         waveform=ConstWaveformCfg(length=0.1),
-        ro_length=0.1,
+        ro_length=ro_length,
         pre_delay=1.5,
         trig_offset=0.25,
     )
@@ -686,6 +785,13 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay():
         modules=[cfg.build("readout")],
         reps=1,
     )
+    if ro_length == 0.1:
+        with pytest.raises(
+            ValueError, match=r"ADC 0 read 0.*no pulse carrier in acquisition window"
+        ):
+            prog.acquire(env.soc, progress=False)
+        assert not env.soc.binding.rounds
+        return
     prog.acquire(env.soc, progress=False)
     request = env.soc.binding.last_request
     expected_trigger = prog.cycles2us(prog.us2cycles(0.25))

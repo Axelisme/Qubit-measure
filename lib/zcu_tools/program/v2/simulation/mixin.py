@@ -21,7 +21,7 @@ from .signals import materialize_shots
 from .soc import SimulationSoc
 
 if TYPE_CHECKING:
-    from ..modular import ModularProgramV2
+    from ..base import MyProgramV2
 
 
 # One unbound callable and its metadata, never an acquiring program instance.
@@ -189,11 +189,11 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             return False
         return True
 
-    def _program(self) -> "ModularProgramV2":
-        from ..modular import ModularProgramV2
+    def _program(self) -> "MyProgramV2":
+        from ..base import MyProgramV2
 
-        if not isinstance(self, ModularProgramV2):
-            raise ValueError("simulation requires a ModularProgramV2 frontend")
+        if not isinstance(self, MyProgramV2):
+            raise ValueError("simulation requires a MyProgramV2 frontend")
         return self
 
     def _consume_integrated_result(
@@ -362,7 +362,7 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
     ):
         from contextlib import contextmanager
 
-        from .frontend import build_request
+        from .compiled import build_compiled_request
 
         @contextmanager
         def call():
@@ -373,11 +373,12 @@ class SimulationAcquireMixin(ImproveAcquireMixin):
             sequence = soc.binding.begin()
             self._simulation_active = True
             try:
-                request = build_request(
-                    self,
+                request = build_compiled_request(
+                    self._program(),
                     mode,
                     soc.binding,
                     sequence,
+                    routes=soc.routes,
                     charge_requirements=charge_requirements,
                 )
                 soc.install_request(

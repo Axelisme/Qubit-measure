@@ -22,7 +22,7 @@ from zcu_tools.program.v2.simulation import (
     SimulationSoc,
     SimulationTiming,
 )
-from zcu_tools.program.v2.simulation.frontend import build_request
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 
 class Clock:
@@ -256,7 +256,12 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
     )
     sequence = binding.begin()
     try:
-        binding.sample_round(build_request(program, "decimated", binding, sequence), 0)
+        binding.sample_round(
+            build_compiled_request(
+                program, "decimated", binding, sequence, routes=((0, 0),)
+            ),
+            0,
+        )
         # Allow 10 ns of DAC/ADC rounding per repetition of this nominal sequence.
         assert clock.waits == pytest.approx([expected], abs=100e-9)
     finally:

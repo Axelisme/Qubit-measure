@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 from zcu_tools.program.v2.ir.instructions import (
     Instruction,
@@ -5,10 +7,35 @@ from zcu_tools.program.v2.ir.instructions import (
     MetaInst,
     NopInst,
     RegWriteInst,
+    WaitInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
 from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
+
+
+def test_position_preserves_order_and_counts_wait_labels_and_metadata():
+    insts: list[Instruction] = [
+        MetaInst(type="LOOP_START", name="loop"),
+        LabelInst(name=Label("entry")),
+        WaitInst(c_op="time"),
+        MetaInst(type="LOOP_END", name="loop"),
+        LabelInst(name=Label("tail")),
+        NopInst(),
+        LabelInst(name=Label("end")),
+        MetaInst(type="TIMING_BOUNDARY", name="body_end"),
+    ]
+    positioned, cursor = IRLinker().position(insts)
+
+    assert [record.instruction for record in positioned] == insts
+    assert all(
+        record.instruction is inst
+        for record, inst in zip(positioned, insts, strict=True)
+    )
+    assert [record.p_addr for record in positioned] == [0, 0, 0, 2, 2, 2, 3, 3]
+    assert [record.line for record in positioned] == [0, 1, 2, 2, 3, 4, 5, 5]
+    assert cursor.final_p_addr == 3
+    assert cursor.final_line == 5
 
 
 def test_linker_link_tracks_meta_and_label_without_advancing_address():
@@ -48,7 +75,10 @@ def test_linker_link_tracks_meta_and_label_without_advancing_address():
     assert cursor.final_line == 3
 
 
-def test_linker_link_rejects_duplicate_label_names():
+@pytest.mark.parametrize("operation", [IRLinker.link, IRLinker.position])
+def test_linker_rejects_duplicate_label_names(
+    operation: Callable[[IRLinker, list[Instruction]], object],
+):
     linker = IRLinker()
     insts: list[Instruction] = [
         LabelInst(name=Label("dup")),
@@ -57,7 +87,7 @@ def test_linker_link_rejects_duplicate_label_names():
     ]
 
     with pytest.raises(ValueError, match="duplicate label 'dup'"):
-        linker.link(insts)
+        operation(linker, insts)
 
 
 @pytest.mark.parametrize(
