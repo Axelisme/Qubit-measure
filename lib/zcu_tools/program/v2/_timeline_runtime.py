@@ -1137,6 +1137,10 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
+        if left.minimum is not None and right.maximum is not None and left.minimum >= right.maximum:
+            return a
+        if right.minimum is not None and left.maximum is not None and right.minimum >= left.maximum:
+            return b
         if (
             left.minimum is None
             or left.maximum is None
@@ -1250,12 +1254,10 @@ class RuntimeMath(TimedMacro):
     ) -> tuple[int | None, int | None]:
         lo = right.minimum if isinstance(right, RuntimeEnd) else right
         hi = right.maximum if isinstance(right, RuntimeEnd) else right
-        if left.minimum is None or left.maximum is None or lo is None or hi is None:
-            return None, None
+        lower_operand, upper_operand = (hi, lo) if subtract else (lo, hi)
         return (
-            (left.minimum - hi, left.maximum - lo)
-            if subtract
-            else (left.minimum + lo, left.maximum + hi)
+            None if left.minimum is None or lower_operand is None else left.minimum + (-lower_operand if subtract else lower_operand),
+            None if left.maximum is None or upper_operand is None else left.maximum + (-upper_operand if subtract else upper_operand),
         )
 
     def _unbounded_maximum(

@@ -23,7 +23,7 @@ from ._timeline_state import LoopTimelineFrame, TimelineBook
 
 def _end(register: str, expression: TimeExpression, covers: tuple[Time, ...] = ()) -> RuntimeEnd:
     if unbounded_time(expression):
-        return RuntimeEnd(register, None, None, covers=covers, expression=expression)
+        return RuntimeEnd(register, 0, None, covers=covers, expression=expression)
     limits = projected_expression_bounds(expression)
     return RuntimeEnd(register, limits.minimum, limits.maximum, covers=covers, expression=expression)
 
@@ -42,9 +42,9 @@ class LoopTimelineEnter(Macro):
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
-        progress = CycleVariable(storage.register, None, None)
+        progress = CycleVariable(storage.register, 0, None)
         origin = RuntimeEnd(
-            storage.register, None, None,
+            storage.register, 0, None,
             expression=add_time(time_expression(prog, entry), LinearTime(terms=((progress, 1),))),
         )
         channels = {
