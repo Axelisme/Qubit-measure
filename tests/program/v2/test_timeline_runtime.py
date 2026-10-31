@@ -212,6 +212,23 @@ class AllocateTime(Macro):
         pass
 
 
+def test_runtime_events_load_s14_then_increment_for_shared_origin():
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.delay_timeline("duration")
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", timeline="default")
+        prog.pulse(1, "p1", t=40 / 430.08, timeline="other")
+
+    prog = program(body)
+    assert [waves(s) for s in shots(prog)] == [[100, 140]] * 3
+    writes = [i for i in prog.prog_list if i.get("DST") == "s14"]
+    assert len(writes) == 2
+    assert writes[0]["SRC"] == "op"
+    assert writes[1]["OP"] == "s14 + #40"
+    assert all("TIME" not in i for i in prog.prog_list if i["CMD"] == "WPORT_WR")
+
+
 def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
     def body(prog):
         prog.write_reg("duration", 40)
