@@ -377,6 +377,7 @@ class Outputs:
                     segment.shape,
                     segment.tobytes(),
                     maxv,
+                    clock,
                     self.time_base.period_ticks(clock * spc),
                     None,
                 )

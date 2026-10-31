@@ -29,6 +29,8 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation.support import raw_of, request_of
+from tests.program.v2.simulation.time_observations import time_us, times_us
+
 
 
 def drive(length=0.1, gain=0.2):
@@ -87,10 +89,10 @@ def test_loadvalue_repeat_branch_computedpulse_and_wait_follow_execution_order(
     ):
         first, second, readout = timeline.events
         assert first.gain == pytest.approx(-0.4 if i % 2 == 0 else 0.2, abs=1e-4)
-        assert first.duration_us == pytest.approx(0.3 if i % 2 == 0 else 0.1, abs=0.003)
+        assert time_us(request.time_base, first.duration_ticks) == pytest.approx(0.3 if i % 2 == 0 else 0.1, abs=0.003)
         # ComputedPulse reserves the max candidate, even when selecting the short one.
-        assert second.start_us == pytest.approx(0.3, abs=0.007)
-        assert readout.start_us == pytest.approx(0.5, abs=0.012)
+        assert time_us(request.time_base, second.start_ticks) == pytest.approx(0.3, abs=0.007)
+        assert time_us(request.time_base, readout.start_ticks) == pytest.approx(0.5, abs=0.012)
         assert ("inner", 0) in first.iterations
         assert ("inner", 1) in second.iterations
         assert dict(timeline.coordinates)["shot"] == i
@@ -117,7 +119,7 @@ def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquir
             "drive",
             "readout",
         ]
-        assert timeline.events[-1].start_us == pytest.approx(readout_start, abs=0.015)
+        assert time_us(request.time_base, timeline.events[-1].start_ticks) == pytest.approx(readout_start, abs=0.015)
     prog.acquire(env.soc, progress=False)
     for point in range(2):
         assert request_of(env).materialize_point(point) == request.materialize_point(
@@ -140,8 +142,8 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         for p in range(int(np.prod(request.point_dims)))
     ):
         assert events[0].source == "length"
-        assert events[0].duration_us == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
-        assert events[1].start_us == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
+        assert time_us(request.time_base, events[0].duration_ticks) == pytest.approx([0.1, 0.3][i % 2], abs=0.003)
+        assert time_us(request.time_base, events[1].start_ticks) == pytest.approx([0.1, 0.3][i % 2], abs=0.006)
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
     assert raw_of(prog)[0].shape == (2, 2, 1, 2)
 
@@ -198,11 +200,11 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         assert actual_sources == expected_sources
         first_event = next(e for e in events if e.source == "first")
         readout = next(e for e in events if e.gen_ch == 0)
-        assert first_event.start_us == pytest.approx(origin + 0.02, abs=0.003)
+        assert time_us(request.time_base, first_event.start_ticks) == pytest.approx(origin + 0.02, abs=0.003)
         if branches == 2:
             second_event = next(e for e in events if e.gen_ch == 2)
-            assert second_event.start_us == pytest.approx(origin, abs=0.003)
-        assert readout.start_us == pytest.approx(origin + expected_wait, abs=0.007)
+            assert time_us(request.time_base, second_event.start_ticks) == pytest.approx(origin, abs=0.003)
+        assert time_us(request.time_base, readout.start_ticks) == pytest.approx(origin + expected_wait, abs=0.007)
     env.devices.close_all_devices()
 
 
@@ -295,8 +297,8 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     ).build("reset")
     request, _, _ = acquire([None, reset, receiver().build("readout")])
     assert len(request.materialize_point(0).events) == 3
-    assert [e.start_us for e in request.materialize_point(0).events[:2]] == [0, 0]
-    assert request.materialize_point(0).events[-1].start_us == pytest.approx(
+    assert [time_us(request.time_base, e.start_ticks) for e in request.materialize_point(0).events[:2]] == [0, 0]
+    assert time_us(request.time_base, request.materialize_point(0).events[-1].start_ticks) == pytest.approx(
         0.2, abs=0.004
     )
 
@@ -346,11 +348,11 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
                 "readout",
             ]
             assert [
-                event.duration_us for event in timeline.events[:2]
+                time_us(request.time_base, event.duration_ticks) for event in timeline.events[:2]
             ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
-            assert timeline.events[-1].start_us == pytest.approx(84 / 430.08)
-            assert timeline.readouts[0].trigger_us == pytest.approx((93 / 430.08,))
-            assert timeline.duration_us == pytest.approx(181 / 430.08)
+            assert time_us(request.time_base, timeline.events[-1].start_ticks) == pytest.approx(84 / 430.08)
+            assert times_us(request.time_base, timeline.readouts[0].trigger_ticks) == pytest.approx((93 / 430.08,))
+            assert time_us(request.time_base, timeline.duration_ticks) == pytest.approx(181 / 430.08)
     finally:
         env.devices.close_all_devices()
 

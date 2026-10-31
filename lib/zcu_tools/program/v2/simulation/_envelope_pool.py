@@ -20,6 +20,7 @@ class EnvelopeContent:
     shape: tuple[int, ...]
     samples: bytes
     maxv: float
+    fabric_mhz: float
     sample_period_ticks: int
     flat_duration_ticks: int | None
 
@@ -94,6 +95,7 @@ def _entry_bytes(key: EnvelopeContent, envelope: PulseEnvelope) -> int:
             key.shape,
             key.samples,
             key.maxv,
+            key.fabric_mhz,
             key.sample_period_ticks,
             key.flat_duration_ticks,
             *key.shape,

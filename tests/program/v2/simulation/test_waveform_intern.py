@@ -18,6 +18,8 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program.v2.simulation.time_observations import envelope_times_us
+
 
 @pytest.mark.parametrize("kind", ["gauss", "drag", "flat_top", "arb"])
 def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_path):
@@ -88,7 +90,7 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
     for event in events:
         if event.envelope is not None:
             np.testing.assert_allclose(
-                event.envelope.sample_us,
+                envelope_times_us(request.time_base, event.envelope),
                 np.arange(len(event.envelope.values))
                 / (
                     prog.soccfg["gens"][1]["f_fabric"]
@@ -157,9 +159,9 @@ def test_equal_names_do_not_merge_different_compiled_content(difference):
     assert first != second
     if difference == "clock":
         np.testing.assert_array_equal(first.values, second.values)
-        np.testing.assert_array_equal(np.array(first.sample_us) / 2, second.sample_us)
+        np.testing.assert_array_equal(np.array(envelope_times_us(request.time_base, first)) / 2, envelope_times_us(request.time_base, second))
     elif difference == "maxv":
-        np.testing.assert_array_equal(first.sample_us, second.sample_us)
+        np.testing.assert_array_equal(envelope_times_us(request.time_base, first), envelope_times_us(request.time_base, second))
         np.testing.assert_array_equal(np.array(first.values) * 2, second.values)
     else:
         assert any(value.imag != 0 for value in second.values)

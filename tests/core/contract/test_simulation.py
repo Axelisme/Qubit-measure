@@ -26,26 +26,26 @@ def test_request_rejects_noninteger_or_out_of_range_time_arrays(duration, error)
 
 def template_request():
     """Two structural classes with local arrays in sorted flat-point order."""
-    envelope = simulation.PulseEnvelope((0.0, 0.25), (1j, -1j))
+    envelope = simulation.PulseEnvelope(2, (1j, -1j))
     event = simulation.EventSlot(
         gen_ch=2,
         source="drive",
         iterations=(("repeat", 1),),
-        start_us=np.array([5.0, 3.0]),
-        duration_us=np.array([0.5, 0.75]),
+        start_ticks=np.array([40, 24], dtype=np.int64),
+        duration_ticks=np.array([4, 6], dtype=np.int64),
         frequency_mhz=np.array([100.0, 200.0]),
         phase_deg=np.array([10.0, 20.0]),
         gain=np.array([-0.25, 0.5]),
         envelopes=(None, envelope),
         envelope_index=np.array([0, 1], dtype=np.int64),
         active=np.array([True, False]),
-        phase_reference_us=0.125,
+        phase_reference_ticks=1,
     )
     readout = simulation.ReadoutSlot(
         channel=4,
         samples=16,
-        sample_rate_mhz=8.0,
-        trigger_us=np.array([[7.0, 8.0], [4.0, 6.0]]),
+        sample_period_ticks=1,
+        trigger_ticks=np.array([[56, 64], [32, 48]], dtype=np.int64),
         frequency_mhz=np.array([[91.0, 92.0], [93.0, 94.0]]),
         phase_deg=np.array([[1.0, 2.0], [3.0, 4.0]]),
         generator_channels=np.array([[2, 3], [3, 2]], dtype=np.int64),
@@ -55,19 +55,20 @@ def template_request():
         events=(
             event,
             replace(
-                event, active=np.array([True, True]), start_us=np.array([1.0, 2.0])
+                event, active=np.array([True, True]), start_ticks=np.array([8, 16], dtype=np.int64)
             ),
         ),
         readouts=(readout,),
-        duration_us=np.array([10.0, 12.0]),
+        duration_ticks=np.array([80, 96], dtype=np.int64),
     )
     other = simulation.TimelineTemplate(
         points=np.array([1, 2], dtype=np.int64),
         events=(),
         readouts=(),
-        duration_us=np.array([0.25, 0.5]),
+        duration_ticks=np.array([2, 4], dtype=np.int64),
     )
     return simulation.AcquireRequest(
+        time_base=simulation.TimeBase(Fraction(8)),
         mode="integrated",
         loop_dims=(2, 5, 2),
         avg_level=1,
@@ -80,8 +81,8 @@ def template_request():
                 channel=4,
                 gen_ch=3,
                 samples=16,
-                sample_rate_mhz=8.0,
-                trigger_us=(0.0, 0.0),
+                sample_period_ticks=1,
+                trigger_ticks=(0, 0),
             ),
         ),
         root_seed=42,
@@ -106,21 +107,21 @@ def test_materialize_point_selects_template_active_events_and_detaches_values():
     request = template_request()
     first = request.materialize_point(0)
     assert first.coordinates == (("flux", 0), ("frequency", 0))
-    assert [event.start_us for event in first.events] == [5.0, 1.0]
+    assert [event.start_ticks for event in first.events] == [40, 8]
     assert first.events[0].envelope is None
     last = request.materialize_point(3)
     assert last.coordinates == (("flux", 1), ("frequency", 1))
-    assert last.duration_us == 12.0
+    assert last.duration_ticks == 96
     assert last.events == (
         simulation.PulseEvent(
             gen_ch=2,
-            start_us=2.0,
-            duration_us=0.75,
+            start_ticks=16,
+            duration_ticks=6,
             frequency_mhz=200.0,
             phase_deg=20.0,
             gain=0.5,
-            envelope=simulation.PulseEnvelope((0.0, 0.25), (1j, -1j)),
-            phase_reference_us=0.125,
+            envelope=simulation.PulseEnvelope(2, (1j, -1j)),
+            phase_reference_ticks=1,
             source="drive",
             iterations=(("repeat", 1),),
         ),
@@ -130,18 +131,18 @@ def test_materialize_point_selects_template_active_events_and_detaches_values():
         channel=4,
         gen_ch=3,
         samples=16,
-        sample_rate_mhz=8.0,
-        trigger_us=(4.0, 6.0),
+        sample_period_ticks=1,
+        trigger_ticks=(32, 48),
         frequency_mhz=(93.0, 94.0),
         phase_deg=(3.0, 4.0),
         generator_channels=(3, 2),
     )
     assert request.materialize_point(2).events == ()
-    assert request.materialize_point(2).duration_us == 0.5
+    assert request.materialize_point(2).duration_ticks == 4
     request.templates[0].events[1].gain[:] = 0.0
-    request.templates[0].readouts[0].trigger_us[:] = 0.0
+    request.templates[0].readouts[0].trigger_ticks[:] = 0
     assert last.events[0].gain == 0.5
-    assert window.trigger_us == (4.0, 6.0)
+    assert window.trigger_ticks == (32, 48)
 
 
 @pytest.mark.parametrize("point", [-1, 4])

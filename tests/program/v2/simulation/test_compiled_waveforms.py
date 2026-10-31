@@ -5,6 +5,8 @@ import pytest
 from qick.asm_v2 import QickRawParam
 
 from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation.time_observations import envelope_times_us, time_us
+
 
 
 def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
@@ -17,11 +19,12 @@ def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
         )
 
     prog, env = program(lambda p: p.pulse(0, "shaped", tag="arb"), initialize, reps=1)
-    event = request(prog, env).materialize_point(0).events[0]
+    observed = request(prog, env)
+    event = observed.materialize_point(0).events[0]
     assert event.envelope is not None
-    assert event.envelope.sample_us[:2] == pytest.approx((0, 1 / 6144))
+    assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx((0, 1 / 6144))
     assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / 32766)
-    assert event.duration_us == pytest.approx(3 / 384)
+    assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(3 / 384)
 
 
 @pytest.mark.parametrize(
@@ -42,8 +45,9 @@ def test_ordinary_generator_serializes_commands_in_instruction_order(
             p.pulse(0, "p", t=timestamp)
 
     prog, env = program(body, reps=1)
-    events = request(prog, env).materialize_point(0).events
-    assert [e.start_us for e in events] == pytest.approx(expected)
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
+    assert [time_us(observed.time_base, e.start_ticks) for e in events] == pytest.approx(expected)
 
 
 def test_adjacent_ordinary_commands_keep_the_exact_shared_boundary():
@@ -57,9 +61,10 @@ def test_adjacent_ordinary_commands_keep_the_exact_shared_boundary():
         p.pulse(0, "adjacent", t=25 / 384)
 
     prog, env = program(body, initialize, reps=1)
-    first, second = request(prog, env).materialize_point(0).events
-    assert first.start_us == 0
-    assert first.duration_us == second.start_us == 25 / 384
+    observed = request(prog, env)
+    first, second = observed.materialize_point(0).events
+    assert time_us(observed.time_base, first.start_ticks) == 0
+    assert time_us(observed.time_base, first.duration_ticks) == time_us(observed.time_base, second.start_ticks) == 25 / 384
 
 
 def test_flat_top_segments_are_adjacent_without_delaying_another_generator():
@@ -83,9 +88,10 @@ def test_flat_top_segments_are_adjacent_without_delaying_another_generator():
         p.pulse(1, "other", t=0)
 
     prog, env = program(body, initialize, reps=1)
-    events = request(prog, env).materialize_point(0).events
-    assert [e.start_us for e in events] == pytest.approx([0, 3 / 384, 41 / 384, 0])
-    assert [e.duration_us for e in events] == pytest.approx(
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
+    assert [time_us(observed.time_base, e.start_ticks) for e in events] == pytest.approx([0, 3 / 384, 41 / 384, 0])
+    assert [time_us(observed.time_base, e.duration_ticks) for e in events] == pytest.approx(
         np.array([3, 38, 3, 38]) / 384
     )
 
@@ -110,9 +116,10 @@ def test_ordinary_outsel_preserves_command_occupancy_and_envelope(outsel):
         p.pulse(0, "p", t=0)
 
     prog, env = program(body, initialize, reps=1)
-    events = request(prog, env).materialize_point(0).events
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
     assert len(events) == (1 if outsel == "zero" else 2)
-    assert events[-1].start_us == pytest.approx(3 / 384)
+    assert time_us(observed.time_base, events[-1].start_ticks) == pytest.approx(3 / 384)
     if outsel == "product":
         envelope = events[0].envelope
         assert envelope is not None
@@ -241,8 +248,9 @@ def test_wave_register_readback_and_wmem_field_widths_are_distinct():
             )
 
     prog, env = program(body, reps=1)
-    events = request(prog, env).materialize_point(0).events
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
     assert [e.gain for e in events] == pytest.approx(
         np.array([16777223, 65545, 7, 9]) / 32766
     )
-    assert [e.duration_us for e in events] == pytest.approx([38 / 384] * 4)
+    assert [time_us(observed.time_base, e.duration_ticks) for e in events] == pytest.approx([38 / 384] * 4)

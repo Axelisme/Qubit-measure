@@ -17,6 +17,8 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation.time_observations import time_us, times_us
+
 
 
 def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
@@ -105,7 +107,7 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     assert [e.gain for e in events] == pytest.approx(
         np.tile([3276, 6552, 9828], 2) / 32766
     )
-    assert [e.start_us for e in events] == pytest.approx(
+    assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
         np.tile([0, 8, 16], 2) / 430.08
     )
 
@@ -191,7 +193,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     result = request(prog, env)
     events = result.materialize_point(0).events
     assert [e.source for e in events[:2]] == ["one", "two"]
-    assert [e.start_us for e in events[:2]] == pytest.approx(
+    assert [time_us(result.time_base, e.start_ticks) for e in events[:2]] == pytest.approx(
         [44 / 430.08, 132 / 430.08]
     )
     assert len(events) == 3
@@ -431,9 +433,10 @@ def test_wave_memory_and_output_coupled_effects_use_prewrite_words(opcode):
         p.pulse(0, "p", t=0.1)
 
     prog, env = program(body, reps=1)
-    events = request(prog, env).materialize_point(0).events
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
     assert [event.gain for event in events] == pytest.approx([100 / 32766] * 2)
-    assert [event.start_us for event in events] == pytest.approx([0, 43 / 430.08])
+    assert [time_us(observed.time_base, event.start_ticks) for event in events] == pytest.approx([0, 43 / 430.08])
 
 
 def test_wmem_store_initializes_a_new_address_for_native_port_playback():
@@ -613,8 +616,8 @@ def test_ordinary_adc_triggers_are_distinct_output_effects():
     prog = Program(env.soccfg, reps=1, initial_delay=0, relax_delay=0)
     result = request(prog, env)
     reads = result.materialize_point(0).readouts
-    assert reads[0].trigger_us == (0,)
-    assert reads[1].trigger_us == pytest.approx((43 / 430.08,))
+    assert times_us(result.time_base, reads[0].trigger_ticks) == (0,)
+    assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx((43 / 430.08,))
 
 
 def test_reps_varying_body_end_is_an_observable_carry_error():

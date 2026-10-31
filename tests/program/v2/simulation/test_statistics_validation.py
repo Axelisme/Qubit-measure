@@ -2,13 +2,17 @@
 
 import re
 from copy import deepcopy
+from fractions import Fraction
 from dataclasses import replace
+
+from fractions import Fraction
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     AcquireRequest,
+    TimeBase,
     ChannelStatistics,
     ReadoutWindow,
     RoundStatistics,
@@ -27,10 +31,11 @@ def compact_round():
         "integrated",
         (1000,),
         0,
-        (ReadoutWindow(0, 0, 100, 100.0, (0.0,)),),
+        (ReadoutWindow(0, 0, 100, 1, (0,)),),
         1,
         0,
         "validation",
+        time_base=TimeBase(Fraction(100)),
         reps=1000,
     )
     record = RoundStatistics(
@@ -178,10 +183,11 @@ def numeric_round() -> tuple[AcquireRequest, RoundStatistics]:
         "integrated",
         (2, 4),
         1,
-        tuple(ReadoutWindow(ch, 0, 8, 100.0, (0.0,)) for ch in (3, 1)),
+        tuple(ReadoutWindow(ch, 0, 8, 1, (0,)) for ch in (3, 1)),
         17,
         0,
         "validation",
+        time_base=TimeBase(Fraction(100)),
         reps=4,
     )
     first = ChannelStatistics(

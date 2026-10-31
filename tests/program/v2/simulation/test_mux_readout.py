@@ -7,6 +7,8 @@ from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
+from tests.program.v2.simulation.time_observations import time_us, times_us
+
 
 
 @pytest.mark.parametrize("placement", ["direct", "repeat"])
@@ -31,12 +33,12 @@ def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
         assert len(point.events) == count * 2
         assert tuple(w.channel for w in point.readouts) == (4, 1)
         for window in point.readouts:
-            assert len(window.trigger_us) == count
+            assert len(times_us(request.time_base, window.trigger_ticks)) == count
         for start in range(0, len(point.events), 2):
             first, second = point.events[start : start + 2]
             assert first.gen_ch == second.gen_ch == 0
-            assert first.start_us == second.start_us
-            assert first.duration_us == second.duration_us
+            assert time_us(request.time_base, first.start_ticks) == time_us(request.time_base, second.start_ticks)
+            assert time_us(request.time_base, first.duration_ticks) == time_us(request.time_base, second.duration_ticks)
             assert first.frequency_mhz == pytest.approx(1000, abs=1e-5)
             assert second.frequency_mhz == pytest.approx(1080, abs=1e-5)
             assert first.phase_deg == 0
