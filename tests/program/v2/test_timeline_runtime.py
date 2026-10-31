@@ -182,9 +182,7 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
                 self.trigger([0], width=1 / 430.08, timeline="local")
 
     with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
-        prog = Program(
-            make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08
-        )
+        prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
     assert wait["TIME"] == "@56"
