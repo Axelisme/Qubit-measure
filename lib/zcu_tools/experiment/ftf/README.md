@@ -310,8 +310,9 @@ shift. Mux ADCs select incident carriers by the fixed profile's PFB channel
 before demodulation. The profile determines Nyquist folding, channel spacing and
 offset; its PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz passband.
 Different-channel carriers are excluded, including when only one carrier is
-incident. If an observed event has no in-channel carrier, planning raises
-`ValueError` naming the ADC, demodulation frequencies and PFB channel.
+incident. If an observed event has no in-channel carrier, planning retains its
+grids with empty pulses. Acquisition emits receiver background offset and noise
+without a cavity response.
 An addressed single carrier retains its previous output bits. Carriers
 in the same channel still superpose, so their finite-window leakage can depend
 on readout start. This ideal selection does not model FIR response, filter

@@ -168,11 +168,17 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
     first, second = config.mux.receivers
     config = replace(
         config,
-        mux=replace(config.mux, receivers=(first, replace(
-            second,
-            offset_adc=(11.0, -7.0),
-            noise_psd_adc2_ns=((4.0, 0.5), (0.5, 2.0)),
-        ))),
+        mux=replace(
+            config.mux,
+            receivers=(
+                first,
+                replace(
+                    second,
+                    offset_adc=(11.0, -7.0),
+                    noise_psd_adc2_ns=((4.0, 0.5), (0.5, 2.0)),
+                ),
+            ),
+        ),
     )
     numeric = settings()
     plan = ftf_module.plan_template(
@@ -189,20 +195,28 @@ def test_mux_empty_channel_builds_and_acquires_receiver_noise(mode, tones):
         try:
             result = source.open_acquire(acquire_request).sample_round(snapshot(), 0)
             if isinstance(result, IntegratedRound):
-                return result.raw.materialize(acquire_request.reps, acquire_request.avg_level)
+                return result.raw.materialize(
+                    acquire_request.reps, acquire_request.avg_level
+                )
             return {channel.channel: channel.iq for channel in result.channels}
         finally:
             source.close()
 
     actual = acquire(empty)
     # Retuning only the other ADC must not change the observed carrier's bits.
-    reference = replace(base, readouts=(base.readouts[0], replace(
-        base.readouts[1], frequency_mhz=np.full((2, 1), 6000.0)
-    )))
+    reference = replace(
+        base,
+        readouts=(
+            base.readouts[0],
+            replace(base.readouts[1], frequency_mhz=np.full((2, 1), 6000.0)),
+        ),
+    )
     np.testing.assert_array_equal(actual[4], acquire(reference)[4])
     observations = actual[1].reshape(-1, 2)
     count = 3 if mode == "integrated" else 1
-    np.testing.assert_allclose(observations.mean(axis=0), np.array([11.0, -7.0]) * count, atol=0.1)
+    np.testing.assert_allclose(
+        observations.mean(axis=0), np.array([11.0, -7.0]) * count, atol=0.1
+    )
     covariance = count * np.array([[4.0, 0.5], [0.5, 2.0]])
     if mode == "integrated":
         covariance += np.eye(2) / 12
