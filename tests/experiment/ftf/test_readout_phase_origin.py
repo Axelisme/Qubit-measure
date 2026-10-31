@@ -12,6 +12,7 @@ from zcu_tools.experiment.ftf import (
 )
 from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
@@ -20,17 +21,17 @@ pytestmark = pytest.mark.sim
 def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
     """Keep two flat carriers in the plan, with only the addressed one incident."""
     base = template()
-    start = np.array([0.0, 0.302269345238])
+    start = np.array([0, 406250], dtype=np.int64)  # 130 tProc cycles.
     frequencies = (6000.0, 6080.0)
     pulses = tuple(
         replace(
             base.events[0],
             gen_ch=1,
-            start_us=start,
-            duration_us=np.full(2, 1.0),
+            start_ticks=start,
+            duration_ticks=tick_array(np.full(2, 1.0)),
             frequency_mhz=np.full(2, frequency),
             phase_deg=np.full(2, 23.0),
-            phase_reference_us=phase_reference_us,
+            phase_reference_ticks=ticks(phase_reference_us),
             gain=np.full(2, 0.2 if tone == addressed_tone else 0.0),
             envelopes=(None,),
         )
@@ -41,11 +42,11 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
             base.readouts[0],
             channel=tone + 1,
             generator_channels=np.ones((2, 1), dtype=np.int64),
-            trigger_us=(start + 0.05115327380952381)[:, None],
+            trigger_ticks=(start + 68750)[:, None],  # 22 tProc cycles.
             frequency_mhz=np.full((2, 1), frequency),
             phase_deg=np.full((2, 1), 11.0),
             samples=69,
-            sample_rate_mhz=76.8,
+            sample_period_ticks=TIME_BASE.period_ticks(76.8),
         )
         for tone, frequency in enumerate(frequencies)
     )
@@ -69,6 +70,7 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
         snapshot(),
         replace(base, events=pulses, readouts=windows),
         readout=config,
+        time_base=TIME_BASE,
     )
 
 

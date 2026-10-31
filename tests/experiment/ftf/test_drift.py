@@ -15,6 +15,7 @@ from zcu_tools.experiment.ftf.drift import FTFCoherenceDrift
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.core._simulation import TIME_BASE
 from tests.experiment._ftf_templates import (
     expect_statistics,
     herald_template,
@@ -281,7 +282,9 @@ def test_builder_admission_and_rounds_share_one_physical_clock(tmp_path: Path):
         binding = env.soc.binding
         sequence = binding.begin()
         assert len(truth.read_text().splitlines()) == 3
-        acquire = replace(request(), sequence=sequence, relax_delay_us=125000)
+        acquire = replace(
+            request(), sequence=sequence, relax_delay_ticks=TIME_BASE.ticks(125000)
+        )
         duration = 3 * 2 * (125000 + 0.030) / 1e6
         try:
             for index in range(2):

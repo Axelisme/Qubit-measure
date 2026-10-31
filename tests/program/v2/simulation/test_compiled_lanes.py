@@ -8,6 +8,7 @@ from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst
 
 from tests.program.v2.simulation._compiled_support import program, request
+from tests.program.v2.simulation.time_observations import time_us
 
 
 @pytest.mark.parametrize("damage", ["start", "step"])
@@ -239,10 +240,12 @@ def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
     result = request(prog, env)
-    assert result.materialize_point(0).duration_us == pytest.approx(
-        43 / 430.08 + 61 / 307.2
-    )
-    assert result.materialize_point(1).duration_us == pytest.approx(172 / 430.08)
+    assert time_us(
+        result.time_base, result.materialize_point(0).duration_ticks
+    ) == pytest.approx(43 / 430.08 + 61 / 307.2)
+    assert time_us(
+        result.time_base, result.materialize_point(1).duration_ticks
+    ) == pytest.approx(172 / 430.08)
 
 
 def test_progress_counter_read_in_body_is_not_a_sweep_lane_input():

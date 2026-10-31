@@ -24,6 +24,7 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation._compiled_support import request
+from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
 def drive(length=0.1, gain=0.2, *, ch=1, post: float = 0):
@@ -86,10 +87,11 @@ def test_modular_shared_readout_cfg_keeps_each_semantic_source():
     prog, env = module_program(
         [cfg.build("herald"), cfg.build("terminal")], native=False
     )
-    point = request(prog, env).materialize_point(0)
+    observed = request(prog, env)
+    point = observed.materialize_point(0)
     assert [event.source for event in point.events] == ["herald", "terminal"]
     assert [event.gen_ch for event in point.events] == [0, 0]
-    assert len(point.readouts[0].trigger_us) == 2
+    assert len(times_us(observed.time_base, point.readouts[0].trigger_ticks)) == 2
 
 
 def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
@@ -97,16 +99,20 @@ def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
     prog, env = module_program(
         [Pulse("first", cfg), Pulse("second", cfg), receiver().build("readout")]
     )
-    point = request(prog, env).materialize_point(0)
+    observed = request(prog, env)
+    point = observed.materialize_point(0)
     assert [event.source for event in point.events] == ["first", "second", "readout"]
     assert [event.gen_ch for event in point.events] == [1, 1, 0]
     first, second, _ = point.events
     for event in (first, second):
-        assert event.duration_us == 38 / 384
+        assert time_us(observed.time_base, event.duration_ticks) == 38 / 384
         assert event.frequency_mhz == pytest.approx(80, abs=1e-5)
         assert event.gain == pytest.approx(0.2, abs=1e-4)
-    assert [first.start_us, second.start_us] == [0, 43 / 430.08]
-    assert len(point.readouts[0].trigger_us) == 1
+    assert [
+        time_us(observed.time_base, first.start_ticks),
+        time_us(observed.time_base, second.start_ticks),
+    ] == [0, 43 / 430.08]
+    assert len(times_us(observed.time_base, point.readouts[0].trigger_ticks)) == 1
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -128,7 +134,9 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compres
     for index in range(32):
         event = result.materialize_point(index).events[0]
         assert event.gain == pytest.approx(-0.4 if index % 2 == 0 else 0.2, abs=1e-4)
-        assert event.duration_us == pytest.approx((115 if index % 2 == 0 else 38) / 384)
+        assert time_us(result.time_base, event.duration_ticks) == pytest.approx(
+            (115 if index % 2 == 0 else 38) / 384
+        )
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -143,8 +151,12 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length(n
     for index, (duration, end) in enumerate(zip([38, 115], ends, strict=True)):
         events = result.materialize_point(index).events
         assert events[0].source == "length"
-        assert events[0].duration_us == pytest.approx(duration / 384)
-        assert events[1].start_us == pytest.approx(end / 430.08)
+        assert time_us(result.time_base, events[0].duration_ticks) == pytest.approx(
+            duration / 384
+        )
+        assert time_us(result.time_base, events[1].start_ticks) == pytest.approx(
+            end / 430.08
+        )
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -332,12 +344,15 @@ def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
         expected = [(1, 0), (2, 0), (1, 52)]
         readout_start = 129
     prog, env = module_program([reset, receiver().build("readout")])
-    events = request(prog, env).materialize_point(0).events
+    observed = request(prog, env)
+    events = observed.materialize_point(0).events
     assert [e.gen_ch for e in events[:-1]] == [ch for ch, _ in expected]
-    assert [e.start_us for e in events[:-1]] == pytest.approx(
-        [t / 430.08 for _, t in expected]
+    assert [
+        time_us(observed.time_base, e.start_ticks) for e in events[:-1]
+    ] == pytest.approx([t / 430.08 for _, t in expected])
+    assert time_us(observed.time_base, events[-1].start_ticks) == pytest.approx(
+        readout_start / 430.08
     )
-    assert events[-1].start_us == pytest.approx(readout_start / 430.08)
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -363,10 +378,12 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
     ):
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == sources
-        assert [e.start_us for e in point.events] == pytest.approx(
-            [t / 430.08 for t in times]
-        )
-        assert point.readouts[0].trigger_us == pytest.approx((times[-1] / 430.08,))
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in point.events
+        ] == pytest.approx([t / 430.08 for t in times])
+        assert times_us(
+            result.time_base, point.readouts[0].trigger_ticks
+        ) == pytest.approx((times[-1] / 430.08,))
     prog.compile()
     rebuilt = request(prog, env)
     assert [rebuilt.materialize_point(i) for i in range(3)] == [
@@ -414,10 +431,12 @@ def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_end
         assert [e.source for e in point.events] == ["left", "left", "right"] * 2 + [
             "readout"
         ]
-        assert [e.start_us for e in point.events] == pytest.approx(
-            [(start + t) / 430.08 for t in [0, 43, 0, 87, 130, 87, 174]]
-        )
-        assert point.readouts[0].trigger_us == pytest.approx(((start + 174) / 430.08,))
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in point.events
+        ] == pytest.approx([(start + t) / 430.08 for t in [0, 43, 0, 87, 130, 87, 174]])
+        assert times_us(
+            result.time_base, point.readouts[0].trigger_ticks
+        ) == pytest.approx(((start + 174) / 430.08,))
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -442,7 +461,8 @@ def test_parallel_exchange_preserves_child_sources_and_complete_scan_sequences(n
         p.emit(readout)
 
     prog, env = module_program([joined, readout], body=body, data_registers=32)
-    point = request(prog, env).materialize_point(0)
+    observed = request(prog, env)
+    point = observed.materialize_point(0)
     # The advancing author-first sequence emits last, without moving its origin.
     assert [e.source for e in point.events] == [
         "other",
@@ -450,11 +470,13 @@ def test_parallel_exchange_preserves_child_sources_and_complete_scan_sequences(n
         "scan_pulse",
         "scan_pulse",
     ] * 2 + ["readout"]
-    assert [e.start_us for e in point.events] == pytest.approx(
-        [t / 430.08 for t in [17, 7, 35, 63, 119, 109, 137, 165, 193]]
-    )
+    assert [
+        time_us(observed.time_base, e.start_ticks) for e in point.events
+    ] == pytest.approx([t / 430.08 for t in [17, 7, 35, 63, 119, 109, 137, 165, 193]])
     assert [point.events[i].iterations[-1][1] for i in [2, 3, 6, 7]] == [0, 1, 0, 1]
-    assert point.readouts[0].trigger_us == pytest.approx((193 / 430.08,))
+    assert times_us(
+        observed.time_base, point.readouts[0].trigger_ticks
+    ) == pytest.approx((193 / 430.08,))
 
 
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
@@ -482,15 +504,17 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
     for index, (origin_cycle, maximum) in enumerate([(7, 84), (20, 56), (10, 84)]):
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == ["left", "right"] * 2 + ["readout"]
-        assert [e.start_us for e in point.events] == pytest.approx(
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in point.events
+        ] == pytest.approx(
             [(origin_cycle + t) / 430.08 for t in [0, 0, maximum, maximum, 2 * maximum]]
         )
-        assert [e.duration_us for e in point.events[:2]] == pytest.approx(
-            [(25 + 25 * index) / 384, (75 - 25 * index) / 384]
-        )
-        assert point.readouts[0].trigger_us == pytest.approx(
-            ((origin_cycle + 2 * maximum) / 430.08,)
-        )
+        assert [
+            time_us(result.time_base, e.duration_ticks) for e in point.events[:2]
+        ] == pytest.approx([(25 + 25 * index) / 384, (75 - 25 * index) / 384])
+        assert times_us(
+            result.time_base, point.readouts[0].trigger_ticks
+        ) == pytest.approx(((origin_cycle + 2 * maximum) / 430.08,))
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -530,7 +554,9 @@ def test_parallel_scanwith_inside_repeat_keeps_selected_words_coordinates_and_ru
         assert [e.source for e in events] == ["other", "choice", "choice"] * 2 + [
             "readout"
         ]
-        assert [e.start_us for e in events] == pytest.approx(
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in events
+        ] == pytest.approx(
             [(start + t) / 430.08 for t in [0, 0, 28, 56, 56, 84]] + [200 / 430.08]
         )
         assert [e.gain for e in events[:-1]] == pytest.approx(

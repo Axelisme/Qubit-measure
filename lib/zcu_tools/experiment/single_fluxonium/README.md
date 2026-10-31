@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-30, inactive fast-flux DC shortcut
+**Last updated:** 2026-10-31, integer request clocks
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -18,7 +18,7 @@ Transferring a driver to the GUI transfers only that driver's cleanup responsibi
 
 ## Complete timelines
 
-`plan_template(settings, snapshot, template, *, readout_kind="pulse")` returns a `SingleFluxoniumPlan`.
+`plan_template(settings, snapshot, template, *, time_base, readout_kind="pulse")` returns a `SingleFluxoniumPlan`.
 `readout_kind="mux"` accepts coherent terminal tones on the same physical cavity.
 A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
@@ -28,7 +28,11 @@ Preflight requires every requested generator to belong to `drive_lines`, rejecti
 flux, readout and unbound generators before waveform construction or evolution.
 Other legal fast-flux events keep their ordinary routing. Names are diagnostics,
 not role keys. An empty requirement tuple preserves ordinary planning.
-It converts QICK us/MHz/degrees into ns/GHz/radians. Shared
+Pass the originating request's `time_base` to interpret integer tick arrays.
+It converts QICK ticks/MHz/degrees into ns/GHz/radians. `TimeBase.ns` owns exact
+nearest-2-ns support rounding, ties even. Readout grids combine trigger and sample
+offsets in ticks before conversion. Plan and preparation caches include the clock.
+Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.
 `Engine.evolve` owns segmentation, kernel selection and propagation.

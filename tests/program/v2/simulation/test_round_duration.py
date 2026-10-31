@@ -2,6 +2,7 @@
 
 import time
 from dataclasses import replace
+from fractions import Fraction
 from threading import Event
 
 import numpy as np
@@ -10,6 +11,7 @@ from zcu_tools.core.simulation import (
     AcquireRequest,
     EnvironmentSnapshot,
     RoundSignals,
+    TimeBase,
     TimelineTemplate,
 )
 from zcu_tools.experiment.simulation import white_noise
@@ -59,12 +61,15 @@ def request_for(binding: SimulationBinding, sequence: int) -> AcquireRequest:
         1,
         sequence,
         binding.rng_version,
+        time_base=TimeBase(Fraction(1)),
         point_dims=(3,),
         point_names=("scan",),
         reps=10,
         templates=(
-            TimelineTemplate(np.array([0, 2]), (), (), np.array([2000.0, 15000.0])),
-            TimelineTemplate(np.array([1]), (), (), np.array([3000.0])),
+            TimelineTemplate(
+                np.array([0, 2]), (), (), np.array([2000, 15000], dtype=np.int64)
+            ),
+            TimelineTemplate(np.array([1]), (), (), np.array([3000], dtype=np.int64)),
         ),
     )
 
