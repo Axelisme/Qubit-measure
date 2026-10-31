@@ -42,6 +42,55 @@ def _sum_iq(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
     return iq[0][:, :, 0, :].sum(axis=1)
 
 
+@pytest.mark.parametrize("cfg_mode", ["omitted", "none", "legacy"])
+@pytest.mark.parametrize("target", ["root", "scan", "child"])
+def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
+    monkeypatch: pytest.MonkeyPatch, cfg_mode: str, target: str
+) -> None:
+    soc, soccfg = make_acquisition_soc()
+    builder = TimelineBuilder(soccfg, reps=2)
+    builder.emit(_make_readout())
+    program = builder.build()
+    samples = program.ro_chs[0]["length"]
+
+    def poll():
+        raw = np.tile([3 * samples, 4 * samples], (2, 1)).astype(np.int64)
+        return [(2, ([raw], {}))]
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    shape = {"root": (2,), "scan": (2, 2), "child": (2, 1, 2)}[target]
+    updates = []
+    buffer = SignalBuffer(shape, dtype=np.float64, update_interval=None)
+    schedule = (
+        Schedule(scope=Scope("run"))
+        if cfg_mode == "omitted"
+        else Schedule({"reps": 99} if cfg_mode == "legacy" else None, buffer, scope=Scope("run"))
+    )
+    with schedule:
+        if cfg_mode == "omitted":
+            buffer = schedule.buffer(
+                shape,
+                dtype=np.float64,
+                on_update=lambda data: updates.append(data.copy()),
+                update_interval=None,
+            )
+        if target == "root":
+            result = schedule.run_acquire_summed(program, soc, rounds=2, processor=_sum_iq)
+            np.testing.assert_array_equal(result, [12.0, 16.0])
+        else:
+            for _, step in schedule.scan("point", [10, 20]):
+                if target == "child":
+                    step = step.child(0)
+                    step.buffer((2,), dtype=np.float64)
+                result = step.run_acquire_summed(program, soc, rounds=2, processor=_sum_iq)
+                np.testing.assert_array_equal(result, [12.0, 16.0])
+        assert schedule.outcome.status == "completed"
+        np.testing.assert_array_equal(schedule.data, np.broadcast_to([12.0, 16.0], shape))
+    np.testing.assert_array_equal(buffer.array, np.broadcast_to([12.0, 16.0], shape))
+    if cfg_mode == "omitted":
+        np.testing.assert_array_equal(updates[-1], buffer.array)
+
+
 @pytest.mark.parametrize("source", ["handwritten", "builder"])
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
 def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
