@@ -134,7 +134,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 # Reset and initialize before each probe; read out its response.
 
                 if cfg.reset is not None:
-
                     builder.emit(cfg.reset.build("reset"))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(

@@ -145,7 +145,6 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             gain_param = builder.add_sweep("gain", gain_sweep)
 
             if cfg.reset is not None:
-
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain_param))
@@ -194,7 +193,15 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             init_phase = 180.0
 
         fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit, pOpt, pCov = fit.pi_x, fit.pi_x_err, fit.pi2_x, fit.pi2_x_err, fit.curve, fit.params, fit.cov
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit, pOpt, pCov = (
+            fit.pi_x,
+            fit.pi_x_err,
+            fit.pi2_x,
+            fit.pi2_x_err,
+            fit.curve,
+            fit.params,
+            fit.cov,
+        )
 
         names = ("y0", "yscale", "freq", "phase")
         quality = compute_fit_quality(

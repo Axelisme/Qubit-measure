@@ -231,11 +231,25 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
         if options.dual_exp:
             fit = fit_dual_decay(xs, real_signals)
-            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = fit.decay_time1, fit.decay_time1_err, fit.decay_time2, fit.decay_time2_err, fit.curve, fit.params, fit.cov
+            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = (
+                fit.decay_time1,
+                fit.decay_time1_err,
+                fit.decay_time2,
+                fit.decay_time2_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
             names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         else:
             fit = fit_decay(xs, real_signals)
-            t1, t1err, y_fit, pOpt, pCov = fit.decay_time, fit.decay_time_err, fit.curve, fit.params, fit.cov
+            t1, t1err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
             names = ("y0", "yscale", "decay_time")
             t1b = 0.0
             t1berr = 0.0

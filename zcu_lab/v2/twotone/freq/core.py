@@ -190,7 +190,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             # Reset and initialize before the FPGA-swept probe, then read out.
 
             if cfg.reset is not None:
-
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param))

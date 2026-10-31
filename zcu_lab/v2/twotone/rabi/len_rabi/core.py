@@ -262,7 +262,17 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
         )
-        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = fit.pi_x, fit.pi_x_err, fit.pi2_x, fit.pi2_x_err, fit.freq, fit.freq_err, fit.curve, fit.params, fit.cov
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = (
+            fit.pi_x,
+            fit.pi_x_err,
+            fit.pi2_x,
+            fit.pi2_x_err,
+            fit.freq,
+            fit.freq_err,
+            fit.curve,
+            fit.params,
+            fit.cov,
+        )
 
         names = ("y0", "yscale", "freq", "phase") + (
             ("decay_time",) if options.decay else ()

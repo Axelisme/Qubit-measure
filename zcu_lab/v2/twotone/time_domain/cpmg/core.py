@@ -209,26 +209,21 @@ def _prepare_delays(
 ) -> tuple[list[SweepCfg], NDArray[np.float64]]:
     """Round each count's total-time grid and reject intervals too short for pulses."""
     pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
-    windows = (
-        [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
-    )
+    windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
     if len(windows) != len(times):
         raise ValueError("Provide one delay window or one per pi-pulse count")
     if len({window.expts for window in windows}) != 1:
         raise ValueError("All delay windows must have the same number of points")
     lengths = np.array(
         [
-            sweep2array(
-                window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)}
-            )
+            sweep2array(window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)})
             for window, count in zip(windows, times, strict=True)
         ]
     )
 
     # Reject timing that cannot fit the preparation and refocusing pulses.
     min_interval = min(
-        window.start / (2 * count)
-        for window, count in zip(windows, times, strict=True)
+        window.start / (2 * count) for window, count in zip(windows, times, strict=True)
     )
     if min_interval < 0.5 * (  # the first and last delays are half of the interval
         pi2_pulse.waveform.length + pi_pulse.waveform.length

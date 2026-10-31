@@ -150,7 +150,6 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
                 freq_param = builder.add_sweep("freq", freq_sweep)
 
                 if cfg.reset is not None:
-
                     builder.emit(cfg.reset.build("reset"))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param))

@@ -192,7 +192,6 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             builder.add_loop("ge", 2)
 
             if cfg.reset is not None:
-
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             with builder.branch(by="ge", align_timeline=False) as cases, cases.case(1):

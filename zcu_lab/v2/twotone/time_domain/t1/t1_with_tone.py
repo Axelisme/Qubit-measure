@@ -113,7 +113,6 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             length_param = builder.add_sweep("length", length_sweep)
 
             if cfg.reset is not None:
-
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse(name="pi_pulse", cfg=cfg.pi_pulse))
             builder.emit(Pulse("test_pulse", cfg.test_pulse, length=length_param))
@@ -140,10 +139,22 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
 
         if dual_exp:
             fit = fit_dual_decay(xs, real_signals)
-            t1b, t1berr, t1, t1err, y_fit, pOpt = fit.decay_time1, fit.decay_time1_err, fit.decay_time2, fit.decay_time2_err, fit.curve, fit.params
+            t1b, t1berr, t1, t1err, y_fit, pOpt = (
+                fit.decay_time1,
+                fit.decay_time1_err,
+                fit.decay_time2,
+                fit.decay_time2_err,
+                fit.curve,
+                fit.params,
+            )
         else:
             fit = fit_decay(xs, real_signals)
-            t1, t1err, y_fit, pOpt = fit.decay_time, fit.decay_time_err, fit.curve, fit.params
+            t1, t1err, y_fit, pOpt = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+            )
             t1b = 0.0
             t1berr = 0.0
 

@@ -167,7 +167,6 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             # 3. Refocus at the midpoint, then project with the programmed phase ramp.
 
             if cfg.reset is not None:
-
                 builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
             builder.emit(Delay("t2e_delay1", delay=0.5 * length_param))
@@ -252,10 +251,24 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
             fit = fit_decay_fringe(xs, real_signals, fixedparams=fixedparams)
-            t2e, t2eerr, detune, detune_err, y_fit, pOpt, pCov = fit.decay_time, fit.decay_time_err, fit.freq, fit.freq_err, fit.curve, fit.params, fit.cov
+            t2e, t2eerr, detune, detune_err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.freq,
+                fit.freq_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
         elif fit_method == "decay":
             fit = fit_decay(xs, real_signals)
-            t2e, t2eerr, y_fit, pOpt, pCov = fit.decay_time, fit.decay_time_err, fit.curve, fit.params, fit.cov
+            t2e, t2eerr, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
             detune = 0.0
             detune_err = 0.0
         else:
