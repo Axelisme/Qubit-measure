@@ -110,6 +110,9 @@ from zcu_lab.v2.two_qubit.joint_readout.gui_heralded import (
 )
 from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
 from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
+from zcu_lab.v2.two_qubit.rb.gui_heralded import (
+    DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import (
     RAMSEY_DEFINITION as AC_STARK_RAMSEY_DEFINITION,
@@ -269,6 +272,7 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
     "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
     "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
+    "two_qubit/rb_heralded": TWO_QUBIT_RB_HERALDED_DEFINITION,
     "fastflux/twotone": TWO_TONE_DEFINITION,
     "fastflux/t1": FAST_FLUX_T1_DEFINITION,
     "fastflux/distortion/freq": FAST_FLUX_FREQ_DEFINITION,

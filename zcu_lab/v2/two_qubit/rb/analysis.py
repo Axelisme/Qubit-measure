@@ -1,4 +1,4 @@
-"""Same-shot joint00 counting and d=4 interpretation of paired RB fits."""
+"""Joint00 count ratios and d=4 interpretation of paired RB fits."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
 from ...twotone.irb.analysis import IRBAnalysis, analyze_irb
+from .._sums import joint_probabilities
 
 if TYPE_CHECKING:
     from .core import RBCfg, RBResult
@@ -57,13 +58,13 @@ class RBEstimate:
 
 @dataclass(frozen=True)
 class RBAnalysis:
-    """Survival and fit diagnostics derived only from saved cfg/raw.
+    """Survival and fit diagnostics derived only from saved cfg/counts.
 
     survival has shape (depth,seed,2,round); NaN means unavailable paired round.
     acquired_rounds has that shape and records finite whole rounds in each arm
     before pair selection. mean_survival/fit_survival are (2,depth), with equal
     seed weighting; fit_survival remains NaN when estimate is None. estimate is
-    absent on missing calibration/data or an unidentifiable fit. fit_quality is
+    absent on missing cfg/data or an unidentifiable fit. fit_quality is
     reference/interleaved residual diagnostics, or None without a fit. Parameter
     covariance is not exposed by the shared paired owner, so these diagnostics
     have no parameter-error entries. reason explains
@@ -109,23 +110,19 @@ def _paired_means(survival: NDArray[np.float64]) -> NDArray[np.float64]:
 def analyze_rb(
     source: RunRecord[RBCfg, RBResult], options: RBOptions, *, plots: Plots
 ) -> RBAnalysis:
-    """Classify all finite shots with saved GE centers; fit complete paired rounds.
+    """Fit complete paired rounds from (depth,seed,arm,round,3,3) counts.
 
-    source holds raw (depth,seed,arm,round,shot,tone) and its original cfg.
+    Joint00 survival is N_gg/N_total, including other in the denominator.
     Both arms across every depth must be complete for a (seed,round) to enter
-    survival/fitting. Classification retains all shots and ties go to G; joint
-    00 is counted on the same shot, never as a product of marginal fractions.
-    Average complete rounds within each seed, then weight seeds equally.
+    fitting. Average complete rounds within each seed, then weight seeds equally.
+    Zero-total rounds have NaN survival and cannot enter paired fits.
 
-    Reuse analyze_irb's exponential fits and whole paired-seed bootstrap; apply
-    the d=4 coefficient only here. Real survival curves need no IQ rotation:
-    the owner's common real-axis projection leaves their decay constants intact.
-    Restore its possible sign reversal when presenting probability-space curves.
-    Do not clip negative error. Missing cfg/GE or fit ValueError/RuntimeError
-    becomes an explicit reason with no estimate; malformed axes, partial raw
-    rounds and nonfinite acquired samples raise ValueError. Publish a named
-    fit figure (raw paired means and available fits) through caller-owned plots.
-    No library, live Form, devices, filesystem, or model truth is consulted.
+    Reuse analyze_irb's unchanged exponential fit and whole paired-seed bootstrap
+    interface. Apply d=4 only here. Restore the owner's possible real-axis sign
+    reversal for probability-space plots. Negative error is not clipped.
+    Missing cfg or fit ValueError/RuntimeError yields a reason without estimate.
+    Malformed axes, partially populated or nonfinite acquired counts raise.
+    Saved counts suffice; no reclassification, live library or truth is used.
     """
     data, cfg = source.result, source.cfg
     shape = (len(data.depths), len(data.seeds), 2, len(data.rounds))
@@ -137,53 +134,37 @@ def analyze_rb(
     quality = None
     reason = None
     if cfg is None:
-        reason = "RB analysis requires saved cfg and GE centers; current Form is not a substitute"
+        reason = "RB analysis requires saved cfg; current Form is not a substitute"
     else:
         _validate_axes(source)
-        raw = data.signals
-        acquired = np.all(np.isfinite(raw), axis=(-2, -1))
-        missing = np.all(
-            np.isnan(raw) & ~np.isinf(raw.real) & ~np.isinf(raw.imag), axis=(-2, -1)
-        )
+        counts = data.sums
+        acquired = np.all(np.isfinite(counts), axis=(-2, -1))
+        missing = np.all(np.isnan(counts), axis=(-2, -1))
         if not np.all(acquired | missing):
-            raise ValueError("RB raw contains nonfinite acquired IQ or a partial round")
+            raise ValueError("RB sums contains nonfinite counts or a partial round")
+        joint00 = joint_probabilities(counts)[..., 0, 0]
+        paired = (acquired & np.isfinite(joint00)).all(axis=(0, 2))
+        survival = np.where(paired[None, :, None, :], joint00, np.nan)
+        means = _paired_means(survival)
         try:
-            centers1, centers2 = cfg.f1_centers, cfg.f2_centers
-        except ValueError as exc:
+            fit = analyze_irb(
+                data.depths,
+                survival.transpose(3, 1, 2, 0).astype(np.complex128),
+                bootstrap_samples=options.bootstrap_samples,
+                bootstrap_seed=options.bootstrap_seed,
+            )
+        except (ValueError, RuntimeError) as exc:
+            # Isolate model failure while retaining measured count diagnostics.
             reason = str(exc)
         else:
-            first = raw[..., cfg.roles.f1_tone]
-            second = raw[..., cfg.roles.f2_tone]
-            g1 = np.abs(first - centers1.g) <= np.abs(first - centers1.e)
-            g2 = np.abs(second - centers2.g) <= np.abs(second - centers2.e)
-            paired = acquired.all(axis=(0, 2))
-            joint00 = np.mean(g1 & g2, axis=-1)
-            survival = np.where(paired[None, :, None, :], joint00, np.nan)
-            means = _paired_means(survival)
-            try:
-                fit = analyze_irb(
-                    data.depths,
-                    survival.transpose(3, 1, 2, 0).astype(np.complex128),
-                    bootstrap_samples=options.bootstrap_samples,
-                    bootstrap_seed=options.bootstrap_seed,
-                )
-            except (ValueError, RuntimeError) as exc:
-                # Isolate model failure while retaining classified raw diagnostics.
-                reason = str(exc)
-            else:
-                estimate = _estimate(fit)
-                quality = (
-                    compute_fit_quality(
-                        fit.mean_signals[0], fit.fit_signals[0], {}, None
-                    ),
-                    compute_fit_quality(
-                        fit.mean_signals[1], fit.fit_signals[1], {}, None
-                    ),
-                )
-                # The common real-axis PCA may reverse increasing survival.
-                # Restore probability coordinates for plotting, not the decay ratio.
-                sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
-                curves = sign * fit.fit_signals
+            estimate = _estimate(fit)
+            quality = (
+                compute_fit_quality(fit.mean_signals[0], fit.fit_signals[0], {}, None),
+                compute_fit_quality(fit.mean_signals[1], fit.fit_signals[1], {}, None),
+            )
+            # Restore probability coordinates, not the decay ratio.
+            sign = 1.0 if np.sum(fit.mean_signals * means) >= 0 else -1.0
+            curves = sign * fit.fit_signals
     answer = RBAnalysis(survival, acquired, means, curves, estimate, quality, reason)
     _plot(data.depths, answer, plots)
     return answer
@@ -198,13 +179,11 @@ def _validate_axes(source: RunRecord[RBCfg, RBResult]) -> None:
         (data.seeds, cfg.seeds),
         (data.arms, [0, 1]),
         (data.rounds, np.arange(cfg.rounds)),
-        (data.shot_indices, np.arange(cfg.reps)),
-        (data.tone_indices, np.arange(len(cfg.readout.tones))),
     )
     if any(not np.array_equal(actual, wanted) for actual, wanted in expected):
-        raise ValueError("RB raw axes do not match saved cfg and original tone order")
-    if data.signals.shape != tuple(len(actual) for actual, _ in expected):
-        raise ValueError("Expected RB raw shape (depth,seed,arm,round,shot,tone)")
+        raise ValueError("RB count axes do not match saved cfg")
+    if data.sums.shape != (*[len(actual) for actual, _ in expected], 3, 3):
+        raise ValueError("Expected RB sums shape (depth,seed,arm,round,3,3)")
 
 
 def _plot(depths: NDArray[np.int64], answer: RBAnalysis, plots: Plots) -> None:
@@ -218,5 +197,5 @@ def _plot(depths: NDArray[np.int64], answer: RBAnalysis, plots: Plots) -> None:
     if answer.reason is not None:
         ax.set_title(f"No RB estimate: {answer.reason}")
     else:
-        ax.set_title("d=4 paired RB; thermal/SPAM ensemble, statistical seed CI only")
+        ax.set_title("d=4 paired RB; classified ensemble, statistical seed CI only")
     fig.tight_layout()

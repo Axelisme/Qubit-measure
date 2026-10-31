@@ -1,70 +1,62 @@
-"""Paired two-qubit RB acquisition with explicit depth/seed/arm/round/shot/tone."""
+"""Paired two-qubit RB with acquisition-side classification and host rounds."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from qick import QickConfig
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, Pulse
+from zcu_tools.program.v2 import Pulse, Reset, TimelineBuilder, TimelineProgramV2, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
 from .._drive import DualLineCfg
-from .._readout import JointRoles, collect_joint_shots
-from ..joint_readout.core import GECenters, tone_centers
+from .._readout import JointRoles
+from .._sums import joint_probabilities, readout_axes, terminal_counts, validate_classifiers
+from .._timeline import emit_readout_prefix
 from .analysis import RBAnalysis, RBOptions, analyze_rb
 from .program import CZPhasePair, sequence_modules
-from .sequence import make_paired_sequences
-
-
-def _round_collector(
-    program: ModularProgramV2,
-) -> Callable[[Sequence[NDArray[np.float64]]], NDArray[np.complex128]]:
-    shots: NDArray[np.complex128] | None = None
-
-    def collect(acquired: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-        nonlocal shots
-        if shots is None:
-            shots = collect_joint_shots(program, acquired)
-        return shots
-
-    return collect
+from .sequence import TwoQubitGate, make_paired_sequences
 
 
 class RBCfg(ConfigBase):
-    """Thermal B00 → paired random Clifford + own recovery → one mux read.
+    """Optional reset → paired random Clifford + own recovery → terminal read.
 
-    modules/drive are captured calibrated inputs, never simulator fallbacks.
-    roles maps Q0 to F1 and Q1 to F2, including original readout tone positions.
+    roles maps Q0 to F1 and Q1 to F2 at their original full mux tone positions.
     phase_pair is required, ordered and component-named. Delays are us, pulse
-    frequency MHz, phase degrees. No active reset/heralding/DC drive is added.
+    frequency MHz and phase degrees. No DC device is driven. reset=None emits
+    no reset. F1/F2 need circle classifiers with radius from GE Post before Run.
     depths counts random Cliffords, not primitive gates; unique increasing
-    nonnegative integers. seeds are explicit distinct integer random.Random
-    identities, shared across depths/arms/rounds and fully persisted (no child
-    entropy reconstruction). The 31-bit bound preserves exact native axes.
-    f1_centers/f2_centers derive from saved role-tone circle classifiers without
-    radius. Missing or linear calibration permits raw acquisition, but analysis
-    returns the calibration reason without a population or fit.
+    nonnegative integers. seeds are distinct integer random.Random identities
+    shared across depths/arms/rounds. The 31-bit bound preserves exact axes.
+    reps is shots per host round; rounds remains a separate saved axis.
     """
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
+    ] = Field(default=1, gt=0)
     rounds: Annotated[
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
+    ] = Field(default=1, gt=0)
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -82,6 +74,10 @@ class RBCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
+    reset: Annotated[
+        Reset.Cfg | None,
+        FieldMeta(label="Reset", description="Optional reset at the start of every shot."),
+    ] = None
     x90_f1: Annotated[
         Pulse.Cfg,
         FieldMeta(
@@ -119,26 +115,10 @@ class RBCfg(ConfigBase):
         default_factory=lambda: [0, 1], min_length=1
     )
 
-    @property
-    def f1_centers(self) -> GECenters:
-        """Derive F1's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f1_tone)
-
-    @property
-    def f2_centers(self) -> GECenters:
-        """Derive F2's normalized raw GE centers from its saved readout tone.
-
-        Missing or linear calibration raises ValueError; radius is not required.
-        """
-        return tone_centers(self.readout, self.roles.f2_tone)
-
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
         """Reject swapped phases, duplicate axes and mismatched role generators."""
-        self.roles.validate_readout(self.readout)
+        validate_classifiers(self.readout, self.roles)
         self.phase_pair.validate_roles(self.roles)
         if self.depths != sorted(set(self.depths)):
             raise ValueError("RB depths must be unique and increasing")
@@ -157,119 +137,158 @@ class RBCfg(ConfigBase):
 
 @dataclass(frozen=True)
 class RBResult:
-    """Normalized complex raw IQ (depth,seed,arm,round,shot,tone).
+    """Float64 class counts with axes (depth,seed,arm,round,F1,F2).
 
     depths counts random Cliffords; seeds retains exact random.Random identities.
-    arms=[0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] and
-    shot_indices=[0..reps-1] stay separate. tone_indices is the complete original
-    order. signals retains every shot without averaging/filtering/normalization
-    changes. A wholly unacquired round stays complex NaN; acquired IQ is finite.
+    arms=[0,1] means reference/CZ-interleaved. rounds=[0..rounds-1] is a host
+    acquisition axis. sums ends in (3,3), ordered g/e/other on each role.
+    Counts are unnormalized; a wholly unacquired round stays NaN.
     """
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
     arms: NDArray[np.int64]
     rounds: NDArray[np.int64]
-    shot_indices: NDArray[np.int64]
-    tone_indices: NDArray[np.int64]
-    signals: NDArray[np.complex128]
+    sums: NDArray[np.float64]
+
+
+def build_program(
+    cfg: RBCfg,
+    soccfg: QickConfig,
+    gates: Sequence[TwoQubitGate],
+    *,
+    heralded: bool,
+) -> TimelineProgramV2:
+    """Compile playback gates with optional reset, optional herald and terminal.
+
+    gates comes from sequence.make_paired_sequences, including its own recovery.
+    sequence_modules owns pulse translation and fresh zero-origin virtual frames.
+    Every build creates fresh modules; the two tagged reads reuse one mux object.
+    No acquisition occurs. Invalid role classifiers fail before compilation.
+    """
+    validate_classifiers(cfg.readout, cfg.roles)
+    builder = TimelineBuilder(
+        soccfg, reps=cfg.reps,
+        initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+    )
+    readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
+    for module in sequence_modules(
+        gates, x90_f1=cfg.x90_f1, x90_f2=cfg.x90_f2,
+        drive=cfg.drive, phase_pair=cfg.phase_pair,
+    ):
+        builder.emit(module)
+    builder.emit(readout, tag="terminal")
+    return builder.build()
+
+
+def acquire_counts(
+    config: RBCfg, *, context: RunContext, heralded: bool
+) -> NDArray[np.float64]:
+    """Acquire each arm's host rounds separately, preserving raw count slots.
+
+    Return (depth,seed,2,round,3,3), or four trailing class axes for herald.
+    Compile once per depth/seed/arm and always acquire with rounds=1.
+    Live curves show joint00 from accumulated counts over seeds and rounds.
+    Cancellation leaves unfinished slots NaN; callers check context.scope.stop
+    for acquisition errors. The input cfg and sequence identities stay unchanged.
+    """
+    validate_classifiers(config.readout, config.roles)
+    viewer = live_line(
+        context.plots, "measurement", "Random Clifford depth",
+        "Joint00 survival" if not heralded else "Joint00 survival | herald (g,g)",
+        num_lines=2,
+    )
+
+    def update_view(sums: NDArray[np.float64]) -> None:
+        counts = terminal_counts(sums, heralded=heralded)
+        # Unmeasured rounds do not contribute to the cumulative count ratio.
+        totals = np.nansum(counts, axis=(1, 3))
+        viewer.update(
+            np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T
+        )
+
+    class_shape = (3, 3, 3, 3) if heralded else (3, 3)
+    buffer = SignalBuffer(
+        (len(config.depths), len(config.seeds), 2, config.rounds, *class_shape),
+        dtype=np.float64, on_update=update_view,
+    )
+    with Schedule(config, buffer, scope=context.scope) as sched:
+        cfg = sched.cfg
+        for depth, depth_step in sched.scan("depth", cfg.depths):
+            for seed, seed_step in depth_step.scan("seed", cfg.seeds):
+                pair = make_paired_sequences(depth, seed)
+                for arm, arm_step in seed_step.scan("arm", [0, 1]):
+                    sequence = (pair.reference, pair.interleaved)[arm]
+                    prog = build_program(
+                        cfg, context.soccfg, sequence.gates, heralded=heralded
+                    )
+                    processor = shot_sums(
+                        prog, readout_axes(cfg.roles, heralded=heralded)
+                    )
+                    for _, round_step in arm_step.repeat("round", cfg.rounds):
+                        round_step.run_acquire_summed(
+                            prog, context.soc, processor=processor,
+                            rounds=1, options=RunOptions(),
+                        )
+    buffer.trigger_update(flush=True)
+    return buffer.array
+
+
+def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
+    """Restore counts; old per-shot IQ files fail because sums is missing."""
+    sums = data.variable("sums")
+    return RBResult(
+        depths=sums.axes[5].astype(np.int64),
+        seeds=sums.axes[4].astype(np.int64),
+        arms=sums.axes[3].astype(np.int64),
+        rounds=sums.axes[2].astype(np.int64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class RBExp(Experiment[RBResult, RBCfg]):
-    """Stateless paired RB definition, native IO and saved-GE joint00 analysis."""
+    """Paired RB counts, native IO and complete-round joint00 analysis."""
 
     Options = RBOptions
-    AXES_SPEC: ClassVar[AxesSpec[RBResult, RBCfg]] = AxesSpec(
-        axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("shot_indices", "Shot", "", dtype=np.int64),
-            AxesSpec.Axis("rounds", "Round", "", dtype=np.int64),
-            AxesSpec.Axis("arms", "Arm", "", dtype=np.int64),
-            AxesSpec.Axis("seeds", "Seed", "", dtype=np.int64),
-            AxesSpec.Axis("depths", "Clifford depth", "", dtype=np.int64),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[RBResult, RBCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("terminal_f2", ""),
+                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec("Round", "", field_name="rounds", dtype=np.int64),
+                    VariableAxisSpec("Arm", "", field_name="arms", dtype=np.int64),
+                    VariableAxisSpec("Seed", "", field_name="seeds", dtype=np.int64),
+                    VariableAxisSpec(
+                        "Clifford depth", "", field_name="depths", dtype=np.int64
+                    ),
+                ),
+                z=VariableZSpec(
+                    field_name="sums", label="Joint class counts", unit="",
+                    dtype=np.float64,
+                ),
+            ),
         ),
-        z=AxesSpec.Z("signals", "Raw IQ", "a.u."),
         result_type=RBResult,
         cfg_type=RBCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="two_qubit/rb",
+        result_builder=restore_result,
     )
 
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
-        """Compile each depth/seed/arm once; retain completed rounds in fixed slots.
+        """Acquire optional reset → paired sequence → terminal class counts.
 
-        Each round acquires exactly reps same-shot full-tone IQ samples through
-        the public MuxReadout collector. Its final conversion reuses that round's
-        collected array, overwriting the same slot, never appending. Cancellation
-        preserves completed slots and leaves unfinished rounds NaN. Caller owns
-        handles/plots and checks cancel_signal.raise_if_error() for failures.
-        The input config, aliases and library are not changed or reread.
+        Each host round acquires reps shots with rounds=1, not a host average.
+        Return fixed raw count slots; cfg and saved sequence identities are unchanged.
         """
-        cfg = config.model_copy(deep=True, update={"rounds": 1})
-        ntones = len(cfg.readout.tones)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Random Clifford depth",
-            "Completed shots",
-            num_lines=2,
-        )
-
-        def update_view(raw: NDArray[np.complex128]) -> None:
-            viewer.update(
-                np.array(cfg.depths),
-                np.all(np.isfinite(raw), axis=-1).sum(axis=(1, 3, 4)).T,
-            )
-
-        buffer = SignalBuffer(
-            (len(cfg.depths), len(cfg.seeds), 2, config.rounds, cfg.reps, ntones),
-            on_update=update_view,
-        )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            for depth, depth_step in sched.scan("depth", cfg.depths):
-                for seed, seed_step in depth_step.scan("seed", cfg.seeds):
-                    pair = make_paired_sequences(depth, seed)
-                    for arm, arm_step in seed_step.scan("arm", [0, 1]):
-                        sequence = (pair.reference, pair.interleaved)[arm]
-                        builder = arm_step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=arm_step.cfg.reps,
-                            initial_delay=arm_step.cfg.initial_delay,
-                            relax_delay=arm_step.cfg.relax_delay,
-                        )
-                        builder.add(
-                            sequence_modules(
-                                sequence.gates,
-                                x90_f1=cfg.x90_f1,
-                                x90_f2=cfg.x90_f2,
-                                drive=cfg.drive,
-                                phase_pair=cfg.phase_pair,
-                            )
-                        )
-                        builder.add(MuxReadout("readout", cfg.readout))
-                        prog = builder.build()
-                        for _, round_step in arm_step.repeat("round", config.rounds):
-                            _ = round_step.prog_builder(
-                                context.soc,
-                                context.soccfg,
-                                reps=round_step.cfg.reps,
-                                initial_delay=round_step.cfg.initial_delay,
-                                relax_delay=round_step.cfg.relax_delay,
-                            ).run_program(
-                                prog,
-                                raw2signal_fn=_round_collector(prog),
-                                rounds=round_step.cfg.rounds,
-                            )
-        buffer.trigger_update(flush=True)
         return RBResult(
-            np.array(cfg.depths, dtype=np.int64),
-            np.array(cfg.seeds, dtype=np.int64),
+            np.array(config.depths, dtype=np.int64),
+            np.array(config.seeds, dtype=np.int64),
             np.arange(2, dtype=np.int64),
             np.arange(config.rounds, dtype=np.int64),
-            np.arange(cfg.reps, dtype=np.int64),
-            np.arange(ntones, dtype=np.int64),
-            buffer.array,
+            acquire_counts(config, context=context, heralded=False),
         )
 
     def analyze(
@@ -279,10 +298,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
         *,
         plots: Plots,
     ) -> RBAnalysis:
-        """Classify saved same-shot joint00 and fit complete paired seed curves.
+        """Fit saved joint00 count ratios from complete paired seed/round curves.
 
-        Missing calibration/data or an unidentifiable model is a reason-bearing
-        result, not a substituted fit. Malformed/nonfinite acquired raw raises.
-        options controls only deterministic paired-seed bootstrap, not acquisition.
+        options controls deterministic paired-seed bootstrap, not acquisition.
+        Malformed counts raise; missing cfg or unidentifiable fits return a reason.
         """
         return analyze_rb(source, options, plots=plots)
