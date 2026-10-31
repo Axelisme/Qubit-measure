@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，N 路合流、公共部分與旗標選值
+**Last updated:** 2026-11-01，逐點常數軸正規化
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -243,6 +243,9 @@ End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
 已知分量是一維 numpy 陣列。只有範圍的分量是獨立未知軸的係數，常數使用大小為 1 的固定軸。
 作者 register 的每次寫入、量測結果選表與取整誤差各自獨立，range_hint 不建立 loop 相關性。
 加減先合併同軸分量並消去零項，再加總各軸的界。證明不建立多維網格。
+已知軸上逐點全等的分量移到 const 軸，原軸從變數中消失。
+靜態結尾因此成為常數時，後續事件用字面值時間，不配置結尾 register。
+Generator fabric 的逐操作 ceil 若留下逐點差異，該軸仍保留。
 同單一已知軸的非線性運算逐點計算。跨軸 ceil 與定點換算保留原式，另加有界取整誤差。
 跨軸 max/min 使用線性部分加有理係數的 Abs 項，允許負係數及巢狀 Abs。
 正規化合併同類項，消去零係數，並在已知符號時化簡 Abs。

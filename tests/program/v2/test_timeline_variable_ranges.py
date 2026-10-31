@@ -22,9 +22,7 @@ def v6_profile() -> QickConfig:
 def test_complementary_tproc_pulses_leave_a_literal_constant_end():
     cfg = make_mock_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
-        clock.update(
-            fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=430.08
-        )
+        clock.update(fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=430.08)
     cfg["gens"][0].update(
         type="axis_sg_int4_v1",
         has_mixer=True,

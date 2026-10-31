@@ -134,7 +134,8 @@ def step_time(prog, value: float | QickParam) -> float | QickParam:
     if not axes:
         return rounded.start
     return QickParam(
-        rounded.start, {name: span for name, span in rounded.spans.items() if name in axes}
+        rounded.start,
+        {name: span for name, span in rounded.spans.items() if name in axes},
     )
 
 
