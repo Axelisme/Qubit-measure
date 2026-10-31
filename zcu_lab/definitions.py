@@ -102,6 +102,9 @@ from zcu_lab.v2.two_qubit.constructive_phase.gui import (
 )
 from zcu_lab.v2.two_qubit.cz_amplitude.gui import DEFINITION as CZAMPLITUDE_DEFINITION
 from zcu_lab.v2.two_qubit.idle_zz.gui import DEFINITION as IDLE_ZZ_DEFINITION
+from zcu_lab.v2.two_qubit.idle_zz.gui_heralded import (
+    DEFINITION as IDLE_ZZ_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.joint_readout.gui import (
     DEFINITION as JOINT_READOUT_DEFINITION,
 )
@@ -267,6 +270,7 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
     "two_qubit/local_z": LOCAL_Z_DEFINITION,
     "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
+    "two_qubit/idle_zz_heralded": IDLE_ZZ_HERALDED_DEFINITION,
     "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
     "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
     "fastflux/twotone": TWO_TONE_DEFINITION,

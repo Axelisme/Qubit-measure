@@ -8,7 +8,6 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay_fringe
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.utils.process import rotate2real
 
 
 @dataclass(frozen=True)
@@ -16,9 +15,9 @@ class IdleBranchFit:
     """One nominal spectator branch at one DC coordinate.
 
     dc_index/branch select the original axes (branch 0=I, 1=Xπ). acquired_shots
-    counts completed delay/round shots; complete requires all expected samples.
-    trace is the T-point mean target IQ rotated to its principal real axis,
-    retaining NaN where no round exists. fit_curve is the existing decay-cosine
+    counts accepted shots over all delays; complete requires all expected rounds
+    before herald selection. trace is the T-point target (N_e-N_g)/N_total,
+    retaining NaN at unmeasured or zero-acceptance points. fit_curve is the decay-cosine
     model or None when unavailable. magnitude_mhz is nonnegative; signed_mhz
     assumes both branches stay on the side selected by the operator's detune.
     error_mhz is the fitted frequency's covariance 1σ error. resolution_mhz is
@@ -66,37 +65,34 @@ def fit_branch(
     dc_index: int,
     branch: int,
     delays: NDArray[np.float64],
-    shots: NDArray[np.complex128],
-    acquired: NDArray[np.bool_],
+    trace: NDArray[np.float64],
+    shots: NDArray[np.float64],
+    complete: NDArray[np.bool_],
     detune: float,
 ) -> IdleBranchFit:
-    """Fit complete (T,rounds,reps) target IQ, preserving incomplete trace points.
+    """Fit the T-point target sigma trace using a free-phase decay cosine.
 
-    acquired is (T,rounds), established by the core's all-tone finite-round
-    validation. Only complete branches enter the existing decay cosine fitter,
-    with free phase. At least six distinct, regularly spaced delays are needed
-    for five fitted parameters plus residual degrees of freedom. No radius cut,
-    heralding, population correction or simulator input is used.
+    shots is accepted count per delay. complete records acquisition completeness
+    before herald selection. Only complete, finite traces enter the fitter.
+    At least six distinct, regularly spaced delays are needed for five fitted
+    parameters plus residual degrees of freedom. No population correction or
+    simulator input is used.
     Sign is detune's sign. In magnitude coordinates the ambiguous boundaries
     are 0 and 2*abs(detune), including for negative detune. A distance no larger
     than max(1/actual sampled delay span, covariance frequency 1σ) is unresolved.
     Nonfinite covariance is not zero error. Numeric fit failures retain a reason
     and trace; malformed source/raw is rejected by the caller before this seam.
     """
-    masked = np.where(acquired[..., None], shots, complex(np.nan, np.nan))
-    counts = acquired.sum(axis=1) * shots.shape[-1]
-    mean = np.full(len(delays), complex(np.nan, np.nan))
-    for i in np.flatnonzero(counts):
-        mean[i] = np.mean(masked[i][np.isfinite(masked[i])])
-    trace = rotate2real(mean).real
     fit = IdleBranchFit(
-        dc_index, branch, int(counts.sum()), bool(np.all(acquired)), trace
+        dc_index, branch, int(np.nansum(shots)), bool(np.all(complete)), trace
     )
-    if not np.all(acquired):
+    if not np.all(complete):
         return replace(
             fit,
             reason="Required branch is incomplete; all delays and rounds are needed",
         )
+    if not np.all(np.isfinite(trace)):
+        return replace(fit, reason="No accepted shots at one or more required delays")
     span = float(np.ptp(delays))
     if (
         len(delays) < 6
@@ -201,8 +197,8 @@ def plot_analysis(
         subtitle = f"ζ={zeta:.5g} MHz" if zeta is not None else "ζ unavailable"
         ax.set(
             xlabel="Delay (us)",
-            ylabel="Mean target IQ, principal real axis (a.u.)",
-            title=f"{title}; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nThermal nominal branches; mixture not excluded, no heralding",
+            ylabel="Target ⟨σ⟩ = (N_e − N_g) / N_total",
+            title=f"{title}; {dc_label}={dc_value:g}\n{subtitle}; single-frequency model estimate\nNominal branches; mixture not excluded",
         )
         ax.text(
             0.01,

@@ -6,13 +6,19 @@ from typing import TypeAlias
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
+from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from ._analysis import IdleZZAnalysis
 from .core import IdleZZCfg, IdleZZExp, IdleZZResult
-from .form import make_form
+from .form import idle_zz_form
 
 IdleZZRun: TypeAlias = RunRecord[IdleZZCfg, IdleZZResult]
+
+
+def make_form(ctx: FormContext) -> Form[IdleZZCfg]:
+    """Capture roles and seed calibrated pulses/readout; reset starts None."""
+    return idle_zz_form(ctx, IdleZZCfg)
 
 
 def _analyze(req: AnalyzeRequest[IdleZZRun, None], *, plots: Plots) -> IdleZZAnalysis:
