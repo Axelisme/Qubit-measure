@@ -297,7 +297,7 @@ def test_build_and_acquire_retries_acquire_on_the_same_program(
     assert "attempt 2" in warnings[0].message
 
 
-def test_build_and_acquire_retry_clears_shared_failure_cause():
+def test_build_and_acquire_retry_recovers_after_transient_failure():
     result = None
     FlakyBuildProgram.instances.clear()
     run_stop = StopSignal()

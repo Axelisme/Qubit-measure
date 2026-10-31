@@ -190,7 +190,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   Program build、raw conversion 與 update callback 的一般例外直接向 caller 傳播，不標記為 acquire 失敗。
   目前已寫入 buffer / result tree 的 partial result 保留；已寫入的 slot 保留，
   未完成的 slot 維持 NaN 初始化值。若 first round 尚未完成就 stop，program acquire
-  以 stopped partial 例外結束，runner 將 outcome 標記為 `stopped` 並保留 NaN partial。
+  以 stopped partial 例外結束，runner 保留 NaN。只有 Schedule 自己的 token 已停止時，outcome 才記 `stopped`。
 - `StopSignal.set(reason=None)` 保存並向下轉交不解析的停止文字，`reason` 屬性供作者讀取。`Scope.cancel(selector, reason=None)` 將文字傳給選中的 subtree。
 - 一般 producer failure 直接傳播，不轉成 workflow 的 `Failed` 回傳值。錯誤原因只保留在作者工具的 Schedule outcome，不寫入 StopSignal。
   Notebook 不發布失敗當次的 record。GUI 將例外交給 operation failure 收尾。
@@ -202,7 +202,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry。
 - 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。
   預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。
-  耗盡後拋出最後一次 attempt 的同一例外。若失敗時也收到合作取消，不再重試，但仍拋出 producer 例外，不當作正常 partial。
+  耗盡後拋出最後一次 attempt 的同一例外。若失敗時 Schedule 本身也已停止，不再重試，但仍拋出 producer 例外，不當作正常 partial。
   每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。
   Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
