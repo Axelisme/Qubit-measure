@@ -148,6 +148,28 @@ def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficien
     assert "+" in prog.prog_list[masks[-1] + 1]["OP"]
 
 
+def rebased_runtime_end_program():
+    loader = LoadValue("c_times", [200, 80, 220], "scan", "c_duration")
+
+    def body(prog):
+        prog.emit(loader)
+        prog.fork("default", into=["a", "b", "c"])
+        prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a")
+        prog.delay_timeline(QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b")
+        prog.delay_timeline("c_duration", timeline="c")
+        prog.join("a", "b", into="default")
+        prog.sync(timeline="default")
+        prog.pulse(0, "p0", timeline="c")
+
+    return program(body, initialize=lambda p: p.declare(loader))
+
+
+def test_sync_rebases_unjoined_runtime_end_after_crossing_join():
+    result = shots(rebased_runtime_end_program())
+    assert [waves(shot) for shot in result] == [[200], [100], [220]]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [228, 128, 248]
+
+
 class AllocateTime(Macro):
     def preprocess(self, prog):
         prog.add_reg("duration")
