@@ -216,33 +216,32 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 ylabel=f"Observed P{labels[outcome]}",
                 title=f"Terminal {labels[outcome]} · other retained in denominator",
             )
-            if len(result.coordinates) <= 25:
-                ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
-        if answer.herald_matrix is not None:
-            fig, _ = plots.subplots(
-                "herald",
-                nrows=3,
-                ncols=3,
-                figsize=(13, 10),
-                squeeze=False,
-                layout="constrained",
+            ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        herald_matrix = herald_probabilities(result.sums)
+        fig, _ = plots.subplots(
+            "herald",
+            nrows=3,
+            ncols=3,
+            figsize=(13, 10),
+            squeeze=False,
+            layout="constrained",
+        )
+        for outcome, ax in enumerate(fig.axes):
+            image = ax.pcolormesh(
+                result.durations,
+                result.coordinates,
+                herald_matrix[..., outcome // 3, outcome % 3],
+                shading="nearest",
+                vmin=0,
+                vmax=1,
             )
-            for outcome, ax in enumerate(fig.axes):
-                image = ax.pcolormesh(
-                    result.durations,
-                    result.coordinates,
-                    answer.herald_matrix[..., outcome // 3, outcome % 3],
-                    shading="nearest",
-                    vmin=0,
-                    vmax=1,
-                )
-                fig.colorbar(image, ax=ax, label="Herald probability")
-                ax.set(
-                    xlabel="Drive duration (us)",
-                    ylabel="Common drive frequency (MHz)",
-                    title=f"Herald {labels[outcome]}"
-                    + (" · pass fraction, not purity" if outcome == 0 else ""),
-                )
+            fig.colorbar(image, ax=ax, label="Herald probability")
+            ax.set(
+                xlabel="Drive duration (us)",
+                ylabel="Common drive frequency (MHz)",
+                title=f"Herald {labels[outcome]}"
+                + (" · pass fraction, not purity" if outcome == 0 else ""),
+            )
 
         ee_counts = terminal_counts(result.sums, ("e", "e"))
         ee_not_returned = 1.0 - joint_probabilities(ee_counts)[..., 1, 1]
@@ -252,25 +251,8 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         ax.set(xlabel="Drive duration (us)", ylabel="Common drive frequency (MHz)", title="Drive disturbance of |00⟩ · ee control, no shared fit")
         rates = fit_duration_rates(durations, answer)
         _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, rates, strict=True):
-            if rate.rate is not None:
-                ax.errorbar(
-                    coordinate, rate.rate, yerr=rate.uncertainty, fmt="o", color="C0"
-                )
-        reasons = [
-            f"{coordinate:g}: {rate.reason}"
-            for coordinate, rate in zip(coordinates, rates, strict=True)
-            if rate.reason
-        ]
-        if reasons:
-            ax.text(
-                0.02,
-                0.98,
-                "\n".join(reasons),
-                va="top",
-                transform=ax.transAxes,
-                fontsize="small",
-            )
+        ax.errorbar(coordinates, [rate.rate if rate.rate is not None else np.nan for rate in rates], yerr=[rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates], fmt="o", color="C0")
+        ax.text(0.02, 0.98, "\n".join(f"{coordinate:g}: {rate.reason}" for coordinate, rate in zip(coordinates, rates, strict=True) if rate.reason), va="top", transform=ax.transAxes, fontsize="small")
         ax.set(
             xlabel="Common drive frequency (MHz)",
             ylabel="Rabi rate (MHz)",
@@ -285,7 +267,6 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             ylabel="Fitted joint P00",
             title="Duration cosine fits · inspect model against measured return curves",
         )
-        if ax.lines and len(coordinates) <= 25:
-            ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
 
         return RabiAnalysis(answer, rates)

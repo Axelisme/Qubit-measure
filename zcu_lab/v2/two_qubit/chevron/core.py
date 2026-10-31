@@ -222,29 +222,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 ylabel=f"Observed P{labels[outcome]}",
                 title=f"Terminal {labels[outcome]} · other retained in denominator",
             )
-            if len(result.coordinates) <= 25:
-                ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+            ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
         rates = fit_duration_rates(durations, answer)
         _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
-        for coordinate, rate in zip(coordinates, rates, strict=True):
-            if rate.rate is not None:
-                ax.errorbar(
-                    coordinate, rate.rate, yerr=rate.uncertainty, fmt="o", color="C0"
-                )
-        reasons = [
-            f"{coordinate:g}: {rate.reason}"
-            for coordinate, rate in zip(coordinates, rates, strict=True)
-            if rate.reason
-        ]
-        if reasons:
-            ax.text(
-                0.02,
-                0.98,
-                "\n".join(reasons),
-                va="top",
-                transform=ax.transAxes,
-                fontsize="small",
-            )
+        ax.errorbar(coordinates, [rate.rate if rate.rate is not None else np.nan for rate in rates], yerr=[rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates], fmt="o", color="C0")
+        ax.text(0.02, 0.98, "\n".join(f"{coordinate:g}: {rate.reason}" for coordinate, rate in zip(coordinates, rates, strict=True) if rate.reason), va="top", transform=ax.transAxes, fontsize="small")
         ax.set(
             xlabel="Common drive frequency (MHz)",
             ylabel="Rabi rate (MHz)",
@@ -259,7 +241,6 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             ylabel="Fitted joint P00",
             title="Duration cosine fits · inspect model against measured return curves",
         )
-        if ax.lines and len(coordinates) <= 25:
-            ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
+        ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
 
         return RabiAnalysis(answer, rates)

@@ -90,7 +90,7 @@ def _fit_complete_prefix(
             [ParameterSpec(name, value, fixed=name == "phase_deg") for name, value in zip(names, initial, strict=True)],
         )
         if not weighted.diagnostics.valid:
-            return replace(answer, reason="Weighted zero-phase return fit failed")
+            raise ValueError("Weighted zero-phase return fit failed")
         parameters = np.array([weighted.values[name] for name in names])
         covariance = weighted.covariance
     except (ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:

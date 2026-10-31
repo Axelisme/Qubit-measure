@@ -102,7 +102,7 @@ def _fit_duration_rate(
             [ParameterSpec(name, float(value)) for name, value in zip(names, seed.params, strict=True)],
         )
         if not weighted.diagnostics.valid:
-            return RabiRate(None, None, "Weighted cosine fit failed", None, None)
+            raise ValueError("Weighted cosine fit failed")
         parameters = np.array([weighted.values[name] for name in names])
         covariance = weighted.covariance
         frequency = float(parameters[2])
