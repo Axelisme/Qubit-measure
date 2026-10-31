@@ -284,6 +284,10 @@ def lookup_expression(
 ) -> TimeExpression:
     """Preserve one lookup's legal points using the selector at this occurrence."""
     index = source_expression(prog, selector)
+    if len(values) > 1:
+        step = values[1] - values[0]
+        if all(value == values[0] + step * i for i, value in enumerate(values)):
+            return add_time(LinearTime(values[0]), scale_time(index, step))
     axes = expression_axes(index)
     points = evaluate_time(index, axes)
     if points is None:
