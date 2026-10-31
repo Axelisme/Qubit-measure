@@ -900,12 +900,13 @@ def test_time_lookup_accepts_inclusive_index_bounds(loader_type, index):
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
-def test_time_lookup_rejects_sweep_larger_than_table(loader_type):
+@pytest.mark.parametrize("hint", [None, (5, 10)])
+def test_time_lookup_rejects_sweep_larger_than_table(loader_type, hint):
     loader = loader_type("time", [5, 10], "scan", "loaded")
 
     def body(prog):
         prog.emit(loader)
-        prog.delay_timeline("loaded")
+        prog.delay_timeline("loaded", range_hint=hint)
 
     with pytest.raises(ValueError, match=r"loaded.*scan.*allowed.*0.*1.*actual.*0.*2"):
         program(body, initialize=lambda p: p.declare(loader))
