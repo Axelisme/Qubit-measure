@@ -650,6 +650,23 @@ def test_duplicate_builder_axes_raise_at_recording(mock_soccfg, first, second):
     ]
 
 
+def test_mux_objects_share_resources_despite_different_emission_timing():
+    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    cfg = MuxReadoutCfg(
+        gen_ch=0, nqz=1, mixer_freq=1000, length=0.1, ro_length=0.2,
+        tones=[MuxReadoutTone(ro_ch=0, freq=1000, gain=0.1)],
+    )
+    first = cfg.build("first")
+    second = cfg.with_updates(pre_delay=0.01, post_delay=0.03, trig_offset=0.02).build("second")
+    builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
+    builder.emit(first)
+    builder.emit(second)
+    prog = builder.build()
+    assert list(prog.ro_chs) == [0]
+    assert prog.ro_chs[0]["trigs"] == 2
+    assert len(waves(shots(prog)[0])) == 2
+
+
 def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     builder.emit(_readout("first"))
