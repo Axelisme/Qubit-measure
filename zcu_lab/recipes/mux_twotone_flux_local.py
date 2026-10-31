@@ -81,7 +81,7 @@ async def mux_twotone_flux_local(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"frequency.tones.{index}.sweep",
+                f"frequency.tones.{index}.freq",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
     tab.set("frequency.expts", inputs.n)
@@ -99,7 +99,7 @@ async def mux_twotone_flux_local(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"tones.{index}.sweep",
+                f"tones.{index}.flux",
                 None if inputs.flux_sweeps is None else inputs.flux_sweeps[index],
             )
     tab.set("flux_expts", inputs.flux_n)
