@@ -962,10 +962,13 @@ def plan_time_choice(
         result = TimeVariable(value.constant)
         for axis, coefficient in value.terms:
             recipe = axis.producer.reconstruction
+            source = TimeVariable(terms=((axis, 1),))
             term = (
-                linear(recipe)
+                atom(source)
+                if source in captured
+                else linear(recipe)
                 if recipe is not None and _integer_recipe(recipe)
-                else TimeVariable(terms=((axis, 1),))
+                else source
             )
             result = _linear_add(result, _linear_scale(term, coefficient))
         return result

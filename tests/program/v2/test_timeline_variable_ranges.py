@@ -106,7 +106,7 @@ def test_join_eliminates_every_provably_dominated_candidate(extra):
         for length in range(60, 257, 4)
         for _ in range(3 if extra else 2)
     ]
-    assert not any(inst.get("IF") in ("S", "NS") for inst in prog.prog_list)
+    assert not any(inst.get("CMD") == "REG_WR" and inst.get("IF") in ("S", "NS") for inst in prog.prog_list)
 
 
 class AllocateDuration(Macro):

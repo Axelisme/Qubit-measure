@@ -841,7 +841,7 @@ class RuntimeMath(TimedMacro):
         captured = (
             tuple(value for value in values if isinstance(value, RuntimeEnd))
             if inputs is None
-            else tuple(captured_ends)
+            else (*captured_ends, *inputs.values())
         )
         bindings = {runtime_expression(value): value for value in captured}
         common, residuals, atoms = plan_time_choice(
