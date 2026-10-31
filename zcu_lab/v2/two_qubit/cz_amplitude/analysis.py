@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.plotting.plots import Plots
 
 from .._sums import joint_probabilities
 from .fit import CZReturnFit, fit_return
@@ -44,7 +43,6 @@ def analyze_return(
     *,
     acquired_shots: NDArray[np.float64],
     expected_shots: int,
-    plots: Plots,
 ) -> CZAmplitudeAnalysis:
     """Fit P00 from terminal counts, retaining other in the denominator.
 
@@ -66,39 +64,5 @@ def analyze_return(
         acquired_shots=acquired_shots,
         analyzed_shots=accepted,
     )
-    fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete)
-    _plot_return(scales, data, fit, plots=plots)
+    fit = fit_return(scales, data.probabilities[:, 0, 0], data.complete, accepted)
     return CZAmplitudeAnalysis(data, fit)
-
-
-def _plot_return(
-    scales: NDArray[np.float64],
-    answer: CZReturnData,
-    fit: CZReturnFit,
-    *,
-    plots: Plots,
-) -> None:
-    _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
-    for index, label in enumerate(OUTCOME_LABELS):
-        ax.plot(
-            scales, answer.probabilities.reshape(-1, 9)[:, index], ".-", label=label
-        )
-    ax.set(
-        xlabel="Common gain scale",
-        ylabel="Same-shot joint probability",
-        title="B11 → CZ → Xπ⊗Xπ · classified return, not gate fidelity",
-    )
-    if np.any(np.isfinite(fit.curve)):
-        ax.plot(scales, fit.curve, "k--", label="Zero-phase P00 fit")
-    diagnostic = (
-        fit.reason or f"First positive return scale = {fit.scale:.6g} ± {fit.error:.2g}"
-    )
-    ax.text(
-        0.02,
-        0.02,
-        diagnostic,
-        transform=ax.transAxes,
-        fontsize="small",
-        bbox={"facecolor": "white", "alpha": 0.85},
-    )
-    ax.legend()

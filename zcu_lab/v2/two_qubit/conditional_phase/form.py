@@ -61,7 +61,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
             "x90_f2": Slot("$f2.module.x90", copy=True),
             "readout": readout,
             "drive": {
-                # dual_line_drive replaces both frequencies, including repeated gates.
+                # Run overrides both CZ frequencies with the common hardware sweep.
                 "f1": Slot(
                     "$coupler.module.cz_f1", copy=True, set={"freq": Hidden(0.0)}
                 ),

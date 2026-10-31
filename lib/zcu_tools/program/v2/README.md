@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-10-31，fork／join 與可選 register 時間 bounds
+**Last updated:** 2026-10-31，fork／join、可選 register 時間 bounds 與 channel 宣告一致性
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -143,9 +143,16 @@ Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生�
 `SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
 既有 acquire 擴充仍由共同基底提供。
 
-`TimelineProgramV2.declare` 將不可共用的 ADC／register 宣告歸屬到 module 物件。
-不同物件衝突時錯誤列出兩個名稱與物件。
-明示 register 借用與 Pulse registry 共用 generator／template 的規則不變。
+`TimelineProgramV2` 的 module 與原生直接通道宣告遵守同一規則：相同資源設定共用，不同設定在 build 報錯。
+ADC 比較讀窗長度等資源設定。Generator 比較 nqz、mixer 與 mux tones 等宣告。
+Module 衝突訊息列出兩個名稱、物件與不一致欄位。原生直接宣告以 native declaration 標示。
+tProc readout 用各自具名 config 切換 freq、phase、outsel 與 generator 頻率匹配，每次 trigger 使用當次設定。
+原生 `add_readoutconfig` 保留 QICK 的 template 契約，不限制跨 template 的 mode、phrst 或 length。
+靜態 readout 不支援 runtime 切換。相同 Mux 資源可共用，pre/post delay、trig_offset、classifier 與 desc 不參與資源比較。
+每 shot trigger 次數仍由 compiled 總數契約檢查，不按個別 module 的 emit 次數拒絕共用。
+Protected route 的相同宣告也可共用。不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
+Register 仍歸屬到宣告物件，明示 register 借用與 Pulse registry 的 template 共用規則不變。
+`ModularProgramV2` 的宣告與 route protection 規則不變。
 Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
 
 每條 timeline 只保存相對 reference 的結尾。
@@ -157,8 +164,15 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
-省略 `timeline=` 或傳入 `None` 的 `emit`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
-`repeat` 省略母 timeline 時也使用此名字。
+省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：
+
+- `emit`、`pulse`、`trigger`。
+- `send_readoutconfig`、`send_readoutconfig_from_regs`。
+- `pulse_from_regs`、`pulse_by_reg`、`pulse_from_length_reg`。
+- `delay_timeline`、`sync` 與 `repeat` 的母 timeline。
+
+`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時仍須提供配對的 `selection` metadata。
+範圍外省略 timeline 的原生輸出保留 QICK 時間行為，不改選 `"default"`。
 顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
 名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
 範圍不 fork、不 join，也不移動 reference。

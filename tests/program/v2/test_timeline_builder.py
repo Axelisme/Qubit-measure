@@ -661,11 +661,83 @@ def test_duplicate_builder_axes_raise_at_recording(mock_soccfg, first, second):
     ]
 
 
+def test_mux_objects_share_resources_despite_different_emission_timing():
+    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    cfg = MuxReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        mixer_freq=1000,
+        length=0.1,
+        ro_length=0.2,
+        tones=[MuxReadoutTone(ro_ch=0, freq=1000, gain=0.1)],
+    )
+    first = cfg.build("first")
+    second = cfg.with_updates(pre_delay=0.01, post_delay=0.03, trig_offset=0.02).build(
+        "second"
+    )
+    builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
+    builder.emit(first)
+    builder.emit(second)
+    prog = builder.build()
+    assert list(prog.ro_chs) == [0]
+    assert prog.ro_chs[0]["trigs"] == 2
+    assert len(waves(shots(prog)[0])) == 2
+
+
+@pytest.mark.parametrize("field", ["ro_length", "freq", "gain"])
+def test_static_mux_mismatches_name_both_objects_and_resource_field(field):
+    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    cfg = MuxReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        mixer_freq=1000,
+        length=0.1,
+        ro_length=0.2,
+        tones=[MuxReadoutTone(ro_ch=0, freq=1000, gain=0.1)],
+    )
+    first = cfg.build("first")
+    if field == "ro_length":
+        cfg = cfg.with_updates(ro_length=0.3)
+        diagnostic = "ro_length"
+    else:
+        tone = (
+            cfg.tones[0].with_updates(freq=1080)
+            if field == "freq"
+            else cfg.tones[0].with_updates(gain=0.2)
+        )
+        cfg = cfg.with_updates(tones=[tone])
+        diagnostic = "mux_freqs" if field == "freq" else "mux_gains"
+    second = cfg.build("second")
+    builder = v2.TimelineBuilder(soccfg)
+    builder.emit(first)
+    builder.emit(second)
+    with pytest.raises(ValueError, match=diagnostic) as error:
+        builder.build()
+    for module in (first, second):
+        assert module.name in str(error.value)
+        assert repr(module) in str(error.value)
+
+
+def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    builder.emit(_readout("first"))
+    builder.emit(_readout("second"))
+    prog = builder.build()
+    assert list(prog.ro_chs) == [0]
+    assert prog.ro_chs[0]["length"] == 61
+    assert prog.ro_chs[0]["trigs"] == 2
+    # Each read emits one ADC configuration and one generator waveform.
+    assert len(waves(shots(prog)[0])) == 4
+    prog.compile()
+    assert prog.ro_chs[0]["trigs"] == 2
+
+
 @pytest.mark.parametrize("resource", ["adc", "register", "register address"])
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, frontend):
     if resource == "adc":
-        first, second = _readout("first"), _readout("second")
+        first = _readout("first")
+        second = PulseReadout("second", first.cfg, ro_length=0.3)
     elif resource == "register address":
         first = DeclarationModule("first", lambda p: p.add_reg("a", addr=10))
         second = DeclarationModule("second", lambda p: p.add_reg("b", addr=10))
@@ -689,6 +761,8 @@ def test_conflicting_module_objects_name_both_owners(mock_soccfg, resource, fron
 
     with pytest.raises(ValueError, match="(readout|register)") as error:
         compile_program()
+    if resource == "adc":
+        assert "ro_length" in str(error.value)
     for module in (first, second):
         assert module.name in str(error.value)
         assert repr(module) in str(error.value)
@@ -855,6 +929,22 @@ class DeclarationModule(v2.Module):
         pass
 
 
+@pytest.mark.parametrize("field,value", [("nqz", 2), ("mixer_freq", 100)])
+def test_generator_declaration_mismatch_names_both_objects_and_field(
+    mock_soccfg, field, value
+):
+    first = DeclarationModule("first", lambda p: p.declare_gen(0, nqz=1))
+    second = DeclarationModule("second", lambda p: p.declare_gen(0, **{field: value}))
+    builder = v2.TimelineBuilder(mock_soccfg)
+    builder.emit(first)
+    builder.emit(second)
+    with pytest.raises(ValueError, match=field) as error:
+        builder.build()
+    for module in (first, second):
+        assert module.name in str(error.value)
+        assert repr(module) in str(error.value)
+
+
 def test_protected_generator_conflict_names_protector_not_earlier_shared_user(
     mock_soccfg,
 ):
@@ -866,7 +956,7 @@ def test_protected_generator_conflict_names_protector_not_earlier_shared_user(
         prog.protect_readout_routes("protector", 0, [0])
 
     protector = DeclarationModule("protector", protect)
-    conflicting = DeclarationModule("conflicting", lambda p: p.declare_gen(0, nqz=1))
+    conflicting = DeclarationModule("conflicting", lambda p: p.declare_gen(0, nqz=2))
     builder = v2.TimelineBuilder(mock_soccfg)
     for module in (shared, protector, conflicting):
         builder.emit(module)
@@ -898,7 +988,8 @@ def test_explicit_scratch_register_reuse_remains_valid(mock_soccfg):
 def test_failed_build_also_freezes_builder(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg)
     builder.emit(_readout("first"))
-    builder.emit(_readout("second"))
+    first = _readout("first")
+    builder.emit(PulseReadout("second", first.cfg, ro_length=0.3))
     with pytest.raises(ValueError, match="readout"):
         builder.build()
     with pytest.raises(ValueError, match="frozen"):

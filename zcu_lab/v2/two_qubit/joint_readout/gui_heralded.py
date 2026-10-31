@@ -1,4 +1,4 @@
-"""Measure attachment for ground-ground heralded joint readout."""
+"""Measure attachment for joint readout with gg/ee herald diagnostics."""
 
 from pathlib import Path
 from typing import TypeAlias

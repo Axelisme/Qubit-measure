@@ -4,9 +4,13 @@ from dataclasses import replace
 
 import pytest
 from qick.asm_v2 import QickSweep1D
+from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.io_instructions import DportWriteInst
 from zcu_tools.program.v2.ir.operands import ImmValue, Register
+from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program.v2.simulation._compiled_support import program, request
 
@@ -243,6 +247,37 @@ def test_pending_config_fifo_carries_into_later_rep_window():
     prog, env = program(body, initialize, reps=4)
     with pytest.raises(ValueError, match=r"preopt.*cross-shot.*pending config FIFO"):
         request(prog, env)
+
+
+@pytest.mark.parametrize("second_gen", [0, 1])
+def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_gen):
+    env = white_noise(std_adc=0, n_gens=2, n_readouts=1, routes=((0, 0), (1, 0)))
+    try:
+        cfg = PulseReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            ro_ch=0,
+            freq=100,
+            gain=0.2,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=0.2,
+        )
+        first = PulseReadout("first", cfg)
+        cfg = cfg.with_updates(
+            gen_ch=second_gen, freq=200, trig_offset=0.01, post_delay=0.03
+        )
+        second = PulseReadout("second", cfg)
+        builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0)
+        builder.emit(first)
+        builder.emit(second)
+        prog = builder.build()
+        read = request(prog, env).materialize_point(0).readouts[0]
+        assert read.frequency_mhz == pytest.approx((100, 200), abs=1e-5)
+        assert read.generator_channels == (0, second_gen)
+        assert read.samples == 61
+        assert len(read.trigger_us) == 2
+    finally:
+        env.devices.close_all_devices()
 
 
 def test_each_read_uses_its_own_start_config_in_trigger_order():

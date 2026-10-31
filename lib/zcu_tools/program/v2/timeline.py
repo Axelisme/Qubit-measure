@@ -3,8 +3,11 @@
 
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
+from inspect import signature
 from typing import TypedDict, override
 
+import numpy as np
 from qick.asm_v2 import (
     AsmV2,
     ConfigReadout,
@@ -12,6 +15,7 @@ from qick.asm_v2 import (
     OpenLoop,
     Pulse,
     QickParam,
+    QickProgramV2,
     QickRawParam,
     Trigger,
 )
@@ -125,6 +129,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states: dict[int, tuple[Module, object]] = {}
         self._declaration_module: Module | None = None
         self._resource_owners: dict[tuple[str, str | int], Module] = {}
+        self._resource_declarations: dict[tuple[str, int], dict[str, object]] = {}
         self._declaring = False
         self._building_body = False
         self._timeline_default: str | None = None
@@ -219,6 +224,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._module_states.clear()
         self._declaration_module = None
         self._resource_owners.clear()
+        self._resource_declarations.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
         self.set_ext_counter(addr=self.COUNTER_ADDR)
         self._declaring = True
@@ -359,9 +365,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
         Do not mutate it afterward. Outside _initialize raises ValueError;
-        unsupported module types raise NotImplementedError. ADC/register conflicts
-        between distinct modules raise ValueError naming both objects. Explicit
-        register borrowing and module-family Pulse registry sharing are retained.
+        unsupported module types raise NotImplementedError. Inconsistent ADC or
+        generator settings and register conflicts raise ValueError naming both
+        objects and conflicting fields. Equal channel declarations are shared;
+        explicit register borrowing and Pulse registry sharing are retained.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
@@ -388,29 +395,71 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         if self._declaration_module is not None:
             self._resource_owners.setdefault((kind, key), self._declaration_module)
 
+    def _reuse_declaration(
+        self, kind: str, ch: int, settings: dict[str, object]
+    ) -> bool:
+        previous = self._resource_declarations.get((kind, ch))
+        if previous is None:
+            return False
+        differing = []
+        for field, value in settings.items():
+            old = previous[field]
+            if isinstance(old, np.ndarray) or isinstance(value, np.ndarray):
+                equal = (
+                    isinstance(old, np.ndarray)
+                    and isinstance(value, np.ndarray)
+                    and np.array_equal(old, value)
+                )
+            else:
+                equal = old == value
+            if not equal:
+                differing.append("length (ro_length)" if field == "length" else field)
+        if differing:
+            owner = self._resource_owners.get((kind, ch))
+            module = self._declaration_module
+            first = f"{owner.name} ({owner!r})" if owner else "native declaration"
+            second = f"{module.name} ({module!r})" if module else "native declaration"
+            raise ValueError(
+                f"{kind} {ch}: {second} conflicts with {first}; "
+                f"inconsistent fields: {', '.join(differing)}"
+            )
+        return True
+
     @override
     def declare_readout(self, ch: int, *args, **kwargs) -> None:
-        """Declare an ADC, rejecting distinct module owners of the same channel.
+        """Declare or reuse an ADC with identical QICK resource settings.
 
-        Native QICK arguments pass unchanged. During declare(module), ownership
-        follows object identity; conflicts name both modules and their objects.
-        Calls outside module declaration retain native route protection.
+        Arguments follow QICK declare_readout, including length in us. Reuse
+        does not reset trigger accounting. Different settings raise ValueError
+        naming both declaring modules and the inconsistent fields. Runtime
+        freq/phase/outsel/gen matching belongs in separate readout configs.
         """
-        self._check_resource_owner("readout", ch)
+        # Bind at the external adapter so positional/default arguments compare alike.
+        bound = signature(QickProgramV2.declare_readout).bind(self, ch, *args, **kwargs)
+        bound.apply_defaults()
+        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
+        if self._reuse_declaration("readout", ch, settings):
+            return
         super().declare_readout(ch, *args, **kwargs)
+        self._resource_declarations[("readout", ch)] = deepcopy(settings)
         self._remember_resource_owner("readout", ch)
 
     @override
     def declare_gen(self, ch: int, *args, **kwargs) -> None:
-        """Declare a generator, retaining module-family registry sharing.
+        """Declare or reuse a generator with identical QICK resource settings.
 
-        QICK arguments pass unchanged. Protected readout generators reject
-        distinct owners with both module names/objects. Unprotected generators
-        retain native declaration and Pulse registry semantics.
+        Arguments follow QICK declare_gen (nqz, mixer, mux tones and matching
+        ADC). Different declarations raise ValueError naming both modules and
+        inconsistent fields, rather than overwriting the first declaration.
         """
-        if ch in self._protected_gen_routes:
-            self._check_resource_owner("generator", ch)
+        bound = signature(QickProgramV2.declare_gen).bind(self, ch, *args, **kwargs)
+        bound.apply_defaults()
+        settings = {k: v for k, v in bound.arguments.items() if k not in ("self", "ch")}
+        if self._reuse_declaration("generator", ch, settings):
+            return
         super().declare_gen(ch, *args, **kwargs)
+        self._resource_declarations[("generator", ch)] = deepcopy(settings)
+        self._remember_resource_owner("generator", ch)
 
     @override
     def protect_readout_routes(
@@ -421,8 +470,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         owner is the diagnostic label; gen_ch and ro_chs are declared logical
         channels. Native protection errors propagate without changing ownership.
         During declare(module), future conflicts identify this protector object,
-        not earlier unprotected generator users. Outside module declaration the
-        inherited string-owner protection contract is unchanged.
+        not earlier unprotected generator users. Equivalent declarations remain
+        shareable; different-owner explicit protection still raises ValueError.
         """
         super().protect_readout_routes(owner, gen_ch, ro_chs)
         if self._declaration_module is not None:
@@ -467,8 +516,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def timeline(self, name: str) -> Generator[None]:
         """Select an existing name for omitted timeline arguments in this scope.
 
-        Applies to emit, pulse, trigger, delay_timeline, sync and
-        the repeat parent. Branch case emissions use the same default. Nested
+        Applies to emit, pulse, trigger, send_readoutconfig,
+        send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
+        pulse_from_length_reg, delay_timeline, sync and the repeat parent.
+        Branch case emissions use the same default. Nested
         scopes override it and restore it on exit, including exceptions.
         Explicit names win, including default. This neither forks
         nor joins and does not affect native delay/delay_auto. Call in _body;
@@ -882,14 +933,16 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
     ) -> None:
-        """Send an instantaneous config at timeline end+t us, or native t if omitted.
+        """Send an instantaneous config at native t or timeline end+t us.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native args are t=0, tag=None. A timeline end becomes the scheduled config
         instant; config length and unrelated ADC windows do not contribute.
         Wait-only timelines reject placement even at t=0; first sync the bound
         or establish an ordinary scheduling point with join/fork.
         Declaration and timing errors propagate.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().send_readoutconfig(ch, name, *args, **kwargs)
         if timeline is not None:
             source = self._pop_native(ConfigReadout)
@@ -909,10 +962,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play native addresses, or place certified selected playback on timeline.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native arguments retain their meanings. Timeline placement requires
         framework selection metadata pairing the address producer and candidates.
         Selector bounds, writes and overlap are checked during compilation.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         if timeline is None:
             super().pulse_by_reg(ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
             return
@@ -944,10 +999,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play a native length register or certified timeline-selected lengths.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native arguments are unchanged. Timeline placement requires matching
         framework selection metadata; raw waveform length and post stay separate.
         Invalid producer bounds, writes and overlap fail during compilation.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().pulse_from_length_reg(
             ch, name, length_reg=length_reg, flat_top=flat_top, t=t
         )
@@ -968,9 +1025,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play runtime words at native t or timeline end+t, advancing a named end.
 
+        None uses the scoped name, or native reference timing outside a scope.
         kwargs are t (us), tag, freq_reg and gain_reg containing final hardware
         words. Native patching and template/register validation are unchanged.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().pulse_from_regs(ch, name, **kwargs)
         if timeline is not None:
             source = self._pop_native(Pulse)
@@ -983,12 +1042,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Send runtime ADC words at native t or timeline end+t (us).
 
+        None uses the scoped name, or native reference timing outside a scope.
         kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
         instant, independent of config length. Wait-only timelines reject placement
         even at t=0; first sync the bound or establish an ordinary scheduling
         point with join/fork. Native patching and declaration/register validation
         are unchanged.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().send_readoutconfig_from_regs(ch, name, **kwargs)
         if timeline is not None:
             source = self._pop_native(ConfigReadout)
