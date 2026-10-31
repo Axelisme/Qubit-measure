@@ -174,9 +174,8 @@ def _integer_recipe(value: TimeExpression) -> bool:
     if isinstance(value, TimeVariable):
         return _expression_denominator(value) == 1
     operation = value.runtime
-    return (
-        Fraction(operation.coefficient).denominator == 1
-        and all(_integer_recipe(operand) for operand in operation.operands)
+    return Fraction(operation.coefficient).denominator == 1 and all(
+        _integer_recipe(operand) for operand in operation.operands
     )
 
 

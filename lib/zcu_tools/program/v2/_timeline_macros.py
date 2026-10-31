@@ -22,8 +22,8 @@ from qick.asm_v2 import (
     WriteReg,
 )
 
-from ._timeline_bounds import CycleBounds, FixedLoopIndex
 from ._timeline_axis import CycleAxis
+from ._timeline_bounds import CycleBounds, FixedLoopIndex
 from ._timeline_expression import time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
