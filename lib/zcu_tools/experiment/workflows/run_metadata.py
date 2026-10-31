@@ -38,4 +38,4 @@ def record_with_metadata[Cfg: ConfigBase, Result](
         provenance=identity.provenance,
         device_snapshot=facts.device_snapshot,
     )
-    return replace(completed.value, metadata=metadata)
+    return replace(completed.value, metadata=metadata.model_dump(mode="json"))

@@ -12,6 +12,7 @@ import pytest
 from zcu_tools.datafile import save
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import (
     RestoredRun,
     metadata_from_container,
@@ -411,7 +412,9 @@ def test_result_commit_survives_analysis_preparation_failure(
     metadata = historical_metadata().model_copy(
         update={"experiment": RecordingAdapter.spec.tag}
     )
-    loaded = RunRecord(RecordingCfg(), RecordingResult(), metadata)
+    loaded = RunRecord(
+        RecordingCfg(), RecordingResult(), metadata.model_dump(mode="json")
+    )
 
     def run(cfg: RecordingCfg, *, context: RunContext):
         if source == "stopped":
@@ -464,7 +467,7 @@ def test_result_commit_survives_analysis_preparation_failure(
         prepared = prepare_run_data(
             loaded, spec=RecordingAdapter.spec, comment="history"
         )
-        save(path, prepared.to_container(metadata))
+        save(path, prepared.to_container(metadata.model_dump(mode="json")))
         outcome = cf.ctrl.run_analyze_control.load_tab_result(tab_id, str(path))
         assert outcome.analysis_error == "analysis defaults unavailable"
         assert outcome.has_analyze_params is False
@@ -474,8 +477,7 @@ def test_result_commit_survives_analysis_preparation_failure(
     if source == "load":
         assert snapshot.run.result is not None
         assert snapshot.run.result.result == loaded.result
-        assert snapshot.run.result.metadata is not None
-        assert snapshot.run.result.metadata.project() == metadata
+        assert RunMetadataContent(snapshot.run.result.metadata).project() == metadata
     assert snapshot.analysis.params is None
     assert snapshot.analysis.result is None
     assert snapshot.post_analysis.result is None
@@ -634,7 +636,7 @@ def test_load_tab_result_allows_unselected_context_without_soc_and_initializes_a
             parameters=None,
         )
     )
-    loaded = RunRecord(None, object(), historical_metadata())
+    loaded = RunRecord(None, object(), historical_metadata().model_dump(mode="json"))
     adapter = MagicMock()
     # This isolated host collaborator advertises the same Load admission as a value.
     from zcu_tools.gui.app.measure.adapter import AdapterCapabilities

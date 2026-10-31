@@ -711,7 +711,9 @@ def load_browser(
             RunPaneState(
                 result=replace(
                     require_record(tab.run),
-                    metadata=session.metadata.model_copy(update={"snapshot": history}),
+                    metadata=session.metadata.model_copy(
+                        update={"snapshot": history}
+                    ).model_dump(mode="json"),
                 ),
                 storage=None
                 if tab.run.parameters is None

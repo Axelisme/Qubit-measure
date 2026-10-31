@@ -10,6 +10,7 @@ from typing import TypeAlias
 from pydantic import BaseModel, Field
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
     Adapter,
@@ -104,10 +105,10 @@ def _T2Ramsey_get_writeback_items(
     metadata or snapshot logs "no device snapshot" and omits only the record.
     No live calibration lookup, device access or write occurs here.
     """
-    metadata = req.run_result.metadata
+    metadata = RunMetadataContent(req.run_result.metadata)
     devices = (
         None
-        if metadata is None or metadata.device_snapshot is None
+        if metadata.device_snapshot is None
         else deepcopy(dict(metadata.device_snapshot))
     )
     if devices is None:
@@ -143,7 +144,7 @@ def _T2Ramsey_get_writeback_items(
         )
 
     parameters = req.ctx.parameters
-    if parameters is not None and metadata is not None and devices is not None:
+    if parameters is not None and devices is not None:
         frame = record_flux_frame(captured_qubit_flux(parameters), devices)
         items.append(
             RecordWriteback(

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from zcu_tools.experiment.artifacts import ArtifactRef, SaveReport
+from zcu_tools.experiment.metadata import has_native_metadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.registry import RegisteredAdapter
 from zcu_tools.gui.app.measure.services.tab_form import TabFormResource
@@ -541,8 +542,7 @@ class State(SessionState):
         """
         self._assert_owner()
         tab = self.get_tab(tab_id)
-        metadata = None if tab.run.result is None else tab.run.result.metadata
-        if metadata is None:
+        if tab.run.result is None or not has_native_metadata(tab.run.result.metadata):
             raise ValueError("Save report requires historical RunMetadata")
         tab.artifacts.apply_report(report)
         if any(item.status == "saved" for item in report.outputs):

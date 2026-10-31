@@ -81,7 +81,7 @@ def test_data_preparation_failure_reports_outputs_and_saves_other_artifacts(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(source, metadata=session.metadata),
+            result=replace(source, metadata=session.metadata.model_dump(mode="json")),
             storage=session.state.get_tab("tab").run.storage,
             parameters=session.state.get_tab("tab").run.parameters,
         ),
@@ -159,7 +159,7 @@ def test_default_stems_keep_distinct_runs_with_the_same_id_tail_separate(
             session.state,
             "tab",
             RunPaneState(
-                result=replace(source, metadata=metadata),
+                result=replace(source, metadata=metadata.model_dump(mode="json")),
                 storage=None
                 if tab.run.parameters is None
                 else tab.run.parameters.storage,
@@ -196,10 +196,64 @@ def test_save_appends_saved_event_after_transplanted_foreign_history(
     assert session.entry.ledger.events() == (*history, saved)
 
 
+def test_data_save_rejects_wrong_experiment_before_files_or_ledger(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    record = require_record(session.state.get_tab("tab").run)
+    record.metadata["experiment"] = "wrong/experiment"
+    with pytest.raises(ValueError, match="experiment"):
+        session.save()
+    assert session.entry.ledger.events() == ()
+    assert not session.entry.database_path.exists()
+
+
+@pytest.mark.parametrize("command", ["save_data", "save_artifacts"])
+@pytest.mark.parametrize("invalid_field", ["completion", "author_notes"])
+def test_save_rejects_invalid_schema_before_comment_or_historical_entry_creation(
+    native_session: NativeSaveSession, tmp_path: Path, command: str, invalid_field: str
+) -> None:
+    session = native_session
+    record = require_record(session.state.get_tab("tab").run)
+    if invalid_field == "completion":
+        record.metadata["completion"] = "invalid"
+    else:
+        record.metadata["author_notes"] = {"nested": [float("inf")]}
+    record.metadata["snapshot"] = {
+        "entry_name": "historical",
+        "point": None,
+        "roles": {},
+    }
+    original_metadata = json.dumps(record.metadata)
+    comment = session.state.get_tab("tab").save.comment
+    snapshots = session.state.get_artifact_snapshots("tab")
+
+    save = (
+        session.control.save_data
+        if command == "save_data"
+        else session.control.save_artifacts
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        save("tab", comment="rejected", origin=GUI_ORIGIN)
+
+    assert (
+        session.state.get_tab("tab").save.comment,
+        (tmp_path / "result/historical").exists(),
+        (tmp_path / "Database/historical").exists(),
+    ) == (comment, False, False)
+    assert session.state.get_artifact_snapshots("tab") == snapshots
+    assert session.entry.ledger.events() == ()
+    assert session.completions == session.artifact_completions == []
+    assert json.dumps(record.metadata) == original_metadata
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
     session = native_session
+    require_record(session.state.get_tab("tab").run).metadata["author_notes"] = {
+        "quality": [1, None]
+    }
     assert session.state.get_tab("tab").run.confirmed_run_id is None
     planned = session.state.get_artifact_snapshots("tab")
     assert (
@@ -219,6 +273,7 @@ def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
         / "data.h5"
     )
     stored = load(native.output.path)
+    assert stored.docs["metadata"]["author_notes"] == {"quality": [1, None]}
     assert metadata_from_container(stored).run_id == session.metadata.run_id
     assert metadata_from_container(stored).started_at == session.metadata.started_at
     assert metadata_from_container(stored).snapshot == session.metadata.snapshot
@@ -578,16 +633,27 @@ def test_save_uses_tab_storage_after_live_entry_switch(
     assert other.ledger.events() == ()
 
 
+@pytest.mark.parametrize(
+    "missing", ["empty", "device_only", "completion", "provenance"]
+)
 def test_missing_native_evidence_rejects_before_operation_or_files(
     native_session: NativeSaveSession,
+    missing: str,
 ) -> None:
     session = native_session
+    document = session.metadata.model_dump(mode="json")
+    if missing == "empty":
+        document.clear()
+    elif missing == "device_only":
+        document = {"device_snapshot": {}}
+    else:
+        document.pop(missing)
     commit_run(
         session.state,
         "tab",
         RunPaneState(
             result=replace(
-                require_record(session.state.get_tab("tab").run), metadata=None
+                require_record(session.state.get_tab("tab").run), metadata=document
             )
         ),
         plan_layout=session.save_service.plan_layout,
@@ -598,8 +664,9 @@ def test_missing_native_evidence_rejects_before_operation_or_files(
         for artifact in section.artifacts
         for member in artifact.members
     )
-    with pytest.raises(FailedPreconditionError):
+    with pytest.raises(FailedPreconditionError) as caught:
         session.control.save_data("tab", origin=GUI_ORIGIN)
+    assert caught.value.reason_code == "storage_unavailable"
     assert not session.state.is_tab_busy("tab")
     assert session.completions == []
     assert session.entry.ledger.events() == ()
@@ -614,7 +681,11 @@ def test_invalid_record_reports_failed_data_outputs_and_saved_event(
         session.state,
         "tab",
         RunPaneState(
-            result=RunRecord(cfg=None, result=object(), metadata=session.metadata),
+            result=RunRecord(
+                cfg=None,
+                result=object(),
+                metadata=session.metadata.model_dump(mode="json"),
+            ),
             storage=session.state.get_tab("tab").run.storage,
             parameters=session.state.get_tab("tab").run.parameters,
         ),
@@ -668,8 +739,6 @@ def test_save_all_writes_all_members_and_resaves_saved_artifacts(
     assert second.run_id == first.run_id
     assert second.outputs[0].output.path == first.outputs[0].output.path
     assert second.outputs[1].output.path != first.outputs[1].output.path
-    metadata = require_record(session.state.get_tab("tab").run).metadata
-    assert metadata is not None
     assert len(session.entry.ledger.events()) == 2
 
 
@@ -804,7 +873,7 @@ def test_missing_evidence_rejects_comment_before_operation(
         "tab",
         RunPaneState(
             result=replace(
-                require_record(session.state.get_tab("tab").run), metadata=None
+                require_record(session.state.get_tab("tab").run), metadata={}
             )
         ),
     )
@@ -873,8 +942,6 @@ def test_resave_all_failed_replaces_previous_success_evidence(
     assert [output.status for output in data.members[0].outputs] == ["failed", "failed"]
     assert data.members[0].outputs[1].path == second.outputs[1].output.path
     assert data.members[0].outputs[1].path != first.outputs[1].output.path
-    metadata = require_record(session.state.get_tab("tab").run).metadata
-    assert metadata is not None
     assert session.state.get_tab("tab").run.confirmed_run_id == first.run_id
     commit_run(session.state, "tab", RunPaneState())
     assert session.state.get_tab("tab").run.confirmed_run_id is None

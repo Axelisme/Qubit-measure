@@ -15,7 +15,11 @@ from zcu_tools.experiment.acquisition import (
     new_run_id,
 )
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.metadata import RunMetadata
+from zcu_tools.experiment.metadata import (
+    RunMetadata,
+    RunMetadataContent,
+    has_native_metadata,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
 from zcu_tools.experiment.stop_signal import (
@@ -210,13 +214,14 @@ class RunService:
                 op.tab_id,
             )
             return
-        metadata = result.metadata
-        if metadata is None:
+        document = result.metadata
+        if not has_native_metadata(document):
             logger.warning(
                 "Acquired omitted: tab_id=%r has no native acquisition evidence",
                 op.tab_id,
             )
             return
+        metadata = RunMetadataContent(document)
         if metadata.finished_at is None:
             raise ValueError("Acquired requires an acquisition finish timestamp")
         op.storage.ledger.append(
@@ -404,7 +409,7 @@ class RunService:
                         "completion": completion,
                     }
                 )
-                return replace(result, metadata=metadata)
+                return replace(result, metadata=metadata.model_dump(mode="json"))
             return result
 
         spec = OperationSpec(

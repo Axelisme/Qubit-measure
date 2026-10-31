@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。撰寫 Measure adapter、Form、recipe、operator guide 與校準 writeback。
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-01
 
 使用者入口見 [tutorial](../tutorial/README.md)。
 
@@ -377,7 +377,7 @@ Amp Rabi 串接各 round 的 raw IQ，reset-check 累加各 round 的 class coun
 T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用下列記錄格式。
 每筆 `record` 包含：
 
-- `devices` 是 Run 開始前的完整 `metadata.device_snapshot` 深拷貝，必須為 dict。
+- `devices` 是 Run 開始前的完整 `RunMetadataContent(record.metadata).device_snapshot` 深拷貝，必須為 dict。
   裝置名稱與全部設定原樣保存，包含 global coil、各 qubit 的 local 線與 RF 裝置。
   DC 裝置保留 `value`／`value_unit`，RF 裝置保留 `freq_Hz`／`power_dBm`，不壓成單一值。
 - `flux_frame` 複製這次量測所用 qubit 的 `flux: {offset, period: {<device>: ...}}`。Offset 是零輸出時的 Φ0，各 signed period 使用該儀器原生單位／Φ0。
@@ -390,7 +390,7 @@ T1、T2Echo、T2Ramsey、TwoTone frequency 與對應的四個 mux adapter 共用
 
 Adapter 的儀器值只讀 `req.run_result.metadata`，frame 只讀同次 Run 的固定 parameter capture。
 不查目前 alias、目前 point 或 live 裝置。接受 proposal 時不重讀 frame，量測後改校準不改舊 Run 的 record。
-缺 metadata 或 `device_snapshot is None` 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
+Metadata 缺 device_snapshot key 或該值為 null 時，adapter 記 `logging.warning("no device snapshot")` 並省略 record proposal。
 其他 parameter/module proposals 保留。空 snapshot dict 表示已知沒有連線裝置。
 Frame 有 period 但 snapshot 缺值的儀器不貢獻，period 保留。明寫無效或 bool 值時，writer 以 `ValueError` 指名 device。
 此檢查不查 setup、不讀 live 值，也不限制原始量測 Save。未校準 frame 合法。
@@ -401,7 +401,7 @@ Coherence、overnight 與 overnight_mux 在 Start 的固定 `env.parameters` 捕
 逐點 append 與離線重匯出只讀 Plan。Mux 的 Plan 按固定 qubit 名稱存 frame，不按 participant 的排列位置配對。
 Headless caller 必須提供量測時的 frame，不能以空 mapping 代替缺失 capture。缺必要 frame 的舊 workflow manifest 會在載入 Plan 時報 validation error。
 Workflow 以最後一份 acquisition 的 snapshot 核對 frame；沒有 acquisition 或 snapshot 時保留 `devices=null` 的既有政策。
-Notebook 作者在量測前捕捉 flux 區塊，Run 後以 `record_flux_frame(captured_flux, source.metadata.device_snapshot)` 核對同次值。
+Notebook 作者在量測前捕捉 flux 區塊，Run 後以 `record_flux_frame(captured_flux, RunMetadataContent(source.metadata).device_snapshot)` 核對同次值。
 Snapshot 缺席時不組 record；原始量測仍可 Save。接受時經既有 `SavedRun.accept(records={qubit: {"flux_frame": frame, "devices": devices, ...}})` 明傳。
 框架不認得 lab 的 qubit／flux 格式，也不自動從 point 補 frame。
 作者若有自己的 flux 定義，可以自行組裝 `flux_frame`，不必使用 lab helper；仍須保存量測時的定義與值。

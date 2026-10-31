@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from qtpy.QtWidgets import QApplication
-from zcu_tools.datafile import load
+from zcu_tools.datafile import load, save
+from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -176,9 +177,8 @@ def test_native_load_uses_recorded_parameters_without_prevalidating_unused_metad
     assert tab.run.parameters is not None
     assert tab.run.parameters.value("$source_qubit.rate") == 7.0
     record = require_record(tab.run)
-    assert record.metadata is not None
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
-        getattr(record.metadata, defect)
+        getattr(RunMetadataContent(record.metadata), defect)
     with pytest.raises(ValueError, match="metadata"):
         metadata_from_container(load(path))
     assert path.read_bytes() == before
@@ -314,7 +314,9 @@ def test_native_load_ignores_missing_or_corrupted_external_source(
         RunPaneState(
             result=replace(
                 require_record(tab.run),
-                metadata=session.metadata.model_copy(update={"snapshot": broken}),
+                metadata=session.metadata.model_copy(
+                    update={"snapshot": broken}
+                ).model_dump(mode="json"),
             ),
             storage=None if tab.run.parameters is None else tab.run.parameters.storage,
             parameters=tab.run.parameters,
@@ -351,7 +353,9 @@ def test_native_load_uses_parameter_snapshot_names_not_history_summary(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(require_record(previous), metadata=metadata),
+            result=replace(
+                require_record(previous), metadata=metadata.model_dump(mode="json")
+            ),
             storage=None
             if previous.parameters is None
             else previous.parameters.storage,
@@ -409,7 +413,10 @@ def context_free_load_session(
         session.state,
         "tab",
         RunPaneState(
-            result=replace(require_record(tab.run), metadata=session.metadata),
+            result=replace(
+                require_record(tab.run),
+                metadata=session.metadata.model_dump(mode="json"),
+            ),
             storage=tab.run.storage,
             parameters=tab.run.parameters,
         ),
@@ -438,7 +445,7 @@ def context_free_load_session(
                         update={
                             "snapshot": replace(session.metadata.snapshot, point=None)
                         }
-                    ),
+                    ).model_dump(mode="json"),
                 ),
                 storage=None
                 if tab.run.parameters is None
@@ -465,7 +472,6 @@ def test_native_load_without_readable_source_allows_context_free_analysis(
     assert loaded.has_analyze_params
     assert loaded.analysis_source_issue is None
     assert tab.run.analysis_source_issue == loaded.analysis_source_issue
-    assert require_record(tab.run).metadata is not None
     assert require_metadata(tab.run).run_id == session.metadata.run_id
     assert tab.run.parameters is not None and tab.run.parameters.target is None
     assert tab.run.storage is None
@@ -581,7 +587,7 @@ def test_native_load_retains_history_and_resaves_captured_source(
             RunPaneState(
                 result=replace(
                     require_record(session.state.get_tab("tab").run),
-                    metadata=session.metadata,
+                    metadata=session.metadata.model_dump(mode="json"),
                 ),
                 storage=session.state.get_tab("tab").run.storage,
                 parameters=session.state.get_tab("tab").run.parameters,
@@ -817,10 +823,8 @@ def test_unselected_entry_load_and_save_use_recorded_history(
 
         assert outcome.result_type == "RunRecord"
         assert isinstance(require_record(tab.run), RunRecord)
-        metadata = require_record(tab.run).metadata
-        assert metadata is not None and metadata.project() == metadata_from_container(
-            stored
-        )
+        metadata = RunMetadataContent(require_record(tab.run).metadata)
+        assert metadata.project() == metadata_from_container(stored)
         assert tab.run.source_path == str(path)
         assert tab.run.confirmed_run_id is None
         assert tab.run.parameters is not None and tab.run.parameters.target is None
@@ -862,24 +866,11 @@ def test_native_experiment_mismatch_keeps_previous_result_and_history(
 ) -> None:
     with native_save_session(tmp_path, qapp) as session:
         tab = session.state.get_tab("tab")
-        commit_run(
-            session.state,
-            "tab",
-            RunPaneState(
-                result=replace(
-                    require_record(tab.run),
-                    metadata=session.metadata.model_copy(
-                        update={"experiment": "test/different"}
-                    ),
-                ),
-                storage=None
-                if tab.run.parameters is None
-                else tab.run.parameters.storage,
-                parameters=tab.run.parameters,
-            ),
-        )
         session.save()
         path = session.native_data_path
+        stored = load(path)
+        stored.docs["metadata"]["experiment"] = "test/different"
+        save(path, stored, replace=True)
         old_run = tab.run
         service = LoadService(
             session.state, plan_layout=session.save_service.plan_layout

@@ -26,7 +26,7 @@ Ledger 讀取使用 resources 的無 lock typed partial snapshot，只消費 acq
 以 `ResultsIndex.issues` 回報 entry、路徑與原因，不偽造 run；可列出的 run
 則沿用 `ResultRun.issues`。Symlink escape 項目不讀、不跟隨。
 
-`RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 將它放進當次 RunMetadata，後續切換 point 不改這份分析環境。
+`RunService` 在提交 worker 前固定 ParameterContext 的參數快照。Worker 以 RunMetadata 組內容並將 JSON dump 放入 record.metadata，後續切換 point 不改這份分析環境。
 RunService 自己記錄 Stop 與成功的 selector cancel，交付 stop_requested。
 Core 正常回傳就發布並標 finished，不區分 root 或子孫停止。拋錯就 failed 並顯示錯誤。
 Stop 與被接受的 selector cancel 以 stop_requested 記錄。
@@ -39,7 +39,7 @@ Run、Analyze、PostAnalyze、Load 與 Tab 將 pane 提交或退役清理交給 
 Composition root 將同一個 `SaveService.plan_layout` 注入四個結果 producers，預覽與 Save 共用 adapter stem 及 `bind_run_outputs` 的路徑計算。
 正常 Load 後立即顯示預覽，Analyze／PostAnalyze 後也顯示，不要求 storage 或 live entry／point。
 預覽只使用計畫的 layout，不建立目錄或改變未保存狀態。
-缺 metadata 時沒有預覽。
+Metadata 缺 native schema 必填 key 時沒有預覽，也不追加 acquired。逐欄讀取的 run_id、experiment 與 device_snapshot 不受其他缺 key 影響。
 歷史命名欄位讀取失敗時，預覽只隔離 `MetadataFieldError`，保留 Load 與原始內容；其他規劃錯誤照常傳出。
 Save 仍完整驗證 metadata，report 發布實際輸出與逐項失敗。
 `GuardService.admit` 統一 domain admission，啟動時的 hardware exclusion 仍由 operation gate 裁決。

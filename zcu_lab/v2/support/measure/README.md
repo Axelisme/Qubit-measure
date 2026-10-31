@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-01
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -141,7 +141,7 @@ Recipes 的 flux_* inputs、reports 與 picker updates 是獨立 API，不是 co
 
 `writeback_helpers.fluxdep_writeback_items` 組裝 onetone、twotone 與 mux local／global 的校準 proposals。
 它分開提出 `<qubit>.flux.period.<device>` 與預設勾選的 `<qubit>.flux.offset`，保留其他儀器的 period。
-Frame 來自 Analyze 時的 Run ctx.parameters，bias 來自 RunMetadata.device_snapshot。
+Frame 來自 Analyze 時的 Run ctx.parameters。Bias 由 `RunMetadataContent(req.run_result.metadata).device_snapshot` 讀取，只驗這個欄位。
 新的 period 大小配 stored 方向，首次校準使用正方向。
 Offset 以本次擬合 half 對應 flux 0.5，扣除其他有 period 且 snapshot 有值的儀器貢獻。
 被掃儀器的擬合 half 取代其 Run-start 值，只計入一次。

@@ -9,6 +9,7 @@ import pytest
 from matplotlib.figure import Figure
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device.base import BaseDeviceInfo
+from zcu_tools.experiment.artifacts import SaveReport
 from zcu_tools.experiment.metadata import (
     RunMetadata,
     RunSnapshot,
@@ -28,6 +29,7 @@ from zcu_tools.gui.app.measure.state import (
 from zcu_tools.gui.form import FormInput, FormModel
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+from zcu_tools.resources.entry import JsonObject
 
 from tests.gui.app.measure._form_fakes import make_form
 from tests.gui.app.measure._record_support import require_record
@@ -239,6 +241,17 @@ def test_update_tab_result_stores_result_and_clears_stale_analyze_data():
     assert tab.analysis.params is None
 
 
+@pytest.mark.parametrize("metadata", [{}, {"device_snapshot": {}}])
+def test_save_report_requires_native_metadata_before_publication(metadata: JsonObject):
+    state = State(_make_ctx())
+    _add_tab(state, "t1", _make_adapter())
+    state.get_tab("t1").run.result = RunRecord(None, object(), metadata=metadata)
+    with pytest.raises(ValueError, match="historical RunMetadata"):
+        state.commit_save_report("t1", SaveReport("20261101T000000Z-abc123", ()))
+    assert state.get_tab("t1").run.confirmed_run_id is None
+    assert state.version.get("tab:t1:save") == 0
+
+
 def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
     state = State(_make_ctx())
     adapter = _make_adapter()
@@ -264,14 +277,14 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
             hostname="historical-host",
         ),
     )
-    historical = replace(result, metadata=metadata)
+    historical = replace(result, metadata=metadata.model_dump(mode="json"))
     commit_run(
         state, "t1", RunPaneState(result=historical, source_path="/tmp/loaded.hdf5")
     )
 
     tab = state.get_tab("t1")
     assert tab.run.result is historical
-    assert require_record(tab.run).metadata == metadata
+    assert require_record(tab.run).metadata == metadata.model_dump(mode="json")
     assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1
