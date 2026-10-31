@@ -227,16 +227,15 @@ def test_branch_local_forks_merge_only_into_their_unjoined_ancestor(explicit_joi
     def body(prog):
         prog.fork("default", into=["p", "q", "untouched"])
         prog.delay_timeline(9 / 430.08, timeline="untouched")
-        with prog.branch(by="scan") as branch:
-            with branch.case(1):
-                prog.delay_timeline(20 / 430.08, timeline="p")
-                prog.delay_timeline(40 / 430.08, timeline="q")
-                prog.fork("p", into="local")
-                prog.fork("local", into="leaf")
-                prog.delay_timeline(80 / 430.08, timeline="leaf")
-                if explicit_join:
-                    prog.join("leaf", into="q")
-                    prog.join("local", into="q")
+        with prog.branch(by="scan") as branch, branch.case(1):
+            prog.delay_timeline(20 / 430.08, timeline="p")
+            prog.delay_timeline(40 / 430.08, timeline="q")
+            prog.fork("p", into="local")
+            prog.fork("local", into="leaf")
+            prog.delay_timeline(80 / 430.08, timeline="leaf")
+            if explicit_join:
+                prog.join("leaf", into="q")
+                prog.join("local", into="q")
         prog.pulse(0, "p0", timeline="p")
         prog.pulse(1, "p1", timeline="q")
         prog.sync(timeline="untouched")
@@ -255,9 +254,8 @@ def test_runtime_branch_keeps_per_case_closing_sync():
     def body(prog):
         prog.emit(loader)
         prog.fork("default", into="untouched")
-        with prog.branch(by="scan") as branch:
-            with branch.case(1):
-                prog.delay_timeline("loaded")
+        with prog.branch(by="scan") as branch, branch.case(1):
+            prog.delay_timeline("loaded")
         # Native pulse observes shared reference, not a managed end.
         prog.pulse(0, "p0", t=0)
 

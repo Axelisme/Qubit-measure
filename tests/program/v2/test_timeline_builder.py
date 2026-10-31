@@ -146,14 +146,12 @@ def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     # wait for herald/reset to finish before the branch-selected preparation
     builder.sync()
     builder.fork("default", into=["f1", "f2"])
-    with builder.timeline("f1"):
-        with builder.branch(by="prepared_f1") as cases:
-            with cases.case(1):
-                builder.emit(x180_f1)
-    with builder.timeline("f2"):
-        with builder.branch(by="prepared_f2") as cases:
-            with cases.case(1):
-                builder.emit(x180_f2)
+    with builder.timeline("f1"), builder.branch(by="prepared_f1") as cases:
+        with cases.case(1):
+            builder.emit(x180_f1)
+    with builder.timeline("f2"), builder.branch(by="prepared_f2") as cases:
+        with cases.case(1):
+            builder.emit(x180_f2)
     builder.join("f1", "f2", into="default")
     builder.emit(readout, tag="terminal")
     prog = builder.build()
