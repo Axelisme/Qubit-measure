@@ -46,6 +46,7 @@ from .labels import Label, LabelRef
 from .operands import (
     AddrType,
     AluExpr,
+    AluOp,
     DmemAddr,
     ExprType,
     Immediate,
@@ -423,6 +424,22 @@ class RegWriteInst(BaseInst):
         if self.wr is not None:
             writes = writes | self.wr.regs()
         return writes
+
+    @property
+    def is_pure_self_copy(self) -> bool:
+        """Whether this write copies its destination without any other effect."""
+        return (
+            self.src == SrcKeyword.OP
+            and self.op is not None
+            and self.op.op == AluOp.NONE
+            and self.op.rhs is None
+            and self.op.lhs.regs() == self.dst.regs()
+            and not self.uf
+            and self.if_cond is None
+            and all(value is None for value in (
+                self.wr, self.ww, self.wp, self.port, self.lit, self.addr, self.label
+            ))
+        )
 
     @property
     def need_label(self) -> Label | None:

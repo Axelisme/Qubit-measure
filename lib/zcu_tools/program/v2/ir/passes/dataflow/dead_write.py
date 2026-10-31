@@ -114,6 +114,9 @@ class DeadWriteEliminationPass(BlockChunkPass):
         dead: set[int] = set()
 
         for idx, inst in enumerate(insts):
+            if isinstance(inst, RegWriteInst) and inst.is_pure_self_copy:
+                dead.add(idx)
+                continue
             # Treat conditionally executed writes as barriers: they do not
             # reliably shadow previous writes because they may be skipped.
             if (
