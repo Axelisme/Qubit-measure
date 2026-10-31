@@ -9,12 +9,10 @@ import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
 
 from ._timeline_bounds import CycleBounds
+from ._timeline_axis import CycleAxis, CycleProducer, TimeVariable
 from ._timeline_expression import (
-    CycleAxis,
-    CycleProducer,
     TimeAbs,
     TimeExpression,
-    TimeVariable,
     add_time,
     ceiled_time,
     choose_time,

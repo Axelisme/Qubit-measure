@@ -8,160 +8,15 @@ from functools import cached_property, lru_cache
 import numpy as np
 from numpy.typing import NDArray
 
+from ._timeline_axis import (
+    CONST_AXIS, Component, Components, CycleAxis, CycleProducer, CycleValues,
+    CycleLimits, Scalar, TimeVariable, cycle_axis, component_key,
+    scale_component, nonzero_component, merge_components,
+)
 from ._timeline_bounds import CycleBounds
 
-CycleValues = NDArray[np.int64] | NDArray[np.object_]
-CycleLimits = tuple[Fraction | None, Fraction | None]
-Scalar = int | Fraction
 MAX_ABS_TERMS = 20
-
-
-@dataclass(frozen=True)
-class CycleProducer:
-    """Runtime recipe, independent of proof components and register bindings.
-
-    axes/points describe a known source. reconstruction and selection retain
-    integer recipes for branch lowering. fixed_point stores numerator and shift;
-    rounding_remainder identifies a quotient's bounded remainder, not a loop.
-    """
-
-    axes: tuple[tuple[str, int], ...] = ()
-    points: tuple[int, ...] | None = None
-    reconstruction: "TimeExpression | None" = None
-    selection: "tuple[TimeExpression, tuple[int, ...]] | None" = None
-    fixed_point: "tuple[TimeExpression, int] | None" = None
-    rounding_remainder: bool = False
-
-
-@dataclass(frozen=True, eq=False)
-class CycleAxis:
-    """An axis ID, one-dimensional values or bounds, and its runtime producer.
-
-    Loop names identify correlated domains. Each unknown write/error gets a
-    fresh object ID, even with a range hint. None is an unavailable endpoint.
-    values is one-dimensional; no Cartesian proof grids are stored.
-    """
-
-    name: str
-    identity: str | object
-    minimum: int | None
-    maximum: int | None
-    values: CycleValues | None
-    producer: CycleProducer
-
-
-def cycle_axis(
-    name: str,
-    minimum: int | None,
-    maximum: int | None,
-    producer: CycleProducer | None = None,
-) -> CycleAxis:
-    """Capture a one-axis known source, otherwise an independent range axis."""
-    producer = CycleProducer() if producer is None else producer
-    identity: str | object = object()
-    points = None
-    if len(producer.axes) == 1 and not producer.rounding_remainder:
-        identity, count = producer.axes[0]
-        points = np.asarray(
-            producer.points if producer.points is not None else range(count),
-            dtype=np.int64,
-        )
-    if points is not None:
-        points.flags.writeable = False
-    return CycleAxis(name, identity, minimum, maximum, points, producer)
-
-
-CONST_AXIS = CycleAxis("constant", "const", 1, 1, np.asarray([1]), CycleProducer())
-Component = CycleValues | Scalar
 AxisDomains = dict[object, NDArray[np.int64]]
-Components = tuple[tuple[CycleAxis, Component], ...]
-
-
-def _component_scale(component: Component, coefficient: Scalar) -> Component:
-    if isinstance(component, np.ndarray):
-        return np.asarray(component, dtype=object) * np.asarray(
-            coefficient, dtype=object
-        )
-    return component * coefficient
-
-
-def _component_add(left: Component, right: Component) -> Component:
-    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
-        return np.asarray(left, dtype=object) + np.asarray(right, dtype=object)
-    return left + right
-
-
-def _nonzero(component: Component) -> bool:
-    return bool(np.any(np.asarray(component, dtype=object)))
-
-
-def _component_key(axis: CycleAxis, component: Component) -> tuple[object, ...]:
-    return (
-        axis.identity,
-        *(component.flat if isinstance(component, np.ndarray) else (component,)),
-    )
-
-
-@dataclass(frozen=True, eq=False, init=False)
-class TimeVariable:
-    """A sum of axis components, with a separate integer reconstruction recipe.
-
-    components is the authoritative proof mapping, including the singleton
-    const axis. Known components are one-dimensional arrays. Range components
-    are coefficients of independent unknowns. terms/constant are runtime recipe
-    operands only; proofs never reconstruct information from them after capture.
-    """
-
-    constant: Scalar
-    terms: tuple[tuple[CycleAxis, Scalar], ...]
-    components: Components
-
-    def __init__(
-        self,
-        constant: Scalar = 0,
-        terms: tuple[tuple[CycleAxis, Scalar], ...] = (),
-        *,
-        components: Components | None = None,
-    ) -> None:
-        if components is None:
-            components = ((CONST_AXIS, np.asarray([constant], dtype=object)),)
-            for axis, coefficient in terms:
-                component = (
-                    coefficient
-                    if axis.values is None
-                    else _component_scale(axis.values, coefficient)
-                )
-                components = _merge_components(components, ((axis, component),))
-        frozen = []
-        for axis, component in components:
-            if isinstance(component, np.ndarray):
-                component = component.copy()
-                component.flags.writeable = False
-            if _nonzero(component):
-                frozen.append((axis, component))
-        components = tuple(frozen)
-        object.__setattr__(self, "constant", constant)
-        object.__setattr__(self, "terms", terms)
-        object.__setattr__(self, "components", components)
-
-    @cached_property
-    def limits(self) -> CycleLimits:
-        """Return this immutable variable's cached independent-axis bounds."""
-        lower: Fraction | None = Fraction(0)
-        upper: Fraction | None = Fraction(0)
-        for axis, component in self.components:
-            lo, hi = _component_limits(axis, component)
-            lower = None if lower is None or lo is None else lower + lo
-            upper = None if upper is None or hi is None else upper + hi
-        return lower, upper
-
-    def __hash__(self) -> int:
-        return hash(frozenset(_component_key(axis, c) for axis, c in self.components))
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, TimeVariable) and frozenset(
-            _component_key(axis, c) for axis, c in self.components
-        ) == frozenset(_component_key(axis, c) for axis, c in other.components)
 
 
 @dataclass(frozen=True)
@@ -198,31 +53,6 @@ class TimeAbs:
 
 TimeExpression = TimeVariable | TimeAbs
 AbsTerms = tuple[tuple[TimeExpression, Fraction], ...]
-
-
-def _merge_components(
-    left: Components,
-    right: Components,
-) -> Components:
-    groups = {axis.identity: (axis, component) for axis, component in left}
-    for axis, component in right:
-        previous = groups.get(axis.identity)
-        if previous is not None:
-            component = _component_add(previous[1], component)
-        groups[axis.identity] = (axis, component)
-    return tuple((axis, c) for axis, c in groups.values() if _nonzero(c))
-
-
-def _component_limits(axis: CycleAxis, component: Component) -> CycleLimits:
-    if isinstance(component, np.ndarray):
-        return Fraction(component.min()), Fraction(component.max())
-    a, b = (
-        (axis.minimum, axis.maximum) if component >= 0 else (axis.maximum, axis.minimum)
-    )
-    return (
-        None if a is None else Fraction(a * component),
-        None if b is None else Fraction(b * component),
-    )
 
 
 def expression_limits(value: TimeExpression) -> CycleLimits:
@@ -461,7 +291,7 @@ def reduce_loop_time(
             components.append((source, c if last else c * count))
     merged: Components = ()
     for component in components:
-        merged = _merge_components(merged, (component,))
+        merged = merge_components(merged, (component,))
     return TimeVariable(components=merged)
 
 
@@ -860,7 +690,7 @@ def _linear_add(left: TimeVariable, right: TimeVariable) -> TimeVariable:
     return TimeVariable(
         left.constant + right.constant,
         tuple((v, c) for v, c in coefficients.items() if c),
-        components=_merge_components(left.components, right.components),
+        components=merge_components(left.components, right.components),
     )
 
 
@@ -869,9 +699,9 @@ def _linear_scale(value: TimeVariable, coefficient: Scalar) -> TimeVariable:
         value.constant * coefficient,
         tuple((v, c * coefficient) for v, c in value.terms if c * coefficient),
         components=tuple(
-            (axis, _component_scale(c, coefficient))
+            (axis, scale_component(c, coefficient))
             for axis, c in value.components
-            if _nonzero(_component_scale(c, coefficient))
+            if nonzero_component(scale_component(c, coefficient))
         ),
     )
 
@@ -890,7 +720,7 @@ def _structural_key(value: TimeExpression) -> tuple[object, ...]:
     linear, absolute = _parts(value)
     components = tuple(
         sorted(
-            (_component_key(axis, component) for axis, component in linear.components),
+            (component_key(axis, component) for axis, component in linear.components),
             key=repr,
         )
     )

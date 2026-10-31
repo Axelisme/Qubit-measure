@@ -5,11 +5,9 @@ from dataclasses import dataclass, field, replace
 
 from qick.asm_v2 import QickParam, WriteReg
 
+from ._timeline_axis import CycleAxis, CycleProducer, TimeVariable
 from ._timeline_expression import (
-    CycleAxis,
-    CycleProducer,
     TimeExpression,
-    TimeVariable,
     add_time,
     choose_time,
     cycle_axis,
