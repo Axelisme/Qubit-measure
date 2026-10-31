@@ -61,19 +61,15 @@ class IdleZZAnalysis:
 
 
 def fit_branch(
+    fit: IdleBranchFit,
     *,
-    dc_index: int,
-    branch: int,
     delays: NDArray[np.float64],
-    trace: NDArray[np.float64],
-    shots: NDArray[np.float64],
-    complete: NDArray[np.bool_],
     detune: float,
 ) -> IdleBranchFit:
     """Fit the T-point target sigma trace using a free-phase decay cosine.
 
-    shots is accepted count per delay. complete records acquisition completeness
-    before herald selection. Only complete, finite traces enter the fitter.
+    fit contains accepted shot count, acquisition completeness before herald
+    selection, and sigma trace. Only complete, finite traces enter the fitter.
     At least six distinct, regularly spaced delays are needed for five fitted
     parameters plus residual degrees of freedom. No population correction or
     simulator input is used.
@@ -83,10 +79,8 @@ def fit_branch(
     Nonfinite covariance is not zero error. Numeric fit failures retain a reason
     and trace; malformed source/raw is rejected by the caller before this seam.
     """
-    fit = IdleBranchFit(
-        dc_index, branch, int(np.nansum(shots)), bool(np.all(complete)), trace
-    )
-    if not np.all(complete):
+    trace = fit.trace
+    if not fit.complete:
         return replace(
             fit,
             reason="Required branch is incomplete; all delays and rounds are needed",

@@ -34,7 +34,7 @@ from zcu_lab.v2.support.device import set_flux
 from .._readout import JointRoles
 from .._sums import readout_axes, sigma, terminal_counts, validate_classifiers
 from .._timeline import emit_readout_prefix
-from ._analysis import IdleZZAnalysis, fit_branch, plot_analysis
+from ._analysis import IdleBranchFit, IdleZZAnalysis, fit_branch, plot_analysis
 
 
 class IdleZZCfg(ConfigBase):
@@ -308,9 +308,11 @@ def analyze_counts(
     for dc_index in range(len(dc_values)):
         pair = [
             fit_branch(
-                dc_index=dc_index, branch=branch, delays=result.delays,
-                trace=traces[dc_index, branch], shots=shots[dc_index, branch],
-                complete=complete[dc_index, branch], detune=cfg.detune,
+                IdleBranchFit(
+                    dc_index, branch, int(np.nansum(shots[dc_index, branch])),
+                    bool(np.all(complete[dc_index, branch])), traces[dc_index, branch],
+                ),
+                delays=result.delays, detune=cfg.detune,
             )
             for branch in range(2)
         ]
