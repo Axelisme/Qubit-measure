@@ -74,10 +74,6 @@ class Pulse(Module):
         *,
         block_mode: bool = True,
         ro_ch: int | None = None,
-        freq: float | QickParam | None = None,
-        gain: float | QickParam | None = None,
-        phase: float | QickParam | None = None,
-        length: float | QickParam | None = None,
     ) -> None:
         """Capture a pulse and optional runtime ADC channel for frequency matching.
 
@@ -85,18 +81,9 @@ class Pulse(Module):
         QICK frequency rounding, mixer declaration and pulse registry identity.
         cfg is copied; None emits no pulse. Explicit pulse_id disables sharing.
         tag names timing measurements; block_mode waits through pre/post delays.
-        freq (MHz), gain (normalized), phase (degrees) and length (us) override
-        the copied cfg via set_param; None keeps cfg. Waveform length restrictions
-        apply, including ValueError for unsupported sweeps. With cfg=None,
-        non-None overrides raise ValueError because there is no pulse to update.
         """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
-        for knob, value in dict(freq=freq, gain=gain, phase=phase, length=length).items():
-            if value is not None:
-                if self.cfg is None:
-                    raise ValueError(f"{name}: overrides require a pulse cfg")
-                self.cfg.set_param(knob, value)
         self.tag = tag
         self.block_mode = block_mode
         self.pulse_id = pulse_id

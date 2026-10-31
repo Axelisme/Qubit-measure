@@ -54,7 +54,7 @@ def _pulse_cfg(ch: int = 0) -> PulseCfg:
 
 def _assert_same_compile(actual, expected):
     assert actual.prog_list == expected.prog_list
-    np.testing.assert_array_equal(actual.compile_waves(), expected.compile_waves())
+    np.testing.assert_array_equal(actual.binprog["wmem"], expected.binprog["wmem"])
     np.testing.assert_array_equal(actual.compile_datamem(), expected.compile_datamem())
 
 
