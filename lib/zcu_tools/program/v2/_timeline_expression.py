@@ -213,9 +213,7 @@ def _merge_components(
     return tuple((axis, c) for axis, c in groups.values() if _nonzero(c))
 
 
-def _component_limits(
-    axis: CycleAxis, component: Component
-) -> CycleLimits:
+def _component_limits(axis: CycleAxis, component: Component) -> CycleLimits:
     if isinstance(component, np.ndarray):
         return Fraction(component.min()), Fraction(component.max())
     a, b = (
@@ -626,9 +624,7 @@ def _signed_linear(
     return linear
 
 
-def _domain_limits(
-    value: TimeVariable, domains: AxisDomains
-) -> CycleLimits:
+def _domain_limits(value: TimeVariable, domains: AxisDomains) -> CycleLimits:
     components = tuple(
         (
             axis,
@@ -670,7 +666,12 @@ def _constrain_domains(
                     continue
                 previous = domains[axis.identity]
                 kept = previous[
-                    np.asarray(np.asarray(component[previous], dtype=object) + np.asarray(rest_upper, dtype=object) >= 0, dtype=bool)
+                    np.asarray(
+                        np.asarray(component[previous], dtype=object)
+                        + np.asarray(rest_upper, dtype=object)
+                        >= 0,
+                        dtype=bool,
+                    )
                 ]
                 if not len(kept):
                     return None
@@ -887,11 +888,15 @@ def _parts(
 
 def _structural_key(value: TimeExpression) -> tuple[object, ...]:
     linear, absolute = _parts(value)
-    components = tuple(sorted(
-        (_component_key(axis, component) for axis, component in linear.components),
-        key=repr,
-    ))
-    return components, tuple((_structural_key(argument), coefficient) for argument, coefficient in absolute)
+    components = tuple(
+        sorted(
+            (_component_key(axis, component) for axis, component in linear.components),
+            key=repr,
+        )
+    )
+    return components, tuple(
+        (_structural_key(argument), coefficient) for argument, coefficient in absolute
+    )
 
 
 def _orientation(value: TimeExpression) -> int:
@@ -934,7 +939,8 @@ def _normalized(
             combined[term] = combined.get(term, Fraction(0)) + coefficient * amount
     terms = tuple(
         sorted(
-            ((x, c) for x, c in combined.items() if c), key=lambda item: repr(_structural_key(item[0]))
+            ((x, c) for x, c in combined.items() if c),
+            key=lambda item: repr(_structural_key(item[0])),
         )
     )
     return TimeAbs(linear, terms, runtime) if terms else linear
@@ -961,9 +967,7 @@ def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
     return _normalized(_linear_add(a, b), (*x, *y), TimeOperation("add", (left, right)))
 
 
-def difference_limits(
-    left: TimeExpression, right: TimeExpression
-) -> CycleLimits:
+def difference_limits(left: TimeExpression, right: TimeExpression) -> CycleLimits:
     """Cache the normalized difference structure, not operand bounds or storage."""
     return _difference_range(add_time(left, scale_time(right, -1)))
 
