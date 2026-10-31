@@ -16,7 +16,7 @@ F1 and F2 each require a circle classifier **with radius** in their readout tone
 
 ## Sequence and acquisition
 
-Each branch starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. Branch order is 00, 01, 10, 11, with F1 first. Branch 11 applies F1 Xπ then F2 Xπ. Without reset, preparations act on the thermal ensemble.
+Each branch starts with optional reset, applies its nominal I/Xπ preparation, then reads the full mux once with tag `terminal`. Branch order is 00, 01, 10, 11, with F1 first. Branch 11 applies F1 Xπ then F2 Xπ. A single program sweeps all four preparations using a hardware loop and four named cases. The gg case emits no Xπ. Each case keeps its own duration before terminal readout. Without reset, preparations act on the thermal ensemble.
 
 `reps` is shots per acquisition round per branch. `rounds` accumulates completed rounds at acquisition. Initial and relaxation delays use µs.
 

@@ -209,38 +209,45 @@ class JointReadoutHeraldedExp(
 
         buffer = SignalBuffer((4, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
         with Schedule(config, buffer, scope=context.scope) as sched:
-            for prepared, step in sched.scan("prepared_states", list(range(4))):
-                cfg = step.cfg
-                builder = TimelineBuilder(
-                    context.soccfg,
-                    reps=cfg.reps,
-                    initial_delay=cfg.initial_delay,
-                    relax_delay=cfg.relax_delay,
-                )
-                readout = MuxReadout("readout", cfg.readout)
-                if cfg.reset is not None:
-                    builder.emit(Reset("reset", cfg.reset))
-                builder.emit(readout, tag="herald")
-                f1, f2 = PREPARED_STATES[prepared]
-                if f1 == "e":
-                    builder.emit(Pulse("x180_f1", cfg.x180_f1))
-                if f2 == "e":
-                    builder.emit(Pulse("x180_f2", cfg.x180_f2))
-                builder.emit(readout, tag="terminal")
-                prog = builder.build()
-                axes = [
-                    Classify("herald", cfg.roles.f1_tone),
-                    Classify("herald", cfg.roles.f2_tone),
-                    Classify("terminal", cfg.roles.f1_tone),
-                    Classify("terminal", cfg.roles.f2_tone),
-                ]
-                step.run_acquire_summed(
-                    prog,
-                    context.soc,
-                    processor=shot_sums(prog, axes),
-                    rounds=cfg.rounds,
-                    options=RunOptions(),
-                )
+            cfg = sched.cfg
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
+            )
+            builder.add_loop("prepared_states", len(PREPARED_STATES))
+            readout = MuxReadout("readout", cfg.readout)
+            x180_f1 = Pulse("x180_f1", cfg.x180_f1)
+            x180_f2 = Pulse("x180_f2", cfg.x180_f2)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(readout, tag="herald")
+            with builder.branch(by="prepared_states") as cases:
+                for f1, f2 in PREPARED_STATES:
+                    with cases.case():
+                        if f1 == "e":
+                            builder.emit(x180_f1)
+                        if f2 == "e":
+                            builder.emit(x180_f2)
+            # Each case ends at its own duration. Consume that end before readout,
+            # without padding the shorter preparation paths.
+            builder.sync()
+            builder.emit(readout, tag="terminal")
+            prog = builder.build()
+            axes = [
+                Classify("herald", cfg.roles.f1_tone),
+                Classify("herald", cfg.roles.f2_tone),
+                Classify("terminal", cfg.roles.f1_tone),
+                Classify("terminal", cfg.roles.f2_tone),
+            ]
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                processor=shot_sums(prog, axes),
+                rounds=cfg.rounds,
+                options=RunOptions(),
+            )
         return JointReadoutHeraldedResult(np.arange(4, dtype=np.int64), buffer.array)
 
     def analyze(
@@ -297,7 +304,8 @@ class JointReadoutHeraldedExp(
         herald_matrix = herald_probabilities(result.sums)
         acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1))
 
-        fig, axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
+        fig, _axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
+        axes = fig.axes
         for group, (ax, title) in enumerate(
             zip(
                 axes,

@@ -12,7 +12,7 @@ This is a separate GUI and registry entry from `two_qubit/joint_readout`. Each h
 
 Each shot emits optional reset, a full mux read tagged `herald`, the nominal I/Xπ preparation, and a full mux read tagged `terminal`. Both reads emit the same mux module with the same gain, integration window and classifiers. Readout post_delay supplies the wait after herald. There is no extra herald-delay field.
 
-Branch order is 00, 01, 10, 11, with F1 first. Branch 11 applies F1 Xπ then F2 Xπ. `reps` counts shots per round per branch. `rounds` adds completed rounds during acquisition, without a host round axis.
+Branch order is 00, 01, 10, 11, with F1 first. Branch 11 applies F1 Xπ then F2 Xπ. A single program sweeps all four preparations using a hardware loop and four named cases. The gg case emits no Xπ. Each case keeps its own duration before terminal readout. `reps` counts shots per round per branch. `rounds` adds completed rounds during acquisition, without a host round axis.
 
 The processor saves all 81 joint classes as float64 `sums` shaped `(4,3,3,3,3)`. Result stores the nominal `prepared_states=[0,1,2,3]` axis for gg, ge, eg, ee. After that axis, the axes are herald F1, herald F2, terminal F1, terminal F2. Each class axis is g/e/other. Counts remain unnormalized, including rejected herald classes. Native persistence generates class coordinates and retains the actual run cfg. No per-shot IQ survives in Result.
 
