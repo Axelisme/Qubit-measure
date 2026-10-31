@@ -257,7 +257,11 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         # ee starts with spectator e: nominal I is actual e, Xπ is actual g.
         ee = terminal_counts(result.sums, ("e", "e"))[:, ::-1]
         gg_fits, ee_fits = fit_count_traces(
-            result.delays, (gg, ee), (complete, complete[:, ::-1]), cfg.target, cfg.detune
+            result.delays,
+            (gg, ee),
+            (complete, complete[:, ::-1]),
+            cfg.target,
+            cfg.detune,
         )
         terminal = summarize(tuple(gg_fits))
         dc_label = (
@@ -312,9 +316,13 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             if value is not None:
                 ax.errorbar(dc_values[index], value, yerr=error, marker="o", color="C0")
         ax.text(
-            0.5, 0.5,
-            "" if any(value is not None for value in terminal.zeta_mhz) else "ζ unavailable: see branch reasons",
-            transform=ax.transAxes, ha="center",
+            0.5,
+            0.5,
+            ""
+            if any(value is not None for value in terminal.zeta_mhz)
+            else "ζ unavailable: see branch reasons",
+            transform=ax.transAxes,
+            ha="center",
         )
         ax.set(
             xlabel=dc_label,
