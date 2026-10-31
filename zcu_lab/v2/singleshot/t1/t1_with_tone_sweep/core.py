@@ -295,6 +295,10 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         axis = Classify(
             "readout", tone=None if pulse_readout else 0, classifier=classifier
         )
+        # Keep the author's separate sequences so each sampling mode can be
+        # edited in place. Both use TableLengthPulse with on-board GE/length
+        # loops; uniform mode requires SweepCfg, while non-uniform mode also
+        # accepts explicit lengths and materializes its own length table.
         if cfg.uniform:
             return self._run_uniform(cfg, axis, context=context)
         return self._run_non_uniform(cfg, axis, context=context)
