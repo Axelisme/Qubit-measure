@@ -178,7 +178,8 @@ Warning 明說 slack 只有 upper bound，不是實際差距；即使該上界�
 可逐點求值的部分仍保留精確來源，不因另有未知值就丟掉已知 provenance。
 
 使用者於 2026-10-30 對靜態上界、warning 與 relax 護欄的方案選擇：「A」。
-使用者補充：「WAIT可以用常數，但delay_by_timeline要考慮runtime」。
+使用者補充：「WAIT可以用常數，但sync要考慮runtime」。
+引文中的 `sync` 是當時名稱，現名為 `delay_by_timeline`。
 對未知 slack 只發 warning、不以其上界拒絕的選項，使用者同日回答：「A」。
 合法點精確 min／max 與 provenance 的求法由 advisor 於 2026-10-30 依代理授權裁定。
 執行期等待留待有實驗需要每點精確 WAIT 時再評估，不在此契約中自動切換等待方式。

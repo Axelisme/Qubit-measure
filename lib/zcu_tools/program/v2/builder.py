@@ -82,8 +82,8 @@ class BuilderBranchCases:
         Duplicate, non-integer and out-of-range
         indices raise ValueError at build. Calls after branch exit or build,
         and overlapping cases, raise ValueError immediately.
-        Nested branches are supported. Repeat in a case fails at build because
-        its entry/backedge advance reference; put Repeat outside the branch.
+        Nested branches and accumulating Repeat are supported. Repeat bodies
+        inside a case must also preserve reference, including nested Repeat.
         """
         return self._record_case(index)
 
@@ -240,9 +240,9 @@ class TimelineBuilder:
         Local fork names expire and unjoined local ends are discarded. True
         requires all ends to be reconstructible from branch-entry state.
         Case delay/delay_auto/delay_by_timeline fail at build; use timeline_inc.
-        Repeat in
-        a case fails at build; move it outside the branch. Branch inside Repeat
-        is supported. Unconditional actions in this context fail at build; move
+        Repeat in a case may accumulate timeline ends, but its body must also
+        preserve reference, including nested Repeat. Branch inside Repeat is
+        supported. Unconditional actions in this context fail at build; move
         them before or after the with block. Unknown selectors, invalid indices,
         timing and native register-capacity errors propagate from the program.
         Calls after build raise ValueError. Close before build; the handle
