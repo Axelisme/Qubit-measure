@@ -168,7 +168,7 @@ class _TemplateJSON(_NumericJSON):
     points: _Ints
     events: tuple[_EventJSON, ...]
     readouts: tuple[_ReadoutJSON, ...]
-    duration_ticks: _Floats
+    duration_ticks: _Ints
 
     def record(self) -> TimelineTemplate:
         return TimelineTemplate(

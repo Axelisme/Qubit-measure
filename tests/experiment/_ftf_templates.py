@@ -43,7 +43,7 @@ def template(*, tones: int = 0) -> TimelineTemplate:
             (None,),
             np.zeros(2, dtype=np.int64),
             np.ones(2, dtype=bool),
-            0.001,
+            ticks(0.001),
         )
 
     drives = tuple(

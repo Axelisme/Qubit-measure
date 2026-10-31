@@ -23,7 +23,7 @@ def pulse(start_us: float, duration_us: float = 0.004) -> EventSlot:
         (None,),
         np.zeros(2, dtype=np.int64),
         np.ones(2, dtype=bool),
-        0.001,
+        ticks(0.001),
     )
 
 
