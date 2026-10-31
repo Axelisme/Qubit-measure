@@ -102,6 +102,30 @@ def test_dedicated_delivers_error(qapp):
     assert errs == [boom]
 
 
+@pytest.mark.parametrize("run_in_pool", [False, True])
+def test_keyboard_interrupt_is_delivered_unchanged_on_owner_and_drained(
+    qapp, run_in_pool: bool
+) -> None:
+    bg = _bg()
+    error = KeyboardInterrupt("core interrupted")
+    delivered: list[tuple[BaseException, int]] = []
+    succeeded: list[object] = []
+
+    def work() -> None:
+        raise error
+
+    bg.submit(
+        work, run_in_pool=run_in_pool, on_done=succeeded.append,
+        on_error=lambda exc: delivered.append((exc, threading.get_ident())),
+    )
+    # Submitted work has no blocker. Drain also waits for the owner delivery.
+    assert bg.quiesce(timeout_ms=30_000)
+    assert len(delivered) == 1
+    assert delivered[0][0] is error
+    assert delivered[0][1] == threading.get_ident()
+    assert succeeded == []
+
+
 def test_pool_delivers_error(qapp):
     bg = _bg()
     boom = ValueError("pool boom")
