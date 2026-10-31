@@ -3,14 +3,62 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.v2.runtime.schedule import Schedule
+from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
     RecordingBuffer,
     RootUpdateRecordingBuffer,
 )
+
+
+@pytest.mark.parametrize("use_slot", [False, True], ids=["buffer", "slot"])
+@pytest.mark.parametrize(
+    "value",
+    [np.array(7.0), np.array([7.0]), np.array([[7.0, 8.0]]), np.ones(3)],
+    ids=["scalar", "length-one", "extra-axis", "wrong-length"],
+)
+def test_signal_writes_reject_shape_mismatch_without_update(
+    use_slot: bool, value: np.ndarray
+) -> None:
+    updates: list[np.ndarray] = []
+    buffer = SignalBuffer(
+        (2, 2) if use_slot else (2,),
+        dtype=np.float64,
+        on_update=lambda data: updates.append(data.copy()),
+        update_interval=None,
+    )
+    target = buffer[0] if use_slot else buffer
+
+    with pytest.raises(ValueError) as error:
+        target.set(value)
+
+    assert f"target shape={(2,)}" in str(error.value)
+    assert f"value shape={value.shape}" in str(error.value)
+    np.testing.assert_array_equal(buffer.data, np.full(buffer.data.shape, np.nan))
+    assert updates == []
+
+
+def test_signal_writes_accept_exact_array_and_scalar_shapes() -> None:
+    updates: list[np.ndarray] = []
+    buffer = SignalBuffer(
+        (2, 2),
+        dtype=np.float64,
+        on_update=lambda data: updates.append(data.copy()),
+        update_interval=None,
+    )
+
+    buffer.set(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    buffer[0].set(np.array([5.0, 6.0]))
+    scalar_slot = buffer[1, 0]
+    scalar_slot.set(np.array(7.0))
+
+    assert scalar_slot.value.shape == ()
+    np.testing.assert_array_equal(buffer.data, [[5.0, 6.0], [7.0, 4.0]])
+    assert len(updates) == 3
+    np.testing.assert_array_equal(updates[-1], [[5.0, 6.0], [7.0, 4.0]])
 
 
 def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
