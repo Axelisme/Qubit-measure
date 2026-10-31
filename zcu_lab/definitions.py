@@ -97,6 +97,9 @@ from zcu_lab.v2.two_qubit.conditional_phase.gui import (
 from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_DEFINITION,
 )
+from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui_heralded import (
+    DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.constructive_phase.gui import (
     DEFINITION as CONSTRUCTIVE_PHASE_DEFINITION,
 )
@@ -262,6 +265,7 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/joint_readout": JOINT_READOUT_DEFINITION,
     "two_qubit/joint_readout_heralded": JOINT_READOUT_HERALDED_DEFINITION,
     "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
+    "two_qubit/conditional_spectroscopy_heralded": SPECTROSCOPY_HERALDED_DEFINITION,
     "two_qubit/chevron": CHEVRON_DEFINITION,
     "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
     "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
