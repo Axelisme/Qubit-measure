@@ -13,7 +13,6 @@ from zcu_lab.v2.support.measure.mux_forms import (
 from .._measure import captured_roles
 from .core import IdleZZCfg
 
-
 T_Cfg = TypeVar("T_Cfg", bound=IdleZZCfg)
 
 

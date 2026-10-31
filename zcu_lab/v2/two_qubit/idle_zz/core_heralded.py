@@ -19,7 +19,13 @@ from zcu_tools.plotting.plots import Plots
 
 from .._sums import herald_probabilities, terminal_counts
 from ._analysis import IdleZZAnalysis
-from .core import IdleZZCfg, IdleZZResult, acquire_counts, analyze_counts, complete_points
+from .core import (
+    IdleZZCfg,
+    IdleZZResult,
+    acquire_counts,
+    analyze_counts,
+    complete_points,
+)
 
 
 class IdleZZHeraldedCfg(IdleZZCfg):
@@ -61,47 +67,75 @@ def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedRe
     """Restore 81-class sums; old raw-IQ files missing sums raise ValueError."""
     sums = data.variable("sums")
     return IdleZZHeraldedResult(
-        sums.axes[6].astype(np.float64), sums.axes[5].astype(np.int64),
-        sums.axes[4].astype(np.float64), sums.z.astype(np.float64),
+        sums.axes[6].astype(np.float64),
+        sums.axes[5].astype(np.int64),
+        sums.axes[4].astype(np.float64),
+        sums.z.astype(np.float64),
     )
 
 
 class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
     """Estimate conditional fringe differences after a classified (g,g) herald."""
 
-    AXES_SPEC: ClassVar[
-        GroupedAxesSpec[IdleZZHeraldedResult, IdleZZHeraldedCfg]
-    ] = GroupedAxesSpec(
-        variables=(VariableSpec(
-            variable="sums",
-            axes=(
-                VariableAxisSpec.generated_arange("terminal_f2", ""),
-                VariableAxisSpec.generated_arange("terminal_f1", ""),
-                VariableAxisSpec.generated_arange("herald_f2", ""),
-                VariableAxisSpec.generated_arange("herald_f1", ""),
-                VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
-                VariableAxisSpec("Spectator branch", "", field_name="branches", dtype=np.int64),
-                VariableAxisSpec("DC source value (inactive if disabled)", "a.u.", field_name="dc_values"),
+    AXES_SPEC: ClassVar[GroupedAxesSpec[IdleZZHeraldedResult, IdleZZHeraldedCfg]] = (
+        GroupedAxesSpec(
+            variables=(
+                VariableSpec(
+                    variable="sums",
+                    axes=(
+                        VariableAxisSpec.generated_arange("terminal_f2", ""),
+                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec.generated_arange("herald_f2", ""),
+                        VariableAxisSpec.generated_arange("herald_f1", ""),
+                        VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
+                        VariableAxisSpec(
+                            "Spectator branch",
+                            "",
+                            field_name="branches",
+                            dtype=np.int64,
+                        ),
+                        VariableAxisSpec(
+                            "DC source value (inactive if disabled)",
+                            "a.u.",
+                            field_name="dc_values",
+                        ),
+                    ),
+                    z=VariableZSpec(
+                        field_name="sums",
+                        label="Herald and terminal class counts",
+                        unit="",
+                        dtype=np.float64,
+                    ),
+                ),
             ),
-            z=VariableZSpec(field_name="sums", label="Herald and terminal class counts", unit="", dtype=np.float64),
-        ),),
-        result_type=IdleZZHeraldedResult, cfg_type=IdleZZHeraldedCfg,
-        tag="two_qubit/idle_zz_heralded", result_builder=restore_result,
+            result_type=IdleZZHeraldedResult,
+            cfg_type=IdleZZHeraldedCfg,
+            tag="two_qubit/idle_zz_heralded",
+            result_builder=restore_result,
+        )
     )
 
     def run(
-        self, config: IdleZZHeraldedCfg, *, context: RunContext,
+        self,
+        config: IdleZZHeraldedCfg,
+        *,
+        context: RunContext,
     ) -> IdleZZHeraldedResult:
         """Acquire reset if set → herald → spectator I/Xπ → Ramsey → terminal.
 
         The same mux object emits both reads. Return all 81 class counts, with
         rounds accumulated on the acquisition side. No writeback occurs.
         """
-        return IdleZZHeraldedResult(*acquire_counts(config, context=context, heralded=True))
+        return IdleZZHeraldedResult(
+            *acquire_counts(config, context=context, heralded=True)
+        )
 
     def analyze(
-        self, source: RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> IdleZZHeraldedAnalysis:
         """Fit selected target sigma and plot nine herald fractions per DC/branch.
 
@@ -115,23 +149,30 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         terminal = analyze_counts(
             source.cfg,
             IdleZZResult(
-                data.dc_values, data.branches, data.delays,
+                data.dc_values,
+                data.branches,
+                data.delays,
                 terminal_counts(data.sums, heralded=True),
             ),
-            complete=complete, plots=plots,
+            complete=complete,
+            plots=plots,
         )
         matrix = herald_probabilities(data.sums)
-        labels = [f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")]
+        labels = [
+            f"{f1},{f2}" for f1 in ("g", "e", "other") for f2 in ("g", "e", "other")
+        ]
         for dc_index, dc_value in enumerate(data.dc_values):
             fig, axes = plots.subplots(f"herald_{dc_index}", ncols=2, figsize=(12, 5))
             for branch, ax in enumerate(axes):
                 for outcome, label in enumerate(labels):
                     ax.plot(
-                        data.delays, matrix[dc_index, branch].reshape(-1, 9)[:, outcome],
+                        data.delays,
+                        matrix[dc_index, branch].reshape(-1, 9)[:, outcome],
                         label=label,
                     )
                 ax.set(
-                    xlabel="Delay (us)", ylabel="Herald probability",
+                    xlabel="Delay (us)",
+                    ylabel="Herald probability",
                     title=f"DC={dc_value:g}; spectator {'I' if branch == 0 else 'Xπ'}",
                     ylim=(0, 1),
                 )

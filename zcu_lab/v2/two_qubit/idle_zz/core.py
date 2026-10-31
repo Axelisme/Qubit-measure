@@ -24,7 +24,12 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Pulse, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2, shot_sums,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    shot_sums,
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
@@ -202,8 +207,10 @@ def build_program(
         raise ValueError("Ramsey delay must be finite and nonnegative")
     validate_classifiers(cfg.readout, cfg.roles)
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps,
-        initial_delay=cfg.initial_delay, relax_delay=cfg.relax_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
+        relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
     spectator = cfg.x180_f2 if cfg.target == "f1" else cfg.x180_f1
@@ -212,15 +219,21 @@ def build_program(
         builder.emit(Pulse("spectator_x180", spectator))
     builder.emit(Pulse("target_pi2", pi2))
     builder.delay_timeline(delay)
-    builder.emit(Pulse(
-        "projection", pi2.with_updates(phase=pi2.phase + 360 * cfg.detune * delay),
-    ))
+    builder.emit(
+        Pulse(
+            "projection",
+            pi2.with_updates(phase=pi2.phase + 360 * cfg.detune * delay),
+        )
+    )
     builder.emit(readout, tag="terminal")
     return builder.build()
 
 
 def acquire_counts(
-    config: IdleZZCfg, *, context: RunContext, heralded: bool,
+    config: IdleZZCfg,
+    *,
+    context: RunContext,
+    heralded: bool,
 ) -> tuple[
     NDArray[np.float64], NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
 ]:
@@ -233,9 +246,13 @@ def acquire_counts(
     """
     validate_classifiers(config.readout, config.roles)
     delays = sweep2array(config.delay, "time", {"soccfg": context.soccfg})
-    dc_values = np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
+    dc_values = (
+        np.array([0.0]) if config.dc_device is None else sweep2array(config.dc_values)
+    )
     viewer = live_line(
-        context.plots, "measurement", "Delay (us)",
+        context.plots,
+        "measurement",
+        "Delay (us)",
         "Target ⟨σ⟩" if not heralded else "Target ⟨σ⟩ | herald (g,g)",
         num_lines=len(dc_values) * 2,
     )
@@ -246,7 +263,8 @@ def acquire_counts(
 
     classes = (3, 3, 3, 3) if heralded else (3, 3)
     buffer = SignalBuffer(
-        (len(dc_values), 2, len(delays), *classes), dtype=np.float64,
+        (len(dc_values), 2, len(delays), *classes),
+        dtype=np.float64,
         on_update=update_view,
     )
     with Schedule(config, buffer, scope=context.scope) as sched:
@@ -254,18 +272,28 @@ def acquire_counts(
         for dc_value, dc_step in sched.scan("dc", dc_values.tolist()):
             if cfg.dc_device is not None:
                 set_flux(
-                    context.devices[cfg.dc_device], dc_value,
-                    unit=cfg.dc_unit, stop=context.scope.stop,
+                    context.devices[cfg.dc_device],
+                    dc_value,
+                    unit=cfg.dc_unit,
+                    stop=context.scope.stop,
                 )
             for branch, branch_step in dc_step.scan("branch", [0, 1]):
                 for delay, step in branch_step.scan("delay", delays.tolist()):
                     prog = build_program(
-                        step.cfg, context.soccfg, branch, delay, heralded=heralded,
+                        step.cfg,
+                        context.soccfg,
+                        branch,
+                        delay,
+                        heralded=heralded,
                     )
                     step.run_acquire_summed(
-                        prog, context.soc,
-                        processor=shot_sums(prog, readout_axes(cfg.roles, heralded=heralded)),
-                        rounds=cfg.rounds, options=RunOptions(),
+                        prog,
+                        context.soc,
+                        processor=shot_sums(
+                            prog, readout_axes(cfg.roles, heralded=heralded)
+                        ),
+                        rounds=cfg.rounds,
+                        options=RunOptions(),
                     )
     return dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
 
@@ -286,7 +314,9 @@ def analyze_counts(
     and the six regular-delay requirement retain their existing definitions.
     """
     if cfg is None:
-        raise ValueError("Idle ZZ analysis requires saved cfg, not current Form/library")
+        raise ValueError(
+            "Idle ZZ analysis requires saved cfg, not current Form/library"
+        )
     dc_values = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc_values)
     ndelay = cfg.delay.expts
     if (
@@ -309,44 +339,60 @@ def analyze_counts(
         pair = [
             fit_branch(
                 IdleBranchFit(
-                    dc_index, branch, int(np.nansum(shots[dc_index, branch])),
-                    bool(np.all(complete[dc_index, branch])), traces[dc_index, branch],
+                    dc_index,
+                    branch,
+                    int(np.nansum(shots[dc_index, branch])),
+                    bool(np.all(complete[dc_index, branch])),
+                    traces[dc_index, branch],
                 ),
-                delays=result.delays, detune=cfg.detune,
+                delays=result.delays,
+                detune=cfg.detune,
             )
             for branch in range(2)
         ]
         fits.extend(pair)
         a, b = pair
         if (
-            a.signed_mhz is None or b.signed_mhz is None
-            or a.error_mhz is None or b.error_mhz is None
+            a.signed_mhz is None
+            or b.signed_mhz is None
+            or a.error_mhz is None
+            or b.error_mhz is None
         ):
             zetas.append(None)
             errors.append(None)
-            reasons.append("; ".join(
-                f"{label}: {fit.reason}"
-                for label, fit in zip(("I", "Xπ"), pair, strict=True) if fit.reason
-            ))
+            reasons.append(
+                "; ".join(
+                    f"{label}: {fit.reason}"
+                    for label, fit in zip(("I", "Xπ"), pair, strict=True)
+                    if fit.reason
+                )
+            )
         else:
             zetas.append(b.signed_mhz - a.signed_mhz)
             errors.append(float(np.hypot(a.error_mhz, b.error_mhz)))
             reasons.append(None)
     answer = IdleZZAnalysis(tuple(fits), tuple(zetas), tuple(errors), tuple(reasons))
     dc_label = (
-        "DC not swept (inactive coordinate)" if cfg.dc_device is None
+        "DC not swept (inactive coordinate)"
+        if cfg.dc_device is None
         else f"{cfg.dc_device} ({cfg.dc_unit})"
     )
     plot_analysis(
-        answer, result.delays, result.dc_values,
+        answer,
+        result.delays,
+        result.dc_values,
         title=f"Target {cfg.target}, detune={cfg.detune:g} MHz",
-        dc_label=dc_label, plots=plots,
+        dc_label=dc_label,
+        plots=plots,
     )
     return answer
 
 
 def complete_points(
-    cfg: IdleZZCfg | None, sums: NDArray[np.float64], *, heralded: bool,
+    cfg: IdleZZCfg | None,
+    sums: NDArray[np.float64],
+    *,
+    heralded: bool,
 ) -> NDArray[np.bool_]:
     """Validate raw counts and return points with all requested rounds acquired.
 
@@ -371,8 +417,10 @@ def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
     """Restore summed counts; old raw-IQ files missing sums raise ValueError."""
     sums = data.variable("sums")
     return IdleZZResult(
-        sums.axes[4].astype(np.float64), sums.axes[3].astype(np.int64),
-        sums.axes[2].astype(np.float64), sums.z.astype(np.float64),
+        sums.axes[4].astype(np.float64),
+        sums.axes[3].astype(np.int64),
+        sums.axes[2].astype(np.float64),
+        sums.z.astype(np.float64),
     )
 
 
@@ -380,19 +428,32 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
     """Compare target sigma Ramsey fringes for nominal spectator I/Xπ branches."""
 
     AXES_SPEC: ClassVar[GroupedAxesSpec[IdleZZResult, IdleZZCfg]] = GroupedAxesSpec(
-        variables=(VariableSpec(
-            variable="sums",
-            axes=(
-                VariableAxisSpec.generated_arange("terminal_f2", ""),
-                VariableAxisSpec.generated_arange("terminal_f1", ""),
-                VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
-                VariableAxisSpec("Spectator branch", "", field_name="branches", dtype=np.int64),
-                VariableAxisSpec("DC source value (inactive if disabled)", "a.u.", field_name="dc_values"),
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange("terminal_f2", ""),
+                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
+                    VariableAxisSpec(
+                        "Spectator branch", "", field_name="branches", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        "DC source value (inactive if disabled)",
+                        "a.u.",
+                        field_name="dc_values",
+                    ),
+                ),
+                z=VariableZSpec(
+                    field_name="sums", label="Class counts", unit="", dtype=np.float64
+                ),
             ),
-            z=VariableZSpec(field_name="sums", label="Class counts", unit="", dtype=np.float64),
-        ),),
-        result_type=IdleZZResult, cfg_type=IdleZZCfg, cfg_schema_version="4.0",
-        tag="two_qubit/idle_zz", result_builder=restore_result,
+        ),
+        result_type=IdleZZResult,
+        cfg_type=IdleZZCfg,
+        cfg_schema_version="4.0",
+        tag="two_qubit/idle_zz",
+        result_builder=restore_result,
     )
 
     def run(self, config: IdleZZCfg, *, context: RunContext) -> IdleZZResult:
@@ -404,7 +465,11 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         return IdleZZResult(*acquire_counts(config, context=context, heralded=False))
 
     def analyze(
-        self, source: RunRecord[IdleZZCfg, IdleZZResult], options: None, *, plots: Plots,
+        self,
+        source: RunRecord[IdleZZCfg, IdleZZResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> IdleZZAnalysis:
         """Fit complete saved sigma traces, preserving unavailable ζ with reasons.
 
@@ -414,7 +479,8 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         """
         del options
         return analyze_counts(
-            source.cfg, source.result,
+            source.cfg,
+            source.result,
             complete=complete_points(source.cfg, source.result.sums, heralded=False),
             plots=plots,
         )

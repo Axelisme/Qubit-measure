@@ -31,7 +31,9 @@ def run(cfg: IdleZZHeraldedCfg, *, context: RunContext) -> IdleZZHeraldedRun:
 
 
 def _analyze(
-    req: AnalyzeRequest[IdleZZHeraldedRun, None], *, plots: Plots,
+    req: AnalyzeRequest[IdleZZHeraldedRun, None],
+    *,
+    plots: Plots,
 ) -> IdleZZHeraldedAnalysis:
     return IdleZZHeraldedExp().analyze(req.run_result, None, plots=plots)
 
