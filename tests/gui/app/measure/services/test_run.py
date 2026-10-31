@@ -432,8 +432,24 @@ def test_run_failed_emits_outcome_failed_with_message():
     assert payload.error_message == "boom"
 
 
-def test_schedule_failure_reports_failed_not_cancelled():
+@pytest.mark.parametrize("source", ["build", "producer"])
+def test_schedule_failure_reports_failed_not_cancelled(source: str):
     state, tab_id, adapter = make_state()
+    message = "builder boom" if source == "build" else "producer boom"
+
+    class ProducerFailingProgram:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
+            raise RuntimeError(message)
+
+        def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
+            raise NotImplementedError
+
+    program_cls = (
+        ConstructorFailingProgram if source == "build" else ProducerFailingProgram
+    )
 
     def run_with_schedule_failure(*_args: Any, context: RunContext) -> object:
         with Schedule(
@@ -445,7 +461,7 @@ def test_schedule_failure_reports_failed_not_cancelled():
                 sched.prog_builder(
                     "soc",
                     "soccfg",
-                    program_cls=ConstructorFailingProgram,
+                    program_cls=program_cls,
                 )
                 .add(NoopModule("readout"))
                 .build_and_acquire()
@@ -460,11 +476,11 @@ def test_schedule_failure_reports_failed_not_cancelled():
 
     payload = last_run_finished_payload(bg.events)
     assert payload.outcome == "failed"
-    assert payload.error_message == "builder boom"
+    assert payload.error_message == message
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == "failed"
-    assert outcome.error == "builder boom"
+    assert outcome.error == message
     assert state.get_tab(tab_id).run.result is None
     assert not state.is_tab_running(tab_id)
 
