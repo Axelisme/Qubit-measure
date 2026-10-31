@@ -257,7 +257,7 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
         prog.add_reg("index")
 
     def body(prog):
-        with prog.repeat("twice", 2), prog.branch(by="path") as branch:
+        with prog.repeat("twice", 2), prog.branch(by="path", align_timeline=True) as branch:
             for index in (0, 1):
                 with branch.case(index):
                     prog.write_reg("index", index)
@@ -489,7 +489,7 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         prog.write_reg("origin", 100)
         prog.delay_timeline("origin", timeline="default")
         prog.emit(pulse)
-        with prog.branch(by="path") as branch:
+        with prog.branch(by="path", align_timeline=True) as branch:
             for index, amount in enumerate((60, 59)):
                 with branch.case(index):
                     prog.delay_timeline(amount / 430.08, timeline="default")
@@ -687,7 +687,7 @@ def _change_selection(prog, loader, other, change):
     elif change == "translate":
         prog.append_macro(_OverwriteSelected())
     elif change == "constant_branch":
-        with prog.branch(by="path") as branch:
+        with prog.branch(by="path", align_timeline=True) as branch:
             with branch.case(0):
                 prog.write_reg("length", 89)
             with branch.case(1):

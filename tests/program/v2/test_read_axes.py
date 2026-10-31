@@ -239,7 +239,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
                         else:
                             self.trigger([0], t=0, timeline="default")
                 else:
-                    with self.branch(by="choice") as branch:
+                    with self.branch(by="choice", align_timeline=True) as branch:
                         with branch.case(0):
                             if inside:
                                 self.emit(ro, tag="selected")

@@ -586,7 +586,7 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
         prog.delay_timeline(100 / 430.08, timeline="waiting")
         # A runtime branch still leaves a path-selected, wait-only external end.
         prog.write_reg("duration", 10)
-        with prog.branch(by="scan") as cases, cases.case(1):
+        with prog.branch(by="scan", align_timeline=True) as cases, cases.case(1):
             prog.delay_timeline("duration")
         prog.emit(joined, timeline="waiting")
 

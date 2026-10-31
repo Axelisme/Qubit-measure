@@ -126,7 +126,7 @@ def test_branch_selected_address_does_not_hide_a_carried_memory_word():
         p.write_dmem(18, 99)
 
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(2):
                 with branch.case(index):
                     p.write_reg("address", 17)
@@ -230,7 +230,7 @@ def test_conditional_wave_port_only_emits_on_lanes_selected_by_flags():
 
 def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for case in range(2):
                 with branch.case(case), p.repeat(f"reads_{case}", 2):
                     p.trigger([0], t=0)

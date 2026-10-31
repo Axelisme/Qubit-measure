@@ -37,7 +37,7 @@ def branch_program(
         def _body(self, cfg):
             if unregistered == "before":
                 self.append_macro(UnregisteredIndexWrite())
-            with self.branch(by="axis") as branch:
+            with self.branch(by="axis", align_timeline=True) as branch:
                 for index, loader in enumerate(loaders):
                     with branch.case(index):
                         if index != uninitialized:

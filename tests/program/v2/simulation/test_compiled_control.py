@@ -22,7 +22,7 @@ def test_public_acquire_skips_undeclared_branch_points_without_padding():
         p.add_pulse(1, "drive", style="const", freq=80, phase=0, gain=0.2, length=0.1)
 
     def body(p):
-        with p.branch(by="scan") as branch, branch.case(1):
+        with p.branch(by="scan", align_timeline=True) as branch, branch.case(1):
             p.pulse(1, "drive", timeline="default", tag="selected-drive")
         # The routed ADC always needs a carrier, including undeclared points.
         p.pulse(0, "p", t=0, tag="terminal")
@@ -108,7 +108,7 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
         p.trigger([0], t=0)
         p.fork("default", into="external")
         p.delay_timeline(100 / 430.08, timeline="external")
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
                     p.pulse(0, "p", timeline="default", tag=f"case-{index}")
@@ -244,7 +244,7 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
 
 def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             with branch.case(0), p.repeat("twice", 2):
                 p.trigger([0], t=0)
                 p.pulse(0, "p", timeline="default")
@@ -269,7 +269,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
 
     def body(p):
         p.send_readoutconfig(1, "ro1", t=0)
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index), p.repeat(f"case_repeat_{index}", 3):
                     p.trigger([0, 1], t=0)
@@ -316,7 +316,7 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
         return CompiledStream(tuple(records))
 
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(2):
                 with branch.case(index):
                     p.pulse(0, "p", timeline="default")
@@ -370,7 +370,7 @@ def test_branch_dispatch_instructions_must_match_marked_cases(defect):
         return CompiledStream(tuple(records))
 
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(2):
                 with branch.case(index):
                     p.pulse(0, "p", timeline="default")
@@ -406,7 +406,7 @@ def test_structured_branch_memory_live_in_is_rejected(reps):
         p.add_reg("carry", init=QickRawParam("carry", 0, {}))
 
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             for index, amount in enumerate([1, 2]):
                 with branch.case(index):
                     p.inc_reg("carry", amount)
@@ -435,7 +435,7 @@ def test_unsupported_effect_inside_marked_case_retains_case_diagnostics(
     effect, instruction
 ):
     def body(p):
-        with p.branch(by="scan") as branch:
+        with p.branch(by="scan", align_timeline=True) as branch:
             with branch.case(0):
                 p.pulse(0, "p", timeline="default", tag="drive")
                 if effect == "measurement":
