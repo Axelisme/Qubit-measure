@@ -937,10 +937,12 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
             )
         )
     prog = builder.build()
-    # Each aggregate rounds the physical tail plus post once. These nine
-    # drive ends retain their fractional generator/tProc clock relationship.
+    # The swept fabric length uses k=8 upper conversion: 430.08/384=28/25,
+    # W=287. Each aggregate ceils (n*287 + ceil(4.3*256))/256 once.
+    # These literal ends include the permitted upper-conversion error, rather
+    # than the old exact-grid table, and keep both channels' physical coverage.
     drive_ends = [
-        end + extra_post_cycles for end in [84, 164, 243, 323, 402, 482, 561, 641, 720]
+        end + extra_post_cycles for end in [84, 164, 244, 323, 403, 482, 562, 642, 721]
     ]
     expected_waves = [[0, 0, 91, 91, 91 + end, 91 + end] for end in drive_ends]
     expected_ends = [182 + end for end in drive_ends]
