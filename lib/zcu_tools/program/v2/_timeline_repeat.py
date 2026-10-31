@@ -5,11 +5,11 @@ from dataclasses import replace
 from qick.asm_v2 import Macro, WriteReg
 
 from ._timeline_expression import (
-    cycle_variable,
     LinearTime,
     TimeExpression,
     add_time,
     choose_time,
+    cycle_variable,
     multiply_time,
     projected_expression_bounds,
     scale_time,

@@ -8,11 +8,11 @@ from qick.asm_v2 import QickParam, WriteReg
 from ._timeline_expression import (
     CycleProducer,
     CycleVariable,
-    cycle_variable,
     LinearTime,
     TimeExpression,
     add_time,
     choose_time,
+    cycle_variable,
     exact_bounds,
     expression_axes,
     multiply_time,
