@@ -29,3 +29,23 @@ A second figure shows all nine herald proportions for each nominal preparation, 
 The analysis returns gg, ee and combined counts and matrices, selected shot totals, total acquired shots, herald proportions, and pass fraction. FIT offers no writeback or correction. Analyze reads saved counts, not current library settings. Compare with the ordinary version to diagnose thermal contributions, rather than treating the difference as a gate-fidelity measurement.
 
 Compile-only checks do not verify acquisition, save/restore, physical populations or plot appearance. Those need the separate offline and control-chain validation steps.
+
+## Notebook
+
+Use a validated `JointReadoutHeraldedCfg` as `cfg`. Supply the notebook's existing
+hardware handles and device manager. `point_view` is the bound PointView for the
+save destination. Run requires that environment; analyze uses the saved counts.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.joint_readout.core_heralded import JointReadoutHeraldedExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(JointReadoutHeraldedExp())
+record = exp.run(cfg)
+analysis = exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```
+
+Do not call core acquisition directly from the notebook. NotebookAdapter owns
+the run record and the plots for each operation.

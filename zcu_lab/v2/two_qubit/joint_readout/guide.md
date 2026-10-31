@@ -39,3 +39,23 @@ Old raw-IQ files lack `sums` and fail Load explicitly. There is no conversion fr
 Open `two_qubit/joint_readout_heralded` for a separate experiment with its own cfg and saved Result. It adds a full mux herald read before preparation, saves all 81 herald/terminal class combinations, and aligns terminal distributions from herald g,g and e,e by actual preparation. It also adds their counts before normalizing a combined matrix. See the [heralded guide](guide_heralded.md).
 
 Herald pass fraction measures classified acceptance, not ground-state purity. Neither version claims hardware calibration from offline checks. Continue physical calibration with the [FTF bring-up guide](../guide.md).
+
+## Notebook
+
+Use a validated `JointReadoutCfg` as `cfg`. Supply the notebook's existing
+hardware handles and device manager. `point_view` is the bound PointView for the
+save destination. Run requires that environment; analyze uses the saved counts.
+
+```python
+from zcu_tools.notebook import NotebookAdapter
+from zcu_lab.v2.two_qubit.joint_readout.core import JointReadoutExp
+
+nb_adapter = NotebookAdapter(soc=soc, soccfg=soccfg, device_manager=device_manager)
+exp = nb_adapter(JointReadoutExp())
+record = exp.run(cfg)
+analysis = exp.analyze(None)
+saved = exp.save_run(point_view, source=record)
+```
+
+Do not call core acquisition directly from the notebook. NotebookAdapter owns
+the run record and the plots for each operation.

@@ -129,7 +129,7 @@ def _source_quadratures(
     )
     if data.sums.shape != shape:
         raise ValueError(f"Expected summed count shape {shape}, got {data.sums.shape}")
-    return (terminal_counts(data.sums, ("g", "g")) if heralded else data.sums)
+    return terminal_counts(data.sums, ("g", "g")) if heralded else data.sums
 
 
 def _plot_phase(

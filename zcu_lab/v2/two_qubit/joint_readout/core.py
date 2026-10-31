@@ -22,10 +22,10 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
+    Classify,
     Pulse,
     Reset,
     TimelineBuilder,
-    Classify,
     shot_sums,
 )
 from zcu_tools.program.v2.modules import MuxReadout
@@ -217,7 +217,9 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
 
         validate_classifiers(config.readout, config.roles)
         viewer = live_line(
-            context.plots, "measurement", "Nominal preparation (gg, ge, eg, ee)",
+            context.plots,
+            "measurement",
+            "Nominal preparation (gg, ge, eg, ee)",
             "Terminal P(g,g)",
         )
 
@@ -232,7 +234,9 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             for prepared, step in sched.scan("prepared_states", list(range(4))):
                 cfg = step.cfg
                 builder = TimelineBuilder(
-                    context.soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+                    context.soccfg,
+                    reps=cfg.reps,
+                    initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
                 readout = MuxReadout("readout", cfg.readout)
@@ -250,8 +254,11 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                     Classify("terminal", cfg.roles.f2_tone),
                 ]
                 step.run_acquire_summed(
-                    prog, context.soc, processor=shot_sums(prog, axes),
-                    rounds=cfg.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=cfg.rounds,
+                    options=RunOptions(),
                 )
         return JointReadoutResult(np.arange(4, dtype=np.int64), buffer.array)
 
@@ -265,12 +272,16 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options
         result = source.result
-        if not np.array_equal(result.prepared_states, np.arange(4)) or result.sums.shape != (
+        if not np.array_equal(
+            result.prepared_states, np.arange(4)
+        ) or result.sums.shape != (
             4,
             3,
             3,
         ):
-            raise ValueError("Joint readout requires prepared_states [0,1,2,3] and sums (4,3,3)")
+            raise ValueError(
+                "Joint readout requires prepared_states [0,1,2,3] and sums (4,3,3)"
+            )
         answer = JointReadoutAnalysis(
             counts=result.sums.reshape(4, 9),
             matrix=joint_probabilities(result.sums).reshape(4, 9),
@@ -293,9 +304,12 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             xticks=range(9),
             xticklabels=OUTCOME_LABELS,
             yticks=range(4),
-            yticklabels=[f"{label}; n={shots:g}" for label, shots in zip(
-                PREPARED_LABELS, answer.acquired_shots, strict=True
-            )],
+            yticklabels=[
+                f"{label}; n={shots:g}"
+                for label, shots in zip(
+                    PREPARED_LABELS, answer.acquired_shots, strict=True
+                )
+            ],
             xlabel="Observed terminal class (F1, F2)",
             ylabel="Nominal I/Xπ preparation; acquired shots",
             title="Preparation → observed outcome; includes preparation and readout effects",

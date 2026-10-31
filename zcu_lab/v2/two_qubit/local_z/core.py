@@ -219,7 +219,7 @@ def acquire_counts(
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
+        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
         values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
         viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
 
@@ -240,11 +240,19 @@ def acquire_counts(
                         prog,
                         context.soc,
                         processor=shot_sums(
-                            prog, [
-                            Classify(label, tone)
-                            for label in (("herald", "terminal") if heralded else ("terminal",))
-                            for tone in (step.cfg.roles.f1_tone, step.cfg.roles.f2_tone)
-                        ]
+                            prog,
+                            [
+                                Classify(label, tone)
+                                for label in (
+                                    ("herald", "terminal")
+                                    if heralded
+                                    else ("terminal",)
+                                )
+                                for tone in (
+                                    step.cfg.roles.f1_tone,
+                                    step.cfg.roles.f2_tone,
+                                )
+                            ],
                         ),
                         rounds=step.cfg.rounds,
                         options=RunOptions(),

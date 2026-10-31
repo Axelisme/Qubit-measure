@@ -215,7 +215,7 @@ def acquire_counts(
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
+        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
         viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
 
     class_shape = (3, 3, 3, 3) if heralded else (3, 3)
@@ -235,11 +235,14 @@ def acquire_counts(
                     prog,
                     context.soc,
                     processor=shot_sums(
-                        prog, [
+                        prog,
+                        [
                             Classify(label, tone)
-                            for label in (("herald", "terminal") if heralded else ("terminal",))
+                            for label in (
+                                ("herald", "terminal") if heralded else ("terminal",)
+                            )
                             for tone in (cfg.roles.f1_tone, cfg.roles.f2_tone)
-                        ]
+                        ],
                     ),
                     rounds=cfg.rounds,
                     options=RunOptions(),

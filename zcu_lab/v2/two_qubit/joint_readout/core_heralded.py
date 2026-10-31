@@ -10,7 +10,11 @@ from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
-    Experiment, GroupedAxesSpec, GroupedLoadData, VariableAxisSpec, VariableSpec,
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
     VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
@@ -24,7 +28,10 @@ from zcu_lab.v2.support import live_line
 
 from .._readout import JointRoles
 from .._sums import (
-    herald_probabilities, joint_probabilities, terminal_counts, validate_classifiers,
+    herald_probabilities,
+    joint_probabilities,
+    terminal_counts,
+    validate_classifiers,
 )
 
 PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
@@ -156,13 +163,17 @@ class JointReadoutHeraldedExp(
                     VariableAxisSpec.generated_arange("herald_f2", ""),
                     VariableAxisSpec.generated_arange("herald_f1", ""),
                     VariableAxisSpec(
-                        "Nominal preparation", "", field_name="prepared_states",
+                        "Nominal preparation",
+                        "",
+                        field_name="prepared_states",
                         dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
-                    field_name="sums", label="Herald and terminal class counts",
-                    unit="", dtype=np.float64,
+                    field_name="sums",
+                    label="Herald and terminal class counts",
+                    unit="",
+                    dtype=np.float64,
                 ),
             ),
         ),
@@ -184,7 +195,9 @@ class JointReadoutHeraldedExp(
 
         validate_classifiers(config.readout, config.roles)
         viewer = live_line(
-            context.plots, "measurement", "Nominal preparation (gg, ge, eg, ee)",
+            context.plots,
+            "measurement",
+            "Nominal preparation (gg, ge, eg, ee)",
             "Terminal P(g,g) | herald (g,g)",
         )
 
@@ -199,7 +212,9 @@ class JointReadoutHeraldedExp(
             for prepared, step in sched.scan("prepared_states", list(range(4))):
                 cfg = step.cfg
                 builder = TimelineBuilder(
-                    context.soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+                    context.soccfg,
+                    reps=cfg.reps,
+                    initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
                 )
                 readout = MuxReadout("readout", cfg.readout)
@@ -220,8 +235,11 @@ class JointReadoutHeraldedExp(
                     Classify("terminal", cfg.roles.f2_tone),
                 ]
                 step.run_acquire_summed(
-                    prog, context.soc, processor=shot_sums(prog, axes),
-                    rounds=cfg.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(prog, axes),
+                    rounds=cfg.rounds,
+                    options=RunOptions(),
                 )
         return JointReadoutHeraldedResult(np.arange(4, dtype=np.int64), buffer.array)
 
@@ -241,8 +259,14 @@ class JointReadoutHeraldedExp(
         """
         del options
         result = source.result
-        if not np.array_equal(result.prepared_states, np.arange(4)) or result.sums.shape != (
-            4, 3, 3, 3, 3,
+        if not np.array_equal(
+            result.prepared_states, np.arange(4)
+        ) or result.sums.shape != (
+            4,
+            3,
+            3,
+            3,
+            3,
         ):
             raise ValueError(
                 "Heralded joint readout requires prepared_states [0,1,2,3] "
@@ -252,15 +276,21 @@ class JointReadoutHeraldedExp(
         # Herald ee starts with both qubits excited. The same I/Xπ preparation
         # reaches the complementary state, so align nominal ee/eg/ge/gg to gg/ge/eg/ee.
         ee_order = [
-            PREPARED_STATES.index((
-                "e" if f1 == "g" else "g",
-                "e" if f2 == "g" else "g",
-            ))
+            PREPARED_STATES.index(
+                (
+                    "e" if f1 == "g" else "g",
+                    "e" if f2 == "g" else "g",
+                )
+            )
             for f1, f2 in PREPARED_STATES
         ]
         gg = terminal_counts(result.sums, ("g", "g"))
         ee = terminal_counts(result.sums, ("e", "e"))[ee_order]
-        combined = gg + ee
+        # Cancellation may leave only one route to an actual state measured.
+        # Retain that route's counts; preserve NaN when neither was measured.
+        available_counts = np.stack((gg, ee))
+        combined = np.nansum(available_counts, axis=0)
+        combined[np.all(np.isnan(available_counts), axis=0)] = np.nan
         counts = np.stack((gg, ee, combined))
         matrices = joint_probabilities(counts).reshape(3, 4, 9)
         selected_shots = counts.sum(axis=(-2, -1))
@@ -268,29 +298,43 @@ class JointReadoutHeraldedExp(
         acquired_shots = result.sums.sum(axis=(-4, -3, -2, -1))
 
         fig, axes = plots.subplots("matrix", ncols=3, figsize=(24, 6))
-        for group, (ax, title) in enumerate(zip(
-            axes, ("Herald (g,g)", "Herald (e,e)", "Combined counts"), strict=True,
-        )):
+        for group, (ax, title) in enumerate(
+            zip(
+                axes,
+                ("Herald (g,g)", "Herald (e,e)", "Combined counts"),
+                strict=True,
+            )
+        ):
             image = ax.imshow(
-                np.ma.masked_invalid(matrices[group]), vmin=0, vmax=1, cmap="Blues",
+                np.ma.masked_invalid(matrices[group]),
+                vmin=0,
+                vmax=1,
+                cmap="Blues",
             )
             for row in range(4):
                 for col in range(9):
                     value = matrices[group, row, col]
                     label = (
                         f"{value:.3f}\nn={counts[group].reshape(4, 9)[row, col]:g}"
-                        if np.isfinite(value) else "No shots"
+                        if np.isfinite(value)
+                        else "No shots"
                     )
                     ax.text(col, row, label, ha="center", va="center", fontsize=7)
             ax.set(
-                xticks=range(9), xticklabels=OUTCOME_LABELS, yticks=range(4),
+                xticks=range(9),
+                xticklabels=OUTCOME_LABELS,
+                yticks=range(4),
                 yticklabels=[
-                    f"{state}; n={shots:g}" for state, shots in zip(
-                        PREPARED_LABELS, selected_shots[group], strict=True,
+                    f"{state}; n={shots:g}"
+                    for state, shots in zip(
+                        PREPARED_LABELS,
+                        selected_shots[group],
+                        strict=True,
                     )
                 ],
                 xlabel="Observed terminal class (F1, F2)",
-                ylabel="Actual preparation; selected shots", title=title,
+                ylabel="Actual preparation; selected shots",
+                title=title,
             )
             fig.colorbar(image, ax=ax, label="Row-normalized probability")
         fig.tight_layout()
@@ -298,13 +342,20 @@ class JointReadoutHeraldedExp(
         fig, ax = plots.subplots("herald", figsize=(12, 5))
         image = ax.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(4, 9)),
-            vmin=0, vmax=1, cmap="Blues",
+            vmin=0,
+            vmax=1,
+            cmap="Blues",
         )
         ax.set(
-            xticks=range(9), xticklabels=OUTCOME_LABELS, yticks=range(4),
+            xticks=range(9),
+            xticklabels=OUTCOME_LABELS,
+            yticks=range(4),
             yticklabels=[
-                f"{state}; n={shots:g}" for state, shots in zip(
-                    PREPARED_LABELS, acquired_shots, strict=True,
+                f"{state}; n={shots:g}"
+                for state, shots in zip(
+                    PREPARED_LABELS,
+                    acquired_shots,
+                    strict=True,
                 )
             ],
             xlabel="Herald class (F1, F2)",
@@ -314,9 +365,14 @@ class JointReadoutHeraldedExp(
         fig.colorbar(image, ax=ax, label="Herald probability")
         fig.tight_layout()
         return JointReadoutHeraldedAnalysis(
-            gg_counts=gg.reshape(4, 9), gg_matrix=matrices[0],
-            ee_counts=ee.reshape(4, 9), ee_matrix=matrices[1],
-            combined_counts=combined.reshape(4, 9), combined_matrix=matrices[2],
-            selected_shots=selected_shots, acquired_shots=acquired_shots,
-            herald_matrix=herald_matrix, pass_fraction=herald_matrix[..., 0, 0],
+            gg_counts=gg.reshape(4, 9),
+            gg_matrix=matrices[0],
+            ee_counts=ee.reshape(4, 9),
+            ee_matrix=matrices[1],
+            combined_counts=combined.reshape(4, 9),
+            combined_matrix=matrices[2],
+            selected_shots=selected_shots,
+            acquired_shots=acquired_shots,
+            herald_matrix=herald_matrix,
+            pass_fraction=herald_matrix[..., 0, 0],
         )

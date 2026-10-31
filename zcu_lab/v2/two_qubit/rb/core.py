@@ -223,7 +223,7 @@ def acquire_counts(
     )
 
     def update_view(sums: NDArray[np.float64]) -> None:
-        counts = (terminal_counts(sums, ("g", "g")) if heralded else sums)
+        counts = terminal_counts(sums, ("g", "g")) if heralded else sums
         # Unmeasured rounds do not contribute to the cumulative count ratio.
         totals = np.nansum(counts, axis=(1, 3))
         viewer.update(np.array(config.depths), joint_probabilities(totals)[..., 0, 0].T)
@@ -245,11 +245,14 @@ def acquire_counts(
                         cfg, context.soccfg, sequence.gates, heralded=heralded
                     )
                     processor = shot_sums(
-                        prog, [
+                        prog,
+                        [
                             Classify(label, tone)
-                            for label in (("herald", "terminal") if heralded else ("terminal",))
+                            for label in (
+                                ("herald", "terminal") if heralded else ("terminal",)
+                            )
                             for tone in (cfg.roles.f1_tone, cfg.roles.f2_tone)
-                        ]
+                        ],
                     )
                     for _, round_step in arm_step.repeat("round", cfg.rounds):
                         round_step.run_acquire_summed(
