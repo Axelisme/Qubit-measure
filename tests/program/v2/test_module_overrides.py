@@ -35,6 +35,18 @@ from tests.program.v2._mux_support import native_mux
 ProgramKind = Literal["native", "builder", "legacy"]
 
 
+def _module_with_length(cfg: PulseCfg | PulseReadoutCfg | PulseResetCfg, family: str, length: QickParam):
+    if isinstance(cfg, PulseCfg):
+        return Pulse("module", cfg, length=length)
+    if isinstance(cfg, PulseReadoutCfg):
+        if family.endswith("factory"):
+            return Readout("module", cfg, length=length)
+        return PulseReadout("module", cfg, length=length)
+    if family.endswith("factory"):
+        return Reset("module", cfg, length=length)
+    return PulseReset("module", cfg, length=length)
+
+
 def _reset_module(
     cfg: AbsResetCfg, overrides: dict[str, float | QickParam | None], use_factory: bool
 ):
@@ -302,16 +314,5 @@ def test_unsupported_waveform_length_sweep_is_rejected_without_mutation(family):
     with pytest.raises(
         ValueError, match="Gauss waveform length must not be a QickParam"
     ):
-        length = QickSweep1D("point", 0.1, 0.3)
-        if isinstance(cfg, PulseCfg):
-            Pulse("module", cfg, length=length)
-        elif isinstance(cfg, PulseReadoutCfg):
-            if family.endswith("factory"):
-                Readout("module", cfg, length=length)
-            else:
-                PulseReadout("module", cfg, length=length)
-        elif family.endswith("factory"):
-            Reset("module", cfg, length=length)
-        else:
-            PulseReset("module", cfg, length=length)
+        _module_with_length(cfg, family, QickSweep1D("point", 0.1, 0.3))
     assert cfg.model_dump() == original
