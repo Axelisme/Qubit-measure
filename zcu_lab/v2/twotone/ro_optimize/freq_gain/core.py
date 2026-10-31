@@ -180,6 +180,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
                 soc,
                 rounds=cfg.rounds,
                 options=RunOptions(
+                    retry=cfg.acquire_retry,
                     converter=lambda _raw: snr_as_signal(
                         [tracker],
                         ge_axis=1,
