@@ -1,10 +1,27 @@
 """Synthetic template expansion and deferred integrated-shot contracts."""
 
 from dataclasses import replace
+from fractions import Fraction
 
 import numpy as np
 import pytest
 from zcu_tools.core import simulation
+
+
+@pytest.mark.parametrize(
+    "duration, error",
+    [
+        (np.array([0.25]), TypeError),
+        (np.array([2**53 // 1000 + 1], dtype=np.int64), OverflowError),
+    ],
+)
+def test_request_rejects_noninteger_or_out_of_range_time_arrays(duration, error):
+    template = simulation.TimelineTemplate(np.array([0]), (), (), duration)
+    with pytest.raises(error):
+        simulation.AcquireRequest(
+            "decimated", (1,), 0, (), 1, 0, "test",
+            templates=(template,), time_base=simulation.TimeBase(Fraction(1)),
+        )
 
 
 def template_request():
