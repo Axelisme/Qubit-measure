@@ -46,9 +46,24 @@ def test_ns_rounds_exact_grid_once_without_changing_array_shape(
     assert time_base.ns(-212).hex() == (-expected[0, 0]).item().hex()
     assert time_base.ns(0) == 0.0
     assert time_base.ns(np.array([], dtype=np.int64)).shape == (0,)
-    assert time_base.ns(np.array(212, dtype=np.int64)).shape == ()
     if frequency == Fraction(3, 2):
         assert time_base.ns(1) == 666.6666666666666
+
+
+@pytest.mark.parametrize("frequency", [Fraction(43008), Fraction(3, 2)])
+def test_zero_dimensional_tick_arrays_return_float64_arrays(
+    frequency: Fraction,
+) -> None:
+    time_base = simulation.TimeBase(frequency)
+    ticks = np.array(212, dtype=np.int64)
+    expected = np.array(float(Fraction(212000) / frequency), dtype=np.float64)
+
+    result = time_base.ns(ticks)
+
+    assert type(result) is np.ndarray
+    assert result.dtype == np.dtype(np.float64)
+    assert result.shape == ()
+    np.testing.assert_array_equal(result.view(np.uint64), expected.view(np.uint64))
 
 
 def test_fixture_times_must_be_exactly_on_the_grid() -> None:
