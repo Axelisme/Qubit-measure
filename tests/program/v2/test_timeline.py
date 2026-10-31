@@ -60,10 +60,11 @@ def test_timeline_pulses_are_serial_but_native_pulse_stays_at_reference(timeline
     assert shot.end_cycle == 96
 
 
-def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps():
+@pytest.mark.parametrize("subcycle", [0.2, 5e-11])
+def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(subcycle):
     def body(prog):
-        prog.delay_timeline(0.2 / 430.08)
-        prog.delay_timeline(0.2 / 430.08)
+        prog.delay_timeline(subcycle / 430.08)
+        prog.delay_timeline(subcycle / 430.08)
         prog.delay_timeline(QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08), tag="end")
         prog.pulse(0, "p0", timeline="default", tag="pulse")
 
