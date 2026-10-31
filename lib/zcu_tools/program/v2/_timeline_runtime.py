@@ -388,7 +388,7 @@ def known_maximum(a: Time, b: Time) -> Time | None:
 
 
 class RuntimeMath(TimedMacro):
-    """Prepare flag-free cycle arithmetic; translate at its owning macro position."""
+    """Prepare integer cycle arithmetic and conditional candidate selection."""
 
     def __init__(self, prog):
         super().__init__()
