@@ -9,7 +9,11 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
-    FitQuality, compute_fit_quality, decay_time_bounds, decaycos, fit_decay_fringe,
+    FitQuality,
+    compute_fit_quality,
+    decay_time_bounds,
+    decaycos,
+    fit_decay_fringe,
 )
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
@@ -89,7 +93,9 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
     return finite & (total == expected)
 
 
-def sigma_errors(counts: NDArray[np.float64], target: Literal["f1", "f2"]) -> NDArray[np.float64]:
+def sigma_errors(
+    counts: NDArray[np.float64], target: Literal["f1", "f2"]
+) -> NDArray[np.float64]:
     """Return shot-noise errors for (Ne-Ng)/N, including other in N.
 
     counts is delay × terminal F1 × terminal F2. The multinomial variance of
@@ -143,7 +149,13 @@ def fit_traces(
         return tuple(replace(f, reason=reason) for f in fits)
     try:
         return _fit_complete_traces(fits, errors, delays, detune)
-    except (AnalysisFailed, ValueError, RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+    except (
+        AnalysisFailed,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        np.linalg.LinAlgError,
+    ) as exc:
         return tuple(replace(f, reason=f"Fringe fit failed: {exc}") for f in fits)
 
 
@@ -164,7 +176,9 @@ def _fit_complete_traces(
         ParameterSpec("decay_time", float(seeds[0].decay_time), limits=decay_bounds),
     ]
     traces = []
-    for index, (fit, count_error, seed) in enumerate(zip(fits, errors, seeds, strict=True)):
+    for index, (fit, count_error, seed) in enumerate(
+        zip(fits, errors, seeds, strict=True)
+    ):
         offset, amplitude, _, phase, _ = seed.params
         names = tuple(f"{name}_{index}" for name in ("offset", "amplitude", "phase"))
         parameters.extend(
@@ -172,7 +186,13 @@ def _fit_complete_traces(
             for name, value in zip(names, (offset, amplitude, phase), strict=True)
         )
         traces.append(
-            FitTrace(delays, fit.trace, decaycos, (names[0], names[1], "frequency", names[2], "decay_time"), count_error)
+            FitTrace(
+                delays,
+                fit.trace,
+                decaycos,
+                (names[0], names[1], "frequency", names[2], "decay_time"),
+                count_error,
+            )
         )
     shared = fit_shared(traces, parameters)
     frequency = shared.values["frequency"]
@@ -192,7 +212,10 @@ def _fit_complete_traces(
         curve = decaycos(delays, *values.values())
         indices = [shared.parameter_names.index(name) for name in trace.parameter_names]
         quality = compute_fit_quality(
-            fit.trace, curve, values, shared.covariance[np.ix_(indices, indices)],
+            fit.trace,
+            curve,
+            values,
+            shared.covariance[np.ix_(indices, indices)],
             decay_bounds=decay_bounds,
         )
         answers.append(
