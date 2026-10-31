@@ -42,7 +42,9 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     for point, ticks in enumerate((128, 0)):
         read = result.materialize_point(point).readouts[0]
         assert read.trigger_us == pytest.approx((ticks / 430.08,))
-        assert read.duration_us == pytest.approx(61 / 307.2)
+        assert read.samples == 61
+        assert read.sample_rate_mhz == 307.2
+        assert read.generator_channels == (0,)
         assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
 
 
