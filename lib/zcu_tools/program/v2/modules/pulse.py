@@ -121,9 +121,6 @@ class Pulse(Module):
         self.ro_ch = ro_ch
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self._declare_resources(prog)
-
-    def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         if self.cfg is None:
             return
 
