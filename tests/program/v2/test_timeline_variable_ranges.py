@@ -61,6 +61,43 @@ def test_complementary_tproc_pulses_leave_a_literal_constant_end():
     )
 
 
+def test_complementary_fabric_pulses_keep_pointwise_ceil_differences():
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("x", 9)
+            self.declare_gen(0, nqz=1)
+            x = QickSweep1D("x", 1, 9)
+            for name, length in (("x", x), ("complement", 10 - x), ("after", 0.1)):
+                self.add_pulse(
+                    0, name, style="const", freq=100, phase=0, gain=0.5, length=length
+                )
+
+        def _body(self, cfg):
+            self.pulse(0, "x", timeline="default")
+            self.pulse(0, "complement", timeline="default")
+            self.pulse(0, "after", timeline="default", tag="after")
+
+    prog = Program(make_mock_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
+    # At 384 MHz the k=8 upper conversion is 287/256. Separate ceils
+    # of complementary lengths alternate between 4306 and 4305, not one end.
+    expected = [
+        [0, 431, 4306],
+        [0, 861, 4305],
+        [0, 1292, 4306],
+        [0, 1722, 4305],
+        [0, 2153, 4306],
+        [0, 2583, 4305],
+        [0, 3014, 4306],
+        [0, 3444, 4305],
+        [0, 3875, 4306],
+    ]
+    assert [waves(s) for s in shots(prog)] == expected * 2
+    with pytest.raises(RuntimeError, match="non-affine"):
+        prog.get_time_param("after", "t")
+    assert any(name.startswith("_timeline_end_") for name in prog.reg_dict)
+    assert prog.compile_datamem() is None
+
+
 def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
