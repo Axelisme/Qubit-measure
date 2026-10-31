@@ -91,8 +91,9 @@ class FTFReadoutPlan:
     """One ADC's detached batch in program declaration order.
 
     channel is the logical ADC index. batch contains this receiver's calibrated
-    model, grids and point-to-content mapping. Mux events retain only incident
-    carriers in the ADC's profile PFB channel; same-channel carriers superpose.
+    model, grids and point-to-content mapping. Observed mux events retain only
+    incident carriers in the ADC's profile PFB channel; same-channel carriers
+    superpose. Unobserved events keep their pulses and empty grids.
     """
 
     channel: int
@@ -427,8 +428,7 @@ def plan_template(
     An observed mux event without an in-channel carrier raises ValueError naming
     the ADC, demodulation frequencies and PFB channel. Unobserved events retain
     their pulses and empty grids without emitting data.
-    Program
-    common-origin carrier phases convert to pulse-local phases in the first
+    Program common-origin carrier phases convert to pulse-local phases in the first
     terminal carrier's model reference frame; ADC demodulation remains absolute-time.
     All ADCs retain the same ordered event axis, even if none observes terminal.
     Unobserved events have empty grids. Each ADC must have at least one trigger.
