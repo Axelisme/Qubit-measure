@@ -185,6 +185,24 @@ def test_author_register_duration_in_repeat_debits_actual_iteration_advances(cou
     assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 3
 
 
+@pytest.mark.parametrize("align", [False, True])
+def test_branch_register_time_can_be_captured_from_author_entry_state(align):
+    def initialize(prog):
+        prog.add_dmem([40])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        with prog.branch(by="scan", align_timeline=align) as branch:
+            for index in range(3):
+                with branch.case(index):
+                    prog.delay_timeline("duration")
+                    prog.delay_timeline(index / 430.08)
+        prog.pulse(0, "p0", timeline="default")
+
+    expected = [42] * 3 if align else [40, 41, 42]
+    assert [waves(s) for s in shots(program(body, initialize=initialize))] == [[t] for t in expected]
+
+
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
