@@ -845,6 +845,8 @@ class RuntimeMath(TimedMacro):
             for value, expression in zip(values, expressions, strict=True):
                 if (inputs is None or not isinstance(value, RuntimeEnd)) and difference_limits(selected, expression) == (0, 0):
                     return value
+        if inputs is not None:
+            print("JOIN DEBUG", repr(expressions), "CAPTURED", repr(tuple(bindings)), "COMMON", repr(common), "RESIDUALS", repr(residuals), "ATOMS", repr(atoms), flush=True)
         sources = {} if inputs is None else inputs.copy()
         for axis, expression in atoms.items():
             if expression in bindings:
