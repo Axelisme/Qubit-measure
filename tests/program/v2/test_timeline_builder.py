@@ -12,6 +12,7 @@ import pytest
 from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
+from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
 from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.modules.readout import (
@@ -21,11 +22,16 @@ from zcu_tools.program.v2.modules.readout import (
 )
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
 from tests.program.v2.timing_support import shots, waves
 
 
-def test_register_repeat_table_selector_is_ready_for_same_iteration_playback():
+@pytest.mark.parametrize("hint", [None, (0, 2)])
+@pytest.mark.parametrize("tail_sync", [False, True])
+def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
+    hint, tail_sync
+):
     builder = v2.TimelineBuilder(
         v2.make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0
     )
@@ -42,10 +48,11 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback():
         )
         for gain, length in [(0.1, 0.04), (0.2, 0.08)]
     ]
-    with builder.repeat("gate_index", "count", range_hint=(0, 2)):
+    with builder.repeat("gate_index", "count", range_hint=hint):
         builder.emit(v2.LoadValue("gate", [0, 1], "gate_index", "gate"))
         builder.emit(v2.ComputedPulse("gate_pulse", val_reg="gate", pulses=pulses))
-        builder.delay_by_timeline()
+        if tail_sync:
+            builder.delay_by_timeline()
     prog = builder.build()
 
     # The two waveforms quantize to 15/31 generator clocks, then 17/35
@@ -53,6 +60,21 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback():
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[], [0, 17]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, 52] * 2
+
+    env = white_noise(std_adc=0, n_gens=2, routes=((1, 0),))
+    try:
+        request = build_compiled_request(
+            prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
+        )
+        assert request.materialize_point(0).events == ()
+        events = request.materialize_point(1).events
+        assert [event.gain for event in events] == pytest.approx([0.1, 0.2], abs=1e-4)
+        assert [event.start_us for event in events] == pytest.approx([0, 17 / 430.08])
+        assert [event.duration_us for event in events] == pytest.approx(
+            [15 / 384, 31 / 384]
+        )
+    finally:
+        env.devices.close_all_devices()
 
 
 @pytest.mark.parametrize("frontend", ["builder", "native"])

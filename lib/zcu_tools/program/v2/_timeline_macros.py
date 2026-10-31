@@ -807,8 +807,6 @@ class RepeatTimelineExit(Macro):
             self.reference.preprocess(prog)
         else:
             self.accumulator.preprocess(prog)
-        if self.minimum == 0:
-            prog._time_bounds.defined.intersection_update(self.entry.defined)
 
     def translate(self, prog) -> None:
         pass

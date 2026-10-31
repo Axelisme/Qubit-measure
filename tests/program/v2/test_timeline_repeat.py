@@ -65,6 +65,70 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
+@pytest.mark.parametrize("tail_sync", [False, True])
+@pytest.mark.parametrize("position", ["before_write", "after_zero_path", "branch_path"])
+def test_repeat_table_definition_must_dominate_its_time_consumer(position, tail_sync):
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    def initialize(prog):
+        prog.add_reg("count")
+        prog.add_loop("scan", 2)
+        prog.declare(loader)
+
+    def body(prog):
+        prog.write_reg("count", 0)
+        with prog.repeat("r", "count", range_hint=(0, 2)):
+            if position == "before_write":
+                prog.timeline_inc("loaded")
+            if position == "branch_path":
+                with prog.branch(by="scan", align_timeline=False) as branch:
+                    with branch.case(0):
+                        prog.emit(loader)
+                prog.timeline_inc("loaded")
+            else:
+                prog.emit(loader)
+            if tail_sync:
+                prog.delay_by_timeline()
+        if position == "after_zero_path":
+            prog.timeline_inc("loaded")
+
+    with pytest.raises(ValueError, match="loaded.*unknown or uninitialized"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("invalid", ["index_range", "counter_writer"])
+def test_repeat_table_index_keeps_range_and_writer_proof(invalid):
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    class CounterWrite(Macro):
+        def translate(self, prog):
+            WriteReg(dst="r", src=0).translate(prog)
+
+    def body(prog):
+        with prog.repeat("r", "count", range_hint=(0, 3 if invalid == "index_range" else 2)):
+            prog.emit(loader)
+            prog.timeline_inc("loaded")
+            if invalid == "counter_writer":
+                prog.append_macro(CounterWrite())
+            prog.delay_by_timeline()
+
+    def initialize(prog):
+        _register_initialize(prog, value=2)
+        prog.declare(loader)
+
+    error = (
+        "loaded.*r.*allowed.*0.*1.*actual.*0.*2"
+        if invalid == "index_range"
+        else "r.*unregistered.*write at instruction"
+    )
+    with pytest.raises(ValueError, match=error):
+        _program(body, initialize)
+
+
 def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
     def body(prog):
         with prog.repeat("r", "count", range_hint=(1, 10)):
