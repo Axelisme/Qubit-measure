@@ -197,6 +197,18 @@ def test_save_appends_saved_event_after_transplanted_foreign_history(
     assert session.entry.ledger.events() == (*history, saved)
 
 
+def test_data_save_rejects_wrong_experiment_before_files_or_ledger(
+    native_session: NativeSaveSession,
+) -> None:
+    session = native_session
+    record = require_record(session.state.get_tab("tab").run)
+    record.metadata["experiment"] = "wrong/experiment"
+    with pytest.raises(ValueError, match="experiment"):
+        session.save()
+    assert session.entry.ledger.events() == ()
+    assert not session.entry.database_path.exists()
+
+
 def test_data_save_writes_both_formats_and_resave_keeps_run_identity(
     native_session: NativeSaveSession,
 ) -> None:
