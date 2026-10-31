@@ -42,7 +42,7 @@ def ceil_tick(ticks: float) -> int:
     nearest = round(ticks)
     return (
         nearest
-        if math.isclose(ticks, nearest, rel_tol=0, abs_tol=1e-10)
+        if math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)
         else math.ceil(ticks)
     )
 
