@@ -124,6 +124,29 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
         _program(body)
 
 
+def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
+    from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    drive = TableLengthPulse("selected", PulseCfg(ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)), lengths=[7 / 384, 11 / 384], idx_reg="scan")
+
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        prog.declare(drive)
+
+    def body(prog):
+        with prog.repeat("r", 2, advance_ref=False):
+            prog.emit(drive, tag="inside")
+        prog.delay_timeline(0, tag="after")
+        prog.pulse(1, "p1", timeline="default")
+
+    prog = _program(body, initialize)
+    assert [_waves(s) for s in _shots(prog)] == [[0, 8, 16], [0, 13, 26]]
+    with pytest.raises(RuntimeError, match="runtime-only"):
+        prog.get_time_param("inside", "t", as_array=True)
+    assert prog.get_time_param("after", "t", as_array=True) * 430.08 == pytest.approx([16, 26])
+
+
 @pytest.mark.parametrize("parent", ["default", "drive"])
 def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_iteration(
     parent,
