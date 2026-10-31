@@ -329,7 +329,10 @@ class Readout:
     Cfg: TypeAlias = ReadoutCfg
 
     def __new__(
-        cls, name: str, cfg: AbsReadoutCfg, *,
+        cls,
+        name: str,
+        cfg: AbsReadoutCfg,
+        *,
         freq: float | QickParam | None = None,
         gain: float | QickParam | None = None,
         length: float | QickParam | None = None,
@@ -342,7 +345,9 @@ class Readout:
         restrictions propagate. The caller's cfg is never modified.
         """
         effective = deepcopy(cfg)
-        for knob, value in dict(freq=freq, gain=gain, length=length, ro_length=ro_length).items():
+        for knob, value in dict(
+            freq=freq, gain=gain, length=length, ro_length=ro_length
+        ).items():
             if value is not None:
                 effective.set_param(knob, value)
         return effective.build(name)
@@ -379,7 +384,9 @@ class PulseReadout(AbsReadout):
         """
         self.name = name
         self.cfg = deepcopy(cfg)
-        for knob, value in dict(freq=freq, gain=gain, length=length, ro_length=ro_length).items():
+        for knob, value in dict(
+            freq=freq, gain=gain, length=length, ro_length=ro_length
+        ).items():
             if value is not None:
                 self.cfg.set_param(knob, value)
         self.gain_val = gain_val

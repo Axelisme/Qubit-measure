@@ -92,7 +92,9 @@ class Pulse(Module):
         """
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
-        for knob, value in dict(freq=freq, gain=gain, phase=phase, length=length).items():
+        for knob, value in dict(
+            freq=freq, gain=gain, phase=phase, length=length
+        ).items():
             if value is not None:
                 if self.cfg is None:
                     raise ValueError(f"{name}: overrides require a pulse cfg")
