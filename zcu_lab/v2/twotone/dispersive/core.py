@@ -191,11 +191,12 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
 
             builder.add_loop("ge", 2)
 
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+
+                builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
-            with builder.branch(by="ge", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+            with builder.branch(by="ge", align_timeline=False) as cases, cases.case(1):
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
             builder.emit(PulseReadout("readout", cfg.readout, freq=freq_param))
             prog = builder.build()
             sched.run_acquire(prog, soc, rounds=cfg.rounds)

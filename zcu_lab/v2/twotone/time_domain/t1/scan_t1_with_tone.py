@@ -132,7 +132,9 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
                 length_sweep = cfg.length
                 length_param = builder.add_sweep("length", length_sweep)
 
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+
+                    builder.emit(cfg.reset.build("reset"))
                 builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
                 builder.emit(
                     Pulse(

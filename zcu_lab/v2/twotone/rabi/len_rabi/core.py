@@ -158,7 +158,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             length = builder.add_sweep("length", cfg.length)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
             builder.emit(Readout("readout", cfg.readout))
@@ -208,7 +209,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                         builder = TimelineBuilder(
                             context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                         )
-                        builder.emit(Reset("reset", cfg.reset))
+                        if cfg.reset is not None:
+                            builder.emit(cfg.reset.build("reset"))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
                         builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
                         builder.emit(Readout("readout", cfg.readout))
@@ -260,15 +262,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
         )
-        pi_len = fit.pi_x
-        pi_len_err = fit.pi_x_err
-        pi2_len = fit.pi2_x
-        pi2_len_err = fit.pi2_x_err
-        freq = fit.freq
-        freq_err = fit.freq_err
-        y_fit = fit.curve
-        pOpt = fit.params
-        pCov = fit.cov
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = fit.pi_x, fit.pi_x_err, fit.pi2_x, fit.pi2_x_err, fit.freq, fit.freq_err, fit.curve, fit.params, fit.cov
 
         names = ("y0", "yscale", "freq", "phase") + (
             ("decay_time",) if options.decay else ()

@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from qick import QickConfig
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -203,6 +204,45 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
+def _prepare_delays(
+    cfg: CPMG_Cfg, times: NDArray[np.int64], soccfg: QickConfig
+) -> tuple[list[SweepCfg], NDArray[np.float64]]:
+    """Round each count's total-time grid and reject intervals too short for pulses."""
+    pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
+    windows = (
+        [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
+    )
+    if len(windows) != len(times):
+        raise ValueError("Provide one delay window or one per pi-pulse count")
+    if len({window.expts for window in windows}) != 1:
+        raise ValueError("All delay windows must have the same number of points")
+    lengths = np.array(
+        [
+            sweep2array(
+                window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)}
+            )
+            for window, count in zip(windows, times, strict=True)
+        ]
+    )
+
+    # Reject timing that cannot fit the preparation and refocusing pulses.
+    min_interval = min(
+        window.start / (2 * count)
+        for window, count in zip(windows, times, strict=True)
+    )
+    if min_interval < 0.5 * (  # the first and last delays are half of the interval
+        pi2_pulse.waveform.length + pi_pulse.waveform.length
+    ):
+        raise ValueError(
+            "The interval is too short to measure the CPMG signal",
+            f"min_interval: {min_interval:.2g}, ",
+            f"pi2_pulse_length: {pi2_pulse.waveform.length:.2g}, ",
+            f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
+        )
+
+    return windows, lengths
+
+
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[CPMG_Result, CPMG_Cfg]] = CPMG_GROUPED_AXES_SPEC
 
@@ -239,37 +279,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
         times = np.array(cfg.count, dtype=np.int64)
 
-        windows = (
-            [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
-        )
-        if len(windows) != len(times):
-            raise ValueError("Provide one delay window or one per pi-pulse count")
-        if len({window.expts for window in windows}) != 1:
-            raise ValueError("All delay windows must have the same number of points")
-        lengths = np.array(
-            [
-                sweep2array(
-                    window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)}
-                )
-                for window, count in zip(windows, times, strict=True)
-            ]
-        )
+        windows, lengths = _prepare_delays(cfg, times, soccfg)
         length_idxs = np.arange(windows[0].expts, dtype=np.int64)
-
-        # Reject timing that cannot fit the preparation and refocusing pulses.
-        min_interval = min(
-            window.start / (2 * count)
-            for window, count in zip(windows, times, strict=True)
-        )
-        if min_interval < 0.5 * (  # the first and last delays are half of the interval
-            pi2_pulse.waveform.length + pi_pulse.waveform.length
-        ):
-            raise ValueError(
-                "The interval is too short to measure the CPMG signal",
-                f"min_interval: {min_interval:.2g}, ",
-                f"pi2_pulse_length: {pi2_pulse.waveform.length:.2g}, ",
-                f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
-            )
 
         # 2. Track mean IQ and the SNR used to stop averaging each decay curve.
         current_snr = 0.0
@@ -325,7 +336,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 interval = delay / (2 * time)
 
                 # Pulse starts do not consume their duration from the spacing timeline.
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(cfg.reset.build("reset"))
                 builder.fork("default", into="preparation")
                 builder.emit(Pulse("pi2_pulse", pi2_pulse), timeline="preparation")
                 builder.delay_timeline(interval - 0.5 * dpulse_len)

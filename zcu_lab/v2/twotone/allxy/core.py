@@ -261,7 +261,8 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
                     val_reg="gate_idx2",
                 )
             )
-            builder.emit(Reset("reset", cfg=cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
             builder.emit(
                 ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses)
             )

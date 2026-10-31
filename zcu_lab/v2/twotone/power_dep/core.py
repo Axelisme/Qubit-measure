@@ -133,7 +133,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
                 # Reset and initialize before each probe; read out its response.
 
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+
+                    builder.emit(cfg.reset.build("reset"))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(
                     Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param, gain=step.value)

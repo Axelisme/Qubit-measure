@@ -159,7 +159,9 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
             # 3. Let coherence evolve freely, then project with the phase ramp.
 
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+
+                builder.emit(cfg.reset.build("reset"))
             builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
             builder.emit(Delay("t2_delay", delay=length_param))
             builder.sync()
@@ -228,20 +230,10 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                     init_phase = 180.0
                 fixedparams = [None, None, None, init_phase, None]
             fit = fit_decay_fringe(lengths, real_signals, fixedparams=fixedparams)
-            t2r = fit.decay_time
-            t2rerr = fit.decay_time_err
-            detune = fit.freq
-            detune_err = fit.freq_err
-            y_fit = fit.curve
-            pOpt = fit.params
-            pCov = fit.cov
+            t2r, t2rerr, detune, detune_err, y_fit, pOpt, pCov = fit.decay_time, fit.decay_time_err, fit.freq, fit.freq_err, fit.curve, fit.params, fit.cov
         else:
             fit = fit_decay(lengths, real_signals)
-            t2r = fit.decay_time
-            t2rerr = fit.decay_time_err
-            y_fit = fit.curve
-            pOpt = fit.params
-            pCov = fit.cov
+            t2r, t2rerr, y_fit, pOpt, pCov = fit.decay_time, fit.decay_time_err, fit.curve, fit.params, fit.cov
             detune = 0.0
             detune_err = 0.0
 
