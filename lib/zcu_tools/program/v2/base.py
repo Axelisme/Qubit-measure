@@ -76,6 +76,9 @@ class MyProgramV2(  # pyright: ignore[reportIncompatibleMethodOverride]
         self.binprog["dmem"] = [int(word) for word in words]
 
     def compile(self) -> None:
+        if self.binprog is None:
+            # QICK rebuilds pulse declarations; deduplication belongs to that build.
+            self.pulse_registry = PulseRegistry()
         super().compile()
 
         pmem_len = len(self.binprog["pmem"]) if self.binprog["pmem"] is not None else 0
