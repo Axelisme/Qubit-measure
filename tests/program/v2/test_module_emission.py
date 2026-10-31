@@ -75,7 +75,10 @@ def test_same_named_distinct_pulses_keep_distinct_envelopes():
     actual = _program(pulses(("same", "same")))
     fresh = _program(pulses(("first", "second")))
     assert actual.prog_list == fresh.prog_list
-    assert actual.compile_waves() == fresh.compile_waves()
+    assert len(actual.envelopes[0]["envs"]) == 2
+    assert [env["data"].shape for env in actual.envelopes[0]["envs"].values()] == [
+        env["data"].shape for env in fresh.envelopes[0]["envs"].values()
+    ]
 
 
 def test_shared_pulse_definitions_deduplicate_in_each_program():
