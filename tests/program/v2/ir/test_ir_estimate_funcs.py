@@ -22,6 +22,7 @@ from zcu_tools.program.v2.ir.analysis import (
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
     NopInst,
+    RegWriteInst,
     TimeInst,
 )
 from zcu_tools.program.v2.ir.io_instructions import (
@@ -87,6 +88,21 @@ def test_scheduled_ticks_empty_body():
 def test_scheduled_ticks_lit_inc_ref_accumulates():
     bbs: list[IRNode] = [_time_bb(100), _time_bb(50)]
     assert estimate_body_scheduled_ticks(bbs) == 150
+
+
+def test_scheduled_ticks_counts_literal_output_pointer_increment():
+    increment = RegWriteInst.from_dict(
+        {"CMD": "REG_WR", "DST": "s14", "SRC": "op", "OP": "s14 + #40"}
+    )
+    body = BasicBlockNode(insts=[increment, TimeInst(c_op="inc_ref", lit=Immediate(10))])
+    assert estimate_body_scheduled_ticks([body]) == 50
+
+
+def test_scheduled_ticks_unknown_output_increment_contributes_zero():
+    increment = RegWriteInst.from_dict(
+        {"CMD": "REG_WR", "DST": "s14", "SRC": "op", "OP": "s14 + r2"}
+    )
+    assert estimate_body_scheduled_ticks([BasicBlockNode(insts=[increment])]) == 0
 
 
 def test_scheduled_ticks_register_driven_contributes_zero():
