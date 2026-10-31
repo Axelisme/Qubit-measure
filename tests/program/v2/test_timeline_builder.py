@@ -732,8 +732,9 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
     builder.build()
 
 
+@pytest.mark.parametrize("extra_post_cycles", [0, 1])
 def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
-    mock_soccfg,
+    mock_soccfg, extra_post_cycles,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, reps=2, initial_delay=0, relax_delay=0)
     frequency = builder.add_sweep(
@@ -758,7 +759,9 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                             freq=100,
                             gain=0.5,
                             waveform=ConstWaveformCfg(length=0.1),
-                            post_delay=4.3 / 430.08,
+                            post_delay=(
+                                4.3 + (extra_post_cycles if name == "drive" and ch == 1 else 0)
+                            ) / 430.08,
                         ),
                         length=length,
                         freq=frequency,
@@ -770,7 +773,9 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
     prog = builder.build()
     # Each aggregate rounds the physical tail plus post once. These nine
     # drive ends retain their fractional generator/tProc clock relationship.
-    drive_ends = [84, 164, 243, 323, 402, 482, 561, 641, 720]
+    drive_ends = [
+        end + extra_post_cycles for end in [84, 164, 243, 323, 402, 482, 561, 641, 720]
+    ]
     expected_waves = [[0, 0, 91, 91, 91 + end, 91 + end] for end in drive_ends]
     expected_ends = [182 + end for end in drive_ends]
     for _ in range(2):
