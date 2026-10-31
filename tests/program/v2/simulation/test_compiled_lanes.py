@@ -127,8 +127,8 @@ def test_branch_selected_address_does_not_hide_a_carried_memory_word():
 
     def body(p):
         with p.branch(by="scan") as branch:
-            for _ in range(2):
-                with branch.case():
+            for index in range(2):
+                with branch.case(index):
                     p.write_reg("address", 17)
         p.read_dmem("value", "address")
         p.inc_reg("value", 1)
@@ -232,7 +232,7 @@ def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
     def body(p):
         with p.branch(by="scan") as branch:
             for case in range(2):
-                with branch.case(), p.repeat(f"reads_{case}", 2):
+                with branch.case(case), p.repeat(f"reads_{case}", 2):
                     p.trigger([0], t=0)
                     p.pulse(0, "p", timeline="default")
                     p.delay_timeline(case * 43 / 430.08)

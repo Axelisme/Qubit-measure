@@ -10,10 +10,15 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import QickParam, QickSweep1D
+from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program import v2
+from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program.v2.timing_support import shots, waves
 
 
 def _readout(name="read", *, gain: float | QickParam = 0.5):
@@ -62,8 +67,6 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(mock_s
     expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
     assert actual.prog_list == expected.prog_list
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
-    from tests.program.v2.timing_support import shots, waves
-
     assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == [
         0, 43, 0, 86
@@ -86,6 +89,65 @@ def test_indexed_branch_rejects_duplicate_and_out_of_range_points(
 
     with pytest.raises(ValueError, match=message):
         _compile_scoped(mock_soccfg, frontend, body, loops=(("scan", 2),))
+
+
+@pytest.mark.parametrize("heralded", [False, True])
+@pytest.mark.parametrize("reset", [False, True])
+def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
+    heralded, reset
+):
+    soccfg = make_mux_mock_soccfg(3, 2, gen_ch=0, ro_chs=(0, 1))
+    builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=1)
+    builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
+    builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
+    x180_f1, x180_f2 = _pulse("x180_f1", 1), _pulse("x180_f2", 2)
+    readout = MuxReadoutCfg(
+        gen_ch=0,
+        nqz=1,
+        mixer_freq=1000,
+        length=0.1,
+        ro_length=0.2,
+        post_delay=0.05,
+        tones=[
+            MuxReadoutTone(ro_ch=0, freq=1000, gain=0.1),
+            MuxReadoutTone(ro_ch=1, freq=1080, gain=0.1),
+        ],
+    ).build("readout")
+    if reset:
+        builder.emit(TwoPulseResetCfg(
+            pulse1_cfg=v2.PulseCfg(ch=1, nqz=1, freq=100, gain=0.5,
+                waveform=ConstWaveformCfg(length=0.1)),
+            pulse2_cfg=v2.PulseCfg(ch=2, nqz=1, freq=100, gain=0.5,
+                waveform=ConstWaveformCfg(length=0.1)),
+        ).build("reset"))
+    if heralded:
+        builder.emit(readout, tag="herald")
+    # wait for herald/reset to finish before the branch-selected preparation
+    builder.sync()
+    builder.fork("default", into=["f1", "f2"])
+    with builder.timeline("f1"):
+        with builder.branch(by="prepared_f1") as cases:
+            with cases.case(1):
+                builder.emit(x180_f1)
+    with builder.timeline("f2"):
+        with builder.branch(by="prepared_f2") as cases:
+            with cases.case(1):
+                builder.emit(x180_f2)
+    builder.join("f1", "f2", into="default")
+    builder.emit(readout, tag="terminal")
+    prog = builder.build()
+    print(f"heralded={heralded} reset={reset} data_registers={len(prog.reg_dict)}")
+    drive_ports = {soccfg["gens"][ch]["tproc_ch"] for ch in (1, 2)}
+    scheduled = shots(prog)
+    drives = [
+        [event for event in shot.events if event.kind == "wave" and event.port in drive_ports]
+        for shot in scheduled
+    ]
+    assert [len(events) for events in drives] == [
+        2 * int(reset), 2 * int(reset) + 1, 2 * int(reset) + 1, 2 * int(reset) + 2
+    ]
+    # Both selected preparations must start together, after the optional prefix.
+    assert drives[-1][-2].cycle == drives[-1][-1].cycle
 
 
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
@@ -167,10 +229,10 @@ def test_builder_branch_reference_advances_inside_repeat_match_native(mock_soccf
     builder.add_loop("scan", 2)
     readout = _readout()
     with builder.repeat("pairs", 2), builder.branch(by="scan") as branch:
-        with branch.case():
+        with branch.case(0):
             builder.emit(readout)
             builder.delay(0.1)
-        with branch.case():
+        with branch.case(1):
             builder.delay_timeline(0.4)
             builder.sync()
             builder.emit(readout)
@@ -185,10 +247,10 @@ def test_builder_branch_reference_advances_inside_repeat_match_native(mock_soccf
 
         def _body(self, cfg):
             with self.repeat("pairs", 2), self.branch(by="scan") as branch:
-                with branch.case():
+                with branch.case(0):
                     self.emit(readout)
                     self.delay(0.1)
-                with branch.case():
+                with branch.case(1):
                     self.delay_timeline(0.4)
                     self.sync()
                     self.emit(readout)
@@ -248,7 +310,7 @@ def test_builder_build_requires_closed_recording_contexts(mock_soccfg, structure
         with pytest.raises(ValueError, match="(open|close|context)"):
             builder.build()
         if branch is not None:
-            with branch.case():
+            with branch.case(0):
                 builder.delay_timeline(0.1)
         else:
             builder.delay_timeline(0.1)
@@ -278,10 +340,10 @@ def _invalid_structure(
     elif scenario == "duplicate-fork":
         program.fork("default", into=["same", "same"])
     elif scenario == "selector":
-        with program.branch(by="measurement") as branch, branch.case():
+        with program.branch(by="measurement") as branch, branch.case(0):
             program.delay(0.1)
-    elif scenario == "case-count":
-        with program.branch(by="scan") as branch, branch.case():
+    elif scenario == "case-index":
+        with program.branch(by="scan") as branch, branch.case(2):
             program.delay(0.1)
     else:
         raise ValueError(f"unknown scenario: {scenario}")
@@ -297,7 +359,7 @@ def _invalid_structure(
         ("unknown-join", "missing: unknown timeline"),
         ("duplicate-fork", "new, distinct"),
         ("selector", "selector"),
-        ("case-count", "one case per selector point"),
+        ("case-index", "branch case index"),
     ],
 )
 def test_builder_structure_errors_propagate_program_messages_at_build(
@@ -398,15 +460,15 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
 def test_builder_case_handle_rejects_overlap_and_expires_on_exit(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg)
     builder.add_loop("scan", 1)
-    with builder.branch(by="scan") as branch, branch.case():
-        with pytest.raises(ValueError, match="overlap"), branch.case():
+    with builder.branch(by="scan") as branch, branch.case(0):
+        with pytest.raises(ValueError, match="overlap"), branch.case(0):
             pass
         with builder.repeat("body", 2):
             builder.delay_timeline(0.1)
-    with pytest.raises(ValueError, match="open"), branch.case():
+    with pytest.raises(ValueError, match="open"), branch.case(0):
         pass
     assert builder.build().prog_list
-    with pytest.raises(ValueError, match="frozen"), branch.case():
+    with pytest.raises(ValueError, match="frozen"), branch.case(0):
         pass
 
 
@@ -895,10 +957,10 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
         with program.timeline("work"):
             program.delay_timeline(0.1)
             with program.repeat("body", 2), program.branch(by="scan") as branch:
-                with branch.case():
+                with branch.case(0):
                     program.emit(readout)
                     program.delay(0.02)
-                with branch.case():
+                with branch.case(1):
                     program.delay_timeline(0.3)
                     program.sync()
                     program.emit(readout, timeline=None)
@@ -918,10 +980,10 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
                 self.repeat("body", 2, timeline="work"),
                 self.branch(by="scan") as branch,
             ):
-                with branch.case():
+                with branch.case(0):
                     self.emit(readout, timeline="work")
                     self.delay(0.02)
-                with branch.case():
+                with branch.case(1):
                     self.delay_timeline(0.3, timeline="work")
                     self.sync(timeline="work")
                     self.emit(readout, timeline="work")
@@ -969,9 +1031,9 @@ def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
         program.fork("default", into="work")
         program.delay_timeline(0.5, timeline="work")
         with program.timeline("work"), program.branch(by="scan") as branch:
-            with branch.case(), program.timeline("work"):
+            with branch.case(0), program.timeline("work"):
                 pass
-            with branch.case():
+            with branch.case(1):
                 program.emit(pause, timeline="default")
         program.sync(timeline="default")
         program.join("work", into="default")
@@ -985,9 +1047,9 @@ def test_empty_timeline_scopes_do_not_fork_join_or_close_branch_ends(
             self.fork("default", into="work")
             self.delay_timeline(0.5, timeline="work")
             with self.branch(by="scan") as branch:
-                with branch.case():
+                with branch.case(0):
                     pass
-                with branch.case():
+                with branch.case(1):
                     self.emit(pause, timeline="default")
             self.sync(timeline="default")
             self.join("work", into="default")
@@ -1008,13 +1070,13 @@ def test_builder_timeline_between_branch_and_cases_matches_native(mock_soccfg):
     builder.fork("default", into="work")
     builder.delay_timeline(0.3, timeline="work")
     with builder.branch(by="scan") as branch:
-        with builder.timeline("work"), branch.case():
+        with builder.timeline("work"), branch.case(0):
             builder.emit(pause)
             builder.emit(pause, timeline="default")
             with builder.timeline("default"):
                 builder.emit(pause)
             builder.emit(pause)
-        with branch.case():
+        with branch.case(1):
             builder.emit(pause)
     builder.emit(pause)
     actual = builder.build()
@@ -1029,12 +1091,12 @@ def test_builder_timeline_between_branch_and_cases_matches_native(mock_soccfg):
             self.fork("default", into="work")
             self.delay_timeline(0.3, timeline="work")
             with self.branch(by="scan") as branch:
-                with branch.case():
+                with branch.case(0):
                     self.emit(self.pause, timeline="work")
                     self.emit(self.pause, timeline="default")
                     self.emit(self.pause, timeline="default")
                     self.emit(self.pause, timeline="work")
-                with branch.case():
+                with branch.case(1):
                     self.emit(self.pause, timeline="default")
             self.emit(self.pause, timeline="default")
 

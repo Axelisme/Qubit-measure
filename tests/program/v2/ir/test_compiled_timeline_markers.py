@@ -116,9 +116,9 @@ def test_timeline_branch_preserves_order_compare_register_and_body_shell_boundar
 
         def _body(self, cfg: None) -> None:
             with self.branch(by="selector") as branch:
-                with branch.case():
+                with branch.case(0):
                     self.delay_timeline(0.1)
-                with branch.case():
+                with branch.case(1):
                     self.delay_timeline(0.2)
             self.wait(t=0.3)
 

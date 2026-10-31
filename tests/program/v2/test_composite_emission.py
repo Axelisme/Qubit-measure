@@ -259,7 +259,7 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
     def body(prog):
         with prog.repeat("twice", 2), prog.branch(by="path") as branch:
             for index in (0, 1):
-                with branch.case():
+                with branch.case(index):
                     prog.write_reg("index", index)
                     prog.emit(pulse)
 
@@ -490,8 +490,8 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         prog.delay_timeline("origin", timeline="default")
         prog.emit(pulse)
         with prog.branch(by="path") as branch:
-            for amount in (60, 59):
-                with branch.case():
+            for index, amount in enumerate((60, 59)):
+                with branch.case(index):
                     prog.delay_timeline(amount / 430.08, timeline="default")
         prog.emit(following)
 
@@ -688,9 +688,9 @@ def _change_selection(prog, loader, other, change):
         prog.append_macro(_OverwriteSelected())
     elif change == "constant_branch":
         with prog.branch(by="path") as branch:
-            with branch.case():
+            with branch.case(0):
                 prog.write_reg("length", 89)
-            with branch.case():
+            with branch.case(1):
                 pass
     elif change == "constant_backedge":
         with prog.repeat("overwrite", 2):

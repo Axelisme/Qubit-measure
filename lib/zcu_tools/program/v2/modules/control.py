@@ -201,8 +201,8 @@ class Branch(Module):
         Invalid selectors, timelines and child lowering failures propagate.
         """
         with prog.branch(by=self.compare_reg) as cases:
-            for branch in self.branches:
-                with cases.case():
+            for index, branch in enumerate(self.branches):
+                with cases.case(index):
                     for mod in branch:
                         prog.emit(mod, timeline=timeline)
 

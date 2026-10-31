@@ -209,7 +209,7 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
         prog.delay_timeline(100 / 430.08, timeline="external")
         with prog.branch(by="scan") as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((10 + 10 * i) / 430.08)
                     prog.pulse(0, "p0", timeline="default")
         prog.join("external", into="default")
@@ -225,7 +225,7 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
     def body(prog):
         with prog.branch(by="scan") as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     if i == 1:
                         prog.fork("default", into="local")
                         prog.delay_timeline(20 / 430.08, timeline="local")
@@ -241,8 +241,8 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
 def test_branch_local_names_expire_even_when_every_case_forks_same_name():
     def body(prog):
         with prog.branch(by="scan") as branch:
-            for _ in range(3):
-                with branch.case():
+            for index in range(3):
+                with branch.case(index):
                     prog.fork("default", into="local")
         prog.delay_timeline(0, timeline="local")
 
@@ -267,7 +267,7 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
             prog.branch(by="scan") as branch,
         ):
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((5 + 5 * i) / 430.08)
 
     result = shots(program(body, reps=2))
@@ -297,8 +297,8 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
         prog.fork("default", into="external")
         prog.delay_timeline(100 / 430.08, timeline="external")
         with prog.repeat("r", 2), prog.branch(by="scan") as branch:
-            for _ in range(3):
-                with branch.case():
+            for index in range(3):
+                with branch.case(index):
                     prog.delay_timeline(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
         prog.delay_timeline(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")
@@ -316,7 +316,7 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
     def body(prog):
         with prog.repeat("r", 2), prog.branch(by="scan") as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.pulse(0, "p0", timeline="default")
                     if i == 2:
                         prog.pulse(0, "p0", t=35 / 430.08)
@@ -353,7 +353,7 @@ def test_long_pulse_crosses_branch_without_conservative_shell_padding():
         prog.pulse(1, "p1", timeline="external")
         with prog.branch(by="scan") as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     prog.delay_timeline((5 + 5 * i) / 430.08)
 
     result = shots(program(body))
@@ -492,7 +492,7 @@ def test_unregistered_translate_writer_invalidates_constant_time_proof(location)
         elif location == "case":
             with prog.branch(by="scan") as branch:
                 for i in range(3):
-                    with branch.case():
+                    with branch.case(i):
                         if i == 1:
                             prog.append_macro(OverwriteTime())
         elif location == "backedge":
@@ -525,7 +525,7 @@ def test_wait_only_source_rejects_register_delay_but_derived_target_works(contro
         else:
             with prog.branch(by="scan") as branch:
                 for i in range(3):
-                    with branch.case():
+                    with branch.case(i):
                         prog.delay_timeline((10 + 10 * i) / 430.08)
         prog.fork("external", into="derived")
         prog.delay_timeline("duration", timeline="derived")
@@ -556,7 +556,7 @@ def test_time_producer_must_be_initialized_on_every_branch_path():
     def body(prog):
         with prog.branch(by="scan") as branch:
             for i in range(3):
-                with branch.case():
+                with branch.case(i):
                     if i != 1:
                         prog.write_reg("duration", 10)
         prog.delay_timeline("duration")
@@ -641,7 +641,7 @@ def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
         elif where == "branch":
             with prog.branch(by="scan") as branch:
                 for i in range(3):
-                    with branch.case():
+                    with branch.case(i):
                         prog.write_reg("duration", 3 if i == 2 else 0)
                         lookup(prog)
         else:
