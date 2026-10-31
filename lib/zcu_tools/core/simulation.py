@@ -128,6 +128,18 @@ class TimeBase:
             return result
         return (int(ticks) * scale) / self.ticks_per_us.numerator
 
+    def seconds(self, total_ticks: int) -> float:
+        """Convert an aggregate integer tick count to seconds, rounding once.
+
+        total_ticks is a built-in int, including sums over points and reps that
+        exceed int64 or the per-request ns range. TypeError rejects other types.
+        Python rational arithmetic preserves the total before float conversion;
+        OverflowError propagates if seconds cannot be represented by float64.
+        """
+        if type(total_ticks) is not int:
+            raise TypeError("total_ticks must be a built-in integer")
+        return float(Fraction(total_ticks, 1_000_000) / self.ticks_per_us)
+
     def validate_ticks(self, ticks: int | np.int64 | NDArray[np.int64]) -> None:
         """Validate integer ticks against int64 and exact ns-numerator bounds.
 
