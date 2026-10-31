@@ -116,11 +116,6 @@ class TimelineRuntimeAdvance(Macro):
         self.source = source
 
     def preprocess(self, prog) -> None:
-        if self.book.repeats:
-            raise ValueError(
-                "repeat per-iteration reference advance cannot be expressed at compile time "
-                "when using a runtime register delay"
-            )
         auto = self.book.channel_maximum(
             prog, gens=self.source.gens, ros=self.source.ros
         )
@@ -136,7 +131,11 @@ class TimelineRuntimeAdvance(Macro):
         if isinstance(auto, RuntimeEnd):
             self.source.t_regs["auto_t"] = auto.register
         remaining = [
-            self.book.math.floor(end, advance) for end in self.book.ends.values()
+            self.book.math.floor(end, advance)
+            for end in [
+                *self.book.ends.values(),
+                *(end for frame in [*self.book.repeats, *self.book.loop_timelines] for end in frame.external.values()),
+            ]
         ]
         if all(
             not isinstance(end, RuntimeEnd) and _bounds(end)[1] <= 1e-12
