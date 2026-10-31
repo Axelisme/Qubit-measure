@@ -57,14 +57,16 @@ class _RecordedProgram(TimelineProgramV2):
 class BuilderBranchCases:
     """Recording handle yielded by TimelineBuilder.branch, not a runtime selector.
 
-    Use case() once per point of the selected sweep, in point order. Record body
+    Use case(index) for selected zero-based sweep points, in any order. Record body
     operations on the originating builder inside each case. Handles are valid
     only inside their branch context; cases cannot overlap on the same handle.
-    Timeline selection, timing and case-count validation belong to the program
+    Timeline selection, timing and index validation belong to the program
     compiler at build, not this handle.
     """
 
-    def __init__(self, record_case: Callable[[], AbstractContextManager[None]]) -> None:
+    def __init__(
+        self, record_case: Callable[[int], AbstractContextManager[None]]
+    ) -> None:
         """Use record_case to open a case; normally yielded by builder.branch().
 
         The callback captures operations on its builder and enforces recording
@@ -72,13 +74,15 @@ class BuilderBranchCases:
         """
         self._record_case = record_case
 
-    def case(self) -> AbstractContextManager[None]:
-        """Record the next sweep point's body; nesting cases raises ValueError.
+    def case(self, index: int) -> AbstractContextManager[None]:
+        """Record a zero-based sweep point's body; omitted points do nothing.
 
-        Record through the owning builder. Calls after branch exit or build
-        raise ValueError. Nested branch/repeat structures remain allowed.
+        Record through the owning builder. Duplicate, non-integer and out-of-range
+        indices raise ValueError at build. Calls after branch exit or build,
+        and overlapping cases, raise ValueError immediately.
+        Nested branch/repeat structures remain allowed.
         """
-        return self._record_case()
+        return self._record_case(index)
 
 
 class TimelineBuilder:
@@ -211,10 +215,10 @@ class TimelineBuilder:
     def branch(self, *, by: str) -> AbstractContextManager[BuilderBranchCases]:
         """Record sweep-selected cases without equal-duration padding.
 
-        by names an existing sweep loop. The yielded handle's case() records one
-        body per sweep point, in order. Each case closes only used/local ends;
+        by names an existing sweep loop. The yielded handle's case(index) records
+        a zero-based point, in any order. Omitted points execute no actions. Each case closes only used/local ends;
         local names expire at its exit and differing external ends stay
-        wait-only. Unknown selectors, wrong case counts and timeline errors
+        wait-only. Unknown selectors, invalid indices and timeline errors
         propagate from the program at build. Calls after build raise ValueError.
         Close this context before build; its handle expires on exit.
         """
@@ -224,7 +228,7 @@ class TimelineBuilder:
     @contextmanager
     def _branch(self, by: str) -> Generator[BuilderBranchCases]:
         self._ensure_recording()
-        cases: list[tuple[str | None, tuple[_Action, ...]]] = []
+        cases: list[tuple[int, str | None, tuple[_Action, ...]]] = []
         is_open = True
         case_active = False
 
@@ -236,7 +240,7 @@ class TimelineBuilder:
                 raise ValueError("branch.case cannot overlap another case")
 
         @contextmanager
-        def capture_case() -> Generator[None]:
+        def capture_case(index: int) -> Generator[None]:
             nonlocal case_active
             ensure_case()
             case_active = True
@@ -245,13 +249,13 @@ class TimelineBuilder:
                 with self._capture() as case_actions:
                     yield
                 # Cases replay separately from the branch's surrounding actions.
-                cases.append((timeline, tuple(case_actions)))
+                cases.append((index, timeline, tuple(case_actions)))
             finally:
                 case_active = False
 
-        def record_case() -> AbstractContextManager[None]:
+        def record_case(index: int) -> AbstractContextManager[None]:
             ensure_case()
-            return capture_case()
+            return capture_case(index)
 
         try:
             with self._capture() as actions:
@@ -265,9 +269,9 @@ class TimelineBuilder:
             with prog.branch(by=by) as branch:
                 for action in recorded:
                     action(prog)
-                for timeline, case in recorded_cases:
+                for index, timeline, case in recorded_cases:
                     with (
-                        branch.case(),
+                        branch.case(index),
                         nullcontext() if timeline is None else prog.timeline(timeline),
                     ):
                         for action in case:
