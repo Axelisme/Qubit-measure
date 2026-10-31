@@ -513,8 +513,65 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
     return min(candidates, key=lambda weight: (len(_csd(weight)), weight))
 
 
+class EventTime(Macro):
+    """Write one runtime event time to the transient s14 output register.
+
+    base names a captured runtime origin in integer tProc cycles. offset is an
+    integer tProc-cycle displacement or a RuntimeEnd holding that displacement.
+    expression proves the same base + offset event time in relative tProc
+    cycles; it is compile-time provenance, not another runtime calculation.
+
+    Translation compares expression with TimelineBook.output_time. A proven
+    constant difference updates s14 by that amount, or emits nothing for zero;
+    otherwise it loads base + offset. It then caches expression as output_time.
+    Native/raw s14 writes and branch flow invalidate that cache. Timeline event
+    self-copies leave it valid. s14 does not own persistent timeline storage:
+    consumers must capture ends before a later operation can overwrite it.
+    """
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
+
+    def __init__(
+        self, base: RuntimeEnd, offset: RuntimeEnd | int, expression: TimeExpression
+    ):
+        self.base = base
+        self.offset = offset
+        self.expression = expression
+
+    def translate(self, prog) -> None:
+        book = prog._timeline_book
+        previous = book.output_time
+        delta = (
+            None if previous is None else difference_limits(self.expression, previous)
+        )
+        if delta is not None and delta[0] == delta[1] and delta[0] is not None:
+            amount = int(delta[0])
+            if amount:
+                WriteRegOp(
+                    dst="s_out_time", lhs="s_out_time", op="+", rhs=amount
+                ).translate(prog)
+        elif self.offset == 0:
+            WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
+        else:
+            WriteRegOp(
+                dst="s_out_time",
+                lhs=self.base.register,
+                op="+",
+                rhs=self.offset.register
+                if isinstance(self.offset, RuntimeEnd)
+                else self.offset,
+            ).translate(prog)
+        book.output_time = self.expression
+
+
 class RuntimeMath(TimedMacro):
     """Prepare integer cycle arithmetic and conditional candidate selection."""
+
+    def __repr__(self) -> str:
+        # QICK eagerly formats macros even when debug logging is disabled.
+        return f"{type(self).__name__}()"
 
     def __init__(self, prog):
         super().__init__()
@@ -525,6 +582,31 @@ class RuntimeMath(TimedMacro):
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
+
+    def event_time(self, base: RuntimeEnd, offset: float | QickParam) -> RuntimeEnd:
+        """Place a runtime event in s14 without allocating event-time storage.
+
+        The returned operand is transient. Capture any persistent timeline end
+        before another event or native macro can overwrite the output register.
+        Native sweep offsets retain their QICK time registers.
+        """
+        operand = (
+            self.cycles(offset)
+            if isinstance(offset, QickParam) and offset.is_sweep()
+            else round(
+                (offset.start if isinstance(offset, QickParam) else offset)
+                * get_fclk(self.prog)
+            )
+        )
+        result = self.op(
+            base,
+            "+",
+            operand,
+            limits=self._sum_limits(base, operand),
+            target="s_out_time",
+        )
+        self.operations[-1] = EventTime(base, operand, result.expression)
+        return result
 
     def native_end(
         self, aggregate: float | QickParam, native: NativeLength

@@ -155,7 +155,7 @@ class Branch(Module):
     in order on each implicit case timeline. align_timeline=True joins case ends
     into the emission parent, using static max or exact runtime pointwise max. Reference does
     not advance and no wait is inserted. Later emissions resume at the joined
-    end. Reference-moving children fail at build, including explicit sync or
+    end. Reference-moving children fail at build, including explicit delay_by_timeline or
     native delay inside Repeat. Accumulating Repeat scopes are allowed.
     Measurement feedback is not supported.
 

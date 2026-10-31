@@ -170,8 +170,8 @@ class TestStrictParsing:
         inst = WaitInst(c_op="time", addr=Register("s15"))
         assert inst.addr == Register("s15")
 
-    def test_time_inc_ref_reg_read_includes_s14(self):
-        assert TimeInst(c_op="inc_ref").reg_read == frozenset({"s14"})
+    def test_time_inc_ref_has_no_register_operand_reads(self):
+        assert TimeInst(c_op="inc_ref").reg_read == frozenset()
 
     def test_from_dict_rejects_unknown_time_string(self):
         with pytest.raises(ValueError, match="WAIT.TIME"):
