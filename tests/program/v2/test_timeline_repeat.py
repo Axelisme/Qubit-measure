@@ -1067,6 +1067,9 @@ def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
 @pytest.mark.parametrize("tail_sync", [False, True])
 @pytest.mark.parametrize("external_end", [0, 100])
 def test_repeat_allows_native_register_reference_advance(tail_sync, external_end):
+    def initialize(prog):
+        prog.add_reg("count")
+
     def body(prog):
         with prog.time_producer("count", CycleBounds(3, 3)):
             prog.write_reg("count", 3)
@@ -1080,7 +1083,7 @@ def test_repeat_allows_native_register_reference_advance(tail_sync, external_end
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
 
-    prog = _program(body, _register_initialize)
+    prog = _program(body, initialize)
     (shot,) = _shots(prog)
     # Each iteration consumes the 28-cycle native end plus count=3 cycles.
     final_start = 100 if external_end else 62
