@@ -79,6 +79,7 @@ class ProducerBounds:
         self.selected: dict[str, TableSelection] = {}
         self.signed_sources: set[str] = set()
         self.author_writes: set[str] = set()
+        self.framework_sources: set[str] = set()
 
     def author_source(self, name: str) -> bool:
         """Return whether a register has no certified range or arbitrary writes."""
@@ -117,7 +118,10 @@ class ProducerBounds:
             self.author_writes.add(macro.dst)
         if type(macro) is WriteReg and isinstance(macro.src, Integral):
             value = int(macro.src)
-            self.register(macro.dst, CycleBounds(value, value), (macro,), ())
+            # Native constants provide bounds, not framework ownership. Authors
+            # may overwrite them with their own arithmetic or memory reads.
+            self.ranges.setdefault(macro.dst, []).append(CycleBounds(value, value))
+            self.allowed.setdefault(id(macro), set()).add(macro.dst)
 
     def register(
         self,
@@ -133,6 +137,7 @@ class ProducerBounds:
         must themselves have known producers. The owner guarantees these bounds
         across its entire operation, including lookup/word conversion steps.
         """
+        self.framework_sources.add(name)
         self.ranges.setdefault(name, []).append(limits)
         self.dependencies.setdefault(name, set()).update(dependencies)
         if dependency_ranges is not None:

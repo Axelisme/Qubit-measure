@@ -523,7 +523,11 @@ class RuntimeMath(TimedMacro):
             except KeyError as exc:
                 raise ValueError(f"{name}: unknown time register") from exc
             if range_hint is not None:
-                if name in self.prog._time_bounds.ranges or name in self.prog.loop_dict:
+                if (
+                    name in self.prog._time_bounds.framework_sources
+                    or not self.prog._time_bounds.author_source(name)
+                    or name in self.prog.loop_dict
+                ):
                     # A hint supplies bounds, not permission to bypass owner audits.
                     self.prog._time_bounds.source(self.prog, name)
                 limits = CycleBounds(*range_hint)
