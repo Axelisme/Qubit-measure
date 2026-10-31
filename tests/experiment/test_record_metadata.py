@@ -281,6 +281,27 @@ def test_native_round_trip_preserves_author_metadata(tmp_path: Path) -> None:
     assert load(second).docs["metadata"] == document
 
 
+@pytest.mark.parametrize("initial", ["empty", "device_only", "missing_completion"])
+def test_native_save_requires_complete_metadata_before_io(
+    tmp_path: Path, initial: str
+) -> None:
+    complete = historical_metadata().model_dump(mode="json")
+    document: JsonObject = {}
+    if initial == "device_only":
+        document["device_snapshot"] = complete["device_snapshot"]
+    elif initial == "missing_completion":
+        document = {key: value for key, value in complete.items() if key != "completion"}
+    record = experiment.RunRecord(
+        ConfigBase(), Signal(np.array([4000.0]), np.array([1j])), metadata=document
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        experiment.save_run(record, tmp_path / "not-created" / "run.h5", spec=declaration())
+    assert list(tmp_path.iterdir()) == []
+    record.metadata.update(complete)
+    experiment.save_run(record, tmp_path / "complete.h5", spec=declaration())
+    assert load(tmp_path / "complete.h5").docs["metadata"] == complete
+
+
 def test_native_save_requires_record_metadata(tmp_path: Path) -> None:
     record = experiment.RunRecord(
         ConfigBase(),
