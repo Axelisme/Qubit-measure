@@ -17,7 +17,7 @@ from zcu_tools.gui.session.device_models import (
     SetupDeviceRequest,
 )
 from zcu_tools.gui.session.events import DeviceChangedPayload
-from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, OperationKind
+from zcu_tools.gui.session.ports import BackgroundAdmissionClosedError, BackgroundError, OperationKind
 from zcu_tools.gui.session.state import DeviceStatus
 
 from tests.gui._completion_helpers import on_device_disconnected
@@ -110,7 +110,7 @@ class _DeferredPollBackground:
         *,
         run_in_pool: bool,
         on_done: Callable[[Any], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if not run_in_pool:
             self.background.submit(
@@ -122,8 +122,7 @@ class _DeferredPollBackground:
         self.submitted = True
         try:
             result = work()
-        # tolerated: Match BackgroundExecutor's open work-failure contract and defer the original error.
-        except Exception as exc:  # noqa: BLE001
+        except (Exception, KeyboardInterrupt) as exc:
             self._delivery = lambda exc=exc: on_error(exc)
         else:
             self._delivery = lambda result=result: on_done(result)

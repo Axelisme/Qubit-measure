@@ -430,5 +430,6 @@ def test_script_cancel_preserves_real_operation_failure(tmp_path: Path) -> None:
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert snapshot.outcome.runs[0].status == "failed"
+        assert snapshot.outcome.runs[0].stop_requested
     finally:
         client.context.session.close()
