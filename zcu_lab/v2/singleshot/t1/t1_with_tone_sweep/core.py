@@ -283,7 +283,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         a SweepCfg or explicit lengths; invalid or non-positive lengths fail
         before acquisition. Classification uses the first readout tone's circle classifier.
         """
-        # 1. Resolve the outer scan and quantize positive probe durations.
+        # Copy the cfg and select the classifier before dispatching acquisition.
         cfg = deepcopy(cfg)
         pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
@@ -295,23 +295,23 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         axis = Classify(
             "readout", tone=None if pulse_readout else 0, classifier=classifier
         )
-        soc, soccfg = context.soc, context.soccfg
         if cfg.uniform:
-            length_sweep = cfg.length
-            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
-            lengths = sweep2array(
-                length_sweep,
-                "time",
-                {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
-            )
-        else:
-            sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
-            lengths = materialize_nonuniform_t1_pulse_lengths(
-                cfg.length,
-                soccfg=soccfg,
-                gen_ch=cfg.probe_pulse.ch,
-            )
+            return self._run_uniform(cfg, axis, context=context)
+        return self._run_non_uniform(cfg, axis, context=context)
+
+    def _run_uniform(
+        self, cfg: T1WithToneSweepCfg, axis: Classify, *, context: RunContext
+    ) -> T1WithToneSweepResult:
+        """Acquire linearly spaced probe lengths with on-board GE/length loops."""
+        soc, soccfg = context.soc, context.soccfg
+        length_sweep = cfg.length
+        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
+        )
         _require_positive_lengths(lengths)
 
         # 2. Display populations for both preparations and the current scan row.
@@ -344,11 +344,89 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):
-                if cfg.uniform:
-                    inner_length_sweep = step.cfg.length
-                    assert isinstance(inner_length_sweep, SweepCfg), (
-                        "uniform mode requires SweepCfg"
+                inner_length_sweep = step.cfg.length
+                assert isinstance(inner_length_sweep, SweepCfg), (
+                    "uniform mode requires SweepCfg"
+                )
+                step.cfg.probe_pulse.set_param(sweep_name, value)
+                current_index = value_idx
+
+                # Read out at each actual probe end, without longest-point padding.
+                builder = (
+                    step.prog_builder(
+                        soc,
+                        soccfg,
+                        reps=step.cfg.reps,
+                        relax_delay=step.cfg.relax_delay,
                     )
+                    .add(
+                        Reset("reset", step.cfg.reset),
+                        Branch("ge", [], Pulse("pi_pulse", step.cfg.pi_pulse)),
+                        TableLengthPulse(
+                            "probe_pulse",
+                            step.cfg.probe_pulse,
+                            lengths=lengths,
+                            idx_reg="length",
+                        ),
+                        Readout("readout", step.cfg.readout),
+                    )
+                    .declare_sweep("ge", 2)
+                    .declare_sweep("length", len(lengths))
+                )
+                program = builder.build()
+                builder.run_program_summed(
+                    program,
+                    processor=shot_sums(program, [axis]),
+                    sums2signal_fn=lambda sums: sums,
+                    rounds=cfg.rounds,
+                )
+
+        # 4. Keep cumulative counts, including partial rows, in saved-axis order.
+        return T1WithToneSweepResult(xs=xs, lengths=lengths, counts=buffer.array)
+
+    def _run_non_uniform(
+        self, cfg: T1WithToneSweepCfg, axis: Classify, *, context: RunContext
+    ) -> T1WithToneSweepResult:
+        """Acquire materialized non-uniform probe lengths with on-board GE/length loops."""
+        soc, soccfg = context.soc, context.soccfg
+        sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
+        lengths = materialize_nonuniform_t1_pulse_lengths(
+            cfg.length,
+            soccfg=soccfg,
+            gen_ch=cfg.probe_pulse.ch,
+        )
+        _require_positive_lengths(lengths)
+
+        # 2. Display populations for both preparations and the current scan row.
+        gg_2d, ge_2d, go_2d, eg_2d, ee_2d, eo_2d, g_1d, e_1d = self._make_viewers(
+            context.plots, sweep_name
+        )
+        current_index = 0
+
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
+            i = current_index
+
+            gg_2d.update(xs, lengths, populations[:, 0, :, 0])
+            ge_2d.update(xs, lengths, populations[:, 0, :, 1])
+            go_2d.update(xs, lengths, populations[:, 0, :, 2])
+            g_1d.update(lengths, populations[i, 0].T)
+            eg_2d.update(xs, lengths, populations[:, 1, :, 0])
+            ee_2d.update(xs, lengths, populations[:, 1, :, 1])
+            eo_2d.update(xs, lengths, populations[:, 1, :, 2])
+            e_1d.update(lengths, populations[i, 1].T)
+
+        buffer = SignalBuffer(
+            (len(xs), 2, len(lengths), 3),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+
+        # 3. Scan gain/frequency on the host; GE and length loops run on-board.
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            for value_idx, (value, step) in enumerate(
+                sched.scan(sweep_name, xs.tolist())
+            ):
                 step.cfg.probe_pulse.set_param(sweep_name, value)
                 current_index = value_idx
 
