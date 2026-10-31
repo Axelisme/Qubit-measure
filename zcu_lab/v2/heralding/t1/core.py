@@ -153,7 +153,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             delay = builder.add_sweep("delay", cfg.delay)
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.delay_timeline(delay)
+            builder.timeline_inc(delay)
             builder.emit(PulseReadout("signal", cfg.readout))
             prog = builder.build()
             sched.run_acquire_summed(

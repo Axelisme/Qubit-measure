@@ -180,9 +180,9 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                 builder.emit(reset)
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
-            builder.delay_timeline(0.5 * delay)
+            builder.timeline_inc(0.5 * delay)
             builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
-            builder.delay_timeline(0.5 * delay)
+            builder.timeline_inc(0.5 * delay)
             builder.emit(
                 Pulse(
                     "pi2_pulse",

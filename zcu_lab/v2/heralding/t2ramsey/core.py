@@ -198,7 +198,7 @@ class HeraldingT2RamseyExp(Experiment[HeraldingT2RamseyResult, HeraldingT2Ramsey
                 builder.emit(reset)
             builder.emit(PulseReadout("herald", cfg.readout))
             builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
-            builder.delay_timeline(delay)
+            builder.timeline_inc(delay)
             builder.emit(
                 Pulse(
                     "pi2_pulse",

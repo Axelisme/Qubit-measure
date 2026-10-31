@@ -55,7 +55,7 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
         if reset is not None:
             builder.emit(reset)
         builder.emit(Pulse("pi2_pulse", cfg.pi2_pulse))
-        builder.delay_timeline(delay)
+        builder.timeline_inc(delay)
         builder.emit(
             Pulse(
                 "pi2_pulse",
