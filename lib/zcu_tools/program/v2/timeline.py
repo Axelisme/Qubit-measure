@@ -706,7 +706,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self.append_macro(TimelineFork(self._timeline_book, source, targets))
 
     @contextmanager
-    def branch(self, *, by: str) -> Generator[BranchCases]:
+    def branch(self, *, by: str, align_timeline: bool) -> Generator[BranchCases]:
         """Select indexed cases and merge static ends without moving reference.
 
         by is an existing sweep loop name. Use case(index) for zero-based points,
@@ -724,7 +724,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         name = f"_timeline_branch_{self._branch_serial}"
         self._branch_serial += 1
         yield cases
-        self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name))
+        self.append_macro(TimelineBranch(self._timeline_book, by, cases.cases, name, align_timeline=align_timeline))
 
     @contextmanager
     def repeat(

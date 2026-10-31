@@ -841,15 +841,16 @@ class BranchCaseState:
     provenance: BranchProvenance
     frames: list[RepeatFrameSnapshot]
     defined: set[str]
-    static_ends: dict[str, Time] | None
 
 
 class TimelineBranch(Macro):
     def __init__(
-        self, book: TimelineBook, by: str, cases: dict[int, list[Macro]], name: str
+        self, book: TimelineBook, by: str, cases: dict[int, list[Macro]], name: str,
+        *, align_timeline: bool
     ):
         self.book = book
         self.by = by
+        self.align_timeline = align_timeline
         self.indexed_cases = cases
         # Producer and parallel-effect audits visit declared bodies before prepare.
         self.cases: list[list[Macro]] = list(cases.values())
@@ -898,15 +899,9 @@ class TimelineBranch(Macro):
             for ch, value in initial_ros.items():
                 self.book.native_timestamp(prog, value, ro_ch=ch)
             self.prepared.append(self._prepare_case(prog, case))
-            parents, joined = self.book.case_lineage.pop()
-            states.append(
-                self._capture_case(
-                    prog, self._static_case_ends(initial, parents, joined)
-                )
-            )
+            states.append(self._capture_case(prog))
             self.book.pinned.update(prog._timeline_live_registers())
-        static_ends = self._static_branch_ends(initial, states)
-        states = self._close_cases(prog, initial, states, close=static_ends is None)
+        states = self._record_case_sources(prog, states)
         if outer_used is not None:
             outer_used.update(
                 set.union(*(state.used & initial.keys() for state in states))
@@ -920,15 +915,18 @@ class TimelineBranch(Macro):
         self.book.used, self.book.waiting = outer_used, waiting
         self.tails = [RuntimeMath(prog) for _ in results]
         self.book.ends = {}
+        used = set.union(*(state.used & initial.keys() for state in states))
         for name in initial:
             values = [result[name] for result in results]
-            self.book.ends[name] = (
-                static_ends[name]
-                if static_ends is not None
-                else self._merge_values(prog, values)
-            )
-            if static_ends is None and not _same_times(values):
-                self.book.waiting.add(name)
+            if name not in used:
+                self.book.ends[name] = initial[name]
+            elif self.align_timeline:
+                end = values[0]
+                for value in values[1:]:
+                    end = self.book.math.maximum(end, value)
+                self.book.ends[name] = end
+            else:
+                self.book.ends[name] = self._merge_values(prog, values, force=True)
         self._merge_native(
             prog,
             [{**state.gens, **state.runtime_gens} for state in states],
@@ -944,51 +942,13 @@ class TimelineBranch(Macro):
         self.book.pinned = saved_pins
 
     def _prepare_case(self, prog, case: list[Macro]) -> list[PreparedTimelineMacro]:
-        self.book.case_lineage.append(({}, set()))
         prepared = [PreparedTimelineMacro(self.book, macro) for macro in case]
         for macro in prepared:
             macro.preprocess(prog)
         return prepared
 
-    def _static_case_ends(
-        self, initial: dict[str, Time], parents: dict[str, str], joined: set[str]
-    ) -> dict[str, Time] | None:
-        used = (self.book.used or set()) | (self.book.ends.keys() - initial.keys())
-        if any(isinstance(self.book.ends[name], RuntimeEnd) for name in used):
-            return None
-        ends = {name: self.book.ends[name] for name in initial}
-        for local in self.book.ends.keys() - initial.keys():
-            if local in joined:
-                continue
-            ancestor = parents[local]
-            while ancestor not in initial:
-                ancestor = parents[ancestor]
-            merged = known_maximum(ends[ancestor], self.book.ends[local])
-            if merged is None:
-                return None
-            ends[ancestor] = merged
-        return ends
-
-    def _static_branch_ends(
-        self, initial: dict[str, Time], states: list[BranchCaseState]
-    ) -> dict[str, Time] | None:
-        ends = initial.copy()
-        used = set.union(*(state.used & initial.keys() for state in states))
-        for state in states:
-            if state.static_ends is None:
-                return None
-            for name in used:
-                value = state.static_ends[name]
-                if isinstance(value, RuntimeEnd):
-                    return None
-                merged = known_maximum(ends[name], value)
-                if merged is None:
-                    return None
-                ends[name] = merged
-        return ends
-
     def _capture_case(
-        self, prog, static_ends: dict[str, Time] | None
+        self, prog
     ) -> BranchCaseState:
         return BranchCaseState(
             self.book.ends.copy(),
@@ -1001,32 +961,16 @@ class TimelineBranch(Macro):
             self.book.snapshot_branch_provenance(prog),
             self._save_frames(),
             prog._time_bounds.defined.copy(),
-            static_ends,
         )
 
-    def _close_cases(
-        self,
-        prog,
-        initial: dict[str, Time],
-        states: list[BranchCaseState],
-        *,
-        close: bool,
+    def _record_case_sources(
+        self, prog, states: list[BranchCaseState]
     ) -> list[BranchCaseState]:
-        """Finish every path under the already chosen whole-branch closing policy."""
         finished = []
-        for prepared, state in zip(self.prepared, states, strict=True):
+        for state in states:
             self._restore_case(prog, state)
-            if close:
-                used = state.used | (state.ends.keys() - initial.keys())
-                closer = PreparedTimelineMacro(
-                    self.book,
-                    TimelineSync(self.book, None, sources=tuple(sorted(used))),
-                )
-                closer.preprocess(prog)
-                prepared.append(closer)
             self.book.record_branch_sources(prog)
-            finished.append(self._capture_case(prog, state.static_ends))
-            self.book.pinned.update(prog._timeline_live_registers())
+            finished.append(self._capture_case(prog))
         return finished
 
     def _restore_case(self, prog, state: BranchCaseState) -> None:
@@ -1043,8 +987,8 @@ class TimelineBranch(Macro):
         self.book.source_expressions = state.provenance.sources.copy()
         self.book.native_expressions = state.provenance.native.copy()
 
-    def _merge_values(self, prog, values: list[Time]) -> Time:
-        if _same_times(values):
+    def _merge_values(self, prog, values: list[Time], *, force: bool = False) -> Time:
+        if not force and _same_times(values):
             return values[0]
         limits = [time_bounds(prog, value) for value in values]
         merged = RuntimeEnd(
