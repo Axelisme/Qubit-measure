@@ -641,7 +641,11 @@ class RuntimeMath(TimedMacro):
         tail = (aggregate - native.value) * get_fclk(self.prog)
         if isinstance(tail, QickParam):
             constant = tail.start
-            spans = {k: round(v * 256) for k, v in tail.spans.items()}
+            spans = {
+                k: amount
+                for k, v in tail.spans.items()
+                if (amount := round(v * 256)) != 0
+            }
         else:
             constant, spans = tail, {}
         # The product is integer. Ceil the fractional bias once, keeping the
