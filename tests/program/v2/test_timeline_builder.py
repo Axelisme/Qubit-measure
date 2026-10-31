@@ -700,6 +700,38 @@ def _pulse(name, ch=1, *, pulse_id: str | None = None):
     )
 
 
+def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
+    mock_soccfg,
+):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
+    frequency = builder.add_sweep("frequency", v2.SweepCfg(start=100, stop=102, expts=3))
+    duration = builder.add_sweep(
+        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, expts=9)
+    )
+    for name, length in (("prepare", 77 / 384), ("drive", duration)):
+        builder.emit(
+            v2.Join(
+                *(
+                    v2.Pulse(
+                        f"{name}_{ch}",
+                        v2.PulseCfg(
+                            ch=ch,
+                            nqz=1,
+                            freq=100,
+                            gain=0.5,
+                            waveform=ConstWaveformCfg(length=0.1),
+                            post_delay=4.3 / 430.08,
+                        ),
+                        length=length,
+                        freq=frequency,
+                    )
+                    for ch in (0, 1)
+                )
+            )
+        )
+    builder.build()
+
+
 def test_native_parallel_body_allocates_its_own_emission_scope(mock_soccfg):
     readout, pulse = _readout(), _pulse("drive")
 
