@@ -14,11 +14,11 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
-    TimeBase,
     ChannelStatistics,
     ReadoutWindow,
     RoundStatistics,
     SamplingIdentity,
+    TimeBase,
 )
 from zcu_tools.experiment.warmup import EnvironmentWarmup
 from zcu_tools.program.v2.simulation.signals import StatisticsCopier

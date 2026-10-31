@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests.core._simulation import TIME_BASE, tick_tuple, ticks
-
 import importlib
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -19,6 +17,8 @@ from zcu_tools.core.simulation import (
     RoundRequest,
 )
 from zcu_tools.device import DeviceManager, FakeDevice
+
+from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 
 from ._inputs import settings, template
 
@@ -118,7 +118,8 @@ def test_builder_binds_control_generators_and_live_dc_with_single_cavity_readout
         point_dims=(2,),
         point_names=("sweep",),
         templates=(compiled,),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     try:
         device = environment.create_device("FakeDevice", config.dc_bias.source.name)
         assert device.get_info().value_unit == "A"

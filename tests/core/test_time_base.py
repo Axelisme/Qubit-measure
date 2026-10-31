@@ -66,13 +66,19 @@ def test_zero_dimensional_tick_arrays_return_float64_arrays(
     np.testing.assert_array_equal(result.view(np.uint64), expected.view(np.uint64))
 
 
-@pytest.mark.parametrize("frequency", [Fraction(43008), Fraction(3, 2)])
-def test_ns_quantizes_exact_rational_time_with_integer_ties_even(frequency: Fraction) -> None:
+@pytest.mark.parametrize("frequency", [Fraction(43008), Fraction(3, 2), Fraction(1000)])
+def test_ns_quantizes_exact_rational_time_with_integer_ties_even(
+    frequency: Fraction,
+) -> None:
     base = simulation.TimeBase(frequency)
-    ticks = np.array([-9, -3, 0, 3, 9], dtype=np.int64)
-    expected = [float(2 * round(Fraction(int(t) * 1000, 1) / frequency / 2)) for t in ticks]
+    ticks = np.array([-129, -43, -9, -3, 0, 3, 9, 43, 129], dtype=np.int64)
+    expected = [
+        float(2 * round(Fraction(int(t) * 1000, 1) / frequency / 2)) for t in ticks
+    ]
     actual = base.ns(ticks, quantum_ns=2)
-    np.testing.assert_array_equal(actual.view(np.uint64), np.array(expected).view(np.uint64))
+    np.testing.assert_array_equal(
+        actual.view(np.uint64), np.array(expected).view(np.uint64)
+    )
     for tick, value in zip(ticks, expected, strict=True):
         assert base.ns(tick, quantum_ns=2) == value
 

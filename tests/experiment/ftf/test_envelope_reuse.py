@@ -1,6 +1,5 @@
 """Plan-local immutable envelope sharing through the numeric planning seam."""
 
-from tests.core._simulation import TIME_BASE, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -8,6 +7,7 @@ import pytest
 from zcu_tools.core.simulation import PulseEnvelope
 from zcu_tools.experiment.ftf import plan_template
 
+from tests.core._simulation import TIME_BASE, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
@@ -35,13 +35,20 @@ def test_plan_reuses_specs_without_changing_samples_or_candidate_indices():
         np.testing.assert_array_equal(
             track.phase_rad,
             np.deg2rad(event.phase_deg)
-            - 2 * np.pi * event.frequency_mhz * (TIME_BASE.ns(event.phase_reference_ticks) / 1000),
+            - 2
+            * np.pi
+            * event.frequency_mhz
+            * (TIME_BASE.ns(event.phase_reference_ticks) / 1000),
         )
         for index, value in ((0, shared), (2, shared), (3, other)):
             spec = track.envelopes[index]
             np.testing.assert_array_equal(spec.samples, value.values)
             np.testing.assert_array_equal(
-                spec.sample_ns, TIME_BASE.ns(np.arange(len(value.values), dtype=np.int64) * value.sample_period_ticks)
+                spec.sample_ns,
+                TIME_BASE.ns(
+                    np.arange(len(value.values), dtype=np.int64)
+                    * value.sample_period_ticks
+                ),
             )
             assert not spec.samples.flags.writeable
             assert not spec.sample_ns.flags.writeable

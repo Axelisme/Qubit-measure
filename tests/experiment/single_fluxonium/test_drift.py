@@ -1,6 +1,5 @@
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
-from tests.core._simulation import TIME_BASE, tick_tuple
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -28,6 +27,8 @@ from zcu_tools.resources.single_fluxonium import (
     SingleFluxoniumSettings,
     parse_single_fluxonium,
 )
+
+from tests.core._simulation import TIME_BASE, tick_tuple
 
 from ._inputs import settings, template
 
@@ -74,7 +75,8 @@ def request_for(binding: SimulationBinding, sequence: int):
         point_names=("sweep",),
         reps=8,
         templates=(compiled,),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
 
 
 @contextmanager

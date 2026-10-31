@@ -1,6 +1,5 @@
 """Synthetic FTF template builders and result narrowing shared by composition tests."""
 
-from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -24,6 +23,7 @@ from zcu_tools.experiment.ftf import (
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
 from tests.resources._ftf_data import ftf_document
 
 
@@ -61,7 +61,10 @@ def template(*, tones: int = 0) -> TimelineTemplate:
         np.zeros((2, 1), dtype=np.int64),
     )
     return TimelineTemplate(
-        np.array([0, 1], dtype=np.int64), (*drives, ro), (readout,), tick_array(np.full(2, 0.030))
+        np.array([0, 1], dtype=np.int64),
+        (*drives, ro),
+        (readout,),
+        tick_array(np.full(2, 0.030)),
     )
 
 
@@ -145,7 +148,8 @@ def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireR
         point_names=("sweep",),
         reps=3,
         templates=(template(),) if templates is None else templates,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
 
 
 def expect_statistics(result: IntegratedRound | RoundSignals) -> RoundStatistics:

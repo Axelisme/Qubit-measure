@@ -106,10 +106,15 @@ class TimeBase:
     def ns(self, ticks: int | np.int64, *, quantum_ns: int | None = None) -> float: ...
 
     @overload
-    def ns(self, ticks: NDArray[np.int64], *, quantum_ns: int | None = None) -> NDArray[np.float64]: ...
+    def ns(
+        self, ticks: NDArray[np.int64], *, quantum_ns: int | None = None
+    ) -> NDArray[np.float64]: ...
 
     def ns(
-        self, ticks: int | np.int64 | NDArray[np.int64], *, quantum_ns: int | None = None
+        self,
+        ticks: int | np.int64 | NDArray[np.int64],
+        *,
+        quantum_ns: int | None = None,
     ) -> float | NDArray[np.float64]:
         """Convert integer ticks to correctly rounded float64 nanoseconds.
 
@@ -132,10 +137,22 @@ class TimeBase:
                 # a large frequency numerator.
                 numerator = ticks.astype(object) * scale
                 quotient, remainder = numerator // divisor, numerator % divisor
-                rounded = quotient + ((2 * remainder > divisor) | ((2 * remainder == divisor) & (quotient % 2 != 0)))
+                rounded = quotient + (
+                    (2 * remainder > divisor)
+                    | ((2 * remainder == divisor) & (quotient % 2 != 0))
+                )
                 return np.asarray(rounded * quantum_ns, dtype=np.float64)
             quotient, remainder = divmod(int(ticks) * scale, divisor)
-            return float((quotient + (2 * remainder > divisor or (2 * remainder == divisor and quotient % 2 != 0))) * quantum_ns)
+            return float(
+                (
+                    quotient
+                    + (
+                        2 * remainder > divisor
+                        or (2 * remainder == divisor and quotient % 2 != 0)
+                    )
+                )
+                * quantum_ns
+            )
         # Both operands are exactly representable in float64. Only the final
         # IEEE division rounds, including for noninteger rational time bases.
         if isinstance(ticks, np.ndarray):

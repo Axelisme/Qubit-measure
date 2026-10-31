@@ -1,6 +1,5 @@
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -10,6 +9,7 @@ from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, replay
 from zcu_tools.program.v2.simulation import IntegratedRound
 
+from tests.core._simulation import tick_array, ticks
 from tests.experiment._ftf_templates import (
     expect_statistics,
     request,
@@ -53,7 +53,10 @@ def delayed_readout_template():
     shift = ticks(0.140) - readout.start_ticks
     return replace(
         base,
-        events=(*base.events[:-1], replace(readout, start_ticks=readout.start_ticks + shift)),
+        events=(
+            *base.events[:-1],
+            replace(readout, start_ticks=readout.start_ticks + shift),
+        ),
         readouts=tuple(
             replace(window, trigger_ticks=window.trigger_ticks + shift[:, None])
             for window in base.readouts

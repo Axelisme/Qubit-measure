@@ -1,6 +1,5 @@
 """Public compiled-template planning, without evolving or constructing an ADC."""
 
-from tests.core._simulation import TIME_BASE, tick_tuple
 import importlib
 from dataclasses import replace
 
@@ -15,6 +14,8 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.single_fluxonium import SingleFluxoniumSource
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
+
+from tests.core._simulation import TIME_BASE, tick_tuple
 
 from ._inputs import settings, snapshot, template
 
@@ -53,7 +54,8 @@ def charge_preflight():
         point_names=("scan",),
         templates=(compiled,),
         charge_requirements=(ChargeDriveRequirement("Stokes", 3),),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     try:
         yield source, request
     finally:
@@ -91,7 +93,9 @@ def test_preflight_accepts_named_charge_requirements_with_legal_fast_flux(
 
 def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
     planner = importlib.import_module("zcu_tools.experiment.single_fluxonium.template")
-    plan = planner.plan_template(settings(), snapshot(), template(), time_base=TIME_BASE)
+    plan = planner.plan_template(
+        settings(), snapshot(), template(), time_base=TIME_BASE
+    )
     batch = plan.batch
     np.testing.assert_array_equal(batch.points, [0, 3])
     np.testing.assert_array_equal(batch.end_ns, [16, 16])
@@ -119,7 +123,9 @@ def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
     np.testing.assert_array_equal(plan.readout.grids[0][0].times_ns, [18, 19, 20, 21])
     # Detached plan arrays do not change when borrowed template storage changes.
     original = template()
-    detached = planner.plan_template(settings(), snapshot(), original, time_base=TIME_BASE)
+    detached = planner.plan_template(
+        settings(), snapshot(), original, time_base=TIME_BASE
+    )
     original.events[0].gain[:] = 0.9
     np.testing.assert_array_equal(detached.batch.tracks[0].amplitude, [-0.2, -0.2])
 

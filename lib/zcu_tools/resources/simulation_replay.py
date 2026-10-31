@@ -32,8 +32,8 @@ from zcu_tools.core.simulation import (
     PulseEnvelope,
     ReadoutSlot,
     ReadoutWindow,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 
 from .ftf import FTFSettings
@@ -182,8 +182,8 @@ class _TemplateJSON(_NumericJSON):
 class _TimeBaseJSON(_NumericJSON):
     """Schema-owned rational MHz clock; no Fraction-specific wire encoding."""
 
-    num: int
-    den: int
+    num: int = Field(gt=0)
+    den: int = Field(gt=0)
 
     def record(self) -> TimeBase:
         return TimeBase(Fraction(self.num, self.den))
@@ -191,7 +191,9 @@ class _TimeBaseJSON(_NumericJSON):
 
 def _time_base_json(value: object) -> object:
     if isinstance(value, TimeBase):
-        return _TimeBaseJSON(num=value.ticks_per_us.numerator, den=value.ticks_per_us.denominator)
+        return _TimeBaseJSON(
+            num=value.ticks_per_us.numerator, den=value.ticks_per_us.denominator
+        )
     return value
 
 

@@ -1,6 +1,5 @@
 """Acquire composition advances density and cavity memory at the public seam."""
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -18,6 +17,7 @@ from zcu_tools.simulate.evolution import (
     segment_spans,
 )
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import (
     herald_template,
     request,
@@ -56,15 +56,17 @@ def test_acquire_continues_each_point_span_density_field_and_common_origin(shape
         start_ticks=tick_array(np.zeros(2)),
         duration_ticks=tick_array(np.array([0.002, 0.006])),
         gain=np.array([0.3, 0.5]),
-        envelopes=(PulseEnvelope(ticks(0.003), (0j, 1j, 0.3)),)
-        if shaped
-        else (None,),
+        envelopes=(PulseEnvelope(ticks(0.003), (0j, 1j, 0.3)),) if shaped else (None,),
     )
     driven = replace(base, events=(earlier, *base.events))
     try:
         plan = plan_template(
-            source.settings, snapshot(), driven, facts=source.model_facts(snapshot())
-        , time_base=TIME_BASE)
+            source.settings,
+            snapshot(),
+            driven,
+            facts=source.model_facts(snapshot()),
+            time_base=TIME_BASE,
+        )
         spans = segment_spans(plan.batch)
         acquire = request(templates=(driven,))
         source.open_acquire(acquire).sample_round(snapshot(), 0)
@@ -158,10 +160,12 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
     base, readout = herald_template()
     # A second herald gives cavity memory a projected continuation boundary.
     terminal = tuple(
-        replace(event, start_ticks=event.start_ticks + ticks(0.012)) for event in base.events[-2:]
+        replace(event, start_ticks=event.start_ticks + ticks(0.012))
+        for event in base.events[-2:]
     )
     middle = tuple(
-        replace(event, duration_ticks=tick_array(np.full(2, 0.002))) for event in base.events[-2:]
+        replace(event, duration_ticks=tick_array(np.full(2, 0.002)))
+        for event in base.events[-2:]
     )
     windows = tuple(
         replace(
@@ -199,7 +203,14 @@ def test_projection_outcomes_carry_their_own_cavity_memory_into_the_next_span():
     source = FTFSource(numeric, DeviceManager(), readout=readout, engine=engine)
     try:
         facts = source.model_facts(snapshot())
-        plan = plan_template(numeric, snapshot(), driven, readout=readout, facts=facts, time_base=TIME_BASE)
+        plan = plan_template(
+            numeric,
+            snapshot(),
+            driven,
+            readout=readout,
+            facts=facts,
+            time_base=TIME_BASE,
+        )
         source.open_acquire(request(templates=(driven,))).sample_round(snapshot(), 0)
         calls = [
             batches[0] for _, batches, _ in engine.calls if batches[0].points[0] == 0

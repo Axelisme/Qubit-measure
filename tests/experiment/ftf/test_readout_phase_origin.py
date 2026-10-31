@@ -1,6 +1,5 @@
 """Common-origin FTF carriers retain their IQ phase across readout delays."""
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -13,6 +12,7 @@ from zcu_tools.experiment.ftf import (
 )
 from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
@@ -70,7 +70,8 @@ def isolated_carrier_plan(addressed_tone: int, phase_reference_us: float):
         snapshot(),
         replace(base, events=pulses, readouts=windows),
         readout=config,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
 
 
 def classical_batch(plan, tone):

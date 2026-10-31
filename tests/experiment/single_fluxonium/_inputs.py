@@ -1,6 +1,5 @@
 """Small synthetic settings and compiled template inputs, without lab imports."""
 
-from tests.core._simulation import TIME_BASE, tick_array
 import numpy as np
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
@@ -10,6 +9,8 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.resources.single_fluxonium.schema import SingleFluxoniumSettings
+
+from tests.core._simulation import TIME_BASE, tick_array
 
 
 def settings() -> SingleFluxoniumSettings:

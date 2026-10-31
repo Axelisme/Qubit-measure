@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
 from sys import getsizeof
 
-import numpy as np
 import pytest
 from zcu_tools.core.simulation import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager
@@ -360,10 +359,7 @@ def test_encoder_byte_budget_eviction_disable_and_source_close():
     try:
         assert hasattr(source, "envelope_encoder"), "source must own envelope encoding"
         encoder = source.envelope_encoder
-        envelopes = [
-            PulseEnvelope(21000, (complex(i),) * 64)
-            for i in range(3)
-        ]
+        envelopes = [PulseEnvelope(21000, (complex(i),) * 64) for i in range(3)]
         encoded = encoder.encode(envelopes[0])
         single_entry_bytes = encoder.resident_bytes
         assert single_entry_bytes > (

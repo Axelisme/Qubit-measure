@@ -1,6 +1,5 @@
 """Template-to-engine composition and per-acquire FTF round semantics."""
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from collections.abc import Sequence
 from dataclasses import replace
 from threading import Event
@@ -21,6 +20,7 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import (
     expect_statistics,
     herald_template,
@@ -36,7 +36,9 @@ pytestmark = pytest.mark.sim
 def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     import zcu_tools.experiment.ftf as ftf
 
-    plan = ftf.plan_template(settings(), snapshot(), template(tones=1), time_base=TIME_BASE)
+    plan = ftf.plan_template(
+        settings(), snapshot(), template(tones=1), time_base=TIME_BASE
+    )
     track = plan.batch.tracks[0]
     np.testing.assert_array_equal(track.start_ns, [0.0, 2.0])
     np.testing.assert_array_equal(track.duration_ns, [2.0, 2.0])
@@ -69,10 +71,13 @@ def test_template_engine_paths_match_strict_secular_reference(
         base,
         events=(
             *base.events[:-1],
-            replace(base.events[-1], start_ticks=base.events[-1].start_ticks - ticks(0.004)),
+            replace(
+                base.events[-1], start_ticks=base.events[-1].start_ticks - ticks(0.004)
+            ),
         ),
         readouts=tuple(
-            replace(r, trigger_ticks=r.trigger_ticks - ticks(0.004)) for r in base.readouts
+            replace(r, trigger_ticks=r.trigger_ticks - ticks(0.004))
+            for r in base.readouts
         ),
     )
     plan = ftf.plan_template(settings(), snapshot(), tiny, time_base=TIME_BASE)
@@ -136,10 +141,16 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
     base = template()
     # Charge controls beginning after readout must have no effect.
     extra = replace(
-        base.events[0], gen_ch=2, start_ticks=tick_array(np.full(2, 0.015)), gain=np.full(2, 0.5)
+        base.events[0],
+        gen_ch=2,
+        start_ticks=tick_array(np.full(2, 0.015)),
+        gain=np.full(2, 0.5),
     )
     overlap = replace(base, events=(*base.events, extra))
-    plans = [ftf.plan_template(settings(), snapshot(), t, time_base=TIME_BASE) for t in (base, overlap)]
+    plans = [
+        ftf.plan_template(settings(), snapshot(), t, time_base=TIME_BASE)
+        for t in (base, overlap)
+    ]
     engine = Engine(1)
     try:
         results = [engine.evolve(p.source, (p.batch,), cancel=Event()) for p in plans]
@@ -152,8 +163,11 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
     )
     with pytest.raises(ValueError, match="one.*readout"):
         ftf.plan_template(
-            settings(), snapshot(), replace(base, events=(*base.events, base.events[0]))
-        , time_base=TIME_BASE)
+            settings(),
+            snapshot(),
+            replace(base, events=(*base.events, base.events[0])),
+            time_base=TIME_BASE,
+        )
 
 
 def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> None:
@@ -173,8 +187,11 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
     earlier = replace(earlier, active=np.array([True, False]))
     try:
         plan = ftf.plan_template(
-            settings(), snapshot(), replace(base, events=(terminal, earlier, alternate))
-        , time_base=TIME_BASE)
+            settings(),
+            snapshot(),
+            replace(base, events=(terminal, earlier, alternate)),
+            time_base=TIME_BASE,
+        )
     except ValueError as error:
         pytest.fail(f"nonterminal cavity drives must be accepted: {error}")
     drives = getattr(plan, "cavity_drives", None)
@@ -199,7 +216,9 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
     import zcu_tools.experiment.ftf as ftf
 
     base, config = herald_template()
-    plan = ftf.plan_template(settings(), snapshot(), base, readout=config, time_base=TIME_BASE)
+    plan = ftf.plan_template(
+        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+    )
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
     assert plan.cavity_drives == ((), ())
@@ -245,7 +264,9 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
         generator_channels=both.generator_channels[:, :1],
     )
     base = replace(base, readouts=(herald_only, replace(herald_only, channel=1)))
-    plan = plan_template(settings(), snapshot(), base, readout=config, time_base=TIME_BASE)
+    plan = plan_template(
+        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+    )
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
     for item in plan.readouts:
         for point, index in enumerate(item.batch.content_index):
@@ -257,13 +278,22 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
 
 
 @pytest.mark.parametrize("trigger_ticks", [ticks(0.008) - 1, 0])
-def test_readout_rejects_trigger_without_an_incident_pulse_window(trigger_ticks) -> None:
+def test_readout_rejects_trigger_without_an_incident_pulse_window(
+    trigger_ticks,
+) -> None:
     import zcu_tools.experiment.ftf as ftf
 
     base = template()
-    window = replace(base.readouts[0], trigger_ticks=np.full((2, 1), trigger_ticks, dtype=np.int64))
+    window = replace(
+        base.readouts[0], trigger_ticks=np.full((2, 1), trigger_ticks, dtype=np.int64)
+    )
     with pytest.raises(ValueError, match="trigger"):
-        ftf.plan_template(settings(), snapshot(), replace(base, readouts=(window,)), time_base=TIME_BASE)
+        ftf.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, readouts=(window,)),
+            time_base=TIME_BASE,
+        )
 
 
 def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
@@ -271,11 +301,18 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
 
     base = template()
     terminal = base.events[-1]
-    earlier = replace(terminal, start_ticks=tick_array(np.zeros(2)), duration_ticks=terminal.start_ticks)
+    earlier = replace(
+        terminal,
+        start_ticks=tick_array(np.zeros(2)),
+        duration_ticks=terminal.start_ticks,
+    )
     try:
         plan = ftf.plan_template(
-            settings(), snapshot(), replace(base, events=(earlier, terminal))
-        , time_base=TIME_BASE)
+            settings(),
+            snapshot(),
+            replace(base, events=(earlier, terminal)),
+            time_base=TIME_BASE,
+        )
     except ValueError as error:
         pytest.fail(f"cavity drives may end exactly at terminal start: {error}")
     drives = getattr(plan, "cavity_drives", None)
@@ -284,8 +321,11 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
     crossing = replace(earlier, duration_ticks=earlier.duration_ticks + 1)
     with pytest.raises(ValueError, match="cross|overlap"):
         ftf.plan_template(
-            settings(), snapshot(), replace(base, events=(crossing, terminal))
-        , time_base=TIME_BASE)
+            settings(),
+            snapshot(),
+            replace(base, events=(crossing, terminal)),
+            time_base=TIME_BASE,
+        )
 
 
 class CountingEngine(Engine):
@@ -460,11 +500,13 @@ def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
     from zcu_tools.simulate.adc import response
 
     base = template()
-    samples = PulseEnvelope(
-        ticks(0.006), (0.1, 0.8 + 0.2j, 1.0 - 0.1j, 0.2)
-    )
+    samples = PulseEnvelope(ticks(0.006), (0.1, 0.8 + 0.2j, 1.0 - 0.1j, 0.2))
     shaped = replace(base, events=(replace(base.events[0], envelopes=(samples,)),))
-    batch = plan_template(settings(), snapshot(), shaped, time_base=TIME_BASE).readouts[0].batch
+    batch = (
+        plan_template(settings(), snapshot(), shaped, time_base=TIME_BASE)
+        .readouts[0]
+        .batch
+    )
     expected = np.stack(
         [
             adc.ConditionalReadout(batch.model, rtol=1e-12, atol=1e-14)

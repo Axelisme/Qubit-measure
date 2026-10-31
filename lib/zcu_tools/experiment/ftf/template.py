@@ -7,8 +7,8 @@ from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
@@ -216,7 +216,8 @@ def _timeline_batch(
     end_ns: NDArray[np.float64],
     path: _ReadoutPath,
     memo: dict[int, EnvelopeSpec],
-    *, time_base: TimeBase,
+    *,
+    time_base: TimeBase,
 ) -> TimelineBatch:
     """Separate microwave and fast-flux slots using the round's DC projection."""
     microwave = {s.gen_ch: name for name, s in settings.drive_lines.items()}
@@ -226,7 +227,9 @@ def _timeline_batch(
         if event.gen_ch == path.gen_ch or not np.any(event.active):
             continue
         if event.gen_ch in lines:
-            track = drive_track(event, lines[event.gen_ch].source, memo, time_base=time_base)
+            track = drive_track(
+                event, lines[event.gen_ch].source, memo, time_base=time_base
+            )
             flux_tracks.append(
                 FluxTrack(
                     track.port,
@@ -241,7 +244,9 @@ def _timeline_batch(
                 )
             )
         elif event.gen_ch in microwave:
-            drives.append(drive_track(event, microwave[event.gen_ch], memo, time_base=time_base))
+            drives.append(
+                drive_track(event, microwave[event.gen_ch], memo, time_base=time_base)
+            )
         else:
             raise ValueError(f"unbound FTF control generator {event.gen_ch}")
     flux = schedule(
@@ -407,7 +412,9 @@ def plan_template(
         )
     else:
         contents = tuple(
-            readout_contents(terminal_template, drive, window, memo, time_base=time_base)
+            readout_contents(
+                terminal_template, drive, window, memo, time_base=time_base
+            )
             for window in template.readouts
         )
         reference_frequency_ghz = contents[0].pulses[0][0].frequency_ghz
@@ -467,7 +474,9 @@ def plan_template(
     return FTFTemplatePlan(
         source,
         _cavity_batch(
-            _timeline_batch(settings, joint, template, end_ns, path, memo, time_base=time_base),
+            _timeline_batch(
+                settings, joint, template, end_ns, path, memo, time_base=time_base
+            ),
             cavity_drives,
             partition.projective_reads,
         ),

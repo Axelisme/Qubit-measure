@@ -14,9 +14,9 @@ Compiled simulation 的 request 目前以浮點微秒傳遞時間。Frontend 與
 
 2026-10-31，使用者提出「我傾向根除的解決方案」，並選擇「2b」。採用第一階段的公共整數時基 request。第二階段的物理建模留待後議。
 
-`core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。Core 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格不變性已納入驗證，物理 IQ 不變性待 consumer 遷移後驗收。
+`core.simulation.TimeBase` 擁有公共有理數頻率與換算規則。Program 從 soccfg 擷取本次 tProc、已宣告 generator 的 fabric／envelope sample clocks 與已宣告 ADC 的 output clocks，再交給 TimeBase。未宣告 channel 不參與，TimeBase 屬於單一 request。Core 不讀 soccfg，也不 import driver。額外宣告不影響既有事件的異質 clock channel 可以改變時基，但不能改變原 channel 的物理時間與模擬輸出。Frontend 的 ns 網格與 physical IQ 不變性已納入驗證。測試額外宣告 512 MHz fabric generator，時基由 43008 變為 172032 MHz，原 generator／ADC 的事件與 IQ bits 不變。
 
-TimeBase 已提供建立時基、格點檢查與 scalar／array 換算。Request schema 與 compiled frontend 已使用整數時間。Consumer 與 replay 仍待遷移，本篇不表示整條遷移已完成。
+TimeBase、request schema、compiled frontend、physical consumer 與 replay 已使用整數時間。Planner 以必填 time_base keyword 接收 request 的時基。TimelineTemplate 不重複保存時基。Plan 與 preparation cache key 納入時基。
 
 ## 時間契約
 
@@ -26,11 +26,12 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - Request 攜帶 TimeBase。Start、duration、trigger、phase reference、envelope 取樣週期及 ADC 取樣週期都用整數 tick 表達。Frontend 全程做整數運算，不先轉成浮點微秒再組合。
 - 手建 fixture 也必須落在格點上。非格點時間報 `ValueError`，不四捨五入回格點。需要非十進位的精確時間時，caller 可提供 Fraction。
 - `TimeBase.ns` 是唯一的 tick→ns 換算入口。它支援 scalar 與 int64 ndarray，array shape 不變。每個結果都等於有理數 `ticks * 1000 * den / num` 正確捨入一次所得的 float64。
+- 既有 2 ns support 量化由 `TimeBase.ns(..., quantum_ns=2)` 對精確有理數時間做整數 ties-even 捨入。未傳 quantum_ns 時保留單次正確捨入的原換算。
 - ADC 網格先在整數域組成 `trigger + k * period`，再交給 ns。Readout plan 與環境 template 呼叫這個入口，不各自展開換算迴圈或浮點乘除。
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
 - Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
 - `program.shot_time.request_round_time_s` 擁有整數 request 的 round 時長公式，binding 只呼叫這個入口。它用 Python 整數加總各點、relax delay 與 reps，再由 `TimeBase.seconds` 以有理數換成秒。整輪總和不套用單一 request 的 int64 或 ns 精確界限，不因總時長而新拒絕長 acquisition。2026-10-31，advisor 依代理授權裁定此 owner 與範圍。既有 us API 與硬體路徑不變。
-- Replay 明確保存時基的 num／den 與整數時間，並升級格式版本。舊版本明確拒絕，不做相容轉換。
+- Resources 的 replay wire schema 明確保存正整數 num／den 與整數時間。Acquire 與 round 格式版本為 2，舊版本明確拒絕，不做相容轉換。
 
 Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
 

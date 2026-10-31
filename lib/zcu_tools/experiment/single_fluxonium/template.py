@@ -9,8 +9,8 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     ChargeDriveRequirement,
     EnvironmentSnapshot,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
     ProjectiveRead,
@@ -252,18 +252,24 @@ def plan_template(
         readout_kind,
     )
     partition = classify_readout(template, drive, memo, time_base=time_base)
-    read_events = logical_event_contents(template, drive, windows[0], memo, time_base=time_base)
+    read_events = logical_event_contents(
+        template, drive, windows[0], memo, time_base=time_base
+    )
     contents = read_events[-1]
     microwave, fast_flux = [], []
     for index, event in enumerate(template.events):
         if event.gen_ch == drive.gen_ch:
             continue
         if event.gen_ch in drive_names:
-            microwave.append(drive_track(event, drive_names[event.gen_ch], memo, time_base=time_base))
+            microwave.append(
+                drive_track(event, drive_names[event.gen_ch], memo, time_base=time_base)
+            )
         elif (
             settings.flux_line is not None and event.gen_ch == settings.flux_line.gen_ch
         ):
-            fast_flux.append(drive_track(event, settings.flux_line.name, memo, time_base=time_base))
+            fast_flux.append(
+                drive_track(event, settings.flux_line.name, memo, time_base=time_base)
+            )
         else:
             raise ValueError(
                 f"template.events.{index}.gen_ch: unbound single-fluxonium "

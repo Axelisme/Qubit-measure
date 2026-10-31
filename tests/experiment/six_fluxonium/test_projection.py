@@ -4,7 +4,6 @@ Terminal-only numeric pins retire when the versioned ADC/RNG contract changes.
 The reference was captured before projective routing and multi-ADC preparation.
 """
 
-from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 from collections.abc import Generator
 from dataclasses import replace
 from hashlib import sha256
@@ -35,7 +34,7 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
 from tests.resources._six_fluxonium_data import six_document
 
 pytestmark = pytest.mark.sim
@@ -58,7 +57,8 @@ def test_routing_rejects_unsupported_charge_requirements_before_preparation():
         (PulseEvent(0, ticks(0.016), ticks(0.008), 6800, 0, 0.1),),
         (window,),
         ticks(0.024),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     ordinary = AcquireRequest(
         "integrated",
         (1,),
@@ -68,7 +68,8 @@ def test_routing_rejects_unsupported_charge_requirements_before_preparation():
         0,
         "test",
         templates=(single_point_template(timeline),),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     assert len(route_request(settings, ordinary)) == 1
     requested = replace(
         ordinary, charge_requirements=(ChargeDriveRequirement("control", 1),)
@@ -152,7 +153,9 @@ def test_two_cavity_heralds_keep_conditional_and_independent_shot_histories(
         )
         prepared = single.prepare(subrequest, single.snapshot())
         facts = single.model_facts(single.snapshot())
-        plan = single.plan_template(single.snapshot(), group.templates[0], time_base=request.time_base)
+        plan = single.plan_template(
+            single.snapshot(), group.templates[0], time_base=request.time_base
+        )
         rate = facts.readout.rates_per_ns
         elapsed = plan.batch.end_ns[0] - plan.projective_reads[0][0].start_ns
         transition = expm((rate - np.diag(rate.sum(axis=0))) * elapsed).T
@@ -294,7 +297,10 @@ def test_all_sources_preflight_second_adc_template_layout_before_any_evolution(
     conflict = replace(
         second,
         trigger_ticks=np.column_stack(
-            (second.trigger_ticks[:, 0], second.trigger_ticks[:, 0] + 3 * request.time_base.period_ticks(384.0))
+            (
+                second.trigger_ticks[:, 0],
+                second.trigger_ticks[:, 0] + 3 * request.time_base.period_ticks(384.0),
+            )
         ),
     )
     other = replace(

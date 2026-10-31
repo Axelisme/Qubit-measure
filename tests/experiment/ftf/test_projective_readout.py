@@ -1,6 +1,5 @@
 """FTF outcome histories connect herald reads to continued terminal populations."""
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 import json
 from dataclasses import replace
 
@@ -21,6 +20,7 @@ from zcu_tools.simulate import adc
 from zcu_tools.simulate.adc import ADC
 from zcu_tools.simulate.evolution import Engine
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import (
     expect_statistics,
     herald_template,
@@ -95,14 +95,19 @@ def test_trigger_emission_columns_survive_event_grouping_with_partial_adc(mode):
     )
     numeric = settings().with_telemetry(enabled=False)
     canonical = plan_template(
-        numeric, snapshot(), replace(base, readouts=(both, partial)), readout=config
-    , time_base=TIME_BASE)
+        numeric,
+        snapshot(),
+        replace(base, readouts=(both, partial)),
+        readout=config,
+        time_base=TIME_BASE,
+    )
     emitted = plan_template(
         numeric,
         snapshot(),
         replace(base, readouts=(reordered, partial)),
         readout=config,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     readout = adc.ProjectionReadout(
         np.array([[0.4, 0.6], [0.7, 0.3]]),
         (
@@ -268,7 +273,12 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
         raw = prog.get_raw()
         assert raw is not None
         captured = env.soc.binding.rounds[0]
-        plan = plan_template(numeric, captured.snapshot, captured.acquire.templates[0], time_base=captured.acquire.time_base)
+        plan = plan_template(
+            numeric,
+            captured.snapshot,
+            captured.acquire.templates[0],
+            time_base=captured.acquire.time_base,
+        )
         labels = []
         for read in range(2):
             observed = np.concatenate([shots[:, read] for shots in raw], axis=-1)
@@ -405,7 +415,9 @@ def test_terminal_only_runtime_matches_direct_engine_and_adc_elementwise(mode):
     try:
         acquire = request(mode)
         facts = source.model_facts(snapshot())
-        plan = plan_template(numeric, snapshot(), template(), facts=facts, time_base=TIME_BASE)
+        plan = plan_template(
+            numeric, snapshot(), template(), facts=facts, time_base=TIME_BASE
+        )
         evolved = engine.evolve(facts.source, (plan.batch,))
         populations = adc.normalize_populations(
             evolved.densities.diagonal(axis1=-2, axis2=-1).real
@@ -511,7 +523,8 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
         ),
     )
     last = tuple(
-        replace(event, start_ticks=event.start_ticks + ticks(0.012)) for event in base.events[-2:]
+        replace(event, start_ticks=event.start_ticks + ticks(0.012))
+        for event in base.events[-2:]
     )
     windows = tuple(
         replace(
@@ -530,7 +543,8 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
         for window in base.readouts
     )
     middle = tuple(
-        replace(event, duration_ticks=tick_array(np.full(2, 0.002))) for event in base.events[-2:]
+        replace(event, duration_ticks=tick_array(np.full(2, 0.002)))
+        for event in base.events[-2:]
     )
     template = replace(
         base,

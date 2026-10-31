@@ -8,10 +8,9 @@ from zcu_tools.core.simulation import (
     EventSlot,
     PointTimeline,
     ReadoutSlot,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
-
 
 TIME_BASE = TimeBase.from_clocks((1000.0, 430.08, 76.8))
 
@@ -24,7 +23,9 @@ def ticks(time_us: float) -> int:
 def tick_array(times_us: ArrayLike) -> NDArray[np.int64]:
     """Convert finite fixture microseconds exactly; retain the input shape."""
     times = np.asarray(times_us, dtype=np.float64)
-    return np.array([ticks(float(t)) for t in times.flat], dtype=np.int64).reshape(times.shape)
+    return np.array([ticks(float(t)) for t in times.flat], dtype=np.int64).reshape(
+        times.shape
+    )
 
 
 def tick_tuple(times_us: Iterable[float]) -> tuple[int, ...]:

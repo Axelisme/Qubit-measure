@@ -1,6 +1,5 @@
 """Six independent physical cavities through the normal compiled acquire seam."""
 
-from tests.core._simulation import TIME_BASE
 from contextlib import contextmanager
 
 import numpy as np
@@ -109,7 +108,11 @@ def scalar_cavity_means(env, channel, cavity_indices):
             if e.gen_ch in (0, 13)
             and abs(e.frequency_mhz - window.frequency_mhz[0]) < 0.001
         )
-        times = request.time_base.ns(window.trigger_ticks[0] - tone.start_ticks + np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks)
+        times = request.time_base.ns(
+            window.trigger_ticks[0]
+            - tone.start_ticks
+            + np.arange(window.samples, dtype=np.int64) * window.sample_period_ticks
+        )
         pole = (
             np.pi * 0.001
             + 2j * np.pi * (FREQUENCIES[cavity] - tone.frequency_mhz) / 1000

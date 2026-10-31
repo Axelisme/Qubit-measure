@@ -4,7 +4,6 @@ Small retained spaces isolate composition. Production-sized cost is measured by
 an author probe, not by weakening the environment defaults in these tests.
 """
 
-from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
 from dataclasses import replace
 from pathlib import Path
 
@@ -40,6 +39,8 @@ from zcu_tools.resources.simulation_replay import (
 )
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate.evolution import Engine
+
+from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
 
 from ._inputs import settings, slot
 
@@ -90,7 +91,10 @@ def request_for(
         np.zeros((2, 1), dtype=np.int64),
     )
     compiled = TimelineTemplate(
-        np.array([0, 1], dtype=np.int64), tuple(pulses), (window,), tick_array((ends + 24) / 1000)
+        np.array([0, 1], dtype=np.int64),
+        tuple(pulses),
+        (window,),
+        tick_array((ends + 24) / 1000),
     )
     return AcquireRequest(
         mode,
@@ -104,7 +108,8 @@ def request_for(
         point_names=("sweep",),
         reps=reps,
         templates=(compiled,),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
 
 
 def expect_integrated(result):
@@ -133,7 +138,9 @@ def independent_populations(source, request, point):
                 if event.gen_ch != 0
                 for value in (
                     request.time_base.ns(event.start_ticks[point]),
-                    request.time_base.ns(event.start_ticks[point] + event.duration_ticks[point]),
+                    request.time_base.ns(
+                        event.start_ticks[point] + event.duration_ticks[point]
+                    ),
                 )
                 if 0 < value < end
             ),
@@ -147,7 +154,9 @@ def independent_populations(source, request, point):
             if event.gen_ch != 0
             and request.time_base.ns(event.start_ticks[point])
             <= (start + stop) / 2
-            < request.time_base.ns(event.start_ticks[point] + event.duration_ticks[point])
+            < request.time_base.ns(
+                event.start_ticks[point] + event.duration_ticks[point]
+            )
         ]
         flux = facts.model.dc_flux + sum(
             event.gain[point] * source.settings.flux_line.flux_phi0_per_gain
@@ -553,7 +562,9 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     replay = single_replay if target == "single" else ftf_replay
     fixed = ReplayAcquire(
         settings=wrong,
-        request=AcquireRequest("integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE),
+        request=AcquireRequest(
+            "integrated", (1,), 0, (), 123, 0, "test", time_base=TIME_BASE
+        ),
         versions=replay.replay_versions(),
     )
     path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)

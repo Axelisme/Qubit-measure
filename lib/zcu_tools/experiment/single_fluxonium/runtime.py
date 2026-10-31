@@ -15,8 +15,8 @@ from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
     RoundRequest,
     RoundSignals,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
@@ -277,7 +277,10 @@ class SingleFluxoniumSource:
         ) = None
         self._plan: SingleFluxoniumPlan | None = None
         self._plan_key: (
-            tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...], TimeBase, bytes] | None
+            tuple[
+                str, EnvironmentSnapshot, tuple[tuple[str, str], ...], TimeBase, bytes
+            ]
+            | None
         ) = None
         self._closed = False
 
@@ -387,7 +390,11 @@ class SingleFluxoniumSource:
         return self._facts
 
     def plan_template(
-        self, snapshot: EnvironmentSnapshot, template: TimelineTemplate, *, time_base: TimeBase
+        self,
+        snapshot: EnvironmentSnapshot,
+        template: TimelineTemplate,
+        *,
+        time_base: TimeBase,
     ) -> SingleFluxoniumPlan:
         """Plan one complete template, reusing only its exact current content.
 
@@ -411,7 +418,11 @@ class SingleFluxoniumSource:
             self._plan = None
             self._plan_key = None
             self._plan = plan_template(
-                self.settings, snapshot, template, time_base=time_base, readout_kind=self._readout_kind
+                self.settings,
+                snapshot,
+                template,
+                time_base=time_base,
+                readout_kind=self._readout_kind,
             )
             self._plan_key = key
         return self._plan

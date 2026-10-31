@@ -4,7 +4,10 @@ from dataclasses import replace
 
 import numpy as np
 from zcu_tools.core.simulation import AcquireRequest, RoundRequest, RoundSignals
-from zcu_tools.experiment.single_fluxonium.runtime import SingleFluxoniumSource, single_fluxonium
+from zcu_tools.experiment.single_fluxonium.runtime import (
+    SingleFluxoniumSource,
+    single_fluxonium,
+)
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -24,16 +27,27 @@ def test_source_plan_and_preparation_reinterpret_ticks_when_clock_changes():
         changed = source.plan_template(snapshot, compiled, time_base=faster)
         np.testing.assert_array_equal(changed.batch.end_ns, original.batch.end_ns / 2)
         request = AcquireRequest(
-            "integrated", (1, 2), 0, (), 123, 0, "test",
-            time_base=TIME_BASE, point_dims=(2,), point_names=("point",),
+            "integrated",
+            (1, 2),
+            0,
+            (),
+            123,
+            0,
+            "test",
+            time_base=TIME_BASE,
+            point_dims=(2,),
+            point_names=("point",),
             templates=(compiled,),
         )
         # preflight requires the same declared receiver set as the templates.
         from zcu_tools.core.simulation import ReadoutWindow
+
         request = replace(request, readouts=(ReadoutWindow(0, 0, 4, 1344, (24192,)),))
         a = source.prepare(request, snapshot)
         b = source.prepare(replace(request, time_base=faster), snapshot)
-        assert not np.array_equal(a.channel.conditional.sums, b.channel.conditional.sums)
+        assert not np.array_equal(
+            a.channel.conditional.sums, b.channel.conditional.sums
+        )
     finally:
         source.close()
         if env.close_backend is not None:
@@ -52,7 +66,15 @@ def test_extra_declared_clock_preserves_original_channel_physical_iq_bits():
                 if extra:
                     self.declare_gen(1, nqz=1)
                 self.add_envelope(0, "shape", idata=np.full(48, -8191.0))
-                self.add_pulse(0, "p", style="arb", envelope="shape", freq=100, phase=30, gain=-0.25)
+                self.add_pulse(
+                    0,
+                    "p",
+                    style="arb",
+                    envelope="shape",
+                    freq=100,
+                    phase=30,
+                    gain=-0.25,
+                )
                 self.declare_readout(0, length=0.2)
                 self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
 
@@ -62,12 +84,18 @@ def test_extra_declared_clock_preserves_original_channel_physical_iq_bits():
                 self.trigger([0], t=0.1)
 
         program = Program(env.soccfg, reps=2, initial_delay=0, relax_delay=0.1)
-        request = build_compiled_request(program, "decimated", env.soc.binding, 7, routes=env.soc.routes)
+        request = build_compiled_request(
+            program, "decimated", env.soc.binding, 7, routes=env.soc.routes
+        )
         env.soc.install_request(request)
         try:
-            result = env.soc.binding.execute(RoundRequest(request, env.soc.binding.capture_snapshot(), 0))
+            result = env.soc.binding.execute(
+                RoundRequest(request, env.soc.binding.capture_snapshot(), 0)
+            )
             if not isinstance(result, RoundSignals):
-                raise AssertionError("physical decimated acquisition returns RoundSignals")
+                raise AssertionError(
+                    "physical decimated acquisition returns RoundSignals"
+                )
             assert tuple(channel.channel for channel in result.channels) == (0,)
             return request, result.channels[0].iq.copy()
         finally:

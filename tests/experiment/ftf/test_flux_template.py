@@ -3,7 +3,6 @@
 The no-fast-flux compatibility pin retires if that batch contract changes.
 """
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from dataclasses import replace
 
 import numpy as np
@@ -17,6 +16,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import FTFSettings, parse_ftf
 from zcu_tools.simulate.evolution import Engine, segment_spans
 
+from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import (
     herald_template,
     settings,
@@ -77,7 +77,9 @@ def flux_template() -> TimelineTemplate:
 def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     config = flux_settings()
     facts = FTFModelFacts(config, snapshot(0.4))
-    plan = plan_template(config, snapshot(0.4), flux_template(), facts=facts, time_base=TIME_BASE)
+    plan = plan_template(
+        config, snapshot(0.4), flux_template(), facts=facts, time_base=TIME_BASE
+    )
     np.testing.assert_allclose(
         facts.joint.dc_flux, [0.3, 0.24, 0.4], atol=1e-16, rtol=0
     )
@@ -93,7 +95,9 @@ def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     assert plan.batch.segment_boundaries == ((0.0, 2.0, 4.0, 6.0), (0.0, 4.0))
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
     # Fast flux never changes the terminal ADC model's round-DC frequencies.
-    dc_plan = plan_template(config, snapshot(0.4), template(), facts=facts, time_base=TIME_BASE)
+    dc_plan = plan_template(
+        config, snapshot(0.4), template(), facts=facts, time_base=TIME_BASE
+    )
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,
         dc_plan.readouts[0].batch.model.frequencies_ghz,
@@ -209,7 +213,8 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
     shifted = replace(
         herald,
         events=tuple(
-            replace(event, start_ticks=event.start_ticks + ticks(0.020)) for event in herald.events
+            replace(event, start_ticks=event.start_ticks + ticks(0.020))
+            for event in herald.events
         ),
         readouts=tuple(
             replace(window, trigger_ticks=window.trigger_ticks + ticks(0.020))
@@ -243,17 +248,19 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
         ),
         readout=readout,
         facts=facts,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     projection_only = plan_template(
-        config, snapshot(), observed, readout=readout, facts=facts
-    , time_base=TIME_BASE)
+        config, snapshot(), observed, readout=readout, facts=facts, time_base=TIME_BASE
+    )
     combined = plan_template(
         config,
         snapshot(),
         replace(observed, events=(flux_slot(4, 0.2), *observed.events)),
         readout=readout,
         facts=facts,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     # The delayed 0..4 ns flux pulse must still split at 2 and 6 ns.
     assert all({2.0, 6.0} <= set(nodes) for nodes in flux_only.batch.segment_boundaries)
     expected = tuple(

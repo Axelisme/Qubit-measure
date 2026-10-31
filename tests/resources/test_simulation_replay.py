@@ -1,6 +1,7 @@
 """Detached private-input storage, not normal data.h5 or waveform assets."""
 
-from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
+from dataclasses import replace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -12,17 +13,26 @@ from zcu_tools.core.simulation import (
     PulseEnvelope,
     PulseEvent,
     ReadoutWindow,
+    TimeBase,
 )
 from zcu_tools.resources.ftf import parse_ftf
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import (
+    TIME_BASE,
+    single_point_template,
+    tick_array,
+    tick_tuple,
+    ticks,
+)
 from tests.resources._ftf_data import ftf_document
 
 
 @pytest.mark.parametrize("requirements", [(), (ChargeDriveRequirement("drive", 2),)])
+@pytest.mark.parametrize("time_base", [TIME_BASE, TimeBase(Fraction(5, 3))])
 def test_replay_retains_complex_samples_and_deduplicated_acquire(
     tmp_path: Path,
     requirements: tuple[ChargeDriveRequirement, ...],
+    time_base: TimeBase,
 ) -> None:
     from zcu_tools.resources.simulation_replay import (
         ReplayAcquire,
@@ -32,7 +42,13 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
 
     window = ReadoutWindow(0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02,)))
     event = PulseEvent(
-        2, ticks(0.0), ticks(0.016), 42.0, 90.0, -0.3, PulseEnvelope(ticks(0.008), (1 + 2j, -3 - 4j))
+        2,
+        ticks(0.0),
+        ticks(0.016),
+        42.0,
+        90.0,
+        -0.3,
+        PulseEnvelope(ticks(0.008), (1 + 2j, -3 - 4j)),
     )
     timeline = PointTimeline((), (event,), (window,), ticks(0.05), time_base=TIME_BASE)
     request = AcquireRequest(
@@ -45,7 +61,9 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
         "test-rng-v1",
         templates=(single_point_template(timeline),),
         charge_requirements=requirements,
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
+    request = replace(request, time_base=time_base)
     fixed = ReplayAcquire(
         settings=parse_ftf(ftf_document()),
         request=request,
@@ -127,7 +145,9 @@ def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
             },
         }
     )
-    request = AcquireRequest("integrated", (1,), 0, (), 123, 0, "test-rng-v1", time_base=TIME_BASE)
+    request = AcquireRequest(
+        "integrated", (1,), 0, (), 123, 0, "test-rng-v1", time_base=TIME_BASE
+    )
     try:
         fixed = ReplayAcquire(
             settings=settings, request=request, versions=(("backend", "single"),)
@@ -148,12 +168,14 @@ def test_replay_rejects_float_time_format_version() -> None:
     from zcu_tools.resources.simulation_replay import ReplayRound
 
     with pytest.raises(ValueError, match="version"):
-        ReplayRound.model_validate({
-            "version": 1,
-            "acquire_identity": "0" * 64,
-            "snapshot": {"version": "test", "model_identity": "test", "values": []},
-            "index": 0,
-        })
+        ReplayRound.model_validate(
+            {
+                "version": 1,
+                "acquire_identity": "0" * 64,
+                "snapshot": {"version": "test", "model_identity": "test", "values": []},
+                "index": 0,
+            }
+        )
 
 
 def test_replay_rejects_changed_saved_content(tmp_path: Path) -> None:
@@ -209,7 +231,11 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
         mode="integrated",
         loop_dims=(3, 2),
         avg_level=0,
-        readouts=(ReadoutWindow(0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02, 0.04))),),
+        readouts=(
+            ReadoutWindow(
+                0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02, 0.04))
+            ),
+        ),
         root_seed=12345,
         sequence=17,
         rng_version="test-rng-v1",
@@ -217,7 +243,8 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
         point_names=("axis",),
         reps=3,
         templates=(template,),
-     time_base=TIME_BASE)
+        time_base=TIME_BASE,
+    )
     acquire = ReplayAcquire(
         settings=parse_ftf(ftf_document()),
         request=request,

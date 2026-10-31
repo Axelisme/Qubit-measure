@@ -10,8 +10,8 @@ from zcu_tools.core.simulation import (
     AcquireRequest,
     EventSlot,
     ReadoutSlot,
-    TimelineTemplate,
     TimeBase,
+    TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
 from zcu_tools.resources.six_fluxonium import SixFluxoniumSettings
@@ -89,7 +89,9 @@ def _route_template(
     bare: NDArray[np.float64],
     time_base: TimeBase,
 ) -> _TemplateRoutes:
-    partition = classify_readout(template, ReadoutDrive(gen, 1, "mux"), {}, time_base=time_base)
+    partition = classify_readout(
+        template, ReadoutDrive(gen, 1, "mux"), {}, time_base=time_base
+    )
     if any(partition.cavity_drives):
         raise ValueError("six fluxonium does not support untriggered cavity drives")
     for event in template.events:
@@ -205,7 +207,8 @@ def route_request(
     gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
     routing = np.empty((prod(request.point_dims), len(channels)), dtype=np.int64)
     templates = tuple(
-        _route_template(t, channels, gen, bare, request.time_base) for t in request.templates
+        _route_template(t, channels, gen, bare, request.time_base)
+        for t in request.templates
     )
     for template in templates:
         routing[template.template.points] = template.receivers

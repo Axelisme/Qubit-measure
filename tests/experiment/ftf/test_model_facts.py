@@ -1,6 +1,5 @@
 """Physical model reuse at the acquire/engine and numeric-builder boundaries."""
 
-from tests.core._simulation import TIME_BASE
 import weakref
 from collections.abc import Sequence
 from dataclasses import replace
