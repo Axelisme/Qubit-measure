@@ -153,18 +153,16 @@ def test_mux_channel_passband_keeps_only_in_channel_carriers(
     assert len(plan.readouts[0].batch.events[0][0].pulses) == retained
 
 
-def test_mux_excludes_an_off_channel_single_carrier():
+def test_mux_rejects_an_off_channel_single_carrier_with_adc_frequency_and_channel():
     base = mux_template()
-    plan = ftf_module.plan_template(
-        settings(),
-        snapshot(),
-        replace(base, events=base.events[:1]),
-        readout=configuration(),
-        time_base=TIME_BASE,
-    )
-    batch = plan.readouts[1].batch
-    assert all(not event.pulses for events in batch.events for event in events)
-    np.testing.assert_array_equal(ADC(batch.model).responses(batch).sums, 0)
+    with pytest.raises(ValueError, match=r"ADC 1.*6080.*PFB channel 62.*no.*carrier"):
+        ftf_module.plan_template(
+            settings(),
+            snapshot(),
+            replace(base, events=base.events[:1]),
+            readout=configuration(),
+            time_base=TIME_BASE,
+        )
 
 
 def test_mux_retunes_independently_between_logical_events():
