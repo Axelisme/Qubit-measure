@@ -307,8 +307,10 @@ class Scope:
         """Run a core (cfg, *, context) callable with a copied cfg, without saving.
 
         The host captures device settings and supplies borrowed hardware and
-        operation plots. Pause retries the same captured request. Completion
-        carries RunRecord and immutable attempt facts; exceptions propagate.
+        operation plots. The callable runs once, without automatic retries.
+        Child cancellation delivers partial values; root cancellation raises
+        ScriptCancelled after work drains and completion facts are recorded.
+        Completion carries RunRecord and immutable attempt facts; exceptions propagate.
         """
         return await self._capabilities().execute_run(self, experiment, cfg, name=name)
 
@@ -323,7 +325,7 @@ class Scope:
     def commit(self, record: BaseModel) -> None:
         """Snapshot one BaseModel into this scope's record.json; second commit raises.
 
-        Publication is synchronous and bypasses Pause, including root-cancel cleanup.
+        Publication is synchronous and remains available during root-cancel cleanup.
         Later mutation of record does not change the committed snapshot.
         """
         _validate_record(record)

@@ -1,6 +1,6 @@
 # `experiment.workflows` 具名 async workflow
 
-**Last updated:** 2026-10-31（單次 operation）
+**Last updated:** 2026-11-01（單次 operation 與歷史 facts）
 
 **讀者：** framework-dev、lab-author。查閱 workflow 宣告、Scope、控制、operation 事實與 record 保存。
 
@@ -58,7 +58,7 @@ Host 記錄本次 operation、祖先或子孫的 selector cancel，並在完成�
 任意程式例外直接傳回作者，不降級成 Failed。
 
 `await scope.run(fn, cfg)` 接 core 的 `(cfg, *, context: RunContext) -> Result`，包括 bound Experiment.run。
-Cfg 必須是 `zcu_tools.cfg_model.ConfigBase`。每次 attempt 深複製原 capture，建 RunContext 與獨立 operation Plots，借用 soc、soccfg 與 connected drivers。
+Cfg 必須是 `zcu_tools.cfg_model.ConfigBase`。每次呼叫深複製 cfg，建 RunContext 與獨立 operation Plots，借用 soc、soccfg 與 connected drivers。
 呼叫前經 capture_device_snapshot 讀全部 connected drivers。任一讀取失敗就不執行 core。
 回傳是 `Completed[RunRecord[Cfg, Result]]`，不自動保存 raw 或圖。
 非 ConfigBase 的工作用 call。
@@ -130,7 +130,8 @@ ProgramBuilder 的 acquire retry 與 data-driven early stop 由日誌記錄，�
 Kind 是 run、call、setup_device 或 wait_until。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
 Attempt 在該 iteration 中從一開始，每個 operation 增加一次，不隨 commit 重置。
 Stopped 是完成時 operation 自己的 bit，Completed.stop_requested 另含 Host 對子孫發出的取消請求。
-Outcome 是 completed、discarded 或 raised。只有 run 有 pre-call device snapshot。
+目前 Outcome 是 completed 或 raised。discarded 僅保留供讀取歷史 Pause 記錄，不是現行停止行為。
+歷史記錄的 Attempt 也計入當時的 Pause 重試。只有 run 有 pre-call device snapshot。
 
 Commit 的 operations 保存該 scope 與其 children 的 attempts。未 commit 的 attempt 仍留 journal。
 `saved_run.read_records(run, Model | TypeAdapter(Model))` 走 nested 目錄樹，按 commit_seq 回 SavedRecord tuple。
@@ -148,7 +149,7 @@ Wrong model、錯誤欄位、stale 或重複 ID 不消耗新問題。QuestionMis
 Accepted answer 的記憶體交接留在 control callback，journal I/O 留在 callback 之外。
 
 `env.plots` 保留 workflow 趨勢圖。每次 scope.run 使用相同 presentation host 的獨立 operation Plots。
-返回或失敗都先 finish，下一 attempt release 舊 operation。Core 與 finish 同時失敗時保留 core cause 並附 cleanup note。
+返回或失敗都先 finish，下一次 operation release 舊 operation。Core 與 finish 同時失敗時保留 core cause 並附 cleanup note。
 WorkflowPlots.figures 將 workflow 圖與目前 operation/<name> 圖投影給 pane/MCP。
 Workflow 圖不得使用 operation/ 前綴。保存圖時從 Completed.value.result 重畫，不依賴 live 圖位置。
 Progress bars 由 env 保留，execution owner 在 producer drain 後逐一嘗試 close，再發布終態。

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-10-31（workflow 單次 operation 與停止請求）
+**Last updated:** 2026-11-01（workflow 單次 operation 與停止請求）
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -153,8 +153,8 @@ NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保
   `capture_device_snapshot(devices)` 由 Run owner 在下述 checkpoint 呼叫，讀取全部 connected drivers 的設定並轉成隔離 JSON。
   量測時間和 completion 由前端 adapter 在 acquire 邊界記錄，不由 core 或 datafile writer 擷取。Evidence 複製版本 mapping，獨立於可修改的 RunRecord cfg／Result。
 - GUI experiment 與 Notebook 的 Run 建立路徑各捕捉一次 device snapshot。GUI 在 hardware lease 後、adapter.run 前讀取。Notebook 同步執行，資源由 caller 擁有，不新增 lease；它在建立 RunContext 後、core.run 前讀取。兩路對全部已連線 device 各讀一次 get_info，只讀不寫。任一讀取失敗拒絕 Run，不進 adapter/core，不以 cached info 補值；無 device 記 `{}`。Snapshot 隨當次 Run 保存，後續 sweep 或 Save 不重讀、不覆寫。
-- Workflow 的 `await env.run(core.run, cfg)` 每次 attempt 建立新的 `RunContext` 與獨立的 operation Plots，呼叫 core 前捕捉 connected device snapshot，core 回傳時交付 `Completed[RunRecord]`，core 例外原樣傳出。`Completed.facts: OperationFacts` 與 journal／commit 信封共用事實結構；`env.identity` 回 detached startup RunIdentity。Lab saver 將 Completed、identity、spec.tag 與 snapshot 交給 `record_with_metadata`，由 experiment 組裝 RunMetadata 並放入 RunRecord.metadata。保存只傳 record，native 使用 datafile 的通用 Container。作者與保存介面見 [workflows](workflows/README.md)。
-- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run attempt 也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host；返回或失敗先 finish，Pause retry 使用新集合。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
+- Workflow 的 `await env.run(core.run, cfg)` 每次呼叫建立新的 `RunContext` 與獨立的 operation Plots，呼叫 core 前捕捉 connected device snapshot，core 回傳時交付 `Completed[RunRecord]`，core 例外原樣傳出。`Completed.facts: OperationFacts` 與 journal／commit 信封共用事實結構；`env.identity` 回 detached startup RunIdentity。Lab saver 將 Completed、identity、spec.tag 與 snapshot 交給 `record_with_metadata`，由 experiment 組裝 RunMetadata 並放入 RunRecord.metadata。保存只傳 record，native 使用 datafile 的通用 Container。作者與保存介面見 [workflows](workflows/README.md)。
+- `context.py` 的 `RunContext` 提供單次 run 的 soc、soccfg、具名 devices、plots 與 scope。名稱到 driver 的對應在建立時固定，driver 仍由 caller 管理。RunContext 不提供儀器 setters；core 以 `context.devices[cfg.dev[role]]` 取得 driver，再使用實驗層 helper。每次 run 建立新 context、plots 與 Scope。GUI／Notebook 使用 run 根，workflow 使用 operation child；硬體 handle 可重用，不把上一輪停止或錯誤狀態帶入下一輪。核心不管理前端 last_result 或呈現資源生命週期。Workflow 的每次 env.run 呼叫也建立新的 RunContext 與 operation Plots，使用和 workflow 趨勢圖相同的 presentation host。Core 只呼叫一次，不自動重試。返回或失敗都先 finish，下一次 operation 釋放上一組呈現資源。Workflow 層 env.plots 跨 commit 保留，生命週期見 [workflows README](workflows/README.md#ask-與顯示)。
 - `axes_spec.py` 用 `AxesSpec` 描述軸與資料 channel。zcu_lab 以 `AxesSpec.Axis`、`AxesSpec.Z` 宣告子規格；獨立的 `Axis`、`ZSpec` 名稱仍可使用。這些規格描述 Result 欄位如何對應檔案中的軸與資料 channel。
 
   `AxesSpec.Axis("frequency", label="Frequency", unit="Hz", scale=1e6)` 與 `AxesSpec.Z("signal", label="Signal", unit="V")` 接受關鍵字。既有位置參數仍可使用。
