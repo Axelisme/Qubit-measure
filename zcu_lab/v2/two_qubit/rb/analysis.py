@@ -99,22 +99,36 @@ def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
 
 
 def estimate_joint_d4(
-    fit: SharedFitResult, interval: tuple[float, float, int], paired_counts: tuple[int, int],
+    fit: SharedFitResult,
+    interval: tuple[float, float, int],
+    paired_counts: tuple[int, int],
 ) -> RBEstimate:
     """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates."""
     pr, pi = fit.values["p_0"], fit.values["p_1"]
     error = 0.75 * (1 - pi / pr)
     low, high, successes = interval
-    warning = "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
+    warning = (
+        "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
+    )
     if error < 0:
         warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
     return RBEstimate(
-        pr, pi, 0.75 * (1 - pr), error, low, high,
-        paired_counts[0], paired_counts[1], successes, warning,
+        pr,
+        pi,
+        0.75 * (1 - pr),
+        error,
+        low,
+        high,
+        paired_counts[0],
+        paired_counts[1],
+        successes,
+        warning,
     )
 
 
-def count_completion(counts: NDArray[np.float64], class_axes: tuple[int, ...]) -> NDArray[np.bool_]:
+def count_completion(
+    counts: NDArray[np.float64], class_axes: tuple[int, ...]
+) -> NDArray[np.bool_]:
     """Identify whole finite slots, rejecting partial/nonfinite/negative counts."""
     acquired = np.isfinite(counts).all(axis=class_axes)
     missing = np.isnan(counts).all(axis=class_axes)

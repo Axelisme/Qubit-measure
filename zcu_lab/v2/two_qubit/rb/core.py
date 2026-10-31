@@ -40,7 +40,14 @@ from .._sums import (
     joint_probabilities,
     validate_classifiers,
 )
-from .analysis import RBAnalysis, RBOptions, count_completion, estimate_d4, paired_means, validate_axes
+from .analysis import (
+    RBAnalysis,
+    RBOptions,
+    count_completion,
+    estimate_d4,
+    paired_means,
+    validate_axes,
+)
 from .program import CZPhasePair
 from .sequence import TwoQubitGate, make_paired_sequences
 
