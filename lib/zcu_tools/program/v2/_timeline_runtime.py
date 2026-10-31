@@ -74,6 +74,17 @@ def align_end(
     axes = {
         name: count for name, count in prog.loop_dict.items() if name in cycles.spans
     }
+    if native is not None and isinstance(native.value, QickParam):
+        ratio = Fraction(str(get_fclk(prog))) / Fraction(str(native.clock))
+        steps = (
+            Fraction(round(span * native.clock), prog.loop_dict[axis] - 1) * ratio
+            for axis, span in native.value.spans.items()
+            if prog.loop_dict[axis] > 1
+        )
+        if any(step.denominator != 1 for step in steps):
+            # A few sampled ceils can look affine by coincidence. The runtime
+            # consumer still owes the same upper conversion at every length.
+            return prog._timeline_book.math.native_end(value, native)
     points = np.asarray(cycles.to_array(axes), dtype=float)
     rounded = np.array([ceil_tick(float(point)) for point in points.flat]).reshape(
         points.shape
