@@ -117,7 +117,7 @@ def test_done_returns_next_recipe_handoff(tmp_path: Path, following: str) -> Non
                 release_next.set()
         assert reply["execution"] == key
         if following == "question":
-            assert reply["status"] == "paused"
+            assert reply["status"] == "waiting"
             assert (
                 reply["pending_question"]["question"]["proposal"]["items"][0]["name"]
                 == "Q1.freq"
