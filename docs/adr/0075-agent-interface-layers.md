@@ -61,10 +61,10 @@ L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次�
 `experiment.script_host.ScriptHost` 共用於 recipe 與 workflow。Caller 以 catalog 實名建立根 Scope 並交給 host，`host.root` 就是該物件。
 
 - `run(coroutine)` 在 caller worker 執行一次作者 coroutine，等 finally 與 executor drain 後返回或 raise。
-- `await call(fn, *, scope=None, name=None, on_completed=None)` 在 executor 執行 fn。未填 scope 時，operation child 掛根；明填時掛該顯式 parent。回傳 CallResult 的 epoch、stop_requested、stopped 是 fn 完成時的事實。`stop_requested` 記單次 operation 的停止請求，不是結果完整性。
+- `await call(fn, *, scope=None, name=None, on_completed=None)` 在 executor 執行 fn。未填 scope 時，operation child 掛根；明填時掛該顯式 parent。每次 call 只執行 fn 一次，不自動重試。回傳 CallResult 的 stop_requested、stopped 是 fn 完成時的事實。`stop_requested` 記單次 operation 的停止請求，不是結果完整性。
 - on_completed 是 framework recording hook。fn 正常返回後，host 在作者 worker、operation 尚存活時呼叫一次 hook，再檢查根取消。Hook 同步、不 await、不重入；fn 或 hook 的真實例外原樣傳播。這讓 journal 與 recipe Run facts 在根取消時仍保留完成資料。
 - `await ask(question)` 回具名 Answer，公開唯一 request id。錯誤、遲到或重複答案不消耗問題。根取消使 await raise ScriptCancelled，不向作者交付 Optional。
-- `control(fn)` 與 cancel／pause／resume／answer 共用 loop 控制序列。Fn 只做 memory-only、數微秒級的操作，不 await、不阻塞、不 I/O。
+- `control(fn)` 與 cancel／answer 共用 loop 控制序列。Fn 只做 memory-only、數微秒級的操作，不 await、不阻塞、不 I/O。
 - `close()` 請求根停止，off-worker 等待 coroutine、finally 與 executor drain，不強制終止 task。
 
 作者 await 的 AST 規則統一套用到 `zcu_lab/` 所有 async def，不識別 decorator、不分 entry 與 helper，也不做可達性分析。只允許 `env.*`／`tab.*`／`session.*` 呼叫，或靜態解析到 lab async 定義的 helper 呼叫。Helper 可以呼叫另一個 helper，自己的本文也受檢查。工具拒絕 `asyncio.*`、`create_task`、`gather`、`wait_for`、`TaskGroup`，明列原語的直接 Call 不論有無 await 都拒絕，包括 `async with TaskGroup()`。其他 async with／async for 不另禁。`tools/check_script_awaits.py` 接入 quality gate，不是完整 type checker，別名、動態分派與包裝仍可能繞過規則。
@@ -85,7 +85,7 @@ Recipe runtime 用公開 control(fn) 在同一 loop 回合檢查與停止當前 
 
 Iteration generator 的 next 釋放前一趟，close 釋放最後一趟。Host 不建隱式 iteration，也不以 commit 更換 iteration。Recipe 無作者 iteration，路徑直接是 `recipe:<name>/operation#N`。
 
-Commit 是同步 snapshot 寫檔，不經 pause gate。它不啟動硬體工作，取消收尾也必須能存已有成果。Async operation／ask 才經 pause gate。Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。Point 的 try/finally 同步 commit 一次，不在 finally await，根 ScriptCancelled 繼續往上傳播。
+Commit 是同步 snapshot 寫檔，不啟動硬體工作，取消收尾也必須能存已有成果。Async operation／ask 在各自邊界檢查根停止，沒有 Pause gate。Iteration.cancelled 只退出目前 point，主 for 用 continue，point helper 用 return。Point 的 try/finally 同步 commit 一次，不在 finally await，根 ScriptCancelled 繼續往上傳播。
 
 - 根 workflow／recipe 被取消表示腳本本身停止。下一個 call／ask await raise 普通 Exception 子類 ScriptCancelled，不是 asyncio.CancelledError。進行中的 call 先合作 drain、保留 completion facts，再 raise。真正的 fn、recording hook 或 cleanup 例外優先傳播。
 - 根以下的取消表示等待中的工作被打斷。Acquire 只停一次取得；schedule 停該段後續取得；iteration 跳過目前這一點。後續 sibling 不繼承已釋放 child 的停止。Fn 正常返回時 workflow 交付 Completed，拋錯時原錯誤傳給作者 coroutine，不把 acquire 錯誤轉成 Failed。作者決定攔錯、繼續、返回或重試。
@@ -98,11 +98,13 @@ StopSignal 的 set 只停止自己與子孫，reason 只保存與轉交，不解
 
 Scope.cancel 在自己的鎖下匹配唯一目標，再於設 stop 前同步以可選 on_cancel callback 交付該 Scope。Callback 不得阻塞或改樹結構；拋錯就傳原例外、不設 stop，refusal 不呼叫。呼叫端使用這個實際目標，不複製 resolver。這避免 fork 中取消 sibling 時誤記當前 operation，也不改 CancelResult 或 selector 規則。
 
-GUI 按 Stop 或被接受的 selector 選到 run root 時，cancel_requested 記整次 Stop 意圖；core 正常返回仍發布結果，terminal cancelled。只取消子孫且 core 正常返回時 terminal finished。兩者都記 stop_requested，core 拋錯一律 failed。Failed pane 的 source_operation_id 與 stop_requested 屬於該次請求，不代表有 record。Recipe 只用相同 handle 的來源補充停止事實，不借用舊 Run；補充 snapshot 查詢失敗仍傳原 acquisition error。
+GUI 單次 Run 的 core 正常返回一律發布結果並標 terminal finished，不論停止對象是 root 或子孫。GUI Stop、MCP 不帶 scope 的 cancel 與 cancel_scope("run") 都要求目標 scope 合作結束，並記 stop_requested。存檔 completion stopped 另記提早結束，core 拋錯一律 failed。GUI 不再使用 cancel_requested 或 on_cancel 分類 terminal；Scope.cancel(on_cancel=) 仍由 ScriptHost 用來記錄實際停止目標。Failed pane 的 source_operation_id 與 stop_requested 屬於該次請求，不代表有 record。Recipe 只用相同 handle 的來源補充停止事實，不借用舊 Run；補充 snapshot 查詢失敗仍傳原 acquisition error。
 
-2026-10-31，使用者對停止通道、欄位改名及 env.call 例外直接傳出的答覆為「Signal可以有reason欄位可以填，但不解析，1同意 2你怎麼做？這能做到？  3可以 4a」。Notebook 的計時器方案與作者擁有 partial 語意的責任見 [[0069]]。單次 operation 的歸屬、sibling 隔離及 GUI root 分類由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的授權裁定，並非使用者逐字指定的技術方案。
+2026-10-31，使用者對停止通道、欄位改名及 env.call 例外直接傳出的答覆為「Signal可以有reason欄位可以填，但不解析，1同意 2你怎麼做？這能做到？  3可以 4a」。Notebook 的計時器方案與作者擁有 partial 語意的責任見 [[0069]]。單次 operation 的歸屬及 sibling 隔離由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的授權裁定，並非使用者逐字指定的技術方案。
 
-Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration。Resume 開 gate。Workflow 丟棄 Pause 造成的 stale stopped attempt，重跑同 request；普通 scope cancel 直接交值。自然完成也等 gate 後交付，不重跑。主動命令仍限控制命令與步驟邊界的 tunables，不支援 Run 中改科學參數或同時等待多來源。
+2026-11-01，使用者將停止定為「1是，具體來說是，盡快合法結束這個scope，2B，這算是緊急操作？所以要快 3我考慮移除這功能，太難實作了」，再以「6b 其餘採用建議」移除 Pause／Resume 並選擇 GUI 正常回傳一律 finished。停止哪個 scope 就不再為它排新工作，已取得的交給上一層，上一層繼續。Workflow root 的緊急停止仍在 drain 並記 facts 後 raise ScriptCancelled，不向作者交付部分值。
+
+每個 operation 只呼叫一次，沒有 epoch、Pause gate 或丟棄重跑迴圈。Ask 等答覆使用 waiting，Answer 讓同一 coroutine 繼續一次，root Stop 可中斷等待。Journal 保留 QuestionAnswered，不記 PauseRequested／Paused／Resumed，也不新增 QuestionAsked，依使用者 2026-11-01「5a」裁定。主動命令仍限控制命令與步驟邊界的 tunables，不支援 Run 中改科學參數或同時等待多來源。中途接續用新 run 與 saved_run reader，見 [[0062]]。
 
 #### 路徑、選擇器與跨 process 投影
 
@@ -110,7 +112,7 @@ Pause 只停止目前 operation、增加 epoch、關 gate，不停止 iteration�
 
 Status 的 active_path 是根到第一個有多個存活 child 的節點的單一鏈。Live_paths 是所有存活葉完整路徑的 list[str]，不是逗號字串。沒有 fork 時 active_path 等於唯一葉路徑。GUI workflow pane 顯示這兩項原生投影。
 
-Cancel 搜整棵存活子樹，接受 kind、kind#N、operation:<name> 與 live_paths 中的完整路徑精確比對。多筆命中回 cancelled=False、reason="ambiguous" 與候選完整路徑 candidates。同層同名 operation 必須填 #N；跨 parent 的 kind#N 仍多筆就繼續 ambiguous。不選 latest child。Expected 只接受正整數，拒絕 bool，與 #N 同填須一致。合法但不存活的 selector 回 scope not active，序號不符回 sequence mismatch，均不設 token。Root 無序號。
+Cancel 搜整棵存活子樹，接受 kind、kind#N、operation:<name> 與 live_paths 中的完整葉路徑精確比對。Kind selector 唯一選到 root 時，即使 root 有活子層也接受。未具名 GUI root 的 "run" 按 kind 解析，不因字串也等於 root path 而要求它是葉節點。具名 root 的完整路徑與其他 leaf path 仍使用原有葉路徑規則。多筆命中回 cancelled=False、reason="ambiguous" 與候選完整路徑 candidates。同層同名 operation 必須填 #N；跨 parent 的 kind#N 仍多筆就繼續 ambiguous。不選 latest child。Expected 只接受正整數，拒絕 bool，與 #N 同填須一致。合法但不存活的 selector 回 scope not active，序號不符回 sequence mismatch，均不設 token。Root 無序號。
 
 Recipe 本地樹在 MCP process，GUI Run 是另一棵樹。Schedule／acquire 與 composite 完整路徑經 operation.cancel_scope 代理至目前 tab.run 的 handle。Operation.status_scope 回 GUI active_path 與 live_paths。Recipe 省略 GUI run 根，把尾段接到明確的本地 Run operation，並以同一規則投影 cancel ack 的 active_path／candidates。GUI 的 cancelled／reason 原值保留。
 
