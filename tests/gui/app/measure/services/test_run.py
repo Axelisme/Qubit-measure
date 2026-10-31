@@ -666,6 +666,33 @@ def test_bg_error_without_cancel_reports_failed():
     assert payload.error_message == "boom"
 
 
+@pytest.mark.parametrize("requested", [False, True])
+@pytest.mark.parametrize("fails", [False, True])
+def test_frontend_stop_preserves_core_return_or_failure(requested: bool, fails: bool):
+    state, tab_id, adapter = make_state()
+    service, _gate, background, handles = make_run_service(state)
+    record = RunRecord(None, object())
+
+    def acquire(*_args: Any, context: RunContext) -> RunRecord:
+        if requested:
+            assert service.cancel_run()
+        if fails:
+            raise RuntimeError("core failure after request")
+        return record
+
+    adapter.run.side_effect = acquire
+    token = service.start_run(make_inputs(state, tab_id, adapter), plots=make_plots())
+    background.run_work()
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.status == ("failed" if fails else "cancelled" if requested else "finished")
+    pane = state.get_tab(tab_id).run
+    assert pane.result is (None if fails else record)
+    assert pane.stop_requested is requested
+    payload = last_run_finished_payload(background.events)
+    assert payload.error_message == ("core failure after request" if fails else None)
+
+
 def test_bg_error_after_cancel_reports_cancelled_without_result():
     state, tab_id, adapter = make_state()
     svc, _gate, bg, _ = make_run_service(state)
