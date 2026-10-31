@@ -1,5 +1,4 @@
 import pytest
-
 from zcu_tools.program.v2.mocksoc import (
     make_mock_soccfg,
     make_mux_mock_soccfg,
