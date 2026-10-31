@@ -658,7 +658,8 @@ def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     assert list(prog.ro_chs) == [0]
     assert prog.ro_chs[0]["length"] == 61
     assert prog.ro_chs[0]["trigs"] == 2
-    assert len(waves(shots(prog)[0])) == 2
+    # Each read emits one ADC configuration and one generator waveform.
+    assert len(waves(shots(prog)[0])) == 4
     prog.compile()
     assert prog.ro_chs[0]["trigs"] == 2
 
