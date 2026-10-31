@@ -155,7 +155,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
         an explicit delay list and rejects collisions on the hardware time grid.
         """
-        # 1. Prepare the delay axis on the hardware grid without changing cfg.
+        # Prepare classification without changing the caller's cfg.
         cfg = deepcopy(cfg)
         pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
@@ -167,20 +167,19 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         axis = Classify(
             "readout", tone=None if pulse_readout else 0, classifier=classifier
         )
-        soc, soccfg = context.soc, context.soccfg
-        delay_table = None
         if cfg.uniform:
-            length_sweep = cfg.length
-            assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-            lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
-        else:
-            delay_table = materialize_nonuniform_t1_delays(
-                cfg.length,
-                soccfg=soccfg,
-            )
-            lengths = delay_table.times_us
+            return self._run_uniform(cfg, axis, context=context)
+        return self._run_non_uniform(cfg, axis, context=context)
 
-        # 2. Display and retain G/E/Other for both preparations.
+    def _run_uniform(
+        self, cfg: T1Cfg, axis: Classify, *, context: RunContext
+    ) -> T1Result:
+        soc, soccfg = context.soc, context.soccfg
+        length_sweep = cfg.length
+        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
+
+        # Display and retain G/E/Other for both preparations.
         init_g, init_e = self._make_viewers(context.plots)
 
         def plot_fn(counts: NDArray[np.float64]) -> None:
@@ -196,56 +195,90 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         with Schedule(cfg, buffer, scope=context.scope) as sched:
             run_cfg = sched.cfg
 
-            # 3. Sweep delay outside the I/pi branch, then read out each state.
-            if delay_table is None:
-                inner_length_sweep = run_cfg.length
-                assert isinstance(inner_length_sweep, SweepCfg), (
-                    "uniform mode requires SweepCfg"
+            # Sweep delay outside the I/pi branch, then read out each state.
+            inner_length_sweep = run_cfg.length
+            assert isinstance(inner_length_sweep, SweepCfg), (
+                "uniform mode requires SweepCfg"
+            )
+            length_param = sweep2param("length", inner_length_sweep)
+            builder = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
                 )
-                length_param = sweep2param("length", inner_length_sweep)
-                builder = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", run_cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
-                        Delay("t1_delay", delay=length_param),
-                        Readout("readout", run_cfg.readout),
-                    )
-                    .declare_sweep("length", inner_length_sweep)
-                    .declare_sweep("ge", 2)
+                .add(
+                    Reset("reset", run_cfg.reset),
+                    Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
+                    Delay("t1_delay", delay=length_param),
+                    Readout("readout", run_cfg.readout),
                 )
-            else:
-                length_cycles = delay_table.cycles
-                builder = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add(
-                        LoadValue(
-                            "load_t1_delay",
-                            values=list(length_cycles),
-                            idx_reg="length_idx",
-                            val_reg="t1_delay_cycle",
-                            auto_compress=False,
-                        ),
-                        Reset("reset", run_cfg.reset),
-                        Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
-                        DelayAuto("t1_delay", t="t1_delay_cycle"),
-                        Readout("readout", run_cfg.readout),
-                    )
-                    .declare_sweep("length_idx", len(length_cycles))
-                    .declare_sweep("ge", 2)
-                )
+                .declare_sweep("length", inner_length_sweep)
+                .declare_sweep("ge", 2)
+            )
 
-            # 4. Sum classified shots across rounds, preserving partial counts.
+            # Sum classified shots across rounds, preserving partial counts.
+            program = builder.build()
+            _ = builder.run_program_summed(
+                program,
+                sums2signal_fn=lambda sums: sums,
+                processor=shot_sums(program, [axis]),
+                rounds=cfg.rounds,
+            )
+
+        return T1Result(lengths=lengths, counts=buffer.array)
+
+    def _run_non_uniform(
+        self, cfg: T1Cfg, axis: Classify, *, context: RunContext
+    ) -> T1Result:
+        soc, soccfg = context.soc, context.soccfg
+        delay_table = materialize_nonuniform_t1_delays(cfg.length, soccfg=soccfg)
+        length_cycles = delay_table.cycles
+        lengths = delay_table.times_us
+
+        # Display and retain G/E/Other for both preparations.
+        init_g, init_e = self._make_viewers(context.plots)
+
+        def plot_fn(counts: NDArray[np.float64]) -> None:
+            populations = counts / counts.sum(axis=-1, keepdims=True)
+            init_g.update(lengths, populations[:, 0].T)
+            init_e.update(lengths, populations[:, 1].T)
+
+        buffer = SignalBuffer(
+            (len(lengths), 2, 3),
+            dtype=np.float64,
+            on_update=plot_fn,
+        )
+        with Schedule(cfg, buffer, scope=context.scope) as sched:
+            run_cfg = sched.cfg
+
+            # Load each quantized delay before preparing and reading both states.
+            builder = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
+                )
+                .add(
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(length_cycles),
+                        idx_reg="length_idx",
+                        val_reg="t1_delay_cycle",
+                        auto_compress=False,
+                    ),
+                    Reset("reset", run_cfg.reset),
+                    Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
+                    DelayAuto("t1_delay", t="t1_delay_cycle"),
+                    Readout("readout", run_cfg.readout),
+                )
+                .declare_sweep("length_idx", len(length_cycles))
+                .declare_sweep("ge", 2)
+            )
+
+            # Sum classified shots across rounds, preserving partial counts.
             program = builder.build()
             _ = builder.run_program_summed(
                 program,

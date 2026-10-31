@@ -159,79 +159,86 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         Homophasal sampling requires positive fit parameters and rejects points
         that collapse onto the same hardware frequency.
         """
-        # 1. Prepare the frequency grid without changing the caller's cfg.
         cfg = deepcopy(config)
-        soc, soccfg = context.soc, context.soccfg
         if cfg.sampling_mode == "linear":
-            freqs = linear_freqs(cfg, context=context)
-        elif cfg.sampling_mode == "homophasal":
-            params = cfg.homophasal
-            if params is None:
-                raise ValueError("homophasal sampling requires fit parameters")
-            freqs = homophasal_sweep2array(
-                cfg.freq, params, self._round_info(cfg, soccfg)
-            )
-        else:
-            raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
+            return self._run_uniform(cfg, context=context)
+        if cfg.sampling_mode == "homophasal":
+            return self._run_nonuniform(cfg, context=context)
+        raise ValueError(f"Invalid sampling_mode: {cfg.sampling_mode}")
 
+    def _run_uniform(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        soc, soccfg = context.soc, context.soccfg
+        freqs = linear_freqs(cfg, context=context)
         signals_buffer = spectrum_buffer(freqs, plots=context.plots)
 
         with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
             cfg = sched.cfg
 
-            # 2. Reset, read out and sweep frequencies on the FPGA.
-            if cfg.sampling_mode == "linear":
-                freq_sweep = cfg.freq
-                cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
-                _ = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(PulseReadout("readout", cfg.readout))
-                    .declare_sweep("freq", freq_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
-                )
-            else:
-                # Homophasal sampling uses the calibrated DDS table.
-                cfg.readout.set_param("freq", float(freqs[0]))
-                readout_cfg = cfg.readout
-                freq_words, ro_freq_words = readout_freq_words(
+            # Reset, read out and sweep frequencies on the FPGA.
+            freq_sweep = cfg.freq
+            cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
+            _ = (
+                sched.prog_builder(
+                    soc,
                     soccfg,
-                    freqs,
-                    gen_ch=readout_cfg.gen_ch,
-                    ro_ch=readout_cfg.ro_ch,
-                    mixer_freq=readout_cfg.mixer_freq,
-                    nqz=readout_cfg.nqz,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
                 )
+                .add_reset("reset", cfg.reset)
+                .add(PulseReadout("readout", cfg.readout))
+                .declare_sweep("freq", freq_sweep)
+                .build_and_acquire(rounds=cfg.rounds)
+            )
 
-                # Update DDS words after each point, wrapping for the next rep;
-                # the table readout preserves the native sweep's phase timing.
-                builder = (
-                    sched.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=sched.cfg.reps,
-                        relax_delay=sched.cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(
-                        TablePulseReadout(
-                            "readout",
-                            cfg.readout,
-                            idx_reg="freq",
-                            freq_words=freq_words,
-                            ro_freq_words=ro_freq_words,
-                        ),
-                    )
-                    .declare_sweep("freq", len(freqs))
+        return FreqResult(freqs=freqs, signals=signals_buffer.array)
+
+    def _run_nonuniform(self, cfg: FreqCfg, *, context: RunContext) -> FreqResult:
+        soc, soccfg = context.soc, context.soccfg
+        params = cfg.homophasal
+        if params is None:
+            raise ValueError("homophasal sampling requires fit parameters")
+        freqs = homophasal_sweep2array(cfg.freq, params, self._round_info(cfg, soccfg))
+        signals_buffer = spectrum_buffer(freqs, plots=context.plots)
+
+        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+            cfg = sched.cfg
+
+            # Homophasal sampling uses the calibrated DDS table.
+            cfg.readout.set_param("freq", float(freqs[0]))
+            readout_cfg = cfg.readout
+            freq_words, ro_freq_words = readout_freq_words(
+                soccfg,
+                freqs,
+                gen_ch=readout_cfg.gen_ch,
+                ro_ch=readout_cfg.ro_ch,
+                mixer_freq=readout_cfg.mixer_freq,
+                nqz=readout_cfg.nqz,
+            )
+
+            # Update DDS words after each point, wrapping for the next rep;
+            # the table readout preserves the native sweep's phase timing.
+            builder = (
+                sched.prog_builder(
+                    soc,
+                    soccfg,
+                    reps=sched.cfg.reps,
+                    relax_delay=sched.cfg.relax_delay,
                 )
+                .add_reset("reset", cfg.reset)
+                .add(
+                    TablePulseReadout(
+                        "readout",
+                        cfg.readout,
+                        idx_reg="freq",
+                        freq_words=freq_words,
+                        ro_freq_words=ro_freq_words,
+                    ),
+                )
+                .declare_sweep("freq", len(freqs))
+            )
 
-                # 3. Average reps/rounds and retain completed data on cancellation.
-                _ = builder.build_and_acquire(rounds=cfg.rounds)
+            # Average reps/rounds and retain completed data on cancellation.
+            _ = builder.build_and_acquire(rounds=cfg.rounds)
 
         return FreqResult(freqs=freqs, signals=signals_buffer.array)
 
