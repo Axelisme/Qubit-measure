@@ -1,13 +1,12 @@
 """Recipe analysis parameters cross the native tracked owner boundary."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.gui.app.measure.adapter import Analysis, AnalyzeRequest
+from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form import FormModel
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 from zcu_tools.mcp.measure.session import GuiRpcError
@@ -55,7 +54,13 @@ def test_analyze_errors_reach_recipe_author_with_original_message(
 
     fx.registry.register(
         "synthetic/failing-analysis",
-        replace(SampleAdapter, analysis=Analysis(fn=analyze)),
+        Adapter(
+            spec=SampleAdapter.spec,
+            make_form=SampleAdapter.make_form,
+            run=SampleAdapter.run,
+            guide=None,
+            analysis=Analysis(fn=analyze, options=lambda source, env: SampleParams()),
+        ),
     )
     observed: list[str] = []
 
