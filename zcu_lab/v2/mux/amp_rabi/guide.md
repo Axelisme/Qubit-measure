@@ -30,7 +30,8 @@ positions 2/0 in that order, even while the picker shows Q2. Empty, duplicate or
 out-of-range participants block Run and remain editable for correction.
 
 Selected tones need drives on independent generators, distinct from readout.
-Open/Reset fills selected tones' drive and per-tone sweep defaults and sets
+Set each tone's `gain.start` and `gain.stop` bounds. All tones share Expts.
+Open/Reset fills selected tones' drive and per-tone gain defaults and sets
 these fields to None on other tones. The nullable fields remain editable.
 Open/Reset captures the Aliases row `participants`, for example `[Q3, Q1]`,
 and maps it against the captured `$mux.qubits` order to original indices `[2, 0]`.

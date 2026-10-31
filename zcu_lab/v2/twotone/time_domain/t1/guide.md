@@ -24,7 +24,7 @@ Proposes fitted qubit.t1 and its standard error (us) to the captured qubit and w
 
 ## Recommended
 
-Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Missing T1 starts the delay endpoint at 150 us; stored invalid T1 leaves it required and empty. Set 'uniform=False' to cluster more points on the exponential decay while keeping the configured start/stop window.
+Analysis defaults to a single-exponential fit; enable dual-exponential only when the decay clearly shows two timescales (a fast component on top of the slow relaxation). A delay sweep reaching ~5*T1 lets the decay flatten so the fit is well-constrained. Missing T1 starts the delay endpoint at 150 us; stored invalid T1 leaves it required and empty. Set `sampling="decay"` to cluster more points on the exponential decay while keeping the configured start/stop window.
 
 ## Four starting situations
 

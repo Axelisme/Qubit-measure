@@ -92,7 +92,7 @@ def make_flux_form[
                                 "waveform.length": 1.0,
                             },
                         ),
-                        "sweep": {
+                        "freq": {
                             "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
                             "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
                         },
@@ -100,7 +100,7 @@ def make_flux_form[
                     for name in names
                 ],
                 participants,
-                fields=("drive", "sweep"),
+                fields=("drive", "freq"),
             ),
             "expts": 301,
         }
@@ -116,7 +116,7 @@ def make_flux_form[
         )
         for index, name in enumerate(names):
             for endpoint in ("start", "stop"):
-                metadata[("frequency", "tones", index, "sweep", endpoint)] = (
+                metadata[("frequency", "tones", index, "freq", endpoint)] = (
                     seed_metadata(
                         f"From captured {name}.freq and {name}.kappa in MHz; missing calibration requires input"
                     )
@@ -137,12 +137,12 @@ def make_flux_form[
             [
                 {
                     "name": name,
-                    "sweep": {"start": None, "stop": None},
+                    "flux": {"start": None, "stop": None},
                 }
                 for name in names
             ],
             participants,
-            fields=("sweep",),
+            fields=("flux",),
         )
         tree["flux_expts"] = 101
         metadata[("flux_expts",)] = seed_metadata(
@@ -153,7 +153,7 @@ def make_flux_form[
                 description=f"Device name captured from {name}.flux_dev"
             )
             for endpoint in ("start", "stop"):
-                metadata[("tones", index, "sweep", endpoint)] = seed_metadata(
+                metadata[("tones", index, "flux", endpoint)] = seed_metadata(
                     f"Actual half/integer from captured {name}.flux on its flux_dev, accounting for other device biases; native device unit"
                 )
     else:
@@ -180,20 +180,6 @@ def make_flux_form[
             local=local,
         ),
         fixed_elements=tuple(fixed),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "frequency",
-            *(("flux_dev", "flux") if not local else ("flux_expts",)),
-            "flux_unit",
-            "reps",
-            "rounds",
-            "initial_delay",
-            "relax_delay",
-            "settle",
-        ),
     ).with_seed_metadata(metadata)
 
 
@@ -236,7 +222,7 @@ def mux_flux_initial_values(
                 {
                     "name": name,
                     "flux_dev": seed.device,
-                    "sweep": {"start": start, "stop": stop}
+                    "flux": {"start": start, "stop": stop}
                     if index in participants
                     else None,
                 }

@@ -36,7 +36,7 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         # Run supplies each gain; retain independent shape admission.
         drive = replace(drive, set={**drive.set, "gain": Hidden(0.0)})
         tones.append(
-            {"name": name, "drive": drive, "sweep": {"start": -0.3, "stop": 1.0}}
+            {"name": name, "drive": drive, "gain": {"start": -0.3, "stop": 1.0}}
         )
     readout = mux_readout_initial(ctx)
     return Form(
@@ -49,7 +49,7 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
                 participants,
                 fields=(
                     "drive",
-                    "sweep",
+                    "gain",
                 ),
             ),
             "expts": 51,
@@ -62,16 +62,5 @@ def make_form(ctx: FormContext) -> Form[MuxAmpRabiCfg]:
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
-        ),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "expts",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
         ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

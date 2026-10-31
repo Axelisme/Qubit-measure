@@ -38,6 +38,6 @@ The cpmg recipe follows the same Run, save and Analyze steps. Use max_n with poi
 3. With a readout slot, Reset and review the captured module and remaining errors separately.
    A slot does not prove that drive pulses, sweep bounds or GE calibration are valid.
 4. Through the agent, call `cpmg` after inspecting the same Form errors.
-   max_n/points produces the count grid, or supply times. length_points maps to length_expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
+   max_n/points produces the count grid, or supply times. length_points sets Time points and delay.expts. min_length_us/max_length_us set the time window. fit_fringe changes only analysis.
    The Form chooses module sources. Omitted inputs retain Form values; null clears/disables fields. Overrides apply last, then check_ready reports missing or invalid fields before Run.
    Missing inputs return needs_parameters before acquisition. Reset may replace unsaved inputs.

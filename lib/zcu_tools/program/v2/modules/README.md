@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，timeline_inc 與 delay_by_timeline 時間操作
+**Last updated:** 2026-11-01，Timeline mux collection 與具名時間操作
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -229,7 +229,9 @@ Static Mux does not switch runtime readout configurations.
 Legacy `ModularProgramV2.protect_readout_routes` protects successful declarations,
 including when nested; its unprotected routes retain QICK overwrite semantics.
 `collect_iq` selects one standard averaged read using that program's actual
-channel ordering and returns tone-ordered float64 I/Q. The experiment owns
+channel ordering and returns tone-ordered float64 I/Q. Timeline collection
+requires this exact module's compiled readout emission on the supplied program.
+Compiling the same module in another program does not invalidate earlier programs. The experiment owns
 complex conversion, interpretation and persistence. `collect_raw_iq(prog)` reads
 that initialized program's last-round QICK buffers, normalizes each ADC's sums by
 its rounded integration length, and keeps all loops, reads and paired shots in
