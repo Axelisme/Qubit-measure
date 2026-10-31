@@ -170,7 +170,9 @@ def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult
     """Load two-axis sums; old raw-IQ or single-axis files raise ValueError."""
     sums = data.variable("sums")
     if sums.z.shape != (2, 2, 3, 3):
-        raise ValueError("Joint readout requires two preparation axes and sums (2,2,3,3)")
+        raise ValueError(
+            "Joint readout requires two preparation axes and sums (2,2,3,3)"
+        )
     return JointReadoutResult(
         prepared_f1=sums.axes[3].astype(np.int64),
         prepared_f2=sums.axes[2].astype(np.int64),

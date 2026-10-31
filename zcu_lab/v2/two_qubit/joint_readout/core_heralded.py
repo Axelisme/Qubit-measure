@@ -218,10 +218,14 @@ class JointReadoutHeraldedExp(
         def update_view(sums: NDArray[np.float64]) -> None:
             viewer.update(
                 np.arange(4, dtype=np.float64),
-                joint_probabilities(terminal_counts(sums, ("g", "g")))[..., 0, 0].reshape(4),
+                joint_probabilities(terminal_counts(sums, ("g", "g")))[
+                    ..., 0, 0
+                ].reshape(4),
             )
 
-        buffer = SignalBuffer((2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
+        buffer = SignalBuffer(
+            (2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view
+        )
         with Schedule(config, buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
