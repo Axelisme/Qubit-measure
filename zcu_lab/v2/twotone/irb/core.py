@@ -68,7 +68,10 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         axes=(
             AxesSpec.Axis("depths", label="Depth", unit="a.u.", dtype=np.int64),
             AxesSpec.Axis(
-                "arms", label="Arm (0=reference, 1=interleaved)", unit="", dtype=np.int64
+                "arms",
+                label="Arm (0=reference, 1=interleaved)",
+                unit="",
+                dtype=np.int64,
             ),
             AxesSpec.Axis("sub_seeds", label="Seed", unit="", dtype=np.int64),
             AxesSpec.Axis("rounds", label="Round", unit="", dtype=np.int64),
