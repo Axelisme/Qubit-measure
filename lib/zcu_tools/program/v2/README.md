@@ -164,8 +164,15 @@ Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
-省略 `timeline=` 或傳入 `None` 的 `emit`、`pulse`、`trigger`、`delay_timeline`、`sync` 都使用此名字。
-`repeat` 省略母 timeline 時也使用此名字。
+省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：
+
+- `emit`、`pulse`、`trigger`。
+- `send_readoutconfig`、`send_readoutconfig_from_regs`。
+- `pulse_from_regs`、`pulse_by_reg`、`pulse_from_length_reg`。
+- `delay_timeline`、`sync` 與 `repeat` 的母 timeline。
+
+`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時仍須提供配對的 `selection` metadata。
+範圍外省略 timeline 的原生輸出保留 QICK 時間行為，不改選 `"default"`。
 顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
 名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
 範圍不 fork、不 join，也不移動 reference。

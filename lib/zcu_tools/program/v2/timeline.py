@@ -512,8 +512,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def timeline(self, name: str) -> Generator[None]:
         """Select an existing name for omitted timeline arguments in this scope.
 
-        Applies to emit, pulse, trigger, delay_timeline, sync and
-        the repeat parent. Branch case emissions use the same default. Nested
+        Applies to emit, pulse, trigger, send_readoutconfig,
+        send_readoutconfig_from_regs, pulse_from_regs, pulse_by_reg,
+        pulse_from_length_reg, delay_timeline, sync and the repeat parent.
+        Branch case emissions use the same default. Nested
         scopes override it and restore it on exit, including exceptions.
         Explicit names win, including default. This neither forks
         nor joins and does not affect native delay/delay_auto. Call in _body;
@@ -913,14 +915,16 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     def send_readoutconfig(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs
     ) -> None:
-        """Send an instantaneous config at timeline end+t us, or native t if omitted.
+        """Send an instantaneous config at native t or timeline end+t us.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native args are t=0, tag=None. A timeline end becomes the scheduled config
         instant; config length and unrelated ADC windows do not contribute.
         Wait-only timelines reject placement even at t=0; first sync the bound
         or establish an ordinary scheduling point with join/fork.
         Declaration and timing errors propagate.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().send_readoutconfig(ch, name, *args, **kwargs)
         if timeline is not None:
             source = self._pop_native(ConfigReadout)
@@ -940,10 +944,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play native addresses, or place certified selected playback on timeline.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native arguments retain their meanings. Timeline placement requires
         framework selection metadata pairing the address producer and candidates.
         Selector bounds, writes and overlap are checked during compilation.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         if timeline is None:
             super().pulse_by_reg(ch, addr_reg, t, flat_top_pulse=flat_top_pulse)
             return
@@ -975,10 +981,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play a native length register or certified timeline-selected lengths.
 
+        None uses the scoped name, or native reference timing outside a scope.
         Native arguments are unchanged. Timeline placement requires matching
         framework selection metadata; raw waveform length and post stay separate.
         Invalid producer bounds, writes and overlap fail during compilation.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().pulse_from_length_reg(
             ch, name, length_reg=length_reg, flat_top=flat_top, t=t
         )
@@ -999,9 +1007,11 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Play runtime words at native t or timeline end+t, advancing a named end.
 
+        None uses the scoped name, or native reference timing outside a scope.
         kwargs are t (us), tag, freq_reg and gain_reg containing final hardware
         words. Native patching and template/register validation are unchanged.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().pulse_from_regs(ch, name, **kwargs)
         if timeline is not None:
             source = self._pop_native(Pulse)
@@ -1014,12 +1024,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     ) -> None:
         """Send runtime ADC words at native t or timeline end+t (us).
 
+        None uses the scoped name, or native reference timing outside a scope.
         kwargs are t, tag and freq_reg. A timeline end becomes the scheduled config
         instant, independent of config length. Wait-only timelines reject placement
         even at t=0; first sync the bound or establish an ordinary scheduling
         point with join/fork. Native patching and declaration/register validation
         are unchanged.
         """
+        timeline = timeline if timeline is not None else self._timeline_default
         super().send_readoutconfig_from_regs(ch, name, **kwargs)
         if timeline is not None:
             source = self._pop_native(ConfigReadout)
