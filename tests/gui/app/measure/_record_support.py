@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from zcu_tools.experiment.metadata import RunMetadataContent
 from zcu_tools.experiment.metadata import RunMetadata
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.state import RunPaneState

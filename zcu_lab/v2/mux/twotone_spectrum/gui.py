@@ -157,7 +157,7 @@ def _get_writeback_items(
                 ),
             ]
         )
-        if metadata is not None and devices is not None:
+        if devices is not None:
             frame = record_flux_frame(
                 captured_qubit_flux(req.ctx.parameters, qubit), devices
             )

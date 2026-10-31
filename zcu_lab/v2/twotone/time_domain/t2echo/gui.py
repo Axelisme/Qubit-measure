@@ -142,7 +142,7 @@ def _T2Echo_get_writeback_items(
         ),
     ]
     parameters = req.ctx.parameters
-    if parameters is not None and metadata is not None and devices is not None:
+    if parameters is not None and devices is not None:
         frame = record_flux_frame(captured_qubit_flux(parameters), devices)
         items.append(
             RecordWriteback(

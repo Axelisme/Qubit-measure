@@ -290,7 +290,7 @@ def test_run_save_retains_admission_source_after_global_entry_and_alias_changes(
     finally:
         subscription.unsubscribe()
     assert len(finished) == 1 and finished[0].outcome == "finished"
-    metadata, parameters = require_record(tab.run).metadata, tab.run.parameters
+    metadata, parameters = RunMetadataContent(require_record(tab.run).metadata), tab.run.parameters
     assert metadata is not None and parameters is not None
     storage = parameters.capture_storage()
     assert metadata.snapshot.roles == {"driver": "Q2", "custom": "Q1"}

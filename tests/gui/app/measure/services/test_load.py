@@ -208,7 +208,7 @@ def test_load_preserves_authored_input_including_invalid_drafts(
     before = tab.cfg.input.data
     env = tab.cfg.env
     cfg_version = state.version.get(f"tab:{tab_id}:cfg")
-    loaded = RunRecord(RepeatsCfg(reps=40), object(), historical_metadata())
+    loaded = RunRecord(RepeatsCfg(reps=40), object(), historical_metadata().model_dump(mode="json"))
     metadata = historical_metadata()
     adapter.restore.return_value = RestoredRun(loaded, None)
     service, _emit = _service(state)

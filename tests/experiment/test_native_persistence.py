@@ -260,9 +260,9 @@ def test_fixed_axis_saves_like_field_axis_and_restores_without_field(
     frequency = np.array([4000.0, 5000.0])
     signal = np.array([[1 + 2j, 3 - 4j, 5 + 6j], [7 - 8j, 9 + 10j, 11 - 12j]])
     metadata = native_metadata(fixed_spec.tag)
-    fixed_record = RunRecord(NativeCfg(), SingleResult(frequency, signal), metadata)
+    fixed_record = RunRecord(NativeCfg(), SingleResult(frequency, signal), metadata.model_dump(mode="json"))
     field_record = RunRecord(
-        NativeCfg(), PopulationResult(frequency, np.array([0, 1, 2]), signal), metadata
+        NativeCfg(), PopulationResult(frequency, np.array([0, 1, 2]), signal), metadata.model_dump(mode="json")
     )
     fixed_path, field_path = tmp_path / "fixed.h5", tmp_path / "field.h5"
     save_run(fixed_record, fixed_path, spec=fixed_spec)
@@ -332,7 +332,7 @@ def test_fixed_axis_shape_mismatch_fails_before_writing(
     source = RunRecord(
         NativeCfg(),
         SingleResult(np.array([4000.0, 5000.0]), np.ones((3, 2))),
-        native_metadata(spec.tag),
+        native_metadata(spec.tag).model_dump(mode="json"),
     )
     path = tmp_path / ("bad.h5" if native else "bad.hdf5")
     save_record = save_run if native else save_labber

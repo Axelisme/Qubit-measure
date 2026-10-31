@@ -271,7 +271,7 @@ def test_update_tab_loaded_result_bumps_result_analyze_and_post_versions():
 
     tab = state.get_tab("t1")
     assert tab.run.result is historical
-    assert require_record(tab.run).metadata == metadata
+    assert require_record(tab.run).metadata == metadata.model_dump(mode="json")
     assert tab.run.source_path == "/tmp/loaded.hdf5"
     assert state.version.get("tab:t1:result") == 1
     assert state.version.get("tab:t1:analyze") == 1

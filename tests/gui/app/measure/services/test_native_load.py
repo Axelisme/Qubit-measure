@@ -179,7 +179,7 @@ def test_native_load_uses_recorded_parameters_without_prevalidating_unused_metad
     record = require_record(tab.run)
     assert record.metadata is not None
     with pytest.raises(ValueError, match=f"metadata.*{defect}"):
-        getattr(record.metadata, defect)
+        getattr(RunMetadataContent(record.metadata), defect)
     with pytest.raises(ValueError, match="metadata"):
         metadata_from_container(load(path))
     assert path.read_bytes() == before

@@ -476,7 +476,7 @@ def test_analysis_draft_uses_start_run_identity(
         captured = tab.run.parameters
         expected = (
             require_metadata(tab.run).run_id
-            if require_record(tab.run).metadata is not None
+            if require_record(tab.run).metadata
             else None
         )
         seen_analyze: list[

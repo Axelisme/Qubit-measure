@@ -191,7 +191,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     background.run_work()
     pane = state.get_tab(tab_id).run
     assert require_record(pane).result is record.result
-    assert (metadata := require_record(pane).metadata) is not None
+    assert (metadata := RunMetadataContent(require_record(pane).metadata)) is not None
     assert metadata.completion == "stopped"
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "finished"
@@ -209,7 +209,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     next_token = service.start_run(inputs, plots=make_plots())
     assert next_token != token
     background.run_work()
-    assert (metadata := require_record(state.get_tab(tab_id).run).metadata) is not None
+    assert (metadata := RunMetadataContent(require_record(state.get_tab(tab_id).run).metadata)) is not None
     assert metadata.completion == "complete"
     assert (
         next_outcome := handles.poll(next_token)
