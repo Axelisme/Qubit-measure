@@ -105,26 +105,24 @@ def test_schedule_array_writes_accept_exact_shapes(
 
 
 def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
-    root = {"task": {"signals": np.full((1,), np.nan)}}
+    root = [{"signals": np.full((1,), np.nan)}]
     updates: list[tuple[tuple[Any, ...], np.ndarray]] = []
     result_buffer = RecordingBuffer(
         root,
         on_update=lambda step: updates.append(
-            (step.path, root["task"]["signals"].copy())
+            (step.path, root[0]["signals"].copy())
         ),
     )
 
-    def child(step):
-        signals_step = step.child("signals")
-        buffer = signals_step.buffer((1,), dtype=np.float64)
-        buffer.set(np.array([1.0]))
-        buffer.set(np.array([2.0]))
-
     with Schedule(_cfg(), result_buffer, scope=Scope("run")) as sched:
-        sched.batch({"task": child})
+        for _, step in sched.scan("point", [0]):
+            signals_step = step.child("signals")
+            buffer = signals_step.buffer((1,), dtype=np.float64)
+            buffer.set(np.array([1.0]))
+            buffer.set(np.array([2.0]))
 
-    np.testing.assert_allclose(root["task"]["signals"], np.array([2.0]))
-    assert [path for path, _ in updates] == [("task", "signals"), ("task", "signals")]
+    np.testing.assert_allclose(root[0]["signals"], np.array([2.0]))
+    assert [path for path, _ in updates] == [(0, "signals"), (0, "signals")]
     np.testing.assert_allclose(updates[0][1], np.array([1.0]))
     np.testing.assert_allclose(updates[1][1], np.array([2.0]))
 
@@ -168,29 +166,27 @@ def test_schedule_root_trigger_update_passes_none_step() -> None:
 
 
 def test_schedule_child_buffer_validates_target_before_acquire() -> None:
-    root = {
-        "child": {
+    root = [
+        {
             "signals": np.full((2,), np.nan),
             "metadata": {"value": 0},
         }
-    }
-
-    def child(step):
-        signals_step = step.child("signals")
-        try:
-            signals_step.buffer((1,), dtype=np.float64)
-        except ValueError as exc:
-            assert "shape" in str(exc)
-        else:
-            raise AssertionError("buffer should reject shape mismatch")
-
-        metadata_step = step.child("metadata")
-        try:
-            metadata_step.buffer((1,), dtype=np.float64)
-        except ValueError as exc:
-            assert "NDArray" in str(exc)
-        else:
-            raise AssertionError("buffer should reject non-array targets")
+    ]
 
     with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
-        sched.batch({"child": child})
+        for _, step in sched.scan("point", [0]):
+            signals_step = step.child("signals")
+            try:
+                signals_step.buffer((1,), dtype=np.float64)
+            except ValueError as exc:
+                assert "shape" in str(exc)
+            else:
+                raise AssertionError("buffer should reject shape mismatch")
+
+            metadata_step = step.child("metadata")
+            try:
+                metadata_step.buffer((1,), dtype=np.float64)
+            except ValueError as exc:
+                assert "NDArray" in str(exc)
+            else:
+                raise AssertionError("buffer should reject non-array targets")

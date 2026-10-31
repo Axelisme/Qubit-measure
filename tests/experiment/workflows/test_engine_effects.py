@@ -109,17 +109,14 @@ def test_cfg_at_return_is_detached_and_saver_receives_run_record(rig: Rig) -> No
     ).read_text() == "30:9"
 
 
-def test_schedule_acquire_failure_is_recoverable(rig: Rig) -> None:
+def test_schedule_failure_is_recoverable(rig: Rig) -> None:
     cause = OSError("acquire disconnected")
 
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        def fail(_step: object) -> None:
-            raise cause
-
         with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            schedule.batch({"acquire": fail})
+            schedule.mark_failed(cause)
         return 99
 
     observed = start_call(rig, acquire)
