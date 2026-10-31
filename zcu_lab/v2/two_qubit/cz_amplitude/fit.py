@@ -43,7 +43,7 @@ def fit_return(
 ) -> CZReturnFit:
     """Fit complete prefix P00 to offset + contrast*cos(2π*scale/period).
 
-    Inputs are classify_return's finite ascending uniform source scales, P00
+    Inputs are finite ascending uniform source scales, count-derived P00
     including incomplete NaNs, and its completion mask. No source is modified.
     Require measured scale=0 and every requested point through the first positive
     return. A cancelled suffix may be absent; a missing interior scale ends the
