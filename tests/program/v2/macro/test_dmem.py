@@ -31,8 +31,11 @@ class IndexedReads(Macro):
             WriteReg(dst="output", src="value").translate(prog)
             AsmInst(
                 inst={
-                    "CMD": "DPORT_WR", "DST": "0", "SRC": "reg",
-                    "DATA": "r10", "TIME": "@0",
+                    "CMD": "DPORT_WR",
+                    "DST": "0",
+                    "SRC": "reg",
+                    "DATA": "r10",
+                    "TIME": "@0",
                 },
                 addr_inc=1,
             ).translate(prog)
@@ -57,14 +60,21 @@ def indexed_program(axes: Sequence[Mapping[str, int]]) -> TimelineProgramV2:
 @pytest.mark.parametrize("mixed", [False, True])
 def test_native_indices_share_capacity_but_preserve_axis_order_and_counts(mixed):
     axes = (
-        [{"outer": 2}, {"inner": 3}, {"outer": 2, "inner": 3},
-         {"inner": 3, "outer": 2}]
-        if mixed else [{"outer": 2, "inner": 3}] * 20
+        [{"outer": 2}, {"inner": 3}, {"outer": 2, "inner": 3}, {"inner": 3, "outer": 2}]
+        if mixed
+        else [{"outer": 2, "inner": 3}] * 20
     )
     expected = (
-        [[101, 101, 101, 101], [101, 102, 102, 103], [101, 103, 103, 105],
-         [102, 101, 104, 102], [102, 102, 105, 104], [102, 103, 106, 106]]
-        if mixed else [[value] * 20 for value in [101, 102, 103, 104, 105, 106]]
+        [
+            [101, 101, 101, 101],
+            [101, 102, 102, 103],
+            [101, 103, 103, 105],
+            [102, 101, 104, 102],
+            [102, 102, 105, 104],
+            [102, 103, 106, 106],
+        ]
+        if mixed
+        else [[value] * 20 for value in [101, 102, 103, 104, 105, 106]]
     )
     # Twenty identical requests must fit the ordinary 16-register profile.
     # Observe values, not index names or the compile-local sharing dictionary.
@@ -83,7 +93,9 @@ class InvalidCachedIndex(Macro):
         # A caller-supplied hit must not bypass validation. The token is never
         # dereferenced: invalid input must fail before returning any register.
         sweep_table_index(
-            prog, self.axes, name="invalid",
+            prog,
+            self.axes,
+            name="invalid",
             shared_indices={tuple(self.axes.items()): "unallocated"},
         )
 

@@ -175,7 +175,12 @@ def test_runtime_maximum_uses_cartesian_domain_for_independent_table_axes():
     # scan is outer, fine is inner. Zipping the sources loses four legal points.
     assert [waves(s) for s in result] == [[11], [29], [30], [30], [20], [29]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
-        39, 57, 58, 58, 48, 57
+        39,
+        57,
+        58,
+        58,
+        48,
+        57,
     ] * 2
 
 

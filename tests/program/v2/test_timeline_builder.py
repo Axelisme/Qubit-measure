@@ -704,7 +704,9 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
     mock_soccfg,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    frequency = builder.add_sweep("frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3))
+    frequency = builder.add_sweep(
+        "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
+    )
     duration = builder.add_sweep(
         "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
     )
@@ -734,7 +736,8 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
 
 @pytest.mark.parametrize("extra_post_cycles", [0, 1])
 def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
-    mock_soccfg, extra_post_cycles,
+    mock_soccfg,
+    extra_post_cycles,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, reps=2, initial_delay=0, relax_delay=0)
     frequency = builder.add_sweep(
@@ -760,8 +763,14 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                             gain=0.5,
                             waveform=ConstWaveformCfg(length=0.1),
                             post_delay=(
-                                4.3 + (extra_post_cycles if name == "drive" and ch == 1 else 0)
-                            ) / 430.08,
+                                4.3
+                                + (
+                                    extra_post_cycles
+                                    if name == "drive" and ch == 1
+                                    else 0
+                                )
+                            )
+                            / 430.08,
                         ),
                         length=length,
                         freq=frequency,

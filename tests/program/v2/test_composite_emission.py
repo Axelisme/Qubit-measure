@@ -565,7 +565,9 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("post, advance", [(0, 0), (-60, 60), (-60, 59)])
-def test_equal_runtime_maximum_preserves_both_physical_boundaries(reverse, post, advance):
+def test_equal_runtime_maximum_preserves_both_physical_boundaries(
+    reverse, post, advance
+):
     selected = [
         TableLengthPulse(
             f"selected_{ch}",
@@ -602,7 +604,9 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(reverse, post,
             prog.emit(pulse, timeline=target)
 
     def build():
-        return _program(make_mock_soccfg(2, 0), [*selected, *following], body, initialize)
+        return _program(
+            make_mock_soccfg(2, 0), [*selected, *following], body, initialize
+        )
 
     if post + advance < 0:
         with pytest.raises(ValueError, match="pulse overlap"):
@@ -613,7 +617,10 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(reverse, post,
             result = shots(prog)
             # Both selected physical ends are 148/176. Equal numeric aggregate
             # ends must retain both channels' coverage, including the 60-cycle debt.
-            assert [waves(s) for s in result] == [[104, 104, 148, 192], [104, 104, 176, 220]] * 2
+            assert [waves(s) for s in result] == [
+                [104, 104, 148, 192],
+                [104, 104, 176, 220],
+            ] * 2
             assert [s.body_end_cycle - s.start_cycle for s in result] == [236, 264] * 2
             prog.binprog = None
             prog.compile()
