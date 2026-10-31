@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-10-30，Schedule run acquisition
+**Last updated:** 2026-11-01，cfg-optional Schedule 與 root buffer 建立
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -56,8 +56,12 @@ path，並觸發該 buffer 的 update hook。
 
 `outcome.py` 擁有完成狀態值與 exception reason 格式化。`Schedule` 擁有狀態轉換、stop token 與 partial buffer 的生命週期。`RunStatus`、`ScheduleOutcome` 仍可從既有 runtime 與 schedule 入口匯入。
 
-`Schedule` 是 run 內的 scope：入口 deepcopy cfg、typed env、持有顯式 `Scope` child，並
-建立 host-side control flow。
+`Schedule` 是 run 內的 scope，持有 typed env 與顯式 `Scope` child，並建立 host-side control flow。
+`init_cfg` 預設為 `None`。傳入 cfg 時仍 deepcopy，scan／repeat／batch／child 保留既有 cfg 隔離。
+不使用 cfg 時，以 `Schedule(None, buffer, scope=...)` 接收預建的 root buffer，或在
+`with Schedule(scope=...) as sched` 內呼叫 `sched.buffer(shape, ...)` 建立並註冊 root `SignalBuffer`。
+後者沿用 `SignalBuffer` 的 dtype、on_update 與 update_interval 參數；已有 root buffer 時 raise ValueError。
+兩種入口都可從 Schedule 或 step 呼叫 `run_acquire*`，取數不依賴 cfg。
 
 ```python
 signals_buffer = SignalBuffer(

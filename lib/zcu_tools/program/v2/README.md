@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil 相對與絕對容差
+**Last updated:** 2026-11-01，timeline ceil 容差與 builder compilation options
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -155,6 +155,9 @@ The cfg-based APIs delegate to these same word decoders.
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
+建構子另收 `**program_kwargs`，在 `build()` 原樣轉交 `MyProgramV2` 的 QICK compilation options。
+例如 `reps_innermost=True` 將 reps 放在所有 top-level loop 內側。
+Compiler 在 build 時回報不支援或衝突的選項；取數選項仍傳給 Schedule 的 `run_acquire*`。
 它不接收 SoC，不取數，也不依賴 experiment runtime。
 Builder 依物件身分在第一次 emit 時記錄 module 宣告。
 同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。

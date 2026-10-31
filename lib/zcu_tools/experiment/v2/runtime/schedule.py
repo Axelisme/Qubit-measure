@@ -145,7 +145,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     scope is the explicit parent. Entry attaches one schedule child, optionally
     labeled by name; exit releases it. Acquisition attaches its own child under
     that schedule. Buffer cfg/environment behavior is independent of scope names.
-    init_cfg is optional: None leaves cfg unset on this scope and its children.
+    init_cfg is optional: None gives this scope and its children cfg=None.
     A supplied cfg is deep-copied; existing positional cfg calls remain valid.
     For cfg-free acquisition use Schedule(None, buffer, scope=...) or create a
     root SignalBuffer with buffer(shape) inside Schedule(scope=...).
@@ -782,6 +782,13 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
 @dataclass(frozen=True)
 class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
+    """Host-loop coordinate with its schedule, env and writable result path.
+
+    cfg is a detached copy of the parent's cfg, or None for a cfg-free parent.
+    child(addr) inherits it; child(addr, cfg=...) supplies a detached replacement.
+    Acquisition uses the result path and program, independently of cfg.
+    """
+
     schedule: Schedule[T_Cfg, T_Env]
     name: str
     index: Hashable
