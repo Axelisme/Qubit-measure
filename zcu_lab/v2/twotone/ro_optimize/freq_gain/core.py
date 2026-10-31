@@ -12,7 +12,6 @@ from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
@@ -21,6 +20,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,

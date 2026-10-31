@@ -143,7 +143,9 @@ def restore_result(data: GroupedLoadData[StirapCfg]) -> StirapResult:
     )
 
 
-def _scan_coordinates(scan: DelayScan | AmplitudeScan | DetuningScan) -> tuple[NDArray[np.float64], NDArray[np.float64], str]:
+def _scan_coordinates(
+    scan: DelayScan | AmplitudeScan | DetuningScan,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], str]:
     """Return requested x/y coordinates and the selected scan's x label."""
     if scan.kind == "delay":
         x_sweep, y_sweep = scan.stokes_lead, None
