@@ -900,15 +900,21 @@ class TimelineBranch(Macro):
             self.prepared.append(self._prepare_case(prog, case))
             parents, joined = self.book.case_lineage.pop()
             states.append(
-                self._capture_case(prog, self._static_case_ends(initial, parents, joined))
+                self._capture_case(
+                    prog, self._static_case_ends(initial, parents, joined)
+                )
             )
             self.book.pinned.update(prog._timeline_live_registers())
         static_ends = self._static_branch_ends(initial, states)
         states = self._close_cases(prog, initial, states, close=static_ends is None)
         if outer_used is not None:
-            outer_used.update(set.union(*(state.used & initial.keys() for state in states)))
+            outer_used.update(
+                set.union(*(state.used & initial.keys() for state in states))
+            )
         self._merge_frames(prog, [state.frames for state in states])
-        prog._time_bounds.defined = set.intersection(*(state.defined for state in states))
+        prog._time_bounds.defined = set.intersection(
+            *(state.defined for state in states)
+        )
         results = [{name: state.ends[name] for name in initial} for state in states]
         self.book.finish_branch_sources(prog, self.by)
         self.book.used, self.book.waiting = outer_used, waiting
@@ -924,12 +930,16 @@ class TimelineBranch(Macro):
             if static_ends is None and not _same_times(values):
                 self.book.waiting.add(name)
         self._merge_native(
-            prog, [{**state.gens, **state.runtime_gens} for state in states],
-            results, generator=True,
+            prog,
+            [{**state.gens, **state.runtime_gens} for state in states],
+            results,
+            generator=True,
         )
         self._merge_native(
-            prog, [{**state.ros, **state.runtime_ros} for state in states],
-            results, generator=False,
+            prog,
+            [{**state.ros, **state.runtime_ros} for state in states],
+            results,
+            generator=False,
         )
         self.book.pinned = saved_pins
 
@@ -995,7 +1005,12 @@ class TimelineBranch(Macro):
         )
 
     def _close_cases(
-        self, prog, initial: dict[str, Time], states: list[BranchCaseState], *, close: bool
+        self,
+        prog,
+        initial: dict[str, Time],
+        states: list[BranchCaseState],
+        *,
+        close: bool,
     ) -> list[BranchCaseState]:
         """Finish every path under the already chosen whole-branch closing policy."""
         finished = []
@@ -1004,7 +1019,8 @@ class TimelineBranch(Macro):
             if close:
                 used = state.used | (state.ends.keys() - initial.keys())
                 closer = PreparedTimelineMacro(
-                    self.book, TimelineSync(self.book, None, sources=tuple(sorted(used)))
+                    self.book,
+                    TimelineSync(self.book, None, sources=tuple(sorted(used))),
                 )
                 closer.preprocess(prog)
                 prepared.append(closer)
