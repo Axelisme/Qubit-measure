@@ -17,7 +17,9 @@ from ._timeline_expression import (
     substitute_time,
     unbounded_time,
 )
+from ._timeline_guard import PulseGuard
 from ._timeline_runtime import RuntimeEnd, Time, runtime_expression, time_expression
+from .modules.util import get_fclk
 from ._timeline_state import LoopTimelineFrame, TimelineBook
 
 
@@ -118,9 +120,30 @@ class LoopTimelineExit(Macro):
             gap = add_time(duration, scale_time(relative, -1))
             if not unbounded_time(gap) and projected_expression_bounds(gap).minimum >= 0:
                 result = replace(result, covers=(*result.covers, tail))
+        if book.repeats and not book.loop_timelines:
+            self._publish_reference_guards(prog, frame)
         book.ends = {**frame.external, frame.parent: result}
         book.waiting = frame.waiting
         book.pinned = frame.pinned
+
+    def _publish_reference_guards(self, prog, frame: LoopTimelineFrame) -> None:
+        book = self.entry.book
+        for ch in prog.gen_chs:
+            starts = [substitute_time(start, {frame.progress: LinearTime()}) for channel, start, _ in frame.starts if channel == ch]
+            if not starts:
+                continue
+            first = choose_time(*starts, maximum=False)
+            tail = book.native_expression(prog, ch, generator=True)
+            guard = PulseGuard(ch, unbounded=unbounded_time(first) or unbounded_time(tail))
+            if not guard.unbounded:
+                try:
+                    lower = book.math.time_parameter(_end("s0", first))
+                    upper = book.math.time_parameter(_end("s0", tail))
+                except RuntimeError:
+                    lower = projected_expression_bounds(first).minimum / get_fclk(prog)
+                    upper = projected_expression_bounds(tail).maximum / get_fclk(prog)
+                guard = PulseGuard(ch, shifts=(), floors=(upper,), limits=(lower,))
+            book.repeats[-1].pulse_guards[ch].then(guard)
 
     def _check_backedge(self, prog, frame: LoopTimelineFrame, duration: TimeExpression) -> None:
         if self.maximum is None or self.maximum < 2:

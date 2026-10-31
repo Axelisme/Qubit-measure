@@ -177,7 +177,7 @@ class TimelineSelectedPulse(TimedMacro):
         self.book.runtime_gens[self.source.ch] = finish
         self.book.record_native(prog, self.source.ch, finish, generator=True)
         self.book.native_timestamp(prog, finish, gen_ch=self.source.ch)
-        if self.book.repeats:
+        if self.book.repeats and not self.book.loop_timelines:
             lo = time_bounds(prog, start)[0]
             hi = time_bounds(prog, finish)[1]
             self.book.repeats[-1].pulse_guards[self.source.ch].then(

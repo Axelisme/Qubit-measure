@@ -80,7 +80,7 @@ class TimelineObservedPulse(Pulse):
         )
 
     def record(self, prog, t, limit: float | QickParam | None = None) -> None:
-        if self.book.repeats:
+        if self.book.repeats and not self.book.loop_timelines:
             length = prog.pulses[self.name].get_length()
             self.book.repeats[-1].pulse_guards[self.ch].then(
                 _PulseGuard(
