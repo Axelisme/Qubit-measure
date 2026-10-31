@@ -8,11 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
-from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
 
-from .._phase import QuadraturePhase, quadrature_phase
-from ..joint_readout.core import tone_centers
+from .._sums import herald_probabilities, sigma, terminal_counts
+from .._phase import QuadraturePhase, count_phase
 
 if TYPE_CHECKING:
     from .core import LocalZCfg, LocalZResult
@@ -42,110 +41,70 @@ class LocalZTargetFit:
 
 @dataclass(frozen=True)
 class LocalZAnalysis:
-    """Both targets' saved-source phase diagnostics, ordered F1 then F2.
+    """F1/F2 classified phase diagnostics and complete-row OLS fits.
 
-    phases has shape (2,Nn), each entry retaining contrast, nullable logical
-    phase and reason. mean_iq is (2,2,Nn,Ntones), with NaN for incomplete
-    projections; acquired_shots is (2,2,Nn). gate_counts identifies the n axis.
-    fits contains F1 then F2 complete-row linear fits. No measured phase is
-    inferred from a missing independent projection.
+    phases is (2,Nn); quadratures is (2,2,Nn) sigma, and acquired_shots is
+    the projection's terminal total. fits is F1 then F2; gate_counts is the n axis.
+    herald_matrix is the full herald distribution or None for ordinary acquisition.
+    pass_fraction is herald (g,g) acceptance, not ground-state purity.
     """
 
     phases: tuple[tuple[QuadraturePhase, ...], ...]
-    mean_iq: NDArray[np.complex128]
-    acquired_shots: NDArray[np.int64]
+    quadratures: NDArray[np.float64]
+    acquired_shots: NDArray[np.float64]
     gate_counts: tuple[int, ...]
     fits: tuple[LocalZTargetFit, ...]
+    herald_matrix: NDArray[np.float64] | None = None
+    pass_fraction: NDArray[np.float64] | None = None
 
 
 def analyze_local_z(
-    source: RunRecord[LocalZCfg, LocalZResult], *, plots: Plots
+    cfg: LocalZCfg, data: LocalZResult, *, plots: Plots, heralded: bool = False
 ) -> LocalZAnalysis:
-    """Analyze complete X/Y round pairs using only saved cfg and raw IQ.
+    """Derive classified X/Y sigma and phase using saved cfg and count axes.
 
-    Missing saved cfg raises ValueError. Missing centers or projection rounds
-    retain a reason instead of a phase. Invalid axes, partially missing rounds
-    and nonfinite acquired IQ raise ValueError. No thermal shots are excluded.
-    Each complete target row uses adjacent principal-value unwrap and an OLS
-    line with intercept; correction is minus slope, not rewrapped. Interpretation
-    assumes adjacent true phase increments have magnitude below 180 degrees.
-    Residual-scaled covariance and fit_quality diagnose, not gate, the model.
+    Each projection uses all acquired counts, including other in its denominator.
+    Missing/empty projections and zero contrast retain a reason, not a phase.
+    Heralded analysis selects herald (g,g) terminal counts and plots all nine
+    herald fractions. No IQ projection, shot reclassification or purity correction
+    is applied. Complete rows use adjacent unwrap and OLS; correction remains minus slope.
     """
-    cfg, data = source.cfg, source.result
-    if cfg is None:
-        raise ValueError(
-            "Local-Z analysis requires saved source cfg, not current Form/library"
-        )
-    mean, counts, complete = _source_quadratures(cfg, data)
-    targets: list[tuple[QuadraturePhase, ...]] = []
-    for t, tone in enumerate((cfg.roles.f1_tone, cfg.roles.f2_tone)):
-        calibration_reason = None
-        try:
-            centers = tone_centers(cfg.readout, tone)
-        except ValueError as exc:
-            centers = None
-            calibration_reason = str(exc)
-        points: list[QuadraturePhase] = []
-        for n in range(len(cfg.gate_counts)):
-            if not np.all(complete[t, :, n]):
-                point = QuadraturePhase(
-                    np.nan, None, "Missing complete X/Y projection rounds"
-                )
-            elif centers is None:
-                point = QuadraturePhase(np.nan, None, calibration_reason)
-            else:
-                point = quadrature_phase(
-                    data.signals[t, 0, n, :, tone],
-                    data.signals[t, 1, n, :, tone],
-                    centers,
-                )
-            points.append(point)
-        targets.append(tuple(points))
+    counts = _source_quadratures(cfg, data, heralded=heralded)
+    acquired = counts.sum(axis=(-2, -1))
+    quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
+    targets = tuple(
+        tuple(count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
+              for n in range(len(cfg.gate_counts)))
+        for t in range(2)
+    )
     fits = tuple(
         _fit_target(np.array(cfg.gate_counts, dtype=np.float64), points)
         for points in targets
     )
-    answer = LocalZAnalysis(tuple(targets), mean, counts, tuple(cfg.gate_counts), fits)
+    answer = LocalZAnalysis(
+        targets, quadratures, acquired, tuple(cfg.gate_counts), fits,
+        herald_probabilities(data.sums) if heralded else None,
+        herald_probabilities(data.sums)[..., 0, 0] if heralded else None,
+    )
     _plot_analysis(cfg, answer, plots=plots)
     return answer
 
 
 def _source_quadratures(
-    cfg: LocalZCfg,
-    data: LocalZResult,
-) -> tuple[NDArray[np.complex128], NDArray[np.int64], NDArray[np.bool_]]:
-    nn, nt, ns = (
-        len(cfg.gate_counts),
-        len(cfg.readout.tones),
-        cfg.rounds * cfg.reps,
-    )
+    cfg: LocalZCfg, data: LocalZResult, *, heralded: bool
+) -> NDArray[np.float64]:
+    """Validate saved scan axes and select terminal counts without averaging."""
     for actual, expected in (
         (data.targets, np.arange(2)),
         (data.quadratures, np.arange(2)),
         (data.gate_counts, np.array(cfg.gate_counts)),
-        (data.shot_indices, np.arange(ns)),
-        (data.tone_indices, np.arange(nt)),
     ):
         if not np.array_equal(actual, expected):
-            raise ValueError("Local-Z raw axes must match saved cfg")
-    if data.signals.shape != (2, 2, nn, ns, nt):
-        raise ValueError(
-            "Expected raw shape (target,quadrature,n,rounds*reps,full tones)"
-        )
-    rounds = data.signals.reshape(2, 2, nn, cfg.rounds, cfg.reps, nt)
-    acquired = np.all(np.isfinite(rounds), axis=(-2, -1))
-    missing = np.all(
-        np.isnan(rounds) & ~np.isinf(rounds.real) & ~np.isinf(rounds.imag),
-        axis=(-2, -1),
-    )
-    if not np.all(acquired | missing):
-        raise ValueError("Nonfinite acquired IQ or partially missing round")
-    complete = np.all(acquired, axis=-1)
-    counts = acquired.sum(axis=-1, dtype=np.int64) * cfg.reps
-    mean = np.full((2, 2, nn, nt), complex(np.nan, np.nan), dtype=np.complex128)
-    for t, q, n in np.argwhere(complete):
-        mean[t, q, n] = data.signals[t, q, n].mean(axis=0)
-    return mean, counts, complete
+            raise ValueError("LocalZ count axes must match saved cfg")
+    shape = (2, 2, len(cfg.gate_counts)) + ((3, 3, 3, 3) if heralded else (3, 3))
+    if data.sums.shape != shape:
+        raise ValueError(f"Expected summed count shape {shape}, got {data.sums.shape}")
+    return terminal_counts(data.sums, heralded=heralded)
 
 
 def _fit_target(
@@ -198,7 +157,7 @@ def _plot_analysis(cfg: LocalZCfg, answer: LocalZAnalysis, *, plots: Plots) -> N
     fig, _ = plots.subplots(
         "phase", nrows=3, ncols=1, figsize=(10, 9), layout="constrained"
     )
-    fig.suptitle("B00 thermal ensemble · both targets · independent X/Y acquisitions")
+    fig.suptitle("Both targets · independent classified X/Y acquisitions")
     for t, role in enumerate((cfg.roles.f1, cfg.roles.f2)):
         fig.axes[0].plot(
             answer.gate_counts,
@@ -238,7 +197,7 @@ def _plot_analysis(cfg: LocalZCfg, answer: LocalZAnalysis, *, plots: Plots) -> N
     for ax, label in zip(
         fig.axes,
         (
-            "GE-normalized contrast",
+            "Classified quadrature contrast",
             "Logical phase (deg, wrapped)",
             "Logical phase (deg, unwrapped)",
         ),
@@ -248,24 +207,25 @@ def _plot_analysis(cfg: LocalZCfg, answer: LocalZAnalysis, *, plots: Plots) -> N
         ax.set_xlim(answer.gate_counts[0], answer.gate_counts[-1])
         if ax.get_legend_handles_labels()[0]:
             ax.legend()
-    for tone, readout in enumerate(cfg.readout.tones):
-        fig, _ = plots.subplots(
-            f"quadratures_tone_{tone}",
-            nrows=2,
-            ncols=2,
-            figsize=(11, 7),
-            layout="constrained",
+    fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+    for t in range(2):
+        for q, projection in enumerate(("X", "Y")):
+            axes.plot(answer.gate_counts, answer.quadratures[t, q], ".-",
+                      label=f"F{t + 1} {projection}")
+    axes.set(xlabel="CZ gate count", ylabel="Target sigma")
+    axes.legend()
+
+    if answer.herald_matrix is not None:
+        fig, axes = plots.subplots("herald", figsize=(12, 5))
+        matrix = answer.herald_matrix.reshape(-1, 9)
+        image = axes.imshow(np.ma.masked_invalid(matrix), vmin=0, vmax=1,
+                            cmap="Blues", aspect="auto")
+        axes.set(
+            xticks=range(9),
+            xticklabels=[f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")],
+            xlabel="Herald class (F1, F2)",
+            ylabel="Scan row (target, projection, n)",
+            title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
-        fig.suptitle(f"Tone {tone} {readout.label} · B00 thermal ensemble · mean IQ")
-        for t in range(2):
-            for q in range(2):
-                ax = fig.axes[2 * t + q]
-                iq = answer.mean_iq[t, q, :, tone]
-                ax.plot(answer.gate_counts, iq.real, ".-", label="I")
-                ax.plot(answer.gate_counts, iq.imag, ".--", label="Q")
-                ax.set(
-                    xlabel="CZ gate count",
-                    ylabel="Mean IQ (ADC units/sample)",
-                    title=f"F{t + 1} target · {('X', 'Y')[q]} projection pulse",
-                )
-                ax.legend()
+        fig.colorbar(image, ax=axes, label="Herald probability")
+        fig.tight_layout()

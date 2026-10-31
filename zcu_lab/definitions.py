@@ -109,6 +109,8 @@ from zcu_lab.v2.two_qubit.joint_readout.gui_heralded import (
     DEFINITION as JOINT_READOUT_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
+from zcu_lab.v2.two_qubit.local_z.gui_heralded import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
+from zcu_lab.v2.two_qubit.conditional_phase.gui_heralded import DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION
 from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
 from zcu_lab.v2.twotone.ac_stark.gui import (
@@ -265,7 +267,9 @@ ADAPTERS: dict[str, object] = {
     "two_qubit/chevron": CHEVRON_DEFINITION,
     "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
     "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
+    "two_qubit/conditional_phase_heralded": CONDITIONAL_PHASE_HERALDED_DEFINITION,
     "two_qubit/local_z": LOCAL_Z_DEFINITION,
+    "two_qubit/local_z_heralded": LOCAL_Z_HERALDED_DEFINITION,
     "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
     "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
     "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,

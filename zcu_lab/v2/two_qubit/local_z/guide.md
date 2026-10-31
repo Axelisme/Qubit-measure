@@ -1,52 +1,45 @@
 # Local Z
 
-**讀者：** operator、agent。從 GUI 或 MCP 量兩個 target 的 local-Z slope，審閱並套用 correction pair。
-
-**Last updated:** 2026-10-21
-
-GE centers come only from the saved readout cfg at `roles.f1_tone` and
-`roles.f2_tone`. Circle classifiers need no radius for this analysis. There is
-no manual center override or point-parameter calibration lookup. Missing or
-linear classifiers permit raw acquisition; analysis retains an ADC-named
-reason and does not infer a phase or fit.
-
-Readout 有 `$mux.module.readout` slot 時引用 library 的完整 tones 與 scalar 設定。缺 slot 時從 blank mux 範本開始，須手填全部必要讀出欄位。
-
-在幅度與 frequency 選定後，選 `two_qubit/local_z`。同一次 Run 分別量 F1、F2。每個 target 從 `B(00)` 熱初態做 X90、n 次雙線 CZ、projection 與完整 mux readout，另一 qubit 維持原熱態。X/Y projection 分別獨立 acquisition，所有 shots 保留原始熱 population。
-
-修改 parameter source 後，按 Reset 才會重新取得初值。Refresh 只更新 source／choice，並保留已填輸入；Reset 可能覆蓋尚未儲存的輸入。
+**讀者：** operator、agent。量兩個 target 的分類 local-Z slope，審閱並套用 correction pair。
 
 ## Run 前
 
-1. 綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 須為不同 fluxonium，coupler 是 transmon，mux 的 qubits 須包含兩者，並與 resonators 逐項對應。
-2. Open／Reset 固定捕捉角色與 library。核對兩角色 X90、coupler 的 `cz_f1`／`cz_f2`、完整 mux tones 與各自 GE centers。CZ 與 X90 是 Run 的必要輸入。缺 GE centers 時可收 raw，該 target 的 phase 分析則回報缺校準。
-3. 兩 CZ pulses 必須用不同 generator，同 frequency、duration、pre-delay。保留已校準的 signed gain 比例、relative phase 與 waveform。X90 generator 必須對應自己的角色。角色身分由 component 綁定與 mux qubits 順序決定。
-4. 設 gate_counts、reps、rounds。n 至少三點，必須是連續、嚴增、非負整數。預設 `[0,1,2,3,4]`。n=0 直接量無 CZ 的實測基線。
+選 `two_qubit/local_z`。綁定 scalar aliases `f1`、`f2`、`coupler`、`mux`。F1/F2 必須是不同 fluxonium。Coupler 是 transmon，mux 的 qubits 必須包含兩者。
 
-Run 全程使用 Open／Reset 固定的來源。要改角色或來源，重新 Reset。所有 tones、same-shot 關係及 round-major shots 原樣保存；raw shape 是 `(target, projection, n, rounds*reps, tone)`。取消後已完成 round 留在固定 slot，未完成位置是 NaN，每個已取得 round 只計一次。
+先校準 X90、CZ 與完整 mux readout。F1/F2 的原 tone 都需要 circle classifier 與 GE Post radius。缺 classifier、非 circle 或缺 radius 時，Run 會要求先做 GE Post。其他 tone 不需要 classifier。修改 readout 設定後，重新校準。
+
+Readout 有 `$mux.module.readout` slot 時引用完整 library 設定。缺 slot 時手填 blank mux 範本的必要欄位。Open／Reset 捕捉角色、library 與 tone 位置。Refresh 保留已填輸入，換來源後要 Reset 並核對輸入。
+
+Form 複製兩角色 X90 與 `$coupler.module.cz_f1`／`cz_f2`。缺 CZ slot 時必須補填。兩 CZ pulses 用不同 generator，frequency、duration、pre-delay 必須相同。保留 signed gain 比例、relative phase 與 waveform。X90 generator 必須對應自己的角色。幅度與 frequency 選定後再量 local Z。
+
+設 gate_counts、reps、rounds 與等待。n 至少三點，必須是連續、嚴增、非負整數，預設 `[0,1,2,3,4]`。n=0 不發射 CZ，直接量基線。Rounds 在取數端累加，不保留 host round 軸。`reset=None` 不發射 reset，填入 reset cfg 才會在每個 shot 最前面發射。
+
+## 序列與保存
+
+同一次 Run 分別量 F1、F2。每個 shot 依序做可選 reset、target X90、n 次雙線 CZ、projection、terminal mux readout。另一 qubit 保留原初態。X/Y projection 各自取數。Preparation phase 是 φ，X projection 用 φ，Y projection 用 φ+90°。
+
+終端 F1/F2 在取數時分類為 g/e/other。`sums` 是 float64 `(2,2,Nn,3,3)`，依序為 target、projection、n、terminal F1、terminal F2。Target 座標 0/1 表示 F1/F2，projection 0/1 表示 X/Y。Class 順序是 g/e/other。保存總和原值，不保存逐 shot IQ，也不先換算比例。未量點保持 NaN。
+
+取消保留已完成 round 的總和。先檢查 Run 的 stop/error 狀態，再判斷 partial data 是否可用。Native Save／Load 保留 sums、axes 與來源 cfg。Load 不修改目前 Form。Analyze 只用保存來源，缺來源 cfg 時停止分析。缺 sums 的舊逐 shot 檔案會明確拒絕載入。
 
 ## Phase 與 slope
 
-Preparation 是來源 X90 的 phase φ。X projection 用同 φ 的 X90，Y projection 用 φ+90° 的 X90。分析以來源 GE centers 線性投影取得 P1，再由 qX=2P1X−1、qY=2P1Y−1 求 logical Bloch phase `atan2(qY,qX)`，degree wrap 到 `[-180,180)`。線性投影保留原始讀出效果與熱混合。
+每個 projection 的 `sigma=(N_e-N_g)/N_total`，other 留在分母。Logical phase 是 `atan2(sigma_Y,sigma_X)`，degree wrap 到 `[-180,180)`。Contrast 是兩個 sigma 的向量長度。分析不再線性投影 IQ。
 
-每個 target 必須有整列完整的 X/Y phases。缺任一點、缺任一完整 round pair、缺 GE centers 或零 contrast 時，該 target 回報 slope 不可辨識並保留原因。Unwrap 只處理完整列；微弱但非零 contrast 仍可進入分析。看 contrast、quadratures 與曲線判斷是否需要重測。
+每個 phase 使用兩個 projection 已取得的總和，不要求完成全部預定 rounds。空或缺失 projection、零 contrast 都保留原因，不猜 phase。每個 target 必須有整列 phase 才做 unwrap 與 fit。微弱但非零 contrast 仍可分析，操作員須看 quadratures 與 contrast 判斷是否重測。
 
-分析對完整列做相鄰主值 unwrap，再用含 intercept 的 ordinary least squares 擬合 `phase_deg = intercept + slope*n`。兩個 target 各自擬合。Slope 是每 CZ 的 logical Bloch phase accrual，correction 是它的負值，保留原數值。零 slope 可以是有效結果，缺失分量則維持缺失。
+分析沿 n 做相鄰主值 unwrap，再用含 intercept 的 OLS 擬合 `phase_deg=intercept+slope*n`。兩 target 各自擬合。Slope 是每 CZ 的 logical Bloch phase accrual，correction 是它的負值，不重新 wrap。零 slope 可以有效，缺失 correction 維持缺失。
 
-此解讀假設相鄰真實 phase 增量滿足 `|Δθ| < 180°`，每 gate 額外的 360° 在連續 n 採樣下仍無法辨認。操作員須自行確認採樣假設。
+解讀假設相鄰真實增量滿足 `|Δθ|<180°`。每 gate 額外的 360° 無法由連續 n 採樣辨認。`phase` 圖顯示 contrast、wrapped phase、unwrapped phase 與 fit。`quadratures` 圖顯示兩 target 的 X/Y sigma。Summary 保留 acquired counts、每點原因、intercept、slope、correction、slope 1σ error 與 fit_quality。Covariance 來自模型 residual variance，不是 shot-noise 或 phase uncertainty 模型。零 residual 不代表無物理誤差。
 
-`phase` 圖顯示兩 target 的 contrast、wrapped phase、unwrapped phase 與線性 fit。`quadratures_tone_i` 顯示完整每 tone 在兩 target、兩 projection 的平均 I/Q。Summary 保留每點原因、acquired shots、intercept、slope、correction、slope 1σ error 與既有 `fit_quality`。Covariance 以線性模型的 residual variance 估計，它只描述線性模型的擬合誤差，shot-noise 與 phase uncertainty 須另行評估。零 residual 仍有物理誤差的可能。模型適用性與統計診斷由操作員看 residual、uncertainty 與資料判斷。
+普通版仍量 ensemble，local phase 可能偏離線性模型。純態 phase 與 gate fidelity 須另行驗證。
 
-熱態的其他成分仍在資料內，phase 可以偏離線性模型。將結果解讀為熱 ensemble 的模型估計；純化分支的 local phase 與 gate fidelity 須另行驗證。
+## Preview 與 Apply
 
-## Preview 與手動 Apply
+只有兩 target 都有有效 correction，才提出一筆 `$coupler.ext.cz_phase`。內容沿用 `f1`、`f2` component 名稱與 `correction_f1_deg`、`correction_f2_deg`。任一分量缺失就不提案。Preview 後勾選該列，再按 Apply Selected。
 
-只有 F1/F2 都得到有效 correction，才提出一筆 `$coupler.ext.cz_phase` compound parameter。它包含 `f1`、`f2` component 名稱與 `correction_f1_deg`、`correction_f2_deg`。任一分量缺失時停止整筆提案並回報原因。先 preview，再勾選這一列按 Apply Selected。只有 Apply Selected 才寫入校準。
+提案只讀來源 cfg 與同次 Run／Load capture。F1/F2/coupler 與來源不同時拒絕提案，包括交換 F1/F2。後續使用 correction pair 時也要核對身分與順序。
 
-提案只讀 source cfg 與同次 Run／Load capture。若 F1/F2/coupler 與來源不同，拒絕提案，包括交換 F1/F2。後續使用 phase pair 時也須核對 component 名稱與順序。
+Correction 用於後續 single-qubit virtual-Z frame。Pulse phase 正負須依既有 convention 核對。Apply 只更新 phase pair，不改 CZ constructive relative phase、pulse 或 slot。修改 amplitude、frequency、duration、waveform、relative phase 或 DC 後，要重測 local Z。
 
-Correction 以 virtual Z 更新後續 single-qubit logical frame，CZ 的 constructive relative phase 維持原值。Pulse phase 的正負換算須依既有 frame convention 核對。Apply 這一列只更新 phase pair，pulse、slot 與其他 parameter 都維持原值。
-
-Native Save／Load 保留 raw、axes 與 source cfg。Load 保持目前 Form 原值，Analyze 只用保存來源。缺 source cfg 時保留 raw，分析與提案則回報來源缺失。改 pulse amplitude、frequency、duration、waveform、relative phase 或 DC 工作點後，要重測 local Z；校準時效由操作員確認。
-
-完整操作順序見 [FTF bring-up guide](../guide.md)。實際 FTF 控制鏈與 gate 表現須用現場資料另行驗證。
+Herald 版是獨立的 `two_qubit/local_z_heralded` 入口。完整校準順序見 [FTF bring-up guide](../guide.md)。
