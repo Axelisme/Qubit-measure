@@ -232,6 +232,23 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(align_timeli
     assert [s.body_end_cycle - s.start_cycle for s in result] == [max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1)) for row, start in zip(expected, starts, strict=True)]
 
 
+def test_branch_discards_unjoined_local_end_before_next_pulse() -> None:
+    def body(prog: TimelineProgramV2) -> None:
+        prog.fork("default", into="p")
+        with prog.branch(by="scan", align_timeline=True) as branch:
+            with branch.case(1):
+                prog.delay_timeline(20 / 430.08, timeline="p")
+                prog.fork("p", into="local")
+                prog.delay_timeline(80 / 430.08, timeline="local")
+        prog.pulse(0, "p0", timeline="p")
+
+    result = shots(program(body))
+    # Only p's case ends 0/20/0 participate; the unjoined local end 100 expires.
+    assert [waves(shot) for shot in result] == [[20]] * 3
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [48] * 3
+
+
+
 @pytest.mark.parametrize("explicit_join", [False, True])
 @pytest.mark.parametrize("align_timeline", [True, False])
 def test_branch_local_forks_are_discarded_unless_explicitly_joined(explicit_join, align_timeline):
