@@ -81,7 +81,7 @@ def test_record_metadata_requires_explicit_completion() -> None:
     assemble: Callable[..., object] = workflows.record_with_metadata
     with pytest.raises(TypeError, match="completion"):
         assemble(
-            workflows.Completed(source, False, facts),
+            workflows.Completed(source, facts),
             identity=workflows.RunIdentity("run", history.provenance),
             experiment_tag="synthetic/trace", snapshot=history.snapshot,
         )

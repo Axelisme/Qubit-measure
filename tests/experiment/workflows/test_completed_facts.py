@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 from pydantic import TypeAdapter
 from zcu_tools.datafile import JsonObject
-from zcu_tools.device import FakeDevice
+from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import (
     Completed,

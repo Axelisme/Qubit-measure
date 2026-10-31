@@ -4,7 +4,7 @@ from typing import Literal, TypedDict
 
 from pydantic import JsonValue
 
-from zcu_tools.datafile import JsonObject
+
 from zcu_tools.experiment.workflows import CommittedRecord, OperationFacts, RunStatus
 from zcu_tools.experiment.workflows.models import OperationKind, OperationOutcome
 
@@ -18,7 +18,7 @@ class EncodedRecordReply(TypedDict):
 
 
 class OperationReply(TypedDict):
-    """One native attempt; UTC timestamps are ISO text, snapshot is JSON or None.
+    """One native attempt; UTC timestamps are ISO text.
 
     kind identifies the operation helper; attempt counts actual executor starts
     within this commit scope. iteration counts successful commit scopes from one,
@@ -32,7 +32,7 @@ class OperationReply(TypedDict):
     attempt: int
     started_at: str
     finished_at: str
-    device_snapshot: dict[str, JsonObject] | None
+
     outcome: OperationOutcome
     reason: str | None
     stopped: bool
@@ -121,9 +121,7 @@ def project_operation(operation: OperationFacts) -> OperationReply:
         "attempt": operation.attempt,
         "started_at": operation.started_at.isoformat(),
         "finished_at": operation.finished_at.isoformat(),
-        "device_snapshot": None
-        if operation.device_snapshot is None
-        else dict(operation.device_snapshot),
+
         "outcome": operation.outcome,
         "reason": operation.reason,
         "stopped": operation.stopped,
