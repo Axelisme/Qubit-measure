@@ -98,6 +98,29 @@ def test_repeat_table_definition_must_dominate_its_time_consumer(position, tail_
         _program(body, initialize)
 
 
+def test_repeat_table_index_proof_does_not_cover_the_final_counter_value():
+    from zcu_tools.program.v2.modules import LoadValue
+
+    loader = LoadValue("time", [5, 10], "r", "loaded")
+
+    def body(prog):
+        with prog.repeat("r", "count", range_hint=(2, 2)):
+            prog.emit(loader)
+            prog.timeline_inc("loaded")
+            prog.delay_by_timeline()
+        # The closing shell increments r to 2. Its body index proof cannot
+        # justify another lookup into a two-element table after the loop.
+        prog.emit(loader)
+        prog.timeline_inc("loaded")
+
+    def initialize(prog):
+        _register_initialize(prog, value=2)
+        prog.declare(loader)
+
+    with pytest.raises(ValueError, match="r.*(uninitialized|index dependency)"):
+        _program(body, initialize)
+
+
 @pytest.mark.parametrize("invalid", ["index_range", "counter_writer"])
 def test_repeat_table_index_keeps_range_and_writer_proof(invalid):
     from zcu_tools.program.v2.modules import LoadValue
