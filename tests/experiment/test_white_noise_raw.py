@@ -1,7 +1,8 @@
 """White-noise environments own complete, replayable deferred shot sources."""
 
-from tests.core._simulation import TIME_BASE, tick_tuple
 from __future__ import annotations
+
+from tests.core._simulation import TIME_BASE, tick_tuple
 
 from dataclasses import replace
 from typing import TYPE_CHECKING

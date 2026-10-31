@@ -273,7 +273,7 @@ def test_readout_block_may_end_at_next_start_but_must_not_cross_it(kind) -> None
                 events=(
                     terminal,
                     second,
-                    replace(first, duration_ticks=first.duration_ticks + ticks(1e-12)),
+                    replace(first, duration_ticks=first.duration_ticks + 1),
                 ),
             ),
             drive,

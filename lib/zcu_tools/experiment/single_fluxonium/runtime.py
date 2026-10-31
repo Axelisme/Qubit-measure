@@ -277,7 +277,7 @@ class SingleFluxoniumSource:
         ) = None
         self._plan: SingleFluxoniumPlan | None = None
         self._plan_key: (
-            tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...], bytes] | None
+            tuple[str, EnvironmentSnapshot, tuple[tuple[str, str], ...], TimeBase, bytes] | None
         ) = None
         self._closed = False
 

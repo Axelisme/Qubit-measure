@@ -1,7 +1,8 @@
 """Public source lifecycle, live snapshots and content-addressed plan reuse."""
 
-from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 from __future__ import annotations
+
+from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 
 import importlib
 from collections.abc import Generator
