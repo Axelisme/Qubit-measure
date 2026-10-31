@@ -66,8 +66,8 @@ class OperationOutcome:
     query paths, not through the operation handle). ``OperationHandles`` never
     interprets ``status``; it is carried verbatim to the awaiter.
 
-    status is pending, finished, failed or cancelled. error is the original
-    failure message for failed operations, otherwise None.
+    status is pending, finished, failed or cancelled. error is an optional
+    failure message; None means no message was supplied.
     """
 
     status: OperationStatus
