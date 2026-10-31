@@ -30,7 +30,7 @@ class Program(MyProgramV2):
         self.append_macro(Adapt(Trigger(ros=[0], pins=[], tts=[], t=0, width=0.01, ddr4=False, mr=False, tag=None)))
 
 
-prog = Program(make_mock_soccfg(1, 1), reps=1, initial_delay=0, final_delay=0, final_wait=0)
+prog = Program(make_mock_soccfg(1, 1), reps=1, initial_delay=0, relax_delay=0)
 insts = [record.instruction.to_dict() for record in prog.compiled_stream.records if record.instruction is not None]
 copies = [i for i in insts if i.get("CMD") == "REG_WR" and i.get("DST") == "s14" and i.get("OP") == "s14"]
 ports = [i for i in insts if i.get("CMD") in ("WPORT_WR", "DPORT_WR", "TRIG")]
