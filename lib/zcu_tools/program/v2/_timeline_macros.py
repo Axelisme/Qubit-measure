@@ -413,7 +413,7 @@ class TimelineRepeatExit(TimelineSync):
         self,
         book: TimelineBook,
         count: int,
-        maximum: int,
+        maximum: int | None,
         *,
         variable: bool = False,
         iterations: int | str = 1,
@@ -432,6 +432,8 @@ class TimelineRepeatExit(TimelineSync):
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
         for ch, guard in frame.pulse_guards.items():
+            if self.maximum is None:
+                continue
             repeated = guard.repeated(self.count, self.maximum)
             repeated.require((frame.native_gens[ch],), repeated.limits)
             if self.book.repeats:

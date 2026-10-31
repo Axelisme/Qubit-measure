@@ -172,8 +172,8 @@ class RepeatFrame:
         self, book: "TimelineBook", count: TimeExpression, *, axis: str
     ) -> None:
         """Keep entry values at zero iterations, otherwise the last body write."""
-        limits = projected_expression_bounds(count)
-        if limits.maximum == 0:
+        limits = None if unbounded_time(count) else projected_expression_bounds(count)
+        if limits is not None and limits.maximum == 0:
             book.source_expressions = self.initial_source_expressions.copy()
             return
         executed = choose_time(LinearTime(1), count, maximum=False)
@@ -181,7 +181,7 @@ class RepeatFrame:
         for name, expression in book.source_expressions.items():
             if axis in expression_axes(expression):
                 expression = reduce_loop_time(expression, axis, last=True)
-            if limits.minimum == 0:
+            if limits is None or limits.minimum == 0:
                 if name not in self.initial_source_expressions:
                     # A body-only definition is not available on the zero path.
                     continue
@@ -366,13 +366,15 @@ class TimelineBook:
         self.used: set[str] | None = None
 
     def repeat_count(
-        self, prog, iterations: int | str, minimum: int, maximum: int
+        self, prog, iterations: int | str, minimum: int, maximum: int | None
     ) -> TimeExpression:
         """Describe count points without requiring a bounds-only count producer."""
+        if isinstance(iterations, str) and maximum is None:
+            return LinearTime(terms=((CycleVariable(iterations, None, None), 1),))
         return (
             bounded_source_expression(prog, iterations, minimum, maximum)
-            if isinstance(iterations, str)
-            else LinearTime(iterations)
+            if isinstance(iterations, str) and maximum is not None
+            else LinearTime(iterations if isinstance(iterations, int) else minimum)
         )
 
     def observe_selection(

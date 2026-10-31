@@ -237,13 +237,12 @@ def test_repeat_rejects_invalid_integer_count(count):
     "count,hint",
     [
         (2, (1, 3)),
-        ("n", None),
         ("n", (-1, 3)),
         ("n", (3, 2)),
         ("n", (True, 3)),
     ],
 )
-def test_repeat_rejects_missing_or_invalid_range_hint(count, hint):
+def test_repeat_rejects_invalid_range_hint(count, hint):
     def body(prog):
         with prog.repeat("r", count, range_hint=hint):
             pass
