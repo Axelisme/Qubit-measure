@@ -357,6 +357,7 @@ class TimelineBuilder:
         *,
         timeline: str | None = None,
         tag: str | None = None,
+        range_hint: tuple[int, int] | None = None,
     ) -> None:
         """Record end += t without moving reference; tag exposes static end.
 
@@ -365,7 +366,7 @@ class TimelineBuilder:
         name. Unknown/wait-only timelines, unknown bounds and overflow fail
         during build, as in TimelineProgramV2.delay_timeline.
         """
-        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag))
+        self._record(lambda prog: prog.delay_timeline(t, timeline=timeline, tag=tag, range_hint=range_hint))
 
     def fork(self, source: str, *, into: str | list[str]) -> None:
         """Record new timeline names copying source's current end.
