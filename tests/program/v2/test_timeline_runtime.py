@@ -588,7 +588,10 @@ def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
 
     prog = program(body)
     assert [waves(s) for s in shots(prog)] == [[35], [35], [45]]
-    assert prog.compile_datamem() is None
+    memory = prog.compile_datamem()
+    # Three IR dispatch destinations are allowed; no additional time words.
+    assert memory is not None and len(memory) == 3
+    assert set(int(word) for word in memory) <= set(prog.labels.values())
 
 
 def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():

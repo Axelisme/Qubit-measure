@@ -408,6 +408,10 @@ class RuntimeMath(TimedMacro):
         since those ends were computed. Other variables must be known on the
         point grid or supplied in inputs.
         """
+        axes = expression_axes(expression)
+        points = evaluate_time(expression, axes)
+        if points is not None:
+            return self.lookup([int(value) for value in points.flat], axes)
         for captured in captured_ends:
             delta = self._captured_delta(expression, runtime_expression(captured))
             if delta is not None:
