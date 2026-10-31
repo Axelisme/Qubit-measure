@@ -177,7 +177,6 @@ class TimelineBuilder:
         name: str,
         n: int | str,
         *,
-        advance_ref: bool,
         timeline: str | None = None,
         range_hint: tuple[int, int] | None = None,
     ) -> AbstractContextManager[None]:
@@ -198,7 +197,7 @@ class TimelineBuilder:
         raises ValueError. Close all recording contexts before build.
         """
         self._ensure_recording()
-        return self._repeat(name, n, timeline, range_hint, advance_ref=advance_ref)
+        return self._repeat(name, n, timeline, range_hint)
 
     @contextmanager
     def _repeat(
@@ -207,8 +206,6 @@ class TimelineBuilder:
         n: int | str,
         timeline: str | None,
         range_hint: tuple[int, int] | None,
-        *,
-        advance_ref: bool,
     ) -> Generator[None]:
         with self._capture() as actions:
             yield
@@ -220,7 +217,6 @@ class TimelineBuilder:
                 n,
                 timeline=timeline,
                 range_hint=range_hint,
-                advance_ref=advance_ref,
             ):
                 for action in recorded:
                     action(prog)

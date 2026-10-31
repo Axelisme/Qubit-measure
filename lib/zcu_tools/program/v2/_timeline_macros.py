@@ -32,7 +32,7 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
-from ._timeline_repeat import LoopTimelineExit
+from ._timeline_repeat import LoopTimelineEnter, LoopTimelineExit
 from ._timeline_runtime import (
     DeferredCoverage,
     EventEnd,
@@ -417,15 +417,15 @@ class TimelineSync(Delay):
             super().preprocess(prog)
 
 
-class TimelineRepeatEnter(TimelineSync):
-    """Synchronize the parent, then isolate this iteration's local namespace."""
+class TimelineRepeatEnter(Macro):
+    """Isolate the constant-zero loop namespace without moving reference."""
 
     def __init__(self, book: TimelineBook, timeline: str, counter: str | None = None):
-        super().__init__(book, timeline)
+        self.book = book
+        self.timeline = timeline
         self.counter = counter
 
     def preprocess(self, prog) -> None:
-        super().preprocess(prog)
         if self.counter is not None:
             prog.add_reg(self.counter)
         parent = self.timeline
@@ -455,8 +455,8 @@ class TimelineRepeatEnter(TimelineSync):
         self.book.waiting.clear()
 
 
-class TimelineRepeatExit(TimelineSync):
-    """Close one iteration, then rebase the outer namespace by all iterations."""
+class TimelineRepeatExit(Macro):
+    """Restore outer ends using only the body's explicit reference advances."""
 
     def __init__(
         self,
@@ -468,7 +468,7 @@ class TimelineRepeatExit(TimelineSync):
         iterations: int | str = 1,
         axis: str,
     ):
-        super().__init__(book, None)
+        self.book = book
         self.axis = axis
         self.iterations = iterations
         self.count = count
@@ -476,7 +476,6 @@ class TimelineRepeatExit(TimelineSync):
         self.variable = variable
 
     def preprocess(self, prog) -> None:
-        super().preprocess(prog)
         frame = self.book.repeats.pop()
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
@@ -606,6 +605,51 @@ class TimelineRepeatExit(TimelineSync):
                     gen_ch=ch if generator else None,
                     ro_ch=None if generator else ch,
                 )
+
+
+class RepeatTimelineEnter(Macro):
+    """Choose one lowering from recorded structure and the incoming end."""
+
+    def __init__(self, book: TimelineBook, parent: str, counter: str | None):
+        self.book = book
+        self.parent = parent
+        self.tail_sync = False
+        self.reference = TimelineRepeatEnter(book, parent, counter)
+        self.accumulator = LoopTimelineEnter(book, parent, counter)
+        self.constant = False
+
+    def preprocess(self, prog) -> None:
+        incoming = self.book.end(self.parent, placement=True)
+        self.constant = self.tail_sync and not isinstance(incoming, RuntimeEnd) and _bounds(incoming) == (0.0, 0.0)
+        if self.tail_sync and not self.constant:
+            import warnings
+
+            warnings.warn("Repeat entry is not constant zero; add sync() before the loop to avoid a tail register", UserWarning, stacklevel=2)
+        if self.constant:
+            self.reference.preprocess(prog)
+        else:
+            self.accumulator.preprocess(prog)
+
+    def translate(self, prog) -> None:
+        pass
+
+
+class RepeatTimelineExit(Macro):
+    """Close the selected lowering without adding an implicit synchronization."""
+
+    def __init__(self, entry: RepeatTimelineEnter, iterations: int | str, minimum: int, maximum: int | None, axis: str):
+        self.entry = entry
+        self.accumulator = LoopTimelineExit(entry.accumulator, iterations, minimum, maximum)
+        self.reference = TimelineRepeatExit(entry.book, minimum, maximum, variable=isinstance(iterations, str) and (maximum is None or minimum != maximum), iterations=iterations, axis=axis)
+
+    def preprocess(self, prog) -> None:
+        if self.entry.constant:
+            self.reference.preprocess(prog)
+        else:
+            self.accumulator.preprocess(prog)
+
+    def translate(self, prog) -> None:
+        pass
 
 
 class ModuleEmission(TimedMacro):
