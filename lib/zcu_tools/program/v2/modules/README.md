@@ -22,7 +22,12 @@ without leaking hardware register choreography into experiment classes.
 Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
-同一宣告物件可重複發射，舊 module 的 tag 與 block_mode 不控制新路徑。
+同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
+各 program 以 module 物件身分持有 pulse／waveform、runtime readout、table offset 與 loader 的宣告結果。
+重新 compile 只重建該 program 的資源，不覆寫其他 program 的宣告。
+`Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
+舊 module 的 tag 與 block_mode 不控制新路徑。
+Legacy init／run 仍將狀態放在 module 上，不提供此跨 program 重用契約。
 
 Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
 Lowering 不用 `total_length` 重建時間，也不移動 reference。
@@ -111,6 +116,35 @@ returns the concrete module from `cfg.build(name)`, not an instance of the
 factory class. `Reset(name, None)` returns `None` (no reset). Module sequences
 in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
 `ScanWith` skip `None` entries without emitting setup or timed operations.
+
+## Constructor overrides
+
+Constructors accept `**overrides: Unpack[...]` using the exported `total=False`
+TypedDicts `PulseOverrides`, `PulseReadoutOverrides`, `PulseResetOverrides`,
+`TwoPulseResetOverrides` and `BathResetOverrides`. `ResetOverrides` lists the
+factory's combined keys. Pyright checks keyword names and values. At runtime,
+unknown or wrong-variant keys raise `TypeError`, even when their value is `None`.
+Constructors copy cfg before applying overrides through its existing `set_param` routing. Numeric values and QICK sweep parameters use the same units
+and waveform restrictions as `set_param`. `None` keeps the cfg value, including
+zero-valued settings. The caller's cfg is unchanged. Registry hashing, read-axis
+owners and lowering all use the effective cfg retained by the module.
+
+| Constructor | Override keywords |
+| --- | --- |
+| `Pulse` / `PulseReset` | `freq`, `gain`, `phase`, `length` |
+| `PulseReadout` / `Readout` with pulse cfg | `freq`, `gain`, `length`, `ro_length` |
+| `TwoPulseReset` | `gain1`, `gain2`, `freq1`, `freq2`, `length` (both pulses) |
+| `BathReset` | `qub_gain`, `qub_freq`, `qub_length`, `res_gain`, `res_freq`, `res_length`, `pi2_phase` |
+
+`Reset` forwards the keywords for its selected variant. Frequencies are MHz,
+lengths are us, phases are degrees and gains are normalized. `MuxReadout` does
+not accept override keywords; `Readout` with mux cfg rejects non-None overrides.
+Unsupported waveform length sweeps raise `ValueError` at construction.
+Accepting a `ro_length` sweep value does not mean QICK can compile an ADC-window
+sweep. That existing compile error is unchanged, just as with `set_param`.
+
+`cfg.set_param(name, value)` remains available and mutates that cfg. Use a
+caller-owned copy when deliberately updating cfg before constructing modules.
 
 ## Dmem Tables
 

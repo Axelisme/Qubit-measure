@@ -1,6 +1,6 @@
 """Native table declarations and register consumers through linked compilation."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 from zcu_tools.program.v2 import ir
@@ -15,6 +15,7 @@ def compile_lookup(
     prefix: Sequence[int] = (),
     indices: Sequence[int] | None = None,
     existing_destination: bool = False,
+    before_body: Callable[[], None] | None = None,
 ):
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -26,6 +27,8 @@ def compile_lookup(
             self.declare(loader)
 
         def _body(self, cfg):
+            if before_body is not None:
+                before_body()
             self.fork("default", into="lookup")
             self.delay_timeline(13 / 430.08, timeline="lookup")
             for index in range(len(loader.values)) if indices is None else indices:
@@ -58,6 +61,27 @@ def analyze(prog: TimelineProgramV2) -> ir.TimingAnalysis:
             prog.prog_list, prog.labels, prog.timing_layout, prog.compile_datamem()
         )
     )
+
+
+@pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
+@pytest.mark.parametrize("values", [[13, 29], [0, 1, 2, 3] * 16])
+def test_shared_lookup_keeps_each_programs_dmem_allocation(loader_type, values):
+    shared = loader_type("shared", values, "index", "value")
+    other_programs = []
+
+    def build_other():
+        other_programs.append(compile_lookup(shared, prefix=(91, 83, 79)))
+
+    first = compile_lookup(shared, before_body=build_other)
+    fresh = compile_lookup(loader_type("shared", values, "index", "value"))
+    other_fresh = compile_lookup(
+        loader_type("shared", values, "index", "value"), prefix=(91, 83, 79)
+    )
+    assert first.prog_list == fresh.prog_list
+    assert analyze(first) == analyze(fresh)
+    assert other_programs[0].prog_list == other_fresh.prog_list
+    first.compile()
+    assert first.prog_list == fresh.prog_list
 
 
 @pytest.mark.parametrize("prefix", [(), (91, -7, 83)])

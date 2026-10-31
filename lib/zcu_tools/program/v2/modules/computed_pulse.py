@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
@@ -62,14 +62,17 @@ class ComputedPulse(Module):
         int4 flat-top layouts raise ValueError. The selector register is borrowed;
         its bounds and all address writes are audited when consumed as time.
         """
-        base_idxs = self._declare_candidates(prog)
-        self._address_loader = LoadValue(
+        base_idxs = self._declare_candidates(
+            prog, declare_pulse=lambda pulse: pulse.declare(prog)
+        )
+        address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
             idx_reg=self.val_reg,
             val_reg=f"{self.name}_wmem_index",
         )
-        self._address_loader.declare(prog)
+        address_loader.declare(prog)
+        prog.set_module_state(self, address_loader)
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
@@ -80,15 +83,16 @@ class ComputedPulse(Module):
         path. Address/selector writes and same-channel overlap fail at compile.
         """
         del tag  # ModuleEmission owns the occurrence tag.
-        relation = self._address_loader.lower_selected(prog)
+        address_loader = prog.get_module_state(self, LoadValue)
+        relation = address_loader.lower_selected(prog)
         choices = tuple(
-            PlaybackChoice(pulse.pulse_id, pulse.cfg.post_delay)
+            PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules
-            if pulse.pulse_id is not None and pulse.cfg is not None
+            if pulse.cfg is not None
         )
         prog.pulse_by_reg(
             self.ref_cfg.ch,
-            self._address_loader.val_reg,
+            address_loader.val_reg,
             t=self.ref_cfg.pre_delay,
             flat_top_pulse=self._is_flat_top,
             timeline="default" if timeline is None else timeline,
@@ -98,7 +102,9 @@ class ComputedPulse(Module):
         )
 
     def init(self, prog: ModularProgramV2) -> None:
-        base_idxs = self._declare_candidates(prog)
+        base_idxs = self._declare_candidates(
+            prog, declare_pulse=lambda pulse: pulse.init(prog)
+        )
         self.dmem_offset = prog.add_dmem(base_idxs)
         logger.debug(
             "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
@@ -112,7 +118,10 @@ class ComputedPulse(Module):
         )
 
     def _declare_candidates(
-        self, prog: ModularProgramV2 | TimelineProgramV2
+        self,
+        prog: ModularProgramV2 | TimelineProgramV2,
+        *,
+        declare_pulse: Callable[[Pulse], None],
     ) -> list[int]:
         if self._is_flat_top:
             gen_type = prog.soccfg["gens"][self.ref_cfg.ch].get("type", "")
@@ -124,7 +133,7 @@ class ComputedPulse(Module):
                 )
 
         for pulse_mod in self.pulse_modules:
-            pulse_mod.init(prog)
+            declare_pulse(pulse_mod)
 
         # Collect the starting wmem index for each candidate and store them in
         # a dmem table. This removes the contiguity requirement: candidates may
@@ -133,11 +142,11 @@ class ComputedPulse(Module):
         base_idxs: list[int] = []
         for pulse_mod in self.pulse_modules:
             wave_names = prog.list_pulse_waveforms(
-                pulse_mod.pulse_id, exclude_special=False
+                pulse_mod.pulse_name(prog), exclude_special=False
             )
             if len(wave_names) != self._stride:
                 raise ValueError(
-                    f"ComputedPulse candidate {pulse_mod.pulse_id!r} expected "
+                    f"ComputedPulse candidate {pulse_mod.pulse_name(prog)!r} expected "
                     f"{self._stride} waveform(s) (style={self.ref_cfg.waveform.style}), "
                     f"got {len(wave_names)}"
                 )

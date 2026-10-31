@@ -13,7 +13,7 @@ from zcu_tools.program.v2.modules.reset import (
     PulseResetCfg,
     TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2.timing_support import shots as _shots
@@ -54,6 +54,46 @@ def _program(
                 body(self)
 
     return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
+
+
+def _envelope_shapes(prog: TimelineProgramV2) -> list[tuple[int, ...]]:
+    envelopes = prog.envelopes[0]["envs"]
+    if not isinstance(envelopes, dict):
+        raise TypeError("QICK envelope declarations must be a mapping")
+    return [envelope["data"].shape for envelope in envelopes.values()]
+
+
+def test_same_named_distinct_pulses_keep_distinct_envelopes():
+    def pulses(names):
+        return [
+            Pulse(
+                name,
+                PulseCfg(
+                    ch=0,
+                    nqz=1,
+                    freq=1000,
+                    gain=0.5,
+                    waveform=CosineWaveformCfg(length=length),
+                ),
+            )
+            for name, length in zip(names, (0.1, 0.2), strict=True)
+        ]
+
+    actual = _program(pulses(("same", "same")))
+    fresh = _program(pulses(("first", "second")))
+    assert actual.prog_list == fresh.prog_list
+    assert len(_envelope_shapes(actual)) == 2
+    assert _envelope_shapes(actual) == _envelope_shapes(fresh)
+
+
+def test_shared_pulse_definitions_deduplicate_in_each_program():
+    shared = [_pulse("first"), _pulse("second")]
+    first = _program(shared)
+    second = _program(shared)
+    fresh = _program([_pulse("first"), _pulse("second")])
+    assert second.prog_list == fresh.prog_list == first.prog_list
+    first.compile()
+    assert first.prog_list == fresh.prog_list
 
 
 @pytest.mark.parametrize("timeline", [None, "drive"])
@@ -141,11 +181,48 @@ def test_default_emit_only_moves_end_until_sync(sync):
         prog.emit(pulse)
         if sync:
             prog.sync()
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([pulse], body))
     assert [_waves(s) for s in shots] == [[0, 43 if sync else 0]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [43] * 2
+
+
+def test_shared_runtime_readout_keeps_each_programs_templates():
+    shared = _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
+    others = []
+
+    def build(readout, *, padded=False, interleave=False):
+        def initialize(prog):
+            if padded:
+                prog.add_reg("padding")
+                prog.declare(_pulse("padding", ch=2, length=0.2))
+            for register in ("frequency", "gain", "adc_word"):
+                prog.add_reg(register)
+
+        def body(prog):
+            if interleave:
+                others.append(build(shared, padded=True))
+            prog.write_reg("frequency", 1000)
+            prog.write_reg("gain", 100)
+            prog.write_reg("adc_word", 2000)
+            prog.emit(readout)
+
+        return _program([readout], body, initialize)
+
+    first = build(shared, interleave=True)
+    fresh = build(
+        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
+    )
+    other_fresh = build(
+        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"),
+        padded=True,
+    )
+    assert first.prog_list == fresh.prog_list
+    assert _shots(first) == _shots(fresh)
+    assert others[0].prog_list == other_fresh.prog_list
+    first.compile()
+    assert first.prog_list == fresh.prog_list
 
 
 def _readout(**kwargs):
@@ -213,9 +290,9 @@ def test_delay_emit_does_not_move_reference_and_does_not_receil(delay_type):
 
     def body(prog):
         prog.emit(delay)
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.sync()
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
 
     shots = _shots(_program([delay, pulse], body))
     # ceil(.504*430.08)=217, not218.
@@ -228,7 +305,7 @@ def test_wrong_pulse_time_is_detected_by_independent_timing_expectation():
 
     def body(prog):
         prog.emit(pulse)
-        prog.pulse(0, pulse.pulse_id, t=1)
+        prog.pulse(0, pulse.pulse_name(prog), t=1)
 
     shot = _shots(_program([pulse], body))[0]
     with pytest.raises(AssertionError):
@@ -359,12 +436,12 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
         prog.fork("default", into="other")
         prog.delay_timeline(40 / 430.08)
         prog.delay_timeline(60 / 430.08, timeline="other")
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         if consumer == "native":
             prog.delay_reg_auto("wait_cycles")
         else:
             prog.emit(auto)
-        prog.pulse(0, pulse.pulse_id, t=1 / 430.08, timeline="default")
+        prog.pulse(0, pulse.pulse_name(prog), t=1 / 430.08, timeline="default")
         prog.pulse(1, "native", timeline="other")
 
     def initialize(prog):
@@ -397,7 +474,7 @@ def test_runtime_guard_rejects_unknown_custom_time_producer(timeline, end):
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.delay_timeline(end, timeline=timeline)
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
 
     with pytest.raises(ValueError, match="wait_cycles.*unknown.*producer"):
@@ -488,9 +565,11 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
         prog.delay_timeline(
             QickSweep1D("scan", 60 / 430.08, 86 / 430.08), timeline=timeline
         )
-        prog.pulse(0, pulse.pulse_id)
+        prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
-        prog.pulse(0, pulse.pulse_id, t=1 / 430.08, timeline=timeline, tag="after")
+        prog.pulse(
+            0, pulse.pulse_name(prog), t=1 / 430.08, timeline=timeline, tag="after"
+        )
 
     prog = _program([pulse], body, initialize)
     assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(1)

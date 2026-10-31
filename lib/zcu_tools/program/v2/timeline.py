@@ -1,3 +1,4 @@
+# tolerated(file-size): Native declaration ownership and timing share one compile lifecycle.
 """Native QICK programs with timeline ends relative to reference time."""
 
 from collections.abc import Generator, Mapping, Sequence
@@ -117,6 +118,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._timeline_register_pool: list[str] = []
         self._timeline_math_active = False
         self._declared_modules: list[Module] = []
+        self._module_states: dict[int, tuple[Module, object]] = {}
         self._declaration_module: Module | None = None
         self._resource_owners: dict[tuple[str, str | int], Module] = {}
         self._declaring = False
@@ -209,6 +211,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         self._emission_serial = 0
         self._emission_scope = None
         self._declared_modules.clear()
+        self._module_states.clear()
         self._declaration_module = None
         self._resource_owners.clear()
         self.append_macro(TimelineBoundary(self._timeline_book, "reset"))
@@ -316,6 +319,36 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         A recompile rebuilds these immutable records with their native writers.
         """
         return tuple(self._time_bounds.fixed_loops.values())
+
+    def set_module_state(self, module: Module, state: object) -> None:
+        """Save this compile's declaration result for the exact module object.
+
+        Module declare implementations call this after allocating their resources.
+        The program retains both objects until recompilation. Replacing a result
+        is allowed during declaration; calls outside _initialize raise ValueError.
+        """
+        if not self._declaring:
+            raise ValueError("module state can only be saved during declaration")
+        self._module_states[id(module)] = (module, state)
+
+    def get_module_state[T](self, module: Module, state_type: type[T]) -> T:
+        """Return this program's declaration result as state_type.
+
+        module is the exact object passed to its declaration. Missing declarations
+        or a mismatched result type raise ValueError. Results belong to this
+        compile and must not be transferred to another program.
+        """
+        entry = self._module_states.get(id(module))
+        if entry is None or entry[0] is not module:
+            raise ValueError(
+                f"{module.name}: module has no declaration on this program"
+            )
+        state = entry[1]
+        if not isinstance(state, state_type):
+            raise ValueError(
+                f"{module.name}: expected {state_type.__name__} declaration"
+            )
+        return state
 
     def declare(self, module: Module) -> None:
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
