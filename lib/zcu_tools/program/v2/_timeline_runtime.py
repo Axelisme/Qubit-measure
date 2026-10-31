@@ -664,7 +664,7 @@ class RuntimeMath(TimedMacro):
         point grid or supplied in inputs.
         """
         for captured in captured_ends:
-            delta = self._captured_delta(expression, runtime_expression(captured))
+            delta = add_time(expression, scale_time(runtime_expression(captured), -1))
             if delta is not None:
                 lower, upper = expression_limits(delta)
                 if lower is not None and lower >= 0:
