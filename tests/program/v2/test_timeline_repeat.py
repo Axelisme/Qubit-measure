@@ -65,6 +65,23 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
+def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
+    def body(prog):
+        with prog.repeat("r", "count", range_hint=(1, 10)):
+            prog.pulse(0, "p0")
+            prog.delay_timeline(12 / 430.08)
+        prog.pulse(1, "p1", timeline="default")
+
+    prog = _program(body, _register_initialize, reps=2)
+    assert [_waves(s) for s in _shots(prog)] == [[0, 40, 80, 120]] * 2
+    increments = [i for i in prog.prog_list if i.get("DST") == "s14" and i.get("OP") == "s14 + #40"]
+    assert 1 <= len(increments) < 32
+    for index, inst in enumerate(prog.prog_list):
+        if inst in increments:
+            assert prog.prog_list[index - 1]["CMD"] == "WPORT_WR"
+    assert sum(i["CMD"] == "WPORT_WR" for i in prog.prog_list) < 33
+
+
 def test_repeat_fixed_point_matches_explicit_native_reference_loop():
     def body(prog):
         with prog.repeat("r", 2):
