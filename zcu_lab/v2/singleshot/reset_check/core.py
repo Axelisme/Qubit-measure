@@ -134,7 +134,6 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
             cfg.readout.ro_ch
             if isinstance(cfg.readout, PulseReadoutCfg)
@@ -142,7 +141,12 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None, classifier=classifier
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
+            classifier=classifier,
         )
         gains = sweep2array(
             cfg.gain,

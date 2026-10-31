@@ -132,7 +132,11 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         # Keep the G/E/Other contract for every declared ADC.
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
-            "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
         )
 
         freq_sweep = cfg.freq

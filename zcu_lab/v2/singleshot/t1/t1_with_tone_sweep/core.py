@@ -274,7 +274,6 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         """
         # 1. Resolve the outer scan and quantize positive probe durations.
         cfg = deepcopy(cfg)
-        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
             cfg.readout.ro_ch
             if isinstance(cfg.readout, PulseReadoutCfg)
@@ -282,7 +281,12 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=0 if not isinstance(cfg.readout, PulseReadoutCfg) and len(cfg.readout.tones) > 1 else None, classifier=classifier
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
+            classifier=classifier,
         )
         soc, soccfg = context.soc, context.soccfg
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
