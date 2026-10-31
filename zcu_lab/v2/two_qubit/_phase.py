@@ -28,6 +28,21 @@ def wrap_phase(degrees: float) -> float:
     return float((degrees + 180) % 360 - 180)
 
 
+def count_phase(x: float, y: float) -> QuadraturePhase:
+    """Return phase atan2(y,x) in degrees from classified sigma quadratures.
+
+    x/y are (N_e-N_g)/N_total from independent target projections, including
+    other in each denominator. Empty or unmeasured projections have NaN sigma
+    and yield a reason. Zero contrast is undefined; weak contrast is not gated.
+    """
+    if not np.all(np.isfinite([x, y])):
+        return QuadraturePhase(np.nan, None, "Missing or empty X/Y projection counts")
+    contrast = float(np.hypot(x, y))
+    if contrast == 0:
+        return QuadraturePhase(contrast, None, "Zero quadrature contrast")
+    return QuadraturePhase(contrast, wrap_phase(float(np.degrees(np.arctan2(y, x)))))
+
+
 def quadrature_phase(
     x_iq: NDArray[np.complex128],
     y_iq: NDArray[np.complex128],
