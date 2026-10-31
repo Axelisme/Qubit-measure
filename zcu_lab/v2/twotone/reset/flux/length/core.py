@@ -14,13 +14,12 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Pulse,
     PulseReset,
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support.reset import reset_scan_buffer
@@ -81,23 +80,6 @@ class LengthAnalyzeOptions:
 class LengthCfg(ConfigBase):
     """Sweep a const flux reset's length between two calibrated pi switches."""
 
-    reps: Annotated[
-        int,
-        FieldMeta(label="Reps", description="Repetitions per branch/length per round."),
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(label="Reset", description="Optional reset before each branch."),
@@ -119,21 +101,37 @@ class LengthCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
+    reps: Annotated[
+        int,
+        FieldMeta(label="Reps", description="Repetitions per branch/length per round."),
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     Options: ClassVar[type[LengthAnalyzeOptions]] = LengthAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("lengths", "Flux reset length", "s", scale=1e-6),
-            AxesSpec.Axis(
-                "after_pi", "After reset pi (0=off, 1=on)", "None", dtype=np.int64
+            AxesSpec.Axis("lengths", label="Flux reset length", unit="s", scale=1e-6),
+            AxesSpec.Axis("after_pi", label="After reset pi (0=off, 1=on)", unit="None", dtype=np.int64
             ),
-            AxesSpec.Axis(
-                "before_pi", "Before reset pi (0=off, 1=on)", "None", dtype=np.int64
+            AxesSpec.Axis("before_pi", label="Before reset pi (0=off, 1=on)", unit="None", dtype=np.int64
             ),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="3.0",
@@ -168,26 +166,26 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Each hold length has the Cartesian product of the two calibrated pi switches.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "length", sweep2param("length", sched.cfg.length)
-            )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Branch("before_pi", [], Pulse("pi_before", sched.cfg.pi_pulse)),
-                    PulseReset("tested_reset", sched.cfg.tested_reset),
-                    Branch("after_pi", [], Pulse("pi_after", sched.cfg.pi_pulse)),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("before_pi", 2)
-                .declare_sweep("after_pi", 2)
-                .declare_sweep("length", sched.cfg.length)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder.add_loop("before_pi", 2)
+            builder.add_loop("after_pi", 2)
+            length = builder.add_sweep("length", cfg.length)
+            builder.emit(Reset("reset", cfg.reset))
+            # Keep the selected pi duration; the off case must not gain idle time.
+            builder.sync()
+            with builder.branch(by="before_pi", align_timeline=False) as cases:
+                with cases.case(1):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.sync()
+            builder.emit(PulseReset("tested_reset", cfg.tested_reset, length=length))
+            builder.sync()
+            with builder.branch(by="after_pi", align_timeline=False) as cases:
+                with cases.case(1):
+                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.sync()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return LengthResult(lengths=lengths, signals=signals_buffer.array)
 

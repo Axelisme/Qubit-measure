@@ -3,9 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -15,7 +16,7 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg
+from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, TimelineBuilder, TimelineProgramV2
 
 from zcu_lab.v2.support import live_line
 
@@ -42,6 +43,12 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class LengthCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -58,20 +65,15 @@ class LengthCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Length", unit="us")]
 
 
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("phases", "Pi2 Phase", "deg", dtype=np.float64),
-            AxesSpec.Axis("lengths", "Length", "s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
+            AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=LengthResult,
         cfg_type=LengthCfg,
         cfg_schema_version="3.0",
@@ -114,7 +116,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         orig_qub_length = tested_reset.qubit_tone_cfg.waveform.length
         length_diff = orig_res_length - orig_qub_length
 
-        prog_cache: dict[float, Any] = {}
+        prog_cache: dict[float, TimelineProgramV2] = {}
 
         def average_signals(
             signals: NDArray[np.complex128],
@@ -126,49 +128,40 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             return mean_signals  # (lengths, 4)
 
         # Show tomography contrast, but retain phase-resolved IQ for round averaging.
-        viewer = live_line(context.plots, "measurement", "Length (us)", "Signal (a.u.)")
-        buffer = SignalBuffer(
-            (rounds, len(lengths), 4),
-            on_update=lambda data: viewer.update(
-                lengths, bathreset_signal2real(average_signals(data))
-            ),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Signal (a.u.)")
+        viewer = live_line(ax, num_lines=1)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(lengths, bathreset_signal2real(average_signals(data)))
+
+        fig.show()
+        buffer = SignalBuffer((rounds, len(lengths), 4), on_update=update)
 
         # Repeat the host length scan; each program sweeps the four pi/2 phases.
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            length_values = lengths.tolist()
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("rounds", rounds):
-                for length, step in rep.scan("length", length_values):
-                    step.cfg.rounds = 1
-                    tested_reset = step.cfg.tested_reset
-                    tested_reset.set_param("qub_length", length)
-                    tested_reset.set_param("res_length", length + length_diff)
-                    tested_reset.set_param(
-                        "pi2_phase", QickSweep1D("phase", 0.0, 270.0)
-                    )
-
-                    cache_key = float(tested_reset.qubit_tone_cfg.waveform.length)
-                    builder = step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    program = prog_cache.get(cache_key)
+                for length, step in rep.scan("length", lengths.tolist()):
+                    program = prog_cache.get(length)
                     if program is None:
-                        program = (
-                            builder.add(
-                                Reset("reset", step.cfg.reset),
-                                Pulse("init_pulse", step.cfg.init_pulse),
-                                BathReset("tested_reset", tested_reset),
-                                Readout("readout", step.cfg.readout),
-                            )
-                            .declare_sweep("phase", 4)
-                            .build()
+                        builder = TimelineBuilder(
+                            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay,
                         )
-                        prog_cache[cache_key] = program
+                        builder.add_loop("phase", 4)
+                        builder.emit(Reset("reset", cfg.reset))
+                        builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                        builder.emit(BathReset(
+                            "tested_reset", cfg.tested_reset,
+                            qub_length=length, res_length=length + length_diff,
+                            pi2_phase=QickSweep1D("phase", 0.0, 270.0),
+                        ))
+                        builder.emit(Readout("readout", cfg.readout))
+                        program = builder.build()
+                        prog_cache[length] = program
 
-                    _ = builder.run_program(program, rounds=cfg.rounds)
+                    step.run_acquire(program, soc, rounds=cfg.rounds)
         signals = average_signals(buffer.array)
 
         return LengthResult(

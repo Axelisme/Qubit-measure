@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import fit_qubit_freq
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -20,7 +21,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -40,6 +41,12 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -56,11 +63,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[PulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 @dataclass(frozen=True)
@@ -71,8 +73,8 @@ class FreqAnalysis:
 
 class FreqExp(Experiment[FreqResult, FreqCfg]):
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -99,30 +101,27 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # Retain complex IQ and display its projection along the response axis.
-        viewer = live_line(context.plots, "measurement", "Frequency (MHz)", "Amplitude")
-        signals_buffer = SignalBuffer(
-            (len(freqs),),
-            on_update=lambda data: viewer.update(freqs, reset_signal2real(data)),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
+        viewer = live_line(ax, num_lines=1)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(freqs, reset_signal2real(data))
+
+        fig.show()
+        signals_buffer = SignalBuffer((len(freqs),), on_update=update)
 
         # Sweep the tested reset frequency after the optional preparation.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "freq", sweep2param("freq", sched.cfg.freq)
-            )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    PulseReset("tested_reset", sched.cfg.tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("freq", sched.cfg.freq)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            freq = builder.add_sweep("freq", cfg.freq)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(PulseReset("tested_reset", cfg.tested_reset, freq=freq))
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return FreqResult(freqs, signals_buffer.array)
 

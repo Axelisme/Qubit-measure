@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -21,7 +22,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
@@ -57,6 +58,13 @@ class FreqGainAnalysis:
 
 
 class FreqGainCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -73,12 +81,6 @@ class FreqGainCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Freq", unit="MHz")]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -92,13 +94,12 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqGainResult, FreqGainCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis(
-                "freqs", "Cavity Frequency", "Hz", scale=1e6, dtype=np.float64
+            AxesSpec.Axis("freqs", label="Cavity Frequency", unit="Hz", scale=1e6, dtype=np.float64
             ),
-            AxesSpec.Axis("gains", "Cavity drive Gain", "a.u.", dtype=np.float64),
-            AxesSpec.Axis("phases", "Pi2 Phase", "deg", dtype=np.float64),
+            AxesSpec.Axis("gains", label="Cavity drive Gain", unit="a.u.", dtype=np.float64),
+            AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
         cfg_schema_version="3.0",
@@ -139,42 +140,31 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         )
 
         # Display opposite-phase contrast while retaining all four complex IQ planes.
-        viewer = live_heatmap(
-            context.plots,
-            "measurement",
-            "Cavity Frequency (MHz)",
-            "Cavity drive Gain (a.u.)",
-        )
-        signals_buffer = SignalBuffer(
-            (4, len(gains), len(freqs)),
-            on_update=lambda data: viewer.update(
-                freqs, gains, bathreset_signal2real(data).T
-            ),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Cavity Frequency (MHz)", ylabel="Cavity drive Gain (a.u.)")
+        viewer = live_heatmap(ax)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(freqs, gains, bathreset_signal2real(data).T)
+
+        fig.show()
+        signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            tested_reset = sched.cfg.tested_reset
-            tested_reset.set_param("res_gain", sweep2param("gain", sched.cfg.gain))
-            tested_reset.set_param("res_freq", sweep2param("freq", sched.cfg.freq))
-            phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
-            tested_reset.set_param("pi2_phase", phase_param)
-
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    BathReset("tested_reset", tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("phase", 4)
-                .declare_sweep("gain", sched.cfg.gain)
-                .declare_sweep("freq", sched.cfg.freq)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            builder.add_loop("phase", 4)
+            gain = builder.add_sweep("gain", cfg.gain)
+            freq = builder.add_sweep("freq", cfg.freq)
+            phase = QickSweep1D("phase", 0.0, 270.0) + cfg.tested_reset.pi2_cfg.phase
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(BathReset("tested_reset", cfg.tested_reset,
+                res_gain=gain, res_freq=freq, pi2_phase=phase))
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return FreqGainResult(
             gains=gains,

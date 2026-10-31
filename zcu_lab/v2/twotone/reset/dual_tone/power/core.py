@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -19,7 +20,7 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     TwoPulseReset,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
 
@@ -36,6 +37,13 @@ class PowerResult:
 
 
 class PowerCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain1: Annotated[GainSweep, FieldMeta(label="Gain1", unit="a.u.")]
+    gain2: Annotated[GainSweep, FieldMeta(label="Gain2", unit="a.u.")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -52,12 +60,6 @@ class PowerCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[TwoPulseReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain1: Annotated[GainSweep, FieldMeta(label="Gain1", unit="a.u.")]
-    gain2: Annotated[GainSweep, FieldMeta(label="Gain2", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -82,10 +84,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
     # Both axes are gains in a.u. -> scale=IDENTITY (default)
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("gains2", "Power2", "a.u."),  # inner
-            AxesSpec.Axis("gains1", "Power1", "a.u."),  # outer
+            AxesSpec.Axis("gains2", label="Power2", unit="a.u."),  # inner
+            AxesSpec.Axis("gains1", label="Power1", unit="a.u."),  # outer
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         cfg_schema_version="3.0",
@@ -126,38 +128,28 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             return np.abs(signals - signals[ref_i, ref_j])
 
         # Display contrast relative to the minimum-gain corner in either scan direction.
-        viewer = live_heatmap(
-            context.plots, "measurement", "Gain1 (a.u.)", "Gain2 (a.u.)"
-        )
-        signals_buffer = SignalBuffer(
-            (len(gains1), len(gains2)),
-            on_update=lambda data: viewer.update(
-                gains1, gains2, dual_reset_gain_signal2real(data)
-            ),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Gain1 (a.u.)", ylabel="Gain2 (a.u.)")
+        viewer = live_heatmap(ax)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(gains1, gains2, dual_reset_gain_signal2real(data))
+
+        fig.show()
+        signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
 
         # Sweep both reset gains in hardware and collect mean IQ.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "gain1", sweep2param("gain1", sched.cfg.gain1)
-            )
-            sched.cfg.tested_reset.set_param(
-                "gain2", sweep2param("gain2", sched.cfg.gain2)
-            )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    TwoPulseReset("tested_reset", sched.cfg.tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("gain1", sched.cfg.gain1)
-                .declare_sweep("gain2", sched.cfg.gain2)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
+            gain1 = builder.add_sweep("gain1", cfg.gain1)
+            gain2 = builder.add_sweep("gain2", cfg.gain2)
+            builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(TwoPulseReset("tested_reset", cfg.tested_reset, gain1=gain1, gain2=gain2))
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return PowerResult(gains1, gains2, signals_buffer.array)
 
