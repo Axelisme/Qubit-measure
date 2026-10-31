@@ -69,7 +69,9 @@ def _array_json(value: object) -> object:
     """Convert only ndarrays; JSON dictionaries go to the typed wire validator."""
     if isinstance(value, np.ndarray):
         return _ArrayJSON(
-            dtype=value.dtype.name, shape=value.shape, values=tuple(value.ravel().tolist())
+            dtype=value.dtype.name,
+            shape=value.shape,
+            values=tuple(value.ravel().tolist()),
         )
     return value
 
