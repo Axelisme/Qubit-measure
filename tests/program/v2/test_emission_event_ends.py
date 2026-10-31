@@ -577,11 +577,9 @@ def test_reset_retains_child_posts_and_rounds_dependent_placement(
     result = shots(
         _program([reset], body, lambda prog: prog.append_macro(_AllocateDuration()))
     )
-    # Cavity actual end+post=47.89504 =>48; its rule-a duration=50.
-    # Two: second end+post=9+22.4+21.504=52.904 =>53 (rule a54).
-    # Bath: pi2 starts48+4=52, end+post=52+22.4+.21504 =>75.
-    # Qubit: short=9+22.4+1.29024 =>33; long=9+172.48+1.29024 =>183.
-    # Rule a Bath ignores the qubit tail:50+29=79, pi2 starts54.
+    # Cavity ceil(5+43.68+.21504)=49. The second child closes53.
+    # Bath pi2 starts49+5=54 and closesceil(54+22.4+.21504)=77.
+    # The longer qubit still dominates atceil(9+172.48+1.29024)=183.
     assert [waves(shot) for shot in result] == [
         [origin + cycle for cycle in expected_waves]
     ] * 2

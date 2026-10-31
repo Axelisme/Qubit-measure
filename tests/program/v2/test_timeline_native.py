@@ -151,6 +151,20 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 175]
 
 
+def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
+    def body(prog):
+        value = QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08)
+        prog.trigger([0], t=value, width=value, timeline="default", tag="edge")
+        prog.sync()
+        prog.pulse(0, "pulse", timeline="default", tag="after")
+
+    prog = _program(body, lambda p: p.add_loop("scan", 4))
+    assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx([0, 1, 2, 3])
+    assert prog.get_time_param("edge", "width", as_array=True) * 430.08 == pytest.approx([0, 1, 2, 3])
+    assert [[e.cycle - s.start_cycle for e in s.events if e.kind == "wave"] for s in _shots(prog)] == [[173], [174], [175], [176]]
+    assert prog.compile_datamem() is None
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):

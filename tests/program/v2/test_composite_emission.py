@@ -122,8 +122,8 @@ def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
         lambda p: p.add_loop("frequency", 3),
     )
     result = shots(prog)
-    # ADC .1us rounds25 clocks at250MHz =>43.008cycles, pulse39=>43.68.
-    # Config at0; trigger/pulse at4; ceil(4+43.68+.21504)=48.
+    # ADC .1us rounds31 clocks at307.2MHz =>43.4 cycles, pulse39=>43.68.
+    # Config at0; trigger/pulse at5; ceil(5+43.68+.21504)=49.
     assert [waves(shot) for shot in result] == [[0, 5]] * 6
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [49] * 6
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [58] * 6
@@ -582,7 +582,7 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
 
     prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
-    # max(88/116,100) +60 =>160/176. No sweep-wide max176.
+    # max(89/117,100) +60 =>160/177. No sweep-wide max177.
     assert [waves(s) for s in result] == [[105, 160], [105, 177]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 221] * 2
 

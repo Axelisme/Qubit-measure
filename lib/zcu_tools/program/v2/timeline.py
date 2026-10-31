@@ -113,7 +113,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     operations retain QICK timing. Named outputs update their relative ends;
     sync and body completion move reference time. Each compile resets ends.
     All instructions share the existing IR and acquisition implementations.
-    Simulation frontend migration is separate.
+    get_time_param returns actual scalar/affine times. Runtime-only and
+    non-affine timeline times raise RuntimeError, including as_array=True.
+    Reading time parameters does not change scheduling or allocate time data.
     """
 
     macro_list: list[Macro]
@@ -553,7 +555,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         timeline = timeline if timeline is not None else self._timeline_default
         start = len(self.macro_list)
         previous_scope = self._emission_scope
-        emission_name = f"{module.name} emission {self._emission_serial}"
         self._emission_scope = (self._emission_serial, 0)
         self._emission_serial += 1
         try:
@@ -568,7 +569,6 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
                 module,
                 [PreparedTimelineMacro(self._timeline_book, macro) for macro in macros],
                 tag,
-                emission_name=emission_name,
             )
         )
 

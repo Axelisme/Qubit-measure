@@ -590,15 +590,11 @@ class ModuleEmission(TimedMacro):
 
     owner is the borrowed declaration object, macros are fresh native operations,
     and tag identifies this occurrence's first timed operation in get_time_param.
-    emission_name identifies this occurrence in timing-resource errors.
     Construction and timing placement are owned by TimelineProgramV2.emit.
     """
 
-    def __init__(
-        self, owner: Module, macros: list[Macro], tag: str | None, *, emission_name: str
-    ):
+    def __init__(self, owner: Module, macros: list[Macro], tag: str | None):
         super().__init__(tag=tag)
-        self.emission_name = emission_name
         self.owner = owner
         self.macros = macros
         self.finishers: list[PreparedTimelineMacro] = []

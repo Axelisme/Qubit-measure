@@ -254,9 +254,9 @@ def test_module_join_selected_lengths_keep_pointwise_maximum_and_runtime_origin(
 
     prog = _program([origin, joined, tail], body, data_registers=32)
     result = shots(prog)
-    # pre rounds4; post=.21504. Const raw ends43.68/71.68/99.68
-    # give per-child ceil48/76/104. Flat adds ramps16 gen clocks,
-    # giving ceil66/94/122. Crossing maxima:104/76/104 or122/94/122.
+    # Start ceils5; post=.21504. Const ends49/77/105.
+    # Flat adds16 gen clocks, giving ends67/95/123.
+    # Crossing maxima are105/77/105 or123/95/123.
     # Both emissions start at origin7 plus the accumulated pointwise maximum.
     starts = [135, 107, 135] if flat else [117, 89, 117]
     tails = [253, 197, 253] if flat else [217, 161, 217]
@@ -530,8 +530,8 @@ def test_module_join_preserves_known_readout_provenance_and_parallel_origin():
     choice = Branch("scan", _pulse("a", 0), None, _pulse("long_a", 0, 50))
     joined = Join(readout, choice)
     result = shots(_program([joined], lambda prog: prog.emit(joined)))
-    # Readout config0, playback22 and ADC43..215.2 plus post8.6016
-    # finish at224, independent of the shorter Branch's28/0/56 advance.
+    # Readout config0, playback22 and ADC44..216.2 plus post8.6016
+    # finish at225, independent of the shorter Branch's28/0/56 advance.
     assert [waves(s) for s in result] == [[0, 22, 0], [0, 22], [0, 22, 0]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [225] * 6
     assert [s.end_cycle - s.start_cycle for s in result] == [225] * 6
