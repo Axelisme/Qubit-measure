@@ -390,6 +390,20 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
         assert shifts == []
 
 
+def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
+    pulse = Pulse("wide", _pulse_cfg(length=QickSweep1D("scan", 3 / 384, 65535 / 384), pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
+
+    def body(prog):
+        prog.emit(pulse)
+        prog.emit(tail)
+
+    prog = _program([pulse, tail], body, lambda p: p.add_loop("scan", 3))
+    assert [waves(shot)[1] for shot in shots(prog)] == [
+        (n * 287 + 255) // 256 for n in (3, 32769, 65535)
+    ] * 2
+
+
 def test_runtime_cross_grid_product_overflow_fails_at_build():
     # Native waveform words fit 16 bits, and the final end fits signed32.
     # Only the required fixed-point product overflows, before ASR8.
