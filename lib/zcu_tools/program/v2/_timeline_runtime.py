@@ -953,6 +953,7 @@ class RuntimeMath(TimedMacro):
             if maximum
             else ()
         )
+        covers = self._choice_coverage(values) if maximum else ()
         if len(plan.residuals) == 1:
             selected = substitute_time(
                 add_time(plan.common, plan.residuals[0]), plan.atoms
@@ -964,7 +965,11 @@ class RuntimeMath(TimedMacro):
                     and difference_limits(selected, expression) == (0, 0)
                 ):
                     if isinstance(value, RuntimeEnd):
-                        return replace(value, deferred=deferred) if maximum else value
+                        return (
+                            replace(value, covers=covers, deferred=deferred)
+                            if maximum
+                            else value
+                        )
                     if not deferred:
                         return value
         sources = {} if inputs is None else inputs.copy()
@@ -983,20 +988,20 @@ class RuntimeMath(TimedMacro):
             result = self._select(result, operand, maximum=maximum, target=destination)
         result = self.add(shared, result, target=destination)
         proof = choose_time(*expressions, maximum=maximum)
-        covers = (
-            tuple(
-                item
-                for value in values
-                if not isinstance(value, (TimeVariable, TimeAbs))
-                for item in (
-                    value,
-                    *(value.covers if isinstance(value, RuntimeEnd) else ()),
-                )
-            )
-            if maximum
-            else ()
-        )
         return replace(result, expression=proof, covers=covers, deferred=deferred)
+
+    @staticmethod
+    def _choice_coverage(values: Sequence[Time | TimeExpression]) -> tuple[Time, ...]:
+        """A maximum covers every input boundary, even when equal inputs collapse."""
+        return tuple(
+            item
+            for value in values
+            if not isinstance(value, (TimeVariable, TimeAbs))
+            for item in (
+                value,
+                *(value.covers if isinstance(value, RuntimeEnd) else ()),
+            )
+        )
 
     def source(
         self,
@@ -1089,6 +1094,17 @@ class RuntimeMath(TimedMacro):
         aggregate = self._selected_points(completed, axes)
         return max(0, *(a - b for a, b in zip(physical, aggregate, strict=True)))
 
+    def _selection_operand(self, value: Time) -> int | str:
+        """Resolve a ceiled candidate to literal cycles or its live register."""
+        if isinstance(value, RuntimeEnd):
+            return value.register
+        if isinstance(value, QickParam) and value.is_sweep():
+            return self.cycles(value).register
+        scalar = value.start if isinstance(value, QickParam) else value
+        if isinstance(scalar, RuntimeEnd):
+            return scalar.register
+        return round(scalar * get_fclk(self.prog))
+
     def selected_end(
         self,
         selector: str,
@@ -1112,18 +1128,7 @@ class RuntimeMath(TimedMacro):
         lower = min(round(lo * get_fclk(self.prog)) for lo, _ in limits)
         upper = max(round(hi * get_fclk(self.prog)) for _, hi in limits)
         self.check(lower, upper)
-        operands: list[int | str] = []
-        for value in candidates:
-            if isinstance(value, RuntimeEnd):
-                operands.append(value.register)
-            elif isinstance(value, QickParam) and value.is_sweep():
-                operands.append(self.cycles(value).register)
-            else:
-                scalar = value.start if isinstance(value, QickParam) else value
-                if isinstance(scalar, RuntimeEnd):
-                    operands.append(scalar.register)
-                else:
-                    operands.append(round(scalar * get_fclk(self.prog)))
+        operands = [self._selection_operand(value) for value in candidates]
         register = (
             candidates[0].register
             if isinstance(candidates[0], RuntimeEnd)

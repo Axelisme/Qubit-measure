@@ -223,12 +223,8 @@ class LoopTimelineExit(Macro):
         offsets = [difference_limits(event.expression, origin) for event in events]
         if any(lo is None or lo != hi for lo, hi in offsets):
             return False
-        for generator, ch in frame.initial_channels:
-            native = self.entry.book.native_expression(prog, ch, generator=generator)
-            if native != frame.initial_native[generator, ch]:
-                lo, hi = difference_limits(native, end)
-                if lo is None or lo != hi:
-                    return False
+        if not self._constant_channel_offsets(prog, frame, end):
+            return False
         for math in frame.body_math:
             math.operations = [
                 op for op in math.operations if isinstance(op, EventTime)
@@ -245,6 +241,18 @@ class LoopTimelineExit(Macro):
         self.entry.book.math.operations = [
             WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=int(advance))
         ]
+        return True
+
+    def _constant_channel_offsets(
+        self, prog, frame: LoopTimelineFrame, end: TimeExpression
+    ) -> bool:
+        """Pointer lowering requires every changed physical tail to track the end."""
+        for generator, ch in frame.initial_channels:
+            native = self.entry.book.native_expression(prog, ch, generator=generator)
+            if native != frame.initial_native[generator, ch]:
+                lo, hi = difference_limits(native, end)
+                if lo is None or lo != hi:
+                    return False
         return True
 
     def _capture_channel(
