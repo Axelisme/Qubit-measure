@@ -41,6 +41,7 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
     pane = state.get_tab(tab_id).run
     assert pane.result is (None if fails else record)
     assert pane.stop_requested
+    assert pane.source_operation_id == token
 
 
 def test_gui_stop_reaches_already_active_descendants() -> None:
