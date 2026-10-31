@@ -28,3 +28,25 @@ def test_averaged_collection_preserves_read_axes_tones_and_nan_after_module_reus
     assert iq.shape == (3, 2, 2)
     with pytest.raises(ValueError, match="mux"):
         native_mux().build("mux").collect_iq(prog, acquired)
+
+
+def test_raw_collection_keeps_shots_reads_tones_and_offsets(monkeypatch):
+    module = native_mux().build("mux")
+    builder = TimelineBuilder(mux_soccfg(), reps=3)
+    builder.add_loop("point", 2)
+    builder.emit(module)
+    builder.emit(module)
+    prog = builder.build()
+    sentinels = np.arange(24, dtype=np.int64).reshape(3, 2, 2, 2)
+    raw = [
+        sentinels * prog.ro_chs[4]["length"],
+        (sentinels + 1000) * prog.ro_chs[1]["length"],
+    ]
+    monkeypatch.setattr(prog, "get_raw", lambda: raw)
+    iq = module.collect_raw_iq(prog)
+    assert iq.shape == (3, 2, 2, 2, 2)
+    np.testing.assert_array_equal(iq[..., 0, :], sentinels)
+    np.testing.assert_array_equal(iq[..., 1, :], sentinels + 1000)
+    np.testing.assert_array_equal(module.collect_raw_iq(prog, read_index=1), iq[..., 1, :, :])
+    with pytest.raises(ValueError, match="mux"):
+        native_mux().build("mux").collect_raw_iq(prog)
