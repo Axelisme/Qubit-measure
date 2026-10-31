@@ -1,6 +1,7 @@
 """Axis-component cycle algebra. Proof envelopes never supply runtime values."""
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from fractions import Fraction
 from functools import cached_property, lru_cache
@@ -919,6 +920,102 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     for value in unique[1:]:
         result = _binary_choice(result, value, maximum=maximum)
     return result
+
+
+def plan_time_choice(
+    values: tuple[TimeExpression, ...],
+    *,
+    maximum: bool = True,
+    captured: tuple[TimeExpression, ...] = (),
+) -> tuple[TimeVariable, tuple[TimeVariable, ...], dict[CycleAxis, TimeExpression]]:
+    """Factor runtime recipes into S and undominated residuals, in cycle units.
+
+    Captured expressions are opaque atoms, including captured max results.
+    The returned atom mapping binds those atoms to their original proof values;
+    callers must supply captured registers instead of rebuilding their sources.
+    Other atoms retain their original integer producer, never Abs proof terms.
+    Coefficients use the N-input mode, breaking ties toward smaller magnitude.
+    """
+    atoms: dict[TimeExpression, CycleAxis] = {}
+
+    def atom(value: TimeExpression) -> TimeVariable:
+        if value not in atoms:
+            lo, hi = expression_limits(value)
+            atoms[value] = cycle_axis(
+                "join operand",
+                None if lo is None else math.ceil(lo),
+                None if hi is None else math.floor(hi),
+                CycleProducer(reconstruction=value),
+            )
+        return TimeVariable(terms=((atoms[value], 1),))
+
+    def linear(value: TimeExpression) -> TimeVariable:
+        if value in captured:
+            return atom(value)
+        if isinstance(value, TimeAbs):
+            recipe = value.runtime
+            if recipe.kind == "add":
+                return _linear_add(linear(recipe.operands[0]), linear(recipe.operands[1]))
+            if recipe.kind == "scale" and recipe.coefficient == int(recipe.coefficient):
+                return _linear_scale(linear(recipe.operands[0]), recipe.coefficient)
+            return atom(value)
+        result = TimeVariable(value.constant)
+        for axis, coefficient in value.terms:
+            recipe = axis.producer.reconstruction
+            term = (
+                linear(recipe)
+                if recipe is not None and _integer_recipe(recipe)
+                else TimeVariable(terms=((axis, 1),))
+            )
+            result = _linear_add(result, _linear_scale(term, coefficient))
+        return result
+
+    def candidates(value: TimeExpression) -> list[TimeVariable]:
+        if value in captured:
+            return [atom(value)]
+        for entry in captured:
+            delta = add_time(value, scale_time(entry, -1))
+            lo, _ = expression_limits(delta)
+            if isinstance(delta, TimeVariable) and lo is not None and lo >= 0:
+                return [_linear_add(atom(entry), linear(delta))]
+        if isinstance(value, TimeAbs) and value.runtime.kind == ("max" if maximum else "min"):
+            return [item for operand in value.runtime.operands for item in candidates(operand)]
+        if isinstance(value, TimeVariable) and value.constant == 0 and len(value.terms) == 1:
+            axis, coefficient = value.terms[0]
+            recipe = axis.producer.reconstruction
+            if coefficient == 1 and recipe is not None:
+                return candidates(recipe)
+        return [linear(value)]
+
+    lines = [line for value in values for line in candidates(value)]
+    if not lines:
+        raise ValueError("time choice requires at least one value")
+    variables = dict.fromkeys(axis for line in lines for axis, _ in line.terms)
+    common_terms = []
+    for axis in variables:
+        counts = Counter(dict(line.terms).get(axis, 0) for line in lines)
+        coefficient = min(counts, key=lambda c: (-counts[c], abs(c), c))
+        if coefficient:
+            common_terms.append((axis, coefficient))
+    common = TimeVariable(terms=tuple(common_terms))
+    residuals = [_linear_add(line, _linear_scale(common, -1)) for line in lines]
+    replacements = {axis: value for value, axis in atoms.items()}
+    proofs = [substitute_time(line, replacements) for line in residuals]
+    kept: list[TimeVariable] = []
+    for index, residual in enumerate(residuals):
+        dominated = False
+        for other, proof in enumerate(proofs):
+            if index == other:
+                continue
+            lo, hi = difference_limits(proof, proofs[index])
+            better = lo is not None and lo >= 0 if maximum else hi is not None and hi <= 0
+            equal = lo == hi == 0
+            if better and (not equal or other < index):
+                dominated = True
+                break
+        if not dominated:
+            kept.append(residual)
+    return common, tuple(kept), replacements
 
 
 def substitute_time(

@@ -44,7 +44,6 @@ from ._timeline_runtime import (
     Time,
     align_end,
     ceil_tick,
-    known_maximum,
     optional_time_bounds,
     source_expression,
     step_time,
@@ -100,9 +99,9 @@ class TimelineJoin(Macro):
 
     def preprocess(self, prog) -> None:
         super().preprocess(prog)
-        end = self.book.end(self.into)
-        for source in self.sources:
-            end = self.book.math.maximum(end, self.book.end(source))
+        end = self.book.math.join(
+            [self.book.end(self.into), *(self.book.end(source) for source in self.sources)]
+        )
         self.book.ends[self.into] = end
         self.book.waiting.discard(self.into)
 
@@ -1159,15 +1158,10 @@ class TimelineBranch(Macro):
                 self.book.ends[name] = initial[name]
             elif not self.align_timeline:
                 self.book.ends[name] = self._merge_values(prog, values, force=True)
-            elif any(isinstance(value, RuntimeEnd) for value in values):
-                self.book.ends[name] = self.result_math.reconstruct_maximum(
+            else:
+                self.book.ends[name] = self.result_math.join(
                     values, self.entry_inputs, self.captured_ends
                 )
-            else:
-                end = values[0]
-                for value in values[1:]:
-                    end = self.result_math.maximum(end, value)
-                self.book.ends[name] = end
 
     def _prepare_case(
         self, prog, case: list[Macro], index: int, initial: dict[str, Time]
@@ -1277,7 +1271,7 @@ class TimelineBranch(Macro):
                 channels[ch] = value
             for name, end in self.book.ends.items():
                 if isinstance(end, RuntimeEnd) and all(
-                    known_maximum(result[name], snapshot[ch]) is result[name]
+                    self.result_math.covers(result[name], snapshot[ch])
                     for snapshot, result in zip(snapshots, results, strict=True)
                 ):
                     self.book.ends[name] = replace(end, covers=(*end.covers, value))

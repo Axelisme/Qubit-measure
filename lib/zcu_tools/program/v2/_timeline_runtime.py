@@ -23,6 +23,7 @@ from ._timeline_expression import (
     expression_limits,
     known_time_point,
     point_time,
+    plan_time_choice,
     projected_expression_bounds,
     scale_time,
     select_time,
@@ -470,27 +471,6 @@ def time_bounds(prog, value: Time) -> tuple[float, float]:
     return result
 
 
-def known_maximum(a: Time, b: Time) -> Time | None:
-    """Return a proven dominant operand, or None when a runtime max is needed.
-
-    a and b are reference-relative ends in us, or bounded cycle registers.
-    Equal ends and compile-time dominant scalar/affine ends return an input
-    unchanged. This never emits instructions or approximates crossing ends.
-    Invalid static bounds propagate their existing errors.
-    """
-    if a is b or (isinstance(a, RuntimeEnd) and any(item is b for item in a.covers)):
-        return a
-    if isinstance(b, RuntimeEnd) and any(item is a for item in b.covers):
-        return b
-    if not isinstance(a, RuntimeEnd) and not isinstance(b, RuntimeEnd):
-        lower, upper = bounds(a - b)
-        if lower >= -1e-12:
-            return a
-        if upper <= 1e-12:
-            return b
-    return None
-
-
 def _csd(value: int) -> list[tuple[int, int]]:
     digits: list[tuple[int, int]] = []
     exponent = 0
@@ -705,14 +685,9 @@ class RuntimeMath(TimedMacro):
                     raise RuntimeError("runtime recipe requires an integer multiplier")
                 scaled = self.multiply(values[0], abs(int(coefficient)))
                 return scaled if coefficient >= 0 else self.subtract(0.0, scaled)
-            result = values[0]
-            for value in values[1:]:
-                if operation.kind == "max":
-                    result = self.cycles(self.maximum(result, value))
-                else:
-                    delta = self.subtract(result, value)
-                    result = self.subtract(result, self.maximum(0.0, delta))
-            return result
+            return self.cycles(
+                self.join(values, maximum=operation.kind == "max")
+            )
         return self._reconstruct_linear(expression, inputs)
 
     def _reconstruct_linear(
@@ -835,38 +810,59 @@ class RuntimeMath(TimedMacro):
             )
         return RuntimeEnd(result.register, expression=expression)
 
-    def reconstruct_maximum(
+    def join(
         self,
         values: Sequence[Time],
-        inputs: dict[CycleAxis, RuntimeEnd],
-        captured_ends: Sequence[RuntimeEnd],
-    ) -> RuntimeEnd:
-        """Join case ends using immutable entry values and exact known increments.
+        inputs: dict[CycleAxis, RuntimeEnd] | None = None,
+        captured_ends: Sequence[RuntimeEnd] = (),
+        *,
+        maximum: bool = True,
+        target: str | None = None,
+    ) -> Time:
+        """Materialize one N-way max/min from original recipes and live bindings.
 
-        values are reference-relative case ends. Preserve a common incoming
-        floor/max while joining its known increments, so no historical source
-        register is reread. Other ends use reconstruct's cycle-algebra contract.
+        values are reference-relative microseconds or captured cycle registers.
+        With inputs supplied, reconstruct branch results from entry registers;
+        otherwise RuntimeEnd values are opaque live operands. Captured entry
+        max values never expand into historical source-register reads.
+        target may alias the first operand only when that operand is dead.
         """
-        expressions = [time_expression(self.prog, value) for value in values]
-        for captured in captured_ends:
-            shifts = [
-                self._captured_delta(value, runtime_expression(captured))
-                for value in expressions
-            ]
-            if any(shift is None for shift in shifts):
-                continue
-            delta = choose_time(*(shift for shift in shifts if shift is not None))
-            lower, upper = expression_limits(delta)
-            if lower is not None and lower >= 0:
-                if lower == upper:
-                    return self.add(captured, int(lower) / get_fclk(self.prog))
-                return self.add(captured, self.reconstruct(delta, inputs))
-        return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
-
-    def _captured_delta(
-        self, expression: TimeExpression, captured: TimeExpression
-    ) -> TimeExpression | None:
-        return add_time(expression, scale_time(captured, -1))
+        if not values:
+            raise ValueError("time choice requires at least one value")
+        expressions = tuple(time_expression(self.prog, value) for value in values)
+        captured = (
+            tuple(value for value in values if isinstance(value, RuntimeEnd))
+            if inputs is None
+            else tuple(captured_ends)
+        )
+        bindings = {runtime_expression(value): value for value in captured}
+        common, residuals, atoms = plan_time_choice(
+            expressions, maximum=maximum, captured=tuple(bindings)
+        )
+        sources = {} if inputs is None else inputs.copy()
+        for axis, expression in atoms.items():
+            if expression in bindings:
+                sources[axis] = bindings[expression]
+        # Bind every shared producer once for common and residual reconstruction.
+        for axis, _ in common.terms:
+            if axis not in sources:
+                sources[axis] = self.reconstruct(TimeVariable(terms=((axis, 1),)), sources)
+        shared = self.reconstruct(common, sources)
+        operands = [self.reconstruct(value, sources) for value in residuals]
+        result = operands[0]
+        destination = target
+        if len(operands) > 1:
+            destination = self.allocate() if target is None else target
+        for operand in operands[1:]:
+            result = self._select(result, operand, maximum=maximum, target=destination)
+        result = self.add(shared, result, target=destination)
+        proof = choose_time(*expressions, maximum=maximum)
+        covers = tuple(
+            item
+            for value in values
+            for item in (value, *(value.covers if isinstance(value, RuntimeEnd) else ()))
+        ) if maximum else ()
+        return replace(result, expression=proof, covers=covers)
 
     def source(
         self,
@@ -1191,7 +1187,7 @@ class RuntimeMath(TimedMacro):
 
     def covers(self, end: Time, previous: Time) -> bool:
         """Prove coverage with exact identities or the common source-range rule."""
-        if known_maximum(end, previous) is end:
+        if end is previous or (isinstance(end, RuntimeEnd) and any(item is previous for item in end.covers)):
             return True
         lower, _ = difference_limits(
             time_expression(self.prog, end), time_expression(self.prog, previous)
@@ -1254,24 +1250,16 @@ class RuntimeMath(TimedMacro):
         )
 
     def maximum(self, a: Time, b: Time, *, target: str | None = None) -> Time:
-        known = known_maximum(a, b)
-        if known is not None:
-            return known
-        left, right = self.cycles(a), self.cycles(b)
-        lower, upper = difference_limits(
-            runtime_expression(left), runtime_expression(right)
-        )
-        if lower is not None and lower >= 0:
-            return a
-        if upper is not None and upper <= 0:
-            return b
-        if (
-            left.minimum is None
-            or left.maximum is None
-            or right.minimum is None
-            or right.maximum is None
-        ):
-            return self._unbounded_maximum(left, right, target=target)
+        """Join two ends through the common N-way recipe planner."""
+        return self.join((a, b), target=target)
+
+    def _select(
+        self, left: RuntimeEnd, right: RuntimeEnd, *, maximum: bool, target: str | None
+    ) -> RuntimeEnd:
+        lower, upper = difference_limits(runtime_expression(left), runtime_expression(right))
+        safe = lower is not None and upper is not None and -(2**31) <= lower <= upper <= LIMIT
+        if not safe:
+            return self._masked_select(left, right, maximum=maximum, target=target)
         destination = self.allocate() if target is None else target
         self.operations.append(
             AsmInst(
@@ -1292,29 +1280,14 @@ class RuntimeMath(TimedMacro):
                     "DST": self.prog._get_reg(destination),
                     "SRC": "op",
                     "OP": self.prog._get_reg(right.register),
-                    "IF": "S",
+                    "IF": "S" if maximum else "NS",
                 },
                 addr_inc=1,
             )
         )
-        covers = (
-            a,
-            b,
-            *(a.covers if isinstance(a, RuntimeEnd) else ()),
-            *(b.covers if isinstance(b, RuntimeEnd) else ()),
-        )
-        # max(a,b) is no earlier than either input, so either input's deferred
-        # physical boundary remains covered after the same additional debt.
-        deferred = (
-            *(a.deferred if isinstance(a, RuntimeEnd) else ()),
-            *(b.deferred if isinstance(b, RuntimeEnd) else ()),
-        )
-        return RuntimeEnd(
-            destination,
-            covers=covers,
-            deferred=deferred,
-            expression=choose_time(runtime_expression(left), runtime_expression(right)),
-        )
+        return RuntimeEnd(destination, expression=choose_time(
+            runtime_expression(left), runtime_expression(right), maximum=maximum
+        ))
 
     @staticmethod
     def _sum_limits(
@@ -1333,53 +1306,37 @@ class RuntimeMath(TimedMacro):
             lower
         ), None if upper is None else math.floor(upper)
 
-    def _unbounded_maximum(
-        self, left: RuntimeEnd, right: RuntimeEnd, *, target: str | None
+    def _masked_select(
+        self, left: RuntimeEnd, right: RuntimeEnd, *, maximum: bool, target: str | None
     ) -> RuntimeEnd:
-        """Emit max without interval shortcuts; signed overflow is author-owned."""
+        """Select signed words without trusting an overflowing subtraction sign."""
         destination = self.allocate() if target is None else target
-        delta = self.op(left, "-", right, limits=(None, None), target=self.scratch(0))
-        absolute = self.scratch(1)
-        self.operations.append(
-            AsmInst(
-                inst={
-                    "CMD": "REG_WR",
-                    "DST": self.prog._get_reg(absolute),
-                    "SRC": "op",
-                    "OP": f"ABS {self.prog._get_reg(delta.register)}",
-                },
-                addr_inc=1,
-            )
-        )
-        # Divide before adding to avoid the unnecessary 2*x intermediate.
-        half = self.op(delta, "ASR", 1, limits=(None, None), target=self.scratch(2))
-        abs_half = self.op(
-            RuntimeEnd(absolute, None, None),
-            "ASR",
-            1,
-            limits=(None, None),
-            target=absolute,
-        )
-        remainder = self.op(
-            delta, "-", half, limits=(None, None), target=self.scratch(0)
-        )
-        parity = self.op(
-            remainder, "-", half, limits=(None, None), target=self.scratch(0)
-        )
-        total = self.op(
-            half, "+", abs_half, limits=(None, None), target=self.scratch(2)
-        )
-        positive = self.op(
-            total, "+", parity, limits=(None, None), target=self.scratch(2)
-        )
-        result = self.op(right, "+", positive, limits=(None, None), target=destination)
-        return RuntimeEnd(
-            result.register,
-            None,
-            None,
-            (left, right, *left.covers, *right.covers),
-            expression=choose_time(runtime_expression(left), runtime_expression(right)),
-        )
+        delta, signs, mask = (self.scratch(index) for index in range(3))
+        x, y = left.register, right.register
+
+        def emit(dst: str, a: str, operator: str, b: str | int) -> None:
+            rhs = f"#{b}" if isinstance(b, int) else self.prog._get_reg(b)
+            self.operations.append(AsmInst(inst={
+                "CMD": "REG_WR", "DST": self.prog._get_reg(dst), "SRC": "op",
+                "OP": f"{self.prog._get_reg(a)} {operator} {rhs}",
+            }, addr_inc=1))
+
+        emit(delta, x, "-", y)
+        emit(signs, x, "^", y)
+        emit(mask, x, "^", delta)
+        emit(mask, mask, "AND", signs)
+        emit(mask, mask, "^", delta)
+        # ASR counts are four-bit hardware operands.
+        for shift in (15, 15, 1):
+            emit(mask, mask, "ASR", shift)
+        if not maximum:
+            emit(mask, mask, "^", -1)
+        emit(delta, x, "^", y)
+        emit(delta, delta, "AND", mask)
+        emit(destination, x, "^", delta)
+        return RuntimeEnd(destination, expression=choose_time(
+            runtime_expression(left), runtime_expression(right), maximum=maximum
+        ))
 
     def floor(self, end: Time, advance: Time) -> Time:
         key = (id(end), id(advance))
