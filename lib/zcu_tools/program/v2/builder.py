@@ -109,12 +109,20 @@ class TimelineBuilder:
         reps: int = 1,
         initial_delay: float = 1.0,
         relax_delay: float = 1.0,
+        **program_kwargs: object,
     ) -> None:
-        """Capture the compile profile and shot controls without compiling."""
+        """Capture the compile profile, shot controls and compilation options.
+
+        program_kwargs are forwarded unchanged to TimelineProgramV2 at build,
+        following MyProgramV2's QICK compilation-option contract (for example,
+        reps_innermost). They are not acquisition options or cfg overrides.
+        Unsupported or conflicting options raise from the compiler at build.
+        """
         self._soccfg = soccfg
         self._reps = reps
         self._initial_delay = initial_delay
         self._relax_delay = relax_delay
+        self._program_kwargs = program_kwargs
         self._initialize_actions: list[_Action] = []
         self._body_actions: list[_Action] = []
         self._action_stack = [self._body_actions]
@@ -487,4 +495,5 @@ class TimelineBuilder:
             reps=self._reps,
             initial_delay=self._initial_delay,
             relax_delay=self._relax_delay,
+            **self._program_kwargs,
         )
