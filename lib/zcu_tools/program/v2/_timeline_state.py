@@ -476,20 +476,26 @@ class TimelineBook:
         )
 
     def _observe_alu(self, prog, macro: WriteRegOp) -> None:
-        if macro.op not in ("+", "-") or not self._known_source(prog, macro.lhs):
-            self.source_expressions[macro.dst] = LinearTime(
-                terms=((CycleVariable(macro.dst, None, None), 1),)
-            )
-            return
         right = macro.rhs
-        if isinstance(right, int):
-            rhs = LinearTime(right)
-        elif isinstance(right, str) and self._known_source(prog, right):
-            rhs = source_expression(prog, right)
-        else:
-            self.source_expressions[macro.dst] = LinearTime(
-                terms=((CycleVariable(macro.dst, None, None), 1),)
-            )
+        rhs = (
+            LinearTime(right)
+            if isinstance(right, int)
+            else source_expression(prog, right)
+            if isinstance(right, str) and self._known_source(prog, right)
+            else None
+        )
+        if (
+            macro.op not in ("+", "-")
+            or not self._known_source(prog, macro.lhs)
+            or rhs is None
+        ):
+            if macro.dst in prog._time_bounds.allowed.get(id(macro), ()):
+                # Unsupported ALU operations retain the owner's certified range.
+                self.source_expressions.pop(macro.dst, None)
+            else:
+                self.source_expressions[macro.dst] = LinearTime(
+                    terms=((CycleVariable(macro.dst, None, None), 1),)
+                )
             return
         self.source_expressions[macro.dst] = add_time(
             source_expression(prog, macro.lhs),
