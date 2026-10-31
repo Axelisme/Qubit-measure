@@ -32,7 +32,7 @@ def test_signal_writes_reject_shape_mismatch_without_update(
     )
     target = buffer[0] if use_slot else buffer
 
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(ValueError, match="shape") as error:
         target.set(value)
 
     assert f"target shape={(2,)}" in str(error.value)
