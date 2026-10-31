@@ -20,7 +20,9 @@ from .form import scan_form
 ChevronHeraldedRun: TypeAlias = RunRecord[ChevronHeraldedCfg, ChevronHeraldedResult]
 
 
-def _analyze(req: AnalyzeRequest[ChevronHeraldedRun, None], *, plots: Plots) -> RabiAnalysis:
+def _analyze(
+    req: AnalyzeRequest[ChevronHeraldedRun, None], *, plots: Plots
+) -> RabiAnalysis:
     """Analyze saved source cfg/counts, never the current Form or library."""
     return ChevronHeraldedExp().analyze(req.run_result, None, plots=plots)
 

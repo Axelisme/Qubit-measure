@@ -41,7 +41,8 @@ class ChevronCfg(DurationScanCfg):
     frequency: Annotated[
         SweepCfg,
         FieldMeta(
-            unit="MHz", label="Common drive frequency",
+            unit="MHz",
+            label="Common drive frequency",
             description="Set the common drive frequency sweep endpoints in MHz; review the scan window before Run.",
         ),
     ]
@@ -63,7 +64,9 @@ class ChevronResult(RabiScanResult):
     """
 
 
-def acquire_scan(config: ChevronCfg, *, context: RunContext, heralded: bool) -> RabiScanResult:
+def acquire_scan(
+    config: ChevronCfg, *, context: RunContext, heralded: bool
+) -> RabiScanResult:
     """Acquire this scan with optional herald; no input mutation or host round loop.
 
     Coordinate transforms preserve signed gains, timing and source waveforms.
@@ -78,7 +81,9 @@ def acquire_scan(config: ChevronCfg, *, context: RunContext, heralded: bool) -> 
         )
         for coordinate in coordinates
     ]
-    return acquire_counts(config, coordinates, drives, context=context, heralded=heralded)
+    return acquire_counts(
+        config, coordinates, drives, context=context, heralded=heralded
+    )
 
 
 def analyze_scan(
@@ -92,8 +97,11 @@ def analyze_scan(
     """
     answer = joint_return(cfg, result, sweep2array(cfg.frequency), heralded=heralded)
     plot_return_data(
-        result, answer, coordinate_label="Common drive frequency (MHz)",
-        map_name="chevron", plots=plots,
+        result,
+        answer,
+        coordinate_label="Common drive frequency (MHz)",
+        map_name="chevron",
+        plots=plots,
     )
     rates = fit_duration_rates(result, answer)
     plot_duration_rates(
@@ -120,14 +128,29 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
                 axes=(
                     VariableAxisSpec.generated_arange("terminal_f2", ""),
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Drive duration", "s", field_name="durations", scale=1e-6),
-                    VariableAxisSpec("Common drive frequency", "Hz", field_name="coordinates", scale=1e6),
+                    VariableAxisSpec(
+                        "Drive duration", "s", field_name="durations", scale=1e-6
+                    ),
+                    VariableAxisSpec(
+                        "Common drive frequency",
+                        "Hz",
+                        field_name="coordinates",
+                        scale=1e6,
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Terminal class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
-        result_type=ChevronResult, cfg_type=ChevronCfg,
-        cfg_schema_version="4.0", tag="two_qubit/chevron", result_builder=restore_result,
+        result_type=ChevronResult,
+        cfg_type=ChevronCfg,
+        cfg_schema_version="4.0",
+        tag="two_qubit/chevron",
+        result_builder=restore_result,
     )
 
     def run(self, config: ChevronCfg, *, context: RunContext) -> ChevronResult:
@@ -140,7 +163,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         return ChevronResult(data.coordinates, data.durations, data.sums)
 
     def analyze(
-        self, source: RunRecord[ChevronCfg, ChevronResult], options: None, *, plots: Plots
+        self,
+        source: RunRecord[ChevronCfg, ChevronResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> RabiAnalysis:
         """Use saved count axes and cfg to plot return and fit eligible traces.
 
@@ -149,5 +176,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         """
         del options
         if source.cfg is None:
-            raise ValueError("Rabi analysis requires saved cfg; current Form/library is not a substitute")
+            raise ValueError(
+                "Rabi analysis requires saved cfg; current Form/library is not a substitute"
+            )
         return analyze_scan(source.cfg, source.result, plots=plots, heralded=False)

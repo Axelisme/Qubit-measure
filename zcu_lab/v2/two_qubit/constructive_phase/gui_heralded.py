@@ -28,7 +28,9 @@ from .core_heralded import (
 )
 from .form import scan_form
 
-ConstructivePhaseHeraldedRun: TypeAlias = RunRecord[ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult]
+ConstructivePhaseHeraldedRun: TypeAlias = RunRecord[
+    ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult
+]
 
 
 def _analyze(
@@ -79,7 +81,9 @@ def run(
     cfg: ConstructivePhaseHeraldedCfg, *, context: RunContext
 ) -> RunRecord[ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult]:
     """Run the experiment and retain its actual configuration."""
-    return RunRecord(cfg=cfg, result=ConstructivePhaseHeraldedExp().run(cfg, context=context))
+    return RunRecord(
+        cfg=cfg, result=ConstructivePhaseHeraldedExp().run(cfg, context=context)
+    )
 
 
 def make_form(ctx: FormContext) -> Form[ConstructivePhaseHeraldedCfg]:

@@ -50,7 +50,10 @@ class DurationScanCfg(ConfigBase):
 
     reset: Annotated[
         Reset.Cfg | None,
-        FieldMeta(label="Reset", description="Optional reset before each shot's reads and preparation."),
+        FieldMeta(
+            label="Reset",
+            description="Optional reset before each shot's reads and preparation.",
+        ),
     ] = None
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -166,7 +169,9 @@ def build_program(
     for pulse in (point_drive.f1, point_drive.f2):
         pulse.set_param("length", duration)
     builder = TimelineBuilder(
-        soccfg, reps=cfg.reps, initial_delay=cfg.initial_delay,
+        soccfg,
+        reps=cfg.reps,
+        initial_delay=cfg.initial_delay,
         relax_delay=cfg.relax_delay,
     )
     readout = emit_readout_prefix(builder, cfg.readout, cfg.reset, heralded=heralded)
@@ -199,7 +204,9 @@ def acquire_counts(
         raise ValueError("Each finite coordinate requires one explicit drive pair")
     durations = sweep2array(config.duration)
     viewer = live_line(
-        context.plots, "measurement", "Drive duration (us)",
+        context.plots,
+        "measurement",
+        "Drive duration (us)",
         "Terminal P00 | herald (g,g)" if heralded else "Terminal P00",
         num_lines=len(coordinates),
     )
@@ -211,17 +218,24 @@ def acquire_counts(
     class_shape = (3, 3, 3, 3) if heralded else (3, 3)
     buffer = SignalBuffer(
         (len(coordinates), len(durations), *class_shape),
-        dtype=np.float64, on_update=update_view,
+        dtype=np.float64,
+        on_update=update_view,
     )
     with Schedule(config, buffer, scope=context.scope) as sched:
         for index, step in sched.scan("coordinate", list(range(len(drives)))):
             for duration, duration_step in step.scan("duration", durations.tolist()):
                 cfg = duration_step.cfg
-                prog = build_program(cfg, context.soccfg, drives[index], duration, heralded=heralded)
+                prog = build_program(
+                    cfg, context.soccfg, drives[index], duration, heralded=heralded
+                )
                 duration_step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, readout_axes(cfg.roles, heralded=heralded)),
-                    rounds=cfg.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog, readout_axes(cfg.roles, heralded=heralded)
+                    ),
+                    rounds=cfg.rounds,
+                    options=RunOptions(),
                 )
     buffer.trigger_update(flush=True)
     return RabiScanResult(coordinates, durations, buffer.array)

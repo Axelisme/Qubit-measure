@@ -89,41 +89,66 @@ def plot_return_data(
     """
     fig, ax = plots.subplots(map_name, figsize=(9, 6), layout="constrained")
     image = ax.pcolormesh(
-        data.durations, data.coordinates, answer.populations[..., 0],
-        shading="nearest", vmin=0, vmax=1,
+        data.durations,
+        data.coordinates,
+        answer.populations[..., 0],
+        shading="nearest",
+        vmin=0,
+        vmax=1,
     )
     fig.colorbar(image, ax=ax, label="Observed joint P00 after double Xπ")
     ax.set(
-        xlabel="Drive duration (us)", ylabel=coordinate_label,
+        xlabel="Drive duration (us)",
+        ylabel=coordinate_label,
         title="Nominal B11 return proxy · not gate fidelity",
     )
-    labels = tuple(f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other"))
+    labels = tuple(
+        f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
+    )
     fig, _ = plots.subplots(
-        "return", nrows=3, ncols=3, figsize=(13, 10), squeeze=False, layout="constrained"
+        "return",
+        nrows=3,
+        ncols=3,
+        figsize=(13, 10),
+        squeeze=False,
+        layout="constrained",
     )
     for outcome, ax in enumerate(fig.axes):
-        for coordinate, values in zip(data.coordinates, answer.populations, strict=True):
+        for coordinate, values in zip(
+            data.coordinates, answer.populations, strict=True
+        ):
             ax.plot(data.durations, values[:, outcome], ".-", label=f"{coordinate:g}")
         ax.set(
-            xlabel="Drive duration (us)", ylabel=f"Observed P{labels[outcome]}",
+            xlabel="Drive duration (us)",
+            ylabel=f"Observed P{labels[outcome]}",
             title=f"Terminal {labels[outcome]} · other retained in denominator",
         )
         if len(data.coordinates) <= 25:
             ax.legend(title=coordinate_label, fontsize="x-small", ncols=2)
     if answer.herald_matrix is not None:
         fig, _ = plots.subplots(
-            "herald", nrows=3, ncols=3, figsize=(13, 10), squeeze=False, layout="constrained"
+            "herald",
+            nrows=3,
+            ncols=3,
+            figsize=(13, 10),
+            squeeze=False,
+            layout="constrained",
         )
         for outcome, ax in enumerate(fig.axes):
             image = ax.pcolormesh(
-                data.durations, data.coordinates,
+                data.durations,
+                data.coordinates,
                 answer.herald_matrix[..., outcome // 3, outcome % 3],
-                shading="nearest", vmin=0, vmax=1,
+                shading="nearest",
+                vmin=0,
+                vmax=1,
             )
             fig.colorbar(image, ax=ax, label="Herald probability")
             ax.set(
-                xlabel="Drive duration (us)", ylabel=coordinate_label,
-                title=f"Herald {labels[outcome]}" + (" · pass fraction, not purity" if outcome == 0 else ""),
+                xlabel="Drive duration (us)",
+                ylabel=coordinate_label,
+                title=f"Herald {labels[outcome]}"
+                + (" · pass fraction, not purity" if outcome == 0 else ""),
             )
 
 

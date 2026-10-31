@@ -49,10 +49,14 @@ def restore_result(
     )
 
 
-class ConstructivePhaseHeraldedExp(Experiment[ConstructivePhaseHeraldedResult, ConstructivePhaseHeraldedCfg]):
+class ConstructivePhaseHeraldedExp(
+    Experiment[ConstructivePhaseHeraldedResult, ConstructivePhaseHeraldedCfg]
+):
     """Condition constructive_phase analysis on herald classified (g,g)."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[ConstructivePhaseHeraldedResult, ConstructivePhaseHeraldedCfg]] = GroupedAxesSpec(
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConstructivePhaseHeraldedResult, ConstructivePhaseHeraldedCfg]
+    ] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
@@ -61,14 +65,28 @@ class ConstructivePhaseHeraldedExp(Experiment[ConstructivePhaseHeraldedResult, C
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
                     VariableAxisSpec.generated_arange("herald_f2", ""),
                     VariableAxisSpec.generated_arange("herald_f1", ""),
-                    VariableAxisSpec("Drive duration", "s", field_name="durations", scale=1e-6),
-                    VariableAxisSpec("F2 relative to F1 phase", "deg", field_name="coordinates", scale=1.0),
+                    VariableAxisSpec(
+                        "Drive duration", "s", field_name="durations", scale=1e-6
+                    ),
+                    VariableAxisSpec(
+                        "F2 relative to F1 phase",
+                        "deg",
+                        field_name="coordinates",
+                        scale=1.0,
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Herald and terminal class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Herald and terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
-        result_type=ConstructivePhaseHeraldedResult, cfg_type=ConstructivePhaseHeraldedCfg,
-        tag="two_qubit/constructive_phase_heralded", result_builder=restore_result,
+        result_type=ConstructivePhaseHeraldedResult,
+        cfg_type=ConstructivePhaseHeraldedCfg,
+        tag="two_qubit/constructive_phase_heralded",
+        result_builder=restore_result,
     )
 
     def run(
@@ -80,11 +98,18 @@ class ConstructivePhaseHeraldedExp(Experiment[ConstructivePhaseHeraldedResult, C
         counts, including completed partial rounds. Check context.scope.stop.
         """
         data = acquire_scan(config, context=context, heralded=True)
-        return ConstructivePhaseHeraldedResult(data.coordinates, data.durations, data.sums)
+        return ConstructivePhaseHeraldedResult(
+            data.coordinates, data.durations, data.sums
+        )
 
     def analyze(
-        self, source: RunRecord[ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult],
-        options: None, *, plots: Plots,
+        self,
+        source: RunRecord[
+            ConstructivePhaseHeraldedCfg, ConstructivePhaseHeraldedResult
+        ],
+        options: None,
+        *,
+        plots: Plots,
     ) -> ConstructivePhaseAnalysis:
         """Analyze the herald (g,g) slice and plot all nine herald fractions.
 
@@ -93,5 +118,7 @@ class ConstructivePhaseHeraldedExp(Experiment[ConstructivePhaseHeraldedResult, C
         """
         del options
         if source.cfg is None:
-            raise ValueError("Rabi analysis requires saved cfg; current Form/library is not a substitute")
+            raise ValueError(
+                "Rabi analysis requires saved cfg; current Form/library is not a substitute"
+            )
         return analyze_scan(source.cfg, source.result, plots=plots, heralded=True)

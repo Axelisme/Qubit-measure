@@ -36,7 +36,8 @@ class ConstructivePhaseCfg(DurationScanCfg):
     relative_phase: Annotated[
         SweepCfg,
         FieldMeta(
-            unit="deg", label="F2 relative to F1 phase",
+            unit="deg",
+            label="F2 relative to F1 phase",
             description="Set the f2 relative to f1 phase sweep endpoints in deg; review the scan window before Run.",
         ),
     ]
@@ -58,7 +59,9 @@ class ConstructivePhaseResult(RabiScanResult):
     """
 
 
-def acquire_scan(config: ConstructivePhaseCfg, *, context: RunContext, heralded: bool) -> RabiScanResult:
+def acquire_scan(
+    config: ConstructivePhaseCfg, *, context: RunContext, heralded: bool
+) -> RabiScanResult:
     """Acquire this scan with optional herald; no input mutation or host round loop.
 
     Coordinate transforms preserve signed gains, timing and source waveforms.
@@ -69,11 +72,15 @@ def acquire_scan(config: ConstructivePhaseCfg, *, context: RunContext, heralded:
     drives = [
         DualLineCfg(
             f1=config.drive.f1.model_copy(deep=True),
-            f2=config.drive.f2.with_updates(phase=float(config.drive.f1.phase) + coordinate),
+            f2=config.drive.f2.with_updates(
+                phase=float(config.drive.f1.phase) + coordinate
+            ),
         )
         for coordinate in coordinates
     ]
-    return acquire_counts(config, coordinates, drives, context=context, heralded=heralded)
+    return acquire_counts(
+        config, coordinates, drives, context=context, heralded=heralded
+    )
 
 
 def analyze_scan(
@@ -85,15 +92,22 @@ def analyze_scan(
     distribution. Other remains in the terminal denominator. Empty traces are
     unresolved. Saved cfg determines axes; the current Form/library is unused.
     """
-    answer = joint_return(cfg, result, sweep2array(cfg.relative_phase), heralded=heralded)
+    answer = joint_return(
+        cfg, result, sweep2array(cfg.relative_phase), heralded=heralded
+    )
     plot_return_data(
-        result, answer, coordinate_label="F2 relative to F1 phase (deg)",
-        map_name="interference", plots=plots,
+        result,
+        answer,
+        coordinate_label="F2 relative to F1 phase (deg)",
+        map_name="interference",
+        plots=plots,
     )
     return analyze_constructive_phase(result, answer, plots=plots)
 
 
-def restore_result(data: GroupedLoadData[ConstructivePhaseCfg]) -> ConstructivePhaseResult:
+def restore_result(
+    data: GroupedLoadData[ConstructivePhaseCfg],
+) -> ConstructivePhaseResult:
     """Restore summed counts; old raw-IQ files without sums raise ValueError."""
     sums = data.variable("sums")
     return ConstructivePhaseResult(
@@ -104,24 +118,43 @@ def restore_result(data: GroupedLoadData[ConstructivePhaseCfg]) -> ConstructiveP
 class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhaseCfg]):
     """Acquire and persist the ordinary constructive_phase count scan."""
 
-    AXES_SPEC: ClassVar[GroupedAxesSpec[ConstructivePhaseResult, ConstructivePhaseCfg]] = GroupedAxesSpec(
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[ConstructivePhaseResult, ConstructivePhaseCfg]
+    ] = GroupedAxesSpec(
         variables=(
             VariableSpec(
                 variable="sums",
                 axes=(
                     VariableAxisSpec.generated_arange("terminal_f2", ""),
                     VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Drive duration", "s", field_name="durations", scale=1e-6),
-                    VariableAxisSpec("F2 relative to F1 phase", "deg", field_name="coordinates", scale=1.0),
+                    VariableAxisSpec(
+                        "Drive duration", "s", field_name="durations", scale=1e-6
+                    ),
+                    VariableAxisSpec(
+                        "F2 relative to F1 phase",
+                        "deg",
+                        field_name="coordinates",
+                        scale=1.0,
+                    ),
                 ),
-                z=VariableZSpec(field_name="sums", label="Terminal class counts", unit="", dtype=np.float64),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
             ),
         ),
-        result_type=ConstructivePhaseResult, cfg_type=ConstructivePhaseCfg,
-        cfg_schema_version="4.0", tag="two_qubit/constructive_phase", result_builder=restore_result,
+        result_type=ConstructivePhaseResult,
+        cfg_type=ConstructivePhaseCfg,
+        cfg_schema_version="4.0",
+        tag="two_qubit/constructive_phase",
+        result_builder=restore_result,
     )
 
-    def run(self, config: ConstructivePhaseCfg, *, context: RunContext) -> ConstructivePhaseResult:
+    def run(
+        self, config: ConstructivePhaseCfg, *, context: RunContext
+    ) -> ConstructivePhaseResult:
         """Acquire optional reset → B11 → dual drive → double Xπ → terminal.
 
         Return unchanged counts, including completed rounds on cancellation.
@@ -131,7 +164,11 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         return ConstructivePhaseResult(data.coordinates, data.durations, data.sums)
 
     def analyze(
-        self, source: RunRecord[ConstructivePhaseCfg, ConstructivePhaseResult], options: None, *, plots: Plots
+        self,
+        source: RunRecord[ConstructivePhaseCfg, ConstructivePhaseResult],
+        options: None,
+        *,
+        plots: Plots,
     ) -> ConstructivePhaseAnalysis:
         """Use saved count axes and cfg to plot return and fit eligible traces.
 
@@ -140,5 +177,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         """
         del options
         if source.cfg is None:
-            raise ValueError("Rabi analysis requires saved cfg; current Form/library is not a substitute")
+            raise ValueError(
+                "Rabi analysis requires saved cfg; current Form/library is not a substitute"
+            )
         return analyze_scan(source.cfg, source.result, plots=plots, heralded=False)
