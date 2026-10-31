@@ -229,6 +229,38 @@ def test_runtime_events_load_s14_then_increment_for_shared_origin():
     assert all("TIME" not in i for i in prog.prog_list if i["CMD"] == "WPORT_WR")
 
 
+@pytest.mark.parametrize("clobber", ["native", "raw"])
+def test_runtime_event_restores_output_time_after_clobber(clobber):
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.delay_timeline("duration")
+        prog.fork("default", into="other")
+        prog.pulse(0, "p0", timeline="default")
+        if clobber == "native":
+            prog.append_macro(Pulse(ch=1, name="p1", t="duration"))
+        else:
+            prog.asm_inst({"CMD": "REG_WR", "DST": "s14", "SRC": "imm", "LIT": "7"})
+        prog.pulse(0, "p0", t=40 / 430.08, timeline="other")
+
+    result = shots(program(body, reps=2))
+    expected = [100, 100, 140] if clobber == "native" else [100, 140]
+    assert [waves(shot) for shot in result] == [expected] * 6
+
+
+def test_runtime_event_restores_output_time_after_branch_merge():
+    def body(prog):
+        prog.write_reg("duration", 100)
+        prog.delay_timeline("duration")
+        with prog.branch(by="scan", align_timeline=False) as branch:
+            for index in range(3):
+                with branch.case(index):
+                    prog.pulse(0, "p0", t=index * 40 / 430.08)
+        prog.pulse(0, "p0")
+
+    result = shots(program(body, reps=2))
+    assert [waves(shot) for shot in result] == [[100, 128], [140, 168], [180, 208]] * 2
+
+
 def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
     def body(prog):
         prog.write_reg("duration", 40)
