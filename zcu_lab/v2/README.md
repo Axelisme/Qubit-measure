@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-10-31，作者寫法慣例
+**Last updated:** 2026-10-31，取數路徑分流慣例
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -49,6 +49,23 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。
 結果根為 dataclass、pydantic model 或字串 key 的 Mapping，summary 是 strict JSON object，key 沿用原生欄位名。
 非有限數值轉為 null，Live RPC 另以 `invalid` 回報路徑。保存文件只含 pane、parameters、summary，不保存 invalid。
+
+## 取數路徑分流慣例
+
+實驗有不同取數路徑時，例如 FPGA sweep 與 host 逐點取數，讓 `run` 只做共同前置與分派。
+每條路徑寫成一個私有 `_run_*` 方法，各自建立 buffer、`Schedule` 與程式，並在方法內寫出取數流程。
+各路徑回傳同一種 Result，座標與資料沿用相同的軸順序與 shape 契約。
+呼叫端與 `analyze` 只讀這份 Result，不依取數路徑分支。
+程式結構不同就拆成不同路徑。
+即使共用同一個硬體迴圈，只要 delay 機制或 module 組合不同，也要拆分。
+只有座標數值不同、程式結構相同時，才保留單一路徑。
+
+以 [twotone len_rabi/core.py](twotone/rabi/len_rabi/core.py) 為例，`run` 先拒絕原生 arb 波形、複製 cfg，再準備量化長度座標。
+`const`／`flat_top` 交給 `_run_for_flat`，在 FPGA sweep 長度。
+其他可調長度的波形，例如 `cosine`，交給 `_run_for_arb`，由 host 逐長度取數並重用同長度的程式。
+`_run_for_arb` 沿用歷史名稱，不表示它接受原生 arb 資產。
+兩條路徑都回傳 `LenRabiResult`，`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
+Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
 
 ## 即時圖工具
 
