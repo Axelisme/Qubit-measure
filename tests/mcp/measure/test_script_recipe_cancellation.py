@@ -24,8 +24,8 @@ async def run_twice(
 ) -> Report:
     """Record two GUI Run completions using each test's own transport and list."""
     tab = session.open_tab("synthetic")
-    partials.append((await tab.run()).partial_result)
-    partials.append((await tab.run()).partial_result)
+    partials.append((await tab.run()).stop_requested)
+    partials.append((await tab.run()).stop_requested)
     return Report(count=inputs.count)
 
 
@@ -241,7 +241,7 @@ def test_stopped_script_await_unwinds_author_and_preserves_cleanup_error(
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
-        assert snapshot.outcome.runs[0].partial_result
+        assert snapshot.outcome.runs[0].stop_requested
         assert snapshot.outcome.runs[0].run_id == "native-1"
         assert snapshot.outcome.runs[0].status == "completed"
         assert len(snapshot.outcome.runs[0].saves) == 1
@@ -315,7 +315,7 @@ def test_cancel_pending_value_await_unwinds_without_an_error(
         assert snapshot.outcome is not None
         assert snapshot.outcome.report is None
         assert len(snapshot.outcome.runs) == 1
-        assert not snapshot.outcome.runs[0].partial_result
+        assert not snapshot.outcome.runs[0].stop_requested
     finally:
         client.context.session.close()
 

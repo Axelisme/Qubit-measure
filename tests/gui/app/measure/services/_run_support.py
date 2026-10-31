@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.device import BaseDevice
 from zcu_tools.experiment.records import RunRecord
@@ -34,7 +33,6 @@ from zcu_tools.gui.session.operation_runner import (
 )
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2 import Module
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._progress_fakes import DirectProgressTransport
@@ -135,37 +133,6 @@ class FakeBg:
             except (RuntimeError, ValueError, TypeError, OSError) as exc:
                 assert self.last_on_error is not None
                 self.last_on_error(exc)
-
-
-class ConstructorFailingProgram:
-    def __init__(
-        self,
-        soccfg: Any,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        modules: list[Any],
-        sweep: list[tuple[str, Any]] | None,
-    ) -> None:
-        raise RuntimeError("builder boom")
-
-    def acquire(self, *_args: Any, **_kwargs: Any) -> np.ndarray:
-        raise NotImplementedError
-
-    def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
-        raise NotImplementedError
-
-
-class NoopModule(Module):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def init(self, prog: Any) -> None:
-        pass
-
-    def run(self, prog: Any, t: Any = 0.0) -> Any:
-        return t
 
 
 def make_run_service(
