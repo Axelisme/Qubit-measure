@@ -88,19 +88,20 @@ def test_schedule_body_interrupt_propagates_with_buffer_intact(loop: str) -> Non
     buffer = SignalBuffer(3, dtype=np.float64)
     stop = StopSignal()
     interrupt = KeyboardInterrupt("host body stopped")
-    with (
-        pytest.raises(KeyboardInterrupt) as caught,
-        Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched,
-    ):
-        steps = (
-            sched.scan("point", range(3))
-            if loop == "scan"
-            else sched.repeat("point", 3)
-        )
-        for index, step in steps:
-            if index == 1:
-                raise interrupt
-            buffer[step].set(np.array(7.0))
+    def run() -> None:
+        with Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched:
+            steps = (
+                sched.scan("point", range(3))
+                if loop == "scan"
+                else sched.repeat("point", 3)
+            )
+            for index, step in steps:
+                if index == 1:
+                    raise interrupt
+                buffer[step].set(np.array(7.0))
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        run()
     np.testing.assert_allclose(buffer.data, [7.0, np.nan, np.nan], equal_nan=True)
     assert caught.value is interrupt
     assert not stop.is_set()

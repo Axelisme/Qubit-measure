@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import _thread
+import signal
+import threading
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from math import isfinite
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from types import FrameType, TracebackType
+from typing import Any, Generic, Self, TypeVar
 
 from matplotlib.figure import Figure
 
@@ -28,7 +32,7 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.native_persistence import load_run_with_metadata, save_labber
 from zcu_tools.experiment.records import AnalysisRecord, RunRecord
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.notebook._interrupt import _RunInterrupts
+from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.notebook.plotting import NotebookPlotHost, finish_failed_plots
 from zcu_tools.notebook.saving import SavedRun
 from zcu_tools.plotting.plots import PlotHost, Plots
@@ -43,6 +47,61 @@ OptionsT = TypeVar("OptionsT")
 def _validate_interrupt_timeout(seconds: float) -> None:
     if not isfinite(seconds) or seconds <= 0:
         raise ValueError("interrupt_timeout must be finite and positive (seconds)")
+
+
+class _RunInterrupts:
+    """Own the temporary main-thread handler and the frontend stop-request fact."""
+
+    def __init__(self, stop: StopSignal, timeout: float) -> None:
+        self.stop_requested = False
+        self._stop = stop
+        self._timeout = timeout
+        self._previous = signal.getsignal(signal.SIGINT)
+        self._main_thread = threading.current_thread() is threading.main_thread()
+        self._thread_id = threading.get_ident()
+        self._active = False
+        self._timer: threading.Timer | None = None
+
+    def __enter__(self) -> Self:
+        if self._main_thread:
+            self._active = True
+            signal.signal(signal.SIGINT, self._handle)
+        return self
+
+    def _handle(self, _signum: int, _frame: FrameType | None) -> None:
+        if not self._active:
+            return
+        if self.stop_requested:
+            raise KeyboardInterrupt
+        self.stop_requested = True
+        self._stop.set(reason="Notebook SIGINT")
+        self._timer = threading.Timer(self._timeout, self._interrupt_main)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _interrupt_main(self) -> None:
+        if self._active:
+            if hasattr(signal, "pthread_kill"):
+                # Target the main thread to interrupt blocking POSIX C calls.
+                signal.pthread_kill(self._thread_id, signal.SIGINT)
+            else:
+                _thread.interrupt_main()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._active = False
+        try:
+            if self._timer is not None:
+                self._timer.cancel()
+                # Drain an already-running callback before returning the handler.
+                self._timer.join()
+        finally:
+            if self._main_thread:
+                signal.signal(signal.SIGINT, self._previous)
 
 
 class NotebookAdapter:
