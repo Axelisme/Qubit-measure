@@ -469,6 +469,8 @@ class RuntimeMath(TimedMacro):
             axes = expression_axes(delta)
             points = evaluate_time(delta, axes)
             if points is not None and int(points.min()) >= 0:
+                if int(points.min()) == int(points.max()):
+                    return self.add(captured, int(points.min()) / get_fclk(self.prog))
                 return self.add(
                     captured, self.lookup([int(v) for v in points.flat], axes)
                 )
