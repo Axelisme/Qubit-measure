@@ -77,7 +77,9 @@ AxisDomains = dict[object, NDArray[np.int64]]
 
 def _component_scale(component: Component, coefficient: Scalar) -> Component:
     if isinstance(component, np.ndarray):
-        return np.asarray(component, dtype=object) * np.asarray(coefficient, dtype=object)
+        return np.asarray(component, dtype=object) * np.asarray(
+            coefficient, dtype=object
+        )
     return component * coefficient
 
 
@@ -123,7 +125,9 @@ class TimeVariable:
             components = ((CONST_AXIS, np.asarray([constant], dtype=object)),)
             for axis, coefficient in terms:
                 component = (
-                    coefficient if axis.values is None else _component_scale(axis.values, coefficient)
+                    coefficient
+                    if axis.values is None
+                    else _component_scale(axis.values, coefficient)
                 )
                 components = _merge_components(components, ((axis, component),))
         frozen = []
@@ -241,10 +245,13 @@ def time_variables(value: TimeExpression) -> tuple[CycleAxis, ...]:
     """Return surviving source identities for runtime capture and diagnostics."""
     if isinstance(value, TimeVariable):
         return tuple(axis for axis, _ in value.terms)
-    return tuple(dict.fromkeys(
-        axis for item in (value.linear, *(x for x, _ in value.absolute))
-        for axis in time_variables(item)
-    ))
+    return tuple(
+        dict.fromkeys(
+            axis
+            for item in (value.linear, *(x for x, _ in value.absolute))
+            for axis in time_variables(item)
+        )
+    )
 
 
 def expression_axes(value: TimeExpression) -> dict[str, int]:
@@ -289,7 +296,9 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
         elif axis.identity == "const":
             result = result + component[0]
         else:
-            shape = tuple(len(component) if name == axis.identity else 1 for name in axes)
+            shape = tuple(
+                len(component) if name == axis.identity else 1 for name in axes
+            )
             result = result + component.reshape(shape)
     return np.asarray(result, dtype=object)
 
@@ -305,7 +314,11 @@ def ceiled_time(value: TimeExpression) -> TimeExpression:
         points = evaluate_time(value, axes)
         if points is not None:
             rounded = np.asarray(
-                [_ceil_fraction(Fraction(v)) for v in np.asarray(points, dtype=object).flat], dtype=np.int64
+                [
+                    _ceil_fraction(Fraction(v))
+                    for v in np.asarray(points, dtype=object).flat
+                ],
+                dtype=np.int64,
             ).reshape(points.shape)
             return point_time("ceil cycles", axes, rounded, reconstruction=value)
     denominator = math.lcm(
@@ -332,7 +345,8 @@ def shifted_time(value: TimeExpression, shift: int) -> TimeExpression:
         points = evaluate_time(value, axes)
         if points is not None:
             values = np.asarray(
-                [int(v) >> shift for v in np.asarray(points, dtype=object).flat], dtype=np.int64
+                [int(v) >> shift for v in np.asarray(points, dtype=object).flat],
+                dtype=np.int64,
             ).reshape(points.shape)
             variable = cycle_axis(
                 "shifted cycles",
@@ -373,7 +387,9 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
         return limits
     if any(axis.values is None for axis in _proof_axes(value).values()):
         return None
-    if isinstance(value, TimeAbs) and any(len(_abs_arguments(block)) > MAX_ABS_TERMS for block in _connected_blocks(value)):
+    if isinstance(value, TimeAbs) and any(
+        len(_abs_arguments(block)) > MAX_ABS_TERMS for block in _connected_blocks(value)
+    ):
         return None
     return limits
 
@@ -527,7 +543,9 @@ def select_time(
 
 def _proof_axes(value: TimeExpression) -> dict[object, CycleAxis]:
     linear, absolute = _parts(value)
-    axes = {axis.identity: axis for axis, _ in linear.components if axis.identity != "const"}
+    axes = {
+        axis.identity: axis for axis, _ in linear.components if axis.identity != "const"
+    }
     for argument, _ in absolute:
         axes.update(_proof_axes(argument))
     return axes
@@ -549,10 +567,16 @@ def _connected_blocks(value: TimeAbs) -> list[TimeAbs]:
     blocks = []
     used: set[object] = set()
     for axes, terms in groups:
-        components = tuple((a, c) for a, c in value.linear.components if a.identity in axes)
+        components = tuple(
+            (a, c) for a, c in value.linear.components if a.identity in axes
+        )
         used |= axes
-        blocks.append(TimeAbs(TimeVariable(components=components), tuple(terms), value.runtime))
-    remaining = tuple((a, c) for a, c in value.linear.components if a.identity not in used)
+        blocks.append(
+            TimeAbs(TimeVariable(components=components), tuple(terms), value.runtime)
+        )
+    remaining = tuple(
+        (a, c) for a, c in value.linear.components if a.identity not in used
+    )
     if remaining:
         blocks.append(TimeAbs(TimeVariable(components=remaining), (), value.runtime))
     return blocks
@@ -563,7 +587,11 @@ def _interval_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction |
     lower, upper = linear.limits
     for argument, coefficient in absolute:
         lo, hi = expression_limits(argument)
-        abs_lo = Fraction(0) if lo is None or hi is None or lo <= 0 <= hi else min(abs(lo), abs(hi))
+        abs_lo = (
+            Fraction(0)
+            if lo is None or hi is None or lo <= 0 <= hi
+            else min(abs(lo), abs(hi))
+        )
         abs_hi = None if lo is None or hi is None else max(abs(lo), abs(hi))
         a, b = (abs_lo, abs_hi) if coefficient > 0 else (abs_hi, abs_lo)
         lower = None if lower is None or a is None else lower + coefficient * a
@@ -580,22 +608,38 @@ def _abs_arguments(value: TimeExpression) -> list[TimeExpression]:
     return list(dict.fromkeys(arguments))
 
 
-def _signed_linear(value: TimeExpression, signs: dict[TimeExpression, int]) -> TimeVariable:
+def _signed_linear(
+    value: TimeExpression, signs: dict[TimeExpression, int]
+) -> TimeVariable:
     linear, absolute = _parts(value)
     for argument, coefficient in absolute:
-        linear = _linear_add(linear, _linear_scale(_signed_linear(argument, signs), coefficient * signs[argument]))
+        linear = _linear_add(
+            linear,
+            _linear_scale(
+                _signed_linear(argument, signs), coefficient * signs[argument]
+            ),
+        )
     return linear
 
 
-def _domain_limits(value: TimeVariable, domains: AxisDomains) -> tuple[Fraction | None, Fraction | None]:
+def _domain_limits(
+    value: TimeVariable, domains: AxisDomains
+) -> tuple[Fraction | None, Fraction | None]:
     components = tuple(
-        (axis, component[domains[axis.identity]] if isinstance(component, np.ndarray) and axis.identity in domains else component)
+        (
+            axis,
+            component[domains[axis.identity]]
+            if isinstance(component, np.ndarray) and axis.identity in domains
+            else component,
+        )
         for axis, component in value.components
     )
     return TimeVariable(components=components).limits
 
 
-def _constrain_domains(constraints: tuple[TimeVariable, ...], domains: AxisDomains) -> AxisDomains | None:
+def _constrain_domains(
+    constraints: tuple[TimeVariable, ...], domains: AxisDomains
+) -> AxisDomains | None:
     domains = domains.copy()
     changed = True
     while changed:
@@ -605,14 +649,25 @@ def _constrain_domains(constraints: tuple[TimeVariable, ...], domains: AxisDomai
             if upper is not None and upper < 0:
                 return None
             for axis, component in constraint.components:
-                if not isinstance(component, np.ndarray) or axis.identity not in domains:
+                if (
+                    not isinstance(component, np.ndarray)
+                    or axis.identity not in domains
+                ):
                     continue
-                rest = TimeVariable(components=tuple((a, c) for a, c in constraint.components if a.identity != axis.identity))
+                rest = TimeVariable(
+                    components=tuple(
+                        (a, c)
+                        for a, c in constraint.components
+                        if a.identity != axis.identity
+                    )
+                )
                 _, rest_upper = _domain_limits(rest, domains)
                 if rest_upper is None:
                     continue
                 previous = domains[axis.identity]
-                kept = previous[np.asarray(component[previous] + rest_upper >= 0, dtype=bool)]
+                kept = previous[
+                    np.asarray(component[previous] + rest_upper >= 0, dtype=bool)
+                ]
                 if not len(kept):
                     return None
                 if len(kept) != len(previous):
@@ -621,7 +676,9 @@ def _constrain_domains(constraints: tuple[TimeVariable, ...], domains: AxisDomai
     return domains
 
 
-def _endpoint_witness(value: TimeVariable, domains: AxisDomains, *, upper: bool) -> dict[object, int]:
+def _endpoint_witness(
+    value: TimeVariable, domains: AxisDomains, *, upper: bool
+) -> dict[object, int]:
     witness = {axis: int(indices[0]) for axis, indices in domains.items()}
     for axis, component in value.components:
         if isinstance(component, np.ndarray) and axis.identity in domains:
@@ -641,7 +698,13 @@ def _witness_satisfies(constraint: TimeVariable, witness: dict[object, int]) -> 
     return result >= 0
 
 
-def _linear_extreme(value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: AxisDomains, *, upper: bool) -> Fraction | None:
+def _linear_extreme(
+    value: TimeVariable,
+    constraints: tuple[TimeVariable, ...],
+    domains: AxisDomains,
+    *,
+    upper: bool,
+) -> Fraction | None:
     best: Fraction | None = None
     pending = [domains]
     while pending:
@@ -655,25 +718,42 @@ def _linear_extreme(value: TimeVariable, constraints: tuple[TimeVariable, ...], 
         if best is not None and (estimate <= best if upper else estimate >= best):
             continue
         witness = _endpoint_witness(value, current, upper=upper)
-        violated = next((c for c in constraints if not _witness_satisfies(c, witness)), None)
+        violated = next(
+            (c for c in constraints if not _witness_satisfies(c, witness)), None
+        )
         if violated is None:
             best = estimate
             continue
-        split = next((a.identity for a, _ in violated.components if a.identity in current and len(current[a.identity]) > 1), None)
+        split = next(
+            (
+                a.identity
+                for a, _ in violated.components
+                if a.identity in current and len(current[a.identity]) > 1
+            ),
+            None,
+        )
         if split is None:
             continue
         indices = current[split]
         middle = len(indices) // 2
-        pending.extend(({**current, split: indices[:middle]}, {**current, split: indices[middle:]}))
+        pending.extend(
+            ({**current, split: indices[:middle]}, {**current, split: indices[middle:]})
+        )
     return best
 
 
-def _constrained_limits(value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: AxisDomains) -> tuple[Fraction | None, Fraction | None]:
+def _constrained_limits(
+    value: TimeVariable, constraints: tuple[TimeVariable, ...], domains: AxisDomains
+) -> tuple[Fraction | None, Fraction | None]:
     lower, upper = _domain_limits(value, domains)
     components = {axis.identity: c for axis, c in value.components}
     for constraint in constraints:
         for axis, component in constraint.components:
-            if axis.identity == "const" or isinstance(component, np.ndarray) or not component:
+            if (
+                axis.identity == "const"
+                or isinstance(component, np.ndarray)
+                or not component
+            ):
                 continue
             amount = components.get(axis.identity, 0)
             if isinstance(amount, np.ndarray):
@@ -694,9 +774,15 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
         return _interval_limits(value)
     axes = _proof_axes(value)
     known = all(axis.values is not None for axis in axes.values())
-    domains: AxisDomains = {identity: np.arange(len(axis.values), dtype=np.int64) for identity, axis in axes.items() if axis.values is not None}
+    domains: AxisDomains = {
+        identity: np.arange(len(axis.values), dtype=np.int64)
+        for identity, axis in axes.items()
+        if axis.values is not None
+    }
     leaves: list[tuple[Fraction | None, Fraction | None]] = []
-    pending: list[tuple[dict[TimeExpression, int], tuple[TimeVariable, ...], AxisDomains]] = [({}, (), domains)]
+    pending: list[
+        tuple[dict[TimeExpression, int], tuple[TimeVariable, ...], AxisDomains]
+    ] = [({}, (), domains)]
     while pending:
         signs, constraints, current = pending.pop()
         current = _constrain_domains(constraints, current)
@@ -706,14 +792,28 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
             argument = arguments[len(signs)]
             linear = _signed_linear(argument, signs)
             lo, hi = _domain_limits(linear, current)
-            choices = (1,) if lo is not None and lo >= 0 else (-1,) if hi is not None and hi <= 0 else (1, -1)
+            choices = (
+                (1,)
+                if lo is not None and lo >= 0
+                else (-1,)
+                if hi is not None and hi <= 0
+                else (1, -1)
+            )
             for sign in choices:
-                pending.append(({**signs, argument: sign}, (*constraints, _linear_scale(linear, sign)), current))
+                pending.append(
+                    (
+                        {**signs, argument: sign},
+                        (*constraints, _linear_scale(linear, sign)),
+                        current,
+                    )
+                )
             continue
         linear = _signed_linear(value, signs)
         if known:
-            bounds = (_linear_extreme(linear, constraints, current, upper=False),
-                      _linear_extreme(linear, constraints, current, upper=True))
+            bounds = (
+                _linear_extreme(linear, constraints, current, upper=False),
+                _linear_extreme(linear, constraints, current, upper=True),
+            )
             if bounds == (None, None):
                 continue
         else:
@@ -722,8 +822,12 @@ def _block_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
     if not leaves:
         return _interval_limits(value)
     return (
-        None if any(lo is None for lo, _ in leaves) else min(lo for lo, _ in leaves if lo is not None),
-        None if any(hi is None for _, hi in leaves) else max(hi for _, hi in leaves if hi is not None),
+        None
+        if any(lo is None for lo, _ in leaves)
+        else min(lo for lo, _ in leaves if lo is not None),
+        None
+        if any(hi is None for _, hi in leaves)
+        else max(hi for _, hi in leaves if hi is not None),
     )
 
 
@@ -735,8 +839,12 @@ def _abs_limits(value: TimeAbs) -> tuple[Fraction | None, Fraction | None]:
             return Fraction(points.min()), Fraction(points.max())
     limits = [_block_limits(block) for block in _connected_blocks(value)]
     return (
-        None if any(lo is None for lo, _ in limits) else sum((lo for lo, _ in limits if lo is not None), Fraction(0)),
-        None if any(hi is None for _, hi in limits) else sum((hi for _, hi in limits if hi is not None), Fraction(0)),
+        None
+        if any(lo is None for lo, _ in limits)
+        else sum((lo for lo, _ in limits if lo is not None), Fraction(0)),
+        None
+        if any(hi is None for _, hi in limits)
+        else sum((hi for _, hi in limits if hi is not None), Fraction(0)),
     )
 
 
@@ -755,18 +863,29 @@ def _linear_scale(value: TimeVariable, coefficient: Scalar) -> TimeVariable:
     return TimeVariable(
         value.constant * coefficient,
         tuple((v, c * coefficient) for v, c in value.terms if c * coefficient),
-        components=tuple((axis, _component_scale(c, coefficient)) for axis, c in value.components
-                         if _nonzero(_component_scale(c, coefficient))),
+        components=tuple(
+            (axis, _component_scale(c, coefficient))
+            for axis, c in value.components
+            if _nonzero(_component_scale(c, coefficient))
+        ),
     )
 
 
-def _parts(value: TimeExpression) -> tuple[TimeVariable, tuple[tuple[TimeExpression, Fraction], ...]]:
-    return (value, ()) if isinstance(value, TimeVariable) else (value.linear, value.absolute)
+def _parts(
+    value: TimeExpression,
+) -> tuple[TimeVariable, tuple[tuple[TimeExpression, Fraction], ...]]:
+    return (
+        (value, ())
+        if isinstance(value, TimeVariable)
+        else (value.linear, value.absolute)
+    )
 
 
 def _orientation(value: TimeExpression) -> int:
     linear, absolute = _parts(value)
-    for _, component in sorted(linear.components, key=lambda item: repr(item[0].identity)):
+    for _, component in sorted(
+        linear.components, key=lambda item: repr(item[0].identity)
+    ):
         items = np.asarray(component, dtype=object).flat
         for amount in items:
             if amount:
@@ -800,7 +919,11 @@ def _normalized(
         linear = _linear_add(linear, _linear_scale(variable, coefficient))
         for term, amount in terms:
             combined[term] = combined.get(term, Fraction(0)) + coefficient * amount
-    terms = tuple(sorted(((x, c) for x, c in combined.items() if c), key=lambda item: repr(item[0])))
+    terms = tuple(
+        sorted(
+            ((x, c) for x, c in combined.items() if c), key=lambda item: repr(item[0])
+        )
+    )
     return TimeAbs(linear, terms, runtime) if terms else linear
 
 
@@ -826,22 +949,30 @@ def add_time(left: TimeExpression, right: TimeExpression) -> TimeExpression:
 
 
 @lru_cache(maxsize=4096)
-def difference_limits(left: TimeExpression, right: TimeExpression) -> tuple[Fraction | None, Fraction | None]:
+def difference_limits(
+    left: TimeExpression, right: TimeExpression
+) -> tuple[Fraction | None, Fraction | None]:
     """Cache normalized structural differences for dominance, not runtime values."""
     return expression_limits(add_time(left, scale_time(right, -1)))
 
 
-def _binary_choice(left: TimeExpression, right: TimeExpression, *, maximum: bool) -> TimeExpression:
+def _binary_choice(
+    left: TimeExpression, right: TimeExpression, *, maximum: bool
+) -> TimeExpression:
     lo, hi = difference_limits(left, right)
     if lo is not None and lo >= 0:
         return left if maximum else right
     if hi is not None and hi <= 0:
         return right if maximum else left
-    total = add_time(scale_time(left, Fraction(1, 2)), scale_time(right, Fraction(1, 2)))
+    total = add_time(
+        scale_time(left, Fraction(1, 2)), scale_time(right, Fraction(1, 2))
+    )
     linear, terms = _parts(total)
     difference = add_time(left, scale_time(right, -1))
     recipe = TimeOperation("max" if maximum else "min", (left, right))
-    return _normalized(linear, (*terms, (difference, Fraction(1 if maximum else -1, 2))), recipe)
+    return _normalized(
+        linear, (*terms, (difference, Fraction(1 if maximum else -1, 2))), recipe
+    )
 
 
 def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression:
@@ -861,11 +992,15 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         axes = expression_axes(group[0])
         points = [evaluate_time(value, axes) for value in group]
         known = [point for point in points if point is not None]
-        merged = (np.maximum if maximum else np.minimum).reduce(np.broadcast_arrays(*known))
+        merged = (np.maximum if maximum else np.minimum).reduce(
+            np.broadcast_arrays(*known)
+        )
         proof = group[0]
         for value in group[1:]:
             proof = _binary_choice(proof, value, maximum=maximum)
-        names = ", ".join(sorted({axis.name for value in group for axis in time_variables(value)}))
+        names = ", ".join(
+            sorted({axis.name for value in group for axis in time_variables(value)})
+        )
         replacement = point_time(names, axes, merged, reconstruction=proof)
         unique = [value for value in unique if value not in group]
         unique.append(replacement)
@@ -875,7 +1010,9 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
     return result
 
 
-def substitute_time(value: TimeExpression, replacements: dict[CycleAxis, TimeExpression]) -> TimeExpression:
+def substitute_time(
+    value: TimeExpression, replacements: dict[CycleAxis, TimeExpression]
+) -> TimeExpression:
     """Substitute captured immutable sources, including nested Abs arguments."""
     if isinstance(value, TimeAbs):
         linear = substitute_time(value.linear, replacements)
@@ -885,10 +1022,18 @@ def substitute_time(value: TimeExpression, replacements: dict[CycleAxis, TimeExp
             absolute = choose_time(substituted, scale_time(substituted, -1))
             result = add_time(result, scale_time(absolute, coefficient))
         return result
-    unchanged = tuple((axis, component) for axis, component in value.components if axis not in replacements)
+    unchanged = tuple(
+        (axis, component)
+        for axis, component in value.components
+        if axis not in replacements
+    )
     result: TimeExpression = TimeVariable(
         value.constant,
-        tuple((axis, coefficient) for axis, coefficient in value.terms if axis not in replacements),
+        tuple(
+            (axis, coefficient)
+            for axis, coefficient in value.terms
+            if axis not in replacements
+        ),
         components=unchanged,
     )
     for axis, component in value.components:

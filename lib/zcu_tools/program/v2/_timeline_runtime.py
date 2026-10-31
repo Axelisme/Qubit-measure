@@ -12,8 +12,8 @@ from ._timeline_bounds import CycleBounds
 from ._timeline_expression import (
     CycleAxis,
     CycleProducer,
-    TimeExpression,
     TimeAbs,
+    TimeExpression,
     TimeVariable,
     add_time,
     ceiled_time,
@@ -678,7 +678,10 @@ class RuntimeMath(TimedMacro):
                     return self.add(captured, self.reconstruct(delta, inputs))
         if isinstance(expression, TimeAbs):
             operation = expression.runtime
-            values = [self.reconstruct(item, inputs, captured_ends) for item in operation.operands]
+            values = [
+                self.reconstruct(item, inputs, captured_ends)
+                for item in operation.operands
+            ]
             if operation.kind == "add":
                 return self.add(values[0], values[1])
             if operation.kind == "scale":
