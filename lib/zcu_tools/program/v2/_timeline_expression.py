@@ -83,7 +83,8 @@ def cycle_variable(
     minimum: int | None,
     maximum: int | None,
     producer: CycleProducer | None = None,
-    *, interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None,
+    *,
+    interval_points: tuple[tuple[int, ...], tuple[int, ...]] | None = None,
 ) -> CycleVariable:
     """Capture a producer's range once, without evaluating expression grids.
 
@@ -280,7 +281,10 @@ def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | 
                 result, np.asarray(coefficient * variable.minimum, dtype=object)
             )
             continue
-        if not variable.producer.axes or variable.bounds.deviation_minimum != variable.bounds.deviation_maximum:
+        if (
+            not variable.producer.axes
+            or variable.bounds.deviation_minimum != variable.bounds.deviation_maximum
+        ):
             return None
         local = dict(variable.producer.axes)
         if variable.producer.rounding_remainder:
@@ -383,7 +387,10 @@ def exact_bounds(value: TimeExpression) -> CycleBounds | None:
         return limits
     for variable in variables:
         recipe = variable.producer
-        if variable.bounds.deviation_minimum != variable.bounds.deviation_maximum or not recipe.axes:
+        if (
+            variable.bounds.deviation_minimum != variable.bounds.deviation_maximum
+            or not recipe.axes
+        ):
             return None
         if not isinstance(variable.bounds.source, str):
             axes = dict(recipe.axes).keys()
@@ -407,12 +414,20 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
     for variable, coefficient in value.terms:
         r = variable.bounds
         if isinstance(r.source, str) and r.deviation_minimum != r.deviation_maximum:
-            deviations = r.deviation_maximum if upper == (coefficient > 0) else r.deviation_minimum
+            deviations = (
+                r.deviation_maximum
+                if upper == (coefficient > 0)
+                else r.deviation_minimum
+            )
             if r.start is None or r.end is None:
                 raise ValueError("runtime-only time has no compile-time bounds")
             count = len(deviations)
             points = tuple(
-                int(Fraction(r.start) + Fraction((r.end - r.start) * i, max(1, count - 1)) + deviation)
+                int(
+                    Fraction(r.start)
+                    + Fraction((r.end - r.start) * i, max(1, count - 1))
+                    + deviation
+                )
                 for i, deviation in enumerate(deviations)
             )
             endpoint = cycle_variable(
