@@ -23,4 +23,3 @@ Sums 是 float64 `DC × 2 branches × delay × 3 × 3 × 3 × 3` 原始計數。
 每個 DC 點另畫兩個 branch 的全部 9 類 herald 比例。g,g 是 pass fraction，分母是所有 herald classes 的總數。Pass fraction 是分類接受率，不是 ground-state purity。Classifier 誤差、有限 radius 與熱混合都限制此解讀。
 
 Terminal 分析回傳與普通版相同的 magnitude、signed frequency、covariance error、fit_quality、ζ 與原因。外層分析另有 herald_matrix 與 pass_fraction。ζ 仍是 `f_Xπ − f_I`，不宣稱純 ZZ，也不寫回 calibration。Analyze 只讀保存的 cfg，不查目前 Form 或 library。
-
