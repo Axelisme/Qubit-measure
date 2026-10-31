@@ -419,8 +419,9 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
             data, sampled_params, sampled_phases, idx = payload
             cur_flux, cur_freq, cur_gain = sampled_params[idx, :]
             title = (
-                f"Iteration {idx}, Phase {sampled_phases[idx]}, Flux: {cur_flux:.2g} (a.u.), "
-                f"Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
+                f"Iteration {idx}, Phase {sampled_phases[idx]}\n"
+                f"Flux: {cur_flux:.2g} (a.u.), Freq: {1e-3 * cur_freq:.4g} (GHz)\n"
+                f"Power: {cur_gain:.2g} (dBm)"
             )
             axes[0].set_title(title)
             artists = []
