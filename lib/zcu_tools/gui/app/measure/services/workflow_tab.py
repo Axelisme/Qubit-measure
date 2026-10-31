@@ -339,7 +339,7 @@ class WorkflowTab[C]:
         return token
 
     def _finished(
-        self, status: RunStatus | None, error: BackgroundError | None
+        self, _status: RunStatus | None, error: BackgroundError | None
     ) -> None:
         self.error = None if error is None else str(error)
         if self.plots is not None:
