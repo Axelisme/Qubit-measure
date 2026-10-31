@@ -13,7 +13,11 @@ from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.gui.app.measure.state import State
 from zcu_tools.gui.app.measure.ui.main_window import MainWindow
 from zcu_tools.gui.event_bus import BaseEventBus
-from zcu_tools.gui.session.context_types import CommandOrigin, EntryRequest, PointCreateRequest
+from zcu_tools.gui.session.context_types import (
+    CommandOrigin,
+    EntryRequest,
+    PointCreateRequest,
+)
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.program.v2 import make_mock_soccfg
 
