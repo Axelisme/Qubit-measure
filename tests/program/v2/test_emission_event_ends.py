@@ -265,6 +265,19 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
     ] * 2
 
 
+def test_scalar_static_cross_grid_ceil_keeps_small_positive_post():
+    pulse = Pulse("precise", _pulse_cfg(length=25 / 384, pre=0, post=5e-11 / 430.08))
+    prog = _program([pulse], lambda p: p.emit(pulse))
+    # The native waveform is exactly28 tProc ticks. Any positive post needs29.
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [29] * 2
+
+
+def test_runtime_cross_grid_length_sweep_fails_without_implicit_time_table():
+    pulse = Pulse("cross_grid", _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0))
+    with pytest.raises(ValueError, match="runtime cross-grid.*conversion"):
+        _program([pulse], lambda p: p.emit(pulse), lambda p: p.add_loop("scan", 3))
+
+
 def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
     pulse = Pulse(
         "drive",
