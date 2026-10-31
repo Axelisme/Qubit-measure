@@ -25,7 +25,12 @@ def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
             self.add_loop("i", 50)
             self.declare_gen(0, nqz=1)
             self.add_pulse(
-                0, "p", style="const", freq=1000, phase=0, gain=0.5,
+                0,
+                "p",
+                style="const",
+                freq=1000,
+                phase=0,
+                gain=0.5,
                 length=QickSweep1D("i", 100 / 599.04, 492 / 599.04),
             )
 
@@ -61,7 +66,9 @@ def test_author_register_does_not_inherit_loop_correlation(hint):
             self.write_reg_op("duration", "i", "+", 80)
             self.fork("default", into="other")
             self.delay_timeline("duration", range_hint=hint, tag="author")
-            self.delay_timeline(QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other")
+            self.delay_timeline(
+                QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
+            )
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
@@ -91,7 +98,9 @@ def test_measurement_selected_table_is_independent_of_loop_time():
             self.emit(loader)
             self.fork("default", into="other")
             self.delay_timeline("selected", tag="selected")
-            self.delay_timeline(QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other")
+            self.delay_timeline(
+                QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
+            )
             self.join("other", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
@@ -107,20 +116,37 @@ def test_two_loop_fabric_conversion_keeps_linear_part_for_dominance():
             self.add_loop("j", 3)
             self.declare_gen(0, nqz=1)
             self.add_pulse(
-                0, "p", style="const", freq=1000, phase=0, gain=0.5,
-                length=(QickSweep1D("i", 100 / 599.04, 116 / 599.04)
-                        + QickSweep1D("j", 0, 16 / 599.04)),
+                0,
+                "p",
+                style="const",
+                freq=1000,
+                phase=0,
+                gain=0.5,
+                length=(
+                    QickSweep1D("i", 100 / 599.04, 116 / 599.04)
+                    + QickSweep1D("j", 0, 16 / 599.04)
+                ),
             )
 
         def _body(self, cfg):
             self.fork("default", into="pulse")
             self.pulse(0, "p", timeline="pulse")
-            self.delay_timeline(QickSweep1D("i", 80 / 430.08, 92 / 430.08)
-                                + QickSweep1D("j", 0, 12 / 430.08))
+            self.delay_timeline(
+                QickSweep1D("i", 80 / 430.08, 92 / 430.08)
+                + QickSweep1D("j", 0, 12 / 430.08)
+            )
             self.join("pulse", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert not any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        80, 86, 92, 86, 92, 98, 92, 98, 104,
+        80,
+        86,
+        92,
+        86,
+        92,
+        98,
+        92,
+        98,
+        104,
     ]

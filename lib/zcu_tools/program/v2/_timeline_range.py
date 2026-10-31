@@ -48,7 +48,9 @@ def source_limits(
         if r.start is None or r.end is None:
             return None, None
         for i in range(count):
-            line = Fraction(r.start) + Fraction((r.end - r.start) * i, max(1, count - 1))
+            line = Fraction(r.start) + Fraction(
+                (r.end - r.start) * i, max(1, count - 1)
+            )
             a = coefficient * (line + r.deviation_minimum[i])
             b = coefficient * (line + r.deviation_maximum[i])
             lows[i] += min(a, b)

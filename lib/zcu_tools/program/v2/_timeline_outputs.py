@@ -142,7 +142,8 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
             start = (
-                end if self.relative_t == "auto"
+                end
+                if self.relative_t == "auto"
                 else self.book.math.add(end, placement_time(prog, self.relative_t))
             )
             end_limits = optional_time_bounds(prog, start)

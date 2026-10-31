@@ -94,7 +94,11 @@ def cycle_variable(
     Recipe metadata survives independently for runtime reconstruction.
     """
     producer = CycleProducer() if producer is None else producer
-    axes, points, interval_points = producer.axes, producer.points, producer.interval_points
+    axes, points, interval_points = (
+        producer.axes,
+        producer.points,
+        producer.interval_points,
+    )
     source: str | object = object()
     start, end = minimum, maximum
     low = high = (Fraction(0),)
@@ -102,7 +106,9 @@ def cycle_variable(
         source, count = axes[0]
         low = high = (Fraction(0),) * count
         if interval_points is not None or points is not None:
-            lower, upper = interval_points if interval_points is not None else (points, points)
+            lower, upper = (
+                interval_points if interval_points is not None else (points, points)
+            )
             if lower is None or upper is None:
                 raise RuntimeError("point producer has no values")
             start, end = lower[0], lower[-1]
@@ -110,8 +116,14 @@ def cycle_variable(
                 Fraction(start) + Fraction((end - start) * i, max(1, count - 1))
                 for i in range(count)
             )
-            low = tuple(Fraction(value) - origin for value, origin in zip(lower, line, strict=True))
-            high = tuple(Fraction(value) - origin for value, origin in zip(upper, line, strict=True))
+            low = tuple(
+                Fraction(value) - origin
+                for value, origin in zip(lower, line, strict=True)
+            )
+            high = tuple(
+                Fraction(value) - origin
+                for value, origin in zip(upper, line, strict=True)
+            )
     return CycleVariable(
         name,
         VariableRange(source, start, end, low, high),
@@ -171,23 +183,43 @@ def expression_limits(value: TimeExpression) -> tuple[Fraction | None, Fraction 
         # shared loop coordinates when an independent feedback value survives.
         # Each resulting linear path still uses source_limits, never a grid.
         variables = time_variables(value)
-        if variables and all(v.minimum is not None and v.maximum is not None for v in variables) and any(
-            not isinstance(v.bounds.source, str) or v.bounds.deviation_minimum != v.bounds.deviation_maximum for v in variables
+        if (
+            variables
+            and all(v.minimum is not None and v.maximum is not None for v in variables)
+            and any(
+                not isinstance(v.bounds.source, str)
+                or v.bounds.deviation_minimum != v.bounds.deviation_maximum
+                for v in variables
+            )
         ):
-            lower_choice = choose_time(*(bound_unknowns(item, upper=False) for item in value.alternatives), maximum=value.maximum)
-            upper_choice = choose_time(*(bound_unknowns(item, upper=True) for item in value.alternatives), maximum=value.maximum)
-            return expression_limits(lower_choice)[0], expression_limits(upper_choice)[1]
+            lower_choice = choose_time(
+                *(bound_unknowns(item, upper=False) for item in value.alternatives),
+                maximum=value.maximum,
+            )
+            upper_choice = choose_time(
+                *(bound_unknowns(item, upper=True) for item in value.alternatives),
+                maximum=value.maximum,
+            )
+            return expression_limits(lower_choice)[0], expression_limits(upper_choice)[
+                1
+            ]
         limits = [expression_limits(item) for item in value.alternatives]
         select = max if value.maximum else min
         lows = [lo for lo, _ in limits if lo is not None]
         highs = [hi for _, hi in limits if hi is not None]
         return (
-            select(lows) if lows and (value.maximum or len(lows) == len(limits)) else None,
-            select(highs) if highs and (not value.maximum or len(highs) == len(limits)) else None,
+            select(lows)
+            if lows and (value.maximum or len(lows) == len(limits))
+            else None,
+            select(highs)
+            if highs and (not value.maximum or len(highs) == len(limits))
+            else None,
         )
     groups: dict[str | object, list[tuple[VariableRange, int | Fraction]]] = {}
     for variable, coefficient in value.terms:
-        groups.setdefault(variable.bounds.source, []).append((variable.bounds, coefficient))
+        groups.setdefault(variable.bounds.source, []).append(
+            (variable.bounds, coefficient)
+        )
     lower: Fraction | None = Fraction(value.constant)
     upper: Fraction | None = Fraction(value.constant)
     for terms in groups.values():
@@ -221,12 +253,12 @@ def time_variables(value: TimeExpression) -> tuple[CycleVariable, ...]:
 
 def expression_axes(value: TimeExpression) -> dict[str, int]:
     """Return only the loop dimensions used by this expression's producers."""
-    return dict(axis for variable in time_variables(value) for axis in variable.producer.axes)
+    return dict(
+        axis for variable in time_variables(value) for axis in variable.producer.axes
+    )
 
 
-def evaluate_time(
-    value: TimeExpression, axes: dict[str, int]
-) -> CycleValues | None:
+def evaluate_time(value: TimeExpression, axes: dict[str, int]) -> CycleValues | None:
     """Evaluate legal points by broadcasting shared axes; None means unknown input.
 
     axes contains the union of dimensions requested by the caller. Missing
@@ -241,12 +273,17 @@ def evaluate_time(
                 return None
             result = points if result is None else select(result, points)
         return result
-    result = np.asarray(value.constant, dtype=object if isinstance(value.constant, Fraction) else np.int64)
+    result = np.asarray(
+        value.constant,
+        dtype=object if isinstance(value.constant, Fraction) else np.int64,
+    )
     for variable, coefficient in value.terms:
         if variable.minimum is None or variable.maximum is None:
             return None
         if variable.minimum == variable.maximum:
-            result = np.add(result, np.asarray(coefficient * variable.minimum, dtype=object))
+            result = np.add(
+                result, np.asarray(coefficient * variable.minimum, dtype=object)
+            )
             continue
         if not variable.producer.axes or variable.producer.interval_points is not None:
             return None
@@ -271,7 +308,10 @@ def evaluate_time(
         order = [name for name in axes if name in local]
         points = points.transpose(tuple(list(local).index(name) for name in order))
         shape = tuple(local.get(name, 1) for name in axes)
-        result = np.add(result, np.multiply(np.asarray(coefficient, dtype=object), points.reshape(shape)))
+        result = np.add(
+            result,
+            np.multiply(np.asarray(coefficient, dtype=object), points.reshape(shape)),
+        )
     return result
 
 
@@ -307,15 +347,24 @@ def shifted_time(value: TimeExpression, shift: int) -> TimeExpression:
         if points is not None:
             values = points >> shift
             variable = cycle_variable(
-                "shifted cycles", int(values.min()), int(values.max()),
-                CycleProducer(tuple(axes.items()), tuple(int(v) for v in values.flat),
-                              fixed_point=(value, shift)),
+                "shifted cycles",
+                int(values.min()),
+                int(values.max()),
+                CycleProducer(
+                    tuple(axes.items()),
+                    tuple(int(v) for v in values.flat),
+                    fixed_point=(value, shift),
+                ),
             )
             return LinearTime(terms=((variable, 1),))
     divisor = 1 << shift
     remainder = cycle_variable(
-        "rounding remainder", 0, divisor - 1,
-        CycleProducer(tuple(axes.items()), fixed_point=(value, shift), rounding_remainder=True),
+        "rounding remainder",
+        0,
+        divisor - 1,
+        CycleProducer(
+            tuple(axes.items()), fixed_point=(value, shift), rounding_remainder=True
+        ),
     )
     return add_time(
         scale_time(value, Fraction(1, divisor)),
@@ -365,7 +414,10 @@ def bound_unknowns(value: TimeExpression, *, upper: bool) -> TimeExpression:
             index = int(upper == (coefficient > 0))
             points = variable.producer.interval_points[index]
             endpoint = cycle_variable(
-                variable.name, min(points), max(points), CycleProducer(variable.producer.axes, points)
+                variable.name,
+                min(points),
+                max(points),
+                CycleProducer(variable.producer.axes, points),
             )
             terms.append((endpoint, coefficient))
         elif isinstance(variable.bounds.source, str):
@@ -384,25 +436,37 @@ def projected_expression_bounds(value: TimeExpression) -> CycleBounds:
     """Project cycles through the common directed-source range rule."""
     return expression_bounds(value)
 
+
 def slack_variables(value: TimeExpression) -> list[str]:
     """Name surviving nonconstant cycle sources without constructing a point grid."""
-    return sorted({
-        variable.name for variable in time_variables(value)
-        if variable.minimum != variable.maximum
-    })
+    return sorted(
+        {
+            variable.name
+            for variable in time_variables(value)
+            if variable.minimum != variable.maximum
+        }
+    )
 
 
 def point_time(
-    name: str, axes: dict[str, int], points: NDArray[np.int64],
-    *, reconstruction: TimeExpression | None = None,
+    name: str,
+    axes: dict[str, int],
+    points: NDArray[np.int64],
+    *,
+    reconstruction: TimeExpression | None = None,
 ) -> TimeExpression:
     """Retain a known nonlinear grid as a bounded variable, or a scalar constant."""
     lower, upper = int(points.min()), int(points.max())
     if lower == upper:
         return LinearTime(lower)
     variable = cycle_variable(
-        name, lower, upper, CycleProducer(
-            tuple(axes.items()), tuple(int(v) for v in points.flat), reconstruction=reconstruction,
+        name,
+        lower,
+        upper,
+        CycleProducer(
+            tuple(axes.items()),
+            tuple(int(v) for v in points.flat),
+            reconstruction=reconstruction,
         ),
     )
     return LinearTime(terms=((variable, 1),))
@@ -452,7 +516,8 @@ def interval_time(
         int(lower.min()),
         int(upper.max()),
         CycleProducer(
-            tuple(axes.items()), interval_points=(
+            tuple(axes.items()),
+            interval_points=(
                 tuple(int(v) for v in lower.flat),
                 tuple(int(v) for v in upper.flat),
             ),
@@ -585,9 +650,19 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         choice = TimeChoice(unique, maximum)
         limits = [expression_limits(value) for value in unique]
         select = max if maximum else min
-        lower = None if any(lo is None for lo, _ in limits) else select(lo for lo, _ in limits if lo is not None)
-        upper = None if any(hi is None for _, hi in limits) else select(hi for _, hi in limits if hi is not None)
-        logging.getLogger(__name__).warning("Timeline range fallback: %s branches exceed 64", len(unique))
+        lower = (
+            None
+            if any(lo is None for lo, _ in limits)
+            else select(lo for lo, _ in limits if lo is not None)
+        )
+        upper = (
+            None
+            if any(hi is None for _, hi in limits)
+            else select(hi for _, hi in limits if hi is not None)
+        )
+        logging.getLogger(__name__).warning(
+            "Timeline range fallback: %s branches exceed 64", len(unique)
+        )
         variable = cycle_variable(
             "choice fallback",
             None if lower is None else math.floor(lower),
@@ -602,9 +677,13 @@ def choose_time(*values: TimeExpression, maximum: bool = True) -> TimeExpression
         if all(
             index == other
             or (
-                lower is not None and alternative[1] is not None and lower >= alternative[1]
+                lower is not None
+                and alternative[1] is not None
+                and lower >= alternative[1]
                 if maximum
-                else upper is not None and alternative[0] is not None and upper <= alternative[0]
+                else upper is not None
+                and alternative[0] is not None
+                and upper <= alternative[0]
             )
             for other, alternative in enumerate(limits)
         ):

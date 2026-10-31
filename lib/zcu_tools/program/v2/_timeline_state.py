@@ -544,7 +544,17 @@ class TimelineBook:
         if macro.dst not in prog._time_bounds.allowed.get(id(macro), ()):
             # Author arithmetic is a runtime recipe, not a certified loop range.
             expression = LinearTime(
-                terms=((cycle_variable(macro.dst, None, None, CycleProducer(reconstruction=expression)), 1),)
+                terms=(
+                    (
+                        cycle_variable(
+                            macro.dst,
+                            None,
+                            None,
+                            CycleProducer(reconstruction=expression),
+                        ),
+                        1,
+                    ),
+                )
             )
         self.source_expressions[macro.dst] = expression
 

@@ -178,7 +178,9 @@ class RuntimeEnd:
             expression = (
                 LinearTime(minimum)
                 if minimum is not None and minimum == maximum
-                else LinearTime(terms=((cycle_variable(register, minimum, maximum), 1),))
+                else LinearTime(
+                    terms=((cycle_variable(register, minimum, maximum), 1),)
+                )
             )
         object.__setattr__(self, "register", register)
         object.__setattr__(self, "covers", covers)
@@ -250,7 +252,9 @@ def parameter_expression(
         count = prog.loop_dict[name]
         if count > 1:
             if name not in axes:
-                axes[name] = cycle_variable(name, 0, count - 1, CycleProducer(((name, count),)))
+                axes[name] = cycle_variable(
+                    name, 0, count - 1, CycleProducer(((name, count),))
+                )
             terms.append((axes[name], round(span * factor / (count - 1))))
     return LinearTime(round(value.start * factor), tuple(terms))
 
@@ -308,7 +312,9 @@ def source_expression(prog, name: str) -> TimeExpression:
     if name in prog.loop_dict:
         count = prog.loop_dict[name]
         if name not in book.cycle_axes:
-            book.cycle_axes[name] = cycle_variable(name, 0, count - 1, CycleProducer(((name, count),)))
+            book.cycle_axes[name] = cycle_variable(
+                name, 0, count - 1, CycleProducer(((name, count),))
+            )
         return LinearTime(terms=((book.cycle_axes[name], 1),))
     register = prog.reg_dict.get(name)
     if register is not None and register.init is not None:
@@ -317,7 +323,9 @@ def source_expression(prog, name: str) -> TimeExpression:
     limits = prog._time_bounds.describe(prog, name)
     if limits.minimum == limits.maximum:
         return LinearTime(limits.minimum)
-    return LinearTime(terms=((cycle_variable(name, limits.minimum, limits.maximum), 1),))
+    return LinearTime(
+        terms=((cycle_variable(name, limits.minimum, limits.maximum), 1),)
+    )
 
 
 def bounded_source_expression(
@@ -343,7 +351,11 @@ def bounded_source_expression(
                         name,
                         minimum,
                         maximum,
-                        CycleProducer(reconstruction=prog._timeline_book.source_expressions.get(name)),
+                        CycleProducer(
+                            reconstruction=prog._timeline_book.source_expressions.get(
+                                name
+                            )
+                        ),
                     ),
                     1,
                 ),
@@ -375,8 +387,10 @@ def lookup_expression(
         lower,
         upper,
         CycleProducer(
-            tuple(axes.items()), tuple(int(v) for v in selected.flat),
-            reconstruction=reconstruction, selection=(index, values),
+            tuple(axes.items()),
+            tuple(int(v) for v in selected.flat),
+            reconstruction=reconstruction,
+            selection=(index, values),
         ),
     )
     return LinearTime(terms=((variable, 1),))
@@ -697,7 +711,9 @@ class RuntimeMath(TimedMacro):
                 axis, count = variable.producer.axes[0]
                 amount = coefficient * (count - 1)
                 if amount != int(amount):
-                    raise RuntimeError("fractional cycle span lost its conversion recipe")
+                    raise RuntimeError(
+                        "fractional cycle span lost its conversion recipe"
+                    )
                 spans[axis] = spans.get(axis, 0) + int(amount)
             return self.cycles(
                 QickParam(float(expression.constant), spans) / get_fclk(self.prog)
@@ -705,7 +721,9 @@ class RuntimeMath(TimedMacro):
         result = self.cycles(float(expression.constant) / get_fclk(self.prog))
         for variable, coefficient in expression.terms:
             if coefficient != int(coefficient):
-                raise RuntimeError("fractional cycle coefficient lost its conversion recipe")
+                raise RuntimeError(
+                    "fractional cycle coefficient lost its conversion recipe"
+                )
             coefficient = int(coefficient)
             if variable in inputs:
                 term = inputs[variable]
@@ -757,7 +775,9 @@ class RuntimeMath(TimedMacro):
                 divisor = 1 << shift
                 copies = -coefficient * divisor
                 if copies != int(copies):
-                    raise RuntimeError("fractional conversion lost its complete quotient")
+                    raise RuntimeError(
+                        "fractional conversion lost its complete quotient"
+                    )
                 quotient = add_time(
                     scale_time(numerator, Fraction(1, divisor)),
                     LinearTime(terms=((variable, Fraction(-1, divisor)),)),
@@ -766,7 +786,11 @@ class RuntimeMath(TimedMacro):
                 converted = self._reconstruct_fixed_point(variable, inputs)
                 scaled = self.multiply(converted, abs(int(copies)))
                 remainder = self.reconstruct(rest, inputs)
-                return self.add(remainder, scaled) if copies > 0 else self.subtract(remainder, scaled)
+                return (
+                    self.add(remainder, scaled)
+                    if copies > 0
+                    else self.subtract(remainder, scaled)
+                )
         return None
 
     def _reconstruct_fixed_point(
@@ -1161,7 +1185,8 @@ class RuntimeMath(TimedMacro):
         if known_maximum(end, previous) is end:
             return True
         difference = add_time(
-            time_expression(self.prog, end), scale_time(time_expression(self.prog, previous), -1)
+            time_expression(self.prog, end),
+            scale_time(time_expression(self.prog, previous), -1),
         )
         lower, _ = expression_limits(difference)
         return lower is not None and lower >= 0
@@ -1226,7 +1251,9 @@ class RuntimeMath(TimedMacro):
         if known is not None:
             return known
         left, right = self.cycles(a), self.cycles(b)
-        difference = add_time(runtime_expression(left), scale_time(runtime_expression(right), -1))
+        difference = add_time(
+            runtime_expression(left), scale_time(runtime_expression(right), -1)
+        )
         lower, upper = expression_limits(difference)
         if lower is not None and lower >= 0:
             return a
@@ -1280,8 +1307,12 @@ class RuntimeMath(TimedMacro):
         )
         abs_half = self.op(
             RuntimeEnd(
-                absolute, 0, max(abs(delta.minimum), abs(delta.maximum)),
-                expression=choose_time(runtime_expression(delta), scale_time(runtime_expression(delta), -1)),
+                absolute,
+                0,
+                max(abs(delta.minimum), abs(delta.maximum)),
+                expression=choose_time(
+                    runtime_expression(delta), scale_time(runtime_expression(delta), -1)
+                ),
             ),
             "ASR",
             1,
@@ -1342,12 +1373,18 @@ class RuntimeMath(TimedMacro):
     def _sum_limits(
         left: RuntimeEnd, right: RuntimeEnd | int, *, subtract: bool = False
     ) -> tuple[int | None, int | None]:
-        rhs = runtime_expression(right) if isinstance(right, RuntimeEnd) else LinearTime(right)
+        rhs = (
+            runtime_expression(right)
+            if isinstance(right, RuntimeEnd)
+            else LinearTime(right)
+        )
         expression = add_time(
             runtime_expression(left), scale_time(rhs, -1) if subtract else rhs
         )
         lower, upper = expression_limits(expression)
-        return None if lower is None else math.ceil(lower), None if upper is None else math.floor(upper)
+        return None if lower is None else math.ceil(
+            lower
+        ), None if upper is None else math.floor(upper)
 
     def _unbounded_maximum(
         self, left: RuntimeEnd, right: RuntimeEnd, *, target: str | None

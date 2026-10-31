@@ -1057,7 +1057,8 @@ class TimelineBranch(Macro):
                 self.book.source_expressions.setdefault(register, expression)
                 for variable in time_variables(expression):
                     if not variable.producer.axes or (
-                        variable.producer.points is not None and variable.name in prog.reg_dict
+                        variable.producer.points is not None
+                        and variable.name in prog.reg_dict
                     ):
                         self.entry_inputs[variable] = self.entry_math.snapshot(
                             RuntimeEnd(
