@@ -940,14 +940,7 @@ class TimelineBranch(Macro):
                 self.book.ends[name] = initial[name]
             elif self.align_timeline:
                 if any(isinstance(value, RuntimeEnd) for value in values):
-                    rebuilt = [
-                        self.result_math.reconstruct(time_expression(prog, value), inputs, captured_ends)
-                        for value in values
-                    ]
-                    end = rebuilt[0]
-                    for value in rebuilt[1:]:
-                        end = self.result_math.cycles(self.result_math.maximum(end, value))
-                    self.book.ends[name] = end
+                    self.book.ends[name] = self.result_math.reconstruct_maximum(values, inputs, captured_ends)
                 else:
                     end = values[0]
                     for value in values[1:]:

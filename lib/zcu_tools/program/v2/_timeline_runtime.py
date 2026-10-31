@@ -416,6 +416,28 @@ class RuntimeMath(TimedMacro):
             result = self.add(result, scaled) if coefficient > 0 else self.subtract(result, scaled)
         return result
 
+    def reconstruct_maximum(
+        self, values: Sequence[Time], inputs: dict[CycleVariable, RuntimeEnd],
+        captured_ends: Sequence[RuntimeEnd],
+    ) -> RuntimeEnd:
+        """Join case ends using immutable entry values and exact known increments.
+
+        values are reference-relative case ends. Preserve a common incoming
+        floor/max while joining its known increments, so no historical source
+        register is reread. Other ends use reconstruct's cycle-algebra contract.
+        """
+        expressions = [time_expression(self.prog, value) for value in values]
+        for captured in captured_ends:
+            shifts = [self._captured_delta(value, runtime_expression(captured)) for value in expressions]
+            if any(shift is None for shift in shifts):
+                continue
+            delta = choose_time(*(shift for shift in shifts if shift is not None))
+            axes = expression_axes(delta)
+            points = evaluate_time(delta, axes)
+            if points is not None and int(points.min()) >= 0:
+                return self.add(captured, self.lookup([int(v) for v in points.flat], axes))
+        return self.reconstruct(choose_time(*expressions), inputs, captured_ends)
+
     def _captured_delta(
         self, expression: TimeExpression, captured: TimeExpression
     ) -> TimeExpression | None:
