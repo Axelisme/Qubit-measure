@@ -851,24 +851,43 @@ class RuntimeMath(TimedMacro):
             else (*captured_ends, *inputs.values())
         )
         bindings = {runtime_expression(value): value for value in captured}
-        common, residuals, atoms = plan_time_choice(
+        plan = plan_time_choice(
             expressions, maximum=maximum, captured=tuple(bindings)
         )
-        if len(residuals) == 1:
-            selected = substitute_time(add_time(common, residuals[0]), atoms)
+        # A max is no earlier than any operand, so each operand's debt remains
+        # sufficient after the join. A min cannot inherit that guarantee.
+        deferred = (
+            tuple(
+                proof
+                for value in values
+                if isinstance(value, RuntimeEnd)
+                for proof in value.deferred
+            )
+            if maximum
+            else ()
+        )
+        if len(plan.residuals) == 1:
+            selected = substitute_time(
+                add_time(plan.common, plan.residuals[0]), plan.atoms
+            )
             for value, expression in zip(values, expressions, strict=True):
                 if (
                     not isinstance(value, (TimeVariable, TimeAbs))
                     and (inputs is None or not isinstance(value, RuntimeEnd))
                     and difference_limits(selected, expression) == (0, 0)
                 ):
-                    return value
+                    if isinstance(value, RuntimeEnd):
+                        return replace(value, deferred=deferred) if maximum else value
+                    if not deferred:
+                        return value
         sources = {} if inputs is None else inputs.copy()
-        for axis, expression in atoms.items():
+        for axis, expression in plan.atoms.items():
             if expression in bindings:
                 sources[axis] = bindings[expression]
-        shared = self.reconstruct(common, sources)
-        operands = [self.reconstruct(value, sources, (shared,)) for value in residuals]
+        shared = self.reconstruct(plan.common, sources)
+        operands = [
+            self.reconstruct(value, sources, (shared,)) for value in plan.residuals
+        ]
         result = operands[0]
         destination = target
         if len(operands) > 1:
@@ -890,7 +909,7 @@ class RuntimeMath(TimedMacro):
             if maximum
             else ()
         )
-        return replace(result, expression=proof, covers=covers)
+        return replace(result, expression=proof, covers=covers, deferred=deferred)
 
     def source(
         self,

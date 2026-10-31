@@ -1016,19 +1016,39 @@ class _ChoiceRecipes:
         return [self.linear(value)]
 
 
+@dataclass(frozen=True)
+class TimeChoicePlan:
+    """Factored integer-cycle recipes for one runtime max/min.
+
+    common is the additive part S, in tProc cycles, evaluated once for all
+    candidates. residuals is a nonempty tuple of undominated cycle recipes;
+    the result is S plus their maximum (or minimum for a min plan).
+    atoms maps opaque recipe axes in common/residuals to their original
+    immutable cycle expressions. Captured atoms require the caller's live
+    register bindings; other atoms retain their original integer producers.
+    This mapping never authorizes reconstruction from Abs proof terms.
+    """
+
+    common: TimeVariable
+    residuals: tuple[TimeVariable, ...]
+    atoms: dict[CycleAxis, TimeExpression]
+
+
 def plan_time_choice(
     values: tuple[TimeExpression, ...],
     *,
     maximum: bool = True,
     captured: tuple[TimeExpression, ...] = (),
-) -> tuple[TimeVariable, tuple[TimeVariable, ...], dict[CycleAxis, TimeExpression]]:
-    """Factor runtime recipes into S and undominated residuals, in cycle units.
+) -> TimeChoicePlan:
+    """Plan max(values), or min(values) when maximum=False, in tProc cycles.
 
-    Captured expressions are opaque atoms, including captured max results.
-    The returned atom mapping binds those atoms to their original proof values;
-    callers must supply captured registers instead of rebuilding their sources.
-    Other atoms retain their original integer producer, never Abs proof terms.
-    Coefficients use the N-input mode, breaking ties toward smaller magnitude.
+    values must contain at least one immutable integer-cycle expression with
+    its original runtime recipe; empty values raise ValueError. captured lists
+    expressions backed by live caller-owned registers. They remain opaque,
+    including captured max results, and must not be rebuilt from old sources.
+    Return common S, undominated residuals and their opaque atom bindings in
+    one TimeChoicePlan. Coefficients use the N-input mode, breaking ties toward
+    smaller magnitude. This function emits no runtime instructions.
     """
     recipes = _ChoiceRecipes(captured, maximum=maximum)
     lines = [line for value in values for line in recipes.candidates(value)]
@@ -1061,7 +1081,7 @@ def plan_time_choice(
                 break
         if not dominated:
             kept.append(residual)
-    return common, tuple(kept), replacements
+    return TimeChoicePlan(common, tuple(kept), replacements)
 
 
 def substitute_time(
