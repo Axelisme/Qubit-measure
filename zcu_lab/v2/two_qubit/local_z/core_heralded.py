@@ -1,6 +1,7 @@
 """Ground-ground heralded two-target local Z."""
 
 from dataclasses import dataclass
+from itertools import product
 from typing import ClassVar
 
 import numpy as np
@@ -370,18 +371,16 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             if ax.get_legend_handles_labels()[0]:
                 ax.legend(fontsize="small")
         fig, axes = plots.subplots("quadratures", figsize=(10, 5))
-        for herald, values in (
-            ("gg", gg_quadratures),
-            ("ee sign-corrected", ee_quadratures),
+        for (herald, values), t, (q, projection) in product(
+            (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
+            range(2), enumerate(("X", "Y"))
         ):
-            for t in range(2):
-                for q, projection in enumerate(("X", "Y")):
-                    axes.plot(
-                        cfg.gate_counts,
-                        values[t, q],
-                        ".-",
-                        label=f"{herald} F{t + 1} {projection}",
-                    )
+            axes.plot(
+                cfg.gate_counts,
+                values[t, q],
+                ".-",
+                label=f"{herald} F{t + 1} {projection}",
+            )
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend(ncols=2)
         fig, axes = plots.subplots("herald", figsize=(12, 5))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from numpy.typing import NDArray

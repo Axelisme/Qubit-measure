@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
@@ -303,11 +304,11 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
-                with builder.branch(
-                    by="spectator_states", align_timeline=True
-                ) as cases:
-                    with cases.case(1):
-                        builder.emit(x180)
+                with (
+                    builder.branch(by="spectator_states", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180)
                 builder.emit(prepare)
                 for _ in range(n):
                     builder.emit(drive)
@@ -392,23 +393,24 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             "phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
         fig.suptitle(f"{cfg.target.upper()} target · actual spectator g/e")
-        for b, state in enumerate(("g (I)", "e (Xπ)")):
-            for j, n in enumerate(data.gate_counts):
-                fig.axes[0].plot(
-                    data.frequencies,
-                    [p.contrast for p in phases[b][j]],
-                    ".-",
-                    label=f"{state} n={n}",
-                )
-                fig.axes[1].plot(
-                    data.frequencies,
-                    [
-                        np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                        for p in phases[b][j]
-                    ],
-                    ".-",
-                    label=f"{state} n={n}",
-                )
+        for (b, state), (j, n) in product(
+            enumerate(("g (I)", "e (Xπ)")), enumerate(data.gate_counts)
+        ):
+            fig.axes[0].plot(
+                data.frequencies,
+                [p.contrast for p in phases[b][j]],
+                ".-",
+                label=f"{state} n={n}",
+            )
+            fig.axes[1].plot(
+                data.frequencies,
+                [
+                    np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                    for p in phases[b][j]
+                ],
+                ".-",
+                label=f"{state} n={n}",
+            )
         fig.axes[2].plot(
             data.frequencies, conditional, ".-", label="Fitted slope_e − slope_g"
         )
@@ -426,15 +428,15 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="small", ncols=2)
         fig, axes = plots.subplots("quadratures", figsize=(10, 5))
-        for b, state in enumerate(("g", "e")):
-            for q, projection in enumerate(("X", "Y")):
-                for j, n in enumerate(data.gate_counts):
-                    axes.plot(
-                        data.frequencies,
-                        quadratures[b, q, j],
-                        ".-",
-                        label=f"{state} {projection} n={n}",
-                    )
+        for (b, state), (q, projection), (j, n) in product(
+            enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
+        ):
+            axes.plot(
+                data.frequencies,
+                quadratures[b, q, j],
+                ".-",
+                label=f"{state} {projection} n={n}",
+            )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="small", ncols=3)
         fig, axes = plots.subplots("slopes", figsize=(10, 5))

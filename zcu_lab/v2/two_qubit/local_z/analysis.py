@@ -81,7 +81,7 @@ def fit_target(
     weighted = design / np.sqrt(variances_deg2[:, None])
     if np.linalg.matrix_rank(weighted) != 2:
         return LocalZTargetFit(reason="Unidentifiable linear model")
-    covariance = np.linalg.inv(weighted.T @ weighted)
+    covariance = np.asarray(np.linalg.inv(weighted.T @ weighted), dtype=np.float64)
     intercept, slope = np.linalg.lstsq(
         weighted, y / np.sqrt(variances_deg2), rcond=None
     )[0]

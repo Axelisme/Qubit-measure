@@ -1,6 +1,7 @@
 """Ground-ground heralded conditional phase."""
 
 from dataclasses import dataclass
+from itertools import product
 from typing import ClassVar
 
 import numpy as np
@@ -211,11 +212,11 @@ class ConditionalPhaseHeraldedExp(
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
-                with builder.branch(
-                    by="spectator_states", align_timeline=True
-                ) as cases:
-                    with cases.case(1):
-                        builder.emit(x180)
+                with (
+                    builder.branch(by="spectator_states", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180)
                 builder.emit(prepare)
                 for _ in range(n):
                     builder.emit(drive)
@@ -342,27 +343,28 @@ class ConditionalPhaseHeraldedExp(
         fig.suptitle(
             f"{cfg.target.upper()} · shared slopes by actual spectator; gg vs ee"
         )
-        for herald, points in (("gg", phases), ("ee", ee_phases)):
-            for b, state in enumerate(("g", "e")):
-                for j, n in enumerate(data.gate_counts):
-                    label = f"{herald} spectator {state} n={n}"
-                    fig.axes[0].plot(
-                        data.frequencies,
-                        [p.contrast for p in points[b][j]],
-                        ".-",
-                        label=label,
-                    )
-                    fig.axes[1].plot(
-                        data.frequencies,
-                        [
-                            np.nan
-                            if p.logical_phase_deg is None
-                            else p.logical_phase_deg
-                            for p in points[b][j]
-                        ],
-                        ".-",
-                        label=label,
-                    )
+        for (herald, points), (b, state), (j, n) in product(
+            (("gg", phases), ("ee", ee_phases)),
+            enumerate(("g", "e")), enumerate(data.gate_counts)
+        ):
+            label = f"{herald} spectator {state} n={n}"
+            fig.axes[0].plot(
+                data.frequencies,
+                [p.contrast for p in points[b][j]],
+                ".-",
+                label=label,
+            )
+            fig.axes[1].plot(
+                data.frequencies,
+                [
+                    np.nan
+                    if p.logical_phase_deg is None
+                    else p.logical_phase_deg
+                    for p in points[b][j]
+                ],
+                ".-",
+                label=label,
+            )
         fig.axes[2].plot(
             data.frequencies,
             conditional,
@@ -386,31 +388,29 @@ class ConditionalPhaseHeraldedExp(
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="x-small", ncols=3)
         fig, axes = plots.subplots("slopes", figsize=(10, 5))
-        for name, fit in (("joint", fitted), ("gg-only", gg_fitted)):
-            for b, state in enumerate(("g", "e")):
-                axes.errorbar(
-                    data.frequencies,
-                    fit.slopes_deg[b],
-                    yerr=fit.errors_deg[b],
-                    fmt=".-",
-                    label=f"{name} actual spectator {state}",
-                )
+        for (name, fit), (b, state) in product(
+            (("joint", fitted), ("gg-only", gg_fitted)), enumerate(("g", "e"))
+        ):
+            axes.errorbar(
+                data.frequencies,
+                fit.slopes_deg[b],
+                yerr=fit.errors_deg[b],
+                fmt=".-",
+                label=f"{name} actual spectator {state}",
+            )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
         fig, axes = plots.subplots("quadratures", figsize=(11, 6))
-        for herald, values in (
-            ("gg", gg_quadratures),
-            ("ee sign-corrected", ee_quadratures),
+        for (herald, values), (b, state), (q, projection), (j, n) in product(
+            (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
+            enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
         ):
-            for b, state in enumerate(("g", "e")):
-                for q, projection in enumerate(("X", "Y")):
-                    for j, n in enumerate(data.gate_counts):
-                        axes.plot(
-                            data.frequencies,
-                            values[b, q, j],
-                            ".-",
-                            label=f"{herald} {state} {projection} n={n}",
-                        )
+            axes.plot(
+                data.frequencies,
+                values[b, q, j],
+                ".-",
+                label=f"{herald} {state} {projection} n={n}",
+            )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="x-small", ncols=4)
         fig, axes = plots.subplots("herald", figsize=(12, 5))
