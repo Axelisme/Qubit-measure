@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 import pytest
-from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, QickSweep1D, WriteReg
+from qick.asm_v2 import CloseLoop, Macro, OpenLoop, Pulse, QickParam, QickSweep1D, WriteReg
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -551,7 +551,7 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
                     prog.delay_timeline(25 / 430.08)
             prog.pulse(0, "p0", timeline="default")
             # Unmanaged output must still see the incoming reference.
-            prog.pulse(1, "p1", t=0)
+            prog.append_macro(Pulse(ch=1, name="p1", t=0))
 
         if inside_repeat:
             prog.sync()

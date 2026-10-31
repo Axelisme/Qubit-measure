@@ -639,6 +639,7 @@ class RepeatTimelineExit(Macro):
 
     def __init__(self, entry: RepeatTimelineEnter, iterations: int | str, minimum: int, maximum: int | None, axis: str):
         self.entry = entry
+        self.iterations = iterations
         self.accumulator = LoopTimelineExit(entry.accumulator, iterations, minimum, maximum)
         self.reference = TimelineRepeatExit(entry.book, minimum, maximum, variable=isinstance(iterations, str) and (maximum is None or minimum != maximum), iterations=iterations, axis=axis)
 
@@ -1087,7 +1088,7 @@ class TimelineBranch(Macro):
                 macro.iterations
                 for case in self.cases
                 for macro in case
-                if isinstance(macro, LoopTimelineExit)
+                if isinstance(macro, (LoopTimelineExit, RepeatTimelineExit))
                 and isinstance(macro.iterations, str)
             }
             for register in registers:

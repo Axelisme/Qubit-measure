@@ -1,5 +1,6 @@
 """Structured compiled control through public compilation and numeric requests."""
 
+from qick.asm_v2 import Trigger
 from dataclasses import replace
 
 import numpy as np
@@ -193,7 +194,7 @@ def test_repeat_checks_actual_adc_reads_against_unchanged_static_layout(
             p.emit(loader)
         p.sync()
         with p.repeat('inner', 'count' if register_count else count, **{'range_hint': (0, 3)} if register_count else {}):
-            p.trigger([0], t=0)
+            p.append_macro(Trigger(ros=[0], t=0))
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -231,7 +232,7 @@ def test_register_repeat_rejects_point_dependent_adc_counts_against_static_layou
         p.emit(loader)
         p.sync()
         with p.repeat('inner', 'count', range_hint=(1, 3)):
-            p.trigger([0], t=0)
+            p.append_macro(Trigger(ros=[0], t=0))
             p.pulse(0, "p", timeline="default")
             p.sync()
 
@@ -285,7 +286,7 @@ def test_scan_total_cannot_mask_per_shot_adc_read_count_mismatch(counts):
         p.emit(loader)
         p.sync()
         with p.repeat('inner', 'count', range_hint=(0, 2)):
-            p.trigger([0], t=0)
+            p.append_macro(Trigger(ros=[0], t=0))
             p.pulse(0, "p", timeline="default")
             p.sync()
 

@@ -1,5 +1,6 @@
 """Runtime readout timing through public native compile/request seams."""
 
+from qick.asm_v2 import Trigger
 from dataclasses import replace
 
 import pytest
@@ -30,7 +31,7 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
             bit = p.soccfg["readouts"][0]["trigger_bit"]
             p.write_reg_op("mask", "mask", "SL", bit)
             p.write_reg_op("when", "inner", "SL", 7)
-            p.trigger([0], t=0)
+            p.append_macro(Trigger(ros=[0], t=0))
             p.sync()
 
     def transform(snapshot):

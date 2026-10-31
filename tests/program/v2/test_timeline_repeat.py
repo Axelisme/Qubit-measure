@@ -1,5 +1,6 @@
 """Repeat boundaries through native compilation and linked timing analysis."""
 
+from zcu_tools.program.v2.macro.wmem import PulseFromRegs
 from collections.abc import Callable
 from contextlib import nullcontext
 
@@ -1054,7 +1055,7 @@ def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
     def body(prog):
         prog.sync()
         with prog.repeat('r', 2):
-            prog.pulse(0, "p0")  # Native events do not advance default.
+            prog.append_macro(Pulse(ch=0, name='p0'))  # Native events do not advance default.
             prog.delay_timeline(10 / 430.08)
             prog.sync()
 
@@ -1110,7 +1111,7 @@ def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 2):
-                prog.pulse(0, "p0")
+                prog.append_macro(Pulse(ch=0, name='p0'))
                 prog.delay_timeline(10 / 430.08)
                 prog.sync()
             prog.sync()
@@ -1134,10 +1135,10 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
         prog.sync()
         with prog.repeat('r', count, range_hint=hint):
             if native_prefix:
-                prog.pulse(0, "p0")
+                prog.append_macro(Pulse(ch=0, name='p0'))
                 prog.delay_timeline(28 / 430.08)
             prog.pulse(0, "p0", timeline="default")
-            prog.pulse(0, "p0", t=(56 if native_prefix else 28) / 430.08)
+            prog.append_macro(Pulse(ch=0, name='p0', t=(56 if native_prefix else 28) / 430.08))
             prog.sync()
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
@@ -1152,7 +1153,7 @@ def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, i
             prog.sync()
             with prog.repeat('inner', inner):
                 prog.pulse(0, "p0", timeline="default")
-                prog.pulse(0, "p0", t=28 / 430.08)
+                prog.append_macro(Pulse(ch=0, name='p0', t=28 / 430.08))
                 prog.sync()
             prog.sync()
 
@@ -1169,7 +1170,7 @@ def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, h
         prog.sync()
         with prog.repeat('r', count, range_hint=hint):
             prog.pulse(0, "p0", timeline="default")
-            prog.pulse(0, "p0", t=28 / 430.08)
+            prog.append_macro(Pulse(ch=0, name='p0', t=28 / 430.08))
             prog.sync()
 
     (shot,) = _shots(_program(body, initialize))
@@ -1186,7 +1187,7 @@ def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
         prog.sync()
         with prog.repeat('r', 'count' if register else 2, range_hint=(0, 2) if register else None):
             prog.pulse(0, "p0", timeline="default")
-            prog.pulse(0, "p0", t=28 / 430.08)
+            prog.append_macro(Pulse(ch=0, name='p0', t=28 / 430.08))
             prog.delay_timeline(28 / 430.08)
             prog.sync()
 
@@ -1205,7 +1206,7 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count', range_hint=(0, 4)):
-                prog.pulse(0, "p0")
+                prog.append_macro(Pulse(ch=0, name='p0'))
                 prog.delay_timeline(28 / 430.08)
                 prog.pulse(0, "p0", timeline="default")
                 prog.sync()
@@ -1229,10 +1230,10 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count' if register else 2, range_hint=(1, 3) if register else None):
-                prog.pulse(0, "p0")
+                prog.append_macro(Pulse(ch=0, name='p0'))
                 prog.delay_timeline(QickSweep1D("scan", 28 / 430.08, 38 / 430.08))
                 prog.pulse(0, "p0", timeline="default")
-                prog.pulse(0, "p0", t=QickSweep1D("scan", 56 / 430.08, 66 / 430.08))
+                prog.append_macro(Pulse(ch=0, name='p0', t=QickSweep1D('scan', 56 / 430.08, 66 / 430.08)))
                 if safe:
                     prog.delay_timeline(28 / 430.08)
                 prog.sync()
@@ -1265,7 +1266,7 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
         with prog.repeat('outer', 2):
             prog.sync()
             with prog.repeat('inner', 'count' if register else 2, range_hint=(1, 3) if register else None):
-                prog.pulse(0, "p0")
+                prog.append_macro(Pulse(ch=0, name='p0'))
                 prog.delay_timeline(QickSweep1D("scan", 20 / 430.08, 40 / 430.08))
                 prog.sync()
             prog.pulse(0, "p0", t=30 / 430.08, timeline="default")
@@ -1291,9 +1292,9 @@ def test_repeat_guard_observes_native_pulse_entrypoints(native):
             if native == "macro":
                 prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
             elif native == "runtime-words":
-                prog.pulse_from_regs(0, "p0", gain_reg="count", t=28 / 430.08)
+                prog.append_macro(PulseFromRegs(ch=0, name='p0', gain_reg='count', t=28 / 430.08))
             else:
-                prog.pulse(0, "p0", t="auto")
+                prog.append_macro(Pulse(ch=0, name='p0', t='auto'))
             prog.sync()
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
@@ -1323,7 +1324,7 @@ def test_repeat_guard_protects_module_emission_after_native_tail():
         prog.sync()
         with prog.repeat('r', 2):
             prog.emit(pulse)
-            prog.pulse(0, "p0", t=28 / 430.08)
+            prog.append_macro(Pulse(ch=0, name='p0', t=28 / 430.08))
             prog.sync()
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
