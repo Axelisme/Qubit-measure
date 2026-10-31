@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
@@ -127,6 +128,7 @@ class _DeferredPollBackground:
         try:
             result = work()
         except (Exception, KeyboardInterrupt) as exc:
+            logging.exception("Deferred device poll work failed")
             self._delivery = lambda exc=exc: on_error(exc)
         else:
             self._delivery = lambda result=result: on_done(result)
