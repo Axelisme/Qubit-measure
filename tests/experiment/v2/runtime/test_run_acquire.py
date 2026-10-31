@@ -115,10 +115,10 @@ def test_single_adc_default_converter_preserves_all_signal_axes(
             else schedule.run_acquire_decimated
         )
         result = run(RawProgram([raw]), "soc")
-    expected_iq = raw[0] if mode == "integrated" else raw
-    np.testing.assert_array_equal(result.real, expected_iq[..., 0])
-    np.testing.assert_array_equal(result.imag, expected_iq[..., 1])
-    assert result.shape == signal_shape
+        expected_iq = raw[0] if mode == "integrated" else raw
+        np.testing.assert_array_equal(np.real(result), expected_iq[..., 0])
+        np.testing.assert_array_equal(np.imag(result), expected_iq[..., 1])
+        assert result.shape == signal_shape
 
 
 @pytest.fixture

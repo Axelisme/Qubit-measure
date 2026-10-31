@@ -95,14 +95,14 @@ def test_shot_overrun_obeys_explicit_retry_budget(
                 options=RunOptions(retry=retry),
             )
 
-    assert len(polls) == (5 if retry else 3)
-    assert sched.outcome.status == ("completed" if retry else "failed")
-    if retry:
-        np.testing.assert_allclose(result, 30 if mode == "summed" else 5 - 5j)
-    else:
-        assert isinstance(sched.outcome.exception, AcquisitionContractError)
-        np.testing.assert_array_equal(result, 7 + 8j)
-    np.testing.assert_array_equal(buffer.array, result)
+        assert len(polls) == (5 if retry else 3)
+        assert sched.outcome.status == ("completed" if retry else "failed")
+        if retry:
+            np.testing.assert_allclose(result, 30 if mode == "summed" else 5 - 5j)
+        else:
+            assert isinstance(sched.outcome.exception, AcquisitionContractError)
+            np.testing.assert_array_equal(result, 7 + 8j)
+        np.testing.assert_array_equal(buffer.array, result)
 
 
 def test_shot_overrun_restarts_all_rounds_with_one_retry(
