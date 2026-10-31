@@ -244,7 +244,9 @@ Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為�
 Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
 Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
-作者 sweep 使用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。非仿射的 runtime 跨格點長度在 build 報錯，留給 runtime 換算階段處理。
+作者 sweep 使用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
+Runtime 跨 generator 格點的長度使用 k=8 定點換算，aggregate 加 post 後再 ceil。
+作者明確宣告的值表與 waveform／length selection tables 保留。IR dispatch 的 jump-address table 也保留，不是逐點時間 table。
 ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
 未進入 timeline 範圍時，省略 timeline 選 default，但不移動 reference。
 以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
