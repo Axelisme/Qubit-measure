@@ -32,6 +32,7 @@ from ._timeline_outputs import (
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
 )
+from ._timeline_repeat import LoopTimelineExit
 from ._timeline_runtime import (
     DeferredCoverage,
     EventEnd,
@@ -1034,8 +1035,8 @@ class TimelineBranch(Macro):
         if self.align_timeline:
             registers = prog._time_bounds.defined | self.book.source_expressions.keys()
             registers |= {
-                name for name in prog.reg_dict
-                if name not in prog.loop_dict and prog._time_bounds.author_source(name)
+                macro.iterations for case in self.cases for macro in case
+                if isinstance(macro, LoopTimelineExit) and isinstance(macro.iterations, str)
             }
             for register in registers:
                 expression = (

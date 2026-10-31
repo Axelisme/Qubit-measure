@@ -24,7 +24,7 @@ class FixedRawShots:
         """Return owned int64 shots by repeating literal sums in loop order."""
         return {
             channel: np.rint(
-                np.repeat(np.expand_dims(value, avg_level), reps, advance_ref=True, axis=avg_level)
+                np.repeat(np.expand_dims(value, avg_level), reps, axis=avg_level)
             ).astype(np.int64)
             for channel, value in self.values.items()
         }
