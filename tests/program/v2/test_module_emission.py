@@ -206,7 +206,9 @@ def test_shared_runtime_readout_keeps_each_programs_templates():
         return _program([readout], body, initialize)
 
     first = build(shared, interleave=True)
-    fresh = build(_readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"))
+    fresh = build(
+        _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word")
+    )
     other_fresh = build(
         _readout(freq_val="frequency", gain_val="gain", ro_freq_val="adc_word"),
         padded=True,
@@ -560,7 +562,9 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
         )
         prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
-        prog.pulse(0, pulse.pulse_name(prog), t=1 / 430.08, timeline=timeline, tag="after")
+        prog.pulse(
+            0, pulse.pulse_name(prog), t=1 / 430.08, timeline=timeline, tag="after"
+        )
 
     prog = _program([pulse], body, initialize)
     assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(1)

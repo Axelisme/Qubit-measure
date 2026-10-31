@@ -158,7 +158,9 @@ class LoadValue(Module):
             raise ValueError(f"{self.name}: selected playback needs a nonempty table")
         captured = prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
         relation = TableSelection(
-            prog.get_module_state(self, _LookupDeclaration).table, self.val_reg, captured
+            prog.get_module_state(self, _LookupDeclaration).table,
+            self.val_reg,
+            captured,
         )
         index_limits = CycleBounds(0, len(self.values) - 1)
         with prog.time_producer(

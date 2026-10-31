@@ -378,7 +378,9 @@ class PulseReadout(AbsReadout):
 
     def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         """Declare the generator, ADC window and fixed/runtime configuration templates."""
-        state = self._declare_resources(prog, declare_pulse=lambda pulse: pulse.init(prog))
+        state = self._declare_resources(
+            prog, declare_pulse=lambda pulse: pulse.init(prog)
+        )
         self._runtime_pulse = state.runtime_pulse
         self._runtime_ro_name = state.runtime_ro_name
 

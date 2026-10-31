@@ -339,10 +339,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         entry = self._module_states.get(id(module))
         if entry is None or entry[0] is not module:
-            raise ValueError(f"{module.name}: module has no declaration on this program")
+            raise ValueError(
+                f"{module.name}: module has no declaration on this program"
+            )
         state = entry[1]
         if not isinstance(state, state_type):
-            raise ValueError(f"{module.name}: expected {state_type.__name__} declaration")
+            raise ValueError(
+                f"{module.name}: expected {state_type.__name__} declaration"
+            )
         return state
 
     def declare(self, module: Module) -> None:
