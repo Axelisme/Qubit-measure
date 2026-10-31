@@ -209,19 +209,18 @@ class JointReadoutHeraldedExp(
 
         buffer = SignalBuffer((4, 3, 3, 3, 3), dtype=np.float64, on_update=update_view)
         with Schedule(config, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
             builder = TimelineBuilder(
                 context.soccfg,
-                reps=cfg.reps,
-                initial_delay=cfg.initial_delay,
-                relax_delay=cfg.relax_delay,
+                reps=config.reps,
+                initial_delay=config.initial_delay,
+                relax_delay=config.relax_delay,
             )
             builder.add_loop("prepared_states", len(PREPARED_STATES))
-            readout = MuxReadout("readout", cfg.readout)
-            x180_f1 = Pulse("x180_f1", cfg.x180_f1)
-            x180_f2 = Pulse("x180_f2", cfg.x180_f2)
-            if cfg.reset is not None:
-                builder.emit(Reset("reset", cfg.reset))
+            readout = MuxReadout("readout", config.readout)
+            x180_f1 = Pulse("x180_f1", config.x180_f1)
+            x180_f2 = Pulse("x180_f2", config.x180_f2)
+            if config.reset is not None:
+                builder.emit(Reset("reset", config.reset))
             builder.emit(readout, tag="herald")
             with builder.branch(by="prepared_states") as cases:
                 for f1, f2 in PREPARED_STATES:
@@ -236,16 +235,16 @@ class JointReadoutHeraldedExp(
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
-                Classify("herald", cfg.roles.f1_tone),
-                Classify("herald", cfg.roles.f2_tone),
-                Classify("terminal", cfg.roles.f1_tone),
-                Classify("terminal", cfg.roles.f2_tone),
+                Classify("herald", config.roles.f1_tone),
+                Classify("herald", config.roles.f2_tone),
+                Classify("terminal", config.roles.f1_tone),
+                Classify("terminal", config.roles.f2_tone),
             ]
             sched.run_acquire_summed(
                 prog,
                 context.soc,
                 processor=shot_sums(prog, axes),
-                rounds=cfg.rounds,
+                rounds=config.rounds,
                 options=RunOptions(),
             )
         return JointReadoutHeraldedResult(np.arange(4, dtype=np.int64), buffer.array)
