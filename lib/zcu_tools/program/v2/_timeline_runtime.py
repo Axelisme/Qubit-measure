@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from qick.asm_v2 import AsmInst, Macro, QickParam, TimedMacro, WriteReg
@@ -113,9 +113,13 @@ class RuntimeEnd:
     deferred records physical boundaries covered only after an additional proven
     nonnegative cycle advance; negative operations and reference debits drop it.
     expression carries correlated integer-cycle algebra for native timestamp
-    projection only. None creates a fresh bounded value (or an exact constant);
-    copying a value must preserve its expression, not its recycled register name.
-    The original intervals still control register arithmetic and overflow checks.
+    projection and maximum proofs over the complete legal producer-axis domain.
+    Unknown values cannot supply point samples. None creates a fresh bounded
+    value (or an exact constant); copying preserves this immutable value identity,
+    never reconstructing it from a recycled register name. Maximum proofs retain
+    both operands' coverage and deferred boundaries. Producer registration and
+    whole-stream write audits remain required. The original intervals still
+    control emitted register arithmetic and overflow checks.
     """
 
     register: str
@@ -510,7 +514,10 @@ class RuntimeMath(TimedMacro):
         offset = self.prog.add_timing_dmem(values, owner=owner)
         register = self.allocate()
         index = sweep_table_index(
-            self.prog, axes, name=f"_timeline_index_{len(self.prog.reg_dict)}"
+            self.prog,
+            axes,
+            name=f"_timeline_index_{len(self.prog.reg_dict)}",
+            shared_indices=self.prog._timeline_book.sweep_indices,
         )
         operation = DmemLookup(
             dst=register, index=index, offset=offset, address=self.scratch(3)
@@ -805,11 +812,49 @@ class RuntimeMath(TimedMacro):
         known = known_maximum(a, b)
         if known is not None:
             return known
-        left, right = self.cycles(a), self.cycles(b)
-        if left.minimum >= right.maximum:
+        # Prove dominance before allocating static operands. Use the same native
+        # cycle quantization as materialization, and still validate both ranges.
+        limits: list[tuple[int, int]] = []
+        expressions: list[TimeExpression] = []
+        for value in (a, b):
+            rounded = (
+                value if isinstance(value, RuntimeEnd) else step_time(self.prog, value)
+            )
+            lo, hi = time_bounds(self.prog, rounded)
+            lower = round(lo * get_fclk(self.prog))
+            upper = round(hi * get_fclk(self.prog))
+            self.check(lower, upper)
+            limits.append((lower, upper))
+            expressions.append(time_expression(self.prog, rounded))
+        if limits[0][0] >= limits[1][1]:
             return a
-        if right.minimum >= left.maximum:
+        if limits[1][0] >= limits[0][1]:
             return b
+        # Evaluate the complete Cartesian union, broadcasting shared axes rather
+        # than zipping independent producers. Unknown sources retain runtime max.
+        delta = add_time(expressions[0], scale_time(expressions[1], -1))
+        points = evaluate_time(delta, expression_axes(delta))
+        dominant = None
+        if points is not None:
+            if np.all(points >= 0):
+                dominant = a
+            elif np.all(points <= 0):
+                dominant = b
+        if dominant is not None:
+            return replace(
+                self.cycles(dominant),
+                covers=(
+                    a,
+                    b,
+                    *(a.covers if isinstance(a, RuntimeEnd) else ()),
+                    *(b.covers if isinstance(b, RuntimeEnd) else ()),
+                ),
+                deferred=(
+                    *(a.deferred if isinstance(a, RuntimeEnd) else ()),
+                    *(b.deferred if isinstance(b, RuntimeEnd) else ()),
+                ),
+            )
+        left, right = self.cycles(a), self.cycles(b)
         destination = self.allocate() if target is None else target
         # A fresh result can hold intermediates. An explicitly aliased target
         # must preserve both input operands until the final addition.
