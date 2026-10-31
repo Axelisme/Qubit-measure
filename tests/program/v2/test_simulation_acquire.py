@@ -88,10 +88,9 @@ def test_builder_program_acquires_and_sums_tagged_readouts():
         assert request is not None
         assert request.point_names == ("point",)
         assert request.reps == 3
-        assert [read.samples for read in request.materialize_point(0).readouts] == [
-            16,
-            16,
-        ]
+        (window,) = request.materialize_point(0).readouts
+        assert window.samples == 16
+        assert len(window.trigger_us) == 2
     finally:
         env.devices.close_all_devices()
 
