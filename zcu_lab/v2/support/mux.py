@@ -5,24 +5,21 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules import MuxReadout
 
 
 def averaged_mux_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
+    prog: TimelineProgramV2, readout: MuxReadout, acquired: Sequence[NDArray[np.float64]]
 ) -> NDArray[np.complex128]:
-    """Collect normalized complex IQ from the program's named readout module.
+    """Collect this program's averaged IQ in the explicit readout's tone order.
 
-    Preserve acquisition axis order (point, tone for a hardware sweep).
-    Raise ValueError when prog has no MuxReadout named readout. Collection
-    uses the initialized module owned by prog, not a builder's copied cfg.
+    Preserve acquisition axis order (point, tone for a hardware sweep), ADC
+    normalization and offsets. The owner rejects modules not emitted by prog
+    and invalid acquired arrays. No averaging or classification is added here.
     """
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-    raise ValueError("Mux program is missing its named MuxReadout")
+    iq = readout.collect_iq(prog, acquired, read_index=0)
+    return iq[..., 0] + 1j * iq[..., 1]
 
 
 @dataclass(frozen=True)

@@ -29,20 +29,18 @@ from functools import partial
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import StrictInt, model_validator
 from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.context import RunContext
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
+from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules import (
     ConstWaveform,
     FlatTopWaveform,
-    Join,
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
@@ -113,6 +111,12 @@ class MuxGECfg(ConfigBase):
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
 
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
+    participants: list[StrictInt]
+    shots: StrictInt
+
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -128,11 +132,6 @@ class MuxGECfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxGEToneCfg], FieldMeta(element_label="name")]
-    participants: list[StrictInt]
-    shots: StrictInt
 
     @model_validator(mode="after")
     def validate_acquisition(self) -> MuxGECfg:
@@ -228,14 +227,12 @@ def validate_ge_result(result: MuxGEResult) -> None:
 
 
 def _raw_signal(
-    prog: ModularProgramV2, _acquired: Sequence[NDArray[np.float64]]
+    prog: TimelineProgramV2,
+    readout: MuxReadout,
+    _acquired: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
-    # The builder copies modules: use only the initialized owner from this acquire.
-    for module in prog.modules:
-        if isinstance(module, MuxReadout) and module.name == "readout":
-            iq = module.collect_raw_iq(prog, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-    raise ValueError("GE program is missing its named MuxReadout")
+    iq = readout.collect_raw_iq(prog, read_index=0)
+    return iq[..., 0] + 1j * iq[..., 1]
 
 
 def _validate_source(source: RunRecord[MuxGECfg, MuxGEResult]) -> None:
@@ -293,11 +290,11 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[MuxGEResult, MuxGECfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", "Shot Index", "", dtype=np.int64),
-            AxesSpec.Axis("prepared_states", "Probe On", "", dtype=np.int64),
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
+            AxesSpec.Axis("shot_indices", label="Shot Index", unit="", dtype=np.int64),
+            AxesSpec.Axis("prepared_states", label="Probe On", unit="", dtype=np.int64),
+            AxesSpec.Axis("tone_indices", label="Tone", unit="", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=MuxGEResult,
         cfg_type=MuxGECfg,
         cfg_schema_version="3.0",
@@ -326,72 +323,55 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         )
         shots = np.arange(cfg.shots, dtype=np.int64)
 
-        # 2. Show both preparations without averaging away their IQ spread.
+        # Show paired preparations without averaging away their IQ spread.
+        figures = []
         for index in indices:
-            context.plots.subplots(f"measurement_{index}")
+            fig, _ = context.plots.subplots(num=f"measurement_{index}")
+            figures.append(fig)
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            snapshot = data.copy()
-            for row, index in enumerate(indices):
-
-                def draw(figure: Figure, row: int = row, index: int = index) -> None:
-                    axes = figure.axes[0]
-                    axes.clear()
-                    for cloud, label, color in zip(
-                        snapshot[:, :, row],
-                        ("g preparation (probe off)", "e preparation (probe on)"),
-                        ("tab:blue", "tab:red"),
-                        strict=True,
-                    ):
-                        axes.scatter(
-                            cloud.real,
-                            cloud.imag,
-                            s=8,
-                            alpha=0.5,
-                            color=color,
-                            label=label,
-                        )
-                    axes.set(
-                        xlabel="I (a.u.)",
-                        ylabel="Q (a.u.)",
-                        title=f"{index}: {cfg.tones[index].name}",
-                    )
-                    axes.set_aspect("equal", adjustable="datalim")
-                    axes.grid()
-                    axes.legend()
-
-                context.plots.draw(f"measurement_{index}", draw)
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            for row, (index, figure) in enumerate(zip(indices, figures, strict=True)):
+                axes = figure.axes[0]
+                axes.clear()
+                for cloud, label, color in zip(
+                    data[:, :, row],
+                    ("g preparation (probe off)", "e preparation (probe on)"),
+                    ("tab:blue", "tab:red"), strict=True,
+                ):
+                    axes.scatter(cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label)
+                axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title=f"{index}: {cfg.tones[index].name}")
+                axes.set_aspect("equal", adjustable="datalim")
+                axes.grid()
+                axes.legend()
+            return tuple(figures)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(None, buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("probe on", [False, True]):
                 # 3. Start tone branches together; read out after the longest one.
                 # Init runs in both preparations, probe only in the second.
-                branches = [
-                    [
-                        Pulse(f"init_{i}", cfg.tones[i].init_pulse),
-                        Pulse(
-                            f"probe_{i}",
-                            cfg.tones[i].require_drive() if with_probe else None,
-                        ),
-                    ]
-                    for i in indices
-                ]
-                builder = (
-                    step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=cfg.shots,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    .add_reset("reset", cfg.reset)
-                    .add(Join(*branches), MuxReadout("readout", readout))
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
                 )
+                builder.emit(Reset("reset", cfg.reset))
+                timelines = [f"tone_{i}" for i in indices]
+                builder.fork("default", into=timelines)
+                for i, timeline in zip(indices, timelines, strict=True):
+                    builder.emit(Pulse(f"init_{i}", cfg.tones[i].init_pulse), timeline=timeline)
+                    builder.emit(Pulse(f"probe_{i}", cfg.tones[i].require_drive() if with_probe else None), timeline=timeline)
+                builder.join(*timelines, into="default")
+                readout_module = MuxReadout("readout", readout)
+                builder.emit(readout_module)
                 prog = builder.build()
                 # Read normalized shots from this program's initialized readout.
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_raw_signal, prog), rounds=1
+                _ = step.run_acquire(
+                    prog, context.soc, rounds=1,
+                    options=RunOptions(converter=partial(_raw_signal, prog, readout_module)),
                 )
 
         # 4. Keep completed preparations in participant/preparation/shot order.

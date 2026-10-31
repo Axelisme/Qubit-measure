@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import Macro, QickParam
 
 from zcu_tools.cfg_model import (
     Centroid3Classifier,
@@ -970,7 +970,7 @@ class MuxReadout(AbsReadout):
                 raise ValueError(f"{self.name}: use the program that initialized this module")
             return
 
-        def emitted(macros) -> bool:
+        def emitted(macros: Sequence[Macro]) -> bool:
             for macro in macros:
                 source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
                 if isinstance(source, ReadoutEmission) and source.owner is self:

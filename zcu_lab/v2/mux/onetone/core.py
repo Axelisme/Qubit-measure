@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
@@ -16,13 +15,14 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, Reset, SweepCfg
+from zcu_tools.program.v2 import Reset, SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.resonator import (
     ResonanceFit,
     ResonanceOptions,
@@ -149,30 +149,6 @@ class MuxOnetoneCfg(ConfigBase):
     Saved data retains the full base readout, including inactive tones.
     """
 
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    initial_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Initial delay",
-            unit="us",
-            description="Delay before the first repetition.",
-        ),
-    ] = 1.0
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     readout: Annotated[
         MuxReadout.Cfg,
@@ -208,6 +184,31 @@ class MuxOnetoneCfg(ConfigBase):
         ),
     ]
 
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial delay",
+            unit="us",
+            description="Delay before the first repetition.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+
     @field_validator("participants")
     @classmethod
     def validate_participants(cls, value: list[int], info: ValidationInfo) -> list[int]:
@@ -226,17 +227,6 @@ class MuxOnetoneCfg(ConfigBase):
                 "participants indices must be in 0..N-1 of the full readout"
             )
         return value
-
-
-def _mux_signal(
-    prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-) -> NDArray[np.complex128]:
-    # Builder deep-copies modules; only the program-owned instance is initialized.
-    for module in prog.modules:
-        if module.name == "readout" and isinstance(module, MuxReadout):
-            iq = module.collect_iq(prog, acquired, read_index=0)
-            return iq[:, 0] + 1j * iq[:, 1]
-    raise ValueError("Mux program is missing its named readout MuxReadout")
 
 
 def validate_analysis_source(
@@ -333,10 +323,10 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[MuxOnetoneResult, MuxOnetoneCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("tone_indices", "Tone", "", dtype=np.int64),
-            AxesSpec.Axis("dfs", "Frequency offset", "Hz", scale=1e6),
+            AxesSpec.Axis("tone_indices", label="Tone", unit="", dtype=np.int64),
+            AxesSpec.Axis("dfs", label="Frequency offset", unit="Hz", scale=1e6),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=MuxOnetoneResult,
         cfg_type=MuxOnetoneCfg,
         cfg_schema_version="3.0",
@@ -393,25 +383,25 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
             tones=[base_readout.tones[index] for index in indices]
         )
         # 2. Give each selected spectrum its own figure and original tone identity.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Nominal frequency offset (MHz)",
-                "Magnitude (a.u.)",
-                title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}",
-            )
-            for index in indices
-        ]
+        viewers = []
+        for index in indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(xlabel="Nominal frequency offset (MHz)", ylabel="Magnitude (a.u.)", title=f"{index}: {base_readout.tones[index].label or f'tone {index}'}")
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for column, viewer in enumerate(viewers):
-                viewer.update(dfs, np.abs(data[:, column]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(dfs, np.abs(data[:, row]))
+            )
 
         signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)
 
         # 3. Rebuild reset -> mux readout at each offset, always from the base tones.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
             for df, step in sched.scan("df", dfs.tolist()):
                 readout = active_readout.with_updates(
                     tones=[
@@ -419,21 +409,20 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
                         for tone in active_readout.tones
                     ]
                 )
-                builder = (
-                    step.prog_builder(
-                        context.soc,
-                        context.soccfg,
-                        reps=step.cfg.reps,
-                        initial_delay=step.cfg.initial_delay,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add_reset("reset", step.cfg.reset)
-                    .add(MuxReadout("readout", readout))
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=cfg.reps,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
                 )
+                builder.emit(Reset("reset", cfg.reset))
+                readout_module = MuxReadout("readout", readout)
+                builder.emit(readout_module)
                 prog = builder.build()
                 # Collect all selected ADCs and average reps/rounds into this scan row.
-                _ = builder.run_program(
-                    prog, raw2signal_fn=partial(_mux_signal, prog), rounds=cfg.rounds
+                _ = step.run_acquire(
+                    prog, context.soc, rounds=cfg.rounds,
+                    options=RunOptions(converter=partial(averaged_mux_signal, prog, readout_module)),
                 )
 
         # 4. Keep acquired rows and the original tone mapping, including partial scans.
