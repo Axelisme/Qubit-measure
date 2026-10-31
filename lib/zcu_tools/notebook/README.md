@@ -119,7 +119,7 @@ Notebook 在建立 RunContext 後、core.run 前，對全部已連線 device 各
 
 `acquisition_for(source)` 只接受此 NotebookExperiment 最近成功 run 的同一 RunRecord，回傳隔離的 run identity、UTC 開始／結束時間、complete／stopped 與 software provenance。Run 在 core acquire 前捕捉 software evidence，core 正常回傳後結束計時，不包含 plots.finish、analyze 或 save。Presentation 成功後才成組發布 record 與 evidence。Analyze 與所有失敗保留 evidence，下一次成功 run 取代它，成功 load 清除它。Loaded、手組、另一 adapter 或過期 record 不能取得此 acquisition evidence。Completion 依 adapter 本次是否送過停止請求記為 stopped 或 complete，不讀 core 或子 scope 的完成事實。子 scope 取消不會自動將 Notebook record 標為 stopped。
 
-NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 的發布只看 core 正常回傳或拋錯，不檢查 StopSignal 的錯誤或 partial facts。逃出 core 的 KeyboardInterrupt 也原樣傳播，不發布當次 record。SIGINT handler、首次中斷的停止請求與逾時契約見[共用實驗入口](#共用實驗入口)。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
+NotebookExperiment 隔離 caller cfg／options 與核心工作輸入，不深拷貝大型 Result 或 Figure。Record-owned cfg／options 可被使用者刻意修改，不承諾完整不可變歷史。成功分析才成組提交 record 與 presentation handle。Run 的發布只看 core 正常回傳或拋錯，不判斷資料完整度，也不讀作者工具的 outcome。逃出 core 的 KeyboardInterrupt 也原樣傳播，不發布當次 record。SIGINT handler、首次中斷的停止請求與逾時契約見[共用實驗入口](#共用實驗入口)。Run／load 成功清目前分析引用，失敗保留前次成功組；分析舊 source 不替換 last_run。Notebook 的 run、同步分析與 GE post 共用失敗呈現的收尾，保留 producer 與 cleanup 錯誤，只釋放本次呈現，不關閉使用者持有的舊圖。Record 的 figures 只有具名 Mapping 與原生 Matplotlib 操作；presentation handle 另持有 Plots.release 責任。
 
 明確 Notebook host 同步執行 caller 的操作，caller 負責順序。Host 在發布前完成
 widget 初始化，普通更新與最後刷新都同步繪製，不等待 cell 結束才處理前端請求。
