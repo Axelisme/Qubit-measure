@@ -298,8 +298,8 @@ For example, set a common point count and override Q3's amplitude range:
   "participants": [2, 0],
   "n": 51,
   "overrides": [
-    {"path": "tones.2.sweep.start", "value": 0.0},
-    {"path": "tones.2.sweep.stop", "value": 0.3}
+    {"path": "tones.2.gain.start", "value": 0.0},
+    {"path": "tones.2.gain.stop", "value": 0.3}
   ]
 }
 ```
@@ -367,7 +367,7 @@ Drive DAC frequencies advance in one shared hardware loop while mux readout
 tones and ADC frequencies stay fixed.
 
 Choose each `tones[i].drive`. Use dotted-path overrides to set MHz bounds at
-`tones[i].sweep.start` and `stop`, or supply the full `sweeps` list.
+`tones[i].freq.start` and `stop`, or supply the full `sweeps` list.
 Set shared `n` for all tones. The scans advance together by point number, not through every combination
 of frequencies. Set `model_type` to `lor` or `sinc` to select the fit model.
 Set `plot_fit` to false to hide the fitted curve without changing the fit.
@@ -388,7 +388,7 @@ using the [Save and Apply procedure](#save-review-and-apply).
 `mux_amp_rabi` opens `mux/amp_rabi`. It scans drive gain on selected qubits and
 fits Rabi oscillations to estimate pi and pi/2 gains.
 
-Choose each `tones[i].drive`. Set `tones[i].sweep.start` and `stop` in native
+Choose each `tones[i].drive`. Set `tones[i].gain.start` and `stop` in native
 gain units, or supply the full `sweeps` list and one shared `n`.
 Copy a referenced drive inline before editing its fields.
 Each scan point applies the corresponding
@@ -412,7 +412,7 @@ oscillations to estimate pi and pi/2 lengths and the Rabi frequency.
 
 Set `tones[i].drive` to a const or flat_top pulse. A flat_top duration must exceed
 both ramps. Arb waveforms are not supported for this scan. Set each
-`tones[i].sweep.start` and `stop` in us, or supply the full `sweeps` list.
+`tones[i].length.start` and `stop` in us, or supply the full `sweeps` list.
 Set shared `n` for all tones.
 The recipe does not stretch or crop a waveform to make it valid.
 
@@ -433,7 +433,8 @@ and slot destinations in the [review step](#save-review-and-apply).
 and measures mux IQ to fit their energy relaxation.
 
 Select calibrated pi pulses at `tones[i].drive`. Set the shared us range with
-`"delays.start"`, `"delays.stop"` and `"delays.n"` overrides.
+`"delay.start"`, `"delay.stop"` and `"delay.n"` overrides.
+`sampling` defaults to `"linear"`; select `"decay"` for a nonuniform delay table.
 There is one requested-delay axis for all participants.
 
 Successful report rows contain `t1` and optional second decay `t1b` in us
