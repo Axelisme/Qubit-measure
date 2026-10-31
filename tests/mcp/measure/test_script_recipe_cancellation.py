@@ -339,7 +339,7 @@ def test_failed_run_retains_only_its_own_frontend_stop_facts(
             return {"reason": "completed", "status": "failed", "error": "core failed"}
         if method == "tab.snapshot" and gui.runs == 1:
             if snapshot_fails:
-                raise ValueError("snapshot unavailable")
+                return {"tabs": []}
             return {"tabs": [{
                 "tab_id": "tab-1", "adapter_name": "synthetic",
                 "interaction": {"is_running": False, "is_analyzing": False},
