@@ -128,7 +128,8 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
             phase = builder.add_sweep("phase", cfg.phase)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(BathReset("tested_reset", cfg.tested_reset, pi2_phase=phase))
             builder.emit(Readout("readout", cfg.readout))

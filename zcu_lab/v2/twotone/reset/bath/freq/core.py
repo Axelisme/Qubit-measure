@@ -168,7 +168,8 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             gain = builder.add_sweep("gain", cfg.gain)
             freq = builder.add_sweep("freq", cfg.freq)
             phase = QickSweep1D("phase", 0.0, 270.0) + cfg.tested_reset.pi2_cfg.phase
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(
                 BathReset(

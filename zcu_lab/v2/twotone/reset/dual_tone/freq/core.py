@@ -146,7 +146,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         # Host rows are frequency 2; the Result restores frequency-1 rows.
         soc, soccfg = context.soc, context.soccfg
         plots = context.plots
-        fig, (map_ax, line_ax) = plots.subplots(1, 2, num="measurement")
+        fig, _ = plots.subplots(nrows=1, ncols=2, num="measurement")
+        map_ax, line_ax = fig.axes
         map_ax.set(xlabel="Frequency1 (MHz)", ylabel="Frequency2 (MHz)")
         line_ax.set_xlabel("Frequency1 (MHz)")
         viewer = live_heatmap(map_ax)
@@ -171,7 +172,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
                 freq1 = builder.add_sweep("freq1", cfg.freq1)
-                builder.emit(Reset("reset", cfg.reset))
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
                 builder.emit(Pulse("init_pulse", cfg.init_pulse))
                 builder.emit(
                     TwoPulseReset(
@@ -216,7 +218,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             )
             freq1 = builder.add_sweep("freq1", cfg.freq1)
             freq2 = builder.add_sweep("freq2", cfg.freq2)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(
                 TwoPulseReset(

@@ -147,7 +147,8 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             )
             gain1 = builder.add_sweep("gain1", cfg.gain1)
             gain2 = builder.add_sweep("gain2", cfg.gain2)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(
                 TwoPulseReset(

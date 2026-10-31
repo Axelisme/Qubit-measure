@@ -162,7 +162,8 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                             relax_delay=cfg.relax_delay,
                         )
                         builder.add_loop("phase", 4)
-                        builder.emit(Reset("reset", cfg.reset))
+                        if cfg.reset is not None:
+                            builder.emit(Reset("reset", cfg.reset))
                         builder.emit(Pulse("init_pulse", cfg.init_pulse))
                         builder.emit(
                             BathReset(

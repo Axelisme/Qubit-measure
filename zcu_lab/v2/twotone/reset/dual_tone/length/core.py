@@ -136,7 +136,8 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             tested_reset_cfg = deepcopy(cfg.tested_reset)
             tested_reset_cfg.pulse1_cfg.set_param("length", length)
             tested_reset_cfg.pulse2_cfg.set_param("length", length + length_diff)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("init_pulse", cfg.init_pulse))
             builder.emit(TwoPulseReset("tested_reset", tested_reset_cfg))
             builder.emit(Readout("readout", cfg.readout))

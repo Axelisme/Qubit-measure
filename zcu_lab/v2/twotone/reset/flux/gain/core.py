@@ -164,18 +164,23 @@ class GainExp(Experiment[GainResult, GainCfg]):
             builder.add_loop("before_pi", 2)
             builder.add_loop("after_pi", 2)
             gain = builder.add_sweep("gain", cfg.gain)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             # Keep the selected pi duration; the off case must not gain idle time.
             builder.sync()
-            with builder.branch(by="before_pi", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="before_pi", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.sync()
             builder.emit(PulseReset("tested_reset", cfg.tested_reset, gain=gain))
             builder.sync()
-            with builder.branch(by="after_pi", align_timeline=False) as cases:
-                with cases.case(1):
-                    builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            with (
+                builder.branch(by="after_pi", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
             builder.sync()
             builder.emit(Readout("readout", cfg.readout))
             sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)

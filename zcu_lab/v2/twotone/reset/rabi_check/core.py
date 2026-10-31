@@ -123,7 +123,8 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
             )
             builder.add_loop("reset_sel", 3)
             gain = builder.add_sweep("gain", cfg.gain)
-            builder.emit(Reset("reset", cfg.reset))
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
             builder.emit(Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain))
             # Preserve each selected case's duration instead of padding to the maximum.
             builder.sync()
