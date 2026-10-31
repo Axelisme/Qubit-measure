@@ -1045,7 +1045,7 @@ def test_timeline_scope_repeat_parent_and_case_emissions_match_explicit_program(
             ):
                 with branch.case(0):
                     self.emit(readout, timeline="work")
-                    self.delay_timeline(0.02)
+                    self.delay_timeline(0.02, timeline="work")
                 with branch.case(1):
                     self.delay_timeline(0.3, timeline="work")
                     self.emit(readout, timeline="work")

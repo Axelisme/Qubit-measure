@@ -39,6 +39,7 @@ from ._timeline_runtime import (
     SelectedEventEnd,
     Time,
     align_end,
+    known_maximum,
     source_expression,
     step_time,
     time_expression,
@@ -1040,7 +1041,7 @@ class TimelineBranch(Macro):
                 (
                     name
                     for name in self.book.ends
-                    if all(
+                    if not self.align_timeline and all(
                         _same_times([snapshot[ch], result[name]])
                         for snapshot, result in zip(snapshots, results, strict=True)
                     )
@@ -1054,6 +1055,12 @@ class TimelineBranch(Macro):
             )
             if isinstance(value, RuntimeEnd):
                 channels[ch] = value
+            for name, end in self.book.ends.items():
+                if isinstance(end, RuntimeEnd) and all(
+                    known_maximum(result[name], snapshot[ch]) is result[name]
+                    for snapshot, result in zip(snapshots, results, strict=True)
+                ):
+                    self.book.ends[name] = replace(end, covers=(*end.covers, value))
             self.book.native_timestamp(
                 prog,
                 time_bounds(prog, value)[1],
