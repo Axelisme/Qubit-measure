@@ -10,6 +10,7 @@ from ._timeline_runtime import (
     RuntimeEnd,
     SelectedEventEnd,
     Time,
+    optional_time_bounds,
     placement_time,
     step_time,
     time_bounds,
@@ -71,6 +72,7 @@ class TimelineSelectedPulse(TimedMacro):
         self.selection = selection
         self.relative_t: float | QickParam = source.t
         self.event_end = SelectedEventEnd(0.0, selection.selector, (), ())
+        self.runtime_start: RuntimeEnd | None = None
 
     def _lengths(self, prog) -> tuple[float | QickParam, ...]:
         lengths: list[float | QickParam] = []
@@ -131,19 +133,24 @@ class TimelineSelectedPulse(TimedMacro):
             start = origin + offset
             raw_origin = 0.0
             offset = start
+        start_limits = optional_time_bounds(prog, start)
+        previous_limits = optional_time_bounds(prog, previous)
+        self.book.check_loop_pulse(prog, self.source.ch, start)
         if (
-            not (
+            start_limits is not None and previous_limits is not None
+            and not (
                 bounds(self.relative_t)[0] >= 0
                 and self.book.math.covers(origin, previous)
             )
-            and time_bounds(prog, start)[0] < time_bounds(prog, previous)[1] - 1e-12
+            and start_limits[0] < previous_limits[1] - 1e-12
         ):
             raise ValueError(
                 f"{self.timeline}: channel {self.source.ch} pulse overlap; cannot prove runtime start >= previous end"
             )
-        self.source.t = time_bounds(prog, start)[1]
+        self.source.t = self.book.math.preprocess_time(start) if isinstance(start, RuntimeEnd) else start
         self.source.preprocess(prog)
         if isinstance(start, RuntimeEnd):
+            self.runtime_start = start
             self.source.t_regs["t"] = start.register
         else:
             self.source.t = start
@@ -169,9 +176,7 @@ class TimelineSelectedPulse(TimedMacro):
         self.book.set_end(self.timeline, finish)
         self.book.runtime_gens[self.source.ch] = finish
         self.book.record_native(prog, self.source.ch, finish, generator=True)
-        self.book.native_timestamp(
-            prog, time_bounds(prog, finish)[1], gen_ch=self.source.ch
-        )
+        self.book.native_timestamp(prog, finish, gen_ch=self.source.ch)
         if self.book.repeats:
             lo = time_bounds(prog, start)[0]
             hi = time_bounds(prog, finish)[1]
@@ -197,4 +202,6 @@ class TimelineSelectedPulse(TimedMacro):
         return self.source.list_time_params()
 
     def get_time_param(self, name: str) -> QickParam:
+        if name == "t" and self.runtime_start is not None:
+            return self.book.math.time_parameter(self.runtime_start)
         return self.source.get_time_param(name)
