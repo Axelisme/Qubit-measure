@@ -10,11 +10,11 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、workflow 壽命比較與 adapter edelay 政策、各實驗獨立分析與畫圖、local flux reset 由 lab 組裝既有能力、五層、實驗定義的離線 probe 驗收與框架測試邊界、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、charge admission 的 caller／program／environment 分工與硬體隔離、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、workflow 壽命比較與 adapter edelay 政策、各實驗獨立分析與畫圖、local flux reset 由 lab 組裝既有能力、五層、實驗定義的離線 probe 驗收與框架測試邊界、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、charge admission 的 caller／program／environment 分工與硬體隔離、mux PFB channel 查詢歸 program 與 FTF carrier selection 的分工、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
 
 ## Concurrency / Lifecycle
 
-- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：domain admission／tab busy、啟動時 hardware exclusion、lease／handle、runner 共用 async／同步／跨 callback lease 的生命週期、event-origin scope、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：domain admission／tab busy、啟動時 hardware exclusion、lease／handle、runner 共用 async／同步／跨 callback lease 的生命週期、event-origin scope、GUI core 正常回傳 finished／拋錯 failed 與 BackgroundError owner delivery、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
 - [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
 - [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
@@ -38,9 +38,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host、await guardrail、顯式 Scope 與 selector 歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、根 ScriptCancelled 與 analyze failed 值。Workflow 的 operation 原語與 live tunables 生效點見 0062。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host、await guardrail、顯式 Scope、活子層下的 root kind selector 與歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、單次 stop_requested 與 sibling 隔離、GUI／recipe 同 Run facts、根 ScriptCancelled、Analyze 黑箱與作者例外處理。Workflow 的 operation 原語與 live tunables 生效點見 0062。
 - [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation、Ask waiting 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
 
 ## Persistence
 
@@ -52,12 +52,14 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Experiment runtime／Workflows
 
-- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime delay_by_timeline 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch／Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。兩種 program 共用優化前 compiled snapshot 與單一 simulation frontend，採獨立 shot 與 effect-based admission。A、B、builder 與 C 已交付；大量實驗遷移及 D 的 legacy program／init／run 移除仍未交付。
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Pause 中斷及同 request 重試、live tunables、core 同簽名 env.run、operation facts 與作者自存 commit 目錄。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：MyProgramV2 基底、module identity／resource owner 與每次 emission、program-owned declarations 與跨原生 program 重用、constructor keyword 的有效 cfg、TimelineBuilder 組序列與 Schedule run_acquire* 取數的分工、timeline 範圍預設、B1 結尾與 reference 分離、規則 b 與逐點精確 ceil、runtime producer bounds 與寫入稽核、runtime delay_by_timeline 與常數 shell WAIT、已知 provenance 的精確 slack／relax 護欄與未知上界警告、native channel 編譯期結尾記帳、Branch case 索引與必填 align_timeline 的靜態／逐點 max 或 runtime 結尾、兩模式不推進 reference、case 外操作與局部 fork 邊界、Repeat 實際路徑與 wait-only、Module Join 與 program join 分工，以及 IR timing analysis。兩種 program 共用優化前 compiled snapshot 與單一 simulation frontend，採獨立 shot 與 effect-based admission。A、B、builder 與 C 已交付；大量實驗遷移及 D 的 legacy program／init／run 移除仍未交付。
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、每個 operation 單次呼叫、Ask waiting、live tunables、core 同簽名 env.run、root 緊急停止、例外直接傳出、stop_requested 與 completed／raised facts、歷史 discarded 讀取、作者自存 commit 目錄。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、core 黑箱與作者 partial 語意、停止請求與 Notebook 首次 SIGINT／10秒期限、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
 
 
 ## Analysis / Simulation / Waveform
+
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：TimeBase 擁有有理數公共頻率、格點與範圍檢查、scalar／array 的單次正確捨入；採用整數 request 與 replay 升版，第二階段物理建模留待後議。TimeBase、整數 request、compiled frontend、整數 round pacing、physical consumer 與 replay v2 已實作，並驗證異質 clock 額外宣告時原 channel IQ bits 不變。
 
 - [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。所有模擬器納入每次 acquisition 固定、預設關閉的損耗漂移；Engine preparation 限一次 evolve，single 跨損耗保留結構並重建 rates，FTF 漂移時重建完整 facts，routing facts 與 acquire-local CavityAverageCache 各有獨立 lifetime。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
 

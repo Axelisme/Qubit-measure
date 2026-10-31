@@ -10,6 +10,7 @@ from zcu_tools.core.simulation import (
     AcquireRequest,
     EventSlot,
     ReadoutSlot,
+    TimeBase,
     TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
@@ -61,8 +62,8 @@ def _event_rows(
 ) -> EventSlot:
     return replace(
         event,
-        start_us=event.start_us[rows],
-        duration_us=event.duration_us[rows],
+        start_ticks=event.start_ticks[rows],
+        duration_ticks=event.duration_ticks[rows],
         frequency_mhz=event.frequency_mhz[rows],
         phase_deg=event.phase_deg[rows],
         gain=event.gain[rows],
@@ -74,7 +75,7 @@ def _event_rows(
 def _window_rows(window: ReadoutSlot, rows: NDArray[np.int64]) -> ReadoutSlot:
     return replace(
         window,
-        trigger_us=window.trigger_us[rows],
+        trigger_ticks=window.trigger_ticks[rows],
         frequency_mhz=window.frequency_mhz[rows],
         phase_deg=window.phase_deg[rows],
         generator_channels=window.generator_channels[rows],
@@ -86,8 +87,11 @@ def _route_template(
     channels: tuple[int, ...],
     gen: int,
     bare: NDArray[np.float64],
+    time_base: TimeBase,
 ) -> _TemplateRoutes:
-    partition = classify_readout(template, ReadoutDrive(gen, 1, "mux"), {})
+    partition = classify_readout(
+        template, ReadoutDrive(gen, 1, "mux"), {}, time_base=time_base
+    )
     if any(partition.cavity_drives):
         raise ValueError("six fluxonium does not support untriggered cavity drives")
     for event in template.events:
@@ -167,7 +171,7 @@ def _project_template(
                     for w in template.readouts
                     if w.channel in observed
                 ),
-                duration_us=template.duration_us[rows],
+                duration_ticks=template.duration_ticks[rows],
             )
         )
     return tuple(templates)
@@ -203,7 +207,8 @@ def route_request(
     gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
     routing = np.empty((prod(request.point_dims), len(channels)), dtype=np.int64)
     templates = tuple(
-        _route_template(t, channels, gen, bare) for t in request.templates
+        _route_template(t, channels, gen, bare, request.time_base)
+        for t in request.templates
     )
     for template in templates:
         routing[template.template.points] = template.receivers

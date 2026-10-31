@@ -67,17 +67,6 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
         ),
         operation=True,
     ),
-    _entry(
-        "pause",
-        "Request cooperative Pause, retaining the operation and RUN lease until resume/terminal delivery.",
-        (_RUN,),
-    ),
-    _entry(
-        "resume",
-        "Resume a delivered paused run in the worker under the same RUN lease and operation.",
-        (_RUN,),
-        operation=True,
-    ),
     method_entry(
         "workflow.cancel",
         "workflow:h_workflow_cancel",
@@ -139,7 +128,7 @@ METHODS: tuple[RemoteMethodEntry, ...] = (
     ),
     _entry(
         "answer",
-        "Answer the exact pending_question.request_id using its answer_schema. Returns the original pending operation_id; the worker retains the same RUN lease through terminal owner delivery. Invalid answers preserve the paused question.",
+        "Answer the exact pending_question.request_id using its answer_schema. Returns the original pending operation_id; the worker retains the same RUN lease through terminal owner delivery. Invalid answers preserve the waiting question.",
         (
             _RUN,
             required_string("request_id"),

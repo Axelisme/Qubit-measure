@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.core.simulation import (
     ChargeDriveRequirement,
     EnvironmentSnapshot,
+    TimeBase,
     TimelineTemplate,
 )
 from zcu_tools.experiment.readout_plan import (
@@ -194,13 +195,14 @@ def plan_template(
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,
     *,
+    time_base: TimeBase,
     readout_kind: Literal["pulse", "mux"] = "pulse",
     charge_requirements: tuple[ChargeDriveRequirement, ...] = (),
 ) -> SingleFluxoniumPlan:
     """Convert one complete QICK template to evolution and logical read events.
 
     settings is validated physical/wiring data; snapshot supplies exactly the live
-    DC source value in its native A/V unit. template arrays use us/MHz/degrees.
+    DC source value in its native A/V unit. template arrays use ticks/MHz/degrees with the request's time_base.
     Support uses the shared nearest-2-ns, ties-even conversion. Only the bound
     microwave generators enter tracks under their own source names. Fast-flux
     controls pass through FilteredFlux including delay, signed complex envelopes and all exponential
@@ -249,19 +251,25 @@ def plan_template(
         settings.readout.drive.input_per_gain,
         readout_kind,
     )
-    partition = classify_readout(template, drive, memo)
-    read_events = logical_event_contents(template, drive, windows[0], memo)
+    partition = classify_readout(template, drive, memo, time_base=time_base)
+    read_events = logical_event_contents(
+        template, drive, windows[0], memo, time_base=time_base
+    )
     contents = read_events[-1]
     microwave, fast_flux = [], []
     for index, event in enumerate(template.events):
         if event.gen_ch == drive.gen_ch:
             continue
         if event.gen_ch in drive_names:
-            microwave.append(drive_track(event, drive_names[event.gen_ch], memo))
+            microwave.append(
+                drive_track(event, drive_names[event.gen_ch], memo, time_base=time_base)
+            )
         elif (
             settings.flux_line is not None and event.gen_ch == settings.flux_line.gen_ch
         ):
-            fast_flux.append(drive_track(event, settings.flux_line.name, memo))
+            fast_flux.append(
+                drive_track(event, settings.flux_line.name, memo, time_base=time_base)
+            )
         else:
             raise ValueError(
                 f"template.events.{index}.gen_ch: unbound single-fluxonium "

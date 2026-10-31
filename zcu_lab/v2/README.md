@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-10-31，作者寫法慣例
+**Last updated:** 2026-11-01，取數路徑分流慣例與 mux Len Rabi 波形支援
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -65,6 +65,24 @@ Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
 Save／MCP 透過單一 `summarize_analysis` 轉換 native 結果，不使用已退休的實驗 serializer 或結果 base。
 結果根為 dataclass、pydantic model 或字串 key 的 Mapping，summary 是 strict JSON object，key 沿用原生欄位名。
 非有限數值轉為 null，Live RPC 另以 `invalid` 回報路徑。保存文件只含 pane、parameters、summary，不保存 invalid。
+
+## 取數路徑分流慣例
+
+實驗有不同取數路徑時，例如 FPGA sweep 與 host 逐點取數，讓 `run` 只做共同前置與分派。
+每條路徑寫成一個私有 `_run_*` 方法，各自建立 buffer、`Schedule` 與程式，並在方法內寫出取數流程。
+各路徑回傳同一種 Result，座標與資料沿用相同的軸順序與 shape 契約。
+呼叫端與 `analyze` 只讀這份 Result，不依取數路徑分支。
+程式結構不同就拆成不同路徑。
+即使共用同一個硬體迴圈，只要 delay 機制或 module 組合不同，也要拆分。
+只差座標數值、程式結構相同時，可以保留單一路徑。
+不強制合併作者已拆開的實驗，保留時在原地說明理由。
+
+以 [twotone len_rabi/core.py](twotone/rabi/len_rabi/core.py) 為例，`run` 先拒絕原生 arb 波形、複製 cfg，再準備量化長度座標。
+`const`／`flat_top` 交給 `_run_for_flat`，在 FPGA sweep 長度。
+其他可調長度的波形，例如 `cosine`，交給 `_run_for_arb`，由 host 逐長度取數並重用同長度的程式。
+`_run_for_arb` 沿用歷史名稱，不表示它接受原生 arb 資產。
+兩條路徑都回傳 `LenRabiResult`，`lengths` 與 `signals` 都是一維 `(N,)`，每個長度對應一個平均 complex IQ。
+Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，不把內部的 round 軸交給呼叫端。
 
 ## 即時圖工具
 
@@ -201,8 +219,12 @@ partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 
 每個元素有固定 qubit `name` 與 nullable drive；pulse sweep 類另有只含 `start`／`stop` 的 `ToneRangeCfg`，
 T1／Ramsey／Echo 使用共用 requested-delay 軸。只針對 participants 驗證 drive、逐 tone sweep 與獨立 generator。未參與欄位保留草稿，結果為 None。全 readout 身分始終驗證。三個 pulse scan 的頂層 `expts` 是共用正整數，
 表單在 Tones 後只顯示一個 Expts，預設為頻譜 301、Amp Rabi 51、Len Rabi 101。
-每 tone 只有 Start／Stop，不接受舊的每 tone 點數。Len Rabi 參與元素只接受
-const／flat_top，不伸縮或裁切 arb asset。
+每 tone 只有 Start／Stop，不接受舊的每 tone 點數。
+Len Rabi 參與元素支援 const／flat_top 與取樣波形，例如 cosine、gauss、DRAG。
+全體 participants 都用 const／flat_top 時，保留硬體長度表路徑。
+任一 participant 使用取樣波形時，全體 participants 一起走 host 路徑。
+Host 每點只編譯一次，跨 rounds 重用程式。
+原生 arb asset 的長度由資產決定，掃描前即拒絕，不伸縮或裁切。
 Participants 非空、不重複，索引必須在完整 tones 範圍內。Runtime 直接保留清單順序，
 例如 `[2, 0]` 依序量 Q3、Q1。GE raw、analysis 與 native persistence 同樣保留該順序。
 RunRecord 保存完整具名 cfg 與 participants，不另保存目的地或 group snapshot。
@@ -231,7 +253,9 @@ Frequency 座標在磁碟上是 Hz，在記憶體是 MHz。Gain 不縮放。
 Analyze／Save 使用 explicit RunRecord；Load 還原同次完整 tones cfg、原始 indices、獨立數值座標與 IQ。
 它們不讀目前 Form 或 library。Freq 取消保留全 sweep 已完成 rounds 的平均；
 Amp Rabi 取消保留已完成點與當點 completed-round 平均，未寫入 IQ 維持 NaN。
-Caller 先呼叫 RunContext.scope.stop.raise_if_error()，不把 failure 的 partial data 報為成功。
+Acquisition 例外原樣傳出；core 回傳的資料由作者決定是否可分析。
+`MuxOnetoneExp.run` 與 `MuxFreqExp.run` 可接 `on_acquire_stop`，在每次外部取消的 acquire 清理後同步通知。
+Mux flux scan 用這個作者 callback 丟棄被取消的當前 flux point，不從 parent stop 推斷子層資料完整度。
 Numeric core 不保存 writeback destination，也不發 proposal。
 
 ## Qubit flux helpers

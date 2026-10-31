@@ -125,8 +125,9 @@ class RabiScanResult:
     the leaf AXES_SPEC. sums is (Nc,Nd,3,3), or (Nc,Nd,3,3,3,3) with herald.
     Class order is g/e/other. Axis order is terminal F1/F2, preceded by herald
     F1/F2 when present. Unmeasured points remain NaN; completed rounds survive
-    cancellation. There is no shot axis or IQ. Check the RunContext stop signal
-    for execution errors before accepting partial results.
+    cancellation. There is no shot axis or IQ. The RunContext stop signal carries
+    only a stop request and reason. Execution errors propagate from run as
+    exceptions; a normal return after a stop request may contain partial counts.
     """
 
     coordinates: NDArray[np.float64]

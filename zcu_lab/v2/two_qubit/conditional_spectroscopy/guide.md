@@ -40,7 +40,7 @@ P_e 等於該 qubit 判為 e 的計數除以全部 terminal 計數，other 留�
 
 Result 保存 float64 `sums`，形狀為 `DC × prepared_f1[2] × prepared_f2[2] × frequency × 3 × 3`。最後兩軸為 terminal F1、F2，順序皆為 g、e、other。數值是總和，不是比例，檔案大小不隨 reps 或 rounds 增長。
 
-取消保留已完成 rounds，未量點維持 NaN。操作 owner 必須檢查 stop signal，避免把取數錯誤當作取消。Save 保存座標、計數與本次 cfg。Load 不改目前表單，Analyze 只讀保存的 cfg 與 sums。舊 per-shot IQ 與單一 branch 軸格式會明確拒絕載入，不做自動轉換。
+取消保留已完成 rounds，未量點維持 NaN。StopSignal 只承載停止請求與 reason，不承載錯誤。取數失敗由 Run 直接拋出例外；停止請求後正常返回的結果可以是合法 partial。Save 保存座標、計數與本次 cfg。Load 不改目前表單，Analyze 只讀保存的 cfg 與 sums。舊 per-shot IQ 與單一 branch 軸格式會明確拒絕載入，不做自動轉換。
 
 ## Notebook
 

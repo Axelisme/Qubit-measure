@@ -37,6 +37,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
 
 from .workflow_tunables import TunablesHost
@@ -124,8 +125,8 @@ class WorkflowController[F: FormModel, C]:
     A fixed controller accepts a replacement only after terminal cleanup. The
     current binding owns the unique form draft and fixed Start capture. Native
     Engine status remains authoritative; a token or binding is not acceptance.
-    Pause and Ask retain the original worker, operation, RUN lease and progress.
-    Resume and Answer only signal that worker; they submit no producer. This does not
+    Ask retains the original worker, operation, RUN lease and progress.
+    Answer only signals that worker; it submits no producer. This does not
     arbitrate other processes or restore hardware. Commands run on the owner
     thread; startup publication and cooperative controls share a binding lock.
     """
@@ -135,7 +136,7 @@ class WorkflowController[F: FormModel, C]:
         runner: OperationRunner,
         owner_id: str,
         *,
-        on_finished: Callable[[RunStatus | None, Exception | None], None],
+        on_finished: Callable[[RunStatus | None, BackgroundError | None], None],
     ) -> None:
         """Borrow runner and report terminal native delivery to the view.
 
@@ -144,7 +145,7 @@ class WorkflowController[F: FormModel, C]:
         acceptance) and the original producer error, if any. Terminal cleanup
         fixes the native handle outcome and releases admission/lease/progress
         before notification. View errors are logged and do not alter outcome or
-        binding. Pause and Ask retain the original worker until terminal delivery. Callback reentry may
+        binding. Ask retains the original worker until terminal delivery. Callback reentry may
         Stop, or Start a replacement after terminal cleanup; no old binding is
         written after notification. No instrument call occurs here.
         """
@@ -177,7 +178,7 @@ class WorkflowController[F: FormModel, C]:
 
     @property
     def operation_id(self) -> int | None:
-        """Return the one live run token, retained while paused; None at terminal."""
+        """Return the one live run token, retained during Ask; None at terminal."""
         run = self._run
         return None if run is None or run.phase == "terminal" else run.token
 
@@ -194,7 +195,7 @@ class WorkflowController[F: FormModel, C]:
     def has_pending_segment(self) -> bool:
         """Read whether admission, producer or terminal cleanup is still pending.
 
-        Pause and Ask leave work pending. Stop/close wait for the original worker
+        Ask leaves work pending. Stop/close wait for the original worker
         to finish author cleanup and deliver its terminal result.
         """
         run = self._run
@@ -213,7 +214,7 @@ class WorkflowController[F: FormModel, C]:
         native tunables through its adapter and is responsible for their match;
         this generic Controller does not validate that conversion. Mismatched
         identity raises RunMismatch, accepted bindings raise RuntimeError.
-        Pending/paused/active/finishing replacement raises InvalidRunState before
+        Pending/active/finishing replacement raises InvalidRunState before
         mutation. Engine validates declaration/values on the worker. Admission,
         factory and submit errors propagate, clear pending ownership and create
         no native files. Stop before worker startup does not create a native run.
@@ -276,7 +277,7 @@ class WorkflowController[F: FormModel, C]:
             run.phase = "producing"
         return token
 
-    def _notify(self, status: RunStatus | None, error: Exception | None) -> None:
+    def _notify(self, status: RunStatus | None, error: BackgroundError | None) -> None:
         try:
             self._on_finished(status, error)
         except Exception:
@@ -293,7 +294,7 @@ class WorkflowController[F: FormModel, C]:
         ):
             run.native_error = error
 
-    def _finish(self, run: _Run[F, C], error: Exception | None) -> None:
+    def _finish(self, run: _Run[F, C], error: BackgroundError | None) -> None:
         if run.phase in {"finishing", "terminal"}:
             return
         status = None if run.engine is None else run.engine.status()
@@ -327,48 +328,6 @@ class WorkflowController[F: FormModel, C]:
         """Reject absent/stale target with RunMismatch before any side effect."""
         if run_id != self.run_id:
             raise RunMismatch(run_id, self.run_id)
-
-    def pause(self, run_id: str) -> RunStatus:
-        """Request cooperative Pause, retaining the run's operation and lease.
-
-        Stale/absent targets raise RunMismatch. Pending acceptance raises
-        RuntimeError. Only a producing running/pausing Engine accepts Pause;
-        other phases raise InvalidRunState. Worker return alone is not delivery.
-        """
-        with self._lock:
-            self.require_run_id(run_id)
-            run = self._run
-            if run is None or run.engine is None:
-                raise RuntimeError("Pause requires an accepted workflow run")
-            status = run.engine.status()
-            if (
-                run.phase != "producing"
-                or status is None
-                or status.lifecycle not in {"running", "pausing"}
-            ):
-                raise InvalidRunState(
-                    "pause", "running" if status is None else status.lifecycle
-                )
-            try:
-                return run.engine.pause(run_id)
-            except Exception as error:
-                self._record_native_failure(run, error)
-                raise
-
-    def resume(self, run_id: str) -> int:
-        """Open the native pause gate on the retained worker; return its run token.
-
-        Stale targets raise RunMismatch. Pending acceptance raises RuntimeError.
-        Engine rejects a nonpaused run or pending Ask without changing ownership.
-        No second worker or Runner continuation is submitted.
-        """
-        with self._lock:
-            self.require_run_id(run_id)
-            run = self._run
-            if run is None or run.engine is None or run.token is None:
-                raise RuntimeError("Resume requires an accepted workflow run")
-            run.engine.resume(run_id)
-            return run.token
 
     def pending_question(self, run_id: str) -> PendingQuestion | None:
         """Read the retained worker's current Ask, including its unique request ID.

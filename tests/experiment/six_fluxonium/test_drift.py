@@ -16,6 +16,7 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
+from tests.core._simulation import TIME_BASE, tick_tuple
 from tests.experiment.single_fluxonium._inputs import slot, template
 from tests.resources._six_fluxonium_data import six_document
 
@@ -113,7 +114,10 @@ def routed_request(binding, sequence):
         "integrated",
         (4, 2),
         0,
-        tuple(ReadoutWindow(ch, 0, 4, 1000, (0.018,)) for ch in range(2)),
+        tuple(
+            ReadoutWindow(ch, 0, 4, TIME_BASE.period_ticks(1000), tick_tuple((0.018,)))
+            for ch in range(2)
+        ),
         binding.root_seed,
         sequence,
         binding.rng_version,
@@ -121,7 +125,8 @@ def routed_request(binding, sequence):
         point_names=("sweep",),
         reps=4,
         templates=(compiled,),
-        relax_delay_us=125000,
+        relax_delay_ticks=TIME_BASE.ticks(125000),
+        time_base=TIME_BASE,
     )
 
 

@@ -217,8 +217,7 @@ def _controls(driver: ComponentDriver) -> set[str]:
     return {
         widget.text
         for widget in driver.visible().widgets
-        if widget.kind == "QPushButton"
-        and widget.text in {"Refresh", "Start", "Pause", "Resume", "Stop"}
+        if widget.kind == "QPushButton" and widget.text in {"Refresh", "Start", "Stop"}
     }
 
 
@@ -337,7 +336,7 @@ def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
     _shot(driver, tmp_path, "fork-opened")
     driver.click("Start")
     # Ask retains both authored children until the scenario sends Stop.
-    qt_until(lambda: _status(driver, "paused"), label="forked Ask accepted")
+    qt_until(lambda: _status(driver, "waiting"), label="forked Ask accepted")
     _shot(driver, tmp_path, "fork-two-leaves")
     active = driver.observe(object_name="workflow.active_path")
     leaves = driver.observe(object_name="workflow.live_paths")
@@ -350,7 +349,7 @@ def test_workflow_pane_keeps_active_chain_and_two_live_leaves(
     _shot(driver, tmp_path, "fork-cancelled")
 
 
-def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_path):
+def test_running_close_lock_and_badge_navigation(workflow_window, tmp_path):
     _, window = workflow_window
     driver = ComponentDriver(window)
     _ready(driver)
@@ -377,12 +376,6 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.click(object_name="workflow.badge")
     _shot(driver, tmp_path, "06-badge-navigation")
     assert driver.tabs("synthetic (1)").current == "synthetic (1)"
-    driver.click("Pause")
-    qt_until(lambda: _status(driver, "paused"), label="native pause gate")
-    _shot(driver, tmp_path, "07-paused")
-    driver.click_tooltip("Close synthetic (1)")
-    _shot(driver, tmp_path, "08-paused-close-refused")
-    assert driver.tabs("synthetic (1)").captions == ("synthetic (1)", "synthetic (2)")
     driver.select_tab("Tunables")
     _shot(driver, tmp_path, "08a-tunables")
     driver.enter_text(value="0.5", object_name="form.input.gain")
@@ -390,9 +383,6 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     driver.click("Apply")
     _shot(driver, tmp_path, "09-tunables-applied")
     assert driver.observe(object_name="workflow.message").text == "Applied revision 1"
-    driver.click("Resume")
-    qt_until(lambda: _status(driver, "running"), label="resumed")
-    _shot(driver, tmp_path, "10-resumed")
     driver.click("Stop")
     qt_until(lambda: _status(driver, "cancelled"), label="stop delivered")
     _shot(driver, tmp_path, "11-stopped")
@@ -406,8 +396,7 @@ def test_running_paused_close_lock_and_badge_navigation(workflow_window, tmp_pat
     ("state", "expected"),
     [
         ("idle", {"Refresh", "Start"}),
-        ("running", {"Pause", "Stop"}),
-        ("paused", {"Resume", "Stop"}),
+        ("running", {"Stop"}),
         ("waiting", {"Stop"}),
     ],
 )
@@ -425,13 +414,9 @@ def test_run_state_shows_only_meaningful_controls(
         driver.click("Start")
         # The retained invocation delivers Ask or the synthetic public wait.
         qt_until(
-            lambda: _status(driver, "paused" if state == "waiting" else "running"),
+            lambda: _status(driver, "waiting" if state == "waiting" else "running"),
             label="control scenario start delivery",
         )
-    if state == "paused":
-        driver.click("Pause")
-        # Pause interrupts the wait and retains the invocation at its native gate.
-        qt_until(lambda: _status(driver, "paused"), label="control scenario paused")
     _ask_shot(driver, tmp_path, f"controls-02-{state}")
     try:
         assert _controls(driver) == expected
@@ -492,10 +477,10 @@ def test_ask_answer_or_cancel_preserves_visible_exchange(
     assert driver.tabs("Plan").captions == ("Plan", "Tunables")
     driver.click("Start")
     # Start must yield its question. Badge and pane project separate snapshots;
-    # native paused alone does not establish that both have rendered the Ask.
+    # native waiting alone does not establish that both have rendered the Ask.
     qt_until(
         lambda: (
-            _status(driver, "paused")
+            _status(driver, "waiting")
             and any(
                 w.object_name == "workflow.badge" and "等待回答" in w.text
                 for w in driver.visible().widgets
@@ -605,7 +590,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     _ask_shot(driver, tmp_path, "restart-03-first-plan")
     driver.click("Start")
     # The author coroutine yields the explicitly requested first question.
-    qt_until(lambda: _status(driver, "paused"), label="first run question")
+    qt_until(lambda: _status(driver, "waiting"), label="first run question")
     _ask_shot(driver, tmp_path, "restart-04-first-question")
     assert driver.tabs("Ask").current == "Ask"
     assert '"point": 1' in driver.observe(object_name="workflow.ask").text
@@ -638,7 +623,7 @@ def test_new_run_hides_retained_exchange_until_new_question(
     _ask_shot(driver, tmp_path, "restart-10-new-question-plan")
     driver.click("Start")
     # The nonzero plan yields a fresh question on this same tab's third run.
-    qt_until(lambda: _status(driver, "paused"), label="new run question")
+    qt_until(lambda: _status(driver, "waiting"), label="new run question")
     _ask_shot(driver, tmp_path, "restart-11-new-question")
     assert driver.tabs("restart-questions (1)").captions == ("restart-questions (1)",)
     assert driver.tabs("Ask").captions == ("Plan", "Tunables", "Ask")
@@ -693,7 +678,7 @@ def test_next_question_replaces_answer_and_selects_ask(two_questions_window, tmp
     _ask_shot(driver, tmp_path, "next-01-opened")
     driver.click("Start")
     # The retained invocation must yield the first synthetic question.
-    qt_until(lambda: _status(driver, "paused"), label="first question")
+    qt_until(lambda: _status(driver, "waiting"), label="first question")
     _ask_shot(driver, tmp_path, "next-02-first-question")
     assert '"point": 1' in driver.observe(object_name="workflow.ask").text
     driver.enter_text(object_name="workflow.answer", value='{"value": 17}')
@@ -830,7 +815,7 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
     _ask_shot(driver, tmp_path, "remote-03-opened")
     driver.click("Start")
     # The submitted retained invocation must deliver its synthetic Ask pause.
-    qt_until(lambda: _status(driver, "paused"), label="remote Stop Ask pause")
+    qt_until(lambda: _status(driver, "waiting"), label="remote Stop Ask pause")
     _ask_shot(driver, tmp_path, "remote-04-question")
     token = control.tabs()[0].operation_id
     run_id = control.tabs()[0].run_id
@@ -864,8 +849,8 @@ def test_remote_workflow_stop_reclaims_before_cancelling_same_operation(
         assert driver.observe(object_name="control_indicator").text == "Local locked"
         assert _controls(driver) == {"Stop"}
         assert observed == [
-            ("rpc:workflow-agent", False, "paused", token),
-            ("gui", True, "paused", token),
+            ("rpc:workflow-agent", False, "waiting", token),
+            ("gui", True, "waiting", token),
         ], "Reclaim must precede Stop's lifecycle change on the original operation"
         assert control.tabs()[0].operation_id == token
         assert control.tabs()[0].run_id == run_id

@@ -28,6 +28,8 @@ from zcu_tools.resources.single_fluxonium import (
     parse_single_fluxonium,
 )
 
+from tests.core._simulation import TIME_BASE, tick_tuple
+
 from ._inputs import settings, template
 
 
@@ -65,7 +67,7 @@ def request_for(binding: SimulationBinding, sequence: int):
         "integrated",
         (8, 2),
         0,
-        (ReadoutWindow(0, 0, 4, 1000, (0.018,)),),
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000), tick_tuple((0.018,))),),
         binding.root_seed,
         sequence,
         binding.rng_version,
@@ -73,6 +75,7 @@ def request_for(binding: SimulationBinding, sequence: int):
         point_names=("sweep",),
         reps=8,
         templates=(compiled,),
+        time_base=TIME_BASE,
     )
 
 

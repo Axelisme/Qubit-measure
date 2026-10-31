@@ -290,21 +290,39 @@ class ConditionalPhaseHeraldedExp(
         # ee starts the target in e (both sigma signs reverse); nominal I/Xπ
         # now means actual spectator e/g. Reorder to actual g/e before sharing.
         ee = terminal_counts(data.sums, ("e", "e"))[::-1]
-        gg_stats = count_quadratures(gg, cfg.target)
-        ee_stats = count_quadratures(ee, cfg.target)
-        phases = phase_points(gg_stats.values)
-        ee_phases = phase_points((-ee_stats.values))
+        gg_stats, ee_stats = (
+            count_quadratures(gg, cfg.target),
+            count_quadratures(ee, cfg.target),
+        )
+        # Check acquisition before herald selection; low/zero acceptance is not
+        # an incomplete round. ee uses the reversed actual-spectator order.
+        complete = np.isclose(
+            data.sums.sum(axis=(-4, -3, -2, -1)),
+            cfg.reps * cfg.rounds,
+            rtol=8 * np.finfo(float).eps,
+            atol=0,
+        )
+        gg_values, ee_values = (
+            np.where(complete, gg_stats.values, np.nan),
+            np.where(complete[::-1], -ee_stats.values, np.nan),
+        )
+        phases, ee_phases = phase_points(gg_values), phase_points(ee_values)
         fitted = fit_phase_slopes(
             data.gate_counts,
-            np.stack((gg_stats.values, (-ee_stats.values))),
+            np.stack((gg_values, ee_values)),
             np.stack((gg_stats.variances, ee_stats.variances)),
-            np.stack((gg_stats.acquired, ee_stats.acquired)),
+            np.stack(
+                (
+                    np.where(complete, gg_stats.acquired, np.nan),
+                    np.where(complete[::-1], ee_stats.acquired, np.nan),
+                )
+            ),
         )
         gg_fitted = fit_phase_slopes(
             data.gate_counts,
-            gg_stats.values[None],
+            gg_values[None],
             gg_stats.variances[None],
-            gg_stats.acquired[None],
+            np.where(complete, gg_stats.acquired, np.nan)[None],
         )
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
         gg_conditional = (

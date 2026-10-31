@@ -12,10 +12,10 @@ def test_call_uses_explicit_receiver_and_records_on_owner_loop() -> None:
     host = ScriptHost(root)
     assert getattr(host, "root", None) is root, "host must expose its exact root"
     owner = get_ident()
-    seen: list[tuple[int, int]] = []
+    seen: list[tuple[int, str]] = []
 
     def record(result: CallResult[str]) -> None:
-        seen.append((get_ident(), result.epoch))
+        seen.append((get_ident(), result.result))
 
     async def script() -> str:
         with root.child("calibration") as scope:
@@ -26,7 +26,7 @@ def test_call_uses_explicit_receiver_and_records_on_owner_loop() -> None:
             return result.result
 
     assert host.run(script()) == "workflow:synthetic/calibration#1/operation:T1#1"
-    assert seen == [(owner, 0)]
+    assert seen == [(owner, "workflow:synthetic/calibration#1/operation:T1#1")]
 
 
 def test_root_cancel_records_completion_before_raising_and_does_not_set_host_error() -> (
@@ -43,7 +43,7 @@ def test_root_cancel_records_completion_before_raising_and_does_not_set_host_err
 
     def record(result: CallResult[int]) -> None:
         assert result.result == 7
-        assert result.stopped and result.partial_result
+        assert result.stopped and result.stop_requested
         seen.append("recorded")
 
     async def script() -> None:

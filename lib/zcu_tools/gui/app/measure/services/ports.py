@@ -38,13 +38,14 @@ class RunPaneSnapshot:
     """Current Run and confirmed persistence identity.
 
     result is the adapter-owned record or None; source_path is the loaded file
-    or None. source_operation_id identifies the publishing acquisition or None
-    after Load. run_id is None until at least one persistent output succeeds;
+    or None. source_operation_id identifies the publishing acquisition or failed
+    Run's request facts, not result availability; None after Load. run_id is None until at least one persistent output succeeds;
     it survives failed resaves, but does not survive Run replacement.
     acquisition_run_id is the fixed Run/Load metadata identity before any Save;
     None means no native acquisition metadata, not unsaved data.
-    partial_result is the completed Run's cancellation fact, independent of
-    metadata and terminal operation classification; replacement resets it.
+    stop_requested is True when the frontend sent an accepted Stop or selector
+    cancel during this Run. It does not describe completeness or success, and
+    does not include core-owned stops. Replacement resets it to False.
     """
 
     result: object | None
@@ -52,7 +53,7 @@ class RunPaneSnapshot:
     source_operation_id: int | None = None
     run_id: str | None = None
     acquisition_run_id: str | None = None
-    partial_result: bool = False
+    stop_requested: bool = False
     # Fixed Load source diagnostic, or None for a readable source/non-Load.
     analysis_source_issue: str | None = None
 

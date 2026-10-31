@@ -146,7 +146,7 @@ def test_run_publishes_record_and_historical_metadata_together(
     capture.assert_called_once()
     outcome = handles.poll(token)
     assert outcome is not None
-    assert outcome.status == ("cancelled" if stopped else "finished")
+    assert outcome.status == "finished"
 
 
 def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
@@ -215,14 +215,20 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     ) is not None and next_outcome.status == "finished"
 
 
-def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
+@pytest.mark.parametrize("frontend_request", [False, True])
+def test_stop_request_without_native_metadata_resets_before_next_run(
+    frontend_request: bool,
+) -> None:
     state, tab_id, adapter = make_state()
     service, _gate, background, handles = make_run_service(state)
     record = RunRecord(cfg=ConfigBase(), result=SampleResult(np.array([1.0])))
 
     def partial(*_args: object, context: RunContext) -> object:
         child = context.scope.branch("acquire")
-        child.stop.set()
+        if frontend_request:
+            assert service.cancel_scope(token, scope="acquire").cancelled
+        else:
+            child.stop.set(reason="author-local stop")
         child.release()
         return record
 
@@ -232,14 +238,14 @@ def test_partial_fact_without_native_metadata_resets_before_next_run() -> None:
     background.run_work()
     pane = state.get_tab(tab_id).run
     assert require_record(pane).metadata is None
-    assert pane.partial_result
+    assert pane.stop_requested is frontend_request
     assert (outcome := handles.poll(token)) is not None and outcome.status == "finished"
     adapter.run.side_effect = None
     adapter.run.return_value = record
     service.start_run(inputs, plots=make_plots())
-    assert not state.get_tab(tab_id).run.partial_result
+    assert not state.get_tab(tab_id).run.stop_requested
     background.run_work()
-    assert not state.get_tab(tab_id).run.partial_result
+    assert not state.get_tab(tab_id).run.stop_requested
 
 
 @pytest.mark.parametrize("provenance_failure", [False, True])
@@ -377,7 +383,7 @@ def test_cancel_after_acquisition_does_not_relabel_completed_measurement_evidenc
     metadata = require_record(state.get_tab(tab_id).run).metadata
     assert metadata is not None and metadata.completion == "complete"
     outcome = handles.poll(token)
-    assert outcome is not None and outcome.status == "cancelled"
+    assert outcome is not None and outcome.status == "finished"
 
 
 def test_run_reads_all_connected_devices_after_lease_before_core() -> None:

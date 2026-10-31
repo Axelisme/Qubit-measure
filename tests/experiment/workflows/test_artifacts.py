@@ -13,9 +13,6 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Actor, Live, RunPaths, WorkflowEnv
 from zcu_tools.experiment.workflows.artifacts import RunArtifacts
 from zcu_tools.experiment.workflows.journal import (
-    Paused,
-    PauseRequested,
-    Resumed,
     RunEnded,
     RunMetadata,
     StopRequested,
@@ -74,7 +71,7 @@ def test_start_documents_are_detached_and_use_identity_not_slug(
     assert event["identity"] == initial["identity"]
     assert event["roots"] == initial["roots"]
     assert datetime.fromisoformat(event["time"]) == metadata.started_at
-    artifacts.set_lifecycle("paused")
+    artifacts.set_lifecycle("waiting")
     assert json.loads(path.read_text())["plan"] == {"targets": [1, 2]}
 
 
@@ -140,9 +137,6 @@ def test_journal_round_trips_control_events_in_append_order(
 ) -> None:
     events = (
         TunablesChanged(Actor("agent", "協作者"), 0, 1, {"reps": 3}),
-        PauseRequested(clock.now(), 1),
-        Paused(1, 0),
-        Resumed(0, 1),
         StopRequested(clock.now(), 1),
         RunEnded("cancelled", None, 1, 0),
     )
@@ -164,10 +158,10 @@ def test_lifecycle_manifest_replaces_only_on_change(
 ) -> None:
     path = artifacts.paths.metadata_root / "manifest.json"
     clock.value += timedelta(seconds=5)
-    artifacts.set_lifecycle("paused")
-    paused = json.loads(path.read_text())
-    assert paused["lifecycle"] == "paused" and paused["ended_at"] is None
-    assert datetime.fromisoformat(paused["updated_at"]) == clock.now()
+    artifacts.set_lifecycle("waiting")
+    waiting = json.loads(path.read_text())
+    assert waiting["lifecycle"] == "waiting" and waiting["ended_at"] is None
+    assert datetime.fromisoformat(waiting["updated_at"]) == clock.now()
     clock.value += timedelta(seconds=5)
     artifacts.set_lifecycle("failed", "disk failure")
     ended = json.loads(path.read_text())
@@ -192,7 +186,7 @@ def test_manifest_replace_failure_retains_last_document(
     with monkeypatch.context() as patch:
         patch.setattr(Path, "replace", broken_replace)
         with pytest.raises(OSError, match="replace failed") as caught:
-            artifacts.set_lifecycle("paused")
+            artifacts.set_lifecycle("waiting")
         assert caught.value is cause
     assert path.read_bytes() == before
     assert len(tuple(path.parent.glob(".manifest-*.tmp.json"))) == 1
@@ -206,7 +200,7 @@ def test_journal_io_failure_is_not_followed_by_invented_success(
     artifacts.journal_path.unlink()
     artifacts.journal_path.mkdir()
     with pytest.raises(DIRECTORY_OPEN_ERROR):
-        artifacts.append(Paused(None, 0))
+        artifacts.append(StopRequested(START, None))
     with pytest.raises(RuntimeError, match="unusable after an I/O failure"):
         artifacts.append(RunEnded("failed", "journal broken", None, 0))
     assert not tuple(artifacts.journal_path.iterdir())
@@ -219,7 +213,7 @@ def test_nonfinite_mandatory_payload_does_not_consume_sequence(
         artifacts.append(
             TunablesChanged(Actor("user", "user"), 0, 1, {"reps": float("inf")})
         )
-    artifacts.append(Paused(None, 0))
+    artifacts.append(StopRequested(START, None))
     lines = [
         json.loads(line) for line in artifacts.journal_path.read_text().splitlines()
     ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
@@ -8,7 +9,8 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.experiment.acquisition_facts import StopDecision
 from zcu_tools.experiment.scope import Scope
-from zcu_tools.experiment.stop_signal import ScheduleOutcomeError, StopSignal
+from zcu_tools.experiment.stop_signal import StopSignal
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -58,18 +60,62 @@ def _overrun_acquisition(monkeypatch: pytest.MonkeyPatch, *, recover: bool):
     # Complete one round, then store a partial chunk before the offending one.
     failed = [[chunk(3, 91)], [chunk(1, 99)], [chunk(3, 99)]]
     batches = iter(failed + ([[chunk(3, 4)], [chunk(3, 6)]] if recover else failed))
-    monkeypatch.setattr(soc, "poll_data", lambda: next(batches))
-    return soc, program
+    polls: list[int] = []
+
+    def poll():
+        polls.append(1)
+        return next(batches)
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    return soc, program, polls
 
 
-def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
+@pytest.mark.parametrize("retry", [0, 1])
+@pytest.mark.parametrize("mode", ["builder", "integrated", "summed"])
+def test_shot_overrun_obeys_explicit_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, retry: int, mode: str
+) -> None:
+    soc, program, polls = _overrun_acquisition(monkeypatch, recover=True)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    buffer.set(np.array(7 + 8j))
+    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+        with nullcontext() if retry else pytest.raises(AcquisitionContractError):
+            if mode == "builder":
+                sched.prog_builder(soc, "unused").run_program(
+                    program, rounds=2, options=AcquireOptions(retry=retry)
+                )
+            elif mode == "integrated":
+                sched.run_acquire(
+                    program, soc, rounds=2, options=RunOptions(retry=retry)
+                )
+            else:
+                sched.run_acquire_summed(
+                    program,
+                    soc,
+                    rounds=2,
+                    processor=lambda iq: iq[0][..., 0, 0].sum(axis=1),
+                    options=RunOptions(retry=retry),
+                )
+
+        assert len(polls) == (5 if retry else 3)
+        assert sched.outcome.status == ("completed" if retry else "failed")
+        if retry:
+            np.testing.assert_allclose(buffer.array, 30 if mode == "summed" else 5 - 5j)
+        else:
+            assert isinstance(sched.outcome.exception, AcquisitionContractError)
+            np.testing.assert_array_equal(buffer.array, 7 + 8j)
+
+
+def test_shot_overrun_restarts_all_rounds_with_one_retry(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     result = None
-    soc, program = _overrun_acquisition(monkeypatch, recover=True)
+    soc, program, _ = _overrun_acquisition(monkeypatch, recover=True)
     buffer = SignalBuffer((), dtype=np.complex128)
     with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+        result = sched.prog_builder(soc, "unused").run_program(
+            program, rounds=2, options=AcquireOptions(retry=1)
+        )
 
     assert sched.outcome.status == "completed"
     assert result is not None
@@ -87,20 +133,21 @@ def test_shot_overrun_restarts_all_rounds_without_opt_in_retry(
     )
 
 
-def test_repeated_shot_overrun_exhausts_default_retry_and_discards_failed_data(
+def test_repeated_shot_overrun_exhausts_explicit_retry_and_discards_failed_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result = None
-    soc, program = _overrun_acquisition(monkeypatch, recover=False)
+    soc, program, _ = _overrun_acquisition(monkeypatch, recover=False)
     buffer = SignalBuffer((), dtype=np.complex128)
-    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
-        result = sched.prog_builder(soc, "unused").run_program(program, rounds=2)
+    with (
+        pytest.raises(AcquisitionContractError) as caught,
+        Schedule(_cfg(), buffer, scope=Scope("run")) as sched,
+    ):
+        sched.prog_builder(soc, "unused").run_program(
+            program, rounds=2, options=AcquireOptions(retry=1)
+        )
 
     assert sched.outcome.status == "failed"
-    assert isinstance(sched.outcome.exception, AcquisitionContractError)
-    assert sched.stop.error is not None
-    assert result is not None
-    assert np.isnan(result)
+    assert sched.outcome.exception is caught.value
     assert np.isnan(buffer.array)
 
 
@@ -122,8 +169,6 @@ def test_build_and_acquire_stop_condition_stops_program_without_schedule_stop():
         )
         assert sched.outcome.status == "completed"
         assert run_stop.is_set() is False
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     np.testing.assert_allclose(result, np.array([2.0]))
@@ -208,8 +253,6 @@ def test_data_stop_keeps_first_completed_round_and_cancels_later_rounds(
         assert sched.outcome.reason is None
         assert sched.outcome.exception is None
         assert not run_stop.is_set()
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     assert produced_rounds == [1]
@@ -254,7 +297,7 @@ def test_build_and_acquire_retries_acquire_on_the_same_program(
     assert "attempt 2" in warnings[0].message
 
 
-def test_build_and_acquire_retry_clears_shared_failure_cause():
+def test_build_and_acquire_retry_recovers_after_transient_failure():
     result = None
     FlakyBuildProgram.instances.clear()
     run_stop = StopSignal()
@@ -271,33 +314,59 @@ def test_build_and_acquire_retry_clears_shared_failure_cause():
             )
         )
         assert sched.outcome.status == "completed"
-        assert run_stop.error is None
-        run_stop.raise_if_error()
 
     assert result is not None
     np.testing.assert_allclose(result, np.array([4.0]))
 
 
-def test_build_and_acquire_returns_partial_on_keyboard_interrupt_without_retrying():
+def test_build_and_acquire_propagates_keyboard_interrupt_without_retrying():
     InterruptingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
-        result = (
+    with (
+        pytest.raises(KeyboardInterrupt),
+        Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched,
+    ):
+        (
             sched.prog_builder("soc", "soccfg", program_cls=InterruptingProgram)
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
             )
         )
-        assert sched.is_stop() is True
-        assert sched.outcome.status == "interrupted"
-        assert isinstance(sched.outcome.exception, KeyboardInterrupt)
-        np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
 
     assert len(InterruptingProgram.instances) == 1
     assert InterruptingProgram.instances[0].acquire_count == 1
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
+
+
+@pytest.mark.parametrize("phase", ["producer", "converter"])
+def test_run_acquire_propagates_same_interrupt_without_retry(phase: str) -> None:
+    interrupt = KeyboardInterrupt("acquisition interrupted")
+    attempts = 0
+
+    class Program:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
+            nonlocal attempts
+            attempts += 1
+            if phase == "producer":
+                raise interrupt
+            return [np.array([[[1.0, 0.0]]])]
+
+    def convert(_raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+        raise interrupt
+
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        Schedule(_cfg(), SignalBuffer((1,)), scope=Scope("run")) as sched,
+    ):
+        sched.run_acquire(
+            Program(), object(), options=RunOptions(retry=3, converter=convert)
+        )
+    assert caught.value is interrupt
+    assert attempts == 1
 
 
 def test_build_and_acquire_first_round_stop_returns_nan_partial(
@@ -323,68 +392,58 @@ def test_build_and_acquire_first_round_stop_returns_nan_partial(
     np.testing.assert_allclose(result, np.array([np.nan]), equal_nan=True)
     np.testing.assert_allclose(signals_buffer.array, np.array([np.nan]), equal_nan=True)
     assert sched.outcome.exception is None
-    assert sched.stop.error is None
 
 
-def test_build_and_acquire_returns_last_partial_after_retry_exhaustion():
-    result = None
+def test_build_and_acquire_raises_after_retry_exhaustion_and_retains_buffer():
     AlwaysFailingProgram.instances.clear()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched:
-        result = (
+    with (
+        pytest.raises(RuntimeError, match="permanent failure") as caught,
+        Schedule(_cfg(rounds=1), signals_buffer, scope=Scope("run")) as sched,
+    ):
+        (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
             )
         )
-        assert sched.is_stop() is True
-        assert sched.outcome.status == "failed"
-        assert isinstance(sched.outcome.exception, RuntimeError)
-        assert sched.outcome.reason == "RuntimeError: permanent failure"
-
-    assert result is not None
-    np.testing.assert_allclose(result, np.array([2.0]))
+    assert sched.is_stop() is True
+    assert sched.outcome.status == "failed"
+    assert sched.outcome.exception is caught.value
+    assert sched.outcome.reason == "RuntimeError: permanent failure"
     np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
     assert len(AlwaysFailingProgram.instances) == 1
     assert AlwaysFailingProgram.instances[0].acquire_count == 2
 
 
-def test_build_and_acquire_records_failed_outcome_on_run_stop_signal():
-    result = None
+def test_build_and_acquire_keeps_failed_outcome_local_to_schedule():
     AlwaysFailingProgram.instances.clear()
     run_stop = StopSignal()
     signals_buffer = SignalBuffer((1,), dtype=np.float64)
 
-    with Schedule(
-        _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=run_stop)
-    ) as sched:
-        result = (
+    with (
+        pytest.raises(RuntimeError, match="permanent failure") as caught,
+        Schedule(
+            _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=run_stop)
+        ) as sched,
+    ):
+        (
             sched.prog_builder("soc", "soccfg", program_cls=AlwaysFailingProgram)
             .add(FakeModule("readout"))
             .build_and_acquire(
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=1)
             )
         )
-        assert sched.outcome.status == "failed"
-        assert run_stop.error is None
-        assert sched.stop.error is not None
-        assert sched.stop.error.status == "failed"
+    assert sched.outcome.status == "failed"
+    assert sched.outcome.exception is caught.value
 
-    with pytest.raises(
-        ScheduleOutcomeError, match="RuntimeError: permanent failure"
-    ) as exc_info:
-        run_stop.raise_if_error()
-
-    assert exc_info.value.exception is sched.outcome.exception
     assert not run_stop.is_set()
-    assert result is not None
-    np.testing.assert_allclose(result, np.array([2.0]))
+    np.testing.assert_allclose(signals_buffer.array, np.array([2.0]))
 
 
-def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
-    result = None
+def test_build_and_acquire_raises_without_retry_when_stop_set_after_failed_attempt():
     stop = StopSignal()
     cause = RuntimeError("failure with stop")
     attempts: list[int] = []
@@ -416,10 +475,13 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
         def acquire_decimated(self, *_args: Any, **_kwargs: Any) -> list[np.ndarray]:
             raise NotImplementedError
 
-    with Schedule(
-        _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=stop)
-    ) as sched:
-        result = (
+    with (
+        pytest.raises(RuntimeError) as caught,
+        Schedule(
+            _cfg(rounds=1), signals_buffer, scope=Scope("run", stop=stop)
+        ) as sched,
+    ):
+        (
             sched.prog_builder(
                 "soc",
                 "soccfg",
@@ -430,12 +492,9 @@ def test_build_and_acquire_does_not_retry_when_stop_set_after_failed_attempt():
                 raw2signal_fn=identity_array, options=AcquireOptions(retry=3)
             )
         )
-        assert sched.outcome.exception is cause
-        assert sched.outcome.status == "stopped"
-        assert sched.outcome.reason == "stop requested"
-        assert stop.error is None
-
+    assert caught.value is cause
+    assert sched.outcome.exception is cause
+    assert sched.outcome.status == "stopped"
+    assert sched.outcome.reason == "stop requested"
     assert attempts == [1]
-    assert result is not None
-    np.testing.assert_allclose(result, np.array([1.0]))
     np.testing.assert_allclose(signals_buffer.array, np.array([1.0]))

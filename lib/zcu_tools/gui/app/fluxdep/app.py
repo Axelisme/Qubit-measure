@@ -20,6 +20,7 @@ from zcu_tools.gui.runtime import (
     GuiRuntimeBehavior,
     GuiRuntimeSpec,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.resources.entry.registry import component_registry
 
 if TYPE_CHECKING:
@@ -78,7 +79,7 @@ class FluxDepGuiBehavior(GuiRuntimeBehavior):
         def submit_interactive(
             compute: Callable[[], object],
             on_done: Callable[[object], None],
-            on_error: Callable[[Exception], None],
+            on_error: Callable[[BackgroundError], None],
         ) -> None:
             runner.submit(compute, on_done=on_done, on_error=on_error)
 

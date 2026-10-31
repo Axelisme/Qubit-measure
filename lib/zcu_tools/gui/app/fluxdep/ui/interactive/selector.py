@@ -27,6 +27,7 @@ from zcu_tools.analysis.fluxdep.stroke import (
 from zcu_tools.gui.app.fluxdep.interactive import CrossSelectionContext
 from zcu_tools.gui.expected_error import FailedPreconditionError, InvalidInputError
 from zcu_tools.gui.session.adapters.qt_background import BackgroundRunner
+from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.widgets.selectable_text import make_label_selectable
 from zcu_tools.plotting.fluxdep.cross_selection import CrossSelectionPlot
 
@@ -38,7 +39,7 @@ CrossSelectionPreviewSubmitter = Callable[
     [
         Callable[[], CrossSelectionView],
         Callable[[CrossSelectionView], None],
-        Callable[[Exception], None],
+        Callable[[BackgroundError], None],
     ],
     None,
 ]
@@ -325,7 +326,7 @@ class SelectorWidget(InteractiveMplWidget):
         self,
         compute: Callable[[], CrossSelectionView],
         on_done: Callable[[CrossSelectionView], None],
-        on_error: Callable[[Exception], None],
+        on_error: Callable[[BackgroundError], None],
     ) -> None:
         if self._runner is None:
             raise RuntimeError("owned cross-selection runner is unavailable")
@@ -357,7 +358,7 @@ class SelectorWidget(InteractiveMplWidget):
                 f"added {len(view.added_points)}, removed {len(view.removed_points)}"
             )
 
-        def error(exc: Exception) -> None:
+        def error(exc: BackgroundError) -> None:
             if not current():
                 return
             self._view = None

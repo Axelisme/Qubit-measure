@@ -140,7 +140,7 @@ def tab_operation_state(
             "available": snap.run.result is not None,
             "source_path": snap.run.source_path,
             "source_operation_id": snap.run.source_operation_id,
-            "partial_result": snap.run.partial_result,
+            "stop_requested": snap.run.stop_requested,
         },
         "analysis_state": {
             "source_operation_id": snap.analysis.source_operation_id,

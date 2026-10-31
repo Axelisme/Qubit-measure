@@ -19,7 +19,7 @@ from zcu_tools.resources.ftf import FTFSettings, parse_ftf
 from zcu_tools.simulate.baths import H_OVER_K
 from zcu_tools.simulate.evolution import Engine
 
-from tests.core._simulation import single_point_template
+from tests.core._simulation import TIME_BASE, single_point_template, ticks
 from tests.experiment._ftf_templates import snapshot
 from tests.resources._ftf_data import ftf_document
 
@@ -82,27 +82,25 @@ def reset_template(
     """
     ramp_ns = 8.0
     end_ns = 2 * ramp_ns + hold_ns
-    times = np.unique(
-        np.r_[
-            np.arange(0, ramp_ns + 1, 2),
-            ramp_ns + hold_ns,
-            np.arange(ramp_ns + hold_ns, end_ns + 1, 2),
-        ]
-    )
+    times = np.arange(0, end_ns + 1, 2)
     ramp_fraction = np.minimum(np.minimum(times, end_ns - times) / ramp_ns, 1)
     values = (1 - np.cos(np.pi * ramp_fraction)) / 2
-    envelope = (
-        None
-        if sudden
-        else PulseEnvelope(tuple(times / 1000), tuple(values.astype(complex)))
-    )
+    envelope = None if sudden else PulseEnvelope(2688, tuple(values.astype(complex)))
     end_us = end_ns / 1000
-    flux = PulseEvent(4, 0.0, end_us, 0.0, 0.0, -0.1, envelope)
-    readout_us = end_us + settling_ns / 1000
-    readout = PulseEvent(0, readout_us, 0.008, 6000.0, 0.0, 0.1)
-    window = ReadoutWindow(0, 0, 4, 1000.0, (readout_us,), (6000.0,), (0.0,))
+    flux = PulseEvent(4, ticks(0.0), ticks(end_us), 0.0, 0.0, -0.1, envelope)
+    readout_ticks = ticks(end_us) + ticks(settling_ns / 1000)
+    readout = PulseEvent(0, readout_ticks, ticks(0.008), 6000.0, 0.0, 0.1)
+    window = ReadoutWindow(
+        0, 0, 4, TIME_BASE.period_ticks(1000.0), (readout_ticks,), (6000.0,), (0.0,)
+    )
     return single_point_template(
-        PointTimeline((), (flux, readout), (window,), readout_us + 0.008)
+        PointTimeline(
+            (),
+            (flux, readout),
+            (window,),
+            readout_ticks + ticks(0.008),
+            time_base=TIME_BASE,
+        )
     )
 
 
@@ -119,6 +117,7 @@ def evolve_reset(
         snapshot(),
         reset_template(hold_ns, sudden=sudden),
         facts=facts,
+        time_base=TIME_BASE,
     )
     engine = Engine(1)
     try:
@@ -175,6 +174,7 @@ def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) 
         snapshot(),
         reset_template(hold_ns, settling_ns=8.0),
         facts=facts,
+        time_base=TIME_BASE,
     )
     # The delayed return must finish before the DC readout observation.
     waveform = plan.batch.flux_waveform

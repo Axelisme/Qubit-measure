@@ -31,9 +31,27 @@ Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 
 這些檢查由 program 擁有，builder 不解析 module 的內部資源；`ModularProgramV2` 的規則不變。
 
 作者在 `_initialize` 建立並 `declare(module)`，在 `_body` 呼叫 `emit(module, timeline=..., tag=...)`。
-Module 保存資源宣告結果，不繼承 QICK Macro，也不能直接傳給 `append_macro`。
+Module 描述資源需求，不繼承 QICK Macro，也不能直接傳給 `append_macro`。
+原生路徑由 `TimelineProgramV2` 以 module 物件身分為 key 持有宣告結果，宣告時寫入，lowering 從該 program 讀取。
+同一 module 物件可同時宣告進多個原生 program，手寫 program 與 `TimelineBuilder` 都適用。
+重新 compile 只重建該 program 的宣告結果，不覆寫其他 program 的資源。
+Legacy `ModularProgramV2` 仍將宣告狀態放在 module 上，不提供此跨 program 重用契約。
+
+2026-10-30，對宣告結果改由 program 持有的 B1 方案，使用者回答：「我也傾向B1，原因是對作者而言最小驚訝」。
+Builder 深複製只解決 builder 的重用，且會分離原物件與複本的身分，手寫 program 不受益。
+切換 program 時重新綁定也無法保留多個 program 各自的宣告結果，因此兩者都不能取代 program ownership。
+
+作者以 `Pulse("probe", cfg.probe, freq=freq)` 這類 constructor keyword 傳入數值或 sweep。
+支援覆寫的 module 建構子先複製 cfg，再套用覆寫並保留有效 cfg，caller cfg 不變。
+`None` 沿用原值。
+Registry identity、read axes 與 lowering 都使用有效 cfg。
+作者不必只為套入掃描值先 deepcopy cfg，也不必知道 waveform 的內部路由。
+各 module 的 keyword、單位與限制見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#constructor-overrides)。
+2026-10-30，對掃描值的作者寫法，使用者指出：「11其實我覺得set_param有點複雜，不夠python原生，作者不容易直接看出來要怎麼寫新實驗。」
+使用者選擇「11B」，採用建構時 keyword 覆寫。
+
 每次 emit 建立新的通用 `ModuleEmission`，時間與 tag 屬於那次發射。
-各 module owner 提供宣告與 lowering，不經舊 `run`。
+各 module owner 提供宣告與 lowering，原生 declare／lower 不呼叫 legacy `init`／`run`。
 只有確實需要不同 preprocess／expand 行為時，才另建 macro 類別。
 
 使用者於 2026-10-29 對原生作者入口指出：「我覺得不太好，用program寫法就該接近原生的寫法，而builder才該設計成一個with scope，內部是像body的寫法」。
@@ -83,8 +101,8 @@ Builder 產生的 program 與手寫 program 使用相同入口；program 自身�
 它涵蓋 `emit`、`emit_parallel`、`pulse`、`trigger`、`timeline_inc`、`delay_by_timeline` 與 `repeat` 的母 timeline。
 顯式名字優先，包含 `"default"`；巢狀範圍覆蓋外層，離開時還原。
 名字須是 default 或已 fork 的 timeline，未知名字報錯；範圍本身不 fork、不 join，也不推進 reference。
-`branch` 仍只有 `by`，沒有母 timeline 參數；case 內的發射沿用當下範圍預設。
-範圍不增加 branch 的同步或 join，case used/local 與不等長規則維持不變。
+`branch` 接受 `by` 與必填 `align_timeline`，沒有母 timeline 參數；case 內的發射沿用當下範圍預設。
+範圍不推進 reference；branch 的結尾依下述 `align_timeline` 規則合併。
 原生 `delay`／`delay_auto` 只推進 reference，不受此預設影響。
 使用者於 2026-10-30 對只切換既有名字的預設、顯式值優先、巢狀還原與 program 同名入口，回答：「1a 採用建議」。
 
@@ -196,10 +214,24 @@ Into 接受一個新名字或名字 list；重名與未宣告使用報錯。
 並要求：「那會需要一個宣告新timeline的機制，從當前指定timeline尾端分岔」。
 因此採記帳式 fork／join，不提供 `with join`／`j.branch`。
 
-`with self.branch(by=...)` 依 sweep selector 選 case，不支援量測結果分支。
-每個 case 只同步自己使用的 timeline 與局部 fork，可不等長，不補到共同最長 reference。
-Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeline 必須在入口前宣告。
-入口前既有 timeline 的 path ends 不同時，保留實際選中 end 並標為只能等待。
+`with self.branch(by=..., align_timeline=...) as cases` 依 sweep selector 選 `cases.case(index)`，不支援量測結果分支。
+Index 是 by 迴圈的 zero-based 整數點索引。未宣告的 index 是空 case；重複、非整數或超界 index 報錯。
+`align_timeline` 是必填 keyword-only bool。每個 case 從入口的 timeline 結尾與 reference 開始。
+True 對每條 timeline 的各 case 結尾取 join，全靜態取靜態 max，否則取精確逐點 max。
+True 要求各 case 結尾能從入口狀態重建，無法重建時 build 報錯，不執行未選 case 的動作。
+False 保留被 case 使用的 timeline 在 runtime 實際走到的結尾，未使用的 timeline 不變。
+兩種模式都不推進 reference、不自動 sync，後續可在各 timeline 結尾繼續發射。
+未使用的外部 long pulse 可以橫跨 Branch，不因不同 case 的結尾而變成只能等待。
+Case 內的 native delay、delay_auto 與 sync 在 build 時報錯，延遲改用 delay_timeline。
+Branch 區塊內、case 外的 timeline 操作在 build 時報錯，無條件動作寫在區塊前或後。
+Case 內 fork 的名字在 case 結束後失效。未 join 的局部結尾直接丟棄，不合回祖先，也不報錯。
+跨 Branch 要使用的 timeline 必須在入口前宣告。Register 超限保留 QICK 原錯誤，由作者負責。
+
+使用者於 2026-10-31 要求：「case()輸入應該要有對應的值，值沒有宣告對應case應該視為空branch」。
+對結尾選擇裁定：「我會預期branch實際長度可以選擇所以case的最大值，或是runtime時走的那個branch」；「我不想自動推進ref time」。
+對局部 fork 說明：「局部fork自動並回是超出預期的行為」。
+並選定參數名稱：「那感覺叫align_timeline:bool 比較好，我記得兩種需求都有吧？很多要不要打pi pulse的branch就是select?」。
+對 case 外操作報錯的提案回答：「好」。
 
 `with self.repeat(name, n, timeline=P, range_hint=...)` 的母 timeline P 預設為 default。
 入口先 `delay_by_timeline(timeline=P)`，避免第一圈與迴圈前 P 的內容重疊。固定 n=0 仍同步入口，但不執行 body。
@@ -207,6 +239,8 @@ Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeli
 其他外部 timeline 可以橫跨迴圈，但不能在內部使用，連作為 fork source 也不行。
 每圈同步 P 與局部結尾。離開後 P 為 0，局部名字失效，可在外部重新 fork。
 巢狀 Repeat 遞迴套用此規則。
+Case 內不能放 Repeat，因為其入口與回邊隱含推進 reference，build 時報錯，須移到 branch 外。
+Repeat 內放 Branch 仍合法，兩種 align_timeline 都遵守上述 branch 結尾契約。
 
 使用者於 2026-10-29 要求考慮「一開始一個超長flux pulse在獨立timeline，中間有branch或repeat的情況」，並對允許外部 timeline 橫跨結構的修正規則回答：「我同意」。
 這取代進入 Repeat 時拒絕尚未結束的外部 timeline 的做法。
@@ -216,7 +250,7 @@ Case 內 fork 的名字在 case 結束後失效；跨 Branch 要使用的 timeli
 Register n 是既有 register 名字，不得與 name 命名的 counter 同名。
 它一律要求作者保證的非負整數閉區間 `range_hint=(minimum, maximum)`，minimum 不得大於 maximum。
 編譯器不從 register 初值推定 range，也不新增硬體檢查。
-Register 次數或不同 case 的推進需要 runtime storage 時，外部結尾按實際路徑扣除，不採 minimum count 的等待上界。
+Repeat 的 register 次數或其 body 路徑推進需要 runtime storage 時，外部結尾按實際路徑扣除，不採 minimum count 的等待上界。
 路徑不同或 register 次數後尚未消耗的原 timeline 保持只能等待。
 
 只能等待的來源可供 join／fork、delay_by_timeline 或 body 對齊使用。
@@ -224,9 +258,9 @@ Register 次數或不同 case 的推進需要 runtime storage 時，外部結尾
 Join 目標與 fork 新 timeline 是普通狀態，從實際 remaining end 建立可繼續發射的排程點，來源本身仍只能等待。
 Sync 或原生 reference 推進完整消耗該 end 後，來源恢復普通狀態；部分消耗仍只能等待。
 
-Repeat body 支援具名 timeline 的 register 時間與各 case 不同的 Branch advance。
+Repeat body 支援具名 timeline 的 register 時間與不同 case 的 Branch 結尾，Branch 本身不推進 reference。
 各 case 分別累積 pulse guard，回邊使用全路徑保守 envelope 證明不重疊。
-Envelope 只作重疊與範圍證明，不改各 case 的 reference advance、實際 end、body_end 或 shot_end。
+Envelope 只作重疊與範圍證明，不改 Repeat 的 reference advance、Branch 實際 end、body_end 或 shot_end。
 Repeat body 內的 DelayAuto(register) 與原生 delay_reg_auto 仍拒絕；它們是未知的 native reference advance，不是具名 timeline duration。
 迴圈外 consumer 不受這項 Repeat 限制。
 
@@ -323,7 +357,7 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 | B，已交付 | 其餘 Module lowering、規則 b、runtime timeline 與 a→b 時序差異報告。新路徑不讀 block_mode，legacy 欄位與 init／run 保留到 D。B 不遷移實驗、不改模擬 frontend，也不刪舊路徑。MuxReadout 只轉換 declaration／playback，collect_raw_iq 仍只接受 legacy program。 |
 | Builder，已交付 | 在 B 的 TimelineProgramV2 上提供序列錄製與 build，Schedule 提供共用 run_acquire*。交付時與舊 builder 並存，不遷移實驗，也不等待 C 的 frontend 切換。 |
 | C，已交付 | 兩種 program 共用優化前 compiled snapshot 與唯一 compiled simulation frontend，已完成既定語料的 parity／完整 acquire 效能驗收並移除舊 Module-tree simulation frontend。現行支援與拒絕範圍見上節；大量實驗遷移仍未交付。 |
-| D，另行交付 | 刪除舊 init／run 路徑與退役的 legacy 入口，不再於此切換規則 b。 |
+| D，另行交付 | 原生宣告 ownership 與 constructor overrides 已交付。2026-10-31，對 D 移回大量實驗遷移結尾的安排，使用者回答：「採用建議」。屆時一併刪除舊 init／run／block_mode、ModularProgramV2 與 ProgramBuilder。set_param 也於大量遷移時退出作者介面。目前 legacy 路徑與 set_param 保留，不先替即將退役的 ModularProgramV2 改寫 declare／lower 路徑。D 不再切換規則 b。 |
 
 2026-10-29，對規則 b 與差異報告提前到 B、D 只刪舊路徑的安排，使用者回答：「採用建議」。
 同日，對 B 的 register delay、Module Join lowering 與 Mux 取數範圍，使用者回答：「1A  2B 3A」。

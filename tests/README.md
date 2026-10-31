@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-30（框架 UI 與實驗定義的驗收分流）
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -443,7 +443,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 ### Experiment v2 Schedule runtime tests
 
 `tests/experiment/v2/runtime/test_program_builder.py` 覆蓋 ProgramBuilder 建構、cfg 投影與 program-side sweep；`test_program_acquire.py` 覆蓋 integrated／decimated acquire、caller-owned program cache、progress 與 raw conversion。`test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
-`test_schedule.py` 覆蓋 typed env、host scan／repeat／batch；`test_schedule_buffers.py` 覆蓋 root buffer 註冊、child buffer 同步與 shape validation。`test_schedule_lifecycle.py` 擁有 context 與 stop token 生命週期，`test_signal_buffer_flush.py` 擁有 SignalBuffer 寫入通知、manual update 與 flush。
+`test_schedule.py` 覆蓋 typed env、host scan／repeat；`test_schedule_buffers.py` 覆蓋 root buffer 註冊、child buffer 同步與 shape validation。`test_schedule_lifecycle.py` 擁有 context 與 stop token 生命週期，`test_signal_buffer_flush.py` 擁有 SignalBuffer 寫入通知、manual update 與 flush。
 `test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
 ### Experiment device contracts

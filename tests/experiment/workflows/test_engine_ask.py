@@ -80,8 +80,6 @@ def test_pending_answer_type_and_parse_are_readonly_and_allow_retry(rig: Rig) ->
         assert rig.events() == before
         assert question(rig).request_id == request_id
         assert not future.done()
-        with pytest.raises(InvalidRunState):
-            rig.engine.resume("run")
         rig.engine.answer("run", Decision(value=7), request_id=request_id)
         assert future.result(timeout=10).lifecycle == "done"
     assert rig.engine.pending_answer_type("run") is None
@@ -112,6 +110,8 @@ def test_answer_continues_same_author_with_live_tunables(rig: Rig) -> None:
     rig.start(script)
     with running(rig) as future:
         request_id = pending(rig)
+        status = rig.engine.status()
+        assert status is not None and status.lifecycle == "waiting"
         rig.engine.update_tunables(
             "run", Tunables(value=8), expected_revision=0, actor=Actor("agent", "test")
         )

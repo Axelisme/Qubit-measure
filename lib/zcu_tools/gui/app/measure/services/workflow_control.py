@@ -43,9 +43,9 @@ class WorkflowTabSnapshot:
     """tab_id is stable per open; name may repeat; run_id/token are absent before Start.
 
     status is native acceptance, not submission. busy includes pending owner
-    delivery and paused lease ownership. error is the last producer failure text,
+    delivery and Ask lease ownership. error is the last producer failure text,
     or None when no failure was delivered. pending_question is the detached
-    answerable Ask envelope, or None outside a delivered unanswered Ask pause.
+    answerable Ask envelope, or None outside a delivered unanswered Ask.
     last_exchange retains the latest per-run question and accepted answer facts.
     """
 
@@ -136,7 +136,7 @@ class WorkflowControlFacet:
         return tab_id
 
     def close(self, tab_id: str) -> bool:
-        """Release an idle tab; return False without mutation while pending/paused.
+        """Release an idle tab; return False without mutation while busy.
 
         The pane must retain itself on False. After True it can dispose its own
         callbacks/timers/editors before deleting children. No session drain,
@@ -227,18 +227,6 @@ class WorkflowControlFacet:
     def status(self, run_id: str) -> RunStatus | None:
         """Read native state; None means this target is still pending acceptance."""
         return self._run_tab(run_id).run.status()
-
-    def pause(self, run_id: str) -> RunStatus:
-        """Request cooperative Pause while retaining the operation and RUN lease."""
-        result = self._run_tab(run_id).run.pause(run_id)
-        self._notify()
-        return result
-
-    def resume(self, run_id: str) -> int:
-        """Continue a delivered paused run with its original operation token."""
-        result = self._run_tab(run_id).run.resume(run_id)
-        self._notify()
-        return result
 
     def cancel(
         self, run_id: str, scope: str = "script", *, expected: int | None = None
@@ -392,7 +380,7 @@ class WorkflowControlFacet:
         fields/model types raise ValidationError/TypeError without consumption.
         Stale run targets raise RunMismatch. Return the same pending token as
         Start, not terminal completion. Author code stays on its original worker;
-        no new Resume/Execute or Runner continuation follows.
+        no new Execute or Runner continuation follows.
         """
         result = self._run_tab(run_id).run.answer(run_id, answer, request_id=request_id)
         self._notify()

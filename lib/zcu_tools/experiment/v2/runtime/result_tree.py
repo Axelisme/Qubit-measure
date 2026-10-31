@@ -132,8 +132,11 @@ class ResultTree(Generic[T_Env]):
 
         ``value`` must match the selected target: a mutable mapping accepts a
         mapping and updates its entries; a list accepts a list and replaces its
-        contents; an ndarray accepts an ndarray or number, copied into the
-        existing target with NumPy broadcasting and casting rules.
+        contents; an ndarray accepts an ndarray or number whose shape exactly
+        matches the target. A number can only be written to a shape ``()`` target.
+        Values are copied into the existing target with NumPy casting rules
+        unchanged. A shape mismatch raises ValueError before writing and emits
+        no events.
 
         Events use this tree's constructor-supplied run ``env``. ``flush=True``
         bypasses subscription throttling; False uses the subscription interval.

@@ -19,7 +19,6 @@ from ._support import make_client
         ("workflow_close", {"tab_id": "workflow-2"}, "workflow.close"),
         ("workflow_status", {}, "workflow.status"),
         ("workflow_status", {"run_id": "run"}, "workflow.status"),
-        ("workflow_pause", {"run_id": "run"}, "workflow.pause"),
         ("workflow_stop", {"run_id": "run"}, "workflow.stop"),
         (
             "workflow_answer",
@@ -113,7 +112,7 @@ def test_cancel_requires_exactly_one_of_operation_execution_or_run(tmp_path):
         client.context.session.close()
 
 
-def test_workflow_start_and_resume_share_existing_session_operation_mapping(tmp_path):
+def test_workflow_start_uses_existing_session_operation_mapping(tmp_path):
     def respond(method, params):
         if method == "operation.await":
             return {"reason": "completed", "status": "completed"}
@@ -124,8 +123,6 @@ def test_workflow_start_and_resume_share_existing_session_operation_mapping(tmp_
         started = client.call(
             "workflow_start", {"tab_id": "workflow-1", "run_id": "native"}
         )
-        resumed = client.call("workflow_resume", {"run_id": "native"})
-        assert started["handle"] == resumed["handle"]
         assert "operation_id" not in started
         assert (
             client.call("wait", {"op": started["handle"], "timeout": 0})["status"]

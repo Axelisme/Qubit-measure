@@ -6,6 +6,8 @@ import pytest
 from zcu_tools.experiment.simulation import load_environment, white_noise
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
+from tests.core._simulation import TIME_BASE, tick_tuple
+
 
 def test_environment_builder_can_resolve_its_own_postponed_annotations(tmp_path):
     path = tmp_path / "authored.py"
@@ -52,10 +54,15 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
             loop_dims=(100,),
             avg_level=0,
             reps=100,
-            readouts=(ReadoutWindow(0, 0, 8, 307.2, (0.0,)),),
+            readouts=(
+                ReadoutWindow(
+                    0, 0, 8, TIME_BASE.period_ticks(307.2), tick_tuple((0.0,))
+                ),
+            ),
             root_seed=17,
             sequence=0,
             rng_version=env.soc.binding.rng_version,
+            time_base=TIME_BASE,
         )
         delivery = env.soc.binding.execute(
             RoundRequest(request, env.soc.binding.capture_snapshot(), 0)

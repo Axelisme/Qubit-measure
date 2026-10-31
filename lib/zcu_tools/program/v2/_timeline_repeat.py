@@ -68,7 +68,7 @@ class LoopTimelineEnter(Macro):
 
     def preprocess(self, prog) -> None:
         book = self.book
-        entry = book.end(self.parent, placement=True)
+        entry = book.end(self.parent)
         if self.counter is not None:
             prog.add_reg(self.counter)
         storage = book.math.snapshot(book.math.cycles(entry))
@@ -92,7 +92,6 @@ class LoopTimelineEnter(Macro):
         self.frame = LoopTimelineFrame(
             self.parent,
             external,
-            book.waiting.copy(),
             entry,
             origin,
             progress,
@@ -105,7 +104,6 @@ class LoopTimelineEnter(Macro):
         book.pinned.update(prog._timeline_live_registers())
         book.pinned.add(storage.register)
         book.ends = {self.parent: origin}
-        book.waiting.clear()
 
     def translate(self, prog) -> None:
         pass
@@ -205,7 +203,6 @@ class LoopTimelineExit(Macro):
         if book.repeats and not book.loop_timelines:
             self._publish_reference_guards(prog, frame)
         book.ends = {**frame.external, frame.parent: result}
-        book.waiting = frame.waiting
         book.pinned = frame.pinned
 
     def _pointer_body(self, prog, frame: LoopTimelineFrame, finish: Time) -> bool:
@@ -226,12 +223,8 @@ class LoopTimelineExit(Macro):
         offsets = [difference_limits(event.expression, origin) for event in events]
         if any(lo is None or lo != hi for lo, hi in offsets):
             return False
-        for generator, ch in frame.initial_channels:
-            native = self.entry.book.native_expression(prog, ch, generator=generator)
-            if native != frame.initial_native[generator, ch]:
-                lo, hi = difference_limits(native, end)
-                if lo is None or lo != hi:
-                    return False
+        if not self._constant_channel_offsets(prog, frame, end):
+            return False
         for math in frame.body_math:
             math.operations = [
                 op for op in math.operations if isinstance(op, EventTime)
@@ -248,6 +241,18 @@ class LoopTimelineExit(Macro):
         self.entry.book.math.operations = [
             WriteRegOp(dst="s_out_time", lhs="s_out_time", op="+", rhs=int(advance))
         ]
+        return True
+
+    def _constant_channel_offsets(
+        self, prog, frame: LoopTimelineFrame, end: TimeExpression
+    ) -> bool:
+        """Pointer lowering requires every changed physical tail to track the end."""
+        for generator, ch in frame.initial_channels:
+            native = self.entry.book.native_expression(prog, ch, generator=generator)
+            if native != frame.initial_native[generator, ch]:
+                lo, hi = difference_limits(native, end)
+                if lo is None or lo != hi:
+                    return False
         return True
 
     def _capture_channel(
@@ -318,7 +323,6 @@ class LoopTimelineExit(Macro):
         if book.repeats and not book.loop_timelines:
             self._publish_reference_guards(prog, frame)
         book.ends = {**external, frame.parent: result}
-        book.waiting = frame.waiting
         book.pinned = frame.pinned
 
     def _reference_summary(
@@ -439,7 +443,6 @@ class LoopTimelineExit(Macro):
                 external[name] = initial
             else:
                 external[name] = self._reference_store(prog, frame, initial, expression)
-                frame.waiting.add(name)
 
         return external
 

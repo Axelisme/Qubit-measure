@@ -97,6 +97,6 @@ def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
             return iq[..., 0] + 1j * iq[..., 1]
 
         result = builder.run_program(prog, rounds=2, raw2signal_fn=convert)
-    stop.raise_if_error()
+
     np.testing.assert_array_equal(result, [5 - 5j, 2 - 2j])
     np.testing.assert_array_equal(buffer.data, result)

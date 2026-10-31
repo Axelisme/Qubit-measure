@@ -381,8 +381,8 @@ class TimelineBuilder:
         t is us, a QICK parameter, or an author-calculated nonnegative cycle
         register name. range_hint optionally guarantees inclusive integer-cycle
         bounds for a register. Unbounded values use runtime maxima; overlap and
-        overflow are author-owned. Invalid hints and unknown/wait-only timelines
-        fail during build, as in TimelineProgramV2.timeline_inc.
+        overflow are author-owned. Invalid hints and unknown timelines fail
+        during build, as in TimelineProgramV2.timeline_inc.
         """
         self._record(
             lambda prog: prog.timeline_inc(
@@ -394,9 +394,10 @@ class TimelineBuilder:
         """Record new timeline names copying source's current end.
 
         source must exist; into is one fresh name or a list of distinct fresh
-        names, captured now. Wait-only sources produce ordinary placement
-        targets. No reference advance or output occurs. Unknown/duplicate names
-        fail at build, and recording after build raises ValueError.
+        names, captured now. Source and targets permit placement at their
+        actual remaining ends. No reference advance or output occurs.
+        Unknown/duplicate names fail at build, and recording after build raises
+        ValueError.
         """
         self._ensure_recording()
         recorded = into if isinstance(into, str) else list(into)
@@ -405,9 +406,9 @@ class TimelineBuilder:
     def join(self, *sources: str, into: str) -> None:
         """Record max of existing sources and target into target's end.
 
-        Sources remain unchanged; the target becomes ordinary, including when
-        sources are wait-only. This is bookkeeping, not a context manager; it
-        emits no output or reference advance. Unknown names fail at build with
+        Sources remain unchanged; the target uses their actual maximum end.
+        This is bookkeeping, not a context manager. It emits no output or
+        reference advance. Unknown names fail at build with
         the program error. Recording after build raises ValueError.
         """
         self._record(lambda prog: prog.join(*sources, into=into))

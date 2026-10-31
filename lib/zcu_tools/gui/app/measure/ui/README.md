@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-10-31
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -28,17 +28,16 @@ monotonic display numbers. The status badge returns to the active workflow.
 The shared RUN lease locks competing panes and Setup/SoC submissions.
 
 `WorkflowPane` renders the facet's Plan and Tunables drafts with `FormEditor`.
-It forwards Refresh, Start, Pause, Resume, Stop, Apply and Discard to the facet.
+It forwards Refresh, Start, Stop, Apply and Discard to the facet.
 Discard restores accepted tunables and clears renderer-local invalid text. It is
-available only for changed drafts while editing is allowed. Entering paused
-selects Tunables and shows the Resume/Apply hint; Resume and Stop hide it.
-A new Ask takes focus after pause navigation. Stopping makes tunables read-only
+available only for changed drafts while editing is allowed.
+A new Ask selects its question page and shows waiting. Stopping makes tunables read-only
 and disables Apply and Discard.
 The active_path label shows the root-to-first-fork chain. The live_paths label
 shows each live leaf full path on its own line, but hides when its only leaf
 matches active_path. Neither label picks a latest child.
 Busy Stop remains enabled under Remote control and reclaims locked Local before
-calling the same facet. Pause, Resume, Answer and tunables retain the holder gate.
+calling the same facet. Answer and tunables retain the holder gate.
 The services own source capture, lowering, accepted tunables and run lifetime.
 Ask displays the authored question and driver-owned answer schema, with a JSON
 answer field. A new question selects Ask; the status badge returns there from

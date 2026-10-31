@@ -708,8 +708,8 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """Declare new timeline names in _body, copying source end at this point.
 
         source must already exist; into is one new name or a list of distinct
-        new names. A wait-only source supplies its actual remaining end; new
-        timelines permit placement while that source stays wait-only.
+        new names. Source and targets retain the actual remaining end and
+        permit placement after branch or runtime Repeat.
         Unknown source or duplicate targets raise ValueError during
         compile. Calling outside _body raises ValueError immediately. This emits
         no output and does not advance reference. Each compile resets names.
@@ -880,7 +880,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
         None selects the scoped name, or default outside a scope.
         Only default exists initially; other names require fork in _body.
-        Fully consumed wait-only bounds become ordinary zero ends again.
+        Runtime ends use their actual remaining value, not a range bound.
         Unknown names or unprovable swept floors raise ValueError during compile.
         """
         selected = timeline if timeline is not None else self._timeline_default

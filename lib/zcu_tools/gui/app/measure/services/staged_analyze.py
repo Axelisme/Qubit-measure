@@ -24,7 +24,6 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.gui.app.measure.events.completion import AnalyzeFailedPayload
 from zcu_tools.gui.app.measure.events.tab import (
     TabInteractionChangedPayload,
@@ -42,6 +41,7 @@ from zcu_tools.gui.session.operation_runner import (
     OperationSpec,
     SettleFn,
 )
+from zcu_tools.gui.session.ports import BackgroundError
 
 logger = logging.getLogger(__name__)
 
@@ -154,13 +154,7 @@ class StagedAnalyzeService:
                 _finish(bg.result, settle)
             else:
                 assert bg.error is not None
-                _fail(
-                    bg.error,
-                    settle,
-                    failure_kind="analysis"
-                    if isinstance(bg.error, AnalysisFailed)
-                    else None,
-                )
+                _fail(bg.error, settle)
 
         def _finish(result: Any, settle: SettleFn) -> None:
             """The shared finished terminal path: record into State, then settle.
@@ -185,10 +179,8 @@ class StagedAnalyzeService:
             )
 
         def _fail(
-            error: Exception,
+            error: BackgroundError,
             settle: SettleFn,
-            *,
-            failure_kind: Literal["analysis"] | None = None,
         ) -> None:
             """The single failure terminal path: clear analyzing, settle failed, emit."""
             logger.warning("staged-analyze failed: tab_id=%r error=%r", tab_id, error)
@@ -201,7 +193,7 @@ class StagedAnalyzeService:
             self._active_tokens.pop(tab_id, None)
             self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
-            settle(OperationOutcome("failed", str(error), failure_kind=failure_kind))
+            settle(OperationOutcome("failed", str(error)))
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.FAILED_FACT)
             )

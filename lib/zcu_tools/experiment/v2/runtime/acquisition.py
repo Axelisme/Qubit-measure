@@ -88,23 +88,38 @@ class SynchronousAcquireKeywords(TypedDict, Generic[T_KeywordRaw_contra]):
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
-    """Convert the first receiver/readout's final-axis IQ pairs to complex signals.
+    """Convert a single ADC/read's final-axis IQ pairs to complex signals.
 
-    raw follows integrated program acquisition layout: receiver, readout, then
-    signal axes ending in a length-two I/Q axis. Invalid layouts raise NumPy or
-    indexing errors; this function does not modify raw.
+    raw follows integrated program acquisition layout: ADC, read, then signal
+    axes ending in a length-two I/Q axis. Require exactly one ADC and one read
+    per shot, otherwise raise ValueError requesting an explicit converter.
+    Other invalid layouts raise NumPy or indexing errors. raw is not modified.
     """
+    read_counts = [adc.shape[0] for adc in raw]
+    if len(raw) != 1 or read_counts != [1]:
+        raise ValueError(
+            f"Default integrated conversion: ADC count={len(raw)}, "
+            f"read counts={read_counts}; provide an explicit converter "
+            "unless there is exactly one ADC and one read per shot"
+        )
     return raw[0][0].dot([1, 1j])
 
 
 def default_decimated_raw2signal_fn(
     raw: Sequence[NDArray[np.float64]],
 ) -> NDArray[np.complex128]:
-    """Convert the first receiver's decimated IQ trace to a complex array.
+    """Convert a single ADC's decimated IQ traces to a complex array.
 
-    raw contains receiver arrays ending in a length-two I/Q axis. Invalid layouts
-    raise NumPy or indexing errors; this function does not modify raw.
+    raw contains ADC arrays ending in a length-two I/Q axis. Require exactly one
+    ADC, otherwise raise ValueError requesting an explicit converter. Preserve
+    all repetition, read and sample axes. Other invalid layouts raise NumPy or
+    indexing errors. raw is not modified.
     """
+    if len(raw) != 1:
+        raise ValueError(
+            f"Default decimated conversion: ADC count={len(raw)}; "
+            "provide an explicit converter unless there is exactly one ADC"
+        )
     return raw[0].dot([1, 1j])
 
 
@@ -112,10 +127,11 @@ def default_decimated_raw2signal_fn(
 class AcquireOptions:
     """Policy shared by integrated and decimated program acquisition.
 
-    retry is a non-negative number of extra attempts, default zero. Shot
-    overrun (AcquisitionContractError) uses max(retry, 1) extra attempts, even
-    when retry is zero. Each retry reruns all rounds on the same program with
-    fresh producer buffers; overrun discards the failed attempt's slot data.
+    retry is a non-negative number of extra attempts, default zero, including
+    shot overrun (AcquisitionContractError). Zero never retries. Exhausted
+    producer failures propagate unchanged, even if cancellation was also requested.
+    Each retry reruns all rounds on the same program with fresh producer buffers;
+    overrun discards the failed attempt's slot data.
     External cancellation and interruption are never retried. progress
     defaults to hiding native acquisition progress. progress_label names the
     rounds bar (default "rounds"). progress_leave=None keeps the completed bar
@@ -128,6 +144,12 @@ class AcquireOptions:
     logged if finite and acquisition actually ends early. Each retry logs its
     reason and next attempt number at warning level; early stops log the stop
     value and completed rounds at info level.
+    on_stop optionally observes external cancellation once per successful
+    cooperative return, including cancellation before any round. It runs
+    synchronously after acquire scope release and progress cleanup, before the
+    signal view is returned. Data-driven stop alone does not call it. Producer,
+    converter, update and KeyboardInterrupt failures do not call it. Observer
+    exceptions propagate unchanged without retry or changing Schedule outcome.
     """
 
     retry: int = 0
@@ -135,6 +157,7 @@ class AcquireOptions:
     progress_label: str = "rounds"
     progress_leave: bool | None = None
     stop_condition: StopCondition | None = None
+    on_stop: Callable[[], None] | None = None
 
 
 @dataclass
@@ -154,8 +177,7 @@ class _AcquireProgress:
         overrun = isinstance(error, AcquisitionContractError)
         if overrun:
             slot.set(initial_signal)
-        retry_limit = max(retry, 1) if overrun else retry
-        if self.attempts > retry_limit:
+        if self.attempts > retry:
             return False
         reason = "shot_overrun" if overrun else type(error).__name__
         logger.warning(
@@ -209,9 +231,14 @@ class AcquisitionRunner:
         and final raw payload to the slot shape. options selects retry, progress
         and data stop. rounds must be a positive int (not bool); retry must be
         nonnegative. The owner must be active and have a default SignalBuffer slot.
-        Producer failure, interrupt or cancellation records the Schedule outcome
-        and retains partial data; overrun restores the pre-acquire slot and allows
-        at least one retry. Conversion/update errors propagate without retry.
+        External cancellation returns partial data; only cancellation of the
+        Schedule itself records its stopped outcome. options.on_stop observes
+        cancellation after scope release and progress cleanup.
+        KeyboardInterrupt propagates unchanged without retry. Producer failures
+        use the explicit retry budget, including zero
+        retries, then propagate unchanged. A concurrent stop prevents retry but
+        does not suppress the failure. Overrun restores the pre-acquire slot.
+        Conversion/update errors propagate without retry.
         """
         require_positive_rounds(rounds)
         retry = options.retry
@@ -230,9 +257,11 @@ class AcquisitionRunner:
             disable=rounds == 1,
         )
         observation = _AcquireProgress(pbar)
+        external_stop = False
         try:
-            for _ in range(max(retry, 1) + 1):
+            for _ in range(retry + 1):
                 if self._schedule.check_stop_requested():
+                    external_stop = True
                     break
                 pbar.reset()
                 observation.attempts += 1
@@ -248,36 +277,33 @@ class AcquisitionRunner:
                         observation=observation,
                     )
                 except _AcquireStopped:
+                    external_stop = True
                     self._schedule.check_stop_requested()
                     break
                 except _CallbackError as exc:
                     raise exc.error from None
-                except KeyboardInterrupt as exc:
-                    self._schedule.mark_interrupted(exc)
-                    break
-                # tolerated: Native acquisition failures retain partial data and may be retried.
-                except Exception as exc:  # noqa: BLE001
-                    # The producer reports first-round cancellation with an exception.
-                    cause = None if isinstance(exc, StoppedPartialAcquireError) else exc
-                    if self._schedule.check_stop_requested(exception=cause):
-                        break
+                # Retry producer failures; exhausted errors propagate unchanged.
+                except Exception as exc:
+                    if self._schedule.check_stop_requested(exception=exc):
+                        raise
                     if not observation.retry_after(exc, retry, slot, initial_signal):
                         self._schedule.mark_failed(exc)
-                        break
+                        raise
                     continue
 
                 if self._schedule.check_stop_requested():
+                    external_stop = True
                     break
 
                 pbar.set_progress(rounds)
                 slot.set(signal_fn(raw))
                 observation.log_early_stop(rounds)
                 break
-        except KeyboardInterrupt as exc:
-            self._schedule.mark_interrupted(exc)
         finally:
             pbar.close()
 
+        if external_stop and options.on_stop is not None:
+            options.on_stop()
         return slot.view
 
     def _acquire_once(

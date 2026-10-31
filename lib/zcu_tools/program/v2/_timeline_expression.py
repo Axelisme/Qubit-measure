@@ -393,34 +393,39 @@ def multiply_time(left: TimeExpression, right: TimeExpression) -> TimeExpression
     )
 
 
+def _selection_common_origin(values: tuple[TimeExpression, ...]) -> TimeVariable | None:
+    """Find linear terms shared by every candidate, before selector projection."""
+    first = values[0]
+    if not isinstance(first, TimeVariable):
+        return None
+    if not all(isinstance(value, TimeVariable) for value in values):
+        return None
+    common = tuple(
+        (axis, coefficient)
+        for axis, coefficient in first.terms
+        if all(
+            isinstance(value, TimeVariable) and (axis, coefficient) in value.terms
+            for value in values
+        )
+    )
+    return TimeVariable(terms=common) if common else None
+
+
 def select_time(
     selector: TimeExpression, values: tuple[TimeExpression, ...]
 ) -> TimeExpression:
     """Retain common components; one-axis selection is exact, others independent."""
     if all(value == values[0] for value in values):
         return values[0]
-    if all(isinstance(value, TimeVariable) for value in values):
-        first = values[0]
-        if isinstance(first, TimeVariable):
-            common = tuple(
-                (v, c)
-                for v, c in first.terms
-                if all(
-                    isinstance(value, TimeVariable) and (v, c) in value.terms
-                    for value in values
-                )
-            )
-            if common:
-                origin = TimeVariable(terms=common)
-                return add_time(
-                    origin,
-                    select_time(
-                        selector,
-                        tuple(
-                            add_time(value, scale_time(origin, -1)) for value in values
-                        ),
-                    ),
-                )
+    origin = _selection_common_origin(values)
+    if origin is not None:
+        return add_time(
+            origin,
+            select_time(
+                selector,
+                tuple(add_time(value, scale_time(origin, -1)) for value in values),
+            ),
+        )
     axes = expression_axes(selector)
     for value in values:
         axes.update(expression_axes(value))
@@ -681,6 +686,28 @@ def _constrained_limits(
     return lower, upper
 
 
+def _sign_choices(bounds: CycleLimits) -> tuple[int, ...]:
+    """Branch only when the current domain cannot prove an Abs argument's sign."""
+    lo, hi = bounds
+    if lo is not None and lo >= 0:
+        return (1,)
+    if hi is not None and hi <= 0:
+        return (-1,)
+    return (1, -1)
+
+
+def _limits_hull(leaves: list[CycleLimits]) -> CycleLimits:
+    """Enclose feasible leaves without inventing bounds for unbounded leaves."""
+    return (
+        None
+        if any(lo is None for lo, _ in leaves)
+        else min(lo for lo, _ in leaves if lo is not None),
+        None
+        if any(hi is None for _, hi in leaves)
+        else max(hi for _, hi in leaves if hi is not None),
+    )
+
+
 def _block_limits(value: TimeAbs) -> CycleLimits:
     arguments = _abs_arguments(value)
     if len(arguments) > MAX_ABS_TERMS:
@@ -704,15 +731,7 @@ def _block_limits(value: TimeAbs) -> CycleLimits:
         if len(signs) < len(arguments):
             argument = arguments[len(signs)]
             linear = _signed_linear(argument, signs)
-            lo, hi = _domain_limits(linear, current)
-            choices = (
-                (1,)
-                if lo is not None and lo >= 0
-                else (-1,)
-                if hi is not None and hi <= 0
-                else (1, -1)
-            )
-            for sign in choices:
+            for sign in _sign_choices(_domain_limits(linear, current)):
                 pending.append(
                     (
                         {**signs, argument: sign},
@@ -734,14 +753,7 @@ def _block_limits(value: TimeAbs) -> CycleLimits:
         leaves.append(bounds)
     if not leaves:
         return _interval_limits(value)
-    return (
-        None
-        if any(lo is None for lo, _ in leaves)
-        else min(lo for lo, _ in leaves if lo is not None),
-        None
-        if any(hi is None for _, hi in leaves)
-        else max(hi for _, hi in leaves if hi is not None),
-    )
+    return _limits_hull(leaves)
 
 
 def _abs_limits(value: TimeAbs) -> CycleLimits:
@@ -1038,6 +1050,20 @@ class TimeChoicePlan:
     atoms: dict[CycleAxis, TimeExpression]
 
 
+def _dominated_choice(
+    index: int, proofs: list[TimeExpression], *, maximum: bool
+) -> bool:
+    """Discard a weaker candidate; preserve the first when proofs are equal."""
+    for other, proof in enumerate(proofs):
+        if index == other:
+            continue
+        lo, hi = difference_limits(proof, proofs[index])
+        better = lo is not None and lo >= 0 if maximum else hi is not None and hi <= 0
+        if better and (lo != 0 or hi != 0 or other < index):
+            return True
+    return False
+
+
 def plan_time_choice(
     values: tuple[TimeExpression, ...],
     *,
@@ -1069,23 +1095,12 @@ def plan_time_choice(
     residuals = [_linear_add(line, _linear_scale(common, -1)) for line in lines]
     replacements = {axis: value for value, axis in recipes.atoms.items()}
     proofs = [substitute_time(line, replacements) for line in residuals]
-    kept: list[TimeVariable] = []
-    for index, residual in enumerate(residuals):
-        dominated = False
-        for other, proof in enumerate(proofs):
-            if index == other:
-                continue
-            lo, hi = difference_limits(proof, proofs[index])
-            better = (
-                lo is not None and lo >= 0 if maximum else hi is not None and hi <= 0
-            )
-            equal = lo == hi == 0
-            if better and (not equal or other < index):
-                dominated = True
-                break
-        if not dominated:
-            kept.append(residual)
-    return TimeChoicePlan(common, tuple(kept), replacements)
+    kept = tuple(
+        residual
+        for index, residual in enumerate(residuals)
+        if not _dominated_choice(index, proofs, maximum=maximum)
+    )
+    return TimeChoicePlan(common, kept, replacements)
 
 
 def substitute_time(
