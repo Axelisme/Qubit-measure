@@ -135,7 +135,7 @@ def test_module_join_emits_parallel_sequences_while_program_join_only_merges_end
     def bookkeeping_body(prog):
         if timeline is not None:
             prog.fork("default", into=parent)
-        prog.delay_timeline(10 / 430.08, timeline=parent)
+        prog.timeline_inc(10 / 430.08, timeline=parent)
         prog.fork(parent, into=["left", "right"])
         prog.emit(first, timeline="left")
         prog.emit(first, timeline="left")
@@ -146,7 +146,7 @@ def test_module_join_emits_parallel_sequences_while_program_join_only_merges_end
     def module_body(prog):
         if timeline is not None:
             prog.fork("default", into=parent)
-        prog.delay_timeline(10 / 430.08, timeline=parent)
+        prog.timeline_inc(10 / 430.08, timeline=parent)
         prog.emit(joined, timeline=timeline)
         prog.emit(tail, timeline=timeline)
 
@@ -247,7 +247,7 @@ def test_module_join_selected_lengths_keep_pointwise_maximum_and_runtime_origin(
         if timeline is not None:
             prog.fork("default", into=parent)
         prog.emit(origin)
-        prog.delay_timeline("origin_cycles", timeline=parent)
+        prog.timeline_inc("origin_cycles", timeline=parent)
         prog.emit(joined, timeline=timeline)
         prog.emit(joined, timeline=timeline)
         prog.emit(tail, timeline=timeline)
@@ -344,21 +344,21 @@ def _advancing_pulse(operation: str, scan: ScanWith) -> Pulse:
                 prog.delay(0.1)
             elif operation == "delay_auto":
                 prog.delay_auto(0.1)
-            elif operation == "sync":
-                prog.delay_timeline(0.1, timeline=timeline)
-                prog.sync(timeline=timeline)
+            elif operation == "delay_by_timeline":
+                prog.timeline_inc(0.1, timeline=timeline)
+                prog.delay_by_timeline(timeline=timeline)
             elif operation == "runtime_sync":
                 prog.write_reg("duration", 10)
-                prog.delay_timeline("duration", timeline=timeline)
-                prog.sync(timeline=timeline)
+                prog.timeline_inc("duration", timeline=timeline)
+                prog.delay_by_timeline(timeline=timeline)
             elif operation == "register":
                 prog.write_reg("duration", 10)
                 prog.delay_reg_auto("duration")
             elif operation == "repeat":
-                prog.sync(timeline=timeline)
+                prog.delay_by_timeline(timeline=timeline)
                 with prog.repeat("inner", 2, timeline=timeline):
-                    prog.delay_timeline(0.1, timeline=timeline)
-                    prog.sync(timeline=timeline)
+                    prog.timeline_inc(0.1, timeline=timeline)
+                    prog.delay_by_timeline(timeline=timeline)
             elif operation == "scan":
                 prog.emit(scan, timeline=timeline)
             else:
@@ -369,7 +369,15 @@ def _advancing_pulse(operation: str, scan: ScanWith) -> Pulse:
 
 @pytest.mark.parametrize(
     "operation",
-    ["delay", "delay_auto", "sync", "runtime_sync", "register", "repeat", "scan"],
+    [
+        "delay",
+        "delay_auto",
+        "delay_by_timeline",
+        "runtime_sync",
+        "register",
+        "repeat",
+        "scan",
+    ],
 )
 @pytest.mark.parametrize("position", ["first", "last", "nested"])
 def test_module_join_rejects_reference_advancing_child_at_build(operation, position):
@@ -380,7 +388,7 @@ def test_module_join_rejects_reference_advancing_child_at_build(operation, posit
     if position == "nested":
         joined = Join(joined)
     with pytest.raises(
-        ValueError, match="cannot advance reference; use delay_timeline instead"
+        ValueError, match="cannot advance reference; use timeline_inc instead"
     ):
         _program(
             [scan, joined],
@@ -393,7 +401,15 @@ def test_module_join_rejects_reference_advancing_child_at_build(operation, posit
 @pytest.mark.parametrize("kind", ["two_pulse", "bath"])
 @pytest.mark.parametrize(
     "operation",
-    ["delay", "delay_auto", "sync", "runtime_sync", "register", "repeat", "scan"],
+    [
+        "delay",
+        "delay_auto",
+        "delay_by_timeline",
+        "runtime_sync",
+        "register",
+        "repeat",
+        "scan",
+    ],
 )
 def test_reset_rejects_reference_advancing_pulse_lowering_at_build(kind, operation):
     scan = ScanWith("scan_child", [7, 9], "value").add_content(_pulse("scan_pulse", 0))
@@ -408,7 +424,7 @@ def test_reset_rejects_reference_advancing_pulse_lowering_at_build(kind, operati
         ).build("reset")
         reset.res_pulse = child
     with pytest.raises(
-        ValueError, match="cannot advance reference; use delay_timeline instead"
+        ValueError, match="cannot advance reference; use timeline_inc instead"
     ):
         _program(
             [scan, reset],
@@ -455,13 +471,13 @@ def test_module_join_cannot_bypass_wait_only_parent_via_internal_forks(empty):
 
     def body(prog):
         prog.fork("default", into="waiting")
-        prog.delay_timeline(100 / 430.08, timeline="waiting")
+        prog.timeline_inc(100 / 430.08, timeline="waiting")
         # A register Repeat leaves its unconsumed external end wait-only.
         prog.write_reg("duration", 1)
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("runtime", "duration", range_hint=(1, 3)):
-            prog.delay_timeline(10 / 430.08)
-            prog.sync()
+            prog.timeline_inc(10 / 430.08)
+            prog.delay_by_timeline()
         prog.emit(joined, timeline="waiting")
 
     with pytest.raises(ValueError, match="timeline can only wait"):
@@ -497,12 +513,12 @@ def test_module_join_preserves_repeat_backedge_guards_without_padding(register, 
 
     def body(prog):
         prog.write_reg("count", 2)
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat(
             "pair", "count" if register else 2, range_hint=(2, 3) if register else None
         ):
             prog.emit(joined)
-            prog.sync()
+            prog.delay_by_timeline()
 
     def compile_program():
         return _program([joined], body, initialize=_declare_registers("count"))

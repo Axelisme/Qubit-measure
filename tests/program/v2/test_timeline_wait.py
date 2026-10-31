@@ -87,11 +87,11 @@ def t1_program(
                     else 43 / 430.08
                 )
                 if sequence == "echo":
-                    self.delay_timeline(gap / 2)
+                    self.timeline_inc(gap / 2)
                     self.pulse(1, "pi", timeline="default")
-                    self.delay_timeline(gap / 2)
+                    self.timeline_inc(gap / 2)
                 else:
-                    self.delay_timeline(gap)
+                    self.timeline_inc(gap)
                 if sequence != "t1":
                     self.pulse(1, "pi", timeline="default")
             self.emit(readout)
@@ -113,7 +113,7 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
 
         def _body(self, cfg):
             self.trigger(ros=[0], t=0, width=1 / 430.08)
-            self.delay_timeline(42 / 430.08)
+            self.timeline_inc(42 / 430.08)
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
     (shot,) = shots(prog)
@@ -139,7 +139,7 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
             self.write_reg("duration", 20)
             self.emit(loader)
             self.trigger(ros=[0], t=0, width=1 / 430.08)
-            self.delay_timeline("duration")
+            self.timeline_inc("duration")
 
     if relax_cycles < 10:
         with pytest.raises(
@@ -183,9 +183,9 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
 
         def _body(self, cfg):
             self.emit(loader)
-            self.delay_timeline("origin_cycles")
+            self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.delay_timeline(10 / 430.08)
+            self.timeline_inc(10 / 430.08)
             self.delay(QickSweep1D("advance_axis", 10 / 430.08, 30 / 430.08))
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
@@ -287,7 +287,7 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
             self.pulse(0, "drive0", timeline="default")
             self.pulse(1, "drive1", t=self.start, timeline="other")
             self.join("other", into="default")
-            self.sync()
+            self.delay_by_timeline()
             self.emit(readout)
 
     prog = Program(make_mock_soccfg(3, 1), initial_delay=0, relax_delay=1)
@@ -333,9 +333,9 @@ def variable_tail_program(
 
         def _body(self, cfg):
             self.emit(origin)
-            self.delay_timeline("origin_cycles")
+            self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.delay_timeline(
+            self.timeline_inc(
                 QickSweep1D(
                     "post_axis", -tail_cycles[0] / 430.08, -tail_cycles[1] / 430.08
                 )
@@ -409,13 +409,13 @@ def opposing_tail_program(
                 (right, "right_cycles", "other", 1),
             ):
                 self.emit(loader)
-                self.delay_timeline(register, timeline=timeline)
+                self.timeline_inc(register, timeline=timeline)
                 self.trigger(ros=[ro], width=1 / 430.08, timeline=timeline)
-                self.delay_timeline(-200 / 430.08, timeline=timeline)
+                self.timeline_inc(-200 / 430.08, timeline=timeline)
             if feedback:
                 with self.time_producer("feedback_cycles", CycleBounds(0, 31)):
                     self.write_reg_op("feedback_cycles", "s11", "AND", 31)
-                self.delay_timeline("feedback_cycles")
+                self.timeline_inc("feedback_cycles")
 
     return Program(
         make_mock_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / 430.08
@@ -484,13 +484,13 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
         def _body(self, cfg):
             self.emit(origin)
             self.emit(count)
-            self.delay_timeline("origin_cycles")
+            self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.delay_timeline(-200 / 430.08)
-            self.sync()
+            self.timeline_inc(-200 / 430.08)
+            self.delay_by_timeline()
             with self.repeat("repeat", "count_cycles", range_hint=(1, 3)):
-                self.delay_timeline(10 / 430.08)
-                self.sync()
+                self.timeline_inc(10 / 430.08)
+                self.delay_by_timeline()
 
     with pytest.warns(
         UserWarning, match=r"WAIT.*count_cycles.*slack=20 cycles"
@@ -516,11 +516,11 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
             self.emit(counts)
             self.write_reg("duration", 10)
             self.trigger(ros=[0], width=1 / 430.08)
-            self.sync()
+            self.delay_by_timeline()
             with self.repeat("inner", "count_cycles", range_hint=(0, 1)):
                 self.write_reg("duration", 20)
-                self.sync()
-            self.delay_timeline("duration")
+                self.delay_by_timeline()
+            self.timeline_inc("duration")
 
     if relax_cycles < 10:
         with pytest.raises(
@@ -557,13 +557,13 @@ def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection
 
         def _body(self, cfg):
             self.trigger(ros=[0], width=1 / 430.08)
-            self.sync()
+            self.delay_by_timeline()
             with self.repeat("inner", 2):
                 self.emit(delays)
-                self.delay_timeline("delay_cycles")
-                self.sync()
+                self.timeline_inc("delay_cycles")
+                self.delay_by_timeline()
             if reuse_after:
-                self.delay_timeline("delay_cycles")
+                self.timeline_inc("delay_cycles")
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == (20 if reuse_after else 40)
@@ -582,14 +582,14 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
             self.declare_readout(0, length=50 / 307.2)
 
         def _body(self, cfg):
-            self.sync()
+            self.delay_by_timeline()
             with self.repeat("inner", 2):
                 self.emit(delays)
-                self.delay_timeline(60 / 430.08)
+                self.timeline_inc(60 / 430.08)
                 self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-                self.delay_timeline(-40 / 430.08)
-                self.delay_timeline("delay_cycles")
-                self.sync()
+                self.timeline_inc(-40 / 430.08)
+                self.timeline_inc("delay_cycles")
+                self.delay_by_timeline()
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == 20
@@ -613,10 +613,10 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
                 with self.branch(by="scan", align_timeline=False) as cases:
                     for case in range(2):
                         with cases.case(case):
-                            self.delay_timeline("delay_cycles")
-                            self.delay_timeline(case * 5 / 430.08)
+                            self.timeline_inc("delay_cycles")
+                            self.timeline_inc(case * 5 / 430.08)
             else:
-                self.delay_timeline("delay_cycles")
+                self.timeline_inc("delay_cycles")
 
     slack = 15 if branch else 10
     with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
@@ -686,11 +686,11 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             self.fork("default", into="other")
             self.emit(left)
             self.emit(right)
-            self.delay_timeline("left_cycles")
+            self.timeline_inc("left_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
             # A negative post leaves a real ADC tail beyond the body boundary.
-            self.delay_timeline(-30 / 430.08)
-            self.delay_timeline("right_cycles", timeline="other")
+            self.timeline_inc(-30 / 430.08)
+            self.timeline_inc("right_cycles", timeline="other")
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
     expected_body = []
@@ -717,9 +717,9 @@ def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
         def _body(self, cfg):
             self.trigger(ros=[0], t=0, width=1 / 430.08)
             self.fork("default", into=["right", "extra"])
-            self.delay_timeline(QickSweep1D("i", 0, 40 / 430.08))
-            self.delay_timeline(QickSweep1D("i", 40 / 430.08, 0), timeline="right")
-            self.delay_timeline(QickSweep1D("j", 0, 10 / 430.08), timeline="extra")
+            self.timeline_inc(QickSweep1D("i", 0, 40 / 430.08))
+            self.timeline_inc(QickSweep1D("i", 40 / 430.08, 0), timeline="right")
+            self.timeline_inc(QickSweep1D("j", 0, 10 / 430.08), timeline="extra")
             self.join("right", "extra", into="default")
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
@@ -833,7 +833,7 @@ class MixedWaitProgram(TimelineProgramV2):
     def read(self, timeline="default"):
         """Schedule one ADC, then leave the requested tail beyond body end."""
         self.trigger(ros=[0], width=1 / 430.08, timeline=timeline)
-        self.delay_timeline(-self.recipe.tail / 430.08)
+        self.timeline_inc(-self.recipe.tail / 430.08)
 
     def emit_controls(self):
         """Emit the recipe's budgeted unequal Branch and fixed/runtime Repeats."""
@@ -844,20 +844,20 @@ class MixedWaitProgram(TimelineProgramV2):
                     with branch.case(index) as case:
                         if recipe.read_at == "branch":
                             self.read(timeline=case)
-                        self.delay_timeline(delay / 430.08)
+                        self.timeline_inc(delay / 430.08)
         if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
-            self.sync()
+            self.delay_by_timeline()
             with self.repeat("fixed", recipe.fixed_count):
                 if recipe.read_at == "fixed":
                     self.read()
-                self.delay_timeline(recipe.loop_delay / 430.08)
-                self.sync()
-            self.sync()
+                self.timeline_inc(recipe.loop_delay / 430.08)
+                self.delay_by_timeline()
+            self.delay_by_timeline()
             with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
                 if recipe.read_at == "runtime":
                     self.read()
-                self.delay_timeline(recipe.loop_delay / 430.08)
-                self.sync()
+                self.timeline_inc(recipe.loop_delay / 430.08)
+                self.delay_by_timeline()
 
     def _body(self, cfg):
         self.emit(self.counts)
@@ -865,10 +865,10 @@ class MixedWaitProgram(TimelineProgramV2):
             self.read()
         self.fork("default", into="parallel")
         self.pulse(0, "pulse0", timeline="default")
-        self.delay_timeline(self.gaps[0], timeline="parallel")
+        self.timeline_inc(self.gaps[0], timeline="parallel")
         self.pulse(1, "pulse1", timeline="parallel")
         self.join("parallel", into="default")
-        self.sync()
+        self.delay_by_timeline()
         if len(self.gaps) == 2:
             # Both forked timelines are consumed. Advance the reference
             # directly to keep this mixed program within 16 data registers.

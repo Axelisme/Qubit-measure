@@ -59,7 +59,7 @@ class PulseGuard:
                 if bounds(limit - end)[0] < -1e-12:
                     raise ValueError(
                         f"repeat: channel {self.channel} pulse overlap; cannot prove "
-                        "start >= previous end at every sweep point; use delay_timeline"
+                        "start >= previous end at every sweep point; use timeline_inc"
                     )
 
     def then(self, other: "PulseGuard") -> None:

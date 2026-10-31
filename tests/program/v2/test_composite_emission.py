@@ -313,14 +313,14 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
         prog.add_reg("index")
 
     def body(prog):
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("twice", 2):
             with prog.branch(by="path", align_timeline=False) as branch:
                 for index in (0, 1):
                     with branch.case(index):
                         prog.write_reg("index", index)
                         prog.emit(pulse)
-            prog.sync()
+            prog.delay_by_timeline()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -356,7 +356,7 @@ def test_selected_runtime_origin_rejects_possible_signed_overflow(kind):
 
     def body(prog):
         prog.write_reg("origin", 2**31 - 41)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
 
     with pytest.raises(ValueError, match="overflow"):
@@ -370,7 +370,7 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
 
     def body(prog):
         if negative_pre:
-            prog.delay_timeline(100 / 430.08, timeline="default")
+            prog.timeline_inc(100 / 430.08, timeline="default")
             prog.emit(pulse)
             prog.emit(pulse)
         else:
@@ -409,7 +409,7 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
         prog.emit(pulse)
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
@@ -431,10 +431,10 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
         if wait:
-            prog.delay_timeline(60 / 430.08, timeline="default")
+            prog.timeline_inc(60 / 430.08, timeline="default")
         prog.emit(following)
 
     if not wait:
@@ -457,7 +457,7 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
         prog.delay_auto(0, gens=True, ros=False)
         prog.emit(following)
@@ -486,10 +486,10 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
         prog.emit(pulse)
         for cycles in advances:
-            prog.delay_timeline(cycles / 430.08, timeline="default")
+            prog.timeline_inc(cycles / 430.08, timeline="default")
         prog.emit(following)
 
     if sum(advances) < 60:
@@ -503,9 +503,9 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
-@pytest.mark.parametrize("sync", [False, True])
+@pytest.mark.parametrize("delay_by_timeline", [False, True])
 def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
-    kind, sync
+    kind, delay_by_timeline
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
@@ -518,12 +518,12 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
-        prog.delay_timeline(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / 430.08, timeline="default")
         prog.fork("default", into="stale")
-        if sync:
-            prog.sync()
+        if delay_by_timeline:
+            prog.delay_by_timeline()
         prog.emit(following)
         prog.emit(following, timeline="stale")
 
@@ -545,12 +545,12 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
         with prog.branch(by="path", align_timeline=False) as branch:
             for index, amount in enumerate((60, 59)):
                 with branch.case(index):
-                    prog.delay_timeline(amount / 430.08)
+                    prog.timeline_inc(amount / 430.08)
         prog.emit(following)
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
@@ -579,11 +579,11 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
             with prog.time_producer("index", CycleBounds(0, 1)):
                 prog.write_reg_op("index", "scan", "AND", 1)
         prog.write_reg("origin", 100)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.fork("default", into="other")
         prog.emit(pulse)
         prog.join("other", into="default")
-        prog.delay_timeline(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / 430.08, timeline="default")
         prog.emit(following)
 
     prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
@@ -602,13 +602,13 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
         prog.add_reg("origin")
 
     def body(prog):
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("twice", 2):
             prog.write_reg("origin", 100)
-            prog.delay_timeline("origin", timeline="default")
+            prog.timeline_inc("origin", timeline="default")
             prog.emit(pulse)
-            prog.delay_timeline(60 / 430.08, timeline="default")
-            prog.sync()
+            prog.timeline_inc(60 / 430.08, timeline="default")
+            prog.delay_by_timeline()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -646,12 +646,12 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 
     def body(prog):
         prog.write_reg("origin", 7)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("twice", 2):
             prog.emit(pulse)
-            prog.sync()
+            prog.delay_by_timeline()
 
     prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
@@ -686,7 +686,7 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
 
     def body(prog):
         prog.write_reg("origin", 7)
-        prog.delay_timeline("origin", timeline="default")
+        prog.timeline_inc("origin", timeline="default")
         prog.fork("default", into=["left", "right"])
         prog.emit(left, timeline="left")
         prog.emit(right, timeline="right")
@@ -760,10 +760,10 @@ def _change_selection(prog, loader, other, change):
             with branch.case(1):
                 pass
     elif change == "constant_backedge":
-        prog.sync()
+        prog.delay_by_timeline()
         with prog.repeat("overwrite", 2):
             prog.write_reg("length", 89)
-            prog.sync()
+            prog.delay_by_timeline()
     elif change == "constant_reset":
         prog.write_reg("length", 89)
         loader.lower_selected(prog)
@@ -980,7 +980,7 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
             )
             if change == "selector_after_playback":
                 prog.write_reg("index", 1)
-            prog.delay_timeline(0.0005, timeline="default")
+            prog.timeline_inc(0.0005, timeline="default")
 
     return _selection_program(Selection())
 
