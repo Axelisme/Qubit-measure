@@ -5,7 +5,9 @@ from dataclasses import replace
 import pytest
 from qick.asm_v2 import QickRawParam
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
-from zcu_tools.program.v2.ir.instructions import MetaInst
+from zcu_tools.program.v2.ir.instructions import MetaInst, TestInst, WaitInst
+from zcu_tools.program.v2.ir.labels import LabelRef
+from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register
 from zcu_tools.program.v2.modules import LoadValue
 
 from tests.program.v2.simulation._compiled_support import program, request
@@ -297,6 +299,38 @@ def test_malformed_branch_metadata_fails_before_numeric_request(defect):
     with pytest.raises(ValueError, match=rf"MetaInst.*preopt.*{reason}"):
         request(prog, env)
     assert env.soc.binding.last_request is None
+
+
+@pytest.mark.parametrize("defect", ["selector", "target", "effect", "tail-effect"])
+def test_branch_dispatch_instructions_must_match_marked_cases(defect):
+    def transform(snapshot):
+        records = list(snapshot.records)
+        start = next(i for i, r in enumerate(records) if isinstance(r.instruction, MetaInst) and r.instruction.type == "BRANCH_START")
+        end = next(i for i, r in enumerate(records) if isinstance(r.instruction, MetaInst) and r.instruction.type == "BRANCH_END")
+        if defect == "selector":
+            index = next(i for i in range(start, end) if isinstance(records[i].instruction, TestInst))
+            inst = TestInst(AluExpr(Register("s0"), AluOp.SUB, Immediate(0)), uf=True)
+        elif defect == "target":
+            index = start + 1
+            inst = replace(records[index].instruction, label=LabelRef("_timeline_branch_0_end"))
+        else:
+            index = start + 1 if defect == "effect" else end - 1
+            inst = WaitInst.from_dict({"CMD": "WAIT", "TIME": "@0"})
+        records[index] = CompiledRecord(inst, records[index].p_addr)
+        return CompiledStream(tuple(records))
+
+    def body(p):
+        with p.branch(by="scan") as branch:
+            for _ in range(2):
+                with branch.case():
+                    p.pulse(0, "p", timeline="default")
+
+    prog, env = program(body, lambda p: p.add_loop("scan", 2), stream_transform=transform)
+    instruction = {"selector": "TestInst", "target": "RegWriteInst", "effect": "WaitInst", "tail-effect": "WaitInst"}[defect]
+    with pytest.raises(ValueError, match=rf"{instruction}.*preopt.*loops=.*branch dispatch"):
+        request(prog, env)
+    assert env.soc.binding.last_request is None
+    assert env.soc.binding.rounds == ()
 
 
 @pytest.mark.parametrize("reps", [1, 2])
