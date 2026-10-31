@@ -104,7 +104,7 @@ class _TimelineScope(Macro):
         pass
 
 
-class TimelineProgramV2(MyProgramV2):
+class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
     """Author native QICK hooks with optional timeline ends (times in us).
 
     Constructor follows MyProgramV2: reps, initial_delay, relax_delay. Native
@@ -362,10 +362,12 @@ class TimelineProgramV2(MyProgramV2):
         """Declare a borrowed module in _initialize; repeat declarations are harmless.
 
         Do not mutate it afterward. Outside _initialize raises ValueError;
-        unsupported module types raise NotImplementedError. Inconsistent ADC or
-        generator settings and register conflicts raise ValueError naming both
-        objects and conflicting fields. Equal channel declarations are shared;
-        explicit register borrowing and Pulse registry sharing are retained.
+        unsupported module types raise NotImplementedError. Generator and ADC
+        declarations follow QICK: later declarations overwrite earlier ones,
+        and authors own their consistency. Read gen_chs/ro_chs for settings.
+        Explicit protect_readout_routes calls prevent later redeclaration.
+        Register conflicts raise ValueError naming both objects; explicit
+        register borrowing and Pulse registry sharing are retained.
         """
         if not self._declaring:
             raise ValueError("declare must be called in _initialize")
@@ -391,33 +393,6 @@ class TimelineProgramV2(MyProgramV2):
     def _remember_resource_owner(self, kind: str, key: str | int) -> None:
         if self._declaration_module is not None:
             self._resource_owners.setdefault((kind, key), self._declaration_module)
-
-    def _reset_resources(self) -> None:
-        ProgramResourcesMixin._reset_resources(self)
-
-    def add_dmem(self, values: Sequence[int]) -> int:
-        """Append int32 words; return their word offset in this compile's dmem."""
-        return ProgramResourcesMixin.add_dmem(self, values)
-
-    def compile_datamem(self):
-        """Return allocated int32 words, or None when no words were allocated."""
-        return ProgramResourcesMixin.compile_datamem(self)
-
-    @override
-    def protect_readout_routes(
-        self, owner: str, gen_ch: int, ro_chs: Sequence[int]
-    ) -> None:
-        """Protect declared generator/ADC routes under their declaring module.
-
-        owner is the diagnostic label; gen_ch and ro_chs are declared logical
-        channels. Native protection errors propagate without changing ownership.
-        During declare(module), future conflicts identify this protector object,
-        not earlier unprotected generator users. Equivalent declarations remain
-        shareable; different-owner explicit protection still raises ValueError.
-        """
-        super().protect_readout_routes(owner, gen_ch, ro_chs)
-        if self._declaration_module is not None:
-            self._resource_owners[("generator", gen_ch)] = self._declaration_module
 
     @override
     def add_reg(

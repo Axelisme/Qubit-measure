@@ -172,15 +172,17 @@ Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生�
 `SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
 既有 acquire 擴充仍由共同基底提供。
 
-`TimelineProgramV2` 的 module 與原生直接通道宣告遵守同一規則：相同資源設定共用，不同設定在 build 報錯。
-ADC 比較讀窗長度等資源設定。Generator 比較 nqz、mixer 與 mux tones 等宣告。
-Module 衝突訊息列出兩個名稱、物件與不一致欄位。原生直接宣告以 native declaration 標示。
+`TimelineProgramV2` 的 module 與原生直接 generator／ADC 宣告沿用 QICK 規則。
+後宣告覆蓋先宣告，由作者負責設定是否一致。
+需要宣告資訊時，直接讀 QICK 的 `gen_chs`／`ro_chs`。
 tProc readout 用各自具名 config 切換 freq、phase、outsel 與 generator 頻率匹配，每次 trigger 使用當次設定。
 原生 `add_readoutconfig` 保留 QICK 的 template 契約，不限制跨 template 的 mode、phrst 或 length。
-靜態 readout 不支援 runtime 切換。相同 Mux 資源可共用，pre/post delay、trig_offset、classifier 與 desc 不參與資源比較。
+靜態 readout 不支援 runtime 切換。
 每 shot trigger 次數仍由 compiled 總數契約檢查，不按個別 module 的 emit 次數拒絕共用。
-Protected route 的相同宣告也可共用。不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
-Register 仍歸屬到宣告物件，明示 register 借用與 Pulse registry 的 template 共用規則不變。
+Timeline module 不自動保護 route。作者明確呼叫繼承的 `protect_readout_routes` 後，該 route 不可重新宣告。
+不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
+Register 名稱與地址仍歸屬到宣告物件，衝突訊息列出兩個 module 名稱與物件。
+明示 register 借用與 Pulse registry 的 template 共用規則不變。
 `ModularProgramV2` 的宣告與 route protection 規則不變。
 Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
 
