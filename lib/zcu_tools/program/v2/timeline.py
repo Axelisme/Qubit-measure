@@ -194,14 +194,14 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
 
     def _add_asm(self, inst, addr_inc=1):
         instruction = BaseInst.from_dict(inst)
-        if inst["CMD"] in ("JUMP", "CALL", "RET") or (
+        if (
             "s14" in instruction.reg_write
             and not (
                 isinstance(instruction, RegWriteInst)
                 and instruction.is_pure_self_copy
             )
         ):
-            pass
+            self._timeline_book.output_time = None
         self._time_bounds.emission(
             inst, self.p_addr, self._time_origin, arithmetic=self._timeline_math_active
         )
