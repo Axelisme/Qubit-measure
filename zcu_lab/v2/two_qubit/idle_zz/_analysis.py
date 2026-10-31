@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay_fringe
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
+from .._sums import sigma
 
 
 @dataclass(frozen=True)
@@ -262,3 +263,28 @@ def validate_axes(
         raise ValueError(
             "Idle ZZ requires saved DC × spectator_states [0,1] × distinct delay axes"
         )
+
+
+def fit_count_traces(
+    delays: NDArray[np.float64], counts: tuple[NDArray[np.float64], ...],
+    complete: tuple[NDArray[np.bool_], ...], target: str, detune: float,
+) -> tuple[tuple[IdleBranchFit, ...], ...]:
+    """Fit aligned DC × actual-state × delay class-count datasets jointly.
+
+    Caller aligns each dataset and its completeness mask by actual spectator
+    state. Frequency/decay are shared only across datasets at the same DC/state.
+    Return dataset-major tuples of DC-major g/e fits. No plotting or selection.
+    """
+    results: list[list[IdleBranchFit]] = [[] for _ in counts]
+    traces = [sigma(c, target) for c in counts]
+    for dc_index in range(counts[0].shape[0]):
+        for state in range(2):
+            fits = tuple(
+                IdleBranchFit(dc_index, state, int(np.nansum(c[dc_index, state])),
+                              bool(np.all(mask[dc_index, state])), trace[dc_index, state])
+                for c, mask, trace in zip(counts, complete, traces, strict=True)
+            )
+            fitted = fit_traces(fits, tuple(sigma_errors(c[dc_index, state], target) for c in counts), delays=delays, detune=detune)
+            for result, fit in zip(results, fitted, strict=True):
+                result.append(fit)
+    return tuple(tuple(result) for result in results)

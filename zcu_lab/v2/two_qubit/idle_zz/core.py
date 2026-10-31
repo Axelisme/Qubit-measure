@@ -302,11 +302,11 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.sync()  # Reset must finish before spectator preparation.
-                with builder.branch(
-                    by="spectator_states", align_timeline=True
-                ) as cases:
-                    with cases.case(1):
-                        builder.emit(spectator)
+                with (
+                    builder.branch(by="spectator_states", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(spectator)
                 builder.emit(pi2)
                 builder.delay_timeline(delay)
                 builder.emit(projection)

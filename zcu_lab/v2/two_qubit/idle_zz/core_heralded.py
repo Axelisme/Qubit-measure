@@ -29,8 +29,7 @@ from ._analysis import (
     IdleBranchFit,
     IdleZZAnalysis,
     complete_points,
-    fit_traces,
-    sigma_errors,
+    fit_count_traces,
     summarize,
     validate_axes,
 )
@@ -198,11 +197,11 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
                 builder.sync()  # Herald/reset must finish before spectator preparation.
-                with builder.branch(
-                    by="spectator_states", align_timeline=True
-                ) as cases:
-                    with cases.case(1):
-                        builder.emit(spectator)
+                with (
+                    builder.branch(by="spectator_states", align_timeline=True) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(spectator)
                 builder.emit(pi2)
                 builder.delay_timeline(delay)
                 builder.emit(projection)
@@ -257,37 +256,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         gg = terminal_counts(result.sums, ("g", "g"))
         # ee starts with spectator e: nominal I is actual e, Xπ is actual g.
         ee = terminal_counts(result.sums, ("e", "e"))[:, ::-1]
-        gg_traces, ee_traces = sigma(gg, cfg.target), sigma(ee, cfg.target)
-        gg_fits, ee_fits = [], []
-        for dc_index in range(len(dc_values)):
-            for state in result.spectator_states:
-                pair = (
-                    IdleBranchFit(
-                        dc_index,
-                        int(state),
-                        int(np.nansum(gg[dc_index, state])),
-                        bool(np.all(complete[dc_index, state])),
-                        gg_traces[dc_index, state],
-                    ),
-                    IdleBranchFit(
-                        dc_index,
-                        int(state),
-                        int(np.nansum(ee[dc_index, state])),
-                        bool(np.all(complete[dc_index, 1 - state])),
-                        ee_traces[dc_index, state],
-                    ),
-                )
-                a, b = fit_traces(
-                    pair,
-                    (
-                        sigma_errors(gg[dc_index, state], cfg.target),
-                        sigma_errors(ee[dc_index, state], cfg.target),
-                    ),
-                    delays=result.delays,
-                    detune=cfg.detune,
-                )
-                gg_fits.append(a)
-                ee_fits.append(b)
+        gg_fits, ee_fits = fit_count_traces(
+            result.delays, (gg, ee), (complete, complete[:, ::-1]), cfg.target, cfg.detune
+        )
         terminal = summarize(tuple(gg_fits))
         dc_label = (
             "DC not swept (inactive coordinate)"
@@ -340,14 +311,11 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ):
             if value is not None:
                 ax.errorbar(dc_values[index], value, yerr=error, marker="o", color="C0")
-        if not any(value is not None for value in terminal.zeta_mhz):
-            ax.text(
-                0.5,
-                0.5,
-                "ζ unavailable: see branch reasons",
-                transform=ax.transAxes,
-                ha="center",
-            )
+        ax.text(
+            0.5, 0.5,
+            "" if any(value is not None for value in terminal.zeta_mhz) else "ζ unavailable: see branch reasons",
+            transform=ax.transAxes, ha="center",
+        )
         ax.set(
             xlabel=dc_label,
             ylabel="ζ = f_e − f_g (MHz)",
