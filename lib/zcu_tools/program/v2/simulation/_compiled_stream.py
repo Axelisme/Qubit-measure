@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..base import MyProgramV2
-from ..ir.instructions import Instruction, MetaInst
+from ..ir.instructions import BaseInst, Instruction, JumpInst, LabelInst, MetaInst, NopInst, RegWriteInst, TestInst
+from ..ir.labels import LabelRef
+from ..ir.operands import AluExpr, AluOp, Immediate, Register, SrcKeyword
 
 
 @dataclass(frozen=True)
@@ -255,6 +257,81 @@ class _Scopes:
         }
 
 
+def _validate_branch(
+    records: tuple[DecodedInstruction, ...], branch: StructuredBranch
+) -> None:
+    """Check skipped dispatch effects against the marker-owned case boundaries.
+
+    Native conditional chains and Modular address tables encode the same case
+    selection. Match their complete effects, including case exits, rather than
+    executing raw jumps or using them to discover structure.
+    """
+    def effects(first: int, last: int) -> list[DecodedInstruction]:
+        return [r for r in records[first:last] if isinstance(r.instruction, BaseInst) and not isinstance(r.instruction, NopInst)]
+
+    def fail(record: DecodedInstruction) -> None:
+        raise ValueError(
+            f"{type(record.instruction).__name__} at preopt {record.position}, loops={record.loops}, cases={record.cases}, source={record.source!r}: branch dispatch disagrees with markers"
+        )
+
+    def entry(index: int) -> LabelRef:
+        if index >= len(records) or not isinstance(records[index].instruction, LabelInst):
+            fail(records[min(index, len(records) - 1)])
+        inst = records[index].instruction
+        if not isinstance(inst, LabelInst):
+            raise ValueError("missing branch entry label")
+        return LabelRef(inst.name)
+
+    targets = [entry(a + 1) for a, _ in branch.cases]
+    end = entry(branch.end + 1)
+    address = Register("s15")
+
+    def jump(target: LabelRef, big: bool, condition: str | None = None) -> list[BaseInst]:
+        if big:
+            return [RegWriteInst(dst=address, src=SrcKeyword.LABEL, label=target), JumpInst(addr=address, if_cond=condition)]
+        return [JumpInst(label=target, if_cond=condition)]
+
+    def matches(actual: list[DecodedInstruction], choices: list[list[BaseInst]]) -> None:
+        prefix = 0
+        for choice in choices:
+            count = 0
+            for record, expected in zip(actual, choice):
+                if record.instruction.to_dict() != expected.to_dict():
+                    break
+                count += 1
+            if count == len(actual) == len(choice):
+                return
+            prefix = max(prefix, count)
+        fail(actual[min(prefix, len(actual) - 1)] if actual else records[branch.start])
+
+    header = records[branch.start + 1:branch.cases[0][0]]
+    table_labels = [r.instruction.name for r in header if isinstance(r.instruction, LabelInst)]
+    choices: list[list[BaseInst]] = []
+    for big in (False, True):
+        chain: list[BaseInst] = []
+        for index, target in enumerate(targets):
+            transfer = jump(target, big, "Z" if index < len(targets) - 1 else None)
+            if index < len(targets) - 1:
+                test = TestInst(AluExpr(Register(branch.compare), AluOp.SUB, Immediate(index)), uf=True)
+                transfer.insert(1 if big else 0, test)
+            chain.extend(transfer)
+        choices.append(chain)
+        if len(table_labels) == len(targets):
+            table: list[BaseInst] = [RegWriteInst(dst=address, src=SrcKeyword.LABEL, label=LabelRef(table_labels[0]))]
+            table.extend(RegWriteInst(dst=address, src=SrcKeyword.OP, op=AluExpr(address, AluOp.ADD, Register(branch.compare))) for _ in range(2 if big else 1))
+            table.append(JumpInst(addr=address))
+            for target in targets:
+                table.extend(jump(target, big))
+            choices.append(table)
+    matches(effects(branch.start + 1, branch.cases[0][0]), choices)
+    for index, (_, last) in enumerate(branch.cases):
+        stop = branch.cases[index + 1][0] if index + 1 < len(branch.cases) else branch.end
+        exits = [jump(end, False), jump(end, True)]
+        if index == len(branch.cases) - 1:
+            exits.append([])
+        matches(effects(last + 1, stop), exits)
+
+
 def predecode(
     prog: MyProgramV2,
 ) -> tuple[
@@ -291,4 +368,8 @@ def predecode(
                 ),
             )
         )
-    return tuple(records), scopes.finish(prog), tuple(scopes.complete_branches)
+    loops = scopes.finish(prog)
+    decoded = tuple(records)
+    for branch in scopes.complete_branches:
+        _validate_branch(decoded, branch)
+    return decoded, loops, tuple(scopes.complete_branches)
