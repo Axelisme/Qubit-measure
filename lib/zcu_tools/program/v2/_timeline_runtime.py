@@ -18,6 +18,7 @@ from ._timeline_expression import (
     TimeExpression,
     add_time,
     choose_time,
+    ceiled_time,
     evaluate_time,
     expression_axes,
     expression_limits,
@@ -280,6 +281,19 @@ def native_event_expression(prog, value: "Time") -> TimeExpression:
     if not isinstance(ticks, QickParam):
         return LinearTime(ceil_tick(ticks))
     axes = {name: prog.loop_dict[name] for name in ticks.spans}
+    if len(axes) > 1:
+        line = LinearTime(Fraction(str(ticks.start)))
+        for name, span in ticks.spans.items():
+            count = axes[name]
+            if count > 1:
+                contribution = scale_time(
+                    source_expression(prog, name), Fraction(str(span)) / (count - 1)
+                )
+                combined = add_time(line, contribution)
+                if not isinstance(combined, LinearTime):
+                    raise RuntimeError("native affine time lost its loop algebra")
+                line = combined
+        return ceiled_time(line)
     raw = np.asarray(ticks.to_array(axes, all_loops=True), dtype=float)
     points = np.asarray(
         [ceil_tick(float(point)) for point in raw.flat], dtype=np.int64
@@ -353,7 +367,7 @@ def lookup_expression(
     points = evaluate_time(index, axes)
     if points is None:
         return LinearTime(terms=((cycle_variable(name, min(values), max(values)), 1),))
-    selected = np.asarray(values, dtype=np.int64)[points]
+    selected = np.asarray(values, dtype=np.int64)[points.astype(np.int64)]
     lower, upper = int(selected.min()), int(selected.max())
     if lower == upper:
         return LinearTime(lower)

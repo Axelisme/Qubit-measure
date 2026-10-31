@@ -241,7 +241,7 @@ def evaluate_time(
         if variable.minimum is None or variable.maximum is None:
             return None
         if variable.minimum == variable.maximum:
-            result = np.add(result, coefficient * variable.minimum)
+            result = np.add(result, np.asarray(coefficient * variable.minimum, dtype=object))
             continue
         if not variable.producer.axes or variable.producer.interval_points is not None:
             return None
@@ -266,8 +266,27 @@ def evaluate_time(
         order = [name for name in axes if name in local]
         points = points.transpose(tuple(list(local).index(name) for name in order))
         shape = tuple(local.get(name, 1) for name in axes)
-        result = np.add(result, np.multiply(coefficient, points.reshape(shape)))
+        result = np.add(result, np.multiply(np.asarray(coefficient, dtype=object), points.reshape(shape)))
     return result
+
+
+def ceiled_time(value: LinearTime) -> TimeExpression:
+    """Bound a cross-loop affine ceil by its line and an independent rounding error.
+
+    Coefficients are exact fractional cycles. Integer lines need no error.
+    The lower tolerance preserves ceil_tick's 1e-10-cycle integer snapping.
+    The error is compile-time proof metadata, never a runtime time table.
+    """
+    denominator = math.lcm(
+        Fraction(value.constant).denominator,
+        *(Fraction(coefficient).denominator for _, coefficient in value.terms),
+    )
+    if denominator == 1:
+        return value
+    error = cycle_variable(
+        "ceil rounding", -math.ceil(Fraction(denominator, 10**10)), denominator - 1
+    )
+    return add_time(value, LinearTime(terms=((error, Fraction(1, denominator)),)))
 
 
 def shifted_time(value: TimeExpression, shift: int) -> TimeExpression:
@@ -398,7 +417,7 @@ def reduce_loop_time(
     remaining = {name: count for name, count in axes.items() if name != axis}
     name = ", ".join(sorted({v.name for v in time_variables(value)}))
 
-    def reduce(points: NDArray[np.int64]) -> NDArray[np.int64]:
+    def reduce(points: CycleValues) -> NDArray[np.int64]:
         grid = np.broadcast_to(points, shape)
         reduced = (
             grid.take(-1, axis=dimension)
