@@ -350,7 +350,9 @@ class RBExp(Experiment[RBResult, RBCfg]):
             counts = data.sums
             acquired = count_completion(counts, (-2, -1))
             joint00 = joint_probabilities(counts)[..., 0, 0]
-            paired = np.asarray((acquired & np.isfinite(joint00)).all(axis=(0, 2)), dtype=np.bool_)
+            paired = np.asarray(
+                (acquired & np.isfinite(joint00)).all(axis=(0, 2)), dtype=np.bool_
+            )
             survival = np.where(paired[None, :, None, :], joint00, np.nan)
             means = paired_means(survival)
             try:

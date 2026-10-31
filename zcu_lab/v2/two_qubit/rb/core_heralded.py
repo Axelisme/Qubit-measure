@@ -170,7 +170,9 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
 
         def update_view(sums: NDArray[np.float64]) -> None:
             curves = []
-            for cell, counts in enumerate((terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))):
+            for cell, counts in enumerate(
+                (terminal_counts(sums, ("g", "g")), terminal_counts(sums, ("e", "e")))
+            ):
                 totals = np.nansum(counts, axis=(1, 3))
                 curves.extend(joint_probabilities(totals)[..., cell, cell].T)
             viewer.update(np.array(config.depths), np.array(curves))
@@ -295,7 +297,12 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 (data.depths, data.seeds, data.arms, data.rounds),
                 (cfg.depths, cfg.seeds, [0, 1], np.arange(cfg.rounds)),
             )
-            for herald, counts in enumerate((terminal_counts(data.sums, ("g", "g")), terminal_counts(data.sums, ("e", "e")))):
+            for herald, counts in enumerate(
+                (
+                    terminal_counts(data.sums, ("g", "g")),
+                    terminal_counts(data.sums, ("e", "e")),
+                )
+            ):
                 total = counts.sum(axis=(-2, -1))
                 returns = joint_probabilities(counts)[..., herald, herald]
                 paired[herald] = (acquired & np.isfinite(returns)).all(axis=(0, 2))
