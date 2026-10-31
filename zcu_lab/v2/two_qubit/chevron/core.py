@@ -115,9 +115,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         result_builder=restore_result,
     )
 
-    def run(
-        self, config: ChevronCfg, *, context: RunContext
-    ) -> ChevronResult:
+    def run(self, config: ChevronCfg, *, context: RunContext) -> ChevronResult:
         """Dispatch duration acquisition by the two drive waveform types.
 
         Constant and flat-top drives use a hardware duration sweep. Sampled
