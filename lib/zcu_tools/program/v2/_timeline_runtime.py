@@ -506,7 +506,7 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
     return min(candidates, key=lambda weight: (len(_csd(weight)), weight))
 
 
-class _EventTime(Macro):
+class EventTime(Macro):
     """Write an event offset directly, reusing only a proven current s14 value."""
 
     def __repr__(self) -> str:
@@ -562,7 +562,7 @@ class RuntimeMath(TimedMacro):
         """
         operand = self.cycles(offset) if isinstance(offset, QickParam) and offset.is_sweep() else round((offset.start if isinstance(offset, QickParam) else offset) * get_fclk(self.prog))
         result = self.op(base, "+", operand, limits=self._sum_limits(base, operand), target="s_out_time")
-        self.operations[-1] = _EventTime(base, operand, result.expression)
+        self.operations[-1] = EventTime(base, operand, result.expression)
         return result
 
     def native_end(

@@ -695,7 +695,7 @@ class RepeatTimelineBody(Macro):
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
-    def preprocess(self, prog) -> None:
+    def preprocess(self, _prog) -> None:
         if not self.entry.constant:
             frame = self.entry.accumulator.frame
             self.entry.book.math.operations.append(WriteReg(dst=frame.origin.register, src="s_out_time"))
@@ -715,7 +715,7 @@ class RepeatTimelineCapture(Macro):
     def __init__(self, entry: RepeatTimelineEnter):
         self.entry = entry
 
-    def preprocess(self, prog) -> None:
+    def preprocess(self, _prog) -> None:
         if not self.entry.constant:
             accumulator = self.entry.accumulator
             self.entry.book.math.operations.append(WriteReg(dst=accumulator.frame.origin.register, src="s_out_time"))

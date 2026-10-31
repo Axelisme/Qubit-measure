@@ -155,6 +155,19 @@ list[Instruction]
 
 [passes/](passes/) 按 `control_flow`、`dataflow`、`timeline`、`loop` 分目錄。
 
+## Output offsets and scheduling windows
+
+TIME updates the reference clock without reading or writing s14. Untimed port
+writes read s14 as their output offset. A preceding s14 write must survive across
+TIME and remain before the port write.
+
+Loop scheduling windows include literal `s14 = s14 + #N` increments as well as
+literal `TIME inc_ref #N`. Register-driven increments have an unknown window and
+do not trigger time-margin unrolling. Each unrolled copy retains its increment.
+The dataflow pipeline removes unconditional pure register self-copies only when
+UF and other effects are absent. Conditional copies and flag updates remain.
+Instruction counts describe the post-IR stream, not QICK's temporary self-copies.
+
 ## Invariants that passes rely on
 
 - Operand 的讀/寫語義不在 operand 層決定：所有 `Operand` 子類只實作 `regs() -> frozenset[str]`（中性語義，「這個值涉及哪些暫存器」）。讀還是寫由持有該 operand 的 instruction 自行決定，在 `reg_read` / `reg_write` 屬性中區分。

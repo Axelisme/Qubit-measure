@@ -19,7 +19,7 @@ from ._timeline_expression import (
     unbounded_time,
 )
 from ._timeline_guard import PulseGuard
-from ._timeline_runtime import RuntimeEnd, Time, _EventTime, runtime_expression, time_expression
+from ._timeline_runtime import RuntimeEnd, Time, EventTime, runtime_expression, time_expression
 from ._timeline_expression import difference_limits
 from .macro.write_reg import WriteRegOp
 from ._timeline_state import LoopTimelineFrame, TimelineBook
@@ -207,7 +207,7 @@ class LoopTimelineExit(Macro):
         duration = difference_limits(end, origin)
         if duration[0] is None or duration[0] != duration[1]:
             return False
-        events = [op for math in frame.body_math for op in math.operations if isinstance(op, _EventTime)]
+        events = [op for math in frame.body_math for op in math.operations if isinstance(op, EventTime)]
         offsets = [difference_limits(event.expression, origin) for event in events]
         if any(lo is None or lo != hi for lo, hi in offsets):
             return False
@@ -218,8 +218,8 @@ class LoopTimelineExit(Macro):
                 if lo is None or lo != hi:
                     return False
         for math in frame.body_math:
-            math.operations = [op for op in math.operations if isinstance(op, _EventTime)]
-        for event, (offset, _) in zip(events, offsets):
+            math.operations = [op for op in math.operations if isinstance(op, EventTime)]
+        for event, (offset, _) in zip(events, offsets, strict=True):
             if offset is None:
                 raise RuntimeError("pointer event lost its constant offset")
             event.base = RuntimeEnd("s_out_time", expression=origin)
@@ -238,8 +238,8 @@ class LoopTimelineExit(Macro):
             raise RuntimeError("pointer channel lost its constant final offset")
         operations = self.entry.post_operations
         if self.minimum == 0 and isinstance(self.iterations, str):
-            operations.append(AsmInst(inst={"CMD": "TEST", "OP": prog._get_reg(self.iterations), "UF": "1"}, addr_inc=1))
-            operations.append(AsmInst(inst={"CMD": "REG_WR", "DST": prog._get_reg(tail.register), "SRC": "op", "OP": f"{prog._get_reg(result.register)} + #{int(offset)}", "IF": "NZ"}, addr_inc=1))
+            operations.append(AsmInst(inst={"CMD": "TEST", "OP": prog.reg_dict[self.iterations].full_addr(), "UF": "1"}, addr_inc=1))
+            operations.append(AsmInst(inst={"CMD": "REG_WR", "DST": prog.reg_dict[tail.register].full_addr(), "SRC": "op", "OP": f"{prog.reg_dict[result.register].full_addr()} + #{int(offset)}", "IF": "NZ"}, addr_inc=1))
         else:
             operations.append(WriteRegOp(dst=tail.register, lhs=result.register, op="+", rhs=int(offset)))
 
