@@ -52,9 +52,9 @@ class LocalZAnalysis:
     pass_fraction: NDArray[np.float64] | None = None
 
 
-
 def fit_target(
-    n: NDArray[np.float64], points: tuple[QuadraturePhase, ...],
+    n: NDArray[np.float64],
+    points: tuple[QuadraturePhase, ...],
     variances_deg2: NDArray[np.float64],
 ) -> LocalZTargetFit:
     """Unwrap a complete phase row and fit intercept+slope*n with count weights.
@@ -67,12 +67,16 @@ def fit_target(
     if any(p.logical_phase_deg is None for p in points):
         return LocalZTargetFit(reason="Incomplete phase row")
     if not np.all(np.isfinite(variances_deg2)) or np.any(variances_deg2 <= 0):
-        return LocalZTargetFit(reason="Unavailable positive count-derived phase variance")
+        return LocalZTargetFit(
+            reason="Unavailable positive count-derived phase variance"
+        )
     y = np.unwrap(
         np.array([p.logical_phase_deg for p in points], dtype=np.float64), period=360
     )
     if np.any(np.abs(np.diff(y)) == 180):
-        return LocalZTargetFit(reason="Adjacent half-turn phase step has ambiguous unwrap")
+        return LocalZTargetFit(
+            reason="Adjacent half-turn phase step has ambiguous unwrap"
+        )
     design = np.column_stack((np.ones_like(n), n))
     weighted = design / np.sqrt(variances_deg2[:, None])
     if np.linalg.matrix_rank(weighted) != 2:
@@ -83,9 +87,17 @@ def fit_target(
     )[0]
     curve = intercept + slope * n
     quality = compute_fit_quality(
-        y, curve, {"intercept_deg": float(intercept), "slope_deg": float(slope)}, covariance
+        y,
+        curve,
+        {"intercept_deg": float(intercept), "slope_deg": float(slope)},
+        covariance,
     )
     return LocalZTargetFit(
-        y, curve, float(intercept), float(slope), -float(slope),
-        float(np.sqrt(covariance[1, 1])), quality,
+        y,
+        curve,
+        float(intercept),
+        float(slope),
+        -float(slope),
+        float(np.sqrt(covariance[1, 1])),
+        quality,
     )

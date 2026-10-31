@@ -58,13 +58,17 @@ def sigma_variance(
     value = marginal[..., 1] - marginal[..., 0]
     return np.divide(
         np.maximum(0, marginal[..., 0] + marginal[..., 1] - value**2),
-        total, out=np.full_like(total, np.nan), where=total > 0,
+        total,
+        out=np.full_like(total, np.nan),
+        where=total > 0,
     )
 
 
 def phase_variance(
-    x: NDArray[np.float64], y: NDArray[np.float64],
-    var_x: NDArray[np.float64], var_y: NDArray[np.float64],
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
+    var_x: NDArray[np.float64],
+    var_y: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Propagate independent X/Y sigma variances through atan2, in degree².
 
@@ -72,7 +76,12 @@ def phase_variance(
     in each sigma denominator. No variance floor or purity correction is applied.
     """
     radius_squared = x**2 + y**2
-    return np.divide(
-        y**2 * var_x + x**2 * var_y, radius_squared**2,
-        out=np.full_like(radius_squared, np.nan), where=radius_squared > 0,
-    ) * (180 / np.pi)**2
+    return (
+        np.divide(
+            y**2 * var_x + x**2 * var_y,
+            radius_squared**2,
+            out=np.full_like(radius_squared, np.nan),
+            where=radius_squared > 0,
+        )
+        * (180 / np.pi) ** 2
+    )

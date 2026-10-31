@@ -79,6 +79,7 @@ class LocalZHeraldedAnalysis(LocalZAnalysis):
     ee_fits has one weighted fit per target. slope_difference_deg is ee−gg per
     target, or None when either fit is unavailable. No shared slope is imposed.
     """
+
     ee_phases: tuple[tuple[QuadraturePhase, ...], ...] = ()
     ee_quadratures: NDArray[np.float64] | None = None
     ee_acquired_shots: NDArray[np.float64] | None = None
@@ -140,7 +141,11 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         """
         validate_classifiers(config.readout, config.roles)
         viewer = live_line(
-            context.plots, "measurement", "CZ gate count", "Target sigma | herald (g,g)", num_lines=4
+            context.plots,
+            "measurement",
+            "CZ gate count",
+            "Target sigma | herald (g,g)",
+            num_lines=4,
         )
 
         def update_view(sums: NDArray[np.float64]) -> None:
@@ -150,14 +155,17 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, 3, 3, 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         with Schedule(config, buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps,
-                    initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
                 builder.add_loop("target", 2)  # 0 = F1, 1 = F2
                 quadrature = builder.add_sweep(
@@ -166,11 +174,13 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 prepare_f1 = Pulse("prepare_f1", config.x90_f1)
                 prepare_f2 = Pulse("prepare_f2", config.x90_f2)
                 projection_f1 = Pulse(
-                    "projection_f1", config.x90_f1,
+                    "projection_f1",
+                    config.x90_f1,
                     phase=config.x90_f1.phase + quadrature,
                 )
                 projection_f2 = Pulse(
-                    "projection_f2", config.x90_f2,
+                    "projection_f2",
+                    config.x90_f2,
                     phase=config.x90_f2.phase + quadrature,
                 )
                 readout = MuxReadout("readout", config.readout)
@@ -197,18 +207,24 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("herald", config.roles.f1_tone),
-                        Classify("herald", config.roles.f2_tone),
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("herald", config.roles.f1_tone),
+                            Classify("herald", config.roles.f2_tone),
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
         return LocalZHeraldedResult(
-            np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -239,75 +255,150 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         gg_quadratures = np.stack((sigma(gg[0], "f1"), sigma(gg[1], "f2")))
         # Starting the target in e reverses both projections, not their slope.
         ee_quadratures = -np.stack((sigma(ee[0], "f1"), sigma(ee[1], "f2")))
-        gg_variances = np.stack((sigma_variance(gg[0], "f1"), sigma_variance(gg[1], "f2")))
-        ee_variances = np.stack((sigma_variance(ee[0], "f1"), sigma_variance(ee[1], "f2")))
+        gg_variances = np.stack(
+            (sigma_variance(gg[0], "f1"), sigma_variance(gg[1], "f2"))
+        )
+        ee_variances = np.stack(
+            (sigma_variance(ee[0], "f1"), sigma_variance(ee[1], "f2"))
+        )
         gg_phases = tuple(
-            tuple(count_phase(float(gg_quadratures[t, 0, n]), float(gg_quadratures[t, 1, n]))
-                  for n in range(len(cfg.gate_counts))) for t in range(2)
+            tuple(
+                count_phase(
+                    float(gg_quadratures[t, 0, n]), float(gg_quadratures[t, 1, n])
+                )
+                for n in range(len(cfg.gate_counts))
+            )
+            for t in range(2)
         )
         ee_phases = tuple(
-            tuple(count_phase(float(ee_quadratures[t, 0, n]), float(ee_quadratures[t, 1, n]))
-                  for n in range(len(cfg.gate_counts))) for t in range(2)
+            tuple(
+                count_phase(
+                    float(ee_quadratures[t, 0, n]), float(ee_quadratures[t, 1, n])
+                )
+                for n in range(len(cfg.gate_counts))
+            )
+            for t in range(2)
         )
         gg_fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64), gg_phases[t],
-                phase_variance(gg_quadratures[t, 0], gg_quadratures[t, 1],
-                               gg_variances[t, 0], gg_variances[t, 1]),
-            ) for t in range(2)
+                np.array(cfg.gate_counts, dtype=np.float64),
+                gg_phases[t],
+                phase_variance(
+                    gg_quadratures[t, 0],
+                    gg_quadratures[t, 1],
+                    gg_variances[t, 0],
+                    gg_variances[t, 1],
+                ),
+            )
+            for t in range(2)
         )
         ee_fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64), ee_phases[t],
-                phase_variance(ee_quadratures[t, 0], ee_quadratures[t, 1],
-                               ee_variances[t, 0], ee_variances[t, 1]),
-            ) for t in range(2)
+                np.array(cfg.gate_counts, dtype=np.float64),
+                ee_phases[t],
+                phase_variance(
+                    ee_quadratures[t, 0],
+                    ee_quadratures[t, 1],
+                    ee_variances[t, 0],
+                    ee_variances[t, 1],
+                ),
+            )
+            for t in range(2)
         )
         differences = tuple(
-            None if g.slope_deg is None or e.slope_deg is None else e.slope_deg - g.slope_deg
+            None
+            if g.slope_deg is None or e.slope_deg is None
+            else e.slope_deg - g.slope_deg
             for g, e in zip(gg_fits, ee_fits, strict=True)
         )
         herald_matrix = herald_probabilities(data.sums)
         answer = LocalZHeraldedAnalysis(
-            gg_phases, gg_quadratures, gg.sum(axis=(-2, -1)),
-            tuple(cfg.gate_counts), gg_fits, herald_matrix, herald_matrix[..., 0, 0],
-            ee_phases, ee_quadratures, ee.sum(axis=(-2, -1)), ee_fits, differences,
+            gg_phases,
+            gg_quadratures,
+            gg.sum(axis=(-2, -1)),
+            tuple(cfg.gate_counts),
+            gg_fits,
+            herald_matrix,
+            herald_matrix[..., 0, 0],
+            ee_phases,
+            ee_quadratures,
+            ee.sum(axis=(-2, -1)),
+            ee_fits,
+            differences,
         )
 
-        fig, _ = plots.subplots("phase", nrows=3, figsize=(10, 10), layout="constrained")
-        for herald, phases, fits in (("gg", gg_phases, gg_fits), ("ee", ee_phases, ee_fits)):
+        fig, _ = plots.subplots(
+            "phase", nrows=3, figsize=(10, 10), layout="constrained"
+        )
+        for herald, phases, fits in (
+            ("gg", gg_phases, gg_fits),
+            ("ee", ee_phases, ee_fits),
+        ):
             for t in range(2):
-                label = f"{herald} F{t+1}"
-                fig.axes[0].plot(cfg.gate_counts, [p.contrast for p in phases[t]], ".-", label=label)
-                fig.axes[1].plot(cfg.gate_counts,
-                    [np.nan if p.logical_phase_deg is None else p.logical_phase_deg for p in phases[t]],
-                    ".-", label=label)
+                label = f"{herald} F{t + 1}"
+                fig.axes[0].plot(
+                    cfg.gate_counts, [p.contrast for p in phases[t]], ".-", label=label
+                )
+                fig.axes[1].plot(
+                    cfg.gate_counts,
+                    [
+                        np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                        for p in phases[t]
+                    ],
+                    ".-",
+                    label=label,
+                )
                 fit = fits[t]
                 if fit.unwrapped_deg is not None and fit.fit_curve is not None:
-                    fig.axes[2].plot(cfg.gate_counts, fit.unwrapped_deg, ".", label=label)
-                    fig.axes[2].plot(cfg.gate_counts, fit.fit_curve,
-                        label=f"{label} slope={fit.slope_deg:.5g} ± {fit.slope_error_deg:.2g} deg")
+                    fig.axes[2].plot(
+                        cfg.gate_counts, fit.unwrapped_deg, ".", label=label
+                    )
+                    fig.axes[2].plot(
+                        cfg.gate_counts,
+                        fit.fit_curve,
+                        label=f"{label} slope={fit.slope_deg:.5g} ± {fit.slope_error_deg:.2g} deg",
+                    )
         fig.axes[2].set_title(
             f"ee − gg slopes (deg/gate): F1={differences[0]}, F2={differences[1]}; writeback uses gg"
         )
-        for ax, label in zip(fig.axes, ("Contrast", "Wrapped phase (deg)", "Unwrapped phase (deg)"), strict=True):
+        for ax, label in zip(
+            fig.axes,
+            ("Contrast", "Wrapped phase (deg)", "Unwrapped phase (deg)"),
+            strict=True,
+        ):
             ax.set(xlabel="CZ gate count", ylabel=label)
             if ax.get_legend_handles_labels()[0]:
                 ax.legend(fontsize="small")
         fig, axes = plots.subplots("quadratures", figsize=(10, 5))
-        for herald, values in (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)):
+        for herald, values in (
+            ("gg", gg_quadratures),
+            ("ee sign-corrected", ee_quadratures),
+        ):
             for t in range(2):
                 for q, projection in enumerate(("X", "Y")):
-                    axes.plot(cfg.gate_counts, values[t, q], ".-", label=f"{herald} F{t+1} {projection}")
+                    axes.plot(
+                        cfg.gate_counts,
+                        values[t, q],
+                        ".-",
+                        label=f"{herald} F{t + 1} {projection}",
+                    )
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend(ncols=2)
         fig, axes = plots.subplots("herald", figsize=(12, 5))
-        image = axes.imshow(np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
-                            vmin=0, vmax=1, cmap="Blues", aspect="auto")
+        image = axes.imshow(
+            np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
+            vmin=0,
+            vmax=1,
+            cmap="Blues",
+            aspect="auto",
+        )
         axes.set(
             xticks=range(9),
-            xticklabels=[f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")],
-            xlabel="Herald class (F1, F2)", ylabel="Scan row (target, projection, n)",
+            xticklabels=[
+                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
+            ],
+            xlabel="Herald class (F1, F2)",
+            ylabel="Scan row (target, projection, n)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")

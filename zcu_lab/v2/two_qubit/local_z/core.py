@@ -210,14 +210,17 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         with Schedule(config, buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps,
-                    initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
                 builder.add_loop("target", 2)  # 0 = F1, 1 = F2
                 quadrature = builder.add_sweep(
@@ -226,11 +229,13 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 prepare_f1 = Pulse("prepare_f1", config.x90_f1)
                 prepare_f2 = Pulse("prepare_f2", config.x90_f2)
                 projection_f1 = Pulse(
-                    "projection_f1", config.x90_f1,
+                    "projection_f1",
+                    config.x90_f1,
                     phase=config.x90_f1.phase + quadrature,
                 )
                 projection_f2 = Pulse(
-                    "projection_f2", config.x90_f2,
+                    "projection_f2",
+                    config.x90_f2,
                     phase=config.x90_f2.phase + quadrature,
                 )
                 readout = MuxReadout("readout", config.readout)
@@ -256,16 +261,22 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
         return LocalZResult(
-            np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -293,27 +304,35 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         counts = data.sums
         quadratures = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-        variances = np.stack((
-            sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2")
-        ))
+        variances = np.stack(
+            (sigma_variance(counts[0], "f1"), sigma_variance(counts[1], "f2"))
+        )
         targets = tuple(
             tuple(
                 count_phase(float(quadratures[t, 0, n]), float(quadratures[t, 1, n]))
                 for n in range(len(cfg.gate_counts))
-            ) for t in range(2)
+            )
+            for t in range(2)
         )
         fits = tuple(
             fit_target(
-                np.array(cfg.gate_counts, dtype=np.float64), targets[t],
+                np.array(cfg.gate_counts, dtype=np.float64),
+                targets[t],
                 phase_variance(
-                    quadratures[t, 0], quadratures[t, 1],
-                    variances[t, 0], variances[t, 1],
+                    quadratures[t, 0],
+                    quadratures[t, 1],
+                    variances[t, 0],
+                    variances[t, 1],
                 ),
-            ) for t in range(2)
+            )
+            for t in range(2)
         )
         answer = LocalZAnalysis(
-            targets, quadratures, counts.sum(axis=(-2, -1)),
-            tuple(cfg.gate_counts), fits,
+            targets,
+            quadratures,
+            counts.sum(axis=(-2, -1)),
+            tuple(cfg.gate_counts),
+            fits,
         )
 
         fig, _ = plots.subplots(
@@ -352,7 +371,9 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 )
         fig.axes[2].set_title(
             "\n".join(
-                f"F{t + 1}: {fit.reason}" for t, fit in enumerate(answer.fits) if fit.reason
+                f"F{t + 1}: {fit.reason}"
+                for t, fit in enumerate(answer.fits)
+                if fit.reason
             )
             or "Complete-row WLS with intercept; correction = −slope"
         )
@@ -380,5 +401,5 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                 )
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend()
-    
+
         return answer

@@ -44,7 +44,9 @@ def _analyze(
 
 
 def _get_writeback_items(
-    req: WritebackRequest[ConditionalPhaseHeraldedRun, ConditionalPhaseHeraldedAnalysis],
+    req: WritebackRequest[
+        ConditionalPhaseHeraldedRun, ConditionalPhaseHeraldedAnalysis
+    ],
 ) -> Sequence[WritebackItem]:
     """Propose two ordinary source pulses with only common frequency replaced.
 

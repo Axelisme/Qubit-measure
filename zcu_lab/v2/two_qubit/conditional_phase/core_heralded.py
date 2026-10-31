@@ -89,6 +89,7 @@ class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
     herald_matrix has all leading scan axes plus herald (3,3); pass_fraction
     is its (g,g) cell, not ground-state purity.
     """
+
     ee_phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...]
     ee_quadratures: NDArray[np.float64]
     ee_acquired_shots: NDArray[np.float64]
@@ -132,7 +133,10 @@ class ConditionalPhaseHeraldedExp(
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Spectator I or Xπ", "", field_name="spectator_states", dtype=np.int64
+                        "Spectator I or Xπ",
+                        "",
+                        field_name="spectator_states",
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
@@ -161,7 +165,10 @@ class ConditionalPhaseHeraldedExp(
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         viewer = live_line(
-            context.plots, "measurement", "Common CZ frequency (MHz)", "Target sigma | herald (g,g)",
+            context.plots,
+            "measurement",
+            "Common CZ frequency (MHz)",
+            "Target sigma | herald (g,g)",
             num_lines=4 * len(config.gate_counts),
         )
 
@@ -172,7 +179,8 @@ class ConditionalPhaseHeraldedExp(
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, len(frequencies), 3, 3, 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         target = config.x90_f1 if config.target == "f1" else config.x90_f2
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
@@ -180,8 +188,10 @@ class ConditionalPhaseHeraldedExp(
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps,
-                    initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
                 builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ
                 quadrature = builder.add_sweep(
@@ -201,7 +211,9 @@ class ConditionalPhaseHeraldedExp(
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
-                with builder.branch(by="spectator_states", align_timeline=True) as cases:
+                with builder.branch(
+                    by="spectator_states", align_timeline=True
+                ) as cases:
                     with cases.case(1):
                         builder.emit(x180)
                 builder.emit(prepare)
@@ -211,19 +223,26 @@ class ConditionalPhaseHeraldedExp(
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("herald", config.roles.f1_tone),
-                        Classify("herald", config.roles.f2_tone),
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("herald", config.roles.f1_tone),
+                            Classify("herald", config.roles.f2_tone),
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseHeraldedResult(
-            np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
-            np.array(config.gate_counts, dtype=np.int64), frequencies,
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            np.array(config.gate_counts, dtype=np.int64),
+            frequencies,
             np.moveaxis(buffer.array, 0, 2),
         )
 
@@ -251,8 +270,19 @@ class ConditionalPhaseHeraldedExp(
         ):
             if not np.array_equal(actual, expected):
                 raise ValueError("Conditional phase count axes must match saved cfg")
-        if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3, 3, 3):
-            raise ValueError("Expected spectator × quadrature × n × frequency × 3 × 3 counts")
+        if data.sums.shape != (
+            2,
+            2,
+            len(cfg.gate_counts),
+            len(frequencies),
+            3,
+            3,
+            3,
+            3,
+        ):
+            raise ValueError(
+                "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
+            )
         gg = terminal_counts(data.sums, ("g", "g"))
         # ee starts the target in e (both sigma signs reverse); nominal I/Xπ
         # now means actual spectator e/g. Reorder to actual g/e before sharing.
@@ -265,69 +295,139 @@ class ConditionalPhaseHeraldedExp(
         phases = phase_points(gg_quadratures)
         ee_phases = phase_points(ee_quadratures)
         fitted = fit_phase_slopes(
-            data.gate_counts, np.stack((gg_quadratures, ee_quadratures)),
-            np.stack((gg_variances, ee_variances)), np.stack((gg_acquired, ee_acquired)),
+            data.gate_counts,
+            np.stack((gg_quadratures, ee_quadratures)),
+            np.stack((gg_variances, ee_variances)),
+            np.stack((gg_acquired, ee_acquired)),
         )
         gg_fitted = fit_phase_slopes(
-            data.gate_counts, gg_quadratures[None], gg_variances[None], gg_acquired[None]
+            data.gate_counts,
+            gg_quadratures[None],
+            gg_variances[None],
+            gg_acquired[None],
         )
         conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
-        gg_conditional = (gg_fitted.slopes_deg[1] - gg_fitted.slopes_deg[0] + 180) % 360 - 180
+        gg_conditional = (
+            gg_fitted.slopes_deg[1] - gg_fitted.slopes_deg[0] + 180
+        ) % 360 - 180
         crossings = phase_crossings(data.frequencies, conditional)
         gg_crossings = phase_crossings(data.frequencies, gg_conditional)
         reasons = [reason for state in fitted.reasons for reason in state if reason]
         reason = "; ".join(dict.fromkeys(reasons)) if reasons else crossings.reason
         herald_matrix = herald_probabilities(data.sums)
         answer = ConditionalPhaseHeraldedAnalysis(
-            phases, gg_quadratures, gg_acquired, tuple(cfg.gate_counts),
-            tuple(float(f) for f in data.frequencies), fitted, conditional, crossings,
-            crossings.frequencies_mhz[0] if reason is None else None, reason,
-            ee_phases, ee_quadratures, ee_acquired, gg_fitted, gg_conditional,
-            gg_crossings, herald_matrix, herald_matrix[..., 0, 0],
+            phases,
+            gg_quadratures,
+            gg_acquired,
+            tuple(cfg.gate_counts),
+            tuple(float(f) for f in data.frequencies),
+            fitted,
+            conditional,
+            crossings,
+            crossings.frequencies_mhz[0] if reason is None else None,
+            reason,
+            ee_phases,
+            ee_quadratures,
+            ee_acquired,
+            gg_fitted,
+            gg_conditional,
+            gg_crossings,
+            herald_matrix,
+            herald_matrix[..., 0, 0],
         )
 
-        fig, _ = plots.subplots("phase", nrows=3, figsize=(11, 11), layout="constrained")
-        fig.suptitle(f"{cfg.target.upper()} · shared slopes by actual spectator; gg vs ee")
+        fig, _ = plots.subplots(
+            "phase", nrows=3, figsize=(11, 11), layout="constrained"
+        )
+        fig.suptitle(
+            f"{cfg.target.upper()} · shared slopes by actual spectator; gg vs ee"
+        )
         for herald, points in (("gg", phases), ("ee", ee_phases)):
             for b, state in enumerate(("g", "e")):
                 for j, n in enumerate(data.gate_counts):
                     label = f"{herald} spectator {state} n={n}"
-                    fig.axes[0].plot(data.frequencies, [p.contrast for p in points[b][j]], ".-", label=label)
-                    fig.axes[1].plot(data.frequencies,
-                        [np.nan if p.logical_phase_deg is None else p.logical_phase_deg for p in points[b][j]],
-                        ".-", label=label)
-        fig.axes[2].plot(data.frequencies, conditional, ".-", label="Joint slope_e − slope_g (writeback)")
-        fig.axes[2].plot(data.frequencies, gg_conditional, "--", label="gg-only slope_e − slope_g")
+                    fig.axes[0].plot(
+                        data.frequencies,
+                        [p.contrast for p in points[b][j]],
+                        ".-",
+                        label=label,
+                    )
+                    fig.axes[1].plot(
+                        data.frequencies,
+                        [
+                            np.nan
+                            if p.logical_phase_deg is None
+                            else p.logical_phase_deg
+                            for p in points[b][j]
+                        ],
+                        ".-",
+                        label=label,
+                    )
+        fig.axes[2].plot(
+            data.frequencies,
+            conditional,
+            ".-",
+            label="Joint slope_e − slope_g (writeback)",
+        )
+        fig.axes[2].plot(
+            data.frequencies, gg_conditional, "--", label="gg-only slope_e − slope_g"
+        )
         for crossing in crossings.frequencies_mhz:
             fig.axes[2].plot(crossing, -180, "x", label="Joint per-gate π crossing")
         fig.axes[2].axhline(-180, color="gray", linestyle="--")
-        fig.axes[2].set_title(reason or f"Joint unique crossing: {answer.frequency_mhz:g} MHz")
-        for ax, label in zip(fig.axes, ("Contrast", "Logical phase (deg)", "Conditional phase (deg/gate)"), strict=True):
+        fig.axes[2].set_title(
+            reason or f"Joint unique crossing: {answer.frequency_mhz:g} MHz"
+        )
+        for ax, label in zip(
+            fig.axes,
+            ("Contrast", "Logical phase (deg)", "Conditional phase (deg/gate)"),
+            strict=True,
+        ):
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="x-small", ncols=3)
         fig, axes = plots.subplots("slopes", figsize=(10, 5))
         for name, fit in (("joint", fitted), ("gg-only", gg_fitted)):
             for b, state in enumerate(("g", "e")):
-                axes.errorbar(data.frequencies, fit.slopes_deg[b], yerr=fit.errors_deg[b],
-                              fmt=".-", label=f"{name} actual spectator {state}")
+                axes.errorbar(
+                    data.frequencies,
+                    fit.slopes_deg[b],
+                    yerr=fit.errors_deg[b],
+                    fmt=".-",
+                    label=f"{name} actual spectator {state}",
+                )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
         fig, axes = plots.subplots("quadratures", figsize=(11, 6))
-        for herald, values in (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)):
+        for herald, values in (
+            ("gg", gg_quadratures),
+            ("ee sign-corrected", ee_quadratures),
+        ):
             for b, state in enumerate(("g", "e")):
                 for q, projection in enumerate(("X", "Y")):
                     for j, n in enumerate(data.gate_counts):
-                        axes.plot(data.frequencies, values[b, q, j],
-                                  ".-", label=f"{herald} {state} {projection} n={n}")
+                        axes.plot(
+                            data.frequencies,
+                            values[b, q, j],
+                            ".-",
+                            label=f"{herald} {state} {projection} n={n}",
+                        )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="x-small", ncols=4)
         fig, axes = plots.subplots("herald", figsize=(12, 5))
-        image = axes.imshow(np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
-                            vmin=0, vmax=1, cmap="Blues", aspect="auto")
+        image = axes.imshow(
+            np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
+            vmin=0,
+            vmax=1,
+            cmap="Blues",
+            aspect="auto",
+        )
         axes.set(
             xticks=range(9),
-            xticklabels=[f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")],
-            xlabel="Herald class (F1, F2)", ylabel="Scan row (spectator, projection, n, frequency)",
+            xticklabels=[
+                f"{a},{b}" for a in ("g", "e", "other") for b in ("g", "e", "other")
+            ],
+            xlabel="Herald class (F1, F2)",
+            ylabel="Scan row (spectator, projection, n, frequency)",
             title="Herald distribution; (g,g) is pass fraction, not ground-state purity",
         )
         fig.colorbar(image, ax=axes, label="Herald probability")

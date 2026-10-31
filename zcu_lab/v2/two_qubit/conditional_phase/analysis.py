@@ -76,19 +76,25 @@ def phase_points(
         tuple(
             tuple(count_phase(float(x), float(y)) for x, y in zip(xs, ys, strict=True))
             for xs, ys in zip(state[0], state[1], strict=True)
-        ) for state in quadratures
+        )
+        for state in quadratures
     )
 
 
 def _quadrature_model(
-    n: NDArray[np.float64], slope: float, amplitude: float, phase: float,
+    n: NDArray[np.float64],
+    slope: float,
+    amplitude: float,
+    phase: float,
 ) -> NDArray[np.float64]:
     angle = np.deg2rad(n * slope + phase)
     return amplitude * np.column_stack((np.cos(angle), np.sin(angle)))
 
 
 def _slope_seed(
-    observations: list[tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]],
+    observations: list[
+        tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+    ],
 ) -> tuple[float, list[tuple[float, float]]]:
     # For each candidate slope, solve each group's complex amplitude linearly.
     # Search one full 2π period rather than using an unwrap-selected local basin.
@@ -101,21 +107,31 @@ def _slope_seed(
         for n, y, errors in observations:
             angle = np.deg2rad(n * slope)
             c, s = np.cos(angle), np.sin(angle)
-            design = np.stack((np.column_stack((c, -s)), np.column_stack((s, c))), axis=1)
+            design = np.stack(
+                (np.column_stack((c, -s)), np.column_stack((s, c))), axis=1
+            )
             weighted = (design / errors[..., None]).reshape(-1, 2)
-            coefficients = np.linalg.lstsq(weighted, (y / errors).ravel(), rcond=None)[0]
+            coefficients = np.linalg.lstsq(weighted, (y / errors).ravel(), rcond=None)[
+                0
+            ]
             residual = weighted @ coefficients - (y / errors).ravel()
             cost += float(residual @ residual)
-            amplitudes.append((float(np.hypot(*coefficients)),
-                               float(np.rad2deg(np.arctan2(coefficients[1], coefficients[0])))))
+            amplitudes.append(
+                (
+                    float(np.hypot(*coefficients)),
+                    float(np.rad2deg(np.arctan2(coefficients[1], coefficients[0]))),
+                )
+            )
         if cost < best_cost:
             best_cost, best_slope, best_amplitudes = cost, float(slope), amplitudes
     return best_slope, best_amplitudes
 
 
 def fit_phase_slopes(
-    n: NDArray[np.int64], quadratures: NDArray[np.float64],
-    variances: NDArray[np.float64], acquired_shots: NDArray[np.float64],
+    n: NDArray[np.int64],
+    quadratures: NDArray[np.float64],
+    variances: NDArray[np.float64],
+    acquired_shots: NDArray[np.float64],
 ) -> PhaseSlopeFit:
     """Fit X=A_h cos(n*slope+φ_h), Y=A_h sin(n*slope+φ_h), without DC.
 
@@ -137,7 +153,9 @@ def fit_phase_slopes(
         reasons: list[str | None] = []
         for f in range(nf):
             result, reason = _fit_frequency(
-                n, quadratures[:, state, :, :, f], variances[:, state, :, :, f],
+                n,
+                quadratures[:, state, :, :, f],
+                variances[:, state, :, :, f],
                 acquired_shots[:, state, :, :, f],
             )
             fits.append(result)
@@ -151,30 +169,47 @@ def fit_phase_slopes(
 
 
 def _fit_frequency(
-    n: NDArray[np.int64], quadratures: NDArray[np.float64],
-    variances: NDArray[np.float64], acquired: NDArray[np.float64],
+    n: NDArray[np.int64],
+    quadratures: NDArray[np.float64],
+    variances: NDArray[np.float64],
+    acquired: NDArray[np.float64],
 ) -> tuple[SharedFitResult | None, str | None]:
-    observations: list[tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]] = []
+    observations: list[
+        tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+    ] = []
     for group in range(len(quadratures)):
         if not np.all(np.isfinite(acquired[group])):
             return None, f"Group {group}: incomplete acquired gate-count axis"
         valid = np.all(
-            np.isfinite(quadratures[group]) & np.isfinite(variances[group])
-            & (variances[group] > 0) & (acquired[group] > 0), axis=0,
+            np.isfinite(quadratures[group])
+            & np.isfinite(variances[group])
+            & (variances[group] > 0)
+            & (acquired[group] > 0),
+            axis=0,
         )
         reason = gate_count_alias_reason(n[valid])
         if reason is not None:
             return None, f"Group {group}: {reason}"
-        observations.append((n[valid].astype(np.float64),
-                             quadratures[group][:, valid].T,
-                             np.sqrt(variances[group][:, valid].T)))
+        observations.append(
+            (
+                n[valid].astype(np.float64),
+                quadratures[group][:, valid].T,
+                np.sqrt(variances[group][:, valid].T),
+            )
+        )
     slope, amplitudes = _slope_seed(observations)
     traces: list[FitTrace] = []
     parameters = [ParameterSpec("slope", slope, limits=(-180, 180))]
-    for group, ((x, y, errors), (amplitude, phase)) in enumerate(zip(observations, amplitudes, strict=True)):
+    for group, ((x, y, errors), (amplitude, phase)) in enumerate(
+        zip(observations, amplitudes, strict=True)
+    ):
         names = ("slope", f"amplitude_{group}", f"phase_{group}")
-        parameters.extend((ParameterSpec(names[1], amplitude, limits=(0, None)),
-                           ParameterSpec(names[2], phase)))
+        parameters.extend(
+            (
+                ParameterSpec(names[1], amplitude, limits=(0, None)),
+                ParameterSpec(names[2], phase),
+            )
+        )
         traces.append(FitTrace(x, y, _quadrature_model, names, errors))
     try:
         result = fit_shared(traces, parameters)

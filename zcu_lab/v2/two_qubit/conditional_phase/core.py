@@ -226,7 +226,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Spectator I or Xπ", "", field_name="spectator_states", dtype=np.int64
+                        "Spectator I or Xπ",
+                        "",
+                        field_name="spectator_states",
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
@@ -255,7 +258,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
         viewer = live_line(
-            context.plots, "measurement", "Common CZ frequency (MHz)", "Target sigma",
+            context.plots,
+            "measurement",
+            "Common CZ frequency (MHz)",
+            "Target sigma",
             num_lines=4 * len(config.gate_counts),
         )
 
@@ -266,7 +272,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, len(frequencies), 3, 3),
-            dtype=np.float64, on_update=update_view,
+            dtype=np.float64,
+            on_update=update_view,
         )
         target = config.x90_f1 if config.target == "f1" else config.x90_f2
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
@@ -274,8 +281,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
-                    context.soccfg, reps=config.reps,
-                    initial_delay=config.initial_delay, relax_delay=config.relax_delay,
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
                 builder.add_loop("spectator_states", 2)  # 0 = I, 1 = Xπ
                 quadrature = builder.add_sweep(
@@ -294,7 +303,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
-                with builder.branch(by="spectator_states", align_timeline=True) as cases:
+                with builder.branch(
+                    by="spectator_states", align_timeline=True
+                ) as cases:
                     with cases.case(1):
                         builder.emit(x180)
                 builder.emit(prepare)
@@ -304,17 +315,24 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 step.run_acquire_summed(
-                    prog, context.soc,
-                    processor=shot_sums(prog, [
-                        Classify("terminal", config.roles.f1_tone),
-                        Classify("terminal", config.roles.f2_tone),
-                    ]),
-                    rounds=config.rounds, options=RunOptions(),
+                    prog,
+                    context.soc,
+                    processor=shot_sums(
+                        prog,
+                        [
+                            Classify("terminal", config.roles.f1_tone),
+                            Classify("terminal", config.roles.f2_tone),
+                        ],
+                    ),
+                    rounds=config.rounds,
+                    options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseResult(
-            np.arange(2, dtype=np.int64), np.arange(2, dtype=np.int64),
-            np.array(config.gate_counts, dtype=np.int64), frequencies,
+            np.arange(2, dtype=np.int64),
+            np.arange(2, dtype=np.int64),
+            np.array(config.gate_counts, dtype=np.int64),
+            frequencies,
             np.moveaxis(buffer.array, 0, 2),
         )
 
@@ -343,7 +361,9 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             if not np.array_equal(actual, expected):
                 raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
-            raise ValueError("Expected spectator × quadrature × n × frequency × 3 × 3 counts")
+            raise ValueError(
+                "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
+            )
         quadratures = sigma(data.sums, cfg.target)
         acquired = data.sums.sum(axis=(-2, -1))
         variances = sigma_variance(data.sums, cfg.target)
@@ -356,40 +376,76 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         reasons = [reason for state in fitted.reasons for reason in state if reason]
         reason = "; ".join(dict.fromkeys(reasons)) if reasons else crossings.reason
         answer = ConditionalPhaseAnalysis(
-            phases, quadratures, acquired, tuple(cfg.gate_counts),
-            tuple(float(f) for f in data.frequencies), fitted, conditional, crossings,
-            crossings.frequencies_mhz[0] if reason is None else None, reason,
+            phases,
+            quadratures,
+            acquired,
+            tuple(cfg.gate_counts),
+            tuple(float(f) for f in data.frequencies),
+            fitted,
+            conditional,
+            crossings,
+            crossings.frequencies_mhz[0] if reason is None else None,
+            reason,
         )
 
-        fig, _ = plots.subplots("phase", nrows=3, figsize=(10, 10), layout="constrained")
+        fig, _ = plots.subplots(
+            "phase", nrows=3, figsize=(10, 10), layout="constrained"
+        )
         fig.suptitle(f"{cfg.target.upper()} target · actual spectator g/e")
         for b, state in enumerate(("g (I)", "e (Xπ)")):
             for j, n in enumerate(data.gate_counts):
-                fig.axes[0].plot(data.frequencies, [p.contrast for p in phases[b][j]],
-                                 ".-", label=f"{state} n={n}")
-                fig.axes[1].plot(data.frequencies,
-                    [np.nan if p.logical_phase_deg is None else p.logical_phase_deg for p in phases[b][j]],
-                    ".-", label=f"{state} n={n}")
-        fig.axes[2].plot(data.frequencies, conditional, ".-", label="Fitted slope_e − slope_g")
+                fig.axes[0].plot(
+                    data.frequencies,
+                    [p.contrast for p in phases[b][j]],
+                    ".-",
+                    label=f"{state} n={n}",
+                )
+                fig.axes[1].plot(
+                    data.frequencies,
+                    [
+                        np.nan if p.logical_phase_deg is None else p.logical_phase_deg
+                        for p in phases[b][j]
+                    ],
+                    ".-",
+                    label=f"{state} n={n}",
+                )
+        fig.axes[2].plot(
+            data.frequencies, conditional, ".-", label="Fitted slope_e − slope_g"
+        )
         for crossing in crossings.frequencies_mhz:
             fig.axes[2].plot(crossing, -180, "x", label="Per-gate π crossing")
         fig.axes[2].axhline(-180, color="gray", linestyle="--")
-        fig.axes[2].set_title(reason or f"Unique fitted crossing: {answer.frequency_mhz:g} MHz")
-        for ax, label in zip(fig.axes, ("Contrast", "Logical phase (deg)", "Conditional phase (deg/gate)"), strict=True):
+        fig.axes[2].set_title(
+            reason or f"Unique fitted crossing: {answer.frequency_mhz:g} MHz"
+        )
+        for ax, label in zip(
+            fig.axes,
+            ("Contrast", "Logical phase (deg)", "Conditional phase (deg/gate)"),
+            strict=True,
+        ):
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="small", ncols=2)
         fig, axes = plots.subplots("quadratures", figsize=(10, 5))
         for b, state in enumerate(("g", "e")):
             for q, projection in enumerate(("X", "Y")):
                 for j, n in enumerate(data.gate_counts):
-                    axes.plot(data.frequencies, quadratures[b, q, j],
-                              ".-", label=f"{state} {projection} n={n}")
+                    axes.plot(
+                        data.frequencies,
+                        quadratures[b, q, j],
+                        ".-",
+                        label=f"{state} {projection} n={n}",
+                    )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="small", ncols=3)
         fig, axes = plots.subplots("slopes", figsize=(10, 5))
         for b, state in enumerate(("g", "e")):
-            axes.errorbar(data.frequencies, fitted.slopes_deg[b], yerr=fitted.errors_deg[b],
-                          fmt=".-", label=f"Actual spectator {state}")
+            axes.errorbar(
+                data.frequencies,
+                fitted.slopes_deg[b],
+                yerr=fitted.errors_deg[b],
+                fmt=".-",
+                label=f"Actual spectator {state}",
+            )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
         return answer
