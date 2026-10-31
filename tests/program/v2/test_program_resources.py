@@ -76,7 +76,7 @@ def test_modular_route_protection_is_atomic_and_unprotected_routes_remain_native
     assert prog.ro_chs[1]["length"] == 123
 
 
-def test_timeline_readout_weights_share_by_value_and_reject_missing_weights():
+def test_timeline_native_readout_weights_can_be_replaced_or_cleared():
     soccfg = make_mock_soccfg(0, 1)
     soccfg["readouts"][0]["has_weights"] = True
     weights = np.zeros((61, 2), dtype=np.int16)
@@ -85,38 +85,34 @@ def test_timeline_readout_weights_share_by_value_and_reject_missing_weights():
         def _initialize(self, cfg):
             self.declare_readout(0, length=0.2, weights=weights)
             self.declare_readout(0, length=0.2, weights=weights.copy())
-            with pytest.raises(ValueError, match="weights"):
-                self.declare_readout(0, length=0.2)
+            np.testing.assert_array_equal(self.ro_chs[0]["weights"], weights)
+            self.declare_readout(0, length=0.2)
 
     prog = Native(soccfg)
-    np.testing.assert_array_equal(prog.ro_chs[0]["weights"], weights)
+    assert prog.ro_chs[0]["weights"] is None
 
 
-def test_timeline_direct_declarations_share_settings_and_preserve_explicit_protection():
+def test_timeline_direct_declarations_overwrite_even_explicitly_protected_routes():
     def initialize(prog: TimelineProgramV2 | ModularProgramV2):
         prog.declare_gen(0, nqz=1)
         prog.declare_readout(0, length=0.4)
         with pytest.raises(ValueError, match="readout route 1 is not declared"):
             prog.protect_readout_routes("missing", 0, [0, 1])
         prog.protect_readout_routes("readout", 0, [0])
-        # Equivalent positional/default forms share even a protected declaration.
+        # Native QICK accepts positional/default forms and later overwrites.
         prog.declare_gen(0, 1)
         prog.declare_readout(0, 0.4, phase=0, sel="product")
         with pytest.raises(ValueError, match="already protected by readout"):
             prog.protect_readout_routes("other", 0, [0])
-        with pytest.raises(ValueError, match="nqz"):
-            prog.declare_gen(0, nqz=2)
-        with pytest.raises(ValueError, match="ro_length"):
-            prog.declare_readout(0, length=0.2)
+        prog.declare_gen(0, nqz=2)
+        prog.declare_readout(0, length=0.2)
         prog.declare_gen(1, nqz=1)
         prog.declare_readout(1, length=0.2)
-        with pytest.raises(ValueError, match="nqz"):
-            prog.declare_gen(1, nqz=2)
-        with pytest.raises(ValueError, match="ro_length"):
-            prog.declare_readout(1, length=0.4)
+        prog.declare_gen(1, nqz=2)
+        prog.declare_readout(1, length=0.4)
 
     prog = _program("timeline", initialize)
-    assert prog.gen_chs[0]["nqz"] == 1
-    assert prog.ro_chs[0]["length"] == 123
-    assert prog.gen_chs[1]["nqz"] == 1
-    assert prog.ro_chs[1]["length"] == 61
+    assert prog.gen_chs[0]["nqz"] == 2
+    assert prog.ro_chs[0]["length"] == 61
+    assert prog.gen_chs[1]["nqz"] == 2
+    assert prog.ro_chs[1]["length"] == 123
