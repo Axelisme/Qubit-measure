@@ -4,6 +4,17 @@
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
+## Timeline rounding
+
+Timeline event starts now ceil to tProc cycles instead of nearest rounding.
+Each operation quantizes its result once. Static waveform and ADC lengths use
+rational clock conversion before the aggregate ceil. Author sweeps retain QICK
+native start rounding and truncated steps; they do not allocate pointwise time
+tables. Non-affine runtime cross-grid lengths currently raise at build and require
+the runtime conversion stage. Known scalar and affine time getters return actual
+quantized values; runtime-only and non-affine time getters raise RuntimeError.
+Author-declared data tables and IR dispatch jump-address tables remain supported.
+
 ## Testing & Type Checking Conventions
 
 - **Type Narrowing**: When a mock or abstract base class type is too generic in tests (e.g., retrieving an item from an `IRNode.insts` list where you expect a `RegWriteInst`), use an explicit assertion (`assert isinstance(item, RegWriteInst)`) rather than `cast()`. This ensures Pyright can perform type narrowing safely while maintaining a runtime guarantee.

@@ -307,7 +307,11 @@ class TimelineAdvance(TimedMacro):
                 registers.append(value)
             else:
                 fractional += value
-        if event.static_cycles is not None and not isinstance(duration, (RuntimeEnd, QickParam)):
+        if (
+            event.static_cycles is not None
+            and not isinstance(duration, (RuntimeEnd, QickParam))
+            and not isinstance(event.origin, QickParam)
+        ):
             origin = 0 if isinstance(event.origin, RuntimeEnd) else round(event.origin * get_fclk(prog))
             exact = event.static_cycles + origin + Fraction(str(duration)) * Fraction(str(get_fclk(prog)))
             result: Time = -(-exact.numerator // exact.denominator) / get_fclk(prog)
