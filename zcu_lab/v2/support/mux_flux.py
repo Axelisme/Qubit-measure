@@ -32,26 +32,16 @@ from zcu_lab.v2.mux.onetone.core import (
 from zcu_lab.v2.mux.twotone_spectrum.core import (
     MuxFreqCfg,
     MuxFreqExp,
+    MuxFreqToneCfg,
     prepare_frequency_scan,
 )
 from zcu_lab.v2.support import live_heatmap_with_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
 from zcu_lab.v2.support.mux_sweep_cfg import (
-    MuxToneCfg,
     ToneRangeCfg,
     require_tone_value,
     validate_participants,
 )
-
-
-class FluxFrequencyToneCfg(MuxToneCfg):
-    """One original qubit drive and finite absolute MHz frequency bounds.
-
-    Inherited name fixes identity; drive supplies the fixed pulse. sweep.start
-    and sweep.stop are MHz, with the point count in frequency.expts.
-    """
-
-    sweep: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
 
 
 class FluxFrequencyCfg(ConfigBase):
@@ -62,7 +52,7 @@ class FluxFrequencyCfg(ConfigBase):
     count. Top-level participants selects acquisition order, not this list.
     """
 
-    tones: Annotated[list[FluxFrequencyToneCfg], FieldMeta(element_label="name")]
+    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
     expts: int = Field(strict=True, gt=0)
 
 
@@ -75,18 +65,18 @@ class FluxIdentityCfg(ConfigBase):
 class FluxLineCfg(FluxIdentityCfg):
     """One local DC source and its native-unit start/stop range.
 
-    flux_dev names a connected driver. sweep advances with all other selected
+    flux_dev names a connected driver. flux advances with all other selected
     lines by point index, using the shared flux_expts, not a Cartesian product.
     """
 
     flux_dev: DeviceName = Field(min_length=1)
-    sweep: ToneRangeCfg | None = None
+    flux: ToneRangeCfg | None = None
 
-    def require_sweep(self) -> ToneRangeCfg:
+    def require_flux(self) -> ToneRangeCfg:
         """Return a selected line's DC bounds, or raise ValueError with its name."""
-        if self.sweep is None:
+        if self.flux is None:
             raise ValueError(f"{self.name}: active tone requires DC sweep")
-        return self.sweep
+        return self.flux
 
 
 class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCfg](
@@ -156,7 +146,7 @@ class MuxFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg), T: FluxIdentityCf
             for index in self.participants:
                 tone = self.frequency.tones[index]
                 require_tone_value(tone.drive, ("frequency", "tones", index, "drive"))
-                require_tone_value(tone.sweep, ("frequency", "tones", index, "sweep"))
+                require_tone_value(tone.freq, ("frequency", "tones", index, "freq"))
         self.inner_cfg()
         return self
 
@@ -228,9 +218,9 @@ class LocalFluxCfg[S: (MuxFrequencyOffsetCfg, FluxFrequencyCfg)](
             raise ValueError("local flux lines must use distinct devices")
         for index in self.participants:
             tone = self.tones[index]
-            require_tone_value(tone.sweep, ("tones", index, "sweep"))
+            require_tone_value(tone.flux, ("tones", index, "flux"))
             make_sweep(
-                tone.require_sweep().start, tone.require_sweep().stop, self.flux_expts
+                tone.require_flux().start, tone.require_flux().stop, self.flux_expts
             )
         return self
 
@@ -279,8 +269,8 @@ def run_flux_scan(
         flux_values = np.asarray(
             [
                 np.linspace(
-                    cfg.tones[i].require_sweep().start,
-                    cfg.tones[i].require_sweep().stop,
+                    cfg.tones[i].require_flux().start,
+                    cfg.tones[i].require_flux().stop,
                     cfg.flux_expts,
                 )
                 for i in indices
@@ -461,7 +451,7 @@ def mux_flux_spec[C: ConfigBase](
         tag=tag,
         result_builder=build,
         result_validator=validate_flux_result,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         labber_layout="independent",
     )
 

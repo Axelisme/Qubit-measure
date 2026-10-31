@@ -296,7 +296,9 @@ class ProducerBounds:
         self.origins[address] = origin
         if arithmetic:
             for register in BaseInst.from_dict(raw).reg_write:
-                self.generated.setdefault(register, set()).add(address)
+                # s14 is shared with native outputs, not compiler-owned storage.
+                if register != "s14":
+                    self.generated.setdefault(register, set()).add(address)
 
     def time_parameters(self, macro: TimedMacro) -> None:
         """Watch registers allocated by native time conversion, not arbitrary data."""

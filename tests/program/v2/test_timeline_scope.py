@@ -91,9 +91,9 @@ def _compile_operation(frontend: str, operation: str, context: str):
 
     def body(prog: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         prog.fork("default", into=["outer", "inner"])
-        prog.delay_timeline(100 / 430.08, timeline="outer")
-        prog.delay_timeline(200 / 430.08, timeline="inner")
-        prog.delay_timeline(300 / 430.08, timeline="default")
+        prog.timeline_inc(100 / 430.08, timeline="outer")
+        prog.timeline_inc(200 / 430.08, timeline="inner")
+        prog.timeline_inc(300 / 430.08, timeline="default")
         scope = nullcontext() if context == "outside" else prog.timeline("outer")
         with scope:
             if context == "restored":
@@ -106,7 +106,7 @@ def _compile_operation(frontend: str, operation: str, context: str):
                 else:
                     module.play(prog)
         selected = {"explicit": "default", "nested": "inner"}.get(context, "outer")
-        prog.sync(timeline=selected)
+        prog.delay_by_timeline(timeline=selected)
         prog.pulse(0, "p", t=0)
 
     soccfg = make_mock_soccfg(1, 1)
@@ -147,6 +147,6 @@ def test_timed_entry_points_select_scope_and_preserve_native_placement(
     expected_end = 100 if context == "outside" else expected_tick
     if context != "outside" and operation.startswith("pulse"):
         expected_end += 44
-    # The second, native pulse observes the selected end after sync. This also
+    # The second, native pulse observes the selected end after delay_by_timeline. This also
     # covers register-selected ends that have no affine get_time_param value.
     assert [waves(shot) for shot in shots(prog)] == [[expected_tick, expected_end]]

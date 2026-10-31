@@ -27,26 +27,27 @@ QICK Hardware Notes
   ``@N`` with ``@(N + P)`` on the instruction.
 - Register-driven ``TIME inc_ref rX`` cannot be folded into ``@N`` because the
   increment amount is unknown at compile time.  Pending is flushed before it.
-- ``TIME set_ref`` / ``updt`` / ``rst`` write s14 to an absolute value,
-  invalidating any accumulated pending delta.  Pending is flushed before them.
+- ``TIME set_ref`` / ``updt`` / ``rst`` replace the reference clock,
+  invalidating any accumulated pending delta. Pending is flushed before them.
+  TIME instructions do not read or write the separate s14 output offset.
 - ``WAIT time @T`` is NOT a fold target even though it carries a ``TimeOffset``:
   its ``@T`` is an absolute user-time comparison value (the assembler expands it
-  to ``TEST s11 - #(T-10)``), not an offset from the s14 reference.  Folding a
+  to ``TEST s11 - #(T-10)``), not an offset from the reference clock.  Folding a
   ``TIME inc_ref`` delta into it would change the wait target time.  ``WaitInst``
   is therefore treated as a flush barrier.
 - Mostly-transparent instructions: ``PortWriteInst``, ``DportWriteInst``,
   ``DmemReadInst``, ``DmemWriteInst``, ``WmemWriteInst``, and ``RegWriteInst``
   whose ``dst`` is not a system register (``sN``).  These pass through
   *without* flushing *unless* they carry an explicit ``@T`` (``TimeOffset``)
-  field or read/write the time-base register (``TIMED_BASE_REG = s14``).
+  field or read/write the output-offset register (``TIMED_BASE_REG = s14``).
   Specifically:
 
   - With ``@T``: the ``TimeOffset`` absorbs ``pending_lit`` (``@T += delta``);
     pending is *not* cleared so the hardware clock still advances at block end.
     This compensation applies only when the instruction does not also write the
-    time-base register through ``-wr``.
+    output-offset register through ``-wr``.
   - Without ``@T``, reading or writing ``TIMED_BASE_REG``: pending is flushed
-    first because the instruction would observe or mutate the reference value.
+    first because its output offset cannot absorb the pending reference advance.
   - Without ``@T``, not touching ``TIMED_BASE_REG``: truly transparent;
     pending is unchanged.
 
@@ -57,8 +58,8 @@ Decision Notes
 Folding is greedy: the pass accumulates all contiguous literal increments
 into ``pending_lit`` and applies them at the first opportunity (next anchored
 instruction or end of block).  This is correct because ``TIME inc_ref`` is
-the only instruction that modifies ``s14`` in the literal path, so the
-accumulated delta is always the exact pending advance.
+the reference advance being deferred in the literal path. The separate s14
+output offset is never changed by TIME.
 """
 
 from __future__ import annotations
@@ -199,7 +200,7 @@ class TimedMergePass(BlockChunkPass):
             ):
                 # WAIT time @T is excluded: its @T is an absolute user-time
                 # comparison value (TEST s11 - #(T-10)), not an offset from the
-                # s14 reference, so absorbing a TIME inc_ref delta would change
+                # reference clock, so absorbing a TIME inc_ref delta would change
                 # the wait target. WaitInst falls through to the else-flush.
                 pending_lit = _fold_anchored_time(inst, pending_lit, result)
             elif _is_reference_clock_barrier(inst):

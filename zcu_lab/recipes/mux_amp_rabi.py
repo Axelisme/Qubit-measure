@@ -121,7 +121,7 @@ async def mux_amp_rabi(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"tones.{index}.sweep",
+                f"tones.{index}.gain",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
     tab.set("expts", inputs.n)

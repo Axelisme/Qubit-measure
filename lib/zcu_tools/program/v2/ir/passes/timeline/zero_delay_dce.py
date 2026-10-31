@@ -22,7 +22,7 @@ After::
 
 QICK Hardware Notes
 -------------------
-- ``TIME inc_ref #0`` is semantically a no-op: ``s14 += 0`` leaves the time
+- ``TIME inc_ref #0`` is semantically a no-op: a zero reference increment leaves the time
   reference unchanged.  No downstream instruction observes any difference.
 - Blocks with ``disable_opt=True`` (dispatch-table stubs) are skipped
   because their pmem word count is fixed by the jump-table encoding.

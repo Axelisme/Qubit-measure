@@ -18,12 +18,12 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import Delay, Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -49,6 +49,12 @@ def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T2EchoCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    detune: float = 0.0
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -79,12 +85,6 @@ class T2EchoCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-    detune: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -111,11 +111,11 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
     # times stores us in memory, s on disk -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[T2EchoResult, T2EchoCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", "Time", "s", scale=1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=T2EchoResult,
         cfg_type=T2EchoCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/t2echo",
     )
 
@@ -134,10 +134,10 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         soc, soccfg = context.soc, context.soccfg
         detune = cfg.detune
 
-        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg, "scaler": 0.5})
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": soccfg, "scaler": 0.5})
 
         true_detune = actual_detune(
-            cfg.length,
+            cfg.delay,
             detune=detune,
             gen_ch=cfg.pi2_pulse.ch,
             soccfg=soccfg,
@@ -156,42 +156,44 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-
-            length_sweep = cfg.length
-            length_param = sweep2param("length", length_sweep)
+        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            length_sweep = cfg.delay
+            length_param = builder.add_sweep("delay", length_sweep)
             detune_param = 360 * detune * length_param
 
             # 3. Refocus at the midpoint, then project with the programmed phase ramp.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg.reset),
-                    Pulse("pi2_pulse1", cfg.pi2_pulse),
-                    Delay("t2e_delay1", delay=0.5 * length_param),
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    Delay("t2e_delay2", delay=0.5 * length_param),
-                    Pulse(
-                        name="pi2_pulse2",
-                        cfg=cfg.pi2_pulse.with_updates(
-                            phase=cfg.pi2_pulse.phase + detune_param
-                        ),
-                    ),
-                    Readout("readout", cfg.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(), cfg.earlystop_snr, t2echo_signal2real
-                        ),
+
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("pi2_pulse1", cfg.pi2_pulse))
+            builder.emit(Delay("t2e_delay1", delay=0.5 * length_param))
+            builder.delay_by_timeline()
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.emit(Delay("t2e_delay2", delay=0.5 * length_param))
+            builder.delay_by_timeline()
+            builder.emit(
+                Pulse(
+                    name="pi2_pulse2",
+                    cfg=cfg.pi2_pulse.with_updates(
+                        phase=cfg.pi2_pulse.phase + detune_param
                     ),
                 )
+            )
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(), cfg.earlystop_snr, t2echo_signal2real
+                    ),
+                ),
             )
 
         # Keep measured IQ separate from fitted coherence times and fringe frequency.
@@ -248,11 +250,25 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
-            t2e, t2eerr, detune, detune_err, y_fit, (pOpt, pCov) = fit_decay_fringe(
-                xs, real_signals, fixedparams=fixedparams
+            fit = fit_decay_fringe(xs, real_signals, fixedparams=fixedparams)
+            t2e, t2eerr, detune, detune_err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.freq,
+                fit.freq_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
             )
         elif fit_method == "decay":
-            t2e, t2eerr, y_fit, (pOpt, pCov) = fit_decay(xs, real_signals)
+            fit = fit_decay(xs, real_signals)
+            t2e, t2eerr, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
             detune = 0.0
             detune_err = 0.0
         else:

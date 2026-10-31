@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpa
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import BeforeValidator
-from qick.asm_v2 import QickParam
+from qick.asm_v2 import Macro, QickParam
 
 from zcu_tools.cfg_model import (
     Centroid3Classifier,
@@ -504,7 +504,7 @@ class PulseReadout(AbsReadout):
             )
         else:
             self.pulse.play(prog, timeline=timeline)
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _run_readout_config_from_regs(
         self, prog: ModularProgramV2, name: str, t: float | QickParam
@@ -702,7 +702,7 @@ class MuxReadout(AbsReadout):
         self._program = prog
 
     def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare tones/routes without enabling legacy raw-IQ collection.
+        """Declare tones/routes for playback and compiled-emission IQ collection.
 
         Incompatible wiring and illegal rounded durations raise ValueError.
         ADC/generator declarations follow QICK: later declarations overwrite
@@ -717,7 +717,7 @@ class MuxReadout(AbsReadout):
         """Play all tones and trigger all ADCs at one origin, then add post once.
 
         The end covers the actual all-tone waveform and every rounded ADC window.
-        timeline=None selects default. Legacy collection remains unavailable.
+        timeline=None selects default. Collection validates this compiled emission.
         """
         timeline = timeline if timeline is not None else "default"
         prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch, tag))
@@ -729,7 +729,7 @@ class MuxReadout(AbsReadout):
             t=self.cfg.trig_offset,
             timeline=timeline,
         )
-        prog.delay_timeline(self.cfg.post_delay, timeline=timeline)
+        prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
     def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
         from ..timeline import TimelineProgramV2
@@ -885,13 +885,14 @@ class MuxReadout(AbsReadout):
 
     def collect_raw_iq(
         self,
-        prog: ModularProgramV2,
+        prog: ModularProgramV2 | TimelineProgramV2,
         *,
         read_index: int | None = None,
     ) -> NDArray[np.float64]:
         """Return last-round raw IQ in tone order, normalized by ADC length.
 
-        prog must be the program that initialized this module. Call after its
+        prog must contain this module's compiled emission (or its legacy init).
+        Call after its
         integrated acquire(), or in a completed-round hook. This reads get_raw()
         from that program, never acquires or samples a new round. A simulation
         getter may materialize retained shots using that round's fixed identity.
@@ -915,10 +916,7 @@ class MuxReadout(AbsReadout):
         raw buffers/channels, count/dtype/loop/read/IQ shape mismatches or invalid
         read_index. Unrelated channels' shapes are ignored. Getter errors propagate.
         """
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
+        self._validate_collection_program(prog)
         if read_index is not None and (type(read_index) is not int or read_index < 0):
             raise ValueError(
                 f"{self.name}: read_index must be None or a nonnegative integer"
@@ -956,16 +954,57 @@ class MuxReadout(AbsReadout):
             selected.append(iq if read_index is None else iq[..., read_index, :])
         return np.stack(selected, axis=-2)
 
+    def _validate_collection_program(
+        self, prog: ModularProgramV2 | TimelineProgramV2
+    ) -> None:
+        from .._timeline_macros import (
+            ModuleEmission,
+            PreparedTimelineMacro,
+            TimelineBranch,
+            TimeProducer,
+        )
+        from ..timeline import TimelineProgramV2
+
+        if not isinstance(prog, TimelineProgramV2):
+            if self._program is not prog:
+                raise ValueError(
+                    f"{self.name}: use the program that initialized this module"
+                )
+            return
+
+        def emitted(macros: Sequence[Macro]) -> bool:
+            for macro in macros:
+                source = (
+                    macro.source if isinstance(macro, PreparedTimelineMacro) else macro
+                )
+                if isinstance(source, ReadoutEmission) and source.owner is self:
+                    return True
+                if isinstance(source, (ModuleEmission, TimeProducer)) and emitted(
+                    source.macros
+                ):
+                    return True
+                if isinstance(source, TimelineBranch) and any(
+                    emitted(case) for case in source.cases
+                ):
+                    return True
+            return False
+
+        if not emitted(prog.macro_list):
+            raise ValueError(
+                f"{self.name}: module has no compiled readout emission on this program"
+            )
+
     def collect_iq(
         self,
-        prog: ModularProgramV2,
+        prog: ModularProgramV2 | TimelineProgramV2,
         acquired: Sequence[NDArray[np.float64]],
         *,
         read_index: int = 0,
     ) -> NDArray[np.float64]:
         """Select one averaged read in tone order, returning (*sweep_shape,N,2).
 
-        Caller must supply the same initialized program's same acquire result:
+        prog must contain this module's compiled emission (or its legacy init).
+        Caller must supply that program's same acquire result:
         an unclassified averaged list of float64 arrays (reads,*sweep_shape,2).
         The list carries no source identity, so another acquisition's same-shaped
         arrays cannot be detected. Raw, single-shot, classified and decimated
@@ -976,16 +1015,11 @@ class MuxReadout(AbsReadout):
         missing initialization/channels, list count, read_index, dtype or shape.
         Unrelated channels' shapes are ignored.
         """
-        if self._program is None:
-            raise ValueError(f"{self.name}: module is not initialized")
+        self._validate_collection_program(prog)
         positions = {ch: i for i, ch in enumerate(prog.ro_chs)}
         for i, tone in enumerate(self.cfg.tones):
             if tone.ro_ch not in positions:
                 raise ValueError(f"{self.name}: tone {i} missing ro_ch {tone.ro_ch}")
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
         if len(acquired) != len(positions):
             raise ValueError(
                 f"{self.name}: acquired item count {len(acquired)} != channels {len(positions)}"

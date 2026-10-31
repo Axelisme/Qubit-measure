@@ -19,7 +19,7 @@ from ._timeline_axis import (
     CycleValues,
     Scalar,
     TimeVariable,
-    component_key,
+    component_values,
     cycle_axis,
     merge_components,
     nonzero_component,
@@ -794,12 +794,18 @@ def _parts(
     )
 
 
-def _structural_key(value: TimeExpression) -> tuple[object, ...]:
+type _StructuralKey = tuple[
+    tuple[tuple[tuple[int, str, int], tuple[Scalar, ...]], ...],
+    tuple[tuple[_StructuralKey, Fraction], ...],
+]
+
+
+def _structural_key(value: TimeExpression) -> _StructuralKey:
     linear, absolute = _parts(value)
     components = tuple(
         sorted(
-            (component_key(axis, component) for axis, component in linear.components),
-            key=repr,
+            (axis.sort_key, component_values(component))
+            for axis, component in linear.components
         )
     )
     return components, tuple(
@@ -809,9 +815,7 @@ def _structural_key(value: TimeExpression) -> tuple[object, ...]:
 
 def _orientation(value: TimeExpression) -> int:
     linear, absolute = _parts(value)
-    for _, component in sorted(
-        linear.components, key=lambda item: repr(item[0].identity)
-    ):
+    for _, component in sorted(linear.components, key=lambda item: item[0].sort_key):
         items = np.asarray(component, dtype=object).flat
         for amount in items:
             if amount:
@@ -848,7 +852,7 @@ def _normalized(
     terms = tuple(
         sorted(
             ((x, c) for x, c in combined.items() if c),
-            key=lambda item: repr(_structural_key(item[0])),
+            key=lambda item: _structural_key(item[0]),
         )
     )
     return TimeAbs(linear, terms, runtime) if terms else linear
