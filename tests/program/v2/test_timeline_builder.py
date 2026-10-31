@@ -25,6 +25,36 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+def test_register_repeat_table_selector_is_ready_for_same_iteration_playback():
+    builder = v2.TimelineBuilder(
+        v2.make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0
+    )
+    builder.add_loop("depth", 2)
+    builder.emit(v2.LoadValue("load_count", [0, 2], "depth", "count"))
+    builder.delay_by_timeline()
+    pulses = [
+        v2.Pulse.Cfg(
+            ch=1,
+            nqz=1,
+            freq=200,
+            gain=gain,
+            waveform=ConstWaveformCfg(length=length),
+        )
+        for gain, length in [(0.1, 0.04), (0.2, 0.08)]
+    ]
+    with builder.repeat("gate_index", "count", range_hint=(0, 2)):
+        builder.emit(v2.LoadValue("gate", [0, 1], "gate_index", "gate"))
+        builder.emit(v2.ComputedPulse("gate_pulse", val_reg="gate", pulses=pulses))
+        builder.delay_by_timeline()
+    prog = builder.build()
+
+    # The two waveforms quantize to 15/31 generator clocks, then 17/35
+    # tProc cycles. The zero-count point must not inherit the previous shot.
+    result = shots(prog)
+    assert [waves(shot) for shot in result] == [[], [0, 17]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, 52] * 2
+
+
 @pytest.mark.parametrize("frontend", ["builder", "native"])
 @pytest.mark.parametrize("operation", ["timeline_inc", "delay_by_timeline"])
 def test_named_time_operations_keep_end_and_reference_separate(
