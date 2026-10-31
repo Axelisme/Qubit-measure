@@ -391,6 +391,8 @@ class ProgramBuilder(ModuleFacade, Generic[ProgramT]):
         if options.retry < 0:
             raise ValueError("retry must be non-negative")
         if self._schedule.check_stop_requested():
+            if options.on_stop is not None:
+                options.on_stop()
             return self._default_slot().view
         program = self._build_program()
         return runner(
