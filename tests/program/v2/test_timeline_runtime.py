@@ -258,19 +258,32 @@ def test_branch_local_forks_merge_only_into_their_unjoined_ancestor(explicit_joi
     assert [waves(s) for s in result] == [expected] * 3
 
 
-def test_runtime_branch_keeps_per_case_closing_sync():
+@pytest.mark.parametrize("align_timeline", [True, False])
+@pytest.mark.parametrize("inside_repeat", [False, True])
+def test_runtime_branch_joins_pointwise_without_advancing_reference(align_timeline, inside_repeat):
     loader = LoadValue("time", [10, 20, 30], "scan", "loaded")
 
     def body(prog):
-        prog.emit(loader)
-        prog.fork("default", into="untouched")
-        with prog.branch(by="scan", align_timeline=True) as branch, branch.case(1):
-            prog.delay_timeline("loaded")
-        # Native pulse observes shared reference, not a managed end.
-        prog.pulse(0, "p0", t=0)
+        def selected():
+            with prog.branch(by="scan", align_timeline=align_timeline) as branch:
+                with branch.case(0):
+                    prog.emit(loader)
+                    prog.delay_timeline("loaded")
+                with branch.case(1):
+                    prog.delay_timeline(25 / 430.08)
+            prog.pulse(0, "p0", timeline="default")
+            # Unmanaged output must still see the incoming reference.
+            prog.pulse(1, "p1", t=0)
+        if inside_repeat:
+            with prog.repeat("twice", 2):
+                selected()
+        else:
+            selected()
 
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
-    assert [waves(s) for s in result] == [[0], [20], [0]]
+    starts = [25, 25, 30] if align_timeline else [10, 25, 0]
+    expected = [[start, 0, 2 * start + 28, start + 28] for start in starts] if inside_repeat else [[start, 0] for start in starts]
+    assert [waves(s) for s in result] == expected
 
 
 def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
