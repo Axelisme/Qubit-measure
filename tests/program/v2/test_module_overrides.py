@@ -318,3 +318,25 @@ def test_unsupported_waveform_length_sweep_is_rejected_without_mutation(family):
     ):
         _module_with_length(cfg, family, QickSweep1D("point", 0.1, 0.3))
     assert cfg.model_dump() == original
+
+
+@pytest.mark.parametrize("factory,cfg", [
+    (Pulse, _pulse_cfg()),
+    (PulseReadout, PulseReadoutCfg(gen_ch=0, nqz=1, freq=100, gain=0.2, waveform=ConstWaveformCfg(length=0.1), ro_ch=0, ro_length=0.2)),
+    (Readout, PulseReadoutCfg(gen_ch=0, nqz=1, freq=100, gain=0.2, waveform=ConstWaveformCfg(length=0.1), ro_ch=0, ro_length=0.2)),
+    (PulseReset, PulseResetCfg(pulse_cfg=_pulse_cfg())),
+    (TwoPulseReset, TwoPulseResetCfg(pulse1_cfg=_pulse_cfg(), pulse2_cfg=_pulse_cfg(1))),
+    (BathReset, BathResetCfg(cavity_tone_cfg=_pulse_cfg(), qubit_tone_cfg=_pulse_cfg(1), pi2_cfg=_pulse_cfg(2))),
+    (Reset, PulseResetCfg(pulse_cfg=_pulse_cfg())),
+])
+def test_unknown_override_keys_raise_type_error_even_when_none(factory, cfg):
+    original = cfg.model_dump()
+    with pytest.raises(TypeError, match="unexpected|Unknown|unknown|unsupported"):
+        factory("module", cfg, unsupported=None)
+    assert cfg.model_dump() == original
+
+
+@pytest.mark.parametrize("cfg", [PulseResetCfg(pulse_cfg=_pulse_cfg()), TwoPulseResetCfg(pulse1_cfg=_pulse_cfg(), pulse2_cfg=_pulse_cfg(1))])
+def test_reset_factory_rejects_other_variants_override_keys(cfg):
+    with pytest.raises(TypeError, match="qub_gain"):
+        Reset("reset", cfg, qub_gain=None)
