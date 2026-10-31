@@ -213,7 +213,6 @@ class ConstructivePhaseHeraldedExp(
         Pass fraction is not ground-state purity. Empty accepted counts give
         NaN terminal probabilities and unresolved fits. Saved cfg is required.
         """
-        del options
         if source.cfg is None:
             raise ValueError(
                 "Rabi analysis requires saved cfg; current Form/library is not a substitute"
@@ -358,11 +357,11 @@ class ConstructivePhaseHeraldedExp(
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
         if analysis.interference is not None:
-            phases, squared, dense, curve = analysis.interference
+            phases, squared, dense, curve, maximum_phase = analysis.interference
             _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
             ax.plot(dense, curve, label="A + B cosφ + C sinφ")
-            ax.axvline(analysis.relative_phase_deg, ls="--", label="Maximum rate phase")
+            ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
             ax.set(
                 xlabel="F2 relative to F1 phase (deg)",
                 ylabel="Rabi rate² (MHz²)",

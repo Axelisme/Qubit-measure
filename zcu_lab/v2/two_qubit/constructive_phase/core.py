@@ -219,7 +219,6 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         Missing cfg or mismatched axes raises ValueError. Failed fits report a
         reason, not zero rates. No IQ classification or automatic write occurs.
         """
-        del options
         if source.cfg is None:
             raise ValueError(
                 "Rabi analysis requires saved cfg; current Form/library is not a substitute"
@@ -326,11 +325,11 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         ax.legend(title="F2 relative to F1 phase (deg)", fontsize="x-small", ncols=2)
 
         if analysis.interference is not None:
-            phases, squared, dense, curve = analysis.interference
+            phases, squared, dense, curve, maximum_phase = analysis.interference
             _, ax = plots.subplots("constructive_phase", figsize=(9, 6), layout="constrained")
             ax.plot(phases, squared, "o", label="Identifiable duration-slice rates²")
             ax.plot(dense, curve, label="A + B cosφ + C sinφ")
-            ax.axvline(analysis.relative_phase_deg, ls="--", label="Maximum rate phase")
+            ax.axvline(maximum_phase, ls="--", label="Maximum rate phase")
             ax.set(
                 xlabel="F2 relative to F1 phase (deg)",
                 ylabel="Rabi rate² (MHz²)",
