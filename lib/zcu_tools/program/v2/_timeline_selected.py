@@ -6,7 +6,6 @@ from qick.asm_v2 import QickParam, QickRawParam, TimedMacro
 
 from ._timeline_guard import PulseGuard, bounds
 from ._timeline_runtime import (
-    NativeLength,
     RuntimeEnd,
     SelectedEventEnd,
     Time,
@@ -150,13 +149,7 @@ class TimelineSelectedPulse(TimedMacro):
             self.source.preprocess(prog)
         lengths = self._lengths(prog)
         offsets = tuple(offset + length for length in lengths)
-        native = tuple(
-            NativeLength(length, prog.soccfg["gens"][self.source.ch]["f_fabric"])
-            for length in lengths
-        )
-        physical = self.book.math.selected_end(
-            selection.selector, offsets, native=native
-        )
+        physical = self.book.math.selected_end(selection.selector, offsets)
         finish = self.book.math.add(raw_origin, physical, target=physical.register)
         self.event_end = SelectedEventEnd(
             raw_origin,
@@ -164,7 +157,6 @@ class TimelineSelectedPulse(TimedMacro):
             offsets,
             tuple(step_time(prog, c.post) for c in selection.choices),
             (finish,),
-            native,
         )
         self.book.set_end(self.timeline, finish)
         self.book.runtime_gens[self.source.ch] = finish

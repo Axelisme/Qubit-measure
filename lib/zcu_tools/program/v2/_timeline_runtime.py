@@ -39,27 +39,12 @@ def ceil_tick(ticks: float) -> int:
     )
 
 
-@dataclass(frozen=True)
-class NativeLength:
-    """Resolved generator length in us and its fabric clock in MHz.
-
-    value retains QICK's native rounded start and truncated sweep steps. clock
-    identifies the integer length lattice before any tProc conversion.
-    """
-
-    value: float | QickParam
-    clock: float
-
-
-def align_end(
-    prog, value: float | QickParam, native: NativeLength | None = None
-) -> "Time":
+def align_end(prog, value: float | QickParam) -> "Time":
     """Ceil a resolved aggregate in us at every native sweep point.
 
     Call only at an aggregate or placement boundary during preprocessing.
-    Scalars and exact integer-affine sweeps remain static. Non-affine native
-    lengths use k=8 upper fixed-point conversion, retaining the aggregate tail.
-    native identifies the original integer lattice, not an already rounded end.
+    Scalars and exact integer-affine sweeps remain static. A non-affine native
+    length grid requires runtime cross-grid conversion and raises ValueError.
     """
 
     cycles = value * get_fclk(prog)
@@ -74,17 +59,6 @@ def align_end(
     axes = {
         name: count for name, count in prog.loop_dict.items() if name in cycles.spans
     }
-    if native is not None and isinstance(native.value, QickParam):
-        ratio = Fraction(str(get_fclk(prog))) / Fraction(str(native.clock))
-        steps = (
-            Fraction(round(span * native.clock), prog.loop_dict[axis] - 1) * ratio
-            for axis, span in native.value.spans.items()
-            if prog.loop_dict[axis] > 1
-        )
-        if any(step.denominator != 1 for step in steps):
-            # A few sampled ceils can look affine by coincidence. The runtime
-            # consumer still owes the same upper conversion at every length.
-            return prog._timeline_book.math.native_end(value, native)
     points = np.asarray(cycles.to_array(axes), dtype=float)
     rounded = np.array([ceil_tick(float(point)) for point in points.flat]).reshape(
         points.shape
@@ -99,9 +73,7 @@ def align_end(
     affine = QickParam(start, spans)
     if np.array_equal(rounded, affine.to_array(axes, all_loops=True)):
         return step_time(prog, affine / get_fclk(prog))
-    if native is None:
-        raise ValueError("runtime cross-grid time requires generator/ADC conversion")
-    return prog._timeline_book.math.native_end(value, native)
+    raise ValueError("runtime cross-grid time requires generator/ADC conversion")
 
 
 def placement_time(prog, value: float | QickParam) -> float | QickParam:
@@ -349,8 +321,6 @@ class EventEnd:
     offset includes resolved event start offset and waveform/ADC duration;
     a runtime offset is already an integer-cycle value.
     Keeping it separate defers ceil until the owner adds its post-delay.
-    native retains the integer length lattice for runtime conversion, or None
-    for operations without a swept generator length.
     rounded contains ceiled event boundaries used only for same-channel
     no-overlap proof after a nonnegative post; it never supplies aggregate time.
     """
@@ -361,7 +331,6 @@ class EventEnd:
     rounded: tuple["Time", ...] = ()
     # Exact static offset in tProc cycles, retained only inside this operation.
     static_cycles: Fraction | None = None
-    native: NativeLength | None = None
 
 
 @dataclass(frozen=True)
@@ -371,7 +340,6 @@ class SelectedEventEnd:
     selector is a certified zero-based register. offsets and posts have equal
     nonzero lengths in selector order. rounded carries physical channel ends
     solely for coverage proof; it is never the aggregate timing source.
-    native pairs each offset with its generator-length lattice when available.
     """
 
     origin: Time
@@ -379,7 +347,6 @@ class SelectedEventEnd:
     offsets: tuple[float | QickParam, ...]
     posts: tuple[float | QickParam, ...]
     rounded: tuple[Time, ...] = ()
-    native: tuple[NativeLength, ...] = ()
 
 
 def optional_time_bounds(prog, value: Time) -> tuple[float, float] | None:
@@ -420,39 +387,6 @@ def known_maximum(a: Time, b: Time) -> Time | None:
     return None
 
 
-def _csd(value: int) -> list[tuple[int, int]]:
-    digits: list[tuple[int, int]] = []
-    exponent = 0
-    while value:
-        if value & 1:
-            sign = 2 - value % 4
-            digits.append((exponent, sign))
-            value -= sign
-        value //= 2
-        exponent += 1
-    return digits
-
-
-def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
-    # For each residue modulo 256 the ceil error grows with n. Its final
-    # member therefore bounds every length <=500us, without a point table.
-    maximum = math.floor(500 * clock)
-    lower = math.ceil(256 * ratio)
-    upper = math.floor(256 * (ratio + Fraction(str(tproc)) / maximum))
-    candidates = []
-    for weight in range(lower, upper + 1):
-        if all(
-            Fraction((n * weight + 255) // 256) - n * ratio <= Fraction(str(tproc))
-            for n in range(max(0, maximum - 255), maximum + 1)
-        ):
-            candidates.append(weight)
-    if not candidates:
-        raise ValueError(
-            "k=8 runtime conversion cannot meet the 500us/1us error budget"
-        )
-    return min(candidates, key=lambda weight: (len(_csd(weight)), weight))
-
-
 class RuntimeMath(TimedMacro):
     """Prepare integer cycle arithmetic and conditional candidate selection."""
 
@@ -465,148 +399,6 @@ class RuntimeMath(TimedMacro):
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
-
-    def native_end(
-        self, aggregate: float | QickParam, native: NativeLength
-    ) -> RuntimeEnd:
-        """Ceil one aggregate using a checked CSD upper fabric conversion.
-
-        Only runtime cross-grid values reach here. Static and integer-affine
-        conversions stay exact. Every multiply/shift intermediate is signed32.
-        """
-        clock = native.clock
-        raw = native.value * clock
-        counts = (
-            QickParam(round(raw.start), {k: round(v) for k, v in raw.spans.items()})
-            if isinstance(raw, QickParam)
-            else round(raw)
-        )
-        ratio = Fraction(str(get_fclk(self.prog))) / Fraction(str(clock))
-        weight = _conversion_weight(ratio, clock, get_fclk(self.prog))
-        sources = self.prog._timeline_book.native_length_sources
-        key = (
-            (
-                round(counts.start),
-                tuple(sorted((k, round(v)) for k, v in counts.spans.items())),
-            )
-            if isinstance(counts, QickParam)
-            else (counts, ())
-        )
-        if key not in sources:
-            sources[key] = self.cycles(counts / get_fclk(self.prog))
-        source = sources[key]
-        product = self.multiply(source, weight)
-        tail = (aggregate - native.value) * get_fclk(self.prog)
-        if isinstance(tail, QickParam):
-            constant = tail.start
-            spans = {k: round(v * 256) for k, v in tail.spans.items()}
-        else:
-            constant, spans = tail, {}
-        # The product is integer. Ceil the fractional bias once, keeping the
-        # public 1e-10-cycle tolerance at the complete aggregate boundary.
-        nearest = round(constant * 256)
-        bias = (
-            nearest
-            if abs(constant - nearest / 256) <= 1e-10
-            else math.ceil(constant * 256)
-        )
-        if spans:
-            tail_value = self.cycles(QickParam(bias + 255, spans) / get_fclk(self.prog))
-            numerator = self.op(
-                product,
-                "+",
-                tail_value,
-                limits=self._sum_limits(product, tail_value),
-                target=product.register,
-            )
-        else:
-            numerator = self.op(
-                product,
-                "+",
-                bias + 255,
-                limits=self._sum_limits(product, bias + 255),
-                target=product.register,
-            )
-        if numerator.minimum is None or numerator.maximum is None:
-            raise RuntimeError("native conversion lost its known bounds")
-        result = self.op(
-            numerator,
-            "ASR",
-            8,
-            limits=(numerator.minimum // 256, numerator.maximum // 256),
-            target=product.register,
-        )
-        expression = runtime_expression(numerator)
-        axes = expression_axes(expression)
-        points = evaluate_time(expression, axes)
-        if points is None:
-            raise RuntimeError("native conversion lost its producer points")
-        values = points // 256
-        variable = CycleVariable(
-            "fabric conversion",
-            int(values.min()),
-            int(values.max()),
-            tuple(axes.items()),
-            tuple(int(v) for v in values.flat),
-            fixed_point=(expression, 8),
-        )
-        return RuntimeEnd(
-            result.register,
-            result.minimum,
-            result.maximum,
-            expression=LinearTime(terms=((variable, 1),)),
-        )
-
-    def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
-        """Multiply by a nonnegative integer with checked CSD shifts/adds."""
-        if factor < 0:
-            raise ValueError("constant multiplication requires a nonnegative factor")
-        digits = _csd(factor)
-        if not digits:
-            return self.cycles(0.0)
-        if value.minimum is None or value.maximum is None:
-            raise RuntimeError("constant multiplication needs known bounds")
-        coefficient = 1
-        result = self.snapshot(value)
-        previous = digits[-1][0]
-        for exponent, sign in reversed(digits[:-1]):
-            shift = previous - exponent
-            while shift:
-                amount = min(15, shift)
-                if result.minimum is None or result.maximum is None:
-                    raise RuntimeError("constant multiplication needs known bounds")
-                result = self.op(
-                    result,
-                    "SL",
-                    amount,
-                    limits=(result.minimum << amount, result.maximum << amount),
-                    target=result.register,
-                )
-                coefficient <<= amount
-                shift -= amount
-            coefficient += sign
-            result = self.op(
-                result,
-                "+" if sign > 0 else "-",
-                value,
-                # Both operands are multiples of this same native source.
-                limits=(coefficient * value.minimum, coefficient * value.maximum),
-                target=result.register,
-            )
-            previous = exponent
-        while previous:
-            amount = min(15, previous)
-            if result.minimum is None or result.maximum is None:
-                raise RuntimeError("constant multiplication needs known bounds")
-            result = self.op(
-                result,
-                "SL",
-                amount,
-                limits=(result.minimum << amount, result.maximum << amount),
-                target=result.register,
-            )
-            previous -= amount
-        return result
 
     def reconstruct(
         self,
@@ -670,8 +462,6 @@ class RuntimeMath(TimedMacro):
                 term = inputs[variable]
             elif variable.reconstruction is not None:
                 term = self.reconstruct(variable.reconstruction, inputs)
-            elif variable.fixed_point is not None:
-                term = self._reconstruct_fixed_point(variable, inputs)
             elif variable.selection is not None:
                 index, words = variable.selection
                 selected = self.reconstruct(index, inputs)
@@ -703,25 +493,6 @@ class RuntimeMath(TimedMacro):
                 else self.subtract(result, scaled)
             )
         return result
-
-    def _reconstruct_fixed_point(
-        self, variable: CycleVariable, inputs: dict[CycleVariable, RuntimeEnd]
-    ) -> RuntimeEnd:
-        if variable.fixed_point is None:
-            raise RuntimeError("fixed-point producer has no numerator")
-        numerator, shift = variable.fixed_point
-        raw = self.reconstruct(numerator, inputs)
-        if raw.minimum is None or raw.maximum is None:
-            raise RuntimeError("fixed-point reconstruction lost bounds")
-        result = self.op(
-            raw, "ASR", shift, limits=(raw.minimum >> shift, raw.maximum >> shift)
-        )
-        return RuntimeEnd(
-            result.register,
-            result.minimum,
-            result.maximum,
-            expression=LinearTime(terms=((variable, 1),)),
-        )
 
     def reconstruct_maximum(
         self,
@@ -871,28 +642,22 @@ class RuntimeMath(TimedMacro):
         values: tuple[float | QickParam, ...],
         *,
         selector_expression: TimeExpression | None = None,
-        native: tuple[NativeLength, ...] = (),
     ) -> RuntimeEnd:
         """Select statically ceiled candidate offsets without allocating time data.
 
-        Static candidates ceil exactly. Swept generator candidates use native's
-        paired integer lattice for runtime fixed-point conversion. Native loop
-        axes retain their register initialization. The already certified selector
-        chooses the candidate at runtime, without longest-candidate padding.
+        Each candidate is scalar or integer-affine after its static ceil. Native
+        loop axes retain their register initialization. The already certified
+        selector chooses one candidate at runtime; unknown cross-grid expressions
+        are rejected by align_end rather than replaced by an upper bound.
         """
-        candidates = tuple(
-            align_end(self.prog, value, native[index] if native else None)
-            for index, value in enumerate(values)
-        )
+        candidates = tuple(align_end(self.prog, value) for value in values)
         limits = [time_bounds(self.prog, value) for value in candidates]
         lower = min(round(lo * get_fclk(self.prog)) for lo, _ in limits)
         upper = max(round(hi * get_fclk(self.prog)) for _, hi in limits)
         self.check(lower, upper)
         operands: list[int | str] = []
         for value in candidates:
-            if isinstance(value, RuntimeEnd):
-                operands.append(value.register)
-            elif isinstance(value, QickParam) and value.is_sweep():
+            if isinstance(value, QickParam) and value.is_sweep():
                 operands.append(self.cycles(value).register)
             else:
                 scalar = value.start if isinstance(value, QickParam) else value
@@ -900,11 +665,7 @@ class RuntimeMath(TimedMacro):
                     operands.append(scalar.register)
                 else:
                     operands.append(round(scalar * get_fclk(self.prog)))
-        register = (
-            candidates[0].register
-            if isinstance(candidates[0], RuntimeEnd)
-            else self.allocate()
-        )
+        register = self.allocate()
         for index, operand in enumerate(operands):
             inst = {
                 "CMD": "REG_WR",
@@ -929,11 +690,6 @@ class RuntimeMath(TimedMacro):
                 )
                 inst["IF"] = "Z"
             self.operations.append(AsmInst(inst=inst, addr_inc=1))
-        # Candidate conversions have been consumed by the selection writes.
-        # Their immutable expressions survive; their storage is no longer live.
-        for candidate in candidates:
-            if isinstance(candidate, RuntimeEnd) and candidate.register != register:
-                self.claimed.discard(candidate.register)
         return RuntimeEnd(
             register,
             lower,
@@ -1070,8 +826,6 @@ class RuntimeMath(TimedMacro):
                 runtime_expression(left),
                 rhs if operator == "+" else scale_time(rhs, -1),
             )
-        if operator == "SL" and isinstance(right, int):
-            expression = scale_time(runtime_expression(left), 1 << right)
         if operator == "+":
             right_minimum = right.minimum if isinstance(right, RuntimeEnd) else right
             if right_minimum is not None and right_minimum >= 0:

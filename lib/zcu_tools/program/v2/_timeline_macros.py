@@ -267,15 +267,6 @@ class TimelineAdvance(TimedMacro):
     def _finish_selected(self, event: SelectedEventEnd, duration: Time) -> RuntimeEnd:
         if isinstance(duration, RuntimeEnd):
             raise ValueError("selected post aggregate requires a scalar or swept post")
-        if (
-            isinstance(duration, (float, int))
-            and duration == 0
-            and all(
-                isinstance(post, (float, int)) and post == 0 for post in event.posts
-            )
-        ):
-            # The physical selection already materialized this exact aggregate.
-            return self.book.math.cycles(event.rounded[0])
         offsets = tuple(
             offset + post + duration
             for offset, post in zip(event.offsets, event.posts, strict=True)
@@ -286,15 +277,13 @@ class TimelineAdvance(TimedMacro):
             physical_offsets = tuple(event.origin + offset for offset in event.offsets)
             completed_offsets = tuple(event.origin + offset for offset in offsets)
         if isinstance(event.origin, RuntimeEnd):
-            selected = self.book.math.selected_end(
-                event.selector, completed_offsets, native=event.native
-            )
+            selected = self.book.math.selected_end(event.selector, completed_offsets)
             selected_result = self.book.math.add(
                 event.origin, selected, target=selected.register
             )
         else:
             selected_result = self.book.math.selected_end(
-                event.selector, completed_offsets, native=event.native
+                event.selector, completed_offsets
             )
         debt = self.book.math.coverage_debt(physical_offsets, completed_offsets)
         if debt == 0:
@@ -337,11 +326,7 @@ class TimelineAdvance(TimedMacro):
             # Apply the shared float-noise policy only to the complete aggregate.
             result: Time = ceil_tick(float(exact)) / get_fclk(prog)
         else:
-            result = (
-                fractional
-                if self.aligned
-                else align_end(prog, fractional, event.native)
-            )
+            result = fractional if self.aligned else align_end(prog, fractional)
         for register in registers:
             result = self.book.math.add(register, result)
         if (

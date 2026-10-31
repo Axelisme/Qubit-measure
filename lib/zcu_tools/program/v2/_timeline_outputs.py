@@ -10,7 +10,6 @@ from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
 from ._timeline_runtime import (
     EventEnd,
-    NativeLength,
     RuntimeEnd,
     Time,
     align_end,
@@ -72,13 +71,6 @@ class TimelineObservedPulse(Pulse):
         self.source = source
         self.runtime_start: RuntimeEnd | None = None
 
-    def native_length(self, prog) -> NativeLength:
-        """Identify this pulse's resolved generator-count lattice."""
-        return NativeLength(
-            prog.pulses[self.name].get_length(),
-            prog.soccfg["gens"][self.ch]["f_fabric"],
-        )
-
     def record(self, prog, t, limit: float | QickParam | None = None) -> None:
         if self.book.repeats:
             length = prog.pulses[self.name].get_length()
@@ -102,10 +94,7 @@ class TimelineObservedPulse(Pulse):
             self.runtime_start = start
             self.source.t_regs["t"] = start.register
             self.book.runtime_gens[self.ch] = self.book.math.add(
-                start,
-                align_end(
-                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
-                ),
+                start, align_end(prog, prog.pulses[self.name].get_length())
             )
             self.book.record_native(
                 prog, self.ch, self.book.runtime_gens[self.ch], generator=True
@@ -166,10 +155,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.source.preprocess(prog)
             self.source.t_regs["t"] = self.book.math.cycles(start).register
             finish = self.book.math.add(
-                start,
-                align_end(
-                    prog, prog.pulses[self.name].get_length(), self.native_length(prog)
-                ),
+                start, align_end(prog, prog.pulses[self.name].get_length())
             )
             offset = (
                 0.0
@@ -181,7 +167,6 @@ class TimelinePlacedPulse(TimelineObservedPulse):
                 offset + prog.pulses[self.name].get_length(),
                 (finish,),
                 _pulse_static_cycles(prog, self.ch, self.name, offset),
-                self.native_length(prog),
             )
             self.book.set_end(self.timeline, finish)
             self.book.runtime_gens[self.ch] = finish
@@ -209,13 +194,12 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             )
         self.record(prog, t, actual_t)
         actual_end = actual_t + prog.pulses[self.name].get_length()
-        finish = align_end(prog, actual_end, self.native_length(prog))
+        finish = align_end(prog, actual_end)
         self.event_end = EventEnd(
             0.0,
             actual_end,
             (finish,),
             _pulse_static_cycles(prog, self.ch, self.name, actual_t),
-            self.native_length(prog),
         )
         self.book.set_end(self.timeline, finish)
         if isinstance(finish, RuntimeEnd):
