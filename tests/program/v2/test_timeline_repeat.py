@@ -212,16 +212,16 @@ def test_case_rejects_reference_owner_advances_through_repeat(operation, nested)
         prog.add_loop("scan", 2)
 
     def body(prog):
-        with prog.branch(by="scan", align_timeline=False) as cases:
-            with (
-                cases.case(0),
-                prog.repeat("r", 2) if nested else nullcontext(),
-            ):
-                prog.delay_timeline(28 / 430.08)
-                if operation == "delay":
-                    prog.delay(28 / 430.08)
-                else:
-                    getattr(prog, operation)()
+        with (
+            prog.branch(by="scan", align_timeline=False) as cases,
+            cases.case(0),
+            prog.repeat("r", 2) if nested else nullcontext(),
+        ):
+            prog.delay_timeline(28 / 430.08)
+            if operation == "delay":
+                prog.delay(28 / 430.08)
+            else:
+                getattr(prog, operation)()
 
     with pytest.raises(ValueError, match="cannot advance reference"):
         _program(body, initialize)
