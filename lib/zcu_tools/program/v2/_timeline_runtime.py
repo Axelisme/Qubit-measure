@@ -1186,10 +1186,6 @@ class RuntimeMath(TimedMacro):
             or right.maximum is None
         ):
             return self._unbounded_maximum(left, right, target=target)
-        if left.minimum >= right.maximum:
-            return a
-        if right.minimum >= left.maximum:
-            return b
         destination = self.allocate() if target is None else target
         # A fresh result can hold intermediates. An explicitly aliased target
         # must preserve both input operands until the final addition.

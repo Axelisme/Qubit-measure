@@ -194,7 +194,7 @@ class TimelineBuilder:
         ValueError. Close all recording contexts before build.
         """
         self._ensure_recording()
-        return self._repeat(name, n, timeline, range_hint, advance_ref)
+        return self._repeat(name, n, timeline, range_hint, advance_ref=advance_ref)
 
     @contextmanager
     def _repeat(
@@ -203,6 +203,7 @@ class TimelineBuilder:
         n: int | str,
         timeline: str | None,
         range_hint: tuple[int, int] | None,
+        *,
         advance_ref: bool,
     ) -> Generator[None]:
         with self._capture() as actions:

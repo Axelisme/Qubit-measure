@@ -25,6 +25,21 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from tests.program.v2.timing_support import shots, waves
 
 
+@pytest.mark.parametrize("align", [False, True])
+def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
+    builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0, reps=2)
+    builder.add_loop("scan", 2)
+    drive = _pulse("drive")
+    with builder.branch(by="scan", align_timeline=align) as cases:
+        with cases.case(0), builder.repeat("r", 2, advance_ref=False):
+            builder.emit(drive)
+    builder.emit(drive)
+    prog = builder.build()
+    assert [waves(s) for s in shots(prog)] == [[0, 43, 86], [86 if align else 0]] * 2
+    prog.compile()
+    assert [waves(s) for s in shots(prog)] == [[0, 43, 86], [86 if align else 0]] * 2
+
+
 def test_builder_forwards_author_register_time_hint(mock_soccfg):
     from zcu_tools.program.v2.modules import LoadValue
 
