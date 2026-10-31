@@ -16,7 +16,7 @@ def record_with_metadata[Cfg: ConfigBase, Result](
     identity: RunIdentity,
     experiment_tag: str,
     snapshot: RunSnapshot,
-    completion: Literal["complete", "partial", "stopped", "unknown"],
+    completion: Literal["complete", "partial", "stopped", "unknown"] = "complete",
 ) -> RunRecord[Cfg, Result]:
     """Return the delivered record with historical workflow acquisition metadata.
 

@@ -87,7 +87,9 @@ def test_record_metadata_requires_explicit_completion() -> None:
     def omit_completion(assemble: Callable[..., object]) -> None:
         assemble(
             workflows.Completed(source, facts),
-            identity=workflows.RunIdentity("run", history.provenance),
+            identity=workflows.RunIdentity(
+                "0123456789abcdef0123456789abcdef", history.provenance
+            ),
             experiment_tag="synthetic/trace",
             snapshot=history.snapshot,
         )
