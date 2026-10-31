@@ -702,7 +702,7 @@ class MuxReadout(AbsReadout):
         self._program = prog
 
     def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare tones/routes without enabling legacy raw-IQ collection.
+        """Declare tones/routes for playback and compiled-emission IQ collection.
 
         Incompatible wiring and illegal rounded durations raise ValueError.
         ADC/generator declarations follow QICK: later declarations overwrite
@@ -717,7 +717,7 @@ class MuxReadout(AbsReadout):
         """Play all tones and trigger all ADCs at one origin, then add post once.
 
         The end covers the actual all-tone waveform and every rounded ADC window.
-        timeline=None selects default. Legacy collection remains unavailable.
+        timeline=None selects default. Collection validates this compiled emission.
         """
         timeline = timeline if timeline is not None else "default"
         prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch, tag))
@@ -885,13 +885,14 @@ class MuxReadout(AbsReadout):
 
     def collect_raw_iq(
         self,
-        prog: ModularProgramV2,
+        prog: ModularProgramV2 | TimelineProgramV2,
         *,
         read_index: int | None = None,
     ) -> NDArray[np.float64]:
         """Return last-round raw IQ in tone order, normalized by ADC length.
 
-        prog must be the program that initialized this module. Call after its
+        prog must contain this module's compiled emission (or its legacy init).
+        Call after its
         integrated acquire(), or in a completed-round hook. This reads get_raw()
         from that program, never acquires or samples a new round. A simulation
         getter may materialize retained shots using that round's fixed identity.
@@ -915,10 +916,7 @@ class MuxReadout(AbsReadout):
         raw buffers/channels, count/dtype/loop/read/IQ shape mismatches or invalid
         read_index. Unrelated channels' shapes are ignored. Getter errors propagate.
         """
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
+        self._validate_collection_program(prog)
         if read_index is not None and (type(read_index) is not int or read_index < 0):
             raise ValueError(
                 f"{self.name}: read_index must be None or a nonnegative integer"
@@ -995,7 +993,8 @@ class MuxReadout(AbsReadout):
     ) -> NDArray[np.float64]:
         """Select one averaged read in tone order, returning (*sweep_shape,N,2).
 
-        Caller must supply the same initialized program's same acquire result:
+        prog must contain this module's compiled emission (or its legacy init).
+        Caller must supply that program's same acquire result:
         an unclassified averaged list of float64 arrays (reads,*sweep_shape,2).
         The list carries no source identity, so another acquisition's same-shaped
         arrays cannot be detected. Raw, single-shot, classified and decimated
