@@ -120,7 +120,7 @@ def test_answer_keeps_invocation_operation_and_lease_until_owner_delivery(asking
         control.close(other)
 
 
-def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path):
+def test_wrong_typed_answer_delivery_stays_waiting_and_can_retry(asking, tmp_path):
     control, harness, author, tab, token = asking
     lease = run_lease_presence(harness)
     assert lease
@@ -131,7 +131,7 @@ def test_wrong_typed_answer_delivery_stays_paused_and_can_retry(asking, tmp_path
         TypeError, match="Answer must match the question's declared model"
     ):
         control.answer(RUN_ID, OtherAnswer(value=7), request_id=request_id)
-    assert control.status(RUN_ID).lifecycle == "paused"
+    assert control.status(RUN_ID).lifecycle == "waiting"
     assert control.tabs()[0].operation_id == token
     assert control.pending_question(RUN_ID) == question
     assert run_lease_presence(harness) == lease
@@ -158,7 +158,7 @@ def test_invalid_json_answer_is_rejected_without_consuming_question(asking):
         control.answer(RUN_ID, {"value": "not an integer"}, request_id=request_id)
     assert not harness.background.completed.is_set()
     assert control.pending_question(RUN_ID) == question
-    assert control.status(RUN_ID).lifecycle == "paused"
+    assert control.status(RUN_ID).lifecycle == "waiting"
     assert control.tabs()[0].operation_id == token
     with pytest.raises(RunMismatch):
         control.answer("stale", {"value": 8}, request_id=request_id)
@@ -184,7 +184,7 @@ def failed_journal_write(tmp_path):
 
 
 @pytest.mark.parametrize("io_failure", [False, True])
-def test_paused_ask_stop_drains_on_worker_before_terminal_owner_delivery(
+def test_waiting_ask_stop_drains_on_worker_before_terminal_owner_delivery(
     asking, tmp_path, io_failure
 ):
     control, harness, author, tab, token = asking

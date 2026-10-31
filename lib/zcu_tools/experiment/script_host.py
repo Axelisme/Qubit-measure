@@ -27,7 +27,7 @@ from .stop_signal import CancelResult
 logger = logging.getLogger(__name__)
 
 type ScriptStatus = Literal[
-    "ready", "running", "paused", "completed", "cancelled", "failed"
+    "ready", "running", "waiting", "completed", "cancelled", "failed"
 ]
 type CancelScope = str
 
@@ -108,7 +108,7 @@ class ScriptHost:
 
     @property
     def status(self) -> ScriptStatus:
-        """Read ready/running/paused or the final completed/cancelled/failed state."""
+        """Read ready/running/waiting or the final completed/cancelled/failed state."""
         with self._lock:
             return self._status
 
@@ -255,7 +255,7 @@ class ScriptHost:
         with self._lock:
             self._answer = future
             self._pending = PendingQuestion(uuid4().hex, question, expected)
-            self._status = "paused"
+            self._status = "waiting"
         self._changed()
         try:
             answer = await future

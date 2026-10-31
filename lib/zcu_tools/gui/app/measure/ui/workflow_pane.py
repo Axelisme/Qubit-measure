@@ -6,10 +6,9 @@ Visible run controls (availability still follows writable/lease/accepted gates):
 Run state                     Controls
 ============================  ==============
 Idle or terminal              Refresh, Start
-Running                       Pause, Stop
-Paused without a question     Resume, Stop
+Running                       Stop
 Waiting for an Ask answer     Stop
-Pending, pausing or stopping  Stop
+Pending or stopping  Stop
 ============================  ==============
 
 Answer stays in Ask. Ask appears for a pending question or the latest retained
@@ -279,7 +278,7 @@ class WorkflowPane(QWidget):
         self._bind_form(
             "tunables",
             editable=writable
-            and (idle or lifecycle in {"running", "pausing", "paused"}),
+            and (idle or lifecycle in {"running", "waiting"}),
         )
         self._project_controls(snapshot, lifecycle, idle=idle)
         self._refresh_discard()
@@ -304,7 +303,7 @@ class WorkflowPane(QWidget):
         self._buttons["Start"].setEnabled(idle)
         self._buttons["Stop"].setEnabled(snapshot.busy)
         self._apply.setEnabled(
-            writable and accepted and lifecycle in {"running", "pausing", "paused"}
+            writable and accepted and lifecycle in {"running", "waiting"}
         )
 
     def _project_question(self, snapshot: WorkflowTabSnapshot) -> None:

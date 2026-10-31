@@ -72,7 +72,7 @@ class NativeStatusReply(TypedDict):
     """JSON projection of RunStatus, with no inferred acceptance or completion.
 
     run_id/workflow identify the native run and declaration. lifecycle is running,
-    pausing, paused, stopping, done, cancelled or failed. call_seq is the
+    waiting, stopping, done, cancelled or failed. call_seq is the
     current commit scope or null; committed_seq counts successful commits.
     revision is the native numeric tunables version. reason is a native diagnostic
     or null. progress is the list of native display snapshots, not commit proof.

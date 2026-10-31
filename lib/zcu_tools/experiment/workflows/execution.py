@@ -24,10 +24,8 @@ from .env import EnvHooks, WorkflowEnv
 from .journal import (
     DeviceSetup,
     OperationFinished,
-    Paused,
     QuestionAnswered,
     RecordCommitted,
-    Resumed,
     RunEnded,
     RunMetadata,
     StopRequested,
@@ -159,7 +157,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         self._executing = True
 
     def execute(self) -> RunStatus:
-        """Drive the single author to terminal, retaining this worker while paused.
+        """Drive the single author to terminal, retaining this worker during Ask.
 
         Exceptions fail the run and retain diagnostics. All authored finally and
         executor drain finish before the reservation is released. No asyncio
@@ -272,14 +270,10 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                 raise self._pending_error
             if self._lifecycle in ("stopping", "failed"):
                 return
-            if phase == "waiting" and self._lifecycle != "paused":
-                self._artifacts.append(Paused(self._call_seq, self._commit_seq))
-                self._artifacts.set_lifecycle("paused")
-                self._lifecycle = "paused"
-            elif phase == "answered" and self._lifecycle == "paused":
-                self._artifacts.append(
-                    Resumed(self._commit_seq, self._tunables.revision)
-                )
+            if phase == "waiting" and self._lifecycle != "waiting":
+                self._artifacts.set_lifecycle("waiting")
+                self._lifecycle = "waiting"
+            elif phase == "answered" and self._lifecycle == "waiting":
                 self._artifacts.set_lifecycle("running")
                 self._lifecycle = "running"
 
@@ -403,7 +397,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
                         )
                 except Exception as error:
                     # Retain the first cause before the other flush owner can
-                    # observe the broken journal or attempt a Resumed append.
+                    # observe the broken journal or attempt a lifecycle write.
                     if self._pending_error is None:
                         self._pending_error = error
                     raise
@@ -432,7 +426,7 @@ class WorkflowRun[P: BaseModel, T: BaseModel, Summary: BaseModel | None, C]:
         """Replace one whole model after its journal append succeeds."""
         try:
             with self._lock:
-                if self._lifecycle not in ("running", "pausing", "paused"):
+                if self._lifecycle not in ("running", "waiting"):
                     raise InvalidRunState("update_tunables", self._lifecycle)
                 return self._tunables.update(
                     tunables, expected_revision=expected_revision, actor=actor
