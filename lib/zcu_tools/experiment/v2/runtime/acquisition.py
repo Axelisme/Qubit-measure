@@ -302,6 +302,8 @@ class AcquisitionRunner:
         finally:
             pbar.close()
 
+        if external_stop and options.on_stop is not None:
+            options.on_stop()
         return slot.view
 
     def _acquire_once(
