@@ -59,12 +59,28 @@ def physical_batches(*, covariance=None, rates=None):
 
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
-def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode):
-    batches = physical_batches(rates=np.array([[0.0, 0.04], [0.02, 0.0]]))
+@pytest.mark.parametrize("window", ["shared", "longer", "earlier", "delayed"])
+def test_empty_event_keeps_receiver_background_noise_and_other_adc_bits(mode, window):
+    batches = physical_batches(
+        rates=np.array([[0.0, 0.04], [0.02, 0.0]]),
+        covariance=np.array([[2.0, 0.3], [0.3, 1.0]]),
+    )
     original = batches[1]
+    times = {
+        "shared": [0.0, 15, 35, 85],
+        "longer": [0.0, 35, 85, 185],
+        "earlier": [-40.0, -20, 0, 25],
+        "delayed": [0.0, 35, 85, 185],
+    }[window]
+    grid = adc.SampleGrid(np.array(times), 6.0)
+    original = replace(
+        original,
+        events=((replace(original.events[0][0], grids=(grid, grid)),),),
+    )
     receiver = adc.Receiver(
         offset=np.array([11.0, -7.0]),
         noise_covariance=np.array([[4.0, 0.5], [0.5, 2.0]]),
+        time_of_flight_ns=40.0 if window == "delayed" else 0.0,
     )
     empty = replace(
         original,
