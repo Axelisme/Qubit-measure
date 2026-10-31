@@ -574,12 +574,15 @@ class TimelineRepeatExit(Macro):
         runtime: dict[str, Time] = {}
         for name, end in self.book.ends.items():
             if isinstance(end, RuntimeEnd):
-                upper = time_bounds(prog, frame.initial_external[name])[1]
+                limits = optional_time_bounds(prog, frame.initial_external[name])
                 debit = _bounds(frame.advance)[0] * self.count
+                upper = (
+                    None
+                    if limits is None
+                    else max(0, round((limits[1] - debit) * get_fclk(prog)))
+                )
                 runtime[name] = (
-                    RuntimeEnd(
-                        end.register, 0, max(0, round((upper - debit) * get_fclk(prog)))
-                    )
+                    RuntimeEnd(end.register, 0, upper)
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
                 )
