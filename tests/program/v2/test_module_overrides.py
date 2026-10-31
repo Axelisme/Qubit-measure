@@ -11,11 +11,14 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
-from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg, Readout
+from zcu_tools.program.v2.modules.readout import MuxReadout, PulseReadout, PulseReadoutCfg, Readout
 from zcu_tools.program.v2.modules.reset import (
     BathReset, BathResetCfg, PulseReset, PulseResetCfg, Reset, TwoPulseReset, TwoPulseResetCfg,
 )
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
+from zcu_tools.program.v2.utils import is_qick_param
+
+from tests.program.v2._mux_support import native_mux
 
 
 ProgramKind = Literal["native", "builder", "legacy"]
@@ -106,9 +109,22 @@ def test_readout_overrides_match_set_param_without_mutating_cfg(kind, swept, fac
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    actual = _compile(kind, [factory("read", cfg, **{knob: value})], swept)
-    expected = _compile(kind, [factory("read", equivalent)], swept)
-    _assert_same_compile(actual, expected)
+    overrides = dict(freq=None, gain=None, length=None, ro_length=None)
+    overrides[knob] = value
+    readout = factory("read", cfg, **overrides)
+    if knob == "ro_length" and swept:
+        effective = readout.cfg.ro_length
+        expected_value = equivalent.ro_length
+        assert is_qick_param(effective) and is_qick_param(expected_value)
+        np.testing.assert_array_equal(effective.to_array({"point": 3}), expected_value.to_array({"point": 3}))
+        with pytest.raises(RuntimeError, match="QickRawParam can only be divided after steps have been defined") as actual_error:
+            _compile(kind, [readout], swept)
+        with pytest.raises(type(actual_error.value), match=str(actual_error.value)):
+            _compile(kind, [factory("read", equivalent)], swept)
+    else:
+        actual = _compile(kind, [readout], swept)
+        expected = _compile(kind, [factory("read", equivalent)], swept)
+        _assert_same_compile(actual, expected)
     assert cfg.model_dump() == original
 
 
@@ -142,7 +158,44 @@ def test_reset_overrides_match_set_param_without_mutating_cfg(kind, swept, use_f
     value = QickSweep1D("point", start, stop) if swept else start
     equivalent = cfg.model_copy(deep=True)
     equivalent.set_param(knob, value)
-    actual = _compile(kind, [ctor("reset", cfg, **{knob: value})], swept)
+    names = {"pulse": ("freq", "gain", "phase", "length"),
+             "two": ("gain1", "gain2", "freq1", "freq2", "length"),
+             "bath": ("qub_gain", "qub_freq", "qub_length", "res_gain", "res_freq", "res_length", "pi2_phase")}
+    overrides = dict.fromkeys(names[variant])
+    overrides[knob] = value
+    actual = _compile(kind, [ctor("reset", cfg, **overrides)], swept)
     expected = _compile(kind, [ctor("reset", equivalent)], swept)
     _assert_same_compile(actual, expected)
+    assert cfg.model_dump() == original
+
+
+@pytest.mark.parametrize("knob", ["freq", "gain", "length", "ro_length"])
+@pytest.mark.parametrize("swept", [False, True])
+def test_mux_rejects_constructor_overrides(knob, swept):
+    cfg = native_mux()
+    original = cfg.model_dump()
+    value = QickSweep1D("point", 0.2, 0.4) if swept else 0.2
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        MuxReadout("mux", cfg, **{knob: value})
+    with pytest.raises(ValueError, match="does not support"):
+        Readout("mux", cfg, **{knob: value})
+    assert cfg.model_dump() == original
+
+
+@pytest.mark.parametrize("family", ["pulse", "readout", "readout_factory", "reset", "reset_factory"])
+def test_unsupported_waveform_length_sweep_is_rejected_without_mutation(family):
+    pulse_cfg = _pulse_cfg()
+    pulse_cfg.waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
+    if family == "pulse":
+        cfg, ctor = pulse_cfg, Pulse
+    elif family.startswith("readout"):
+        cfg = PulseReadoutCfg(gen_ch=0, nqz=1, freq=100, gain=0.2,
+            waveform=pulse_cfg.waveform, ro_ch=0, ro_length=0.2)
+        ctor = Readout if family.endswith("factory") else PulseReadout
+    else:
+        cfg = PulseResetCfg(pulse_cfg=pulse_cfg)
+        ctor = Reset if family.endswith("factory") else PulseReset
+    original = cfg.model_dump()
+    with pytest.raises(ValueError, match="Gauss waveform length must not be a QickParam"):
+        ctor("module", cfg, length=QickSweep1D("point", 0.1, 0.3))
     assert cfg.model_dump() == original
