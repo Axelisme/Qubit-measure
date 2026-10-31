@@ -83,9 +83,11 @@ def test_repeat_table_definition_must_dominate_its_time_consumer(position, tail_
             if position == "before_write":
                 prog.timeline_inc("loaded")
             if position == "branch_path":
-                with prog.branch(by="scan", align_timeline=False) as branch:
-                    with branch.case(0):
-                        prog.emit(loader)
+                with (
+                    prog.branch(by="scan", align_timeline=False) as branch,
+                    branch.case(0),
+                ):
+                    prog.emit(loader)
                 prog.timeline_inc("loaded")
             else:
                 prog.emit(loader)

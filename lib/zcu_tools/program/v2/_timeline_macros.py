@@ -692,11 +692,14 @@ class RepeatTimelineEnter(Macro):
         self.defined = prog._time_bounds.defined.copy()
         if self.counter is not None:
             maximum = self.maximum
-            if maximum is None and isinstance(self.iterations, str):
-                # Only a certified count supplies an implicit finite index range.
-                # Arbitrary author counts retain their runtime-only contract.
-                if not prog._time_bounds.author_source(self.iterations):
-                    maximum = prog._time_bounds.describe(prog, self.iterations).maximum
+            # Only a certified count supplies an implicit finite index range.
+            # Arbitrary author counts retain their runtime-only contract.
+            if (
+                maximum is None
+                and isinstance(self.iterations, str)
+                and not prog._time_bounds.author_source(self.iterations)
+            ):
+                maximum = prog._time_bounds.describe(prog, self.iterations).maximum
             if maximum is not None:
                 prog._time_bounds.register(
                     self.counter,
