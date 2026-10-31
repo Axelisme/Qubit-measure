@@ -395,8 +395,9 @@ class TimelineBuilder:
 
         source must exist; into is one fresh name or a list of distinct fresh
         names, captured now. Source and targets permit placement at their
-        actual remaining ends. No reference advance or output occurs. Unknown/duplicate names
-        fail at build, and recording after build raises ValueError.
+        actual remaining ends. No reference advance or output occurs.
+        Unknown/duplicate names fail at build, and recording after build raises
+        ValueError.
         """
         self._ensure_recording()
         recorded = into if isinstance(into, str) else list(into)
@@ -406,8 +407,8 @@ class TimelineBuilder:
         """Record max of existing sources and target into target's end.
 
         Sources remain unchanged; the target uses their actual maximum end.
-        This is bookkeeping, not a context manager; it
-        emits no output or reference advance. Unknown names fail at build with
+        This is bookkeeping, not a context manager. It emits no output or
+        reference advance. Unknown names fail at build with
         the program error. Recording after build raises ValueError.
         """
         self._record(lambda prog: prog.join(*sources, into=into))
