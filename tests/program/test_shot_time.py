@@ -11,7 +11,9 @@ from zcu_tools.core.simulation import AcquireRequest, TimeBase, TimelineTemplate
 
 @pytest.mark.parametrize("reps", [3, 10**12])
 @pytest.mark.parametrize("relax_delay", [1, np.int64(1)])
-def test_integer_request_round_seconds_preserve_exact_long_totals(reps: int, relax_delay) -> None:
+def test_integer_request_round_seconds_preserve_exact_long_totals(
+    reps: int, relax_delay
+) -> None:
     # Each point is within the ns bound; the whole round may exceed int64.
     request = AcquireRequest(
         "decimated",

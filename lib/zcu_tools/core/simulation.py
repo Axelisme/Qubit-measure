@@ -462,7 +462,9 @@ def _validate_template_times(base: TimeBase, template: TimelineTemplate) -> None
         for envelope in event.envelopes:
             if envelope is not None:
                 base.validate_ticks(envelope.sample_period_ticks)
-                base.validate_ticks(int(envelope.sample_period_ticks) * len(envelope.values))
+                base.validate_ticks(
+                    int(envelope.sample_period_ticks) * len(envelope.values)
+                )
     for readout in template.readouts:
         base.validate_ticks(readout.sample_period_ticks)
         if readout.sample_period_ticks <= 0:

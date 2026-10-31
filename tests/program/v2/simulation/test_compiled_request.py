@@ -67,8 +67,13 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
                     self.declare_gen(1, nqz=1)
                 self.add_envelope(0, "shape", idata=np.full(48, -8191.0))
                 self.add_pulse(
-                    0, "p", style="arb", envelope="shape",
-                    freq=100, phase=30, gain=-0.25,
+                    0,
+                    "p",
+                    style="arb",
+                    envelope="shape",
+                    freq=100,
+                    phase=30,
+                    gain=-0.25,
                 )
                 self.declare_readout(0, length=0.2)
                 self.add_readoutconfig(0, "ro", freq=100, gen_ch=0)
@@ -91,7 +96,10 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
         assert event_a.start_ticks.tolist() == [4300]
         for left, right in (
             (event_a.start_ticks, event_b.start_ticks),
-            (event_a.start_ticks + event_a.duration_ticks, event_b.start_ticks + event_b.duration_ticks),
+            (
+                event_a.start_ticks + event_a.duration_ticks,
+                event_b.start_ticks + event_b.duration_ticks,
+            ),
             (a.duration_ticks, b.duration_ticks),
         ):
             np.testing.assert_array_equal(
@@ -108,8 +116,14 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
         envelope_b = event_b.envelopes[int(event_b.envelope_index[0])]
         assert envelope_a is not None and envelope_b is not None
         np.testing.assert_array_equal(
-            original.time_base.ns(np.arange(len(envelope_a.values), dtype=np.int64) * envelope_a.sample_period_ticks).view(np.uint64),
-            expanded.time_base.ns(np.arange(len(envelope_b.values), dtype=np.int64) * envelope_b.sample_period_ticks).view(np.uint64),
+            original.time_base.ns(
+                np.arange(len(envelope_a.values), dtype=np.int64)
+                * envelope_a.sample_period_ticks
+            ).view(np.uint64),
+            expanded.time_base.ns(
+                np.arange(len(envelope_b.values), dtype=np.int64)
+                * envelope_b.sample_period_ticks
+            ).view(np.uint64),
         )
         np.testing.assert_array_equal(
             np.asarray(envelope_a.values).view(np.uint64),
@@ -117,11 +131,21 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
         )
         ro_a, ro_b = a.readouts[0], b.readouts[0]
         np.testing.assert_array_equal(
-            original.time_base.ns(ro_a.trigger_ticks[..., None] + np.arange(ro_a.samples, dtype=np.int64) * ro_a.sample_period_ticks).view(np.uint64),
-            expanded.time_base.ns(ro_b.trigger_ticks[..., None] + np.arange(ro_b.samples, dtype=np.int64) * ro_b.sample_period_ticks).view(np.uint64),
+            original.time_base.ns(
+                ro_a.trigger_ticks[..., None]
+                + np.arange(ro_a.samples, dtype=np.int64) * ro_a.sample_period_ticks
+            ).view(np.uint64),
+            expanded.time_base.ns(
+                ro_b.trigger_ticks[..., None]
+                + np.arange(ro_b.samples, dtype=np.int64) * ro_b.sample_period_ticks
+            ).view(np.uint64),
         )
-        np.testing.assert_array_equal(ro_a.frequency_mhz.view(np.uint64), ro_b.frequency_mhz.view(np.uint64))
-        np.testing.assert_array_equal(ro_a.phase_deg.view(np.uint64), ro_b.phase_deg.view(np.uint64))
+        np.testing.assert_array_equal(
+            ro_a.frequency_mhz.view(np.uint64), ro_b.frequency_mhz.view(np.uint64)
+        )
+        np.testing.assert_array_equal(
+            ro_a.phase_deg.view(np.uint64), ro_b.phase_deg.view(np.uint64)
+        )
     finally:
         env.devices.close_all_devices()
 
