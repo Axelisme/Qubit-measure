@@ -805,11 +805,23 @@ class RuntimeMath(TimedMacro):
         known = known_maximum(a, b)
         if known is not None:
             return known
-        left, right = self.cycles(a), self.cycles(b)
-        if left.minimum >= right.maximum:
+        # Prove dominance before allocating static operands. Use the same native
+        # cycle quantization as materialization, and still validate both ranges.
+        limits: list[tuple[int, int]] = []
+        for value in (a, b):
+            rounded = (
+                value if isinstance(value, RuntimeEnd) else step_time(self.prog, value)
+            )
+            lo, hi = time_bounds(self.prog, rounded)
+            lower = round(lo * get_fclk(self.prog))
+            upper = round(hi * get_fclk(self.prog))
+            self.check(lower, upper)
+            limits.append((lower, upper))
+        if limits[0][0] >= limits[1][1]:
             return a
-        if right.minimum >= left.maximum:
+        if limits[1][0] >= limits[0][1]:
             return b
+        left, right = self.cycles(a), self.cycles(b)
         destination = self.allocate() if target is None else target
         # A fresh result can hold intermediates. An explicitly aliased target
         # must preserve both input operands until the final addition.
