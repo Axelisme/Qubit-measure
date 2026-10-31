@@ -140,6 +140,52 @@ def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(opera
         prog.get_time_param("runtime", "t")
 
 
+@pytest.mark.parametrize("synchronize", [False, True])
+def test_unknown_branch_local_adc_tail_requires_coverage_for_constant_shell_wait(synchronize):
+    def initialize(prog):
+        prog.add_dmem([40])
+        prog.declare_readout(0, length=4 / 307.2)
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        with prog.branch(by="scan", align_timeline=False) as branch:
+            with branch.case(0):
+                prog.fork("default", into="local")
+                prog.delay_timeline("duration", timeline="local")
+                prog.trigger([0], width=1 / 430.08, timeline="local")
+                if synchronize:
+                    prog.join("local", into="default")
+
+    if not synchronize:
+        with pytest.raises(ValueError, match="ADC.*0.*range_hint.*sync"):
+            program(body, initialize=initialize)
+    else:
+        result = shots(program(body, initialize=initialize))
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [46, 0, 0]
+        assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0]
+
+
+@pytest.mark.parametrize("count", [2, "duration"])
+def test_author_register_duration_in_repeat_debits_actual_iteration_advances(count):
+    def initialize(prog):
+        prog.add_dmem([3])
+
+    def body(prog):
+        prog.read_dmem("duration", 0)
+        prog.fork("default", into="external")
+        prog.delay_timeline(100 / 430.08, timeline="external")
+        with prog.repeat("r", count):
+            prog.delay_timeline("duration")
+            prog.pulse(0, "p0", timeline="default")
+        prog.join("external", into="default")
+        prog.pulse(1, "p1", timeline="default")
+
+    result = shots(program(body, initialize=initialize))
+    expected = [3, 34, 100] if count == 2 else [3, 34, 65, 100]
+    assert [waves(s) for s in result] == [expected] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 3
+
+
 def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
