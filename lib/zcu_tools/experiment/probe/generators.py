@@ -57,4 +57,9 @@ def sample_iq_shots(
     """Draw raw IQ from two centers using each row's excited-state population."""
     rng = np.random.default_rng(seed)
     excited = rng.random((len(excited_population), shots)) < excited_population[:, None]
-    return np.where(excited, np.complex128(e_center), np.complex128(g_center))
+    centers = np.where(excited, np.complex128(e_center), np.complex128(g_center))
+    return (
+        centers
+        + rng.normal(0.0, width, centers.shape)
+        + 1j * rng.normal(0.0, width, centers.shape)
+    )
