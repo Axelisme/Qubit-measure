@@ -63,7 +63,9 @@ def _transition_metrics(
     ground: float,
 ) -> tuple[float, float, float, float, float]:
     retention = float((projected[low + 4] - projected[low]) / contrast)
-    asymmetry = float((projected[low] + projected[low + 4] - 2 * ground) / separation - 1)
+    asymmetry = float(
+        (projected[low] + projected[low + 4] - 2 * ground) / separation - 1
+    )
     middle_retention = float((projected[low + 5] - projected[low + 1]) / contrast)
     return (
         retention,
