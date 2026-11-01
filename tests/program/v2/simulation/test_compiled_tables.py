@@ -440,12 +440,8 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
     # These table lengths are integer-affine on the tProc grid, so remain exact.
     maxima = [
         max(
-            tproc_ceil(
-                prog.soccfg, generator_duration(prog.soccfg, left_length, 1)
-            ),
-            tproc_ceil(
-                prog.soccfg, generator_duration(prog.soccfg, right_length, 2)
-            ),
+            tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, left_length, 1)),
+            tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, right_length, 2)),
         )
         for left_length, right_length in zip(left_lengths, right_lengths, strict=True)
     ]
@@ -464,10 +460,12 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         )
         assert [
             time_us(result.time_base, e.duration_ticks) for e in point.events[:2]
-        ] == pytest.approx([
-            float(generator_duration(prog.soccfg, left_lengths[index], 1)),
-            float(generator_duration(prog.soccfg, right_lengths[index], 2)),
-        ])
+        ] == pytest.approx(
+            [
+                float(generator_duration(prog.soccfg, left_lengths[index], 1)),
+                float(generator_duration(prog.soccfg, right_lengths[index], 2)),
+            ]
+        )
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
         ) == pytest.approx(((origin_cycle + 2 * maximum) / TPROC_MHZ,))

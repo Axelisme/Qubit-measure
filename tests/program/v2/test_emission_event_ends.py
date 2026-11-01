@@ -260,14 +260,17 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
     # Keep the fractional generator tail through post addition, never the ADC tail.
     # Native post sweep increments retain their authored tProc grid.
     posts = (
-        [Fraction(p) / Fraction(str(TPROC_MHZ)) for p in native_sweep(
-            PROFILE, 0.0005, 0.0005 + 4 / TPROC_MHZ, 3
-        )]
+        [
+            Fraction(p) / Fraction(str(TPROC_MHZ))
+            for p in native_sweep(PROFILE, 0.0005, 0.0005 + 4 / TPROC_MHZ, 3)
+        ]
         if swept_post
         else [Fraction("0.0005")]
     )
     ends = [
-        40 + PRE + tproc_ceil(
+        40
+        + PRE
+        + tproc_ceil(
             PROFILE,
             generator_duration(PROFILE, 0.101 if kind == "pulse" else 0.051) + post,
         )

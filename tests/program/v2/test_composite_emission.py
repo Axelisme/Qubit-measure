@@ -196,9 +196,7 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
         "selected_integer",
         val_reg="selector",
         pulses=[
-            _pulse_cfg(n / GEN_MHZ).model_copy(
-                update={"pre_delay": 0, "post_delay": 0}
-            )
+            _pulse_cfg(n / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0})
             for n in lengths
         ],
     )
