@@ -9,6 +9,7 @@ from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.program.v2.simulation import SimulationSoc
 
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -18,6 +19,30 @@ from tests.program.v2.simulation.time_observations import times_us
 def test_offline_board_declares_mock_identity():
     env = white_noise(std_adc=0)
     assert env.soc.is_mock is True
+
+
+@pytest.mark.parametrize(
+    "routes",
+    [
+        [[0, 0]],
+        [(0, 0)],
+        ([0, 0],),
+        ((0,),),
+        ((0, 0, 0),),
+        ((0.0, 0),),
+        ((0, 0.0),),
+        (("0", 0),),
+        (0, 0),
+        None,
+    ],
+)
+def test_soc_rejects_routes_outside_tuple_contract(routes):
+    env = white_noise(std_adc=0)
+    try:
+        with pytest.raises(TypeError, match=r"routes.*tuple.*int.*int"):
+            SimulationSoc(env.soccfg, env.soc.binding, routes=routes)
+    finally:
+        env.devices.close_all_devices()
 
 
 class RawProgram(TimelineProgramV2):

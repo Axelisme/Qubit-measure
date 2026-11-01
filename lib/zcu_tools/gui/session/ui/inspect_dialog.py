@@ -626,6 +626,7 @@ class InspectDialog(QDialog):
         self._library = self._ctrl.read_context(setup=self._is_setup()).library
         self._rebuild_tree(self._library, self._selected)
         self._entry_error.clear()
+        self._library_sync.refresh(has_draft=self._has_library_draft())
 
     # ------------------------------------------------------------------
     # Delete, New and ARB
