@@ -6,7 +6,7 @@
 
 Select the qubit and its resonator. Confirm the qubit pi pulse, readout frequency, readout waveform, integration window and ADC wiring. The optional reset runs before each preparation. The gain sweep overrides the readout gain for both R1 on and R2.
 
-Set `wait` in us. The Form starts it at 0.01 times the captured T1 estimate and starts `relax_delay` at 5 times T1. Missing T1 leaves the corresponding field invalid until you enter a value. These starting values do not establish a suitable photon ring-down time.
+Set `wait` in us. The Form starts it at 0.01 times the captured T1 estimate and starts `relax_delay` at 5 times T1. If T1 is missing or null, or no capture exists, the Form uses 30 us as a first-run time scale. This gives `wait = 0.3 us` and `relax_delay = 150 us`; the 30 us scale is not a calibrated T1 and is not written back as one. A stored but invalid T1 leaves these fields blank and Invalid until you enter values. These starting values do not establish a suitable photon ring-down time.
 
 `wait` starts after the R1 waveform and its configured post-delay, not after the ADC integration window. Set the readout timing and wait so the two ADC windows do not overlap. Include any extra resonator ring-down time you need in this interval.
 

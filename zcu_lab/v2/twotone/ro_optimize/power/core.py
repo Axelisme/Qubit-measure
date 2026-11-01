@@ -6,6 +6,7 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.readout_metrics import readout_metrics
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -66,11 +67,14 @@ class PowerCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class PowerAnalyzeOptions:
-    """gain: optional human-selected gain in a.u.; None proposes no writeback."""
+    """gain: optional human-selected gain in a.u.; None proposes no writeback.
 
-    gain: float | None = None
+    Construction rejects nonfinite gains and values outside [-1, 1].
+    """
+
+    gain: Annotated[float, Field(ge=-1, le=1, allow_inf_nan=False)] | None = None
 
 
 @dataclass(frozen=True)
@@ -234,13 +238,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         source.cfg may be None. Each gain uses readout_metrics without smoothing
         or clipping. Only finite f_sep/qnd_on pairs enter the maximizing frontier.
-        options.gain records a human choice, never an inferred optimum; it must
-        be finite and within [-1, 1] when supplied, otherwise ValueError is raised.
+        options.gain records a human choice, never an inferred optimum.
+        PowerAnalyzeOptions validates finite gains within [-1, 1] at construction.
         """
-        if options.gain is not None and (
-            not np.isfinite(options.gain) or not -1 <= options.gain <= 1
-        ):
-            raise ValueError("Selected gain must be finite and within [-1, 1]")
         result = source.result
         metrics = [readout_metrics(sums) for sums in result.sums]
         arrays = {
