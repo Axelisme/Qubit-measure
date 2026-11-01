@@ -6,28 +6,70 @@ Workflow 在一個 async 函式內保留 history 與區域變數。`env` 是本�
 `run_core(env, ...)` 明確把量測掛在根下。逐點量測則把 `iteration` 傳給 helper，讓取消只影響目前這一點。
 宣告與 GUI 表單入口見 [workflow README](../workflows/README.md)。
 
-## 用 scope 執行 core
+## 用 scope 執行 workflow 取數
 
-共用 helper 收 `Scope` 與既有的 typed cfg，不收另一個 WorkflowEnv。
-`name` 由作者指定，框架不從 callable 猜名字。
+Workflow 自己寫同步 `acquire(cfg, *, context)`，在裡面組 program 並呼叫 runner。
+以下範例只接受 `sampling="linear"`，依序播放 reset、π pulse、delay 與 readout，回傳 core 的 `T1Result`。
+它使用預設 retry 0，不呼叫 core 的 run 或另一個實驗的取數 helper。
+需要 retry 時，依 [workflow README](../workflows/README.md#撰寫-async-workflow) 在同步函式加入 retry 參數，
+從 workflow settings 以 `functools.partial` 綁定。不要在 `T1Cfg` 加 retry 欄位。
 
 ```python
-from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_core import run_core
+from zcu_tools.experiment.scope import Scope
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.experiment.workflows import Completed
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp, T1Result
+from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
+from zcu_tools.utils.process import rotate2real
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Result
+
+
+def acquire(cfg: T1Cfg, *, context: RunContext) -> T1Result:
+    if cfg.sampling != "linear":
+        raise ValueError("This example only supports linear T1 sampling.")
+    times = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
+    signals = SignalBuffer((len(times),))
+    with Schedule(signals, scope=context.scope) as sched:
+        builder = TimelineBuilder(
+            context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+        )
+        delay = builder.add_sweep("delay", cfg.delay)
+        if cfg.reset is not None:
+            builder.emit(cfg.reset.build("reset"))
+        builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+        builder.timeline_inc(delay)
+        builder.delay_by_timeline()
+        builder.emit(Readout("readout", cfg.readout))
+        program = builder.build()
+        sched.run_acquire(
+            program, context.soc, rounds=cfg.rounds,
+            options=RunOptions(
+                stop_condition=snr_checker(
+                    signals.at(), cfg.earlystop_snr, lambda iq: rotate2real(iq).real
+                ),
+            ),
+        )
+    return T1Result(times=times, signals=signals.array)
 
 
 async def run_t1(
     scope: Scope, cfg: T1Cfg
 ) -> Completed[RunRecord[T1Cfg, T1Result]]:
-    return await run_core(scope, T1Exp().run, cfg, name="T1")
+    return await run_core(scope, acquire, cfg, name="T1")
 ```
 
+Async helper 收 `Scope` 與 typed cfg，不收另一個 WorkflowEnv。
+`name` 由作者指定，框架不從 callable 猜名字。
 `run_core` 複製 cfg，並透過 `Scope.call` 建立 operation child。
-Helper 在呼叫 core 前擷取 connected device snapshot，寫入 `RunRecord.metadata["device_snapshot"]`。
-Core 正常回傳就交付 `Completed(value, facts)`，值在 `t1_record.value`，當次事實在 `t1_record.facts`。
+它在呼叫 acquire 前擷取 connected device snapshot，寫入 `RunRecord.metadata["device_snapshot"]`。
+Acquire 正常回傳就交付 `Completed(value, facts)`，值在 `t1_record.value`，當次事實在 `t1_record.facts`。
+保存沿用 `T1Exp.AXES_SPEC`，因此 GUI 仍能以單一 T1 實驗開啟 native 檔。
+本例不建立 operation 即時圖。要顯示即時曲線，在 acquire 內用 `context.plots` 建圖。
+更新函式以 `context.plots.on_plot_thread` 裝飾，再傳給 `SignalBuffer(on_update=...)`。
 `facts.stopped` 只記錄 operation 自身在結束時的 stop bit。只取消其子孫不會把它標成 stopped。
 這個位元不判斷資料是否完整或可用來擬合。
 Acquisition、cfg 與程式例外原樣傳出。作者在能恢復的地方明確 catch，不把 framework run 分成 Completed／Failed 兩條路。
@@ -83,7 +125,7 @@ for cfg, iteration in zip(plan.points, env.iterations(), strict=False):
             continue
 
         try:
-            repeat_record = await run_core(iteration, T1Exp().run, cfg, name="T1-repeat")
+            repeat_record = await run_core(iteration, acquire, cfg, name="T1-repeat")
         except OSError as exc:
             point_record.status = "failed"
             point_record.reason = str(exc)
@@ -128,7 +170,7 @@ Reader 走這棵目錄樹，依 commit 序號排序，不依目錄名排序。
 
 ## 作者決定如何恢復失敗
 
-Core 例外不會自動變成 `Failed`。點與點獨立且例外可恢復時，把原因填進 point record，再 `continue`。
+取數 helper 的例外不會自動變成 `Failed`。點與點獨立且例外可恢復時，把原因填進 point record，再 `continue`。
 上面的 finally 會提交 failed 點。不能恢復的錯誤直接傳出，finally 仍會保存先前已填的欄位。
 後續工作全部依賴這個結果時，填入原因並 `return Summary(reason=...)`，讓 workflow 結束。
 這種 workflow 的 return annotation 要包含自己的 Summary model。

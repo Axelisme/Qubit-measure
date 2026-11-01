@@ -1,4 +1,4 @@
-"""Candidate selection and isolated spectroscopy fits shared with workflows."""
+"""Candidate selection and isolated spectroscopy fits."""
 
 from dataclasses import dataclass
 from typing import Annotated, Literal

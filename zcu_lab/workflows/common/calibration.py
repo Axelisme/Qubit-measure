@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -28,6 +29,7 @@ from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import (
     FreqGainExp,
 )
 from zcu_lab.workflows.common.amp_calibration import calibrate_amp_rabi
+from zcu_lab.workflows.common.calibration_acquire import run_freq_gain
 from zcu_lab.workflows.common.calibration_analysis import (
     FrequencyFit as FrequencyFit,
 )
@@ -362,14 +364,18 @@ async def calibrate_len_rabi(
     cfg = LenRabiCfg(
         reps=settings.rabi_reps,
         rounds=settings.rabi_rounds,
-        acquire_retry=settings.rabi_acquire_retry,
         earlystop_snr=settings.rabi_earlystop_snr,
         relax_delay=settings.resolve_rabi_relax_us(guess.relax_us),
         qub_pulse=drive,
         readout=ro,
         length=_len_rabi_sweep(settings, guess),
     )
-    outcome = await run_core(scope, measure_planned_rabi, cfg, name="Rabi")
+    outcome = await run_core(
+        scope,
+        partial(measure_planned_rabi, retry=settings.rabi_acquire_retry),
+        cfg,
+        name="Rabi",
+    )
     observe_operation(env.summary, outcome)
     diagnostics = RabiResult(
         "failed",
@@ -613,7 +619,6 @@ async def calibrate_readout(
     cfg = FreqGainCfg(
         reps=settings.ro_reps,
         rounds=settings.ro_rounds,
-        acquire_retry=settings.ro_acquire_retry,
         relax_delay=settings.resolve_readout_relax_us(guess_us),
         skew_penalty=settings.ro_skew_penalty,
         qub_pulse=drive,
@@ -631,7 +636,12 @@ async def calibrate_readout(
             step=(gain_stop - gain_start) / (READOUT_GAIN_POINTS - 1),
         ),
     )
-    outcome = await run_core(scope, FreqGainExp().run, cfg, name="readout")
+    outcome = await run_core(
+        scope,
+        partial(run_freq_gain, retry=settings.ro_acquire_retry),
+        cfg,
+        name="readout",
+    )
     observe_operation(env.summary, outcome)
     # Save the landscape and choose its best point meeting the SNR threshold.
     save_native(
