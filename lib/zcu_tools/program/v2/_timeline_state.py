@@ -376,10 +376,13 @@ class BranchProvenance:
     sources maps register names to integer tProc-cycle expressions. native maps
     (is_generator, channel_id) to relative integer-cycle tails. Both mappings
     are detached snapshots, so preparing another case cannot mutate this path.
+    unknown_adcs contains channels last triggered with native t=None; those tails
+    cannot prove ordering for a later managed trigger and do not alter closure.
     """
 
     sources: dict[str, TimeExpression]
     native: dict[tuple[bool, int], TimeExpression]
+    unknown_adcs: frozenset[int]
 
 
 @dataclass
@@ -415,6 +418,7 @@ class TimelineBook:
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
+        self.unknown_native_adcs: set[int] = set()
         # Compile-only event tails. Runtime stores and QICK timestamps keep
         # their existing scheduling roles; these expressions never emit code.
         # Keys are (is_generator, channel_id).
@@ -478,6 +482,7 @@ class TimelineBook:
         entry = self.branch_provenance[-1].entry
         self.source_expressions = entry.sources.copy()
         self.native_expressions = entry.native.copy()
+        self.unknown_native_adcs = set(entry.unknown_adcs)
 
     def record_branch_sources(self, prog) -> None:
         """Capture source/channel values after this case's local timeline closure."""
@@ -486,12 +491,14 @@ class TimelineBook:
     def snapshot_branch_provenance(self, prog) -> BranchProvenance:
         """Copy current register sources and all declared native channel tails."""
         return BranchProvenance(
-            self.source_expressions.copy(), self.snapshot_native_expressions(prog)
+            self.source_expressions.copy(), self.snapshot_native_expressions(prog),
+            frozenset(self.unknown_native_adcs),
         )
 
     def finish_branch_sources(self, prog, selector: str) -> None:
         """Select channel tails and register sources defined on every branch path."""
         frame = self.branch_provenance.pop()
+        self.unknown_native_adcs = set().union(*(path.unknown_adcs for path in frame.paths))
         self.native_expressions = {
             key: select_time(
                 source_expression(prog, selector),
@@ -620,6 +627,11 @@ class TimelineBook:
         Diagnostics report the worst overlap in tProc cycles, or an unprovable
         runtime ordering when the input has no sufficient bounds.
         """
+        if channel in self.unknown_native_adcs:
+            raise ValueError(
+                f"{timeline}: channel {channel} ADC overlap; "
+                "cannot locate previous native trigger (t=None); overlap cycles unknown"
+            )
         expression = time_expression(prog, start)
         previous = self.native_expression(prog, channel, generator=False)
         gap = add_time(expression, scale_time(previous, -1))
@@ -794,6 +806,8 @@ class TimelineBook:
     def record_native(self, prog, ch: int, end: Time, *, generator: bool) -> None:
         """Capture an actual event end in cycles, without changing native storage."""
         self.native_expressions[generator, ch] = native_event_expression(prog, end)
+        if not generator:
+            self.unknown_native_adcs.discard(ch)
 
     def native_expression(self, prog, ch: int, *, generator: bool) -> TimeExpression:
         """Return the compile-only tail, or the initial native end before any event."""

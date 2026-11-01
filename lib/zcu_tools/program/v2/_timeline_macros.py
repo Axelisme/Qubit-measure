@@ -197,6 +197,7 @@ class TimelineBoundary(Macro):
             self.book.reference_guards = 0
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
+            self.book.unknown_native_adcs.clear()
             self.book.native_expressions.clear()
             self.book.native_length_sources.clear()
             self.book.pinned.clear()

@@ -288,6 +288,7 @@ class TimelineObservedTrigger(Trigger):
     def preprocess(self, prog) -> None:
         super().preprocess(prog)
         if self.t_regs["t"] is None:
+            self.book.unknown_native_adcs.update(self.ros)
             return
         actual_t = self.get_time_param("t")
         for ch in self.ros:
