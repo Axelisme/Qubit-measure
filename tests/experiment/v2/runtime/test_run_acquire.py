@@ -352,7 +352,11 @@ def test_shot_overrun_restarts_all_rounds_and_discards_failed_attempts(
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule(buffer, scope=Scope("run")) as schedule,
     ):
-        with nullcontext() if succeeds else pytest.raises(AcquisitionContractError) as caught:
+        with (
+            nullcontext()
+            if succeeds
+            else pytest.raises(AcquisitionContractError) as caught
+        ):
             if mode == "integrated":
                 result = schedule.run_acquire(
                     program, soc, rounds=2, options=RunOptions(retry=retry)
