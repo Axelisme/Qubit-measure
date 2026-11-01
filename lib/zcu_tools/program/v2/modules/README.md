@@ -325,8 +325,12 @@ reused indices. Other `lower_selected` callers retain loader-owned captures unle
 they explicitly borrow `captured_index` for this same short lifetime.
 Every write to playback/capture storage must belong to a consumed table mapping,
 including Branch cases, backedges and resets. A different mapping may reuse the
-storage only after consumption. Playback of an overwritten relation fails. An in-range constant or different-table write still fails with the
-register and instruction position. Ordinary scalar and uint32 word consumers
+storage only after consumption. Each playback must retain the matching relation
+on every incoming Branch path and Repeat iteration, including skipped loops and
+backedges. Empty cases preserve their entry relation; a body-local lookup replaces
+it before that iteration's consumer. Playback of an overwritten relation fails.
+An in-range constant or different-table write still fails with the register and
+instruction position. Ordinary scalar and uint32 word consumers
 keep their existing contracts.
 
 ## Design Boundaries
