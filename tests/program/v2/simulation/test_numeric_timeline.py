@@ -6,7 +6,7 @@ from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.delay import Delay, DelayAuto
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -91,7 +91,10 @@ def test_adc_read_windows_retain_each_generator_association():
     second.cfg.gen_ch = 1
     # Build again so the owned Pulse and flat readout share the selected route.
     second = second.cfg.build("second")
-    prog = compile_modules(env.soccfg, modules=[readout("first"), second])
+    # ADC length is 31/307.2 us = 43.4 tProc cycles; generator ends at 43.
+    prog = compile_modules(
+        env.soccfg, modules=[readout("first"), Delay("adc_gap", 1 / 430.08), second]
+    )
     prog.acquire(env.soc, progress=False)
     window = request_of(env).materialize_point(0).readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)

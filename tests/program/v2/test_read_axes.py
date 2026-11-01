@@ -129,7 +129,10 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
 
         def _body(self, cfg):
             self.emit(ro, tag="prefix")
+            # Each pulse ADC integrates for 1 us; generator completion is earlier.
+            self.timeline_inc(1.0)
             self.emit(ro, tag="herald")
+            self.timeline_inc(1.0)
             self.emit(ro, tag="signal")
 
     prog = Program(cfg, reps=2)
@@ -205,6 +208,8 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
         def _body(self, cfg):
             if not inside:
                 self.emit(ro, tag="selected")
+                # Clear the 1-us ADC window before entering controlled triggers.
+                self.timeline_inc(1.0)
             if control == "Repeat":
                 self.delay_by_timeline()
                 with self.repeat("repeat_scope", 2):
@@ -212,6 +217,8 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
                         self.emit(ro, tag="selected")
                     else:
                         self.trigger([0], t=0, timeline="default")
+                    # Repeat iterations must also clear the 1-us ADC window.
+                    self.timeline_inc(1.0)
                     self.delay_by_timeline()
             else:
                 with self.branch(by="choice", align_timeline=True) as branch:
@@ -238,6 +245,8 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
     if control == "Repeat":
         with builder.repeat("repeat_scope", 2):
             builder.emit(other)
+            # ADC 1 integrates for 1 us independently of the selected ADC 0.
+            builder.timeline_inc(1.0)
     else:
         with (
             builder.branch(by="choice", align_timeline=True) as cases,
@@ -262,12 +271,15 @@ def test_nested_control_rejects_trigger_with_innermost_scope(inner):
     builder = v2.TimelineBuilder(v2.make_mock_soccfg())
     builder.add_loop("choice", 2)
     builder.emit(ro, tag="selected")
+    # Separate the selected 1-us window from nested reads on the same ADC.
+    builder.timeline_inc(1.0)
     if inner == "Repeat":
         with builder.branch(by="choice", align_timeline=True) as cases:
             with cases.case(0):
                 pass
             with cases.case(1), builder.repeat("reads", 2):
                 builder.emit(ro)
+                builder.timeline_inc(1.0)
     else:
         with (
             builder.repeat("reads", 2),
@@ -275,6 +287,7 @@ def test_nested_control_rejects_trigger_with_innermost_scope(inner):
             cases.case(1),
         ):
             builder.emit(ro)
+            builder.timeline_inc(1.0)
     prog = builder.build()
     with pytest.raises(ValueError, match=rf"ADC 0.*{inner}"):
         v2.shot_sums(prog, [v2.IQ("selected")])
@@ -309,6 +322,8 @@ def test_missing_and_ambiguous_labels_list_available_labels(timeline, collision)
 
         def _body(self, cfg):
             self.emit(ro, tag="readout" if collision else None)
+            # Reach label validation after two nonoverlapping 1-us ADC reads.
+            self.timeline_inc(1.0)
             self.emit(ro)
 
     prog = Program(v2.make_mock_soccfg())

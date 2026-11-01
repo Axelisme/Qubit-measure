@@ -50,8 +50,12 @@ def _program(
     return Program(soccfg, reps=2, initial_delay=0, relax_delay=0.02)
 
 
-@pytest.mark.parametrize("length, spacing", [(0.101, 51), (0.201, 92)])
-def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing):
+@pytest.mark.parametrize(
+    "length, spacing, adc_wait", [(0.101, 49, 1), (0.201, 92, 0)]
+)
+def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(
+    length, spacing, adc_wait
+):
     readout = MuxReadout(
         "mux",
         native_mux(
@@ -70,13 +74,16 @@ def test_mux_end_covers_all_tones_and_adc_windows_plus_one_post(length, spacing)
 
     prog = _program(mux_soccfg(), [readout], body)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
+    # Pre-delay ceils to 5 ticks. Generator lengths round to 39/77 at 384 MHz.
+    # ceil(5 + (39 or 77) * 430.08/384 + .0005 * 430.08) gives 49/92.
+    # ADC length rounds to 8 at 76.8 MHz: 44.8 tProc ticks after trigger.
+    # Only the shorter waveform leaves .8 tick for shot closure to wait (ceil 1).
     assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        2 * spacing + 9
+        2 * spacing + adc_wait + 9
     ] * 2
     assert [
         [(e.cycle - shot.start_cycle, e.value) for e in shot.events if e.kind == "data"]

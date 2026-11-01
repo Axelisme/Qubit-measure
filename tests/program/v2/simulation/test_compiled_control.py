@@ -381,6 +381,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
                         p.fork(case, into="capture")
                         p.trigger([0, 1], t=0, timeline="capture")
                         p.pulse(0, "p", tag=f"case-{index}")
+                        # ADC0: 61/307.2 us, ADC1: 31/307.2 us. The 43-cycle
+                        # pulse plus 44 cycles gives 87-cycle trigger spacing.
+                        p.timeline_inc(44 / 430.08)
             p.delay_by_timeline()
 
     prog, env = program(
@@ -398,7 +401,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
         assert [e.source for e in point.events] == [f"case-{index}"] * 3
         for readout in point.readouts:
             assert times_us(result.time_base, readout.trigger_ticks) == pytest.approx(
-                (0, 43 / 430.08, 86 / 430.08)
+                (0, 87 / 430.08, 174 / 430.08)
             )
     assert {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()} == static
 
