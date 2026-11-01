@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-01（來源選擇與 Length Rabi 初值）
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -74,13 +74,16 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
-`rabi_initial_values.len_rabi_initial_values` 為兩種 Length Rabi 選擇相同的 pulse 來源與掃描上限。
-已有 x180 時保留 Slot 與 gain，以有效 pi_len 的四倍作上限。
-pi_len leaf 缺失或 null 時上限為 1 µs，已存但無效的 scalar 則留空。
-arb 沒有持久 scalar length，使用缺 leaf 的 1 µs 上限，不讀 runtime length。
-沒有 x180 時使用 gain=1 的 qub_probe Template 與 1 µs 上限。
+`ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template，Template 持有自己的 set 與 seed metadata，路徑語法、來源故障與 Form 的 family 不相容錯誤照常傳遞。
+
+`rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
+無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。
+Scalar waveform 的有效 pi_len 給出四倍上限，已存但無效的 pi_len 則留空。
 它只讀固定 capture 中的 validated Spec，跟隨 waveform key，但不 materialize、不讀 asset、不寫回校準。
 原始來源在 owner 驗證前被拒絕或轉型的值，不屬於此 typed capture 的可觀察輸入。
+各 Form 用 `source` 選擇 x180 或 gain=1 的 qub_probe Template。
+`qub_probe_gain_seed_metadata(path)` 為 Template gain 提供 uncalibrated 提示，path 包含各 Form 的 module wrapper 與 mux 原始 tone index。
+Singleshot 與 mux 對選出的節點共用一次 `replace(node, set=...)`，隱藏由 Run 取代的 waveform.length。
 
 `rabi_initial_values.amp_rabi_initial_pulse` 為兩種 Amplitude Rabi 選擇相同的 pulse 來源與長度。
 x180 為 arb waveform 時保留原來源 Slot、形狀與 data，不複製、不覆寫 length，也不讀 asset。gain 仍掃 −0.3～1.0；要調長度須先換 waveform。

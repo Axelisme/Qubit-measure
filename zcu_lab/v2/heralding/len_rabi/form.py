@@ -3,10 +3,11 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
-from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_initial_values
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
+from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_length_stop
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
+    qub_probe_gain_seed_metadata,
 )
 
 from .core import HeraldingLenRabiCfg
@@ -14,15 +15,28 @@ from .core import HeraldingLenRabiCfg
 
 def make_form(ctx: FormContext) -> Form[HeraldingLenRabiCfg]:
     """Build starting values and shape from the captured source availability."""
-    qub_pulse, length_stop = len_rabi_initial_values(ctx.parameters)
+    length_stop = len_rabi_length_stop(ctx.parameters)
+    qub_pulse = source(
+        ctx,
+        "$qubit.module.x180",
+        Template(
+            "qub_probe",
+            bindings={"qubit": "$qubit"},
+            set={"gain": 1.0},
+            seed_metadata=qub_probe_gain_seed_metadata(
+                ("qub_pulse", "module", "gain")
+            ),
+        ),
+    )
     return Form(
         HeraldingLenRabiCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),

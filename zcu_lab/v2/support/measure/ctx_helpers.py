@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.cfg_model import validate_device_name
+from zcu_tools.cfg_model import Slot, Template, validate_device_name
 from zcu_tools.datafile import JsonObject
 
 from zcu_lab.components.qubit import QubitBaseSchema, QubitFluxCalibration
@@ -16,7 +16,22 @@ from zcu_lab.v2.support.flux import (
 )
 
 if TYPE_CHECKING:
+    from zcu_tools.gui.form_adapter import FormContext
     from zcu_tools.gui.session.parameters import ParameterContext
+
+
+def source(ctx: FormContext, path: str, template: Template) -> Slot | Template:
+    """Select a captured library slot/root, or the authored template if missing.
+
+    ctx is the fixed Open/Reset capture. path names a module slot or library
+    root and may contain a captured $alias. When ctx.has(path) is True, return
+    Slot(path) as a reference, without copying or adding set overrides.
+    Otherwise return template unchanged, with its authored set and seed_metadata.
+    Invalid path syntax and source failures propagate from ctx.has. A resolved
+    but incompatible module family still raises when consumed by Form.
+    No sources are refreshed, materialized or changed.
+    """
+    return Slot(path) if ctx.has(path) else template
 
 
 def optional_parameter_float(parameters: ParameterContext, path: str) -> float | None:
