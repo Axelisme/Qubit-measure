@@ -141,7 +141,7 @@ Worktree 只隔離檔案，不隔離 ZCU／儀器、GUI subprocess 或固定 por
 - module README：`**讀者：** framework-dev。session 層的 owner、接縫與重要決策速查。`（放在 `**Last updated:**` 行之後）
 - `zcu_lab/tutorial/01-components.md`：`**讀者：** lab-author。三步新增自己的 component。`
 
-檢查腳本判定：非 ADR、非討論的 markdown 第一段含 `**讀者：**` 或 `**Readers:**` 且讀者詞在四個之內。
+`tools/check_doc_readers.py` 判定：非 ADR、非討論的 markdown 第一段含 `**讀者：**` 或 `**Readers:**` 且讀者詞在四個之內。
 
 #### Module README
 
