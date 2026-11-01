@@ -180,8 +180,8 @@ class Receiver(Values):
     zero. Delays the waveform and gives exp(-2πi*f*delay) at absolute frequency f;
     there is no independent electronic-delay parameter. Calibration/noise follow
     the demodulated field's conversion to microwave I+iQ by conjugation.
-    background: optional fixed frequency-dependent transmission before gain/phase;
-    required shape values with zero depth/slope give unity. Does not change noise,
+    background: required fixed frequency-dependent transmission before gain/phase;
+    explicit shape values with zero depth/slope give unity. Does not change noise,
     offset or cavity fields.
     """
 

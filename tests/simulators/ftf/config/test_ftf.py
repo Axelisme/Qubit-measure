@@ -23,7 +23,11 @@ def test_loader_requires_receiver_background_shape(tmp_path: Path, field: str) -
 
 @pytest.mark.parametrize(
     "path",
-    ["numerics.seed", "numerics.projection_weight_floor", "readout.resonators.r1.thermal_occupation"],
+    [
+        "numerics.seed",
+        "numerics.projection_weight_floor",
+        "readout.resonators.r1.thermal_occupation",
+    ],
 )
 def test_loader_requires_model_inputs(tmp_path: Path, path: str) -> None:
     document = parse_ftf(ftf_document()).model_dump(mode="json")
@@ -473,7 +477,8 @@ def test_removed_readout_kind_reports_migration_error(
         (
             "readout.mux.adc",
             [
-                {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, 
+                {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": ch,
                     "gain": 1.0,
                     "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
@@ -484,20 +489,41 @@ def test_removed_readout_kind_reports_migration_error(
         ),
         (
             "readout.mux.adc",
-            [{"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 1, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}]
+            [
+                {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+                    "ro_ch": 1,
+                    "gain": 1.0,
+                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                }
+            ]
             * 2,
             "readout.mux.adc",
         ),
         (
             "readout.mux.adc",
-            [{"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 0, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}],
+            [
+                {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+                    "ro_ch": 0,
+                    "gain": 1.0,
+                    "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+                }
+            ],
             "readout.mux.adc",
         ),
         ("readout.adc", [], "readout.adc"),
         ("readout.mux.input_per_gain", float("inf"), "readout.mux.input_per_gain"),
         (
             "readout.mux.adc",
-            [{"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 1, "gain": 1.0, "noise_psd_adc2_ns": [[1.0, 2.0], [2.0, 1.0]]}],
+            [
+                {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+                    "ro_ch": 1,
+                    "gain": 1.0,
+                    "noise_psd_adc2_ns": [[1.0, 2.0], [2.0, 1.0]],
+                }
+            ],
             "readout.mux.adc.0.noise_psd_adc2_ns",
         ),
     ],
@@ -537,7 +563,12 @@ def test_dual_readout_channel_indices_require_nonnegative_integers(
     error_path = path
     if path.endswith(".adc"):
         value = [
-            {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": value, "gain": 1.0, "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]]}
+            {
+                "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+                "ro_ch": value,
+                "gain": 1.0,
+                "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
+            }
         ]
         error_path += ".0.ro_ch"
     _set_field(document, path, value)

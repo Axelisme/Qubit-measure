@@ -47,15 +47,23 @@ def settings() -> SingleFluxoniumSettings:
             },
             "readout": {
                 "drive": {"gen_ch": 0, "input_per_gain": 10},
-                "resonator": {"thermal_occupation": None, 
+                "resonator": {
+                    "thermal_occupation": None,
                     "frequency_ghz": 7,
                     "charge_coefficient_ghz": 0,
                     "kappa_external_mhz": 1,
                     "kappa_internal_mhz": 0,
                 },
-                "adc": {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 0, "gain": 1, "noise_psd_adc2_ns": [[0, 0], [0, 0]]},
+                "adc": {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
+                    "ro_ch": 0,
+                    "gain": 1,
+                    "noise_psd_adc2_ns": [[0, 0], [0, 0]],
+                },
             },
-            "numerics": {"projection_prune_floor": 1e-9, "slow_envelope_segments_per_period": 20, 
+            "numerics": {
+                "projection_prune_floor": 1e-9,
+                "slow_envelope_segments_per_period": 20,
                 "truncation": {"native_cutoff": 12, "levels": 4},
                 "solver": {
                     "rtol": 1e-8,

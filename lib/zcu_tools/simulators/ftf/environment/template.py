@@ -57,7 +57,6 @@ from zcu_tools.simulators.ftf.physics import (
     schedule,
 )
 
-
 # Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
 _WAVEFORM_SAMPLE_NS = 2.0
 

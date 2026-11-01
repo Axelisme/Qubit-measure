@@ -30,7 +30,9 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
     assert loaded.model_dump()["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] == 4
 
 
-@pytest.mark.parametrize("field", ["routing_cache_bytes", "slow_envelope_segments_per_period"])
+@pytest.mark.parametrize(
+    "field", ["routing_cache_bytes", "slow_envelope_segments_per_period"]
+)
 def test_loader_requires_environment_numeric_inputs(tmp_path: Path, field: str) -> None:
     document = api.parse_six_fluxonium(six_document()).model_dump(mode="json")
     del document["numerics"][field]

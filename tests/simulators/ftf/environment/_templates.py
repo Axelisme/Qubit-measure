@@ -94,7 +94,9 @@ def herald_template() -> tuple[TimelineTemplate, FTFReadoutConfig]:
         frequency_mhz=np.full((2, 1), 6080.0),
         generator_channels=np.ones((2, 1), dtype=np.int64),
     )
-    receiver = FTFReceiverConfig(0, 1000.0, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0)
+    receiver = FTFReceiverConfig(
+        0, 1000.0, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0
+    )
     config = FTFReadoutConfig(
         receiver,
         FTFMuxReadoutConfig(

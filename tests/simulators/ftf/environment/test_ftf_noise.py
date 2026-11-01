@@ -36,7 +36,8 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
         | {
             "readout": {
                 **ftf_document_readout(),
-                "adc": {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, 
+                "adc": {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 0,
                     "gain": 0.0,
                     "noise_psd_adc2_ns": [[10.0, 2.0], [2.0, 20.0]],
@@ -156,7 +157,8 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
         | {
             "readout": {
                 **ftf_document_readout(),
-                "adc": {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, 
+                "adc": {
+                    "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0},
                     "ro_ch": 0,
                     "gain": 0.0,
                     "offset_adc": [10.0, -20.0],

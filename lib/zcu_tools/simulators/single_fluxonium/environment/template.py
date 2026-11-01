@@ -35,7 +35,6 @@ from zcu_tools.simulate.lines import DistortionTerm, FilteredFlux, FluxLine
 from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
 from zcu_tools.simulators.single_fluxonium.environment.numeric import dc_flux
 
-
 # Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
 _WAVEFORM_SAMPLE_NS = 2.0
 # Quantize bath midpoint offsets relative to DC in reduced-flux units.
@@ -142,7 +141,8 @@ def _point_flux(
     starts = starts[(starts < end) | (starts == 0)]
     stops = np.r_[starts[1:], end]
     levels = np.rint(
-        (np.array([filtered.at(float(t))[0] for t in (starts + stops) / 2]) - dc) / _FLUX_LATTICE_PHI0
+        (np.array([filtered.at(float(t))[0] for t in (starts + stops) / 2]) - dc)
+        / _FLUX_LATTICE_PHI0
     ).astype(np.int64)
     changed = np.r_[True, levels[1:] != levels[:-1]]
     return times, values, starts[changed], levels[changed]

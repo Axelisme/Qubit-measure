@@ -39,7 +39,9 @@ pytestmark = pytest.mark.sim
 
 def configuration(channels=(4, 1)):
     return ftf_module.FTFReadoutConfig(
-        pulse=ftf_module.FTFReceiverConfig(0, 1000, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0),
+        pulse=ftf_module.FTFReceiverConfig(
+            0, 1000, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0
+        ),
         mux=ftf_module.FTFMuxReadoutConfig(
             gen_ch=1,
             input_per_gain=1.0,
@@ -48,7 +50,9 @@ def configuration(channels=(4, 1)):
                     ro_ch=ch,
                     gain=1000.0 + i * 100,
                     noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
-                ripple_period_mhz=1000.0, pivot_ghz=0.0)
+                    ripple_period_mhz=1000.0,
+                    pivot_ghz=0.0,
+                )
                 for i, ch in enumerate(channels)
             ),
         ),

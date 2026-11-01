@@ -421,7 +421,10 @@ class JointModel:
         ):
             raise ValueError("finite evolution end and positive bath segment required")
         dynamics = FluxDynamics() if dynamics is None else dynamics
-        step = max(_BATH_GRID_NS, _BATH_GRID_NS * float(np.rint(bath_segment_ns / _BATH_GRID_NS)))
+        step = max(
+            _BATH_GRID_NS,
+            _BATH_GRID_NS * float(np.rint(bath_segment_ns / _BATH_GRID_NS)),
+        )
         boundaries = tuple(
             sorted(
                 {

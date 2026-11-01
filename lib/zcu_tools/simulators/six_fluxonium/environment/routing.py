@@ -16,7 +16,6 @@ from zcu_tools.core.simulation import (
 from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
 from zcu_tools.simulators.six_fluxonium.config import SixFluxoniumSettings
 
-
 # Cover floating subtraction at nearest-cavity ties, in MHz.
 _ROUTING_TIE_MHZ = 1e-9
 
@@ -215,7 +214,14 @@ def route_request(
     gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
     routing = np.empty((prod(request.point_dims), len(channels)), dtype=np.int64)
     templates = tuple(
-        _route_template(t, channels, gen, bare, request.time_base, tuple(q.drive_line.gen_ch for q in qubits))
+        _route_template(
+            t,
+            channels,
+            gen,
+            bare,
+            request.time_base,
+            tuple(q.drive_line.gen_ch for q in qubits),
+        )
         for t in request.templates
     )
     for template in templates:
@@ -234,7 +240,13 @@ def route_request(
             projected = tuple(
                 t
                 for template in templates
-                for t in _project_template(template, compact, int(cavity), observed, qubits[int(cavity)].drive_line.gen_ch)
+                for t in _project_template(
+                    template,
+                    compact,
+                    int(cavity),
+                    observed,
+                    qubits[int(cavity)].drive_line.gen_ch,
+                )
             )
             groups.append(RoutedGroup(int(cavity), points, observed, projected, gen))
     return tuple(groups)

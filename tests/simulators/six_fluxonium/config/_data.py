@@ -96,5 +96,8 @@ def six_document() -> SixDocument:
             "ramp_step": 0.01,
         },
         "qubits": qubits,
-        "numerics": {"routing_cache_bytes": 4 * 1024**2, "slow_envelope_segments_per_period": 20},
+        "numerics": {
+            "routing_cache_bytes": 4 * 1024**2,
+            "slow_envelope_segments_per_period": 20,
+        },
     }

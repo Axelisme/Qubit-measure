@@ -185,11 +185,17 @@ class SixFluxoniumSettings(Values):
                     f"qubits.Q{index}.dc_bias.source.name: must equal Q{index}_bias"
                 )
             if qubit.readout.drive.gen_ch != self.mux_gen_ch:
-                raise ValueError(f"qubits.Q{index}.readout.drive.gen_ch: must equal mux_gen_ch")
+                raise ValueError(
+                    f"qubits.Q{index}.readout.drive.gen_ch: must equal mux_gen_ch"
+                )
             if qubit.drive_line.gen_ch in generators:
-                raise ValueError(f"qubits.Q{index}.drive_line.gen_ch: duplicate generator")
+                raise ValueError(
+                    f"qubits.Q{index}.drive_line.gen_ch: duplicate generator"
+                )
             if qubit.readout.adc.ro_ch in receivers:
-                raise ValueError(f"qubits.Q{index}.readout.adc.ro_ch: duplicate receiver")
+                raise ValueError(
+                    f"qubits.Q{index}.readout.adc.ro_ch: duplicate receiver"
+                )
             generators.add(qubit.drive_line.gen_ch)
             receivers.add(qubit.readout.adc.ro_ch)
             name: Name = qubit.drive_line.name

@@ -268,7 +268,7 @@ class SingleFluxoniumSettings(Values):
     flux_line: one large-amplitude fast-flux
     line, or None/omitted for a DC-only circuit with no pulsed flux route.
     readout: one pulse generator/cavity/ADC. numerics: explicit basis and
-    solver choices, optional seed/pacing. drift: optional per-loss log-OU sigma
+    solver choices, required nullable seed and optional pacing. drift: per-loss log-OU sigma
     and tau_s; None/omitted disables drift. Configured targets require positive
     losses. All sections except flux_line and drift are required.
 

@@ -65,7 +65,12 @@ numerics:
 
 @pytest.mark.parametrize(
     "path",
-    ["numerics.seed", "numerics.slow_envelope_segments_per_period", "numerics.projection_prune_floor", "readout.resonator.thermal_occupation"],
+    [
+        "numerics.seed",
+        "numerics.slow_envelope_segments_per_period",
+        "numerics.projection_prune_floor",
+        "readout.resonator.thermal_occupation",
+    ],
 )
 def test_loader_requires_model_inputs(tmp_path: Path, path: str) -> None:
     document = _parse(yaml.safe_load(DOCUMENT)).model_dump(mode="json")
