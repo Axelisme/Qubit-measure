@@ -347,7 +347,7 @@ def test_shot_overrun_restarts_all_rounds_and_discards_failed_attempts(
     buffer.set(np.array(initial))
     bars: list[RecordingProgressBar] = []
     succeeds = retry > 0 and recover
-    result = None
+    result = buffer.array
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule(buffer, scope=Scope("run")) as schedule,
