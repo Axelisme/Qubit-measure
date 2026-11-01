@@ -468,6 +468,8 @@ class TimelineBuilder:
         triggers reject unprovable ordering against the previous ADC window at
         build, including a previous native trigger. The error names timeline,
         channel and overlap cycles. Pure native triggers keep QICK behavior.
+        Their quantized scalar/sweep starts supply ADC tail evidence. A preceding
+        native t=None makes that ADC tail unlocatable for a later managed trigger.
         Named t=None, unknown resources and invalid timing fail at build.
         Unknown keywords raise TypeError now.
         """

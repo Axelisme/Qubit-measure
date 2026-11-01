@@ -207,6 +207,10 @@ Trigger 的 named end 只含 trigger 寬度，ADC 視窗只更新該 ADC channel
 Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
 ADC 重疊檢查同樣只對帶 timeline 的後一個 trigger 生效，純原生 trigger 保留 QICK 的時間與重疊處理。
+原生 scalar／sweep trigger 的尾端證據使用實際量化起點加 ADC 視窗，不改其 timestamp 或 Trigger 展開指令。
+這份證據也用於 shell WAIT／slack。例如 requested 起點為 0.2 cycle、ADC 長 140 cycles 時，實際起點為 0，WAIT 為 140 cycles。
+原生 `t=None` 無法定位 ADC 起點，後一同 ADC 的 timeline trigger 因無法證明不重疊而報錯。
+此未知標記只用於重疊檢查，不捏造 shot closure 的 runtime 結尾。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
 省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：

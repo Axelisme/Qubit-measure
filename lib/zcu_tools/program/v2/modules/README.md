@@ -30,6 +30,8 @@ Tag 屬於每次 emit，不存於 module constructor。
 Pulse、PulseReadout、TablePulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
 Readout 的 ADC 視窗只更新各 ADC channel 的尾端，不延長作者 timeline。
 後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
+原生 scalar／sweep trigger 以實際量化起點留下 ADC 尾端證據，供重疊檢查與 shell WAIT 使用。
+前一個原生 trigger 使用 `t=None` 時，後一同 ADC 的 timeline trigger 因起點無法定位而報錯。
 Lowering 直接使用實際事件結尾，不移動 reference。
 省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
 同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。

@@ -1032,6 +1032,9 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         at or after each selected ADC's previous end, including native triggers.
         Diagnostics name timeline, channel and overlap cycles. Pure native
         triggers retain QICK timing and overlap behavior, including t=None.
+        Native scalar/sweep tails use actual quantized starts for overlap and
+        shell WAIT evidence. A preceding native t=None has an unlocatable tail,
+        so a later managed trigger on that ADC raises instead of guessing.
         Named t=None raises ValueError at entry.
         """
         timeline = timeline if timeline is not None else self._timeline_default
