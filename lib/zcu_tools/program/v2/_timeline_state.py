@@ -401,6 +401,8 @@ class TimelineBook:
         self.branch_provenance: list[BranchProvenanceFrame] = []
         self.math: RuntimeMath
         self.preparing = 0
+        # Owned native scratch, or None when an author already owns that name.
+        self.shared_scratch: str | None = None
         self.output_time: TimeExpression | None = None
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}

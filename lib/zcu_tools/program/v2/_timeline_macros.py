@@ -198,6 +198,7 @@ class TimelineBoundary(Macro):
             self.book.runtime_ros.clear()
             self.book.native_expressions.clear()
             self.book.native_length_sources.clear()
+            self.book.shared_scratch = None
             self.book.pinned.clear()
         elif self.section == "body_end":
             self.book.check_shell_wait(prog)

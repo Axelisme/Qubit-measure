@@ -1292,6 +1292,18 @@ class RuntimeMath(TimedMacro):
         return register
 
     def scratch(self, index: int) -> str:
+        # Arithmetic masks die inside math.translate. Flat-top addresses live
+        # through the immediately following PulseByReg: its only pre-WPORT
+        # operation is set_timereg (WriteReg), which never uses QICK scratch.
+        # IncReg/Wait/Resync run outside both intervals, so slot zero can share
+        # their native scratch. Never implicitly borrow an author's register.
+        book = self.prog._timeline_book
+        if index == 0:
+            if book.shared_scratch is not None:
+                return book.shared_scratch
+            if "scratch" not in self.prog.reg_dict:
+                book.shared_scratch = self.prog.add_reg("scratch")
+                return book.shared_scratch
         return self.prog.add_reg(f"_timeline_tmp_{index}", allow_reuse=True)
 
     def _operation_storage(
