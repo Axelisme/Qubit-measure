@@ -8,6 +8,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
 
 from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, readout_duration
 
 
 class ScalarProgram(MyProgramV2):
@@ -45,13 +46,17 @@ def test_compiled_scalar_shots_include_shell_and_preserve_boundaries():
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
-    # Generator length10 / 384 us = 11.2 tProc cycles.
-    # Ref20, pulse23, advance5, pulse45; round(20 + 11.2 + relax30)=61.
+    # Native shell rounds the final waveform tail plus relax after body advance.
+    tail = generator_duration(prog.soccfg, 10 / GEN_MHZ)
+    shell = round(20 + tail * TPROC_MHZ + 30)
+    length = 5 + shell
+    starts = [20 + i * length for i in range(2)]
     assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == [
-        (20, 25, 86),
-        (86, 91, 152),
+        (start, start + 5, start + length) for start in starts
     ]
-    assert [[e.cycle for e in s.events] for s in result.shots] == [[23, 45], [89, 111]]
+    assert [[e.cycle for e in s.events] for s in result.shots] == [
+        [start + 3, start + 25] for start in starts
+    ]
     assert [s.loop_indices for s in result.shots] == [(0,), (1,)]
     assert [(e.kind, e.port) for e in result.shots[0].events] == [
         ("wave", 0),
@@ -135,24 +140,20 @@ def test_compiled_sweeps_step_and_reset_register_times_and_trigger_edges():
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
-    # Body adds 5 + (10,12,14); trigger offset=(30,32,34).
-    # ADC10 / 307.2 us = 14 tProc cycles; shell=(74,76,78).
-    assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == [
-        (20, 35, 109),
-        (109, 126, 202),
-        (202, 221, 299),
-        (299, 314, 388),
-        (388, 405, 481),
-        (481, 500, 578),
-    ]
-    assert [[e.cycle for e in s.events] for s in result.shots] == [
-        [20, 55, 65, 67],
-        [109, 148, 158, 160],
-        [202, 245, 255, 257],
-        [299, 334, 344, 346],
-        [388, 427, 437, 439],
-        [481, 524, 534, 536],
-    ]
+    # Body advances and trigger offsets share scan; only ADC tail is cross-grid.
+    adc_tail = readout_duration(prog.soccfg, 10 / RO_MHZ) * TPROC_MHZ
+    expected_boundaries = []
+    expected_events = []
+    start = 20
+    for scan in [0, 1, 2] * 2:
+        body_end = start + 15 + 2 * scan
+        trigger = body_end + 30 + 2 * scan
+        end = body_end + round(30 + 2 * scan + adc_tail + 30)
+        expected_boundaries.append((start, body_end, end))
+        expected_events.append([start, body_end + 20 + 2 * scan, trigger, trigger + 2])
+        start = end
+    assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == expected_boundaries
+    assert [[e.cycle for e in s.events] for s in result.shots] == expected_events
     assert [s.loop_indices for s in result.shots] == [
         (0, 0),
         (0, 1),
@@ -636,12 +637,13 @@ def test_native_waveform_sweep_updates_do_not_require_waveform_contents():
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
+    tail = generator_duration(prog.soccfg, 10 / GEN_MHZ)
+    length = 5 + round(20 + tail * TPROC_MHZ + 30)
+    starts = [20 + i * length for i in range(3)]
     assert [[e.cycle for e in s.events] for s in result.shots] == [
-        [23, 45],
-        [89, 111],
-        [155, 177],
+        [start + 3, start + 25] for start in starts
     ]
-    assert [s.end_cycle for s in result.shots] == [86, 152, 218]
+    assert [s.end_cycle for s in result.shots] == [start + length for start in starts]
 
 
 def test_unknown_wave_data_invalidates_updated_flags_before_control_flow():

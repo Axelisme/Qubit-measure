@@ -17,8 +17,14 @@ from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, readout_duration, tproc_ceil
 
 from .timing_support import recompile, shots, waves
+
+
+PROFILE = load_soccfg(2, 1)
+PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 25 / GEN_MHZ))
+ADC_END = tproc_ceil(PROFILE, readout_duration(PROFILE, 4 / RO_MHZ))
 
 
 def program(
@@ -41,7 +47,7 @@ def program(
                     phase=0,
                     gain=0.5,
                     length=25 / GEN_MHZ,
-                )  # 25 fabric cycles = 28 tProc cycles.
+                )
             self.append_macro(AllocateTime())
             if initialize is not None:
                 initialize(self)
@@ -62,7 +68,7 @@ def test_crossing_floor_places_at_pointwise_remaining_end_and_resets_each_shot()
     result = shots(prog)
     # End 10/20/30 minus reference advance 20 leaves 0/0/10.
     assert [waves(s) for s in result] == [[20], [20], [30]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [48, 48, 58] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [t + PULSE_END for t in (20, 20, 30)] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -302,7 +308,7 @@ def test_runtime_event_restores_output_time_after_branch_merge():
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body, reps=2))
-    assert [waves(shot) for shot in result] == [[100, 208], [140, 208], [180, 208]] * 2
+    assert [waves(shot) for shot in result] == [[t, 180 + PULSE_END] for t in (100, 140, 180)] * 2
 
 
 def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
@@ -315,8 +321,8 @@ def test_register_delay_adds_cycles_to_fork_without_advancing_reference():
 
     result = shots(program(body, reps=2))
     assert [waves(s) for s in result] == [[0, 40]] * 6
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [68] * 6
-    assert [s.end_cycle - s.start_cycle for s in result] == [68] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [40 + PULSE_END] * 6
+    assert [s.end_cycle - s.start_cycle for s in result] == [40 + PULSE_END] * 6
 
 
 @pytest.mark.parametrize("producer", ["alu", "dmem"])
@@ -339,7 +345,7 @@ def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(produc
     expected = [11, 11, 12] if producer == "alu" else [11, 11, 11]
     assert [waves(s) for s in result] == [[t] for t in expected] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
-        t + 28 for t in expected
+        t + PULSE_END for t in expected
     ] * 2
 
 
@@ -360,7 +366,7 @@ def test_author_register_overwrite_after_constant_accepts_optional_hint(producer
 
     result = shots(program(body, initialize=initialize))
     assert [waves(s) for s in result] == [[6]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [34] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [6 + PULSE_END] * 3
 
 
 @pytest.mark.parametrize("hint", [None, (10, 12)])
@@ -464,8 +470,8 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
         for s in result
     ] == [[40], [], []] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [46, 0, 0] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [46, 0, 0] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [40 + ADC_END, 0, 0] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [40 + ADC_END, 0, 0] * 2
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     assert wait["TIME"] == "@0"
 
@@ -493,9 +499,9 @@ def test_unknown_adc_tail_uses_actual_maximum_after_optional_sync(synchronize):
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
         for s in result
     ] == [[40], [41], [42]] * 2
-    # Four ADC samples take 5.6 cycles: ceil gives 46/47/48, crossing 47.
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [47, 47, 48] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [47, 47, 48] * 2
+    # The actual ADC tail crosses the independently authored cycle 47.
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [max(47, t + ADC_END) for t in (40, 41, 42)] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [max(47, t + ADC_END) for t in (40, 41, 42)] * 2
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     assert wait["TIME"] == "@0"
 
@@ -521,8 +527,8 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
     with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
         prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / TPROC_MHZ)
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
-    # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
-    assert wait["TIME"] == "@56"
+    # The hinted latest origin plus the quantized ADC window bounds WAIT.
+    assert wait["TIME"] == f"@{50 + ADC_END}"
     (shot,) = shots(prog)
     assert shot.body_end_cycle - shot.start_cycle == 0
 
@@ -545,9 +551,9 @@ def test_author_register_duration_in_repeat_debits_actual_iteration_advances(cou
         prog.pulse(1, "p1", timeline="default")
 
     result = shots(program(body, initialize=initialize))
-    expected = [3, 34, 100] if count == 2 else [3, 34, 65, 100]
+    expected = [3 + i * (3 + PULSE_END) for i in range(2 if count == 2 else 3)] + [100]
     assert [waves(s) for s in result] == [expected] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PULSE_END] * 3
 
 
 @pytest.mark.parametrize("align", [False, True])
@@ -598,7 +604,7 @@ def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
         prog.pulse(0, "p0", t="auto")
 
     assert [waves(s) for s in shots(program(body, initialize=initialize))] == [
-        [40, 100, 128]
+        [40, 100, 100 + PULSE_END]
     ] * 3
 
 
@@ -617,7 +623,7 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     result = shots(program(body, reps=2))
     # Repeats advance 15/30/45; remaining 85/70/55 still ends at cycle 100.
     assert [waves(s) for s in result] == [[100]] * 6
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PULSE_END] * 6
 
 
 def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
@@ -638,7 +644,7 @@ def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
         # Actual repeats advance 15/30/45; compare the external absolute100
         # with the new relative80, not the conservative author count bound.
         assert [waves(s) for s in result] == [[100], [110], [125]] * 2
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [128, 138, 153] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [t + PULSE_END for t in (100, 110, 125)] * 2
         recompile(prog)
 
 
@@ -653,7 +659,7 @@ def test_known_table_time_producer_places_each_selected_value(loader_type):
 
     result = shots(program(body, initialize=lambda p: p.declare(loader), reps=2))
     assert [waves(s) for s in result] == [[10], [20], [30]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [38, 48, 58] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [t + PULSE_END for t in (10, 20, 30)] * 2
 
 
 def test_runtime_join_uses_pointwise_maximum_and_preserves_later_target():
@@ -676,7 +682,7 @@ def test_runtime_join_uses_pointwise_maximum_and_preserves_later_target():
 
     result = shots(program(body, initialize=initialize))
     assert [waves(s) for s in result] == [[30], [30], [25]]
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [58, 58, 53]
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [t + PULSE_END for t in (30, 30, 25)]
 
 
 def test_runtime_maximum_uses_cartesian_domain_for_independent_table_axes():
@@ -701,12 +707,7 @@ def test_runtime_maximum_uses_cartesian_domain_for_independent_table_axes():
     # scan is outer, fine is inner. Zipping the sources loses four legal points.
     assert [waves(s) for s in result] == [[11], [29], [30], [30], [20], [29]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
-        39,
-        57,
-        58,
-        58,
-        48,
-        57,
+        t + PULSE_END for t in (11, 29, 30, 30, 20, 29)
     ] * 2
 
 
@@ -724,7 +725,7 @@ def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite()
 
     result = shots(program(body, initialize=lambda p: p.declare(loader), reps=2))
     assert [waves(s) for s in result] == [[25], [30], [25]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [53, 58, 53] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [t + PULSE_END for t in (25, 30, 25)] * 2
 
 
 def test_unknown_runtime_adc_start_must_prove_previous_window_is_complete():
@@ -760,7 +761,9 @@ def test_native_trigger_replaces_prior_runtime_adc_tail_for_shot_closure():
         for s in result
     ] == [[40, 100]] * 3
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
-    assert int(str(wait["TIME"]).removeprefix("@")) >= 65
+    assert int(str(wait["TIME"]).removeprefix("@")) >= tproc_ceil(
+        PROFILE, readout_duration(PROFILE, 4 / RO_MHZ) + 60 / TPROC_MHZ
+    ) - 1
 
 
 def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
@@ -782,7 +785,7 @@ def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
         for s in result
     ] == [[45, 48]] * 3
     assert [s.body_end_cycle - s.start_cycle for s in result] == [48] * 3
-    assert [s.end_cycle - s.start_cycle for s in result] == [51] * 3
+    assert [s.end_cycle - s.start_cycle for s in result] == [45 + ADC_END] * 3
 
 
 @pytest.mark.parametrize("managed", [False, True])
@@ -797,11 +800,11 @@ def test_auto_pulse_uses_actual_runtime_channel_end_not_its_upper_bound(managed)
         prog.pulse(0, "p0", t="auto", timeline="other" if managed else None)
 
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
-    assert [waves(s) for s in result] == [[5, 33], [10, 38], [15, 43]]
+    assert [waves(s) for s in result] == [[t, t + PULSE_END] for t in (5, 10, 15)]
     assert [s.body_end_cycle - s.start_cycle for s in result] == (
-        [61, 66, 71] if managed else [33, 38, 43]
+        [t + (2 if managed else 1) * PULSE_END for t in (5, 10, 15)]
     )
-    assert [s.end_cycle - s.start_cycle for s in result] == [61, 66, 71]
+    assert [s.end_cycle - s.start_cycle for s in result] == [t + 2 * PULSE_END for t in (5, 10, 15)]
 
 
 def test_native_register_reference_advance_preserves_unconsumed_end():
@@ -814,7 +817,7 @@ def test_native_register_reference_advance_preserves_unconsumed_end():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[15, 40]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [68] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [40 + PULSE_END] * 3
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
@@ -848,13 +851,13 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(
     # No closing reference advance may shift untouched's independent cycle 7.
     starts = [30, 30, 30] if align_timeline else [10, 0, 30]
     expected = (
-        [[start, start * 2 + 28, max(7, 2 * (start + 28))] for start in starts]
+        [[start, start * 2 + PULSE_END, max(7, 2 * (start + PULSE_END))] for start in starts]
         if inside_repeat
         else [[start, 7] for start in starts]
     )
     assert [waves(s) for s in result] == expected
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
-        max(row[-1] + 28, (start + 28) * (2 if inside_repeat else 1))
+        max(row[-1] + PULSE_END, (start + PULSE_END) * (2 if inside_repeat else 1))
         for row, start in zip(expected, starts, strict=True)
     ]
 
@@ -926,7 +929,7 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
     starts = [25, 25, 30] if align_timeline else [10, 25, 0]
     expected = (
-        [[start, 0, 2 * start + 28, start + 28] for start in starts]
+        [[start, 0, 2 * start + PULSE_END, start + PULSE_END] for start in starts]
         if inside_repeat
         else [[start, 0] for start in starts]
     )
@@ -969,9 +972,9 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
         prog.pulse(1, "p1", timeline="default")
 
     result = shots(program(body, reps=2))
-    # Each selected case closes at 38/48/58; external still ends at 100.
+    # Each selected case includes one playback; external still ends at 100.
     assert [waves(s) for s in result] == [[10, 100], [20, 100], [30, 100]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PULSE_END] * 6
 
 
 def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
@@ -1010,7 +1013,7 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
     result = shots(program(body))
     # Discard unjoined local end 20; default case ends 10/0/30 give True max=30.
     assert [waves(s) for s in result] == [[30]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [30 + PULSE_END] * 3
 
 
 def test_branch_local_names_expire_even_when_every_case_forks_same_name():
@@ -1047,8 +1050,8 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
 
     result = shots(program(body, reps=2))
     # Branch duration is max(5,10,15)=15. Fixed count 2 ends at 30;
-    # counts 1/2/3 end at 15/30/45, joined with the external pulse end 28.
-    expected = [28, 30, 45] if register_count else [30, 30, 30]
+    # Counts 1/2/3 end at 15/30/45, joined with the external pulse end.
+    expected = [max(PULSE_END, t) for t in ((15, 30, 45) if register_count else (30, 30, 30))]
     assert [waves(s) for s in result] == [[0]] * 6
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected * 2
     assert [s.end_cycle - s.start_cycle for s in result] == expected * 2
@@ -1066,9 +1069,9 @@ def test_register_timeline_time_inside_repeat_preserves_legal_pulse_backedge():
             prog.delay_by_timeline()
 
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
-    assert [waves(s) for s in result] == [[5, 38], [10, 48], [15, 58]]
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [66, 76, 86]
-    assert [s.end_cycle - s.start_cycle for s in result] == [66, 76, 86]
+    assert [waves(s) for s in result] == [[t, 2 * t + PULSE_END] for t in (5, 10, 15)]
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [2 * (t + PULSE_END) for t in (5, 10, 15)]
+    assert [s.end_cycle - s.start_cycle for s in result] == [2 * (t + PULSE_END) for t in (5, 10, 15)]
 
 
 def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
@@ -1116,10 +1119,10 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
             program(body)
     else:
         result = shots(program(body))
-        # Safe case 2 ends at 28+35=63, which is every iteration's duration.
-        assert [waves(s) for s in result] == [[0, 63], [0, 63], [0, 35, 63, 98]]
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [126] * 3
-        assert [s.end_cycle - s.start_cycle for s in result] == [126] * 3
+        # Safe case 2 adds 35 cycles after playback on every iteration.
+        assert [waves(s) for s in result] == [[0, 35 + PULSE_END], [0, 35 + PULSE_END], [0, 35, 35 + PULSE_END, 70 + PULSE_END]]
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [2 * (35 + PULSE_END)] * 3
+        assert [s.end_cycle - s.start_cycle for s in result] == [2 * (35 + PULSE_END)] * 3
 
 
 def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding():
@@ -1134,8 +1137,8 @@ def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding()
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[0]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [28] * 3
-    assert [s.end_cycle - s.start_cycle for s in result] == [28] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [PULSE_END] * 3
+    assert [s.end_cycle - s.start_cycle for s in result] == [PULSE_END] * 3
 
 
 def test_long_pulse_crosses_branch_without_conservative_shell_padding():
@@ -1149,8 +1152,8 @@ def test_long_pulse_crosses_branch_without_conservative_shell_padding():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[0]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [28] * 3
-    assert [s.end_cycle - s.start_cycle for s in result] == [28] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [PULSE_END] * 3
+    assert [s.end_cycle - s.start_cycle for s in result] == [PULSE_END] * 3
 
 
 class CustomWrite(WriteReg):
@@ -1255,7 +1258,7 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[30]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [58] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [30 + PULSE_END] * 3
 
 
 @pytest.mark.parametrize("align_timeline", [True, False])
@@ -1369,7 +1372,7 @@ def test_register_source_is_snapshotted_before_subsequent_registered_writes():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[10]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [38] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [10 + PULSE_END] * 3
 
 
 def test_time_producer_must_be_initialized_on_every_branch_path():
@@ -1422,7 +1425,7 @@ def test_time_lookup_accepts_inclusive_index_bounds(loader_type, index):
     expected = 5 if index == 0 else 15
     result = shots(program(body, initialize=lambda p: p.declare(loader)))
     assert [waves(s) for s in result] == [[expected]] * 3
-    assert [s.end_cycle - s.start_cycle for s in result] == [expected + 28] * 3
+    assert [s.end_cycle - s.start_cycle for s in result] == [expected + PULSE_END] * 3
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])
@@ -1528,7 +1531,7 @@ def test_runtime_timeline_reuses_dead_cycle_storage_for_sequential_events():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [
-        [40, 68, 96, 124, 152, 180, 208, 236, 264, 292, 320, 348]
+        [40 + i * PULSE_END for i in range(12)]
     ] * 3
     assert [s.body_end_cycle - s.start_cycle for s in result] == [376] * 3
 

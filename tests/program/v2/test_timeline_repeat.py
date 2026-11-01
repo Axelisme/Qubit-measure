@@ -9,8 +9,16 @@ from zcu_tools.program.v2.macro.wmem import PulseFromRegs
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, runtime_cycles, tproc_ceil
+from math import ceil
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
+
+
+PROFILE = load_soccfg(2, 1)
+PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 25 / GEN_MHZ))
+SHORT_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 5 / GEN_MHZ))
+LONG_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 125 / GEN_MHZ))
 
 
 def _program(
@@ -31,7 +39,7 @@ def _program(
                     phase=0,
                     gain=0.5,
                     length=25 / GEN_MHZ,
-                )  # 25 generator ticks = 28 tProc ticks.
+                )
             if initialize is not None:
                 initialize(self)
 
@@ -62,7 +70,7 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
         phase=0,
         gain=0.5,
         length=5 / GEN_MHZ,
-    )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
+    )
 
 
 @pytest.mark.parametrize("tail_sync", [False, True])
@@ -164,11 +172,11 @@ def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
         prog.pulse(1, "p1", timeline="default")
 
     prog = _program(body, _register_initialize, reps=2)
-    assert [_waves(s) for s in _shots(prog)] == [[0, 40, 80, 120]] * 2
+    assert [_waves(s) for s in _shots(prog)] == [[i * (PULSE_END + 12) for i in range(4)]] * 2
     increments = [
         i
         for i in prog.prog_list
-        if i.get("DST") == "s14" and i.get("OP") == "s14 + #40"
+        if i.get("DST") == "s14" and i.get("OP") == f"s14 + #{PULSE_END + 12}"
     ]
     assert 1 <= len(increments) < 32
     for index, inst in enumerate(prog.prog_list):
@@ -208,7 +216,7 @@ def test_external_timeline_places_at_actual_end_after_runtime_control(
     offsets = [5, 0, 15] if branch_after else [0, 0, 0]
     assert [_waves(shot) for shot in result] == [[origin + t] for t in offsets] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        origin + t + 28 for t in offsets
+        origin + t + PULSE_END for t in offsets
     ] * 2
 
 
@@ -271,8 +279,8 @@ def test_repeat_fixed_point_matches_explicit_native_reference_loop():
     actual = _program(body)
     expected = _program(native_body)
     (shot,) = _shots(actual)
-    assert _waves(shot) == [0, 35, 70]
-    assert (shot.body_end_cycle, shot.end_cycle) == (98, 98)
+    assert _waves(shot) == [i * (PULSE_END + 7) for i in range(3)]
+    assert (shot.body_end_cycle, shot.end_cycle) == (3 * PULSE_END + 14,) * 2
     # Only the native reps/r counters need data registers, not an end carrier.
     assert len(actual.reg_dict) == len(expected.reg_dict) == 2
     assert [
@@ -285,7 +293,7 @@ def test_repeat_fixed_point_matches_explicit_native_reference_loop():
         if inst["CMD"] == "TIME"
     ]
     assert any(
-        inst["CMD"] == "TIME" and inst["C_OP"] == "inc_ref" and inst.get("LIT") == "#35"
+        inst["CMD"] == "TIME" and inst["C_OP"] == "inc_ref" and inst.get("LIT") == f"#{PULSE_END + 7}"
         for inst in actual.prog_list
     )
 
@@ -303,9 +311,9 @@ def test_repeat_nonfixed_tail_preserves_explicit_reference_position(sync_in_midd
 
     prog = _program(body)
     (shot,) = _shots(prog)
-    assert _waves(shot) == [0, 35, 63 if sync_in_middle else 0]
+    assert _waves(shot) == [0, PULSE_END + 7, 2 * PULSE_END + 7 if sync_in_middle else 0]
     assert (shot.body_end_cycle, shot.end_cycle) == (
-        (70, 91) if sync_in_middle else (70, 70)
+        (2 * (PULSE_END + 7), 3 * PULSE_END + 7) if sync_in_middle else (2 * (PULSE_END + 7),) * 2
     )
     assert len(prog.reg_dict) > 2
 
@@ -326,8 +334,8 @@ def test_repeat_nested_or_other_timeline_sync_keeps_variable_tail(shape):
 
     prog = _program(body)
     (shot,) = _shots(prog)
-    assert _waves(shot) == [0, 28, 56]
-    assert (shot.body_end_cycle, shot.end_cycle) == (56, 84)
+    assert _waves(shot) == [i * PULSE_END for i in range(3)]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * PULSE_END, 3 * PULSE_END)
     assert len(prog.reg_dict) > 2
 
 
@@ -343,8 +351,8 @@ def test_repeat_nonzero_entry_warns_without_inserting_reference_advance():
     with pytest.warns(UserWarning, match=r"delay_by_timeline\(\).*before.*loop"):
         prog = _program(body)
     (shot,) = _shots(prog)
-    assert _waves(shot) == [0, 7, 35, 35]
-    assert (shot.body_end_cycle, shot.end_cycle) == (63, 63)
+    assert _waves(shot) == [0, 7, PULSE_END + 7, PULSE_END + 7]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * PULSE_END + 7,) * 2
     assert len(prog.reg_dict) > 2
 
 
@@ -368,10 +376,10 @@ def test_variable_reference_repeat_resets_count_and_external_debit_each_shot(
         prog.pulse(1, "p1", timeline="default")
 
     result = _shots(_program(body, initialize, reps=2))
-    expected = [0, 35, 70, 140] if actual else [140]
+    expected = [i * (PULSE_END + 7) for i in range(3)] + [140] if actual else [140]
     assert [_waves(shot) for shot in result] == [expected] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [168] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [168] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [140 + PULSE_END] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [140 + PULSE_END] * 2
 
 
 @pytest.mark.parametrize("operation", ["delay_by_timeline", "delay", "delay_auto"])
@@ -382,14 +390,14 @@ def test_repeat_allows_explicit_reference_owner_advances_outside_case(operation)
             if operation == "delay_by_timeline":
                 prog.delay_by_timeline()
             elif operation == "delay":
-                prog.delay(28 / TPROC_MHZ)
+                prog.delay(PULSE_END / TPROC_MHZ)
             else:
                 prog.delay_auto()
         prog.pulse(1, "p1")
 
     (shot,) = _shots(_program(body))
-    assert _waves(shot) == [0, 28, 56]
-    assert (shot.body_end_cycle, shot.end_cycle) == (56, 84)
+    assert _waves(shot) == [i * PULSE_END for i in range(3)]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * PULSE_END, 3 * PULSE_END)
 
 
 @pytest.mark.parametrize("operation", ["delay_by_timeline", "delay", "delay_auto"])
@@ -406,7 +414,7 @@ def test_case_rejects_reference_owner_advances_through_repeat(operation, nested)
         ):
             prog.timeline_inc(28 / TPROC_MHZ)
             if operation == "delay":
-                prog.delay(28 / TPROC_MHZ)
+                prog.delay(PULSE_END / TPROC_MHZ)
             else:
                 getattr(prog, operation)()
 
@@ -422,8 +430,8 @@ def test_variable_repeat_shadows_default_without_advancing_reference():
         prog.pulse(1, "p1")
 
     (shot,) = _shots(_program(body))
-    assert _waves(shot) == [0, 28, 0]
-    assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
+    assert _waves(shot) == [0, PULSE_END, 0]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * PULSE_END,) * 2
 
 
 @pytest.mark.parametrize(
@@ -461,13 +469,13 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
 
     shots = _shots(_program(body, initialize, reps=2))
     n = 2 if count == 2 else 3
-    duration = 28 * outer * n
-    case0 = [14 + 28 * i for i in range(outer * n)] + [14 + duration]
+    duration = PULSE_END * outer * n
+    case0 = [14 + PULSE_END * i for i in range(outer * n)] + [14 + duration]
     case1 = [14 + (duration if align else 28)]
     assert [_waves(s) for s in shots] == [case0, case1] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
-        42 + duration,
-        42 + (duration if align else 28),
+        14 + PULSE_END + duration,
+        14 + PULSE_END + (duration if align else 28),
     ] * 2
 
 
@@ -504,8 +512,8 @@ def test_aligned_case_reconstructs_variable_repeat_with_pulse_and_delay():
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize))
-    assert [_waves(s) for s in shots] == [[0, 33, 66], [66]]
-    assert [s.end_cycle - s.start_cycle for s in shots] == [94, 94]
+    assert [_waves(s) for s in shots] == [[0, PULSE_END + 5, 2 * (PULSE_END + 5)], [2 * (PULSE_END + 5)]]
+    assert [s.end_cycle - s.start_cycle for s in shots] == [3 * PULSE_END + 10] * 2
 
 
 @pytest.mark.parametrize("align", [False, True])
@@ -526,7 +534,7 @@ def test_branch_inside_variable_repeat_retains_iteration_origin(align):
 
     shots = _shots(_program(body, initialize))
     assert [_waves(s) for s in shots] == (
-        [[0, 38, 76]] * 2 if align else [[0, 33, 66], [0, 38, 76]]
+        [[0, PULSE_END + d, 2 * (PULSE_END + d)] for d in ([10, 10] if align else [5, 10])]
     )
 
 
@@ -546,8 +554,8 @@ def test_outer_reference_repeat_protects_inner_variable_repeat_backedge(safe):
             _program(body)
     else:
         (shot,) = _shots(_program(body))
-        assert _waves(shot) == [0, 28, 56, 84]
-        assert shot.end_cycle == 112
+        assert _waves(shot) == [i * PULSE_END for i in range(4)]
+        assert shot.end_cycle == 4 * PULSE_END
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])
@@ -578,9 +586,9 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
 
     shots = _shots(_program(body, initialize, reps=2))
     assert [_waves(s) for s in shots] == [
-        [0, t, t + 35, t + 70, 140] for t in [20, 30, 40]
+        [0, t, t + PULSE_END + 7, t + 2 * (PULSE_END + 7), LONG_END] for t in [20, 30, 40]
     ] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 6
+    assert [s.end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 6
 
 
 def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
@@ -614,7 +622,7 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
         prog.pulse(1, "p1", timeline="default")
 
     prog = _program(body, initialize, reps=2)
-    assert [_waves(s) for s in _shots(prog)] == [[40, 88, 96], [41, 95, 108]] * 2
+    assert [_waves(s) for s in _shots(prog)] == [[t, 2 * t + ceil(runtime_cycles(PROFILE, n)), 2 * (t + ceil(runtime_cycles(PROFILE, n)))] for t, n in ((40, 7), (41, 11))] * 2
 
 
 @pytest.mark.parametrize("actual", [0, 2])
@@ -665,12 +673,12 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
         prog.pulse(1, "p1", timeline="default")
 
     prog = _program(body, initialize)
-    assert [_waves(s) for s in _shots(prog)] == [[0, 8, 16], [0, 13, 26]]
+    assert [_waves(s) for s in _shots(prog)] == [[0, ceil(runtime_cycles(PROFILE, n)), 2 * ceil(runtime_cycles(PROFILE, n))] for n in (7, 11)]
     with pytest.raises(RuntimeError, match="runtime-only"):
         prog.get_time_param("inside", "t", as_array=True)
     assert prog.get_time_param(
         "after", "t", as_array=True
-    ) * TPROC_MHZ == pytest.approx([16, 26])
+    ) * TPROC_MHZ == pytest.approx([2 * ceil(runtime_cycles(PROFILE, n)) for n in (7, 11)])
 
 
 @pytest.mark.parametrize("parent", ["default", "drive"])
@@ -689,8 +697,8 @@ def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_itera
         prog.pulse(0, "p0", timeline=parent)
 
     (shot,) = _shots(_program(body))
-    assert _waves(shot) == [0, 28, 63, 98]
-    assert (shot.body_end_cycle, shot.end_cycle) == (126, 126)
+    assert _waves(shot) == [0, PULSE_END, 2 * PULSE_END + 7, 3 * PULSE_END + 14]
+    assert (shot.body_end_cycle, shot.end_cycle) == (4 * PULSE_END + 14,) * 2
 
 
 @pytest.mark.parametrize("advance", [0, 20])
@@ -707,7 +715,7 @@ def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_na
             phase=0,
             gain=0.5,
             length=125 / GEN_MHZ,
-        )  # 125 generator ticks = 140 tProc ticks.
+        )
 
     def body(prog):
         prog.fork("default", into="flux")
@@ -728,10 +736,10 @@ def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_na
     prog = _program(body, initialize, reps=2)
     shots = _shots(prog)
     assert [_waves(s) for s in shots] == [
-        [0, advance, advance + 35, 140, advance + 70]
+        [0, advance, advance + PULSE_END + 7, LONG_END, advance + 2 * (PULSE_END + 7)]
     ] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [168] * 4
-    assert [s.end_cycle - s.start_cycle for s in shots] == [168] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 4
+    assert [s.end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 4
     prog.compile()
     assert _shots(prog) == shots
 
@@ -755,8 +763,8 @@ def test_nested_repeat_syncs_chosen_parent_and_expires_inner_locals(inner_parent
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body))
-    assert _waves(shot) == [10, 38, 66, 104, 132, 160]
-    assert (shot.body_end_cycle, shot.end_cycle) == (188, 188)
+    assert _waves(shot) == [outer * (10 + 3 * PULSE_END) + 10 + inner * PULSE_END for outer in range(2) for inner in range(3)]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * (10 + 3 * PULSE_END),) * 2
 
 
 @pytest.mark.parametrize(
@@ -815,12 +823,10 @@ def test_fixed_repeat_swept_duration_debits_outer_end_at_each_scan_point():
 
     shots = _shots(_program(body, initialize, reps=2))
     assert [_waves(s) for s in shots] == [
-        [10, 48, 100],
-        [15, 58, 100],
-        [20, 68, 100],
+        [t, 2 * t + PULSE_END, 100] for t in (10, 15, 20)
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [128] * 6
-    assert [s.end_cycle - s.start_cycle for s in shots] == [128] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
+    assert [s.end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
 
 
 def test_fixed_repeat_preserves_crossing_external_floor():
@@ -852,8 +858,8 @@ def test_zero_repeat_syncs_parent_but_does_not_execute_or_declare_body():
         prog.pulse(0, "p0", timeline="local")
 
     (shot,) = _shots(_program(body))
-    assert _waves(shot) == [0, 28]
-    assert (shot.body_end_cycle, shot.end_cycle) == (56, 56)
+    assert _waves(shot) == [0, PULSE_END]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * PULSE_END,) * 2
 
 
 @pytest.mark.parametrize("count", [-1, True, False])
@@ -961,7 +967,7 @@ def test_unhinted_register_repeat_preserves_actual_external_end(actual):
     result = _shots(_program(body, initialize, reps=2))
     expected = [100] if actual == 0 else [0, 15, 30, 100]
     assert [_waves(s) for s in result] == [expected] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [128] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PULSE_END] * 2
 
 
 @pytest.mark.parametrize("consumer", ["body", "join", "fork", "delay_by_timeline"])
@@ -1383,7 +1389,7 @@ def test_wrong_repeat_pulse_offset_is_detected_by_independent_timing_oracle():
     (shot,) = _shots(_program(body))
     assert _waves(shot) == [1, 30]
     with pytest.raises(AssertionError):
-        assert _waves(shot) == [0, 28]
+        assert _waves(shot) == [0, PULSE_END]
 
 
 def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
@@ -1477,7 +1483,7 @@ def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    assert _waves(shot) == [0, 28, 56, 84]
+    assert _waves(shot) == [i * PULSE_END for i in range(4)]
     assert (shot.body_end_cycle, shot.end_cycle) == (112, 112)
 
 

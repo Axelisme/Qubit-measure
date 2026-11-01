@@ -21,6 +21,7 @@ from tests.program._profiles import (
     load_soccfg,
 )
 from tests.program._timeline import compile_modules
+from tests.program._timing_expectations import generator_duration
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import (
     envelope_times_us,
@@ -83,7 +84,7 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
         1 / GEN_SAMPLE_MHZ
     )
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(
-        38 / GEN_MHZ
+        float(generator_duration(env.soccfg, 0.1))
     )
     assert values.real.min() == pytest.approx(-0.2, abs=1 / GEN_MAXV)
     assert np.max(np.abs(values)) < 0.23  # never normalize this to a unit peak

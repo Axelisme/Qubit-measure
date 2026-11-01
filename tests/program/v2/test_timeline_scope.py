@@ -8,6 +8,8 @@ from zcu_tools.program import v2
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, runtime_cycles, tproc_ceil
+from math import ceil
 from tests.program.v2.timing_support import shots, waves
 
 
@@ -146,7 +148,11 @@ def test_timed_entry_points_select_scope_and_preserve_native_placement(
     expected_tick = {"explicit": 310, "outside": 10, "nested": 210}.get(context, 110)
     expected_end = 100 if context == "outside" else expected_tick
     if context != "outside" and operation.startswith("pulse"):
-        expected_end += 44
+        expected_end += (
+            ceil(runtime_cycles(prog.soccfg, 39))
+            if operation in ("pulse_by_reg", "pulse_from_length_reg")
+            else tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ))
+        )
     # The second, native pulse observes the selected end after delay_by_timeline. This also
     # covers register-selected ends that have no affine get_time_param value.
     assert [waves(shot) for shot in shots(prog)] == [[expected_tick, expected_end]]

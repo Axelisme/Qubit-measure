@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution import Cancelled
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
+from tests.program._timing_expectations import tproc_ceil
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
@@ -814,7 +815,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
     assert times_us(request.time_base, request.readouts[0].trigger_ticks) == (
         expected_trigger,
     )
-    expected_pulse = prog.cycles2us(646)  # ceil(1.5 us * 430.08 MHz)
+    expected_pulse = prog.cycles2us(tproc_ceil(env.soccfg, 1.5))
     assert (
         time_us(request.time_base, request.materialize_point(0).events[0].start_ticks)
         == expected_pulse

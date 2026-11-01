@@ -16,6 +16,7 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import GEN_MAXV, RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
+from tests.program._timing_expectations import generator_duration, tproc_ceil
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import (
     clock_invariance_program,
@@ -73,7 +74,8 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     template = result.templates[0]
     assert template.events[0].start_ticks.dtype == np.int64
     assert template.events[0].start_ticks.shape == (1,)
-    assert template.events[0].duration_ticks.tolist() == [4256]
+    pulse_ticks = expected_base.ticks(generator_duration(env.soccfg, 0.1))
+    assert template.events[0].duration_ticks.tolist() == [pulse_ticks]
     assert template.duration_ticks.dtype == np.int64
     assert template.readouts[0].trigger_ticks.dtype == np.int64
     assert template.readouts[0].trigger_ticks.shape == (1, 1)
@@ -82,7 +84,7 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     (event,) = point.events
     assert event.source == "drive"
     assert event.start_ticks == 0
-    assert event.duration_ticks == 4256
+    assert event.duration_ticks == pulse_ticks
     assert event.phase_reference_ticks == 0
     assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
     assert event.phase_deg == pytest.approx(30, abs=1e-5)
@@ -233,8 +235,14 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     slot = result.templates[0].events[0]
     assert slot.start_ticks.dtype == np.int64
     assert slot.start_ticks.shape == (6,)
-    assert slot.start_ticks.tolist() == [0, 800, 1600, 0, 800, 1600]
-    assert slot.duration_ticks.tolist() == [4256] * 6
+    # Native time sweeps round start/span, then truncate the signed step.
+    step = int(prog.us2cycles(0.04) / 2)
+    starts = [i * step for i in range(3)] * 2
+    period = result.time_base.period_ticks(prog.tproccfg["f_time"])
+    assert slot.start_ticks.tolist() == [start * period for start in starts]
+    assert slot.duration_ticks.tolist() == [
+        result.time_base.ticks(generator_duration(env.soccfg, 0.1))
+    ] * 6
     events = [result.materialize_point(i).events[0] for i in range(6)]
     assert [e.frequency_mhz for e in events] == pytest.approx(
         [80, 90, 100, 180, 190, 200], abs=1e-5
@@ -243,7 +251,7 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
         np.tile(prog.get_pulse_param("swept", "gain", as_array=True), 2)
     )
     assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
-        np.tile([0, 8, 16], 2) / prog.tproccfg["f_time"]
+        np.asarray(starts) / prog.tproccfg["f_time"]
     )
 
 
@@ -328,9 +336,11 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     result = request(prog, env)
     events = result.materialize_point(0).events
     assert [e.source for e in events[:2]] == ["one", "two"]
+    delay_end = tproc_ceil(env.soccfg, 0.1)
+    pulse_end = tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1, 1))
     assert [
         time_us(result.time_base, e.start_ticks) for e in events[:2]
-    ] == pytest.approx([44 / TPROC_MHZ, 131 / TPROC_MHZ])
+    ] == pytest.approx([delay_end / TPROC_MHZ, (2 * delay_end + pulse_end) / TPROC_MHZ])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 
@@ -586,7 +596,7 @@ def test_wave_memory_and_output_coupled_effects_use_prewrite_words(opcode):
     assert [event.gain for event in events] == pytest.approx([100 / GEN_MAXV] * 2)
     assert [
         time_us(observed.time_base, event.start_ticks) for event in events
-    ] == pytest.approx([0, 43 / TPROC_MHZ])
+    ] == pytest.approx([0, prog.us2cycles(0.1) / TPROC_MHZ])
 
 
 def test_wmem_store_initializes_a_new_address_for_native_port_playback():
