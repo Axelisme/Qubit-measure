@@ -120,8 +120,10 @@ def drive_ratios(
             dtype=np.float64,
             count=len(i),
         )
-        amplitude += gain**2 * paths[:, None] / np.maximum(
-            abs(energies[k] - energies[i, None] - frequency), inverse_time
+        amplitude += (
+            gain**2
+            * paths[:, None]
+            / np.maximum(abs(energies[k] - energies[i, None] - frequency), inverse_time)
         )
     two_ratios = amplitude / np.sqrt((2 * frequency - gap) ** 2 + width2)
     # triu_indices follows the original i/j order; keep each maximum in order.
