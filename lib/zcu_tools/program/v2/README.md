@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-02，caller-selected board profile paths
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -62,8 +62,9 @@ dispatch jump-address tables remain supported.
 from caller-owned YAML mappings. Every setting is required, including channel
 counts, channel types, clocks, memory limits and QICK metadata. The builder does
 not read the installed QICK version or construct hardware or acquisition sources.
-Tests own YAML under `tests/program/profiles/`; lab environments each own an
-adjacent `profile.yaml`. Board profiles remain separate from physical model YAML.
+Tests own YAML under `tests/program/profiles/`; lab board YAML lives under
+`zcu_lab/simulation_envs/`. The startup or example caller selects the profile path.
+Board profiles remain separate from physical model YAML.
 
 `pfb_channel(soccfg, ro_ch, frequency_mhz)` resolves an absolute physical frequency
 through QICK's public readout calculation. It uses the supplied ADC's actual PFB
