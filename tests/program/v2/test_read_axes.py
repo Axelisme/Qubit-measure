@@ -239,10 +239,12 @@ def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
     builder = v2.TimelineBuilder(v2.make_mock_soccfg())
     builder.add_loop("choice", 2)
     for index in (0, 1):
-        with builder.branch(by="choice", align_timeline=True) as cases:
-            with cases.case(index):
-                builder.trigger([0], t=0)
-                builder.timeline_inc(1.5)
+        with (
+            builder.branch(by="choice", align_timeline=True) as cases,
+            cases.case(index),
+        ):
+            builder.trigger([0], t=0)
+            builder.timeline_inc(1.5)
     builder.emit(selected)
     prog = builder.build()
     prog.set_reads_per_shot(2)
