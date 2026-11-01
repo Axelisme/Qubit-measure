@@ -12,8 +12,9 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch、mixer_freq 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
-`mux_readout_initial` 有 captured readout 時回傳 Slot ref，使用 library 完整 tones 與 scalar 設定。
-沒有時以 `readout/mux:blank` Template 的 scalar 初值為來源，再加 group tones 與 group wiring。
+`mux_readout_initial` 未選 ringup 時回傳帶 `readout/mux:blank` Template fallback 的 Slot。
+有 captured readout 時使用 library 完整 tones 與 scalar 設定，不讀取未使用 fallback 的來源。
+缺 slot 時才採用 Template 的 scalar 初值、group tones 與 group wiring，並合併 Template 自有的 seed metadata。
 Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 代替 trigger timing。
 未選 wait_for_ringup 時，即使 group 有 time_of_fly 也不推導 timing。
@@ -27,7 +28,7 @@ trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_leng
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。各 caller 以 `Form(...).with_seed_metadata(...)` 加入來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。純 fallback 的 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。

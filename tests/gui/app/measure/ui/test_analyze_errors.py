@@ -46,7 +46,7 @@ def test_analyze_shows_errors_and_publishes_returns(
     ) -> SampleAnalysis:
         if error_type is not None:
             raise error_type(message)
-        _, axes = plots.subplots("fit")
+        _, axes = plots.subplots(num="fit")
         axes.plot([0, 1], [0.1, 0.3], label="Synthetic fit")
         axes.set_xlabel("Sample")
         axes.set_ylabel("Signal")

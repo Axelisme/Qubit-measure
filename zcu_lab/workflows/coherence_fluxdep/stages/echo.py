@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.workflows import Failed
 from zcu_tools.program import shot_time_s
@@ -175,7 +176,12 @@ async def measure_echo(
             file=acquisition.file,
             gain_clamped=gain_clamped,
         )
-    plot.update(acquisition.result.times, acquisition.result.signals.real)
+
+    @env.plots.on_plot_thread
+    def update_raw(data: tuple[NDArray[np.float64], NDArray[np.float64]]):
+        return plot.set(*data)
+
+    update_raw((acquisition.result.times, acquisition.result.signals.real))
     fit = analyze_t2echo_fluxdep(acquisition.result, fit_fringe=cfg.detune != 0.0)
     if isinstance(fit, Failed):
         return EchoResult(

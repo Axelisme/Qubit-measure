@@ -205,7 +205,7 @@ def _build_jpa_auto_result(
 
 
 _JPA_AUTO_ITERATION_AXIS = (
-    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+    VariableAxisSpec.generated_arange(label="Iteration", unit="a.u.", dtype=np.int64),
 )
 JPA_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
     variables=(

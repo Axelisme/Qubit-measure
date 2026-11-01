@@ -81,30 +81,22 @@ class StaticInteractive(InteractiveFrontend):
 def LayoutAdapter_draw_figures(plots: Plots, count: int, prefix: str) -> None:
     for index in range(1, count + 1):
         name = f"{prefix} tone {index}"
-        plots.subplots(name)
-
-        def draw(figure: Figure, name: str = name, height: int = index) -> None:
-            axes = figure.axes[0]
-            axes.plot([0, 1, 2], [0, height, 0], label=name)
-            axes.set_xlabel("Time")
-            axes.legend()
-
-        plots.draw(name, draw)
+        figure, axes = plots.subplots(num=name)
+        axes.plot([0, 1, 2], [0, index, 0], label=name)
+        axes.set_xlabel("Time")
+        axes.legend()
+        figure.show()
 
 
 def PresentationAdapter_run(
     cfg: SavingCfg, *, context: RunContext
 ) -> RunRecord[SavingCfg, SavingResult]:
     record = AnalysisSavingAdapter.run(cfg, context=context)
-    context.plots.subplots("signal")
-
-    def draw(figure: Figure) -> None:
-        axes = figure.axes[0]
-        axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
-        axes.set_xlabel("Time")
-        axes.legend()
-
-    context.plots.draw("signal", draw)
+    figure, axes = context.plots.subplots(num="signal")
+    axes.plot([0, 1, 2], [0, 1, 0], label="Signal")
+    axes.set_xlabel("Time")
+    axes.legend()
+    figure.show()
     return record
 
 
@@ -112,7 +104,7 @@ def PresentationAdapter_analyze(
     req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
 ) -> PaneSummary:
     for name, values in (("fit", [0, 1, 0]), ("residual", [0, -1, 0])):
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         axes.plot([0, 1, 2], values, label=name)
         axes.set_xlabel("Time")
         axes.legend()
@@ -127,7 +119,7 @@ def PresentationAdapter_post_analyze(
     plots: Plots,
 ) -> PostSummary:
     for name, values in (("summary", [1, 0, 1]), ("detail", [-1, 0, -1])):
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         axes.plot([0, 1, 2], values, label=name)
         axes.set_xlabel("Time")
         axes.legend()

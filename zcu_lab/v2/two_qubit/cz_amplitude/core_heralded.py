@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -88,11 +90,13 @@ class CZAmplitudeHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
-                    VariableAxisSpec("Common gain scale", "", field_name="scales"),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
+                    VariableAxisSpec(
+                        label="Common gain scale", unit="", field_name="scales"
+                    ),
                 ),
                 z=VariableZSpec(
                     field_name="sums",
@@ -119,13 +123,17 @@ class CZAmplitudeHeraldedExp(
         """
         validate_classifiers(config.readout, config.roles)
         scales = sweep2array(config.scales)
-        viewer = live_line(
-            context.plots, "measurement", "Common gain scale", "P(g,g) | herald (g,g)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
+        viewer = live_line(ax)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = terminal_counts(sums, ("g", "g"))
-            viewer.update(scales, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(scales, joint_probabilities(counts)[..., 0, 0])
 
         buffer = SignalBuffer(
             (len(scales), 3, 3, 3, 3), dtype=np.float64, on_update=update_view
@@ -205,7 +213,9 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
-        _, ax = plots.subplots("joint_return", figsize=(10, 5), layout="constrained")
+        _, ax = plots.subplots(
+            num="joint_return", figsize=(10, 5), layout="constrained"
+        )
         for index, label in enumerate(OUTCOME_LABELS):
             ax.plot(
                 result.scales,
@@ -238,7 +248,7 @@ class CZAmplitudeHeraldedExp(
 
         ee_counts = terminal_counts(result.sums, ("e", "e"))
         ee_not_returned = 1.0 - joint_probabilities(ee_counts)[:, 1, 1]
-        _, ax = plots.subplots("ee_control", figsize=(10, 5), layout="constrained")
+        _, ax = plots.subplots(num="ee_control", figsize=(10, 5), layout="constrained")
         ax.plot(result.scales, ee_not_returned, ".-")
         ax.set(
             xlabel="Common gain scale",
@@ -246,7 +256,7 @@ class CZAmplitudeHeraldedExp(
             title="Drive disturbance of |00⟩ · ee control, no shared fit",
         )
         herald_matrix = herald_probabilities(result.sums)
-        _, ax = plots.subplots("herald", figsize=(10, 5), layout="constrained")
+        _, ax = plots.subplots(num="herald", figsize=(10, 5), layout="constrained")
         for index, label in enumerate(OUTCOME_LABELS):
             ax.plot(
                 result.scales, herald_matrix.reshape(-1, 9)[:, index], ".-", label=label

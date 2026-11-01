@@ -3,7 +3,6 @@
 from typing import Any
 
 import numpy as np
-from matplotlib.figure import Figure
 from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -20,12 +19,9 @@ class ProbeExperiment(Experiment[SavingResult, SavingCfg]):
     def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
         result = SavingCore().run(config, context=context)
         result.signal[-1] = complex(np.nan, 0)
-        _, axes = context.plots.subplots("signal/trace")
-
-        def draw(_figure: Figure) -> None:
-            axes.plot(result.frequency, result.signal.real)
-
-        context.plots.draw("signal/trace", draw)
+        figure, axes = context.plots.subplots(num="signal/trace")
+        axes.plot(result.frequency, result.signal.real)
+        figure.show()
         return result
 
     def analyze(
@@ -33,6 +29,6 @@ class ProbeExperiment(Experiment[SavingResult, SavingCfg]):
     ) -> dict[str, object]:
         if source.cfg is None:
             raise ValueError("Analysis requires the restored record")
-        _, axes = plots.subplots("fit")
+        _, axes = plots.subplots(num="fit")
         axes.plot(source.result.frequency, source.result.signal.imag)
         return {"gain": source.cfg.gain, "options": options}

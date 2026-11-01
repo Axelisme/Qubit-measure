@@ -76,7 +76,7 @@ def analyze_environment(
     *,
     plots: Plots,
 ) -> EnvironmentSummary:
-    plots.subplots("recorded")
+    plots.subplots(num="recorded")
     return inspect_environment(request.parameters)
 
 
@@ -87,7 +87,7 @@ def post_environment(
     *,
     plots: Plots,
 ) -> EnvironmentSummary:
-    plots.subplots("recorded-post")
+    plots.subplots(num="recorded-post")
     result = inspect_environment(request.parameters)
     assert request.analyze_result == result
     return result
