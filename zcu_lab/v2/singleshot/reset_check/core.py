@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -20,12 +21,13 @@ from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     TimelineBuilder,
     shot_sums,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
+from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 
 from zcu_lab.v2.support import live_line
 
@@ -37,7 +39,7 @@ class ResetCheckCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -65,11 +67,7 @@ class ResetCheckResult:
     """
 
     gains: NDArray[np.float64]
-    reset_states: NDArray[np.int64]
     counts: NDArray[np.float64]
-    population_states: NDArray[np.int64] = field(
-        default_factory=lambda: np.array([0, 1, 2], dtype=np.int64)
-    )
 
 
 @dataclass(frozen=True)
@@ -90,7 +88,7 @@ def _population_line_kwargs() -> list[dict[str, str]]:
     ]
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class ResetCheckAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
 
@@ -101,10 +99,10 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
     AXES_SPEC: ClassVar[AxesSpec[ResetCheckResult, ResetCheckCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
-                "reset_states", label="Reset State", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Reset State", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis("gains", label="Gain", unit="a.u.", dtype=np.float64),
         ),
@@ -112,7 +110,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         data_variable=DataVariable("counts"),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/reset_check",
     )
 
@@ -134,20 +132,8 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        ro_ch = (
-            cfg.readout.ro_ch
-            if isinstance(cfg.readout, PulseReadoutCfg)
-            else cfg.readout.tones[0].ro_ch
-        )
-        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
-        axis = Classify(
-            "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
-            classifier=classifier,
-        )
+        require_circle_classifiers(cfg.readout)
+        axis = Classify("readout")
         gains = sweep2array(
             cfg.gain,
             "gain",
@@ -212,7 +198,6 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             sched.trigger_update(flush=True)
         return ResetCheckResult(
             gains=gains,
-            reset_states=np.arange(3, dtype=np.int64),
             counts=buffer.array,
         )
 
@@ -233,11 +218,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Check population axes before optional readout-confusion correction.
         result = source.result
         confusion_matrix = options.confusion_matrix
-        if (
-            result.counts.shape != (result.gains.size, 3, 3)
-            or not np.array_equal(result.reset_states, [0, 1, 2])
-            or not np.array_equal(result.population_states, [0, 1, 2])
-        ):
+        if result.counts.shape != (result.gains.size, 3, 3):
             raise ValueError(
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )

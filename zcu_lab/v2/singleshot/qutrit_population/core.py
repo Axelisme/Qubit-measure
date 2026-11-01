@@ -32,7 +32,6 @@ class QutritPopulationResult:
 
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
-    prepared_states: NDArray[np.int64]
 
 
 class QutritPopulationCfg(ConfigBase):
@@ -86,7 +85,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                     "shot_indices", label="Shot Index", unit="None", dtype=np.int64
                 ),
                 AxesSpec.Axis(
-                    "prepared_states",
+                    values=(0, 1, 2),
                     label="Prepared State",
                     unit="None",
                     dtype=np.int64,
@@ -136,7 +135,6 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         result = QutritPopulationResult(
             signals=buffer.array,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
-            prepared_states=np.arange(3, dtype=np.int64),
         )
         plots = context.plots
         figure, _ = plots.subplots(num="measurement")
@@ -177,7 +175,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         """
         del options
         result = analyze_reference_iq(
-            source.result.signals, source.result.prepared_states
+            source.result.signals, np.array([0, 1, 2], dtype=np.int64)
         )
         figure, _ = plots.subplots(
             nrows=2, ncols=2, num="fit", figsize=(10, 7), layout="constrained"

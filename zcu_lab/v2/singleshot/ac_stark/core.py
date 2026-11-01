@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -21,6 +22,7 @@ from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -28,7 +30,6 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import (
-    PulseReadoutCfg,
     require_circle_classifiers,
 )
 from zcu_tools.utils.process import minus_background
@@ -37,17 +38,13 @@ from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
-
-
 @dataclass(frozen=True)
 class AcStarkResult:
     """Measured class counts (Ngain, Nfreq, 3) on rounded gain/frequency grids.
 
     Gains are in a.u.; frequencies are in MHz.
 
-    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    The final state axis is [g,e,other], with fixed coordinates [0,1,2].
     Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
@@ -55,9 +52,6 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     counts: NDArray[np.float64]
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class AcStarkCfg(ConfigBase):
@@ -67,7 +61,7 @@ class AcStarkCfg(ConfigBase):
         Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
     ]
     stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[
@@ -88,7 +82,7 @@ class AcStarkCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class AcStarkAnalyzeOptions:
     chi: float
     kappa: float
@@ -101,7 +95,7 @@ class AcStarkAnalysis:
     ac_stark_coeff: float
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class AcStarkPlotOptions:
     ac_coeff: float
     confusion_matrix: NDArray[np.float64] | None = None
@@ -114,7 +108,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "freqs", label="Frequency", unit="Hz", scale=1e6, dtype=np.float64
@@ -127,7 +121,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         data_variable=DataVariable("counts"),
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/ac_stark",
     )
 
@@ -159,10 +153,6 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
         )
 
         gain_sweep = cfg.gain

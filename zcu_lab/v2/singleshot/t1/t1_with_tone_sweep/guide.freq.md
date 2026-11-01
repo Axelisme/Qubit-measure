@@ -14,7 +14,13 @@ Live plots and Analyze divide each row by its total count before displaying popu
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1; delay stop uses 5 times the tone T1 time scale. Frequency form sweeps `$resonator.freq` +/- 1.5 * `$resonator.kappa`; gain form sweeps 0 to 1. Each form exposes only one outer axis.
 
-Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a circle classifier with a positive radius on the selected readout (the first tone for Mux); missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
+Readout accepts only the pulse family.
+A mux readout in the library is incompatible.
+Classification uses the readout's circle classifier under Readout → Advanced.
+Run requires a positive radius; missing radius prompts singleshot GE Post.
+Linear has no Other state and is rejected.
+Analyze corrects populations only with the saved readout cfg's confusion matrix.
+Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 
