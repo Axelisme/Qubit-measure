@@ -104,13 +104,14 @@ def test_detached_copy_edits_do_not_change_original_input(
     copy = entry.detached_copy()
     assert copy.parameters is entry.parameters
     assert copy.env is entry.env
-    assert copy.state.input == original
-    assert copy.state.base == original
+    assert copy.state.input.data == original.data
+    assert copy.state.input.model is original.model
+    assert copy.state.base.data == original.data
     copy.state.write({path: value}, copy.env)
-    assert copy.state.input != original
-    assert entry.state.input == original
+    assert copy.state.input.data != original.data
+    assert entry.state.input.data == original.data
     entry.state.install_input(copy.state.input)
-    assert entry.state.input == copy.state.input
+    assert entry.state.input.data == copy.state.input.data
 
 
 def test_expression_stores_the_number_from_the_open_capture(

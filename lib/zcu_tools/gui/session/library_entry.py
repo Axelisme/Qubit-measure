@@ -162,19 +162,6 @@ class LibraryEntryForm[S: ConfigBase](ABC):
         """Return the editing state; its base is the projection of the opened Spec."""
         return self._state
 
-    def detached_copy(self) -> Self:
-        """Return independent input/base with the same declaration and capture.
-
-        The copy starts at this form's current input. It subscribes to nothing
-        and writes nothing. The caller installs its input on Save.
-        """
-        entry = type(self).__new__(type(self))
-        entry._form = self._form
-        entry._parameters = self._parameters
-        entry._env = self._env
-        entry._state = FormState(self.state.input)
-        return entry
-
     def result(self) -> S | FormErrors:
         """Evaluate the current input with env into the Spec, or field errors.
 
