@@ -137,8 +137,12 @@ def _validate_wave_ports(profile: _Profile) -> None:
     ports: dict[int, set[int | None]] = {}
     for path, port, selector in users:
         selectors = ports.setdefault(port, set())
-        if selectors and (selector is None or None in selectors or selector in selectors):
-            raise ValueError(f"{path}: shared wave-output port requires distinct tmux_ch")
+        if selectors and (
+            selector is None or None in selectors or selector in selectors
+        ):
+            raise ValueError(
+                f"{path}: shared wave-output port requires distinct tmux_ch"
+            )
         selectors.add(selector)
 
 

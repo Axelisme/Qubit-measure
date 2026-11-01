@@ -22,8 +22,20 @@ def test_explicit_wiring_and_optional_connections_reach_qick(profile):
     cfg = program.build_soccfg(profile)
     for section, output_section, fields in (
         ("generators", "gens", ("dac", "tproc_ch", "tmux_ch")),
-        ("readouts", "readouts", ("adc", "tproc_ctrl", "tmux_ch", "trigger_type",
-                                    "trigger_port", "trigger_bit", "tproc_ch", "b_phase")),
+        (
+            "readouts",
+            "readouts",
+            (
+                "adc",
+                "tproc_ctrl",
+                "tmux_ch",
+                "trigger_type",
+                "trigger_port",
+                "trigger_bit",
+                "tproc_ch",
+                "b_phase",
+            ),
+        ),
     ):
         for source, output in zip(profile[section], cfg[output_section], strict=True):
             for field in fields:
@@ -48,9 +60,16 @@ def test_duplicate_dac_reports_the_later_generator(profile):
 
 
 @pytest.mark.parametrize("profile", ["wiring"], indirect=True)
-@pytest.mark.parametrize("field,value", [("fs_mult", 18), ("fs_div", 4),
-                                         ("decimation", 6), ("samps_per_clk", 10),
-                                         ("coupling", "DC")])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("fs_mult", 18),
+        ("fs_div", 4),
+        ("decimation", 6),
+        ("samps_per_clk", 10),
+        ("coupling", "DC"),
+    ],
+)
 def test_shared_adc_requires_identical_rf_settings(profile, field, value):
     profile["readouts"][1][field] = value
     with pytest.raises(ValueError, match=r"readouts\.1\.adc"):
@@ -85,7 +104,11 @@ def test_three_wave_users_can_share_a_port_with_distinct_tmux(profile):
         tproc_ctrl=profile["generators"][0]["tproc_ch"], tmux_ch=2
     )
     cfg = program.build_soccfg(profile)
-    assert [cfg["gens"][0]["tmux_ch"], *[r["tmux_ch"] for r in cfg["readouts"]]] == [0, 1, 2]
+    assert [cfg["gens"][0]["tmux_ch"], *[r["tmux_ch"] for r in cfg["readouts"]]] == [
+        0,
+        1,
+        2,
+    ]
 
 
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
@@ -101,8 +124,12 @@ def test_mux_rejects_a_readout_with_tproc_control(profile, control_port):
 def test_mux_preserves_explicit_trigger_wiring_and_readout_phase_bits(profile):
     channels = profile["mux"][0]["ro_chs"]
     for port, ch in enumerate(channels):
-        profile["readouts"][ch].update(trigger_type="tport", trigger_port=11 + port,
-                                        trigger_bit=9 + port, b_phase=16 + port)
+        profile["readouts"][ch].update(
+            trigger_type="tport",
+            trigger_port=11 + port,
+            trigger_bit=9 + port,
+            b_phase=16 + port,
+        )
     cfg = program.build_soccfg(profile)
     for port, ch in enumerate(channels):
         output = cfg["readouts"][ch]
@@ -113,12 +140,22 @@ def test_mux_preserves_explicit_trigger_wiring_and_readout_phase_bits(profile):
 
 
 @pytest.mark.parametrize("profile", ["wiring"], indirect=True)
-@pytest.mark.parametrize("section,field", [
-    ("generators", "dac"), ("generators", "tproc_ch"), ("generators", "tmux_ch"),
-    ("readouts", "adc"), ("readouts", "tproc_ctrl"), ("readouts", "tmux_ch"),
-    ("readouts", "trigger_type"), ("readouts", "trigger_port"),
-    ("readouts", "trigger_bit"), ("readouts", "tproc_ch"), ("readouts", "b_phase"),
-])
+@pytest.mark.parametrize(
+    "section,field",
+    [
+        ("generators", "dac"),
+        ("generators", "tproc_ch"),
+        ("generators", "tmux_ch"),
+        ("readouts", "adc"),
+        ("readouts", "tproc_ctrl"),
+        ("readouts", "tmux_ch"),
+        ("readouts", "trigger_type"),
+        ("readouts", "trigger_port"),
+        ("readouts", "trigger_bit"),
+        ("readouts", "tproc_ch"),
+        ("readouts", "b_phase"),
+    ],
+)
 def test_wiring_fields_must_be_explicit_even_when_nullable(profile, section, field):
     # The second readout supplies None for every nullable connection.
     index = 1 if section == "readouts" else 0
