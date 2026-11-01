@@ -86,7 +86,7 @@ class _PFB(_Settings):
     ro_type: str
     ro_fullpath: str
     pfb_nout: _PositiveInt
-    pfb_nch: _PositiveInt
+    pfb_nch: Annotated[int, Field(gt=0, multiple_of=2)]
     pfb_ch_offset: _Count
     pfb_dds_on_output: bool
     has_outsel: bool
@@ -200,7 +200,7 @@ def _apply_mux(profile: _Profile, gens: list[dict], readouts: list[dict]) -> Non
             ro = readouts[ch]
             ro.pop("tproc_ctrl")
             ro.update(mux.readout.model_dump())
-            output_div = ro["decimation"] * mux.readout.pfb_nch / 2
+            output_div = ro["decimation"] * (mux.readout.pfb_nch // 2)
             dds_div = output_div if mux.readout.pfb_dds_on_output else ro["decimation"]
             ro.update(
                 pfb_port=port,

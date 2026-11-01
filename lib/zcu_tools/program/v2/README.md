@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
+**Last updated:** 2026-11-01，YAML compile profiles 與固定 helper 遷移
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -57,6 +57,11 @@ dispatch jump-address tables remain supported.
 `GainSweep` annotates a `SweepCfg` whose start, stop and computed last point must be in [-1, 1]. Values are DAC full-scale fractions in a.u. The same validator runs on Form coordinate representations after their endpoint projection. For example, start=-1, stop=1.1, step=0.5 is accepted when the actual last point is 1.0. Range + Expts retains its stop, so stop=1.1 is rejected. Ordinary `SweepCfg` remains unit-independent.
 
 ## Fixed offline profile
+
+[`program.build_soccfg(profile)`](../README.md#yaml-compile-profiles) derives clocks
+from caller-owned YAML mappings. It requires every setting and does not read the
+installed QICK version. The helpers below remain available during caller migration;
+only those helpers have fixed clock values and default channel counts.
 
 `make_mock_soccfg(n_gens=2, n_readouts=1)` accepts nonnegative channel counts.
 It builds no hardware, acquisition source or noise fallback. The profile uses
