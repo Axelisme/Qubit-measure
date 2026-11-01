@@ -8,7 +8,6 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from reprlib import repr as short_repr
 from time import perf_counter
@@ -26,19 +25,12 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
 from .. import native_persistence
-from ..acquisition import (
-    capture_device_snapshot,
-    capture_software_provenance,
-    new_run_id,
-)
 from ..axes_spec import AxesSpec, GroupedAxesSpec
 from ..base import Experiment
-from ..context import RunContext
-from ..metadata import RunMetadata, RunSnapshot
 from ..records import RunRecord
-from ..scope import Scope
 from ..simulation import SimulationEnvironment, white_noise
 from ..single_fluxonium import single_fluxonium
+from ._acquisition import acquire_record
 from .run_save import RunStageResult as RunStageResult
 from .run_save import run_stage as run_stage
 
@@ -219,44 +211,6 @@ def compare_roundtrip(
     return True
 
 
-def _acquire(
-    experiment: Experiment[_Result, _Cfg],
-    cfg: _Cfg,
-    environment: SimulationEnvironment,
-    plots: Plots,
-) -> RunRecord[_Cfg, _Result]:
-    with Scope("run") as scope:
-        context = RunContext(
-            environment.soc,
-            environment.soccfg,
-            plots,
-            environment.devices.get_all_devices(),
-            scope,
-        )
-        provenance = capture_software_provenance(context=context)
-        devices = capture_device_snapshot(context.devices)
-        started = datetime.now(timezone.utc)
-        result = experiment.run(cfg.model_copy(deep=True), context=context)
-        finished = datetime.now(timezone.utc)
-        spec = experiment.AXES_SPEC
-        if spec is None:
-            raise ValueError("Probe requires experiment.AXES_SPEC")
-        return RunRecord(
-            cfg,
-            result,
-            RunMetadata(
-                run_id=new_run_id(started),
-                experiment=spec.tag,
-                started_at=started.isoformat(),
-                finished_at=finished.isoformat(),
-                completion="stopped" if scope.cancelled else "complete",
-                snapshot=RunSnapshot(roles={}),
-                provenance=provenance,
-                device_snapshot=devices,
-            ).model_dump(mode="json"),
-        )
-
-
 def _export(plots: Plots, stage: str, report: ProbeReport, directory: Path) -> None:
     plots.finish()
     for name in plots:
@@ -302,7 +256,7 @@ def probe(
         with _timed(report, "setup"):
             output_dir.mkdir(parents=True, exist_ok=True)
         with _timed(report, "run"):
-            record = _acquire(experiment, cfg, environment, live)
+            record = acquire_record(experiment, cfg, environment, live)
             report.fields = _describe(record.result)
         with _timed(report, "live_png"):
             _export(live, "live", report, output_dir)

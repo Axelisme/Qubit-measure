@@ -16,6 +16,7 @@ from .. import native_persistence
 from ..base import Experiment
 from ..records import RunRecord
 from ..simulation import SimulationEnvironment
+from ._acquisition import acquire_record
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
@@ -53,16 +54,13 @@ def run_stage(
     errors propagate unchanged. Result shape must agree with AXES_SPEC or native
     validation raises ValueError. This stage neither saves nor calls analyze.
     """
-    # The package defines the existing acquisition helper after its export imports.
-    from . import _acquire
-
     if experiment.AXES_SPEC is None:
         raise ValueError("run_stage requires experiment.AXES_SPEC")
     started = perf_counter()
     style.use(DEFAULT_STYLE)
     plots = Plots(NonPresentingHost())
     try:
-        record = _acquire(experiment, cfg, environment, plots)
+        record = acquire_record(experiment, cfg, environment, plots)
         native_persistence.prepare_run_data(record, spec=experiment.AXES_SPEC, comment="")
         plots.finish()
         pngs: dict[str, bytes] = {}
