@@ -59,8 +59,8 @@ components:
     resonators: [R1, R2]
     qubits: [Q1, Q2]
     wiring:
-      gen_ch: 1
-      ro_ch: [1, 2] # R1/R2 mux ADCs; pulse wiring remains gen0/ADC0.
+      gen_ch: 7
+      ro_ch: [2, 3] # R1/R2 mux ADCs; pulse wiring remains gen0/ADC0.
     # No module slot is supplied because this template carries no library assets.
 aliases:
   format: zcu.aliases

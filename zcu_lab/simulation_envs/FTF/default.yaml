@@ -122,7 +122,7 @@ drive_lines:
 # flux_lines:
 #   f1:
 #     name: f1_flux
-#     gen_ch: 4
+#     gen_ch: 1 # Unbound v6 generator on the shared v2 board.
 #     flux_phi0_per_gain: 0.02 # Signed Phi0 per program gain.
 #     delay_ns: 0.0
 #     tau_ns: 0.0 # Instantaneous base response.
@@ -171,10 +171,10 @@ readout:
     # Two-sided white PSD in ADC^2*ns. Sample covariance = PSD / dt_ns.
     noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
   mux:
-    gen_ch: 1
+    gen_ch: 7
     input_per_gain: 10.0 # sqrt(photons/ns)/gain
     adc:
-      - ro_ch: 1
+      - ro_ch: 2
         gain: 100.0
         phase_deg: 0.0
         time_of_flight_ns: 400.0
@@ -193,7 +193,7 @@ readout:
             low: {corner_ghz: 3.7, rolloff_db_per_ghz: 100.0}
         offset_adc: [0.0, 0.0]
         noise_psd_adc2_ns: [[1.0, 0.2], [0.2, 1.0]]
-      - ro_ch: 2
+      - ro_ch: 3
         gain: 100.0
         phase_deg: 0.0
         time_of_flight_ns: 400.0
