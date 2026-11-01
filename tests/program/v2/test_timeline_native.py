@@ -248,6 +248,63 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
         _program(body, initialize)
 
 
+@pytest.mark.parametrize("control", ["repeat", "nested_repeat", "branch_then_trigger", "trigger_then_branch"])
+def test_adc_overlap_is_rejected_across_control_flow(control):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def trigger(prog):
+        prog.trigger([0], timeline="default")
+        prog.timeline_inc(90 / 430.08)
+
+    def body(prog):
+        if control == "repeat":
+            with prog.repeat("reads", 2):
+                trigger(prog)
+        elif control == "nested_repeat":
+            with prog.repeat("outer", 2):
+                with prog.repeat("inner", 1):
+                    trigger(prog)
+        elif control == "branch_then_trigger":
+            with prog.branch(by="scan", align_timeline=False) as cases:
+                with cases.case(0):
+                    trigger(prog)
+            prog.trigger([0], timeline="default")
+        else:
+            trigger(prog)
+            with prog.branch(by="scan", align_timeline=False) as cases:
+                with cases.case(0):
+                    prog.trigger([0], timeline="default")
+
+    with pytest.raises(ValueError, match=r"channel 0.*ADC overlap.*40 cycles"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("previous", [None, "default"])
+def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
+    def body(prog):
+        prog.trigger([0], timeline=previous)
+        prog.trigger([0], t=0, tag="raw")
+        prog.trigger([0], t=None)
+
+    prog = _program(body)
+    assert prog.get_time_param("raw", "t") == 0
+    assert [(e.cycle, e.value) for e in _shot(prog).events if e.kind == "data"][:4] == [
+        (0, 1), (10, 0), (0, 1), (10, 0)
+    ]
+
+
+def test_native_adc_tail_is_checked_before_a_named_trigger():
+    def body(prog):
+        prog.trigger([0], t=0)
+        prog.timeline_inc(100 / 430.08)
+        prog.trigger([0], timeline="default")
+
+    with pytest.raises(ValueError, match=r"default.*channel 0.*ADC overlap.*73 cycles"):
+        _program(body)
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):
