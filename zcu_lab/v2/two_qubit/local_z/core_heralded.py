@@ -247,9 +247,8 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
-            if not np.array_equal(actual, expected):
-                raise ValueError("LocalZ count axes must match saved cfg")
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+            raise ValueError("LocalZ count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3, 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         gg = terminal_counts(data.sums, ("g", "g"))

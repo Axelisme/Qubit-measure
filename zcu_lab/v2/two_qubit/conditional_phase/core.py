@@ -360,9 +360,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
-            if not np.array_equal(actual, expected):
-                raise ValueError("Conditional phase count axes must match saved cfg")
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+            raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
