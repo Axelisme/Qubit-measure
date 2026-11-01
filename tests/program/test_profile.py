@@ -40,6 +40,15 @@ def test_explicit_wiring_and_optional_connections_reach_qick(profile):
     assert cfg["rf"]["adcs"]["21"]["f_fabric"] == 60.0
 
 
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+def test_duplicate_dac_reports_the_later_generator(profile):
+    other = deepcopy(profile["generators"][0])
+    other["tproc_ch"] = 19
+    profile["generators"].append(other)
+    with pytest.raises(ValueError, match=r"generators\.1\.dac"):
+        program.build_soccfg(profile)
+
+
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_channel_clocks_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
