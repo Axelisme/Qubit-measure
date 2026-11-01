@@ -274,9 +274,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         indices = np.array(frontier, dtype=np.int64)
         indices = indices[np.argsort(f_sep[indices], kind="stable")]
 
-        fig, axes = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
+        fig, _ = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
         for ax, name, label in zip(
-            axes.flat,
+            fig.axes,
             (
                 "snr",
                 "f_sep",
