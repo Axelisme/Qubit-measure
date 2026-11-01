@@ -32,7 +32,8 @@ class ReadoutObservation:
     control_scope is None for provenance markers and ordinary triggers. For
     controlled triggers it is "Repeat", "Repeat <name repr>" or
     "Branch <name repr>", using the innermost timeline scope when present,
-    otherwise the native QICK readout control scope.
+    otherwise the native QICK readout control scope. In case-aware traversal,
+    timeline Branch choices instead appear in ReadoutPath.cases.
     """
 
     source: ReadoutEmission | Trigger

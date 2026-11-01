@@ -20,7 +20,8 @@ from .timeline import TimelineProgramV2
 class IQ:
     """An unclassified read axis with vector (1, I, Q).
 
-    read names one compiled readout emission. tone is None for PulseReadout,
+    read names one logical compiled readout, present once on each Branch path.
+    tone is None for PulseReadout,
     or the zero-based cfg tone position for MuxReadout. Values use normalized
     ADC coordinates without IQ-offset subtraction.
     """
@@ -33,7 +34,8 @@ class IQ:
 class Classify:
     """A one-hot classified read axis, in g/e/other, g/e, or g/e/f order.
 
-    read names one compiled emission. tone is None for PulseReadout or a
+    read names one logical compiled readout, present once on each Branch path.
+    tone is None for PulseReadout or a
     zero-based MuxReadout cfg tone position. None also selects a mux's only tone;
     multi-tone mux requires an explicit position and lists available tones on error.
     classifier overrides that read's calibration; None selects its cfg calibration.
