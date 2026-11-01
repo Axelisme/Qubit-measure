@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-01（來源選擇與 Length Rabi 初值）
+**Last updated:** 2026-11-01，來源選擇與 Length Rabi 初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -74,7 +74,9 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
-`ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template，Template 持有自己的 set 與 seed metadata，路徑語法、來源故障與 Form 的 family 不相容錯誤照常傳遞。
+`ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template。
+Template 持有自己的 set 與 seed metadata。
+路徑語法與來源故障由 `ctx.has` 傳出，family 不相容由 Form 報錯。
 
 `rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
 無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。
