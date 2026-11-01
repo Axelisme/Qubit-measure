@@ -194,7 +194,7 @@ class FluxDepSearchOwner:
                     on_opened=self._opened,
                 )
             )
-        except Exception as exc:
+        except Exception:
             # Runner has settled/cleaned any opened token before re-raising.
             self._busy = False
             activity = self._current
@@ -203,7 +203,9 @@ class FluxDepSearchOwner:
                 if outcome is not None:
                     with self._bus.origin(self._handles.event_origin(activity.token)):
                         self._finish_activity(
-                            activity.token, outcome, display_error=str(exc)
+                            activity.token,
+                            outcome,
+                            display_error="operation failed to start",
                         )
             raise
 
