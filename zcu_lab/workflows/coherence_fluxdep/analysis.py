@@ -70,15 +70,15 @@ def analyze_t2echo_fluxdep(
         fit = fit_or_failed(lambda: fit_decay(result.times, observed))
         if isinstance(fit, Failed):
             return fit
-        lifetime, error, fitted, (parameters, covariance) = fit
+        lifetime, error = fit.decay_time, fit.decay_time_err
+        fitted, parameters, covariance = fit.curve, fit.params, fit.cov
         names = ("y0", "yscale", "decay_time")
     else:
         fringe = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
         if isinstance(fringe, Failed):
             return fringe
-        lifetime, error, _detune, _detune_error, fitted, (parameters, covariance) = (
-            fringe
-        )
+        lifetime, error = fringe.decay_time, fringe.decay_time_err
+        fitted, parameters, covariance = fringe.curve, fringe.params, fringe.cov
         names = ("y0", "yscale", "freq", "phase", "decay_time")
     return DecayFit(
         float(lifetime),
@@ -123,7 +123,8 @@ def analyze_t2ramsey(result: T2RamseyResult) -> RamseyFit | Failed:
     fit = fit_or_failed(lambda: fit_decay_fringe(result.times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, detune, _error, fitted, (parameters, covariance) = fit
+    lifetime, error, detune = fit.decay_time, fit.decay_time_err, fit.freq
+    fitted, parameters, covariance = fit.curve, fit.params, fit.cov
     return RamseyFit(
         float(lifetime),
         float(error),
