@@ -1,18 +1,34 @@
 """Wave-port routing through native compilation and detached requests."""
 
+from collections.abc import Callable
+from dataclasses import replace
+
 import pytest
 from qick import QickConfig
+from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
+from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
+from zcu_tools.program.v2.ir.io_instructions import TrigInst
+from zcu_tools.program.v2.ir.operands import TimeOffset
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import profile_soccfg
 from tests.program.v2.simulation._compiled_support import request
 
 
-def port_program(soccfg: QickConfig) -> TimelineProgramV2:
+def port_program(
+    soccfg: QickConfig,
+    transform: Callable[[CompiledStream], CompiledStream] | None = None,
+) -> TimelineProgramV2:
     """Compile one carrier and two independently configured ADC windows."""
 
     class Program(TimelineProgramV2):
+        @property
+        def compiled_stream(self):
+            stream = super().compiled_stream
+            return stream if transform is None else transform(stream)
+
         def _initialize(self, cfg):
             self.declare_gen(0, nqz=1)
             self.add_pulse(
@@ -32,40 +48,74 @@ def port_program(soccfg: QickConfig) -> TimelineProgramV2:
     return Program(soccfg, reps=2, initial_delay=0, relax_delay=0.1)
 
 
+def build_port_request(
+    soccfg: QickConfig,
+    transform: Callable[[CompiledStream], CompiledStream] | None = None,
+) -> AcquireRequest:
+    """Build a request and release the synthetic environment on all paths."""
+    env = white_noise(soccfg, std_adc=0, seed=None, routes=((0, 0), (0, 1)))
+    try:
+        return request(port_program(soccfg, transform), env)
+    finally:
+        env.devices.close_all_devices()
+
+
 def test_shared_wave_port_routes_carrier_and_each_readout_config():
     soccfg = profile_soccfg("tmux_tport")
     # Isolate wave dispatch from TRIG support in this first acceptance slice.
     for ch, readout in enumerate(soccfg["readouts"]):
         readout.update(trigger_type="dport", trigger_port=3, trigger_bit=ch)
-    env = white_noise(soccfg, std_adc=0, seed=None, routes=((0, 0), (0, 1)))
-    try:
-        result = request(port_program(soccfg), env)
-        point = result.materialize_point(0)
-        (pulse,) = point.events
-        assert pulse.gen_ch == 0
-        assert pulse.frequency_mhz == pytest.approx(80, abs=1e-5)
-        assert [read.frequency_mhz for read in point.readouts] == [
-            pytest.approx((80, 80), abs=1e-5),
-            pytest.approx((120, 120), abs=1e-5),
-        ]
-        assert all(read.gen_ch == 0 for read in point.readouts)
-    finally:
-        env.devices.close_all_devices()
+    point = build_port_request(soccfg).materialize_point(0)
+    (pulse,) = point.events
+    assert pulse.gen_ch == 0
+    assert pulse.frequency_mhz == pytest.approx(80, abs=1e-5)
+    assert [read.frequency_mhz for read in point.readouts] == [
+        pytest.approx((80, 80), abs=1e-5),
+        pytest.approx((120, 120), abs=1e-5),
+    ]
+    assert all(read.gen_ch == 0 for read in point.readouts)
 
 
 def test_tport_set_and_clear_preserve_dport_ticks_and_declared_read_counts():
     points = []
     for name in ("separate_dport", "tmux_tport"):
         soccfg = profile_soccfg(name)
-        env = white_noise(soccfg, std_adc=0, seed=None, routes=((0, 0), (0, 1)))
-        try:
-            result = request(port_program(soccfg), env)
-            points.append(result.materialize_point(0))
-        finally:
-            env.devices.close_all_devices()
+        points.append(build_port_request(soccfg).materialize_point(0))
     dport, tport = points
     for expected, actual in zip(dport.readouts, tport.readouts, strict=True):
         assert actual.trigger_ticks == expected.trigger_ticks
         # QICK emits clr after each set; only the two sets count as reads.
         assert len(actual.trigger_ticks) == 2
         assert actual.frequency_mhz == expected.frequency_mhz
+
+
+def test_explicit_trig_time_does_not_read_cross_shot_s14():
+    soccfg = profile_soccfg("tmux_tport")
+
+    def explicit_times(stream: CompiledStream) -> CompiledStream:
+        time = 0
+        records = []
+        last_write = max(
+            index
+            for index, record in enumerate(stream.records)
+            if isinstance(record.instruction, RegWriteInst)
+            and record.instruction.dst.canonical_name == "s14"
+        )
+        for index, record in enumerate(stream.records):
+            inst = record.instruction
+            if isinstance(inst, RegWriteInst) and inst.dst.canonical_name == "s14":
+                if inst.lit is None:
+                    raise ValueError("test input requires literal trigger timestamps")
+                time = inst.lit.value
+                if index != last_write:
+                    inst = NopInst()
+            if isinstance(inst, TrigInst):
+                inst = replace(inst, time=TimeOffset(time))
+            records.append(CompiledRecord(inst, record.p_addr))
+        return CompiledStream(tuple(records))
+
+    native = build_port_request(soccfg).materialize_point(0)
+    explicit = build_port_request(soccfg, explicit_times).materialize_point(0)
+    assert [read.trigger_ticks for read in explicit.readouts] == [
+        read.trigger_ticks for read in native.readouts
+    ]
