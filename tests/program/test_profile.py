@@ -16,7 +16,9 @@ from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 
 @pytest.fixture
 def profile(request):
-    with (Path(__file__).parent / "profiles" / f"{request.param}.yaml").open() as stream:
+    with (
+        Path(__file__).parent / "profiles" / f"{request.param}.yaml"
+    ).open() as stream:
         return yaml.safe_load(stream)
 
 
@@ -27,9 +29,10 @@ def test_yaml_profile_matches_ordinary_compile_config(profile):
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
 def test_yaml_profile_matches_mux_compile_config(profile):
-    assert program.build_soccfg(profile).get_cfg() == make_mux_mock_soccfg(
-        2, 5, gen_ch=1, ro_chs=(4, 1)
-    ).get_cfg()
+    assert (
+        program.build_soccfg(profile).get_cfg()
+        == make_mux_mock_soccfg(2, 5, gen_ch=1, ro_chs=(4, 1)).get_cfg()
+    )
 
 
 @pytest.mark.parametrize("profile", ["ordinary"], indirect=True)
@@ -149,8 +152,13 @@ def test_yaml_profile_compiles_real_qick_pulse_and_readout(profile):
         def _initialize(self, cfg):
             if mux:
                 self.declare_gen(
-                    gen_ch, nqz=1, mixer_freq=6000.0, mux_freqs=[6000.0],
-                    mux_gains=[0.1], mux_phases=[0.0], ro_ch=ro_ch,
+                    gen_ch,
+                    nqz=1,
+                    mixer_freq=6000.0,
+                    mux_freqs=[6000.0],
+                    mux_gains=[0.1],
+                    mux_phases=[0.0],
+                    ro_ch=ro_ch,
                 )
                 self.declare_readout(ro_ch, length=0.2, freq=6000.0, gen_ch=gen_ch)
                 self.add_pulse(gen_ch, "probe", style="const", mask=[0], length=0.2)
@@ -159,8 +167,13 @@ def test_yaml_profile_compiles_real_qick_pulse_and_readout(profile):
                 self.declare_readout(ro_ch, length=0.2)
                 self.add_readoutconfig(ro_ch, "adc", freq=1000.0, gen_ch=gen_ch)
                 self.add_pulse(
-                    gen_ch, "probe", style="const", freq=1000.0,
-                    phase=0, gain=0.1, length=0.2,
+                    gen_ch,
+                    "probe",
+                    style="const",
+                    freq=1000.0,
+                    phase=0,
+                    gain=0.1,
+                    length=0.2,
                 )
 
         def _body(self, cfg):

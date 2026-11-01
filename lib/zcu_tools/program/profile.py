@@ -127,9 +127,7 @@ def _generators(
         for _ in range(group.count):
             ch = len(gens)
             dac = f"{ch:02d}"
-            cfg = group.model_dump(
-                exclude={"count", "fabric_div", "rf_fabric_div"}
-            )
+            cfg = group.model_dump(exclude={"count", "fabric_div", "rf_fabric_div"})
             cfg.update(
                 dac=dac,
                 tproc_ch=ch,
@@ -150,7 +148,8 @@ def _generators(
 
 
 def _readouts(
-    profile: _Profile, n_gens: int,
+    profile: _Profile,
+    n_gens: int,
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
     readouts: list[dict[str, object]] = []
     adcs: dict[str, dict[str, object]] = {}
@@ -184,7 +183,9 @@ def _readouts(
 
 
 def _apply_mux(
-    profile: _Profile, gens: list[dict[str, object]], readouts: list[dict[str, object]],
+    profile: _Profile,
+    gens: list[dict[str, object]],
+    readouts: list[dict[str, object]],
 ) -> None:
     gen_groups = [group for group in profile.generators for _ in range(group.count)]
     ro_groups = [group for group in profile.readouts for _ in range(group.count)]
@@ -199,14 +200,17 @@ def _apply_mux(
             or len(set(mux.ro_chs)) != len(mux.ro_chs)
             or any(ch >= len(readouts) or ch in used_readouts for ch in mux.ro_chs)
         ):
-            raise ValueError(f"{path}.ro_chs: requires unique unused in-range ADCs within pfb_nout")
+            raise ValueError(
+                f"{path}.ro_chs: requires unique unused in-range ADCs within pfb_nout"
+            )
         used_gens.add(mux.gen_ch)
         used_readouts.update(mux.ro_chs)
         gen = gens[mux.gen_ch]
         gen_group = gen_groups[mux.gen_ch]
         gen.update(mux.generator.model_dump())
         gen.update(
-            f_dds=gen_group.sample_rate(profile.refclk_freq) / mux.generator.interpolation,
+            f_dds=gen_group.sample_rate(profile.refclk_freq)
+            / mux.generator.interpolation,
             fdds_div=gen_group.fs_div * mux.generator.interpolation,
         )
         for port, ch in enumerate(mux.ro_chs):
@@ -216,7 +220,9 @@ def _apply_mux(
             ro_group = ro_groups[ch]
             fs = ro_group.sample_rate(profile.refclk_freq)
             output_div = ro_group.decimation * (mux.readout.pfb_nch // 2)
-            dds_div = output_div if mux.readout.pfb_dds_on_output else ro_group.decimation
+            dds_div = (
+                output_div if mux.readout.pfb_dds_on_output else ro_group.decimation
+            )
             ro.update(
                 pfb_port=port,
                 trigger_bit=port,
