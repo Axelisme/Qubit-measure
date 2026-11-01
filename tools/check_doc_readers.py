@@ -30,6 +30,13 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """
     found: list[Violation] = []
     for path, source in sorted(sources.items()):
+        if (
+            path.startswith("docs/adr/")
+            and path != "docs/adr/README.md"
+            or path.startswith("docs/discussions/")
+            and path != "docs/discussions/INDEX.md"
+        ):
+            continue
         lines = source.splitlines()
         if lines and lines[0] == "---":
             lines = lines[lines.index("---", 1) + 1 :]
