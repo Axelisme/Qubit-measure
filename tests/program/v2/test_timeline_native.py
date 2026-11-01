@@ -242,18 +242,31 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
         prog.fork("default", into="next_read")
         prog.trigger([0], timeline="default")
         if placement == "sweep":
-            prog.timeline_inc(QickSweep1D("scan", 100 / 430.08, 180 / 430.08), timeline="next_read")
+            prog.timeline_inc(
+                QickSweep1D("scan", 100 / 430.08, 180 / 430.08), timeline="next_read"
+            )
         else:
             prog.timeline_inc(100 / 430.08, timeline="next_read")
             if placement == "runtime":
                 prog.timeline_inc("scan", timeline="next_read")
         prog.trigger([0], timeline="next_read")
 
-    with pytest.raises(ValueError, match=r"next_read.*channel 0.*ADC overlap.*40 cycles"):
+    with pytest.raises(
+        ValueError, match=r"next_read.*channel 0.*ADC overlap.*40 cycles"
+    ):
         _program(body, initialize)
 
 
-@pytest.mark.parametrize("control", ["repeat", "repeat_sync", "nested_repeat", "branch_then_trigger", "trigger_then_branch"])
+@pytest.mark.parametrize(
+    "control",
+    [
+        "repeat",
+        "repeat_sync",
+        "nested_repeat",
+        "branch_then_trigger",
+        "trigger_then_branch",
+    ],
+)
 def test_adc_overlap_is_rejected_across_control_flow(control):
     def initialize(prog):
         prog.declare_readout(0, length=100 / 307.2)
@@ -296,7 +309,10 @@ def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
     prog = _program(body)
     assert prog.get_time_param("raw", "t") == 0
     assert [(e.cycle, e.value) for e in _shot(prog).events if e.kind == "data"][:4] == [
-        (0, 1), (10, 0), (0, 1), (10, 0)
+        (0, 1),
+        (10, 0),
+        (0, 1),
+        (10, 0),
     ]
 
 
@@ -310,7 +326,9 @@ def test_native_adc_tail_is_checked_before_a_named_trigger():
         _program(body)
 
 
-@pytest.mark.parametrize("placement", ["static", "sweep", "runtime", "repeat", "repeat_sync"])
+@pytest.mark.parametrize(
+    "placement", ["static", "sweep", "runtime", "repeat", "repeat_sync"]
+)
 def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
     def initialize(prog):
         prog.declare_readout(0, length=100 / 307.2)
@@ -338,7 +356,11 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
     result = _shots(prog)
     expected = {"static": [0, 140], "sweep": [0, 180], "runtime": [0, 141]}
     starts = [
-        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
         for shot in result
     ]
     assert starts == [[0, 140], expected.get(placement, [0, 140])]

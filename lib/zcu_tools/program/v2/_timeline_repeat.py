@@ -145,7 +145,12 @@ class LoopTimelineExit(Macro):
         self._check_backedge(prog, frame, duration)
         if book.loop_timelines:
             book.loop_timelines[-1].adc_starts.extend(
-                (timeline, ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
+                (
+                    timeline,
+                    ch,
+                    substitute_time(start, {frame.progress: TimeVariable()}),
+                    path,
+                )
                 for timeline, ch, start, path in frame.adc_starts
             )
             for ch, start, path in frame.starts:
@@ -323,7 +328,12 @@ class LoopTimelineExit(Macro):
                 for ch, start, path in frame.starts
             )
             outer.adc_starts.extend(
-                (timeline, ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
+                (
+                    timeline,
+                    ch,
+                    substitute_time(start, {frame.progress: TimeVariable()}),
+                    path,
+                )
                 for timeline, ch, start, path in frame.adc_starts
             )
         for outer in book.repeats:
@@ -584,12 +594,18 @@ class LoopTimelineExit(Macro):
             if not generator:
                 lower, _ = difference_limits(gap, TimeVariable())
                 if lower is None or lower < 0:
-                    detail = "unknown overlap cycles" if lower is None else f"{-lower} cycles"
+                    detail = (
+                        "unknown overlap cycles"
+                        if lower is None
+                        else f"{-lower} cycles"
+                    )
                     raise ValueError(
                         f"{timeline}: channel {ch} ADC overlap across repeat backedge; "
                         f"{detail}; cannot prove runtime start >= previous end"
                     )
-            elif not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
+            elif (
+                not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0
+            ):
                 raise ValueError(
                     f"repeat: channel {ch} pulse overlap across backedge; use timeline_inc"
                 )

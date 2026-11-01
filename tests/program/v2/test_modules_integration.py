@@ -495,7 +495,7 @@ def test_table_readout_does_not_share_fixed_pulse_template():
     prog = _make_prog(
         modules=[Readout("fixed", cfg), Delay("adc_gap", 0.5), table],
         sweep=[("freq", 2)],
-        reps=2
+        reps=2,
     )
     pulse_names = [name for name in prog.pulses if not name.endswith("_adc")]
     assert len(pulse_names) == 2

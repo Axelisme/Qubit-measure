@@ -100,9 +100,7 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, timelin
 
 @pytest.mark.parametrize("origin", [0, 40])
 @pytest.mark.parametrize("swept_trigger", [False, True])
-@pytest.mark.parametrize(
-    "offset, post", [(0.0013, 0.0005), (0.0011, 0.0012)]
-)
+@pytest.mark.parametrize("offset, post", [(0.0013, 0.0005), (0.0011, 0.0012)])
 def test_readout_trigger_quantization_does_not_extend_generator_end(
     origin, swept_trigger, offset, post
 ):
@@ -561,7 +559,9 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
 
 @pytest.mark.parametrize("swept_post", [False, True])
 @pytest.mark.parametrize("length, end", [(0.051, 28), (0.201, 92)])
-def test_readout_post_follows_generator_without_waiting_for_adc(length, end, swept_post):
+def test_readout_post_follows_generator_without_waiting_for_adc(
+    length, end, swept_post
+):
     readout = PulseReadout(
         "read",
         PulseReadoutCfg(

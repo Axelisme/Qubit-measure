@@ -82,9 +82,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
         length lookup errors (for example an unreadable arb asset) propagate.
         """
         return (
-            float(self.pre_delay)
-            + float(self.waveform.length)
-            + float(self.post_delay)
+            float(self.pre_delay) + float(self.waveform.length) + float(self.post_delay)
         )
 
     def to_pulse_cfg(self) -> PulseCfg:

@@ -549,17 +549,30 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     readout: v2.Module
     if family == "mux":
         readout = MuxReadoutCfg(
-            gen_ch=0, nqz=1, mixer_freq=1000, length=0.125,
-            pre_delay=3 / 430.08, post_delay=5 / 430.08,
-            ro_length=1.0, trig_offset=0.5,
-            tones=[MuxReadoutTone(ro_ch=ch, freq=1000 + 80 * ch, gain=0.1) for ch in (0, 1)],
+            gen_ch=0,
+            nqz=1,
+            mixer_freq=1000,
+            length=0.125,
+            pre_delay=3 / 430.08,
+            post_delay=5 / 430.08,
+            ro_length=1.0,
+            trig_offset=0.5,
+            tones=[
+                MuxReadoutTone(ro_ch=ch, freq=1000 + 80 * ch, gain=0.1) for ch in (0, 1)
+            ],
         ).build("read")
     else:
         cfg = PulseReadoutCfg(
-            gen_ch=0, nqz=1, freq=100, gain=0.1,
+            gen_ch=0,
+            nqz=1,
+            freq=100,
+            gain=0.1,
             waveform=ConstWaveformCfg(length=0.125),
-            pre_delay=3 / 430.08, post_delay=5 / 430.08,
-            ro_ch=0, ro_length=1.0, trig_offset=0.5,
+            pre_delay=3 / 430.08,
+            post_delay=5 / 430.08,
+            ro_ch=0,
+            ro_length=1.0,
+            trig_offset=0.5,
         )
         if family == "table":
             builder.add_loop("frequency", 2)
@@ -567,7 +580,11 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
                 soccfg, [100, 101], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
             )
             readout = TablePulseReadout(
-                "read", cfg, idx_reg="frequency", freq_words=gen_words, ro_freq_words=adc_words
+                "read",
+                cfg,
+                idx_reg="frequency",
+                freq_words=gen_words,
+                ro_freq_words=adc_words,
             )
         else:
             readout = PulseReadout("read", cfg)
@@ -581,13 +598,21 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
         [[3, 62]] if family == "mux" else [[0, 3, 62]] * len(result)
     )
     assert all(
-        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value] == [216]
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
+        == [216]
         for shot in result
     )
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
     adc_end = 648 if family == "mux" else 646
-    assert all(shot.body_end_cycle - shot.start_cycle + wait_cycles >= adc_end for shot in result)
+    assert all(
+        shot.body_end_cycle - shot.start_cycle + wait_cycles >= adc_end
+        for shot in result
+    )
 
 
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
