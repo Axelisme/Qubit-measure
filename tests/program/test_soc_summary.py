@@ -25,6 +25,14 @@ def test_describe_soc_sections_and_counts() -> None:
 
 def test_describe_soc_columns_present() -> None:
     cfg = load_soccfg(n_gens=2, n_readouts=1)
+    # Converter names are inputs for this ZCU216 port-label example.
+    dacs = [cfg["rf"]["dacs"][gen["dac"]] for gen in cfg["gens"]]
+    adc = cfg["rf"]["adcs"][cfg["readouts"][0]["adc"]]
+    for gen, name, dac in zip(cfg["gens"], ("00", "01"), dacs, strict=True):
+        gen["dac"] = name
+        cfg["rf"]["dacs"][name] = dac
+    cfg["readouts"][0]["adc"] = "00"
+    cfg["rf"]["adcs"]["00"] = adc
     text = describe_soc(cfg)
 
     # ZCU216 port labels: dac "00"->"0_228", "01"->"1_228"; adc "00"->"0_224"
