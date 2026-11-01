@@ -1,6 +1,7 @@
 """Writeback Edit dialogs: scalar parameter values and module item Forms."""
 
 import os
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
@@ -360,8 +361,10 @@ def module_ui(module_widget, tmp_path, request):
 
 
 @pytest.fixture
-def invalid_shared_module_ui(module_widget, module_ui, qapp):
+def invalid_shared_module_ui(module_widget, module_ui, qapp, monkeypatch):
     """Seed ordinary invalid remote input through the public Form owner seam."""
+    callback_errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *error: callback_errors.append(error))
     ctrl, widget, tab_id, pane = module_widget
     form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
     form.state.write({("gain",): {"expr": "missing.value"}}, form.env)
@@ -370,7 +373,8 @@ def invalid_shared_module_ui(module_widget, module_ui, qapp):
     widget.refresh_module_validity(snapshot.writeback_items)
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
-    return module_ui
+    yield module_ui
+    assert not callback_errors, callback_errors
 
 
 @pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
