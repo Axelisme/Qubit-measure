@@ -62,3 +62,14 @@ def test_run_rejects_result_shape_that_disagrees_with_axes(environment: Simulati
 
     with pytest.raises(ValueError, match="shape|dimensions"):
         probe.run_stage(WrongShape(), SavingCfg(), environment)
+
+
+def test_run_rejects_result_dtype_that_disagrees_with_axes(environment: SimulationEnvironment):
+    class WrongDtype(ProbeExperiment):
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            result = super().run(config, context=context)
+            result.frequency = result.frequency.astype("float32")
+            return result
+
+    with pytest.raises(ValueError, match="frequency.*dtype|dtype.*frequency"):
+        probe.run_stage(WrongDtype(), SavingCfg(), environment)
