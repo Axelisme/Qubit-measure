@@ -422,14 +422,44 @@ def test_optional_module_keeps_available_initial_selection(
     assert cfg.probe.freq == (120 if isinstance(node, Template) else 100)
 
 
+@pytest.mark.parametrize("override", [False, True])
+def test_template_in_tree_merges_metadata_with_explicit_path_priority(
+    override: bool,
+) -> None:
+    metadata = {
+        ("probe", "module", "gain"): FieldMeta(
+            description="Template starting gain", calibration="uncalibrated"
+        ),
+        ("probe", "module", "freq"): FieldMeta(
+            description="Template starting frequency", calibration="uncalibrated"
+        ),
+    }
+    form = bound_form(Template("pulse", seed_metadata=metadata))
+    if override:
+        form = form.with_seed_metadata(
+            {("probe", "module", "gain"): FieldMeta(description="Explicit source")}
+        )
+    env = environment()
+    input = form.default_input(env)
+    rows = {row.path: row for row in form.diagnostics(input, env, None)}
+    gain = rows[("probe", "module", "gain")]
+    assert gain.seed_source == ("Explicit source" if override else "Template starting gain")
+    assert gain.uncalibrated is (None if override else True)
+    frequency = rows[("probe", "module", "freq")]
+    assert frequency.seed_source == "Template starting frequency"
+    assert frequency.uncalibrated is True
+
+
 class ResetCore(ConfigBase):
     """Nested references are part of the persistent reset Spec, not form modes."""
 
     reset: BathResetCfg
 
 
-@pytest.mark.parametrize("unbound", [False, True])
-def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -> None:
+@pytest.mark.parametrize(
+    "path", ["Q.pulses.probe", "Q.pulses.missing", "$unbound.module.probe"]
+)
+def test_template_nested_slot_is_direct_key_or_unfilled_invalid(path: str) -> None:
     catalog = {
         "reset": TemplateDef(
             BathResetSpec,
@@ -437,19 +467,17 @@ def test_template_nested_slot_is_direct_key_or_unfilled_invalid(unbound: bool) -
             {
                 "cavity_tone_cfg": Slot("Q.pulses.probe"),
                 "qubit_tone_cfg": Slot("Q.pulses.probe"),
-                "pi2_cfg": Slot(
-                    "$unbound.module.probe" if unbound else "Q.pulses.probe"
-                ),
             },
         )
     }
-    form = Form(ResetCore, {"reset": Template("reset")})
+    form = Form(ResetCore, {"reset": Template("reset", set={"pi2_cfg": Slot(path)})})
     form.bind_templates(catalog, adapter="synthetic-reset")
     env = environment()
     state = FormState(form.default_input(env))
     value = state.result(env)
-    if unbound:
+    if path != "Q.pulses.probe":
         assert isinstance(value, FormErrors)
+        assert any(error[:3] == ("reset", "module", "pi2_cfg") for error in value.messages)
         return
     assert not isinstance(value, FormErrors), value
     reset = state.input.data["reset"]
