@@ -5,6 +5,7 @@ import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
 from zcu_tools.analysis.fitting.anticross import fit_anticross
+from zcu_tools.analysis.fitting.multi_decay import TransitionRates, fit_dual_transition_rates
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 from zcu_tools.analysis.fitting.singleshot import fit_singleshot
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiPhysicalParams, fit_rabi_joint
@@ -147,3 +148,20 @@ def test_anticrossing_recovers_identifiable_center_and_coupling():
     center_x, center_y, coupling, m1, m2, *_ = fit_anticross(xs, *branches)
     assert_allclose([center_x, center_y, coupling], [0.3, 1.5, 0.4], atol=0.001)
     assert_allclose(sorted([m1, m2]), [-1.0, 1.0], atol=0.001)
+
+
+def test_multi_decay_two_initial_states_recover_all_six_rates():
+    times = np.linspace(0.0, 20.0, 160)
+    rates = TransitionRates(0.1, 0.05, 0.08, 0.04, 0.02, 0.01)
+    ground = generators.generate_multi_decay(
+        times, generators.MultiDecayParameters(rates, 0.96, 0.03), 0.0002, 17
+    )
+    excited = generators.generate_multi_decay(
+        times, generators.MultiDecayParameters(rates, 0.04, 0.95), 0.0002, 18
+    )
+    assert ground.shape == excited.shape == (160, 3)
+    fit = fit_dual_transition_rates(times, ground, excited)
+    assert fit.diagnostics.valid
+    assert_allclose(fit.rates.as_array(), rates.as_array(), atol=0.003)
+    assert_allclose(fit.initial_populations1, [0.96, 0.03], atol=0.002)
+    assert_allclose(fit.initial_populations2, [0.04, 0.95], atol=0.002)
