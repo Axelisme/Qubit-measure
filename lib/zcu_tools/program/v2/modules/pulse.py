@@ -23,7 +23,6 @@ from .waveform import (
 )
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -92,10 +91,8 @@ class Pulse(Module):
         self,
         name: str,
         cfg: PulseCfg | None,
-        tag: str | None = None,
         pulse_id: str | None = None,
         *,
-        block_mode: bool = True,
         ro_ch: int | None = None,
         **overrides: Unpack[PulseOverrides],
     ) -> None:
@@ -104,7 +101,6 @@ class Pulse(Module):
         ro_ch is None for unpaired playback or an ADC channel number. It affects
         QICK frequency rounding, mixer declaration and pulse registry identity.
         cfg is copied; None emits no pulse. Explicit pulse_id disables sharing.
-        tag names timing measurements; block_mode waits through pre/post delays.
         freq (MHz), gain (normalized), phase (degrees) and length (us) override
         the copied cfg via set_param; None keeps cfg. Waveform length restrictions
         apply, including ValueError for unsupported sweeps. With cfg=None,
@@ -114,34 +110,15 @@ class Pulse(Module):
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
         apply_cfg_overrides(self.cfg, overrides, PulseOverrides.__annotations__)
-        self.tag = tag
-        self.block_mode = block_mode
         self.pulse_id = pulse_id
         self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 
-    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        if self.cfg is None:
-            return
 
-        self.waveform: AbsWaveform = self.cfg.waveform.build(f"{self.name}_waveform")
-        if self.pulse_id is None:
-            self.pulse_id = prog.pulse_registry.calc_name(self.cfg, ro_ch=self.ro_ch)
-
-            # auto reuse pulse
-            if prog.pulse_registry.register(self.name, self.cfg, ro_ch=self.ro_ch):
-                self.init_pulse(prog, self.pulse_id)
-        else:  # if provided pulse_id, always init pulse (no reuse)
-            self.init_pulse(prog, self.pulse_id)
-
-    def init_pulse(
-        self, prog: ModularProgramV2 | TimelineProgramV2, pulse_id: str
-    ) -> None:
-        self._add_pulse(prog, pulse_id, self.waveform)
 
     def _add_pulse(
         self,
-        prog: ModularProgramV2 | TimelineProgramV2,
+        prog: TimelineProgramV2,
         pulse_id: str,
         waveform: AbsWaveform,
     ) -> None:
@@ -167,75 +144,7 @@ class Pulse(Module):
             **waveform.to_wav_kwargs(),
         )
 
-    def total_length(
-        self, prog: ModularProgramV2 | TimelineProgramV2
-    ) -> float | QickParam:
-        """Return blocking duration in us after init has registered this pulse.
 
-        prog must contain this pulse and its declared loops. Swept playback
-        uses QICK's generator-cycle start and truncated per-loop step, then
-        rounds the start and each step upward to processor ticks. Every point
-        therefore blocks through actual playback, with conservative overrun.
-        Scalar timing and pre/post-delay rounding retain their existing rules.
-        No registered waveform or parameter is mutated. QICK errors propagate.
-        """
-        if self.cfg is None:
-            return 0.0
-        from ..timeline import TimelineProgramV2
-
-        waveform = (
-            prog.get_module_state(self, _PulseDeclaration).waveform
-            if isinstance(prog, TimelineProgramV2)
-            else self.waveform
-        )
-        length = waveform.length
-        if isinstance(length, QickParam) and length.is_sweep():
-            loops = {name: count for name, count, _, _ in prog.loops}
-            generator_cycles = QickParam(0.0)
-            # Registered segments include quantized flat-top ramps and FIR tails.
-            for name in prog.list_pulse_waveforms(
-                self.pulse_name(prog), exclude_special=False
-            ):
-                wave_length = prog.waves[prog.wave2idx[name]].length
-                if isinstance(wave_length, QickRawParam):
-                    # Step a copy so QICK's later compile keeps sole ownership.
-                    raw_length = deepcopy(wave_length)
-                    if raw_length.steps is None:
-                        raw_length.to_steps(loops)
-                    generator_cycles += raw_length / 1.0
-                else:
-                    generator_cycles += wave_length
-            ratio = get_fclk(prog) / get_fclk(prog, gen_ch=self.cfg.ch)
-            spans: dict[str, float] = {}
-            for name, span in generator_cycles.spans.items():
-                intervals = loops[name] - 1
-                step = math.ceil(span / intervals * ratio) if intervals else 0
-                spans[name] = step * intervals
-            length = QickParam(
-                math.ceil(generator_cycles.start * ratio), spans
-            ) / get_fclk(prog)
-        else:
-            length = round_timestamp(prog, length, gen_ch=self.cfg.ch)
-        return round_timestamp(
-            prog,
-            round_timestamp(prog, self.cfg.pre_delay)
-            + length
-            + round_timestamp(prog, self.cfg.post_delay),
-        )
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        cfg = self.cfg
-        if cfg is None:
-            return t
-
-        if self.pulse_id is None:
-            raise RuntimeError(f"{self.name}: initialize the pulse before emission")
-        prog.pulse(cfg.ch, self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
-        if self.block_mode:
-            return t + self.total_length(prog)
-        return t
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Register this program's pulse template; QICK errors propagate."""
@@ -252,27 +161,21 @@ class Pulse(Module):
         if create:
             self._add_pulse(prog, pulse_id, waveform)
 
-    def pulse_name(self, prog: ModularProgramV2 | TimelineProgramV2) -> str:
+    def pulse_name(self, prog: TimelineProgramV2) -> str:
         """Return the pulse identifier declared on prog for native QICK calls.
 
-        prog must have declared this nonempty pulse (or initialized it on the
-        legacy path). Missing declaration or empty cfg raises ValueError.
+        prog must have declared this nonempty pulse.
+        Missing declaration or empty cfg raises ValueError.
         """
-        from ..timeline import TimelineProgramV2
-
-        if isinstance(prog, TimelineProgramV2):
-            return prog.get_module_state(self, _PulseDeclaration).pulse_id
-        if self.pulse_id is None:
-            raise ValueError(f"{self.name}: pulse must be initialized before playback")
-        return self.pulse_id
+        return prog.get_module_state(self, _PulseDeclaration).pulse_id
 
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
         """Play at timeline plus pre_delay; ceil actual end plus post_delay once.
 
-        Legacy block_mode and tag do not affect this occurrence. Empty cfg has
-        zero duration and no playback. QICK resource/timing errors propagate.
+        Empty cfg has zero duration and no playback.
+        QICK resource/timing errors propagate.
         """
         timeline = timeline if timeline is not None else "default"
         self.play(prog, timeline=timeline, tag=tag)
@@ -305,44 +208,8 @@ class Pulse(Module):
             timeline=timeline,
         )
 
-    def allow_rerun(self) -> bool:
-        return True
 
 
-class _RuntimeLengthPulse(Module):
-    def __init__(
-        self,
-        name: str,
-        *,
-        template: Pulse,
-        length_reg: str,
-        flat_top: bool,
-    ) -> None:
-        self.name = name
-        self.template = template
-        self.length_reg = length_reg
-        self.flat_top = flat_top
-
-    def init(self, prog: ModularProgramV2) -> None:
-        pass
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        cfg = self.template.cfg
-        assert cfg is not None
-        assert self.template.pulse_id is not None
-        prog.pulse_from_length_reg(
-            cfg.ch,
-            self.template.pulse_id,
-            length_reg=self.length_reg,
-            flat_top=self.flat_top,
-            t=t + cfg.pre_delay,
-        )
-        return t
-
-    def allow_rerun(self) -> bool:
-        return True
 
 
 class TableLengthPulse(Module):
@@ -378,36 +245,8 @@ class TableLengthPulse(Module):
 
         prefix = f"{name}_table_length"
         self._length_reg = f"{prefix}_gen_cycles"
-        self._duration_reg = f"{prefix}_tproc_cycles"
         self._template = Pulse(f"{name}_template", self.cfg)
-        self._runtime_pulse = _RuntimeLengthPulse(
-            f"{name}_runtime",
-            template=self._template,
-            length_reg=self._length_reg,
-            flat_top=isinstance(self.cfg.waveform, FlatTopWaveformCfg),
-        )
 
-    def playback_parameters(
-        self, prog: ModularProgramV2, index: int
-    ) -> tuple[Pulse, int, int]:
-        """Return the initialized template and selected hardware timing words.
-
-        prog must have initialized this module. index selects lengths in original
-        table order; out-of-range indices raise IndexError. The returned Pulse is
-        borrowed and must not be mutated. The integers are generator cycles for
-        the const/flat segment and tProcessor cycles for the reference increment,
-        including pre/post delays. Flat-top ramps remain in the template. This
-        shares hardware quantization with semantic timeline consumers; it does
-        not pad shorter entries to the maximum candidate. QICK errors propagate.
-        """
-        if not 0 <= index < len(self.lengths):
-            raise IndexError(f"TableLengthPulse index {index} out of bounds")
-        length = self.lengths[index]
-        return (
-            self._template,
-            self._wave_length_cycles(prog, length),
-            self._duration_cycles(prog, length),
-        )
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare one template and the actual generator-length table, not durations.
@@ -466,7 +305,7 @@ class TableLengthPulse(Module):
         )
 
     def _wave_length_cycles(
-        self, prog: ModularProgramV2 | TimelineProgramV2, length: float
+        self, prog: TimelineProgramV2, length: float
     ) -> int:
         wave_length = length
         if isinstance(self.cfg.waveform, FlatTopWaveformCfg):
@@ -490,70 +329,7 @@ class TableLengthPulse(Module):
             )
         return cycles
 
-    def _duration_cycles(self, prog: ModularProgramV2, length: float) -> int:
-        pre = round_timestamp(prog, self.cfg.pre_delay)
-        wave = round_timestamp(prog, length, gen_ch=self.cfg.ch)
-        post = round_timestamp(prog, self.cfg.post_delay)
-        total = round_timestamp(prog, pre + wave + post)
-        if isinstance(total, QickParam):
-            raise ValueError("TableLengthPulse pre_delay/post_delay must not be swept")
-        return int(prog.us2cycles(us=float(total)))
 
-    def init(self, prog: ModularProgramV2) -> None:
-        wave_cycles = [
-            self._wave_length_cycles(prog, length) for length in self.lengths
-        ]
-        duration_cycles = [
-            self._duration_cycles(prog, length) for length in self.lengths
-        ]
-        template_length = self.lengths[0]
-        template_cfg = self._template.cfg
-        assert template_cfg is not None
-        template_cfg.set_param("length", template_length)
-        self._template.init(prog)
 
-        self._length_loader = LoadValue(
-            f"{self.name}_load_gen_length",
-            wave_cycles,
-            idx_reg=self.idx_reg,
-            val_reg=self._length_reg,
-        )
-        self._duration_loader = LoadValue(
-            f"{self.name}_load_duration",
-            duration_cycles,
-            idx_reg=self.idx_reg,
-            val_reg=self._duration_reg,
-        )
-        for module in (
-            self._length_loader,
-            self._duration_loader,
-            self._runtime_pulse,
-        ):
-            module.init(prog)
 
-        self._wait = DelayAuto(f"{self.name}_runtime_duration", t=self._duration_reg)
-        self._wait.init(prog)
 
-    def play_parallel(self, prog: ModularProgramV2, t: float | QickParam = 0.0) -> None:
-        """Emit this initialized pulse at t without advancing the time reference.
-
-        prog must have initialized this module. The named loop selects its table
-        entry. The caller must wait for the selected duration from
-        playback_parameters before later playback; Join owns that common wait
-        for parallel table pulses. No compile-time channel timestamp is updated.
-        """
-        for module in (
-            self._length_loader,
-            self._duration_loader,
-            self._runtime_pulse,
-        ):
-            module.run(prog, t)
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        self.play_parallel(prog, t)
-        return self._wait.run(prog, t)
-
-    def allow_rerun(self) -> bool:
-        return True

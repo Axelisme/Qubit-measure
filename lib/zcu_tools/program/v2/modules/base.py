@@ -10,7 +10,6 @@ from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import ConfigBase
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
     from zcu_tools.resources.context import LibrarySnapshot
 
@@ -67,27 +66,8 @@ def apply_cfg_overrides(
 class Module(ABC):
     name: str
 
-    @abstractmethod
-    def init(self, prog: ModularProgramV2) -> None: ...
 
-    @abstractmethod
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam: ...
 
-    def emit(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        """Run this legacy emission at t us, with this Module as its source.
-
-        Return run's blocking end in us. Control Modules call emit on
-        author-provided children so each child keeps its diagnostic name and
-        restores the parent scope afterward. Internal helpers of one semantic
-        Module call run directly to retain the owner's source. Declaration must
-        already have completed. run errors close the source annotation and propagate.
-        """
-        with prog.source_scope(self.name):
-            return self.run(prog, t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare resources on prog before emission.
@@ -111,8 +91,6 @@ class Module(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
 
-    def allow_rerun(self) -> bool:
-        return False
 
 
 ModuleGroup: TypeAlias = Module | Sequence[Module | None] | None

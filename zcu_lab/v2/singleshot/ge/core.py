@@ -195,7 +195,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         figure.show()
 
         signals_buffer = SignalBuffer((2, cfg.shots), on_update=update)
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
                 probe_cfg = cfg.probe_pulse if with_probe else None
 

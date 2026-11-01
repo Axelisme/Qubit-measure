@@ -48,7 +48,7 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
         (len(gains),),
         on_update=update,
     )
-    with Schedule(None, buffer, scope=context.scope) as sched:
+    with Schedule( buffer, scope=context.scope) as sched:
         builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         gain = builder.add_sweep("gain", cfg.gain)
         reset = Reset("reset", cfg.reset)

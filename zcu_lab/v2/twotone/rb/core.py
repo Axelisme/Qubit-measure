@@ -138,7 +138,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 rb_signal2real(data),
             ),
         )
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
                 builder = TimelineBuilder(

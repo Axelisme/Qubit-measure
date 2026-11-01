@@ -1,3 +1,5 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """QICK callable metadata and argument semantics at public simulation acquire."""
 
 import gc
@@ -10,7 +12,6 @@ import pytest
 from qick.qick_asm import AcquireMixin
 from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -33,8 +34,8 @@ class QickCallable:
         raise AssertionError("integrated simulation must not run QICK transport")
 
 
-def program(env: SimulationEnvironment) -> ModularProgramV2:
-    return ModularProgramV2(
+def program(env: SimulationEnvironment) -> TimelineProgramV2:
+    return compile_modules(
         env.soccfg,
         modules=[
             PulseReadoutCfg(
@@ -52,7 +53,7 @@ def program(env: SimulationEnvironment) -> ModularProgramV2:
 
 
 @pytest.fixture
-def acquisition() -> Iterator[tuple[SimulationEnvironment, ModularProgramV2]]:
+def acquisition() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
     env = white_noise(std_adc=3, seed=123456)
     prog = program(env)
     try:

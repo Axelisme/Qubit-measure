@@ -120,7 +120,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             (len(times),),
             on_update=update,
         )
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             sched.run_acquire_decimated(program, context.soc, rounds=run_cfg.rounds)
 
         return LookbackResult(times=times, signals=signals_buffer.array)

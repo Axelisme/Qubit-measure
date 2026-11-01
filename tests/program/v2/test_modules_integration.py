@@ -1,4 +1,4 @@
-"""Integration tests for all Module subclasses using a real ModularProgramV2.
+"""Integration tests for all Module subclasses using a real TimelineProgramV2.
 
 Each test constructs a real program (triggering real QICK compilation) against
 the mock QickConfig fixture, verifying that the module's init/run pipeline
@@ -6,6 +6,8 @@ integrates with the actual QICK ASM backend without hardware.
 """
 
 from __future__ import annotations
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 
 from typing import Literal
 
@@ -15,7 +17,6 @@ from qick.asm_v2 import Label, QickParam, WriteReg
 from zcu_tools.program.v2 import SweepCfg, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
@@ -67,7 +68,7 @@ RO_LENGTH = 1.0  # µs
 
 def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
-    return ModularProgramV2(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
+    return compile_modules(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
 def _pulse_cfg(
@@ -356,7 +357,7 @@ class TestReadoutIntegration:
             nqz=GEN_NQZ,
         )
         cfg = _readout_cfg(freq=freqs[0])
-        prog = ModularProgramV2(
+        prog = compile_modules(
             soccfg,
             modules=[
                 TablePulseReadout(
@@ -653,7 +654,7 @@ class TestDmemIntegration:
         assert all(type(word) is int for word in dmem)
 
     def test_binprog_rejects_non_vector_dmem(self):
-        class TwoDimensionalDmemProgram(ModularProgramV2):
+        class TwoDimensionalDmemProgram(TimelineProgramV2):
             def compile_datamem(self):
                 return np.asarray([[1, 2]], dtype=np.int32)
 
@@ -685,7 +686,7 @@ def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
     cfg = _pulse_cfg(freq=700.0)
     cfg.mixer_freq = mixer
     pulses = [Pulse(f"p{idx}", cfg, ro_ch=ch) for idx, ch in enumerate((None, 0, 0, 1))]
-    prog = ModularProgramV2(soccfg, modules=pulses)
+    prog = compile_modules(soccfg, modules=pulses)
     assert prog.pulse_registry.count == 3
     assert pulses[1].pulse_id == pulses[2].pulse_id
     assert len({pulses[idx].pulse_id for idx in (0, 1, 3)}) == 3

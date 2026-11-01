@@ -187,7 +187,7 @@ class ConditionalPhaseHeraldedExp(
         )
         target = config.x90_f1 if config.target == "f1" else config.x90_f2
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(

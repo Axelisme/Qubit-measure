@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Shared dmem allocation and route ownership through concrete program APIs."""
 
 from collections.abc import Callable, Sequence
@@ -6,13 +7,12 @@ from typing import Literal
 import numpy as np
 import pytest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
 def _program(
     kind: Literal["timeline", "modular"],
-    initialize: Callable[[TimelineProgramV2 | ModularProgramV2], None],
+    initialize: Callable[[TimelineProgramV2 | TimelineProgramV2], None],
 ):
     class Native(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -21,7 +21,7 @@ def _program(
         def _body(self, cfg):
             pass
 
-    class Modular(ModularProgramV2):
+    class Modular(TimelineProgramV2):
         def _initialize(self, cfg):
             initialize(self)
 
@@ -34,7 +34,7 @@ def _program(
 @pytest.mark.parametrize("kind", ["timeline", "modular"])
 @pytest.mark.parametrize("values", [[], [7, -1, 42]])
 def test_concrete_programs_compile_empty_and_nonempty_dmem(kind, values: Sequence[int]):
-    def initialize(prog: TimelineProgramV2 | ModularProgramV2):
+    def initialize(prog: TimelineProgramV2 | TimelineProgramV2):
         assert prog.add_dmem(values[:2]) == 0
         assert prog.add_dmem(values[2:]) == len(values[:2])
 
@@ -53,7 +53,7 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(kind, values: Sequenc
 
 
 def test_modular_route_protection_is_atomic_and_unprotected_routes_remain_native():
-    def initialize(prog: TimelineProgramV2 | ModularProgramV2):
+    def initialize(prog: TimelineProgramV2 | TimelineProgramV2):
         prog.declare_gen(0, nqz=1)
         prog.declare_readout(0, length=0.4)
         with pytest.raises(ValueError, match="readout route 1 is not declared"):

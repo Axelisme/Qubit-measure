@@ -116,7 +116,7 @@ def test_call_delivers_the_original_experiment_exception_to_the_author(
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        with Schedule(Cfg(), buffer, scope=ctx.scope):
+        with Schedule( buffer, scope=ctx.scope):
             raise cause
         return 99
 
@@ -165,7 +165,7 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         acquire_decimated = acquire
 
     def operation(ctx: CallContext) -> int:
-        with Schedule(Cfg(), SignalBuffer(1), scope=ctx.scope) as schedule:
+        with Schedule( SignalBuffer(1), scope=ctx.scope) as schedule:
             assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
                 schedule.prog_builder("soc", "soccfg").run_program(
@@ -249,7 +249,7 @@ def test_unhandled_exception_fails_run(rig: Rig) -> None:
 
 def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
-        with Schedule(Cfg(), scope=ctx.scope):
+        with Schedule( scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
@@ -353,7 +353,7 @@ def test_author_failure_retains_files_without_committing(
 def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((3,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
+        with Schedule( buffer, scope=ctx.scope) as schedule:
             for _value, step in schedule.scan("sample", (0, 1, 2)):
                 step.set_data(np.complex128(2))
                 break
@@ -400,7 +400,7 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
+        with Schedule( buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder("soc", "soccfg", program_cls=Program)
             builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
                 raw2signal_fn=convert, options=AcquireOptions(retry=1)
@@ -443,7 +443,7 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
+        with Schedule( buffer, scope=ctx.scope) as schedule:
             builder = schedule.prog_builder("soc", "soccfg")
             if mode == "integrated":
                 builder.run_program(Program(), raw2signal_fn=lambda raw: raw)

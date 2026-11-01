@@ -127,7 +127,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
             ),
         )
 
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             # Build the pulse sequence without changing the caller's cfg.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

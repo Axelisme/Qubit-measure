@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Public fast-flux template conversion and engine family selection.
 
 The no-fast-flux compatibility pin retires if that batch contract changes.
@@ -9,7 +10,6 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import EventSlot, PulseEnvelope, TimelineTemplate
 from zcu_tools.experiment.ftf import FTFModelFacts, ftf, plan_template
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -180,7 +180,7 @@ def test_public_environment_admits_bound_flux_generator_through_acquire() -> Non
             ro_length=0.008,
             trig_offset=0.0,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[pulse.build("flux"), readout.build("ro")],
             reps=1,

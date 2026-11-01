@@ -1,10 +1,10 @@
 """Integration tests for ComputedPulse, including flat_top support."""
 
 from __future__ import annotations
+from tests.program._timeline import compile_modules
 
 import pytest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -49,7 +49,7 @@ def _flat_top_pulse(total=0.2, raise_length=0.04, gain=GEN_GAIN, pre_delay=0.0):
 
 def _make_prog(modules):
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-    return ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", 2)])
+    return compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
 
 
 def _gate_modules(gate_pulses, val_reg="gate_idx"):
@@ -86,7 +86,7 @@ def test_dmem_table_populated_for_const_candidates():
         ),
         ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
     ]
-    prog = ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", n_pulses)])
+    prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", n_pulses)])
     assert prog.binprog is not None
 
     # ComputedPulse.dmem_offset is the start of its table in the shared dmem buffer.
@@ -120,7 +120,7 @@ def test_identical_candidates_dedup_table_points_to_same_index():
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
 
     modules = _gate_modules([same_pulse, same_pulse])
-    prog = ModularProgramV2(soccfg, modules=modules, sweep=[("idx_loop", 2)])
+    prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
     assert prog.binprog is not None
 
     cp = modules[1]
@@ -256,23 +256,5 @@ def test_different_channel_rejected():
         ComputedPulse("gate", val_reg="gate_idx", pulses=[p0, p1])
 
 
-def test_allow_rerun_returns_true():
-    pulses = [_const_pulse(gain=0.2), _const_pulse(gain=0.5)]
-    cp = ComputedPulse("gate", val_reg="gate_idx", pulses=pulses)
-    assert cp.allow_rerun() is True
 
 
-def test_total_length_qickparam_raises():
-    from unittest.mock import MagicMock
-
-    from qick.asm_v2 import QickParam
-
-    pulses = [_const_pulse(gain=0.2), _const_pulse(gain=0.5)]
-    cp = ComputedPulse("gate", val_reg="gate_idx", pulses=pulses)
-
-    mock_prog = MagicMock()
-    cp.pulse_modules[0].total_length = MagicMock(return_value=QickParam(start=0.1))
-    cp.pulse_modules[1].total_length = MagicMock(return_value=0.1)
-
-    with pytest.raises(ValueError, match="compile time"):
-        cp.total_length(mock_prog)

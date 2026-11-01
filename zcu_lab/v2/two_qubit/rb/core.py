@@ -241,7 +241,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
             for depth, depth_step in sched.scan("depth", config.depths):
                 for seed, seed_step in depth_step.scan("seed", config.seeds):

@@ -163,7 +163,7 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
             dtype=np.float64,
             on_update=update,
         )
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
 
             # Vary initialization before the optional pi pulse and fixed probe.

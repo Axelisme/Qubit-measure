@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Projective reads preserve shot histories through the program/source contract."""
 
 from collections.abc import Generator
@@ -13,7 +14,6 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -69,7 +69,7 @@ def repeated_read_program(env, reads=2, reps=4096):
         for index in range(reads)
         for module in (readout.build(f"ro{index}"), SoftDelay(f"wait{index}", 0.024))
     ]
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=modules,
         reps=reps,

@@ -151,7 +151,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         buffer = SignalBuffer((rounds, len(lengths), 4), on_update=update)
 
         # Repeat the host length scan; each program sweeps the four pi/2 phases.
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("rounds", rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
                     program = prog_cache.get(length)

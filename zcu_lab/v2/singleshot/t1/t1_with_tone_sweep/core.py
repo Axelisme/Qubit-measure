@@ -328,7 +328,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         )
 
         # 3. Scan gain/frequency on the host; GE and length loops run on-board.
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for value_idx, (value, step) in enumerate(
                 sched.scan(sweep_name, xs.tolist())
             ):

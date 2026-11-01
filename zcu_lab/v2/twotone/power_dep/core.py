@@ -122,7 +122,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
 
         # Acquire a complete spectrum at each fixed drive gain.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

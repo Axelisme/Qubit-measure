@@ -9,10 +9,9 @@ from collections.abc import (
     Sequence,
     Sized,
 )
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from types import TracebackType
-from typing import Any, Generic, Protocol, cast, overload
+from typing import Any, Generic, Protocol, cast
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -35,18 +34,10 @@ from zcu_tools.experiment.v2.runtime.outcome import (
 from zcu_tools.experiment.v2.runtime.outcome import (
     exception_reason,
 )
-from zcu_tools.experiment.v2.runtime.program_builder import (
-    ProgramBuilder,
-    ProgramFactory,
-    ProgramT,
-)
 from zcu_tools.experiment.v2.runtime.run_acquire import RunAcquisitionMixin
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.progress_bar import make_pbar
 from zcu_tools.utils.func_tools import MinIntervalFunc, min_interval
 
-T_Cfg = TypeVar("T_Cfg")
-T_ChildCfg = TypeVar("T_ChildCfg")
 T_Env = TypeVar("T_Env", default=dict[str, Any])
 
 T_Value = TypeVar("T_Value")
@@ -60,7 +51,7 @@ class BufferProtocol(Protocol):
     def data(self) -> Any: ...
 
     def trigger_update(
-        self, step: ScheduleStep[Any, Any, Any] | None = None, *, flush: bool = False
+        self, step: ScheduleStep[Any, Any] | None = None, *, flush: bool = False
     ) -> None: ...
 
 
@@ -104,7 +95,7 @@ class SignalBuffer:
     def trigger_update(
         self,
         # tolerated: BufferProtocol requires step; this buffer always notifies with the full array.
-        step: ScheduleStep[Any, Any, Any] | None = None,  # noqa: ARG002
+        step: ScheduleStep[Any, Any] | None = None,  # noqa: ARG002
         *,
         flush: bool = False,
     ) -> None:
@@ -141,31 +132,27 @@ class SignalSlot:
         self.buffer.trigger_update()
 
 
-class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
+class Schedule(RunAcquisitionMixin, Generic[T_Env]):
     """Runtime scope for Python-like measurement orchestration.
 
-    ScheduleStep and ProgramBuilder use the owner-aware cooperation methods to
+    ScheduleStep and acquisition use the owner-aware cooperation methods to
     access buffers and record outcomes. Schedule alone owns scope validation,
     local-buffer registration, stop transitions and failed-attempt retry reset.
     scope is the explicit parent. Entry attaches one schedule child, optionally
     labeled by name; exit releases it. Acquisition attaches its own child under
-    that schedule. Buffer cfg/environment behavior is independent of scope names.
-    init_cfg is optional: None gives this scope and its children cfg=None.
-    A supplied cfg is deep-copied; existing positional cfg calls remain valid.
-    For cfg-free acquisition use Schedule(None, buffer, scope=...) or create a
+    that schedule. Buffers and env are independent of scope names.
+    Pass a buffer with Schedule(buffer, scope=...) or create a
     root SignalBuffer with buffer(shape) inside Schedule(scope=...).
     """
 
     def __init__(
         self,
-        init_cfg: T_Cfg | None = None,
         *buffers: BufferProtocol,
         env: T_Env | None = None,
         scope: Scope,
         name: str | None = None,
     ) -> None:
         self._ensure_single_root_buffer_count(len(buffers))
-        self.cfg = deepcopy(init_cfg)
         # tolerated(cast): T_Env cannot express the required {} fallback for env=None.
         self._env = cast(T_Env, {} if env is None else env)
         self._buffers = list(buffers)
@@ -176,7 +163,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
         self._scope = scope
         self._name = name
 
-    def __enter__(self) -> Schedule[T_Cfg, T_Env]:
+    def __enter__(self) -> Schedule[T_Env]:
         if self._is_closed:
             raise RuntimeError("Schedule cannot be reused after exiting its context")
         if self._is_active:
@@ -284,113 +271,23 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
     def scan(
         self, name: str, values: Iterable[T_Value]
-    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
+    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Value, T_Env]]]:
         self.ensure_active()
         yield from self.scan_from(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[int, T_Env]]]:
         self.ensure_active()
         yield from self.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
 
-    @overload
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: None = None,
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ModularProgramV2]: ...
 
-    @overload
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: ProgramFactory[ProgramT],
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ProgramT]: ...
 
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: ProgramFactory[ProgramT] | None = None,
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
-        """Return a root-owned builder without compiling or acquiring.
-
-        soc is the acquisition transport; soccfg is the compilation profile.
-        Both are borrowed. reps controls hardware repetitions and must be a
-        positive integer, excluding bool, for the default program.
-        initial_delay and relax_delay are in us. These explicit controls default
-        to 1, 1.0 and 1.0; neither this method nor the builder reads or overrides
-        cfg to obtain program controls.
-
-        Each build calls program_cls, or ModularProgramV2 when omitted, with
-        soccfg positional and reps, initial_delay, relax_delay, modules and
-        sweep as keywords. Modules and sweep specs are deep-copied per build;
-        an empty sweep list becomes None. program_kwargs supplies additional
-        constructor/compilation keywords unchanged, not cfg overrides or acquire
-        options. Do not supply modules or sweep there; use the builder's add
-        and declare_sweep methods.
-
-        The builder uses this Schedule's active scope for stop and outcome
-        handling. Acquisition targets its root-local buffer if registered,
-        otherwise the entire sole root SignalBuffer, with no step indexing.
-        Default rounds progress is retained on close for this root owner.
-
-        An inactive Schedule raises RuntimeError here and on later build/run.
-        Creation does not validate program controls, modules or the target slot.
-        Build requires explicit modules and raises ValueError if none were added.
-        The default program rejects invalid reps with ValueError before compile;
-        other factory/keyword errors propagate at build without retry.
-        Acquisition resolves the target slot and raises ValueError if unavailable.
-        """
-        self.ensure_active()
-        if program_cls is None:
-            return ProgramBuilder(
-                owner=self,
-                soc=soc,
-                soccfg=soccfg,
-                program_cls=ModularProgramV2,
-                program_kwargs=dict(
-                    program_kwargs,
-                    reps=reps,
-                    initial_delay=initial_delay,
-                    relax_delay=relax_delay,
-                ),
-            )
-        return ProgramBuilder(
-            owner=self,
-            soc=soc,
-            soccfg=soccfg,
-            program_cls=program_cls,
-            program_kwargs=dict(
-                program_kwargs,
-                reps=reps,
-                initial_delay=initial_delay,
-                relax_delay=relax_delay,
-            ),
-        )
 
     @property
-    def _acquisition_owner(self) -> Schedule[T_Cfg, T_Env]:
+    def _acquisition_owner(self) -> Schedule[T_Env]:
         return self
 
     def ensure_active(self) -> None:
@@ -473,14 +370,14 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     def scan_from(
         self,
         *,
-        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
+        parent: Schedule[T_Env] | ScheduleStep[Any, T_Env],
         name: str,
         values: Iterable[T_Value],
-    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Cfg, T_Value, T_Env]]]:
+    ) -> Iterator[tuple[T_Value, ScheduleStep[T_Value, T_Env]]]:
         """Yield named scan children of parent until stop, pairing values and steps.
 
         parent must belong to this schedule; the caller ensures an active scope
-        before iteration. Children deepcopy parent.cfg, share env and extend its
+        before iteration. Children share env and extend its
         path with the index. Each child's local buffers are released after yield;
         result data remains. Unsized values are materialized before iteration.
         """
@@ -505,7 +402,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
                     name=name,
                     index=index,
                     value=value,
-                    cfg=deepcopy(parent.cfg),
+
                     path=parent.path + (index,),
                 )
                 try:
@@ -519,16 +416,16 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
     def repeat_from(
         self,
         *,
-        parent: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env],
+        parent: Schedule[T_Env] | ScheduleStep[Any, T_Env],
         name: str,
         times: int,
         interval: float,
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[int, T_Env]]]:
         """Yield named repeat children, checking stop before steps and while waiting.
 
         parent must belong to this schedule; the caller ensures an active scope
         before iteration. times and interval (seconds between steps) must be
-        non-negative or ValueError is raised. Each child deepcopies parent.cfg,
+        non-negative or ValueError is raised. Each child
         shares env and appends its index to the path. Release its local buffers
         after yield without clearing result data.
         """
@@ -570,7 +467,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
                     name=name,
                     index=index,
                     value=index,
-                    cfg=deepcopy(parent.cfg),
+
                     path=parent.path + (index,),
                 )
                 try:
@@ -584,7 +481,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
             time_pbar.close()
 
     def get_data_for(
-        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any]
+        self, owner: Schedule[Any] | ScheduleStep[Any, Any]
     ) -> Any:
         """Return the live result node at owner's path in this active schedule.
 
@@ -603,7 +500,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
     def set_data_for(
         self,
-        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        owner: Schedule[Any] | ScheduleStep[Any, Any],
         value: Any,
         *,
         flush: bool = False,
@@ -622,7 +519,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
     def register_local_buffer(
         self,
-        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        owner: Schedule[Any] | ScheduleStep[Any, Any],
         buffer: SignalBuffer,
     ) -> None:
         """Register buffer as the default acquire target at owner's result path.
@@ -648,7 +545,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
     def trigger_update_for(
         self,
-        owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any],
+        owner: Schedule[Any] | ScheduleStep[Any, Any],
         *,
         flush: bool = False,
     ) -> None:
@@ -674,7 +571,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
                 self._local_buffers.pop(path, None)
 
     def default_slot_for(
-        self, owner: Schedule[T_Cfg, T_Env] | ScheduleStep[T_Cfg, Any, T_Env]
+        self, owner: Schedule[T_Env] | ScheduleStep[Any, T_Env]
     ) -> SignalSlot:
         """Resolve the writable acquire slot for an owner in this active schedule.
 
@@ -699,19 +596,17 @@ class Schedule(RunAcquisitionMixin, Generic[T_Cfg, T_Env]):
 
 
 @dataclass(frozen=True)
-class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
+class ScheduleStep(RunAcquisitionMixin, Generic[T_Value, T_Env]):
     """Host-loop coordinate with its schedule, env and writable result path.
 
-    cfg is a detached copy of the parent's cfg, or None for a cfg-free parent.
-    child(addr) inherits it; child(addr, cfg=...) supplies a detached replacement.
-    Acquisition uses the result path and program, independently of cfg.
+    child(addr) extends this coordinate with a result address.
+    Acquisition uses the result path and a caller-owned program.
     """
 
-    schedule: Schedule[T_Cfg, T_Env]
+    schedule: Schedule[T_Env]
     name: str
     index: Hashable
     value: T_Value
-    cfg: T_Cfg | None
     path: tuple[Hashable, ...]
 
     @property
@@ -723,7 +618,7 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
         return self.schedule.get_data_for(self)
 
     @property
-    def _acquisition_owner(self) -> ScheduleStep[T_Cfg, T_Value, T_Env]:
+    def _acquisition_owner(self) -> ScheduleStep[T_Value, T_Env]:
         return self
 
     @property
@@ -751,26 +646,18 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
     def trigger_update(self, *, flush: bool = False) -> None:
         self.schedule.trigger_update_for(self, flush=flush)
 
-    @overload
-    def child(
-        self, addr: Hashable, *, cfg: None = None
-    ) -> ScheduleStep[T_Cfg, Hashable, T_Env]: ...
 
-    @overload
-    def child(
-        self, addr: Hashable, *, cfg: T_ChildCfg
-    ) -> ScheduleStep[T_ChildCfg, Hashable, T_Env]: ...
 
     def child(
-        self, addr: Hashable, *, cfg: object | None = None
-    ) -> ScheduleStep[Any, Hashable, T_Env]:
+        self, addr: Hashable
+    ) -> ScheduleStep[Hashable, T_Env]:
         self.schedule.ensure_active()
         return ScheduleStep(
             schedule=self.schedule,
             name=str(addr),
             index=addr,
             value=addr,
-            cfg=deepcopy(self.cfg if cfg is None else cfg),
+
             path=self.path + (addr,),
         )
 
@@ -792,102 +679,20 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Cfg, T_Value, T_Env]):
 
     def scan(
         self, name: str, values: Iterable[T_NestedValue]
-    ) -> Iterator[tuple[T_NestedValue, ScheduleStep[T_Cfg, T_NestedValue, T_Env]]]:
+    ) -> Iterator[tuple[T_NestedValue, ScheduleStep[T_NestedValue, T_Env]]]:
         self.schedule.ensure_active()
         yield from self.schedule.scan_from(parent=self, name=name, values=values)
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> Iterator[tuple[int, ScheduleStep[T_Cfg, int, T_Env]]]:
+    ) -> Iterator[tuple[int, ScheduleStep[int, T_Env]]]:
         self.schedule.ensure_active()
         yield from self.schedule.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
 
-    @overload
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: None = None,
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ModularProgramV2]: ...
 
-    @overload
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: ProgramFactory[ProgramT],
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ProgramT]: ...
 
-    def prog_builder(
-        self,
-        soc: object,
-        soccfg: object,
-        *,
-        reps: int = 1,
-        initial_delay: float = 1.0,
-        relax_delay: float = 1.0,
-        program_cls: ProgramFactory[ProgramT] | None = None,
-        **program_kwargs: object,
-    ) -> ProgramBuilder[ProgramT] | ProgramBuilder[ModularProgramV2]:
-        """Return a step-owned builder without compiling or acquiring.
-
-        soc, soccfg, reps, initial_delay, relax_delay, program_cls and
-        program_kwargs follow Schedule.prog_builder's factory contract.
-        In particular, controls are explicit, delays are in us, and cfg is
-        neither projected nor overridden. Each build isolates modules and
-        sweep specs with deep copies.
-
-        This step owns the builder's target, but its Schedule supplies the
-        active scope, stop signal and outcome handling. Acquisition uses the
-        local buffer registered at this step's path, or indexes the sole root
-        SignalBuffer by the full path. Without a local buffer, non-integer path
-        entries or a missing/unsupported root target raise ValueError at acquire.
-        Default rounds progress is removed on close for this step owner.
-
-        An inactive Schedule raises RuntimeError here and on later build/run.
-        As in Schedule.prog_builder, creation does not validate controls or
-        modules. Missing modules raise ValueError at build; the default program
-        rejects invalid reps, including bool, before compile. Factory/keyword
-        errors propagate at build without retry.
-        """
-        self.schedule.ensure_active()
-        if program_cls is None:
-            return ProgramBuilder(
-                owner=self,
-                soc=soc,
-                soccfg=soccfg,
-                program_cls=ModularProgramV2,
-                program_kwargs=dict(
-                    program_kwargs,
-                    reps=reps,
-                    initial_delay=initial_delay,
-                    relax_delay=relax_delay,
-                ),
-            )
-        return ProgramBuilder(
-            owner=self,
-            soc=soc,
-            soccfg=soccfg,
-            program_cls=program_cls,
-            program_kwargs=dict(
-                program_kwargs,
-                reps=reps,
-                initial_delay=initial_delay,
-                relax_delay=relax_delay,
-            ),
-        )
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

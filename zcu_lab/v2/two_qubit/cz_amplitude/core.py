@@ -240,7 +240,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
             Classify("terminal", config.roles.f1_tone),
             Classify("terminal", config.roles.f2_tone),
         ]
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             sched.run_acquire_summed(
                 prog,
                 context.soc,

@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Explicit environments exercise the real QICK acquisition/packing pipeline."""
 
 import importlib
@@ -14,7 +15,6 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.builder import TimelineBuilder
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
@@ -34,7 +34,7 @@ def environment(**kwargs):
 
 
 def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[
             PulseReadoutCfg(
@@ -782,7 +782,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
         pre_delay=1.5,
         trig_offset=0.25,
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[cfg.build("readout")],
         reps=1,

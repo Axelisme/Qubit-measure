@@ -1,3 +1,5 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """Emission order and fail-fast capability checks at public acquisition."""
 
 import numpy as np
@@ -5,7 +7,6 @@ import pytest
 from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.delay import Join, SoftDelay
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -20,7 +21,7 @@ def test_offline_board_declares_mock_identity():
     assert env.soc.is_mock is True
 
 
-class RawProgram(ModularProgramV2):
+class RawProgram(TimelineProgramV2):
     """Emit a supported raw NOP after the Module body."""
 
     def _body(self, cfg):
@@ -28,7 +29,7 @@ class RawProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawMakeProgram(ModularProgramV2):
+class RawMakeProgram(TimelineProgramV2):
     """Hardware compilation hook adding instructions outside the Modules."""
 
     def make_program(self):
@@ -36,7 +37,7 @@ class RawMakeProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawCleanupProgram(ModularProgramV2):
+class RawCleanupProgram(TimelineProgramV2):
     """Hardware cleanup hook adding instructions outside the Modules."""
 
     def _cleanup(self, cfg):
@@ -71,7 +72,7 @@ def test_raw_content_after_terminal_jump_rejected_before_backend(method):
 
 def test_raw_loop_nop_preserves_sweep_readouts():
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg, modules=[readout("readout")], sweep=[("axis", 2)]
     )
     prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
@@ -94,7 +95,7 @@ def test_unwired_generator_pulse_is_not_silently_accepted():
     drive = PulseCfg(
         ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     ).build("unwired_drive")
-    prog = ModularProgramV2(env.soccfg, modules=[drive, readout("readout")])
+    prog = compile_modules(env.soccfg, modules=[drive, readout("readout")])
     with pytest.raises(ValueError, match="unwired_drive.*1.*bound"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -124,7 +125,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
         ro_length=0.1,
         trig_offset=QickParam(0, {"axis": 0.007}),
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg, modules=[cfg.build("readout")], sweep=[("axis", 3)]
     )
     prog.acquire(env.soc, progress=False)
@@ -146,7 +147,7 @@ def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realizati
             [SoftDelay("middle", 0.2), readout("second")],
         )
     ]
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=modules,
         reps=2,

@@ -201,7 +201,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
         )
 
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -256,7 +256,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         acquisition_buffer = SignalBuffer(
             (cfg.rounds, len(lengths), 3, 3), dtype=np.float64
         )
-        with Schedule(None, acquisition_buffer, scope=context.scope) as sched:
+        with Schedule( acquisition_buffer, scope=context.scope) as sched:
             programs: dict[float, TimelineProgramV2] = {}
             for _, rep in sched.repeat("round", cfg.rounds):
                 for index, step in rep.scan("length", list(range(len(lengths)))):

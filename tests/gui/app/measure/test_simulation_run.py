@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """A registered synthetic experiment acquires, stops, fails and saves via RPC."""
 
 import sys
@@ -20,7 +21,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -32,7 +32,7 @@ from tests.gui.app.measure.remote._helpers import call, open_client
 
 
 def NoiseAdapter_run(cfg, *, context):
-    prog = ModularProgramV2(
+    prog = compile_modules(
         context.soccfg,
         modules=[
             PulseReadoutCfg(

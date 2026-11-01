@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Independent cavity histories through the public source and program seams.
 
 Terminal-only numeric pins retire when the versioned ADC/RNG contract changes.
@@ -27,7 +28,6 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.routing import route_request
 from zcu_tools.experiment.six_fluxonium.runtime import SixFluxoniumSource
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import SoftDelay
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
@@ -117,7 +117,7 @@ def repeated_mux_program(env: SimulationEnvironment, *, reads=2, reps=4096):
         ],
     )
     module = readout.build("readout")
-    program = ModularProgramV2(
+    program = compile_modules(
         env.soccfg,
         modules=[
             Repeat("reads", reads).add_content([module, SoftDelay("wait", 0.096)])

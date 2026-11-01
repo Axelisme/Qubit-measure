@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Receiver PSD conversion and public rounded ADC noise, independent of truth."""
 
 import numpy as np
@@ -8,7 +9,6 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
@@ -106,7 +106,7 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
             waveform=ConstWaveformCfg(length=0.08),
             ro_length=0.1,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=2048,
@@ -174,7 +174,7 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
             ro_length=0.06,
             trig_offset=0.01,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=256,

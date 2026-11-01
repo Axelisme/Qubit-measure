@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Startup preparation is observable and does not consume acquisition identity."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -7,7 +8,6 @@ import pytest
 from tqdm.auto import tqdm
 from zcu_tools.experiment import simulation
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
@@ -34,7 +34,7 @@ def program(env):
         waveform=ConstWaveformCfg(length=0.02),
         ro_length=0.02,
     )
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[readout.build("ro")],
         reps=3,

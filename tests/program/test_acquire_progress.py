@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Accumulated acquisition progress through the public context-local factory."""
 
 from collections.abc import Callable
@@ -5,7 +6,6 @@ from collections.abc import Callable
 from zcu_tools.gui.session.pbar_host import ProgressBar
 from zcu_tools.gui.session.ports import ProgressEvent, ProgressEventKind
 from zcu_tools.gui.session.services.progress import BoundProgressFactory
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.progress_bar import use_pbar_factory
@@ -31,7 +31,7 @@ class RecordingTransport:
 
 def _acquire_two_records() -> None:
     soc, soccfg = make_acquisition_soc()
-    program = ModularProgramV2(
+    program = compile_modules(
         soccfg,
         modules=[
             PulseReadoutCfg(

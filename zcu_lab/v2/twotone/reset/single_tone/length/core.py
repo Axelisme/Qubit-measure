@@ -93,7 +93,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         signals_buffer = reset_scan_buffer(context.plots, lengths, xlabel="Length (us)")
 
         # Sweep only the tested reset length after the optional preparation.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

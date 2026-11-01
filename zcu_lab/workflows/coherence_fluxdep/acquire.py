@@ -48,7 +48,7 @@ def run_t2ramsey(cfg: T2RamseyCfg, *, context: RunContext) -> T2RamseyResult:
     fig.show()
     buffer = SignalBuffer((len(times),), on_update=update)
     # Execute the pulse sequence using locally constructed modules and sweeps.
-    with Schedule(None, buffer, scope=context.scope) as sched:
+    with Schedule( buffer, scope=context.scope) as sched:
         builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         delay = builder.add_sweep("delay", cfg.delay)
         reset = Reset("reset", cfg.reset)

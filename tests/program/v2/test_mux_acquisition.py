@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Public builder/acquire integration with fixed mux, not physical simulation."""
 
 import numpy as np
@@ -5,7 +6,6 @@ import pytest
 from zcu_tools.experiment import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import readout
 from zcu_tools.program.v2.modules.control import Repeat
 
@@ -43,7 +43,7 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
     soccfg["readouts"][1]["iq_offset"] = 7.0
     soc = ShotSentinelSoc(soccfg.get_cfg())
     module = native_mux().build("mux")
-    prog = ModularProgramV2(
+    prog = compile_modules(
         soccfg,
         [Repeat("reads", 2).add_content(module)],
         sweep=[("preparation", 4)],
@@ -85,7 +85,7 @@ def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
     buffer = SignalBuffer((2,), dtype=np.complex128)
     stop = StopSignal()
     result = buffer.data
-    with Schedule({}, buffer, scope=Scope("run", stop=stop)) as sched:
+    with Schedule( buffer, scope=Scope("run", stop=stop)) as sched:
         builder = sched.prog_builder(soc, soccfg, reps=3).add(original)
         prog = builder.build()
         module = next(m for m in prog.modules if m.name == "mux")

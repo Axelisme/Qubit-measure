@@ -1,9 +1,9 @@
+from tests.program._timeline import compile_modules
 """Simulation validates compiled uploads without serializing unused transport data."""
 
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -18,7 +18,7 @@ class ObservedData(np.ndarray):
 def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
     env = white_noise(std_adc=0, seed=1)
     try:
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[
                 PulseReadoutCfg(
@@ -54,7 +54,7 @@ def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
 def test_integrated_weight_upload_validates_without_serializing():
     env = white_noise(std_adc=0, seed=1)
     try:
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[
                 PulseReadoutCfg(

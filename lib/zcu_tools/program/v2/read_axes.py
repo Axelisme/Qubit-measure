@@ -19,7 +19,6 @@ from ._timeline_macros import (
     TimeProducer,
 )
 from .macro.readout import ReadoutEmission, readout_control_scope
-from .modular import ModularProgramV2
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
 from .timeline import TimelineProgramV2
 
@@ -75,11 +74,11 @@ def _read_macros(
 
 
 def shot_sums(
-    prog: ModularProgramV2 | TimelineProgramV2, axes: Sequence[Classify | IQ]
+    prog: TimelineProgramV2, axes: Sequence[Classify | IQ]
 ) -> ShotSumProcessor:
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
-    prog is a compiled ModularProgramV2 or TimelineProgramV2. axes lists vectors
+    prog is a compiled TimelineProgramV2. axes lists vectors
     in output-axis order; repeat a read for second moments. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged. Modular labels are module names.
@@ -132,7 +131,7 @@ type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int
 
 
 def _collect_reads(
-    prog: ModularProgramV2 | TimelineProgramV2,
+    prog: TimelineProgramV2,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
     """Read compiled emission provenance and every trigger, preserving execution order."""
     counts = dict.fromkeys(prog.ro_chs, 0)
@@ -164,7 +163,7 @@ def _collect_reads(
 
 
 def _resolve_axis(
-    prog: ModularProgramV2 | TimelineProgramV2,
+    prog: TimelineProgramV2,
     axis: Classify | IQ,
     labels: _LabelReads,
     counts: dict[int, int],

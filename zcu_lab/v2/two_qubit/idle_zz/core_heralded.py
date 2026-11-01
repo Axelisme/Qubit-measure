@@ -163,7 +163,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             # DC stays on host because it sets an external instrument.
             for dc_value, step in sched.scan("dc", dc_values.tolist()):
                 if config.dc_device is not None:

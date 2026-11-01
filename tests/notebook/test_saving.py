@@ -187,7 +187,7 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
             if self.fail:
                 if context is None:
                     raise ValueError("RunContext required")
-                with Schedule(config, SignalBuffer((3,)), scope=context.scope) as sched:
+                with Schedule( SignalBuffer((3,)), scope=context.scope) as sched:
                     sched.prog_builder(context.soc, context.soccfg).run_program(
                         Program()
                     )

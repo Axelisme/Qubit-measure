@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Single-cavity acquisition at the public source and program boundaries.
 
 Small retained spaces isolate composition. Production-sized cost is measured by
@@ -25,7 +26,7 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import LoadValue, ModularProgramV2, Repeat
+from zcu_tools.program.v2 import LoadValue, Repeat
 from zcu_tools.program.v2.modules.delay import Delay, Join
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
@@ -461,7 +462,7 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
                 ro_length=0.016,
                 trig_offset=0.002,
             )
-            program = ModularProgramV2(
+            program = compile_modules(
                 env.soccfg,
                 modules=[
                     Join(first.build("first"), second.build("second")),
@@ -503,7 +504,7 @@ def test_program_acquire_raw_decimated_and_live_round_refresh():
         pulse = PulseCfg(
             ch=1, nqz=1, freq=580, gain=0.2, waveform=ConstWaveformCfg(length=0.032)
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[pulse.build("mw"), readout.build("ro")],
             reps=8,
@@ -668,7 +669,7 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
             waveform=ConstWaveformCfg(length=0.024),
             ro_length=0.016,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=8,
@@ -755,7 +756,7 @@ def test_fixed_seed_acquire_preserves_flux_controls(case, expected):
             ]
         elif case != "absent":
             flux_modules = [fast_flux.build("ff")]
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[
                 microwave.build("mw"),

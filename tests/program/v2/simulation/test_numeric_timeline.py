@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Numeric timeline contracts independent of a physical solver."""
 
 import numpy as np
@@ -5,7 +6,6 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Branch
 from zcu_tools.program.v2.modules.delay import DelayAuto, Join, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
@@ -36,7 +36,7 @@ def readout(name="readout", *, channel=0, samples=31, waveform=None):
 @pytest.mark.parametrize("loader", [LoadValue, LoadWord])
 def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader):
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             loader("empty", [], "reps", "unused"),
@@ -59,7 +59,7 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     )
     env = white_noise(std_adc=0)
     module = readout(waveform=ArbWaveformCfg(data="signed", path=str(path)))
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[module],
         reps=2,
@@ -91,7 +91,7 @@ def test_adc_read_windows_retain_each_generator_association():
     second.cfg.gen_ch = 1
     # Build again so the owned Pulse and flat readout share the selected route.
     second = second.cfg.build("second")
-    prog = ModularProgramV2(env.soccfg, modules=[readout("first"), second])
+    prog = compile_modules(env.soccfg, modules=[readout("first"), second])
     prog.acquire(env.soc, progress=False)
     window = request_of(env).materialize_point(0).readouts[0]
     assert getattr(window, "generator_channels", ()) == (0, 1)
@@ -99,7 +99,7 @@ def test_adc_read_windows_retain_each_generator_association():
 
 def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((1, 1), (0, 0)))
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             readout("one", channel=1, samples=7),
@@ -147,7 +147,7 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
 
 def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1)))
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             Join(
@@ -181,7 +181,7 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
 
 def test_undefined_register_in_unselected_branch_fails_before_signals():
     env = white_noise(std_adc=0)
-    uninitialized = ModularProgramV2(
+    uninitialized = compile_modules(
         env.soccfg,
         modules=[
             Branch(
@@ -205,7 +205,7 @@ def test_undefined_register_in_unselected_branch_fails_before_signals():
 
 def test_short_table_fails_before_signals():
     env = white_noise(std_adc=0)
-    out_of_bounds = ModularProgramV2(
+    out_of_bounds = compile_modules(
         env.soccfg,
         modules=[
             LoadValue("short_table", [0], "axis", "value"),

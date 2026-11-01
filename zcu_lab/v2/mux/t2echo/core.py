@@ -229,7 +229,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule(None, signals, scope=context.scope) as sched:
+        with Schedule( signals, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.
             builder = TimelineBuilder(
                 context.soccfg,

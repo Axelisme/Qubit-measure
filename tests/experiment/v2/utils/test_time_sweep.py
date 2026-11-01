@@ -1,10 +1,10 @@
+from tests.program._timeline import compile_modules
 import numpy as np
 import pytest
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     Pulse,
     PulseCfg,
     make_mock_soccfg,
@@ -38,7 +38,7 @@ def test_planned_time_window_preserves_span_and_compiled_coordinates(
             waveform=ConstWaveformCfg(length=sweep2param("length", planned)),
         ),
     )
-    prog = ModularProgramV2(soccfg, [pulse], sweep=[("length", planned)])
+    prog = compile_modules(soccfg, [pulse], sweep=[("length", planned)])
     compiled = prog.get_pulse_param(pulse.pulse_id, "total_length", as_array=True)
     expected = (
         (193 - 2 * np.arange(87)) if reverse else (20 + 2 * np.arange(87))

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Self, override
 from qick.asm_v2 import QickParam
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -80,7 +79,6 @@ class LoadValue(Module):
 
         self.idx_reg = idx_reg
         self.val_reg = val_reg
-        self.offset = 0
 
         self._packed_values: list[int] = list(self.values)
         self._is_compressed = False
@@ -186,51 +184,15 @@ class LoadValue(Module):
         """Whether several values share one dmem word."""
         return self._is_compressed
 
-    def init(self, prog: ModularProgramV2) -> None:
-        # QICK resolves all emitted consumers before unreachable code is removed.
-        if not self.use_existed:
-            prog.add_reg(self.val_reg)
 
-        if self._is_empty:
-            logger.debug(
-                "LoadValue.init: short-circuit empty values name='%s' (no dmem allocated)",
-                self.name,
-            )
-            return
-
-        self.offset = prog.add_dmem(self._packed_values)
-
-        logger.debug(
-            "LoadValue.init: name='%s', auto_compress=%s, compressed=%s, "
-            "values=%d, packed=%d, bits=%d, per_word=%d",
-            self.name,
-            self.auto_compress,
-            self._is_compressed,
-            len(self.values),
-            len(self._packed_values),
-            self._bits_per_value,
-            self._values_per_word,
-        )
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        self._emit_lookup(prog, self.idx_reg)
-        return t
 
     def _emit_lookup(
-        self, prog: ModularProgramV2 | TimelineProgramV2, index: str
+        self, prog: TimelineProgramV2, index: str
     ) -> None:
         if self._is_empty:
             return
 
-        from ..timeline import TimelineProgramV2
-
-        offset = (
-            prog.get_module_state(self, _LookupDeclaration).offset
-            if isinstance(prog, TimelineProgramV2)
-            else self.offset
-        )
+        offset = prog.get_module_state(self, _LookupDeclaration).offset
         # addr_reg computes dmem address / shift amount; word_reg holds the
         # fetched packed word. addr_reg is reused for shift once word is loaded.
         temp_reg_num = 2 if self._is_compressed else 1
@@ -274,8 +236,6 @@ class LoadValue(Module):
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
 
-    def allow_rerun(self) -> bool:
-        return True
 
     @staticmethod
     def _bits_needed(value: int) -> int:
@@ -353,7 +313,6 @@ class LoadWord(Module):
 
         self.idx_reg = idx_reg
         self.val_reg = val_reg
-        self.offset = 0
 
     @override
     def declare(self, prog: TimelineProgramV2) -> None:
@@ -395,46 +354,19 @@ class LoadWord(Module):
             ):
                 self._emit_lookup(prog)
 
-    def init(self, prog: ModularProgramV2) -> None:
-        if self._is_empty:
-            logger.debug(
-                "LoadWord.init: short-circuit empty values name='%s' (no dmem allocated)",
-                self.name,
-            )
-            return
 
-        self.offset = prog.add_dmem(self._encoded_values)
 
-        if not self.use_existed:
-            prog.add_reg(self.val_reg)
-
-        logger.debug(
-            "LoadWord.init: name='%s', values=%d",
-            self.name,
-            len(self.values),
-        )
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        self._emit_lookup(prog)
-        return t
-
-    def dmem_offset(self, prog: ModularProgramV2 | TimelineProgramV2) -> int:
+    def dmem_offset(self, prog: TimelineProgramV2) -> int:
         """Return this program's raw-word table base for loop update consumers.
 
-        Nonempty tables must be declared or legacy-initialized on prog first.
+        Nonempty tables must be declared on prog first.
         Missing native declarations raise ValueError. Empty tables have no base.
         """
-        from ..timeline import TimelineProgramV2
-
         if self._is_empty:
             raise ValueError(f"{self.name}: empty table has no dmem allocation")
-        if isinstance(prog, TimelineProgramV2):
-            return prog.get_module_state(self, _LookupDeclaration).offset
-        return self.offset
+        return prog.get_module_state(self, _LookupDeclaration).offset
 
-    def _emit_lookup(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _emit_lookup(self, prog: TimelineProgramV2) -> None:
         if self._is_empty:
             return
 
@@ -446,83 +378,5 @@ class LoadWord(Module):
                 prog.write_reg_op(addr_reg, self.idx_reg, "+", offset)
             prog.read_dmem(dst=self.val_reg, addr=addr_reg)
 
-    def allow_rerun(self) -> bool:
-        return True
 
 
-class ScanWith(Module):
-    """Scan a nonempty scalar table in order, loading before each child sequence.
-
-    Each native emission gets an independent fixed-count loop and counter.
-    Each point synchronizes the selected timeline before the next point starts.
-    Destination registers belong to the declaration unless an existing register
-    is explicitly shared with use_existed=True. Values follow the
-    nonnegative signed-int32 LoadValue contract. Empty values raise ValueError.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        values: Sequence[int],
-        val_reg: str,
-        *,
-        use_existed: bool = False,
-    ) -> None:
-        self.name = name
-
-        n = len(values)
-        if n == 0:
-            raise ValueError("ScanWith requires a non-empty values sequence")
-        repeat_mod = Repeat(f"{name}_count", n, range_hint=(0, n - 1))
-        self.value_loader = LoadValue(
-            name=f"{name}_load",
-            idx_reg=repeat_mod.name,
-            val_reg=val_reg,
-            values=values,
-            use_existed=use_existed,
-        )
-        repeat_mod.add_content(self.value_loader)
-
-        self.repeat_mod = repeat_mod
-
-    @override
-    def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare the table destination and all children on prog, in order.
-
-        The native loop owns its index register. use_existed=True leaves the
-        value register to the caller. Child declaration errors propagate.
-        """
-        for mod in self.repeat_mod.sub_modules:
-            prog.declare(mod)
-
-    @override
-    def lower(
-        self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
-    ) -> None:
-        """Load each scalar then emit children on timeline (default if None).
-
-        Synchronize the parent at entry and close each point's actual end via
-        a fixed-count native Repeat. tag identifies this scan emission; children
-        remain separate emissions. Invalid timeline or child errors propagate.
-        """
-        parent = "default" if timeline is None else timeline
-        index = prog.emission_name(self.repeat_mod.name)
-        prog.delay_by_timeline(timeline=parent)
-        with prog.repeat(index, self.repeat_mod.n, timeline=parent):
-            self.value_loader.lower_index(prog, index)
-            for mod in self.repeat_mod.sub_modules[1:]:
-                prog.emit(mod, timeline=parent)
-            prog.delay_by_timeline(timeline=parent)
-
-    def add_content(self, mod: ModuleGroup) -> Self:
-        """Append a module or ordered group; skip None entries (no module)."""
-        self.repeat_mod.add_content(mod)
-        return self
-
-    def init(self, prog: ModularProgramV2) -> None:
-        self.repeat_mod.init(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        return self.repeat_mod.run(prog, t, internal_modules=(self.value_loader,))

@@ -159,7 +159,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(

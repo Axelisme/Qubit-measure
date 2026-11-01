@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
 from dataclasses import replace
@@ -8,7 +9,6 @@ import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFAcquisitionOptions, FTFSource, ftf, replay_round
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
@@ -177,7 +177,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
         acquisition=FTFAcquisitionOptions(private_replay=archive),
     )
     try:
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[
                 PulseReadoutCfg(

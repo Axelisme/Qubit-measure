@@ -218,7 +218,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         context: RunContext,
     ) -> FreqResult:
         signals = spectrum_buffer(freqs, plots=context.plots)
-        with Schedule(None, signals, scope=context.scope) as sched:
+        with Schedule( signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,
@@ -249,7 +249,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             mixer_freq=readout_cfg.mixer_freq,
             nqz=readout_cfg.nqz,
         )
-        with Schedule(None, signals, scope=context.scope) as sched:
+        with Schedule( signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,

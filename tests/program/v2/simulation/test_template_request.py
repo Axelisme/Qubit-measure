@@ -1,9 +1,9 @@
+from tests.program._timeline import compile_modules
 """Public acquisition rejects reps live-ins, inconsistent tables and missing routes."""
 
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Branch, Repeat
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -50,7 +50,7 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
         )
     else:
         modules[0] = Branch("choice", cfg.build("a"), cfg.build("b"), compare_by="reps")
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=modules,
         reps=2,
@@ -71,7 +71,7 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
     module = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[module],
         sweep=[("axis", 2)],
@@ -99,7 +99,7 @@ def test_soc_rejects_unbound_generator_or_adc_route_before_backend(missing):
         cfg.gen_ch = 1
         cfg.ro_ch = 1
         modules = [cfg.build("readout")]
-    prog = ModularProgramV2(env.soccfg, modules=modules)
+    prog = compile_modules(env.soccfg, modules=modules)
     with pytest.raises(
         ValueError,
         match="generator 1 is not bound"

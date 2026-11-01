@@ -141,7 +141,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         signals_buffer = SignalBuffer((len(gains1), len(gains2)), on_update=update)
 
         # Sweep both reset gains in hardware and collect mean IQ.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

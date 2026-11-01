@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Host gain coordinates retain their intended words through QICK compilation."""
 
 import numpy as np
@@ -10,7 +11,6 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
     sweep2array,
 )
 from zcu_tools.program.v2 import (
-    ModularProgramV2,
     Pulse,
     PulseCfg,
     SweepCfg,
@@ -32,7 +32,7 @@ def _compile_scalar_word(soccfg: QickConfig, gain: float) -> int:
             waveform=ConstWaveformCfg(length=0.1),
         ),
     )
-    prog = ModularProgramV2(soccfg, [pulse])
+    prog = compile_modules(soccfg, [pulse])
     actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=False)
     factor = soccfg["gens"][0]["maxv"] * soccfg["gens"][0]["maxv_scale"]
     return round(actual * factor)
@@ -51,7 +51,7 @@ def _compile_sweep_words(
             waveform=ConstWaveformCfg(length=0.1),
         ),
     )
-    prog = ModularProgramV2(soccfg, [pulse], sweep=[("gain", sweep)])
+    prog = compile_modules(soccfg, [pulse], sweep=[("gain", sweep)])
     actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=True)
     factor = soccfg["gens"][0]["maxv"] * soccfg["gens"][0]["maxv_scale"]
     return np.rint(actual * factor).astype(int)
@@ -256,7 +256,7 @@ def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
             waveform=ConstWaveformCfg(length=0.1),
             ro_length=0.1,
         ).build("readout")
-        prog = ModularProgramV2(
+        prog = compile_modules(
             soccfg, [pulse, readout], sweep=[("freq", frequencies)], reps=200
         )
         compiled_gain = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=False)

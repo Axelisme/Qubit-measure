@@ -1,7 +1,6 @@
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime.program_builder import (
+from zcu_tools.experiment.v2.runtime.acquisition import (
     AcquireOptions,
-    ProgramBuilder,
     default_decimated_raw2signal_fn,
     default_raw2signal_fn,
 )
@@ -23,7 +22,6 @@ from zcu_tools.experiment.v2.runtime.schedule import (
 __all__ = [
     "AcquireOptions",
     "BufferProtocol",
-    "ProgramBuilder",
     "ResultNode",
     "ResultTree",
     "ResultUpdateEvent",

@@ -1,3 +1,5 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """Synthetic mixmux/PFB wiring and a deterministic, non-physical transport."""
 
 import numpy as np
@@ -5,7 +7,6 @@ import pytest
 from qick import QickConfig
 from zcu_tools.cfg_model import MuxReadoutCfg, MuxReadoutTone
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import ModuleCfgFactory, readout
 
 
@@ -68,7 +69,7 @@ def mux_soccfg():
     return QickConfig(cfg)
 
 
-class RecordingProgram(ModularProgramV2):
+class RecordingProgram(TimelineProgramV2):
     """Run the real compiler while recording public scheduling intents."""
 
     def __init__(self, soccfg, modules, **kwargs):

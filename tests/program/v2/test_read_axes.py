@@ -1,3 +1,5 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """Read labels, classifiers and shot outer products through compiled programs."""
 
 import numpy as np
@@ -53,7 +55,7 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
     classifier, counts
 ):
     ro = readout(classifier=classifier)
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(v2.make_mock_soccfg(), [ro])
     iq = {
         0: np.array([[-1, 0], [0, 0], [1, 0], [3, 0]], dtype=np.float64).reshape(
             1, 4, 1, 2
@@ -107,7 +109,7 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     classifier, values, expected
 ):
     ro = readout(classifier=classifier)
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(v2.make_mock_soccfg(), [ro])
     process = v2.shot_sums(prog, [v2.Classify("readout")])
     if isinstance(ro.cfg.classifier, CircleClassifier):
         ro.cfg.classifier.g_center = 99j
@@ -158,7 +160,7 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
                 prog.trigger(channels, t=4)
                 return t + 6.0
 
-        prog = v2.ModularProgramV2(cfg, [Reads()], reps=2)
+        prog = compile_modules(cfg, [Reads()], reps=2)
         names = ["readout", "readout"]
     axes = [v2.IQ(name, tone=1 if mux else None) for name in names]
     iq = {
@@ -184,7 +186,7 @@ def test_empty_axes_fail_when_constructing_processor(timeline):
     prog = (
         v2.TimelineProgramV2(v2.make_mock_soccfg())
         if timeline
-        else v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])
+        else compile_modules(v2.make_mock_soccfg(), [readout()])
     )
     with pytest.raises(ValueError, match="axes must contain at least one read"):
         v2.shot_sums(prog, [])
@@ -192,7 +194,7 @@ def test_empty_axes_fail_when_constructing_processor(timeline):
 
 @pytest.mark.parametrize("reads", [0, 2])
 def test_processor_rejects_adc_read_count_mismatch(reads):
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
     process = v2.shot_sums(prog, [v2.IQ("readout")])
     with pytest.raises(ValueError, match=rf"ADC 0.*expected.*1.*actual.*{reads}"):
         process({0: np.zeros((1, 2, reads, 2), dtype=np.float64)})
@@ -203,13 +205,13 @@ def test_processor_rejects_adc_read_count_mismatch(reads):
 )
 def test_tone_must_match_readout_type(mux, tone):
     ro = native_mux((4, 1)).build("readout") if mux else readout()
-    prog = v2.ModularProgramV2(mux_soccfg() if mux else v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(mux_soccfg() if mux else v2.make_mock_soccfg(), [ro])
     with pytest.raises(ValueError, match="tone"):
         v2.shot_sums(prog, [v2.IQ("readout", tone=tone)])
 
 
 def test_declared_reads_must_match_actual_triggers():
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
     prog.set_reads_per_shot(2)
     with pytest.raises(ValueError, match="ADC 0.*2.*1"):
         v2.shot_sums(prog, [v2.IQ("readout")])
@@ -259,7 +261,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
             if control == "Repeat"
             else Branch("choice", target, None)
         )
-        prog = v2.ModularProgramV2(
+        prog = compile_modules(
             v2.make_mock_soccfg(),
             [scope] if inside else [ro, scope],
             sweep=[("choice", 2)],
@@ -278,7 +280,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
         if control == "Repeat"
         else Branch("choice", other, None)
     )
-    prog = v2.ModularProgramV2(
+    prog = compile_modules(
         v2.make_mock_soccfg(n_readouts=2),
         [scope, selected],
         sweep=[("choice", 2)],
@@ -337,7 +339,7 @@ def test_missing_and_ambiguous_labels_list_available_labels(timeline, collision)
             def run(self, prog, t=0.0):
                 return ro.run(prog, ro.run(prog, t))
 
-        prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [Reads()])
+        prog = compile_modules(v2.make_mock_soccfg(), [Reads()])
     label = "readout" if collision else "missing"
     with pytest.raises(ValueError, match=rf"{label}.*available labels.*readout"):
         v2.shot_sums(prog, [v2.IQ(label)])
@@ -368,7 +370,7 @@ def test_explicit_tags_keep_qick_compile_time_uniqueness(native_conflict):
     "classifier", [None, CircleClassifier(g_center=0j, e_center=2 + 0j)]
 )
 def test_missing_or_incomplete_classification_fails_at_construction(classifier):
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [readout(classifier=classifier)])
+    prog = compile_modules(v2.make_mock_soccfg(), [readout(classifier=classifier)])
     with pytest.raises(ValueError, match="classifier missing|GE Post"):
         v2.shot_sums(prog, [v2.Classify("readout")])
 
@@ -395,7 +397,7 @@ def test_parallel_readout_emissions_keep_labels_without_changing_admission():
 def test_single_tone_mux_classify_resolves_implicit_and_explicit_tone(tone):
     cfg = native_mux((4,))
     cfg.tones[0].classifier = LinearClassifier(angle=0.0, threshold=1.0)
-    prog = v2.ModularProgramV2(mux_soccfg(), [cfg.build("readout")])
+    prog = compile_modules(mux_soccfg(), [cfg.build("readout")])
     iq = {
         4: np.array([[-1, 0], [0, 0], [1, 0], [2, 0]], dtype=np.float64).reshape(
             1, 4, 1, 2
@@ -406,7 +408,7 @@ def test_single_tone_mux_classify_resolves_implicit_and_explicit_tone(tone):
 
 
 def test_multi_tone_mux_classify_requires_tone_and_lists_available_positions():
-    prog = v2.ModularProgramV2(mux_soccfg(), [native_mux((4, 1)).build("readout")])
+    prog = compile_modules(mux_soccfg(), [native_mux((4, 1)).build("readout")])
     with pytest.raises(ValueError, match=r"readout.*available tones.*0.*1"):
         v2.shot_sums(
             prog,
@@ -422,7 +424,7 @@ def test_mux_classify_only_axes_produce_joint_counts():
     cfg = native_mux((4, 1))
     for tone in cfg.tones:
         tone.classifier = LinearClassifier(angle=0.0, threshold=0.0)
-    prog = v2.ModularProgramV2(mux_soccfg(), [cfg.build("readout")])
+    prog = compile_modules(mux_soccfg(), [cfg.build("readout")])
     iq = {
         4: np.array([[-1, 0], [-1, 0], [1, 0], [-1, 0]], dtype=np.float64).reshape(
             1, 4, 1, 2
@@ -438,7 +440,7 @@ def test_mux_classify_only_axes_produce_joint_counts():
 
 
 def test_iq_axis_sums_and_repeated_read_second_moments():
-    prog = v2.ModularProgramV2(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
     iq = {0: np.array([[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64)}
     process = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])
     actual = process(iq)

@@ -1,8 +1,8 @@
+from tests.program._timeline import compile_modules
 """Table and reset effects read from public compiled programs, not Module trees."""
 
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord, ScanWith
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
@@ -56,7 +56,7 @@ def module_program(
     env = white_noise(std_adc=0, n_gens=3, routes=((0, 0),))
     env.soccfg["tprocs"][0]["dreg_qty"] = data_registers
     if not native:
-        return ModularProgramV2(
+        return compile_modules(
             env.soccfg,
             modules=modules,
             sweep=list(sweep),

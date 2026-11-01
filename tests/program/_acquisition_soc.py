@@ -1,9 +1,10 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """Deterministic transport for the unbound, ordinary QICK acquisition pipeline."""
 
 import numpy as np
 from qick import QickConfig
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -75,7 +76,7 @@ def make_chunk_acquisition(
     reps: int = 4,
     reads: int = 2,
     sweep: list[tuple[str, int]] | None = None,
-) -> tuple[AcquisitionSoc, ModularProgramV2]:
+) -> tuple[AcquisitionSoc, TimelineProgramV2]:
     """Build unbound single-ADC shots with repeated reads and optional point sweeps."""
     soc, soccfg = make_acquisition_soc()
     readouts = [
@@ -90,7 +91,7 @@ def make_chunk_acquisition(
         ).build(f"readout_{index}")
         for index in range(reads)
     ]
-    program = ModularProgramV2(
+    program = compile_modules(
         soccfg,
         modules=readouts,
         reps=reps,

@@ -134,7 +134,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
 
         # 2. Set the external pump power for each host-side point.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             for jpa_power, step in sched.scan("power (dBm)", jpa_powers.tolist()):
                 set_rf_power(context.devices[cfg.jpa_rf_dev], jpa_power)
 

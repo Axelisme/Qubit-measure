@@ -105,7 +105,7 @@ class Producer:
 
 def run_entry(
     entry: Entry,
-    sched: Schedule[Any, Any],
+    sched: Schedule[Any],
     producer: Producer,
     options: AcquireOptions,
     convert: Callable[[NDArray[np.float64]], NDArray[np.float64]] = lambda raw: raw,
@@ -182,7 +182,7 @@ def test_pre_stopped_build_shortcut_notifies_once_without_build_or_retry(
     root = Scope("run")
     buffer = SignalBuffer((1,), dtype=np.float64)
     buffer.set(np.array([19.0]))
-    with Schedule({}, buffer, scope=root) as sched:
+    with Schedule( buffer, scope=root) as sched:
         builder = sched.prog_builder(object(), object(), program_cls=factory).add(
             FakeModule("readout")
         )
@@ -203,7 +203,7 @@ def test_pre_stopped_build_shortcut_notifies_once_without_build_or_retry(
         np.testing.assert_array_equal(buffer.data, [19.0])
         assert sched.outcome.status == "stopped"
     # Reusing the options on a fresh run must not replay a previous stop.
-    with Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
+    with Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
         result = run_entry("builder", sched, Producer(root, "complete"), options)
         np.testing.assert_array_equal(result, [7.0])
         assert observed == [True]
@@ -225,7 +225,7 @@ def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquir
     producer = Producer(root, ending)
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
 
         def on_stop() -> None:
@@ -267,7 +267,7 @@ def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
     root = Scope("run")
     producer = Producer(root, "finite")
     observed: list[bool] = []
-    with Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
+    with Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
         if mode == "summed":
             sums_options: RunOptions[NDArray[np.float64]] = RunOptions(
                 on_stop=lambda: observed.append(True)
@@ -329,7 +329,7 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule(
-            {},
+            
             SignalBuffer(
                 (1,), dtype=np.float64, on_update=update, update_interval=None
             ),
@@ -369,7 +369,7 @@ def test_stop_callback_failure_propagates_without_retry_or_outcome_change(
 
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
         with pytest.raises(ValueError, match="observer failed") as caught:
             run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=on_stop))

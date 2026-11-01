@@ -173,7 +173,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         )
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -220,7 +220,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             on_update=lambda data: update(_sum_rounds(data)),
         )
         programs: dict[float, TimelineProgramV2] = {}
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("delay", lengths.tolist()):
                     length_key = float(length)

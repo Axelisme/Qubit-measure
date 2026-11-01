@@ -35,14 +35,14 @@ class RecordingBuffer:
         self,
         data: Any,
         *,
-        on_update: Callable[[ScheduleStep[Any, Any, Any]], None] | None = None,
+        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
     ) -> None:
         self.data = data
         self._on_update = on_update
 
     def trigger_update(
         self,
-        step: ScheduleStep[Any, Any, Any] | None = None,
+        step: ScheduleStep[Any, Any] | None = None,
         *,
         flush: bool = False,
     ) -> None:
@@ -53,11 +53,11 @@ class RecordingBuffer:
 class RootUpdateRecordingBuffer:
     def __init__(self, data: Any) -> None:
         self.data = data
-        self.calls: list[tuple[ScheduleStep[Any, Any, Any] | None, bool]] = []
+        self.calls: list[tuple[ScheduleStep[Any, Any] | None, bool]] = []
 
     def trigger_update(
         self,
-        step: ScheduleStep[Any, Any, Any] | None = None,
+        step: ScheduleStep[Any, Any] | None = None,
         *,
         flush: bool = False,
     ) -> None:

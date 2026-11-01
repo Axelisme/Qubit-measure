@@ -297,7 +297,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
         )
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
                 viewer.update(

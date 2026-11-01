@@ -147,7 +147,7 @@ class RunAcquisitionMixin(ABC):
     @abstractmethod
     def _acquisition_owner(
         self,
-    ) -> Schedule[Any, Any] | ScheduleStep[Any, Any, Any]:
+    ) -> Schedule[Any] | ScheduleStep[Any, Any]:
         """Return this Schedule or step; all state remains owned by that object."""
         ...
 

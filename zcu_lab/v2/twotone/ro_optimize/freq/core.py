@@ -132,7 +132,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # Compare pulse-off/on branches at each hardware-swept readout frequency.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
             cfg.readout.set_param("freq", freq_param)

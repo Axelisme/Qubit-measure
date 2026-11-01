@@ -99,7 +99,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
                 zigzag_signal2real(data),
             ),
         )
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             repeat_pulse = getattr(cfg, cfg.repeat_on)
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {cfg.repeat_on} not found")

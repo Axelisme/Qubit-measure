@@ -154,7 +154,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -192,7 +192,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = table.times_us
         update = self._live_update(context.plots, lengths)
         buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

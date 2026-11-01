@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """FTF environment pacing and its opt-out leave public acquisition unchanged."""
 
 import time
@@ -5,7 +6,6 @@ import time
 import numpy as np
 import pytest
 from zcu_tools.experiment.ftf import FTFAcquisitionOptions, ftf
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationClock
@@ -48,7 +48,7 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
             waveform=ConstWaveformCfg(length=0.04),
             ro_length=0.04,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=2,
@@ -91,7 +91,7 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
     document["numerics"] = {**settings.numerics.model_dump(), "time_scale": 0}
     env = ftf(parse_ftf(document))
     try:
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[
                 PulseReadoutCfg(

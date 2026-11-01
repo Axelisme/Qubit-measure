@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Registered synthetic FTF experiment uses real Window/RPC Run and Save."""
 
 import sys
@@ -20,7 +21,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -55,7 +55,7 @@ def FTFAcquisitionAdapter_run(cfg, *, context):
             ro_length=0.03,
         ).build("ro"),
     ]
-    program = ModularProgramV2(
+    program = compile_modules(
         context.soccfg, modules=modules, sweep=[("point", 3)], reps=2
     )
     acquired = program.acquire(

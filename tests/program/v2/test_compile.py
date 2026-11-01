@@ -1,4 +1,4 @@
-"""Smoke tests for ModularProgramV2 compilation without hardware.
+"""Smoke tests for TimelineProgramV2 compilation without hardware.
 
 These tests verify that the program class can be constructed and compiled
 using a mock QickConfig built from a plain dict, exercising the real
@@ -6,12 +6,13 @@ _initialize / _body / compile pipeline.
 """
 
 from __future__ import annotations
+from tests.program._timeline import compile_modules
 
 from collections.abc import Mapping
 
 import pytest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import BaseCustomProgramV2, ModularProgramV2
+from zcu_tools.program.v2.modular import BaseCustomProgramV2, TimelineProgramV2
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
@@ -26,16 +27,16 @@ def _make_prog(
     n_gens: int = 2,
     n_readouts: int = 1,
     **cfg_kwargs,
-) -> ModularProgramV2:
+) -> TimelineProgramV2:
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
-    return ModularProgramV2(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
+    return compile_modules(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
 def _addr_inc(inst: Mapping[str, object]) -> int:
     return 2 if inst.get("CMD") == "WAIT" else 1
 
 
-def _expected_p_addr(prog: ModularProgramV2) -> int:
+def _expected_p_addr(prog: TimelineProgramV2) -> int:
     if not prog.prog_list:
         return 0
     end_addrs = []
@@ -46,7 +47,7 @@ def _expected_p_addr(prog: ModularProgramV2) -> int:
     return max(end_addrs)
 
 
-def _expected_line(prog: ModularProgramV2) -> int:
+def _expected_line(prog: TimelineProgramV2) -> int:
     tracked_labels = sum(1 for info in prog.meta_infos if info.get("kind") == "label")
     return len(prog.prog_list) + tracked_labels
 

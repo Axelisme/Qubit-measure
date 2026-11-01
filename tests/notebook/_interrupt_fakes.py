@@ -100,7 +100,7 @@ class InterruptedCore(SavingCore):
                 raise TypeError("This synthetic experiment requires FakeDevice")
             device.set_value(0.5)
         buffer = SignalBuffer(3)
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             if self.mode == "program-round":
                 sched.prog_builder(context.soc, context.soccfg).run_program(
                     RoundInterruptedProgram(), rounds=2, raw2signal_fn=identity_signal

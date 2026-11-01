@@ -1,10 +1,10 @@
+from tests.program._timeline import compile_modules
 """Worker selection and numerical parity at public FTF composition/acquire seams."""
 
 import numpy as np
 import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.experiment.ftf import ftf, runtime
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -49,7 +49,7 @@ def test_ftf_workers_reach_engine_and_preserve_small_acquire(monkeypatch):
                 waveform=ConstWaveformCfg(length=0.016),
                 ro_length=0.016,
             )
-            program = ModularProgramV2(
+            program = compile_modules(
                 env.soccfg,
                 modules=[pulse.build("drive"), readout.build("ro")],
                 sweep=[("freq", 2)],

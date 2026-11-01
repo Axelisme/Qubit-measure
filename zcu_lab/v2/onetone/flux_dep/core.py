@@ -167,7 +167,7 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             (len(dev_values), len(freqs)),
             on_update=update,
         )
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 set_flux(
                     context.devices[cfg.flux_dev],

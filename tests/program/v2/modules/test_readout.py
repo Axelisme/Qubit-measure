@@ -79,100 +79,6 @@ class TestReadoutFactory:
         ro = Readout("myro", _make_pulse_ro_cfg())
         assert ro.name == "myro"
 
-    def test_allow_rerun_pulse(self):
-        assert Readout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
-
-
-class TestPulseReadoutRuntime:
-    def test_init_wires_pulse_and_ro_window(self, mock_prog):
-        ro = PulseReadout("ro", _make_pulse_ro_cfg(ch=3))
-        ro.init(mock_prog)
-        assert mock_prog.count("declare_readout") == 1
-        assert mock_prog.count("declare_gen") == 1
-
-    def test_run_calls_both_submodules(self, mock_prog):
-        ro = PulseReadout("ro", _make_pulse_ro_cfg(ch=3))
-        ro.init(mock_prog)
-        ro.run(mock_prog, t=0.0)
-        assert mock_prog.count("send_readout_config") == 1
-        assert mock_prog.count("trigger") == 1
-        assert mock_prog.count("pulse") == 1
-
-    def test_runtime_regs_init_scratch_entries(self, mock_prog):
-        ro = PulseReadout(
-            "ro",
-            _make_pulse_ro_cfg(ch=3),
-            gain_val="gain_word",
-            freq_val="freq_word",
-            ro_freq_val="ro_freq_word",
-        )
-
-        ro.init(mock_prog)
-
-        assert mock_prog.count("declare_readout") == 1
-        assert mock_prog.count("declare_gen") == 2
-        add_pulses = mock_prog.events_of("add_pulse")
-        assert [event.kwargs["name"] for event in add_pulses] == [
-            "pulse_0",
-            "ro_runtime_pulse",
-        ]
-        add_readouts = mock_prog.events_of("add_readout_config")
-        assert [event.kwargs["name"] for event in add_readouts] == [
-            "ro_adc",
-            "ro_adc_runtime",
-        ]
-
-    def test_runtime_regs_play_scratch_entries_from_wave_registers(self, mock_prog):
-        ro = PulseReadout(
-            "ro",
-            _make_pulse_ro_cfg(ch=3),
-            gain_val="gain_word",
-            freq_val="freq_word",
-            ro_freq_val="ro_freq_word",
-        )
-        ro.init(mock_prog)
-
-        ro.run(mock_prog, t=0.25)
-
-        assert mock_prog.only("send_readout_config_from_regs").kwargs == {
-            "ch": 3,
-            "name": "ro_adc_runtime",
-            "t": 0.25,
-            "tag": None,
-            "freq_reg": "ro_freq_word",
-        }
-        assert mock_prog.only("pulse_from_regs").kwargs == {
-            "ch": 3,
-            "name": "ro_runtime_pulse",
-            "t": 0.25,
-            "tag": None,
-            "freq_reg": "freq_word",
-            "gain_reg": "gain_word",
-        }
-        assert mock_prog.count("send_readout_config") == 0
-        assert mock_prog.count("pulse") == 0
-
-    def test_runtime_ro_freq_only_leaves_pulse_on_normal_entry(self, mock_prog):
-        ro = PulseReadout(
-            "ro",
-            _make_pulse_ro_cfg(ch=3),
-            ro_freq_val="ro_freq_word",
-        )
-        ro.init(mock_prog)
-
-        ro.run(mock_prog)
-
-        assert mock_prog.only("send_readout_config_from_regs").kwargs == {
-            "ch": 3,
-            "name": "ro_adc_runtime",
-            "t": 0.0,
-            "tag": None,
-            "freq_reg": "ro_freq_word",
-        }
-        assert mock_prog.only("pulse").kwargs["name"] == "pulse_0"
-
-    def test_allow_rerun(self):
-        assert PulseReadout("ro", _make_pulse_ro_cfg()).allow_rerun() is True
 
 
 class TestTablePulseReadout:
@@ -197,43 +103,8 @@ class TestTablePulseReadout:
             )
 
 
-def test_flat_native_knobs_and_capture(mock_prog):
-    cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
-    cfg.set_param("freq", 600.0)
-    cfg.set_param("gain", 0.4)
-    cfg.set_param("length", 0.75)
-    cfg.set_param("ro_length", 2.0)
-    with pytest.raises(ValueError, match="Unknown parameter: ro_freq"):
-        cfg.set_param("ro_freq", 200.0)
-    ro = Readout("flat", cfg)
-    cfg.set_param("freq", 800.0)
-    ro.init(mock_prog)
-    assert mock_prog.only("declare_readout").kwargs == {"ch": 1, "length": 2.0}
-    adc = mock_prog.only("add_readout_config").kwargs
-    pulse = mock_prog.only("add_pulse").kwargs
-    assert (adc["freq"], pulse["freq"]) == (600.0, 600.0)
-    assert (adc["gen_ch"], pulse["ro_ch"], pulse["gain"]) == (2, 1, 0.4)
 
 
-@pytest.mark.parametrize(
-    "length,ro_length,expected_ticks", [(0.5, 2.0, 1034), (3.0, 0.5, 1508)]
-)
-def test_flat_readout_schedules_and_blocks_both_paths(
-    mock_prog, length, ro_length, expected_ticks
-):
-    cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
-    cfg.set_param("length", length)
-    cfg.ro_length = ro_length
-    cfg.pre_delay = 0.25
-    cfg.post_delay = 0.25
-    cfg.trig_offset = 0.4
-    ro = Readout("timed", cfg)
-    ro.init(mock_prog)
-    end = ro.run(mock_prog, t=1.0)
-    assert mock_prog.only("send_readout_config").kwargs["t"] == 1.0
-    assert mock_prog.only("trigger").kwargs == {"ros": [1], "t": 1.4}
-    assert mock_prog.only("pulse").kwargs["t"] == 1.25
-    assert end == pytest.approx(1.0 + expected_ticks / 430.08)
 
 
 @pytest.mark.parametrize("flat_top", [False, True])
@@ -279,26 +150,3 @@ def test_native_readout_conversion_binds_arb_to_explicit_capture(tmp_path, flat_
         ModuleCfgFactory.from_core(source, context=None)
 
 
-def test_swept_readout_schedule_and_blocking_window(mock_prog):
-    import numpy as np
-    from qick.asm_v2 import QickParam
-
-    cfg = _make_pulse_ro_cfg(ch=2, ro_ch=1)
-    cfg.pre_delay = QickParam(0.25, {"scan": 0.1})
-    cfg.trig_offset = QickParam(0.4, {"scan": 0.1})
-    cfg.set_param("ro_length", QickParam(2.0, {"scan": 0.5}))
-    ro = Readout("swept", cfg)
-    ro.init(mock_prog)
-    end = ro.run(mock_prog, t=QickParam(1.0, {"scan": 0.2}))
-    sent = mock_prog.only("send_readout_config").kwargs["t"]
-    trigger = mock_prog.only("trigger").kwargs["t"]
-    pulse = mock_prog.only("pulse").kwargs["t"]
-    loops = {"scan": 3}
-    np.testing.assert_allclose(sent.to_array(loops), [1.0, 1.1, 1.2])
-    np.testing.assert_allclose(trigger.to_array(loops), [1.4, 1.55, 1.7])
-    np.testing.assert_allclose(pulse.to_array(loops), [1.25, 1.4, 1.55])
-    assert isinstance(end, QickParam)
-    end_times = np.asarray(end.to_array(loops))
-    window_ends = np.array([3.4, 3.8, 4.2])
-    assert np.all(end_times >= window_ends)
-    assert np.all(end_times <= window_ends + 0.01)

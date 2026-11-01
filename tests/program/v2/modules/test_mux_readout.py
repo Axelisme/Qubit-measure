@@ -1,3 +1,5 @@
+from zcu_tools.program.v2 import TimelineProgramV2
+from tests.program._timeline import compile_modules
 """Fixed mux compile, hardware validation and averaged-I/Q selection contracts."""
 
 from copy import deepcopy
@@ -6,7 +8,6 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.control import Repeat
@@ -208,7 +209,7 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
         if unrelated_first
         else [module, UnrelatedReadout()]
     )
-    prog = ModularProgramV2(mux_soccfg(), modules)
+    prog = compile_modules(mux_soccfg(), modules)
     selected = {
         4: np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
         1: 100 + np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
@@ -293,7 +294,7 @@ def test_collect_iq_rejects_float32_at_runtime():
         collect(prog, raw)
 
 
-class RawBufferProgram(ModularProgramV2):
+class RawBufferProgram(TimelineProgramV2):
     """Supply synthetic acquisition buffers through the public getter boundary."""
 
     raw: list[NDArray[np.int64]] | None = None

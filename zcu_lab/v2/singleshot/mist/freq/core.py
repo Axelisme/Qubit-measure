@@ -157,7 +157,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
             dtype=np.float64,
             on_update=update,
         )
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             freq_sweep = cfg.freq
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.

@@ -158,7 +158,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             dtype=np.complex128,
             on_update=update_view,
         )
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for length, step in sched.scan("length", lengths.tolist()):
                 # Acquire one length at a time to bound the board raw-buffer size.
                 builder = TimelineBuilder(

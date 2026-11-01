@@ -159,7 +159,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=config.reps,
@@ -231,7 +231,7 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for duration, step in sched.scan("duration", durations.tolist()):
                 builder = TimelineBuilder(
                     context.soccfg,

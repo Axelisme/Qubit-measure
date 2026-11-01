@@ -13,7 +13,6 @@ from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from .._timeline_selected import PlaybackChoice, SelectedPlayback
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 logger = logging.getLogger(__name__)
@@ -101,25 +100,10 @@ class ComputedPulse(Module):
             ),
         )
 
-    def init(self, prog: ModularProgramV2) -> None:
-        base_idxs = self._declare_candidates(
-            prog, declare_pulse=lambda pulse: pulse.init(prog)
-        )
-        self.dmem_offset = prog.add_dmem(base_idxs)
-        logger.debug(
-            "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
-            "dmem_offset=%d, wmem_base_idxs=%s",
-            self.name,
-            self.ref_cfg.ch,
-            self.ref_cfg.waveform.style,
-            self._stride,
-            self.dmem_offset,
-            base_idxs,
-        )
 
     def _declare_candidates(
         self,
-        prog: ModularProgramV2 | TimelineProgramV2,
+        prog: TimelineProgramV2,
         *,
         declare_pulse: Callable[[Pulse], None],
     ) -> list[int]:
@@ -154,31 +138,5 @@ class ComputedPulse(Module):
 
         return base_idxs
 
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        ref_cfg = self.ref_cfg
-        with prog.acquire_temp_reg(2) as (addr_reg, wmem_reg):
-            # addr_reg = val_reg + dmem_offset  →  address of table[val_reg]
-            prog.write_reg_op(addr_reg, self.val_reg, "+", self.dmem_offset)
-            # wmem_reg = dmem[addr_reg]  →  starting wmem index for this candidate
-            prog.read_dmem(dst=wmem_reg, addr=addr_reg)
-            prog.pulse_by_reg(
-                ref_cfg.ch,
-                wmem_reg,
-                t=t + ref_cfg.pre_delay,
-                flat_top_pulse=self._is_flat_top,
-            )
 
-        return t + self.total_length(prog)
 
-    def total_length(self, prog: ModularProgramV2) -> float:
-        lengths = [pulse.total_length(prog) for pulse in self.pulse_modules]
-        if any(isinstance(length, QickParam) for length in lengths):
-            raise ValueError(
-                "ComputedPulse total length cannot be determined at compile time"
-            )
-        return max(float(length) for length in lengths)
-
-    def allow_rerun(self) -> bool:
-        return True

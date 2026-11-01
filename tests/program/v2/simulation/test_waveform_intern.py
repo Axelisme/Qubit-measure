@@ -1,9 +1,9 @@
+from tests.program._timeline import compile_modules
 """Compiled waveform reuse observed through detached request records."""
 
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -42,7 +42,7 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
         )
         for i in range(2)
     ]
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             LoadValue("select", [0, 1], "axis", "selected"),
@@ -119,7 +119,7 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
 def test_equal_names_do_not_merge_different_compiled_content(difference):
     env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
     waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             PulseCfg(ch=ch, nqz=1, freq=80, gain=0.2, waveform=waveform).build(

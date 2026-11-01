@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Independent acquisition-frozen coherence losses through six-source seams."""
 
 import json
@@ -11,7 +12,6 @@ from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow, RoundRequest
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.runtime import SixFluxoniumSource
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
@@ -219,7 +219,7 @@ def test_zero_amplitude_drift_preserves_sampling_and_drift_off_writes_nothing(
                     for ch, freq in enumerate((6800.0, 6925.0))
                 ],
             )
-            program = ModularProgramV2(
+            program = compile_modules(
                 env.soccfg, modules=[readout.build("readout")], reps=4
             )
             if mode == "integrated":

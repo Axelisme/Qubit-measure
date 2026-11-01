@@ -160,7 +160,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         signals_buffer = SignalBuffer((4, len(gains), len(freqs)), on_update=update)
 
         # Sweep both cavity knobs and the final pi/2 phase in one program.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Constructor overrides preserve cfg routing at the public compile boundary."""
 
 from collections.abc import Sequence
@@ -8,7 +9,6 @@ import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -32,7 +32,7 @@ from zcu_tools.program.v2.utils import is_qick_param
 
 from tests.program.v2._mux_support import native_mux
 
-ProgramKind = Literal["native", "builder", "legacy"]
+ProgramKind = Literal["native", "builder"]
 
 
 def _module_with_length(
@@ -65,10 +65,6 @@ def _reset_module(
 
 def _compile(kind: ProgramKind, modules: Sequence[Module], swept: bool):
     soccfg = make_mock_soccfg(n_gens=3, n_readouts=1)
-    if kind == "legacy":
-        return ModularProgramV2(
-            soccfg, modules=list(modules), sweep=[("point", 3)] if swept else None
-        )
     if kind == "builder":
         builder = TimelineBuilder(soccfg)
         if swept:
@@ -108,7 +104,7 @@ def _assert_same_compile(actual, expected):
     np.testing.assert_array_equal(actual.compile_datamem(), expected.compile_datamem())
 
 
-@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("kind", ["native", "builder"])
 @pytest.mark.parametrize("swept", [False, True])
 @pytest.mark.parametrize(
     "knob,start,stop",
@@ -146,7 +142,7 @@ def test_pulse_overrides_match_set_param_without_mutating_cfg(
     assert cfg.model_dump() == original
 
 
-@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("kind", ["native", "builder"])
 def test_pulse_none_overrides_keep_cfg_and_registry_identity(kind):
     cfg = _pulse_cfg()
     actual = _compile(
@@ -163,7 +159,7 @@ def test_pulse_none_overrides_keep_cfg_and_registry_identity(kind):
     _assert_same_compile(actual, expected)
 
 
-@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("kind", ["native", "builder"])
 @pytest.mark.parametrize("swept", [False, True])
 @pytest.mark.parametrize("factory", [PulseReadout, Readout])
 @pytest.mark.parametrize(
@@ -217,7 +213,7 @@ def test_readout_overrides_match_set_param_without_mutating_cfg(
     assert cfg.model_dump() == original
 
 
-@pytest.mark.parametrize("kind", ["native", "builder", "legacy"])
+@pytest.mark.parametrize("kind", ["native", "builder"])
 @pytest.mark.parametrize("swept", [False, True])
 @pytest.mark.parametrize("use_factory", [False, True])
 @pytest.mark.parametrize(

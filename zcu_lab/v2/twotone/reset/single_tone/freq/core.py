@@ -114,7 +114,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         signals_buffer = SignalBuffer((len(freqs),), on_update=update)
 
         # Sweep the tested reset frequency after the optional preparation.
-        with Schedule(None, signals_buffer, scope=context.scope) as sched:
+        with Schedule( signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

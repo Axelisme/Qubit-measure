@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """Joint-ADC per-point sums and completed-round lifecycle at the public seam."""
 
 from collections.abc import Mapping
@@ -8,7 +9,6 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2.modular import ModularProgramV2
 
 from tests.program._acquisition_soc import make_chunk_acquisition
 
@@ -165,7 +165,7 @@ def test_summed_normalizes_moves_reps_and_adds_rounds(
     monkeypatch: pytest.MonkeyPatch, reps_innermost: bool
 ) -> None:
     soc, source = make_chunk_acquisition(reps=2, sweep=[("outer", 2), ("inner", 2)])
-    prog = ModularProgramV2(
+    prog = compile_modules(
         source.soccfg,
         modules=source.modules,
         reps=2,

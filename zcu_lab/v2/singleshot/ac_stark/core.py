@@ -229,7 +229,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for gain_idx, (gain, step) in enumerate(
                 sched.scan("resonator gain", gains.tolist())
             ):

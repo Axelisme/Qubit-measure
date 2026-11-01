@@ -1,3 +1,4 @@
+from tests.program._timeline import compile_modules
 """FTF outcome histories connect herald reads to continued terminal populations."""
 
 import json
@@ -10,7 +11,6 @@ from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundSignals, SamplingIdentity
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, plan_template
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.control import Repeat
 from zcu_tools.program.v2.modules.delay import Delay
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
@@ -249,7 +249,7 @@ def herald_program(env, *, reads=2, reps=256):
             for ch, freq in ((4, 6000.0), (1, 6200.0))
         ],
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             Repeat("reads", reads).add_content(

@@ -1,9 +1,9 @@
+from tests.program._timeline import compile_modules
 """Repeated compiled requests preserve numeric controls and detached envelopes."""
 
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.control import Branch, Repeat
@@ -113,7 +113,7 @@ def repeated_program(env, case):
         waveform=ConstWaveformCfg(length=0.1),
         ro_length=0.1,
     )
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[
             LoadValue("counts", [0, 2, 1], "axis", "count"),

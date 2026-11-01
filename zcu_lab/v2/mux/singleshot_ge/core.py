@@ -354,7 +354,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             return tuple(figures)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)
-        with Schedule(None, buffer, scope=context.scope) as sched:
+        with Schedule( buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("probe on", [False, True]):
                 # 3. Start tone branches together; read out after the longest one.
                 # Init runs in both preparations, probe only in the second.

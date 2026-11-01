@@ -20,7 +20,6 @@ from .pulse import Pulse, PulseCfg, PulseOverrides
 from .util import calc_max_length
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -94,11 +93,8 @@ ResetCfg: TypeAlias = Annotated[
 
 
 class AbsReset(Module):
-    @abstractmethod
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam: ...
+    """Base declaration for reset modules emitted on a TimelineProgramV2."""
 
-    def allow_rerun(self) -> bool:
-        return True
 
 
 class PulseResetOverrides(PulseOverrides, total=False):
@@ -238,18 +234,8 @@ class PulseReset(AbsReset):
         apply_cfg_overrides(self.cfg, overrides, PulseResetOverrides.__annotations__)
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
 
-    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self.reset_pulse.init(prog)
 
-    def total_length(
-        self, prog: ModularProgramV2 | TimelineProgramV2
-    ) -> float | QickParam:
-        return self.reset_pulse.total_length(prog)
 
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        return self.reset_pulse.run(prog, t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the reset pulse's resources on prog."""
@@ -286,23 +272,8 @@ class TwoPulseReset(AbsReset):
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.cfg.pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.cfg.pulse2_cfg)
 
-    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self.reset_pulse1.init(prog)
-        self.reset_pulse2.init(prog)
 
-    def total_length(
-        self, prog: ModularProgramV2 | TimelineProgramV2
-    ) -> float | QickParam:
-        return calc_max_length(
-            self.reset_pulse1.total_length(prog), self.reset_pulse2.total_length(prog)
-        )
 
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        pulse1_t = self.reset_pulse1.run(prog, t)
-        pulse2_t = self.reset_pulse2.run(prog, t)
-        return calc_max_length(pulse1_t, pulse2_t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare both reset pulses on prog."""
@@ -348,22 +319,8 @@ class BathReset(AbsReset):
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=self.cfg.qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=self.cfg.pi2_cfg)
 
-    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        self.res_pulse.init(prog)
-        self.qub_pulse.init(prog)
-        self.pi2_pulse.init(prog)
 
-    def total_length(
-        self, prog: ModularProgramV2 | TimelineProgramV2
-    ) -> float | QickParam:
-        return self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog)
 
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        res_t = self.res_pulse.run(prog, t)
-        self.qub_pulse.run(prog, t)
-        return self.pi2_pulse.run(prog, res_t)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the cavity, qubit and final pi/2 pulses on prog."""
@@ -377,7 +334,7 @@ class BathReset(AbsReset):
         """Overlap cavity/qubit, then place pi/2 after the ceiled cavity end+post.
 
         Merge the qubit and pi/2 ends including their individual post-delays.
-        tag identifies the cavity start; no legacy block_mode is consulted.
+        tag identifies the cavity start.
         """
         timeline = timeline if timeline is not None else "default"
         cavity = prog.emission_name("reset_cavity")
