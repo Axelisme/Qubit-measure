@@ -197,3 +197,20 @@ def generate_resonator(
         )
     noise = _noise((2, freqs.size), noise_std, seed)
     return signals + noise[0] + 1j * noise[1]
+
+
+def generate_qubit_frequency(
+    freqs: NDArray[np.float64], truth: LorentzianParameters, noise_std: float, seed: int
+) -> NDArray[np.float64]:
+    """Return float64 Lorentzian qubit spectroscopy samples matching freqs.
+
+    freqs is a finite 1D frequency array. truth.center/half_width use those
+    frequency units; full width is twice half_width. truth.slope must be zero
+    to match fit_qubit_freq's Lorentzian contract. Either amplitude sign is
+    allowed. noise_std is additive independent Gaussian signal noise, and seed
+    initializes a local RNG. Invalid slope, width, coordinates or noise raise
+    ValueError. Inputs are unchanged.
+    """
+    if truth.slope != 0:
+        raise ValueError("qubit frequency Lorentzian requires zero slope")
+    return generate_lorentzian(freqs, truth, noise_std, seed)
