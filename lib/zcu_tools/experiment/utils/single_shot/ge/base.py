@@ -182,8 +182,11 @@ def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:
 class GE_FitResult(TypedDict, closed=True):
     """GE calibration and diagnostics.
 
-    length_ratio is the dimensionless joint readout length / T1, or None when
-    the data cannot identify it. A user-fixed length_ratio is returned unchanged.
+    length_ratio is the dimensionless joint readout length / T1. It is None
+    when the joint covariance cannot estimate its relative standard error or
+    that error exceeds GEFitOptions.length_ratio_max_relative_error. A user-fixed
+    length_ratio is returned unchanged. ge_params and length_ratio_g/e retain
+    their fitted values regardless of identifiability.
     """
 
     length_ratio: float | None
@@ -212,7 +215,11 @@ class GEFitOptions:
     logscale defaults to linear PDF axes. align_t1 defaults to sharing the joint
     readout/T1 ratio in the two population refinements.
     length_ratio_max_relative_error is a dimensionless, finite, positive
-    threshold; nonpositive or nonfinite values raise ValidationError at construction.
+    threshold on the joint relative standard error sigma/|p|. A missing error
+    estimate or sigma/|p| above the threshold makes the reported length_ratio
+    None; a fixed length_ratio bypasses this check. The default 1.0 corresponds
+    to fit_tools' sigma(ln p) > 1 weak-parameter rule. Nonpositive or nonfinite
+    thresholds raise ValidationError at construction.
     """
 
     numbins: int | str = "auto"
@@ -254,6 +261,13 @@ def fitting_ge_and_plot(
     RuntimeError, ArithmeticError and numpy.linalg.LinAlgError into
     GENumericalError with the original cause. Plotting is outside that boundary;
     its errors propagate unchanged. The input must have paired rows (2,N).
+
+    The returned length_ratio is the dimensionless joint readout length / T1.
+    Fixed options.length_ratio is returned unchanged. For a free fit, an
+    unavailable joint relative standard error or sigma/|p| greater than
+    options.length_ratio_max_relative_error returns None and labels the plot
+    "not identifiable". Other fitted parameters and quality diagnostics are
+    unchanged by this reporting threshold.
     """
     options = GEFitOptions() if options is None else options
     (Ig, Ie), (Qg, Qe) = signals.real, signals.imag
@@ -458,11 +472,14 @@ def fitting_ge_and_plot(
 def _identifiable_length_ratio(
     fitted_ratio: float, joint_quality: FitQuality, options: GEFitOptions
 ) -> float | None:
-    """Preserve fixed ratios; require relative standard error at most one otherwise."""
+    """Preserve fixed ratios; apply the joint relative-error threshold to free fits."""
     if options.length_ratio is not None:
         return options.length_ratio
     relative_error = joint_quality.relative_parameter_errors["length_ratio"]
-    if relative_error is None or relative_error > 1.0:
+    if (
+        relative_error is None
+        or relative_error > options.length_ratio_max_relative_error
+    ):
         return None
     return fitted_ratio
 
