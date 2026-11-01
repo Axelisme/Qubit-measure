@@ -1,8 +1,8 @@
 # `zcu_tools/mcp/measure/`
 
-**Last updated:** 2026-11-01，作者 await 的 run_core 例外
+**Last updated:** 2026-11-01，作者規則與 point 操作程序分層
 
-**讀者：** agent。量測 MCP 的啟動、表單、operation 與寫回契約。
+**讀者：** agent、framework-dev。查閱量測 MCP 的啟動、表單、operation 與寫回契約。
 
 Measure MCP 透過 GUI 的 loopback remote socket 操作同一份 GUI 狀態。GUI core 不 import MCP。GUI `RemoteMethodEntry` 擁有 wire schema、exposure、readonly 與 operation policy。MCP 每次連線讀取 live `rpc.catalog`，不複製 policy 表，也不依 catalog 動態建立 tools。
 
@@ -492,17 +492,7 @@ Execution ID 是 session-local，不是持久恢復機制；query 不建立新�
 
 ### 作者 await 邊界
 
-所有 `zcu_lab/` async def 都使用同一規則，包含未被呼叫的 helpers。
-只 await env／tab／session 的方法呼叫，或可靜態解析到 lab async 定義的 helper。
-唯一開放的 lib await helper 是 `zcu_tools.experiment.run_core.run_core`，
-包含可靜態解析到此完整路徑的 import alias。其他 lib helper 仍禁止。
-Workflow 可寫 `await helper(env, cfg)`，helper 可再 await 另一個 lab helper；
-helper 內的 await 同樣受檢查。
-工具拒絕 asyncio.*、create_task、gather、wait_for、TaskGroup，
-明列原語的直接 Call 即使不 await 也拒絕。
-其他 async with／async for 不另禁。
-Quality gate 執行 `tools/check_script_awaits.py`，不 import lab。
-這不是 type checker；assignment aliases、動態分派與包裝可繞過規則，作者仍須遵守序列執行契約。
+Lab 作者的 await 邊界與檢查入口見 [recipe 作者契約](../../../../zcu_lab/recipes/README.md#作者可呼叫的操作)。
 
 ## Workflow tools
 
