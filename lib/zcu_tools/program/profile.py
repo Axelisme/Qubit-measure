@@ -129,7 +129,9 @@ def _generators(
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
     gens: list[dict[str, object]] = []
     dacs: dict[str, dict[str, object]] = {}
-    for channel in profile.generators:
+    for index, channel in enumerate(profile.generators):
+        if channel.dac in dacs:
+            raise ValueError(f"generators.{index}.dac: requires a unique DAC name")
         fs = channel.sample_rate(profile.refclk_freq)
         cfg = channel.model_dump(
             exclude={"fabric_div", "rf_fabric_div"}, exclude_none=True
