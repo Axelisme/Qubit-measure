@@ -32,18 +32,21 @@ def spectroscopy_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
             # The run overrides both pulse frequencies with the common sweep.
-            Slot(slot, copy=True, set={"freq": Hidden(0.0)})
-            if ctx.has(slot)
-            else Template(
-                "pulse:blank",
-                set={
-                    "ch": Expr(f"${role}.wiring.ch"),
-                    "nqz": None,
-                    "freq": Hidden(0.0),
-                    "gain": None,
-                    "waveform.style": "cosine",
-                    "waveform.length": None,
-                },
+            Slot(
+                slot,
+                copy=True,
+                set={"freq": Hidden(0.0)},
+                fallback=Template(
+                    "pulse:blank",
+                    set={
+                        "ch": Expr(f"${role}.wiring.ch"),
+                        "nqz": None,
+                        "freq": Hidden(0.0),
+                        "gain": None,
+                        "waveform.style": "cosine",
+                        "waveform.length": None,
+                    },
+                ),
             )
         )
     readout = mux_readout_initial(ctx)

@@ -31,10 +31,10 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     drive = {}
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
-        drive[role] = (
-            Slot(slot, copy=True)
-            if ctx.has(slot)
-            else Template(
+        drive[role] = Slot(
+            slot,
+            copy=True,
+            fallback=Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
@@ -44,7 +44,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
-            )
+            ),
         )
     readout = mux_readout_initial(ctx)
     return Form(

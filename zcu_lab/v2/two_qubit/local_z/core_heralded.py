@@ -5,6 +5,8 @@ from itertools import product
 from typing import ClassVar
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -53,8 +55,6 @@ class LocalZHeraldedResult:
     Unmeasured points remain NaN; completed rounds survive cancellation.
     """
 
-    targets: NDArray[np.int64]
-    quadratures: NDArray[np.int64]
     gate_counts: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -65,10 +65,7 @@ def restore_result(
     """Restore 81-class sums; reject legacy raw-IQ files without sums."""
     sums = data.variable("sums")
     return LocalZHeraldedResult(
-        targets=sums.axes[6].astype(np.int64),
-        quadratures=sums.axes[5].astype(np.int64),
-        gate_counts=sums.axes[4].astype(np.int64),
-        sums=sums.z.astype(np.float64),
+        gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
     )
 
 
@@ -97,24 +94,27 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec.generated_arange("herald_f2", ""),
-                        VariableAxisSpec.generated_arange("herald_f1", ""),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                         VariableAxisSpec(
-                            "CZ gate count",
-                            "",
+                            label="CZ gate count",
+                            unit="",
                             field_name="gate_counts",
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            "Projection X or Y",
-                            "",
-                            field_name="quadratures",
+                            label="Projection X or Y",
+                            unit="",
+                            values=(0, 1),
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            "Target F1 or F2", "", field_name="targets", dtype=np.int64
+                            label="Target F1 or F2",
+                            unit="",
+                            values=(0, 1),
+                            dtype=np.int64,
                         ),
                     ),
                     z=VariableZSpec(
@@ -141,18 +141,18 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg stays unchanged; completed rounds survive cancellation.
         """
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "CZ gate count",
-            "Target sigma | herald (g,g)",
-            num_lines=4,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="CZ gate count", ylabel="Target sigma | herald (g,g)")
+        viewer = live_line(ax, num_lines=4)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = terminal_counts(np.moveaxis(sums, 0, 2), ("g", "g"))
             values = np.stack((sigma(counts[0], "f1"), sigma(counts[1], "f2")))
-            viewer.update(np.array(config.gate_counts), values.reshape(4, -1))
+            return viewer.set(np.array(config.gate_counts), values.reshape(4, -1))
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, 3, 3, 3, 3),
@@ -234,8 +234,6 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                 )
         buffer.trigger_update(flush=True)
         return LocalZHeraldedResult(
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -252,13 +250,8 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        for actual, expected in (
-            (data.targets, np.arange(2)),
-            (data.quadratures, np.arange(2)),
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
-            if not np.array_equal(actual, expected):
-                raise ValueError("LocalZ count axes must match saved cfg")
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+            raise ValueError("LocalZ count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3, 3, 3):
             raise ValueError("Expected target × quadrature × gate_count × 3 × 3 counts")
         gg = terminal_counts(data.sums, ("g", "g"))
@@ -349,7 +342,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         )
 
         fig, _ = plots.subplots(
-            "phase", nrows=3, figsize=(10, 10), layout="constrained"
+            num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
         for herald, phases, fits in (
             ("gg", gg_phases, gg_fits),
@@ -394,7 +387,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             ax.set(xlabel="CZ gate count", ylabel=label)
             if ax.get_legend_handles_labels()[0]:
                 ax.legend(fontsize="small")
-        fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+        fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
         for (herald, values), t, (q, projection) in product(
             (("gg", gg_quadratures), ("ee sign-corrected", ee_quadratures)),
             range(2),
@@ -408,7 +401,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             )
         axes.set(xlabel="CZ gate count", ylabel="Target sigma")
         axes.legend(ncols=2)
-        fig, axes = plots.subplots("herald", figsize=(12, 5))
+        fig, axes = plots.subplots(num="herald", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
             vmin=0,

@@ -7,6 +7,8 @@ from itertools import product
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -172,13 +174,11 @@ class ConditionalPhaseCfg(ConfigBase):
 class ConditionalPhaseResult:
     """Summed counts with branch × quadrature × n × frequency leading axes.
 
-    spectator_states=[0,1] denote spectator I/Xπ; quadratures=[0,1] denote X/Y.
+    Fixed spectator states [0,1] denote I/Xπ; quadratures [0,1] denote X/Y.
     sums is float64 with terminal F1/F2 g/e/other class axes, each length 3.
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
-    spectator_states: NDArray[np.int64]
-    quadratures: NDArray[np.int64]
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
@@ -190,8 +190,6 @@ def restore_result(
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
     return ConditionalPhaseResult(
-        spectator_states=sums.axes[5].astype(np.int64),
-        quadratures=sums.axes[4].astype(np.int64),
         gate_counts=sums.axes[3].astype(np.int64),
         frequencies=sums.axes[2].astype(np.float64),
         sums=sums.z.astype(np.float64),
@@ -208,28 +206,31 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        "Common CZ frequency",
-                        "Hz",
+                        label="Common CZ frequency",
+                        unit="Hz",
                         field_name="frequencies",
                         dtype=np.float64,
                         scale=1e6,
                     ),
                     VariableAxisSpec(
-                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
-                    ),
-                    VariableAxisSpec(
-                        "Projection X or Y",
-                        "",
-                        field_name="quadratures",
+                        label="CZ gate count",
+                        unit="",
+                        field_name="gate_counts",
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Spectator I or Xπ",
-                        "",
-                        field_name="spectator_states",
+                        label="Projection X or Y",
+                        unit="",
+                        values=(0, 1),
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        label="Spectator I or Xπ",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                 ),
@@ -258,18 +259,18 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Common CZ frequency (MHz)",
-            "Target sigma",
-            num_lines=4 * len(config.gate_counts),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
+        viewer = live_line(ax, num_lines=4 * len(config.gate_counts))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = np.moveaxis(sums, 0, 2)
             values = sigma(counts, config.target)
-            viewer.update(frequencies, values.reshape(-1, len(frequencies)))
+            return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, len(frequencies), 3, 3),
@@ -340,8 +341,6 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseResult(
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
             frequencies,
             np.moveaxis(buffer.array, 0, 2),
@@ -364,13 +363,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        for actual, expected in (
-            (data.spectator_states, np.arange(2)),
-            (data.quadratures, np.arange(2)),
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
-            if not np.array_equal(actual, expected):
-                raise ValueError("Conditional phase count axes must match saved cfg")
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+            raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
@@ -409,7 +403,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
 
         fig, _ = plots.subplots(
-            "phase", nrows=3, figsize=(10, 10), layout="constrained"
+            num="phase", nrows=3, figsize=(10, 10), layout="constrained"
         )
         fig.suptitle(f"{cfg.target.upper()} target · actual spectator g/e")
         for (b, state), (j, n) in product(
@@ -446,7 +440,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         ):
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="small", ncols=2)
-        fig, axes = plots.subplots("quadratures", figsize=(10, 5))
+        fig, axes = plots.subplots(num="quadratures", figsize=(10, 5))
         for (b, state), (q, projection), (j, n) in product(
             enumerate(("g", "e")), enumerate(("X", "Y")), enumerate(data.gate_counts)
         ):
@@ -458,7 +452,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="small", ncols=3)
-        fig, axes = plots.subplots("slopes", figsize=(10, 5))
+        fig, axes = plots.subplots(num="slopes", figsize=(10, 5))
         for b, state in enumerate(("g", "e")):
             axes.errorbar(
                 data.frequencies,
