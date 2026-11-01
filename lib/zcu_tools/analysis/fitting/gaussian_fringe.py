@@ -5,8 +5,9 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from .base import FitResult, fit_func, fitdecaycos
-from .quality import decay_time_bounds
+from .base import fit_func, fitdecaycos
+from .quality import compute_fit_quality, decay_time_bounds
+from .results import GaussDecayFringeFit
 
 
 def _gaussian_fringe(
@@ -23,8 +24,12 @@ def fit_gauss_decay_fringe(
     real_signals: NDArray[np.float64],
     fit_params: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[float, float, float, float, NDArray[np.float64], FitResult]:
+) -> GaussDecayFringeFit:
     """Fit baseline + A*exp(-(x/T)**2)*cos(2*pi*(f*x + phase/360)).
+
+    Return a named GaussDecayFringeFit; six-value unpacking follows the existing
+    transitional convention. Quality uses actual observations/curve, explicit
+    fixed flags and the same decay_time_bounds as the optimizer.
 
     xs contains acquired nonnegative delays; real_signals is matching float64
     data. The envelope center is fixed at zero, and T is the 1/e time in x
@@ -63,11 +68,32 @@ def fit_gauss_decay_fringe(
         fixedparams,
     )
     parameters[3] %= 360
-    return (
-        float(parameters[4]),
-        float(np.sqrt(covariance[4, 4])),
-        float(parameters[2]),
-        float(np.sqrt(covariance[2, 2])),
-        _gaussian_fringe(xs, *parameters),
-        (parameters, covariance),
+    curve = _gaussian_fringe(xs, *parameters)
+    names = ("y0", "yscale", "freq", "phase", "decay_time")
+    quality = compute_fit_quality(
+        real_signals,
+        curve,
+        dict(zip(names, parameters, strict=True)),
+        covariance,
+        decay_bounds=(lower, upper),
+        fixed_parameters=(
+            tuple(
+                name
+                for name, value in zip(names, fixedparams, strict=True)
+                if value is not None
+            )
+            if fixedparams is not None
+            else ()
+        ),
+    )
+    return GaussDecayFringeFit(
+        (
+            float(parameters[4]),
+            float(np.sqrt(covariance[4, 4])),
+            float(parameters[2]),
+            float(np.sqrt(covariance[2, 2])),
+            curve,
+            (parameters, covariance),
+        ),
+        quality=quality,
     )
