@@ -34,7 +34,8 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(values: Sequence[int]
         assert words is not None
         assert words.dtype == np.int32
         np.testing.assert_array_equal(words, values)
-        # Both concrete programs inherit MyProgramV2's transport normalization.
+        # Transport words must be Python ints, not NumPy scalars.
+        assert all(type(word) is int for word in prog.binprog["dmem"])
         np.testing.assert_array_equal(prog.binprog["dmem"], values)
     else:
         assert words is None

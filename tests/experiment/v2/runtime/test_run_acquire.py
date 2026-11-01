@@ -16,7 +16,11 @@ from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.runtime.acquisition import (
     SynchronousAcquireKeywords,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor
+from zcu_tools.program.acquisition import (
+    AcquisitionContractError,
+    CancelFlagProtocol,
+    ShotSumProcessor,
+)
 from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -303,6 +307,91 @@ def test_run_converter_is_selected_by_none_not_callable_truthiness(
                 options=RunOptions(converter=Converter()),
             )
         np.testing.assert_array_equal(result, [-7.0])
+
+
+@pytest.mark.parametrize("mode", ["integrated", "summed"])
+@pytest.mark.parametrize(
+    "retry,recover,initial",
+    [
+        pytest.param(0, True, 7 + 8j, id="no-retry-preserves-slot"),
+        pytest.param(1, True, 7 + 8j, id="retry-replaces-slot"),
+        pytest.param(1, True, complex("nan"), id="retry-from-empty-slot"),
+        pytest.param(1, False, complex("nan"), id="exhaustion-discards-attempts"),
+    ],
+)
+def test_shot_overrun_restarts_all_rounds_and_discards_failed_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    retry: int,
+    recover: bool,
+    initial: complex,
+) -> None:
+    soc, program = make_chunk_acquisition(reps=3, reads=1)
+    length = program.ro_chs[0]["length"]
+
+    def chunk(shots: int, value: int):
+        return (shots, ([np.tile([value * length, -value * length], (shots, 1))], {}))
+
+    # The failed attempt completes round one, then overruns round two.
+    failed = [[chunk(3, 91)], [chunk(1, 99)], [chunk(3, 99)]]
+    batches = iter(failed + ([[chunk(3, 4)], [chunk(3, 6)]] if recover else failed))
+    polls = []
+
+    def poll():
+        polls.append(1)
+        return next(batches)
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    buffer.set(np.array(initial))
+    bars: list[RecordingProgressBar] = []
+    succeeds = retry > 0 and recover
+    result = None
+    with (
+        use_pbar_factory(recording_pbar_factory(bars)),
+        Schedule(buffer, scope=Scope("run")) as schedule,
+    ):
+        with nullcontext() if succeeds else pytest.raises(AcquisitionContractError) as caught:
+            if mode == "integrated":
+                result = schedule.run_acquire(
+                    program, soc, rounds=2, options=RunOptions(retry=retry)
+                )
+            else:
+                result = schedule.run_acquire_summed(
+                    program,
+                    soc,
+                    rounds=2,
+                    processor=lambda iq: iq[0][..., 0, 0].sum(axis=1),
+                    options=RunOptions(retry=retry),
+                )
+        assert schedule.outcome.status == ("completed" if succeeds else "failed")
+        if not succeeds:
+            assert caught is not None
+            assert schedule.outcome.exception is caught.value
+
+    assert len(polls) == (5 if succeeds else 3 * (retry + 1))
+    if succeeds:
+        expected = 30 if mode == "summed" else 5 - 5j
+        np.testing.assert_allclose(result, expected)
+        np.testing.assert_allclose(buffer.array, expected)
+        raw = program.get_raw()
+        assert raw is not None
+        np.testing.assert_array_equal(raw[0], np.tile([6, -6], (3, 1, 1)) * length)
+    else:
+        np.testing.assert_array_equal(buffer.array, initial)
+
+    rounds_bar = next(bar for bar in bars if bar.desc == "rounds")
+    assert rounds_bar.total == 2
+    assert rounds_bar.reset_count == retry + 1
+    assert rounds_bar.n == (2 if succeeds else 1)
+    assert rounds_bar.closed
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == retry
+    for warning in warnings:
+        assert "expected_shots=3, received_shots=1, chunk_shots=3" in warning.message
+        assert "round_index=1" in warning.message
+        assert "attempt 2" in warning.message
 
 
 def _policy_poll(
