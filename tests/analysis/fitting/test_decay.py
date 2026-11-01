@@ -45,7 +45,9 @@ def test_decay_named_result_preserves_unpacking_and_quality(
 
 
 @pytest.mark.parametrize("fixed", ("free", "center", "sigma"))
-def test_gaussian_named_result_preserves_sigma_conversion_and_quality(fixed: str) -> None:
+def test_gaussian_named_result_preserves_sigma_conversion_and_quality(
+    fixed: str,
+) -> None:
     xs = np.linspace(0.0, 20.0, 160)
     center = 0.0 if fixed == "center" else 2.0
     ys = 0.2 + 0.8 * np.exp(-0.5 * ((xs - center) / 3.0) ** 2)
@@ -54,8 +56,12 @@ def test_gaussian_named_result_preserves_sigma_conversion_and_quality(fixed: str
         xs,
         ys,
         fit_params=(0.2, 0.8, center, 3.0),
-        fixedparams=(None, None, center if fixed == "center" else None,
-                     3.0 if fixed == "sigma" else None),
+        fixedparams=(
+            None,
+            None,
+            center if fixed == "center" else None,
+            3.0 if fixed == "sigma" else None,
+        ),
     )
     time, error, curve, (params, cov) = result
 
@@ -67,14 +73,19 @@ def test_gaussian_named_result_preserves_sigma_conversion_and_quality(fixed: str
     assert result.cov is cov
     np.testing.assert_allclose(params, (0.2, 0.8, center, 3.0), atol=0.02)
     expected = compute_fit_quality(
-        ys, curve, dict(zip(("y0", "yscale", "center", "sigma"), params, strict=True)),
-        cov, fixed_parameters=() if fixed == "free" else (fixed,),
+        ys,
+        curve,
+        dict(zip(("y0", "yscale", "center", "sigma"), params, strict=True)),
+        cov,
+        fixed_parameters=() if fixed == "free" else (fixed,),
     )
     assert result.quality == expected
     assert result.quality.invalid == ()
     assert result.quality.r2 is not None and result.quality.r2 > 0.999
     assert (error == 0.0) if fixed == "sigma" else (error > 0.0)
-    assert_frozen_fields(result, ("decay_time", "decay_time_err", "params", "cov", "curve", "quality"))
+    assert_frozen_fields(
+        result, ("decay_time", "decay_time_err", "params", "cov", "curve", "quality")
+    )
 
 
 def test_fit_decay_recovers_T1():

@@ -187,9 +187,7 @@ def gaussian_comparison(
     times sigma, so the envelope is baseline + A*exp(-(t/T)**2). Numeric fit
     failures propagate to the comparison caller; no acceptance occurs.
     """
-    fit = fit_gauss_decay(
-        times, observed, fixedparams=(None, None, 0.0, None)
-    )
+    fit = fit_gauss_decay(times, observed, fixedparams=(None, None, 0.0, None))
     t, err = fit.decay_time, fit.decay_time_err
     fitted, params, covariance = fit.curve, fit.params, fit.cov
     quality = compute_fit_quality(

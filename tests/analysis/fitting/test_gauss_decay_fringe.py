@@ -18,7 +18,9 @@ def test_gaussian_fringe_named_result_preserves_frequency_and_quality(
     )
     ys += np.random.default_rng(42).normal(0.0, 0.001, xs.size)
     result = fitting.fit_gauss_decay_fringe(
-        xs, ys, fit_params=(0.23, 0.8, 0.7, phase, 6.0),
+        xs,
+        ys,
+        fit_params=(0.23, 0.8, 0.7, phase, 6.0),
         fixedparams=(None, None, None, fixed_phase, None),
     )
     time, error, freq, freq_err, curve, (params, cov) = result
@@ -32,17 +34,30 @@ def test_gaussian_fringe_named_result_preserves_frequency_and_quality(
     assert result.params is params
     assert result.cov is cov
     expected = fitting.compute_fit_quality(
-        ys, curve,
+        ys,
+        curve,
         dict(zip(("y0", "yscale", "freq", "phase", "decay_time"), params, strict=True)),
-        cov, decay_bounds=fitting.decay_time_bounds(xs),
+        cov,
+        decay_bounds=fitting.decay_time_bounds(xs),
         fixed_parameters=() if fixed_phase is None else ("phase",),
     )
     assert result.quality == expected
     assert result.quality.invalid == ()
     assert result.quality.r2 is not None and result.quality.r2 > 0.999
     assert error > 0.0 and freq_err > 0.0
-    assert_frozen_fields(result, ("decay_time", "decay_time_err", "freq", "freq_err",
-                                  "params", "cov", "curve", "quality"))
+    assert_frozen_fields(
+        result,
+        (
+            "decay_time",
+            "decay_time_err",
+            "freq",
+            "freq_err",
+            "params",
+            "cov",
+            "curve",
+            "quality",
+        ),
+    )
 
 
 def test_gaussian_fringe_recovers_zero_centered_envelope_and_frequency() -> None:
