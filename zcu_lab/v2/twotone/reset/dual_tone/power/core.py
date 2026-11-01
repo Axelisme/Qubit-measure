@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -62,7 +63,7 @@ class PowerCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class PowerAnalyzeOptions:
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
@@ -203,7 +204,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             amp2D.T,

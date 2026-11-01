@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitTrace,
@@ -38,16 +39,13 @@ from zcu_lab.v2.support.resonance import get_resonance_freq
 class CKP_Result:
     """Probe frequencies in MHz and mean IQ shaped (2, Nres_freq, Nqub_freq).
 
-    ``initial_states`` labels nominal ground/excited preparations as 0/1,
+    The fixed state axis labels nominal ground/excited preparations as 0/1,
     not independently measured state populations.
     """
 
     res_freqs: NDArray[np.float64]
     qub_freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    initial_states: NDArray[np.int64] = field(
-        default_factory=lambda: np.array([0, 1], dtype=np.int64)
-    )
 
 
 @dataclass(frozen=True)
@@ -164,7 +162,7 @@ def _plot_resonance_maps(
     g_fit_freqs = lorfunc(res_freqs, *g_params)
     e_fit_freqs = lorfunc(res_freqs, *e_params)
 
-    fig, _ = plots.subplots("fit", nrows=2, ncols=1, figsize=(8, 6), sharex=True)
+    fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, figsize=(8, 6), sharex=True)
     ax1, ax2 = fig.axes
 
     fig.suptitle(
@@ -259,7 +257,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
                 dtype=np.float64,
             ),
             AxesSpec.Axis(
-                "initial_states", label="Initial State", unit="None", dtype=np.int64
+                values=(0, 1), label="Initial State", unit="None", dtype=np.int64
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -301,29 +299,30 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        figure, _ = context.plots.subplots("measurement", ncols=2, figsize=(10, 4))
+        figure, _ = context.plots.subplots(num="measurement", ncols=2, figsize=(10, 4))
         ax_ground, ax_excited = figure.axes
-        ground = live_heatmap(
-            context.plots,
-            "measurement",
-            "Resonator Drive Frequency (MHz)",
-            "Qubit Probe Frequency (MHz)",
-            title="Ground State",
-            axes=ax_ground,
-        )
-        excited = live_heatmap(
-            context.plots,
-            "measurement",
-            "Resonator Drive Frequency (MHz)",
-            "Qubit Probe Frequency (MHz)",
-            title="Excited State",
-            axes=ax_excited,
-        )
+        for ax, title in ((ax_ground, "Ground State"), (ax_excited, "Excited State")):
+            ax.set(
+                xlabel="Resonator Drive Frequency (MHz)",
+                ylabel="Qubit Probe Frequency (MHz)",
+                title=title,
+            )
+            formatter = ScalarFormatter(useMathText=True)
+            formatter.set_powerlimits((-2, 2))
+            ax.xaxis.set_major_formatter(formatter)
+            ax.yaxis.set_major_formatter(formatter)
+        ground = live_heatmap(ax_ground)
+        excited = live_heatmap(ax_excited)
 
-        def plot_fn(data: NDArray[np.complex128]) -> None:
+        @context.plots.on_plot_thread
+        def plot_fn(data: NDArray[np.complex128]):
             real_signal = ckp_signal2real(data)
-            ground.update(res_freqs, qub_freqs, real_signal[0])
-            excited.update(res_freqs, qub_freqs, real_signal[1])
+            return (
+                *ground.set(res_freqs, qub_freqs, real_signal[0]),
+                *excited.set(res_freqs, qub_freqs, real_signal[1]),
+            )
+
+        figure.show()
 
         signals_buffer = SignalBuffer(
             (2, len(res_freqs), len(qub_freqs)),
