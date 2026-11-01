@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc, lorfunc
+from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,27 @@ class LorentzianParameters:
     amplitude: float
     center: float
     half_width: float
+
+
+@dataclass(frozen=True)
+class ResonatorParameters:
+    """Complex resonance truth in fitting's MHz frequency convention.
+
+    frequency is resonance MHz; loaded_quality is positive Ql. coupling_quality
+    selects hanger when positive and transmission when None. asymmetry_phase
+    is hanger phi in radians (unused for transmission). amplitude is complex
+    a0 at resonance, electrical_delay is in inverse MHz. amplitude_slope is
+    real log-amplitude slope per MHz; phase_curvature is radians per MHz squared.
+    """
+
+    frequency: float
+    loaded_quality: float
+    coupling_quality: float | None
+    asymmetry_phase: float
+    amplitude: complex
+    electrical_delay: float
+    amplitude_slope: float
+    phase_curvature: float
 
 
 def _coordinates(xs: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -145,3 +167,33 @@ def generate_lorentzian(
     return lorfunc(
         xs, truth.offset, truth.slope, truth.amplitude, truth.center, truth.half_width
     ) + _noise(xs.shape, noise_std, seed)
+
+
+def generate_resonator(
+    freqs: NDArray[np.float64], truth: ResonatorParameters, noise_std: float, seed: int
+) -> NDArray[np.complex128]:
+    """Return complex128 resonator samples matching finite 1D freqs in MHz.
+
+    Select the public HangerModel or TransmissionModel through truth's coupling
+    quality. noise_std is independent Gaussian noise in each IQ quadrature;
+    seed initializes a local RNG. Nonpositive frequency/quality or invalid
+    coordinates/noise raise ValueError. Inputs are unchanged.
+    """
+    _coordinates(freqs)
+    if truth.frequency <= 0 or truth.loaded_quality <= 0:
+        raise ValueError("frequency and loaded_quality must be positive")
+    if truth.coupling_quality is None:
+        signals = TransmissionModel.calc_signals(
+            freqs, truth.frequency, truth.loaded_quality, truth.amplitude,
+            truth.electrical_delay, truth.amplitude_slope, truth.phase_curvature
+        )
+    else:
+        if truth.coupling_quality <= 0:
+            raise ValueError("coupling_quality must be positive or None")
+        signals = HangerModel.calc_signals(
+            freqs, truth.frequency, truth.loaded_quality, truth.coupling_quality,
+            truth.asymmetry_phase, truth.amplitude, truth.electrical_delay,
+            truth.amplitude_slope, truth.phase_curvature
+        )
+    noise = _noise((2, freqs.size), noise_std, seed)
+    return signals + noise[0] + 1j * noise[1]
