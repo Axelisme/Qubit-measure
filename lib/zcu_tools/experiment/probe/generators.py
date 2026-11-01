@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting import decaycos, expfunc
+from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc
 
 
 @dataclass(frozen=True)
@@ -94,4 +94,22 @@ def generate_decay_fringe(
         truth.frequency,
         truth.phase_degrees,
         truth.decay_time,
+    ) + _noise(xs.shape, noise_std, seed)
+
+
+def generate_rabi(
+    xs: NDArray[np.float64], truth: OscillationParameters, noise_std: float, seed: int
+) -> NDArray[np.float64]:
+    """Return float64 Rabi samples matching finite 1D xs without changing inputs.
+
+    None decay_time selects fitting.cosfunc, otherwise fitting.decaycos with
+    positive time. Frequency is cycles per x unit, phase is in degrees.
+    noise_std is independent additive Gaussian signal noise per sample; seed
+    initializes a local RNG. Invalid coordinates, time or noise raise ValueError.
+    """
+    if truth.decay_time is not None:
+        return generate_decay_fringe(xs, truth, noise_std, seed)
+    _coordinates(xs)
+    return cosfunc(
+        xs, truth.offset, truth.amplitude, truth.frequency, truth.phase_degrees
     ) + _noise(xs.shape, noise_std, seed)
