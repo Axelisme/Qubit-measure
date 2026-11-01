@@ -8,7 +8,6 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from reprlib import repr as short_repr
 from time import perf_counter
@@ -26,21 +25,18 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
 from .. import native_persistence
-from ..acquisition import (
-    capture_device_snapshot,
-    capture_software_provenance,
-    new_run_id,
-)
-from ..axes_spec import AxesSpec, GroupedAxesSpec
 from ..base import Experiment
-from ..context import RunContext
-from ..metadata import RunMetadata, RunSnapshot
 from ..records import RunRecord
-from ..scope import Scope
 from ..simulation import SimulationEnvironment, white_noise
 from ..single_fluxonium import single_fluxonium
+from ._acquisition import acquire_record as _acquire_record
+from ._comparison import compare_roundtrip as compare_roundtrip
 from .analysis import AnalysisStageResult as AnalysisStageResult
 from .analysis import analysis_stage as analysis_stage
+from .run_save import RunStageResult as RunStageResult
+from .run_save import SaveStageResult as SaveStageResult
+from .run_save import run_stage as run_stage
+from .run_save import save_stage as save_stage
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
@@ -105,158 +101,6 @@ def _describe(result: Any) -> dict[str, ResultField]:
     }
 
 
-def _scaled_component_equal(before: np.ndarray, after: np.ndarray) -> bool:
-    if not np.array_equal(np.isnan(before), np.isnan(after)):
-        return False
-    finite = np.isfinite(before)
-    if not np.array_equal(finite, np.isfinite(after)):
-        return False
-    infinite = np.isinf(before)
-    if not np.array_equal(before[infinite], after[infinite]):
-        return False
-    # Widen before subtraction/division so small tolerance products cannot
-    # underflow to a rounded absolute allowance for subnormal inputs.
-    left = before[finite].astype(np.longdouble)
-    right = after[finite].astype(np.longdouble)
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        relative = np.abs(left - right) / np.abs(left)
-    return bool(np.all((left == right) | (relative <= 2 * np.finfo(before.dtype).eps)))
-
-
-def _scaled_fields(
-    spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
-) -> set[str]:
-    """Select Result fields whose declared scale permits relative comparison."""
-    declarations = (
-        (*spec.axes, spec.z)
-        if isinstance(spec, AxesSpec)
-        else tuple(
-            declaration
-            for variable in spec.variables
-            for declaration in (*variable.axes, variable.z)
-        )
-    )
-    scales_by_field: dict[str, set[float]] = {}
-    for declaration in declarations:
-        if declaration.field_name is not None:
-            scales_by_field.setdefault(declaration.field_name, set()).add(
-                declaration.scale
-            )
-    if isinstance(spec, GroupedAxesSpec):
-        for name, scales in scales_by_field.items():
-            if len(scales) > 1:
-                raise ValueError(
-                    f"Conflicting scales for Result field {name!r}: {sorted(scales)}"
-                )
-    return {
-        declaration.field_name
-        for declaration in declarations
-        if declaration.field_name is not None
-        and np.isfinite(declaration.scale)
-        and declaration.scale not in (0, 1)
-    }
-
-
-def compare_roundtrip(
-    original: _Result,
-    restored: _Result,
-    *,
-    spec: AxesSpec[_Result, _Cfg] | GroupedAxesSpec[_Result, _Cfg],
-) -> bool:
-    """Compare in-memory Results before save and after native restore.
-
-    Both inputs must be dataclass instances of spec.result_type with the same
-    fields; otherwise raise TypeError. Compare every field, including fields
-    not named by the persistence declaration.
-    Return False for any differing field shape or dtype. AxesSpec and
-    GroupedAxesSpec fields with a finite, nonzero scale other than 1 allow
-    relative error <= 2*eps, atol=0, for
-    floating values (each real/imaginary component for complex arrays). eps is
-    the actual real storage dtype's machine epsilon. NaN component positions
-    must match and infinities must match sign. Zero has no absolute allowance.
-    Fixed/generated axes without a Result field are excluded.
-    Other fields and integer/discrete arrays remain exact,
-    with NaNs equal under NumPy array_equal semantics.
-
-    For round-to-nearest arithmetic with the same represented scale s, one
-    multiplication and division give fl(fl(x*s)/s) = x*(1+d1)*(1+d2).
-    If both operations stay in the normal finite range, |di| <= u = eps/2,
-    hence relative error <= 2*u + u**2 < 2*eps. This assumes no additional
-    lossy dtype conversion. Underflow, overflow and invalid scales do not have
-    this guarantee; they receive no enlarged tolerance or repaired values.
-    Conflicting scales for one Result field across grouped declarations raise
-    ValueError naming the field and scales, even when both Results are identical.
-    Other persistence validation and I/O remain the caller's responsibility.
-    """
-    if (
-        not is_dataclass(original)
-        or isinstance(original, type)
-        or not isinstance(original, spec.result_type)
-        or not is_dataclass(restored)
-        or isinstance(restored, type)
-        or not isinstance(restored, spec.result_type)
-    ):
-        raise TypeError("Roundtrip Results must match spec.result_type")
-    if {item.name for item in fields(original)} != {
-        item.name for item in fields(restored)
-    }:
-        raise TypeError("Roundtrip Results must have the same fields")
-    scaled_fields = _scaled_fields(spec)
-    for item in fields(original):
-        before = np.asarray(getattr(original, item.name))
-        after = np.asarray(getattr(restored, item.name))
-        if before.shape != after.shape or before.dtype != after.dtype:
-            return False
-        if item.name in scaled_fields and before.dtype.kind in "fc":
-            if not _scaled_component_equal(np.real(before), np.real(after)):
-                return False
-            if before.dtype.kind == "c" and not _scaled_component_equal(
-                np.imag(before), np.imag(after)
-            ):
-                return False
-        elif not np.array_equal(before, after, equal_nan=before.dtype.kind in "fc"):
-            return False
-    return True
-
-
-def _acquire(
-    experiment: Experiment[_Result, _Cfg],
-    cfg: _Cfg,
-    environment: SimulationEnvironment,
-    plots: Plots,
-) -> RunRecord[_Cfg, _Result]:
-    with Scope("run") as scope:
-        context = RunContext(
-            environment.soc,
-            environment.soccfg,
-            plots,
-            environment.devices.get_all_devices(),
-            scope,
-        )
-        provenance = capture_software_provenance(context=context)
-        devices = capture_device_snapshot(context.devices)
-        started = datetime.now(timezone.utc)
-        result = experiment.run(cfg.model_copy(deep=True), context=context)
-        finished = datetime.now(timezone.utc)
-        spec = experiment.AXES_SPEC
-        if spec is None:
-            raise ValueError("Probe requires experiment.AXES_SPEC")
-        return RunRecord(
-            cfg,
-            result,
-            RunMetadata(
-                run_id=new_run_id(started),
-                experiment=spec.tag,
-                started_at=started.isoformat(),
-                finished_at=finished.isoformat(),
-                completion="stopped" if scope.cancelled else "complete",
-                snapshot=RunSnapshot(roles={}),
-                provenance=provenance,
-                device_snapshot=devices,
-            ).model_dump(mode="json"),
-        )
-
-
 def _export(plots: Plots, stage: str, report: ProbeReport, directory: Path) -> None:
     plots.finish()
     for name in plots:
@@ -302,7 +146,7 @@ def probe(
         with _timed(report, "setup"):
             output_dir.mkdir(parents=True, exist_ok=True)
         with _timed(report, "run"):
-            record = _acquire(experiment, cfg, environment, live)
+            record = _acquire_record(experiment, cfg, environment, live)
             report.fields = _describe(record.result)
         with _timed(report, "live_png"):
             _export(live, "live", report, output_dir)
@@ -429,7 +273,3 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
             environment.devices.close_all_devices()
     print(json.dumps(report, default=_json_default, indent=2))
     return report
-
-
-if __name__ == "__main__":
-    raise SystemExit(0 if main().exception is None else 1)
