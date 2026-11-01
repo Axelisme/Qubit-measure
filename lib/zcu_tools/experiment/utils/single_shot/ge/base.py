@@ -179,6 +179,13 @@ def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:
 
 
 class GE_FitResult(TypedDict, closed=True):
+    """GE calibration and diagnostics.
+
+    length_ratio is the dimensionless joint readout length / T1, or None when
+    the data cannot identify it. A user-fixed length_ratio is returned unchanged.
+    """
+
+    length_ratio: float | None
     ge_params: tuple[float, float, float, float, float, float, float]
     p0_gg: float
     p0_ge: float
@@ -332,6 +339,7 @@ def fitting_ge_and_plot(
                 excited_covariance,
             ),
         }
+        identifiable_length_ratio = options.length_ratio
         rotated_g_center = _estimate_rotated_center(Ig, Qg, sg, s)
         rotated_e_center = _estimate_rotated_center(Ie, Qe, se, s)
 
@@ -404,12 +412,15 @@ def fitting_ge_and_plot(
 
         _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
 
-        length_title = (
-            f"{length_ratio:.1f}"
-            if options.align_t1
-            else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
-        )
-        fig.suptitle(f"Readout length = {length_title} " + r"$T_1$")
+        if identifiable_length_ratio is None:
+            fig.suptitle("Readout length: not identifiable")
+        else:
+            length_title = (
+                f"{length_ratio:.1f}"
+                if options.align_t1
+                else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
+            )
+            fig.suptitle(f"Readout length = {length_title} " + r"$T_1$")
         fig.tight_layout()
         fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
@@ -417,6 +428,7 @@ def fitting_ge_and_plot(
         fid,
         populations,
         GE_FitResult(
+            length_ratio=identifiable_length_ratio,
             ge_params=ge_params,
             p0_gg=p0_gg,
             p0_ge=p0_ge,
