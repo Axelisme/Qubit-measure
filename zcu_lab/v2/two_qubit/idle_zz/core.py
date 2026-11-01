@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -182,13 +184,13 @@ class IdleZZResult:
     """Unnormalized float64 sums (D,2,T,3,3), terminal F1/F2 g/e/other.
 
     dc_values is the D-point device coordinate, or [0] when DC is disabled.
-    spectator_states is int64 [0,1] for spectator I/Xπ. delays is actual quantized µs.
+    The spectator axis is fixed [0,1] for I/Xπ. delays is actual quantized µs.
     Rounds accumulate without averaging. Unmeasured points stay NaN; completed
     rounds survive cancellation. No individual shots or IQ are retained.
     """
 
     dc_values: NDArray[np.float64]
-    spectator_states: NDArray[np.int64]
+
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -198,7 +200,6 @@ def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
     sums = data.variable("sums")
     return IdleZZResult(
         sums.axes[4].astype(np.float64),
-        sums.axes[3].astype(np.int64),
         sums.axes[2].astype(np.float64),
         sums.z.astype(np.float64),
     )
@@ -212,18 +213,20 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec("Delay", "s", field_name="delays", scale=1e-6),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        "Spectator state (0=I, 1=Xπ)",
-                        "",
-                        field_name="spectator_states",
+                        label="Delay", unit="s", field_name="delays", scale=1e-6
+                    ),
+                    VariableAxisSpec(
+                        label="Spectator state (0=I, 1=Xπ)",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "DC source value (inactive if disabled)",
-                        "a.u.",
+                        label="DC source value (inactive if disabled)",
+                        unit="a.u.",
                         field_name="dc_values",
                     ),
                 ),
@@ -253,16 +256,18 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             if config.dc_device is None
             else sweep2array(config.dc_values)
         )
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Delay (us)",
-            "Target ⟨σ⟩",
-            num_lines=len(dc_values) * 2,
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
+        viewer = live_line(ax, num_lines=len(dc_values) * 2)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
-            viewer.update(delays, sigma(sums, config.target).reshape(-1, len(delays)))
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
+            return viewer.set(
+                delays, sigma(sums, config.target).reshape(-1, len(delays))
+            )
 
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3),
@@ -322,9 +327,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     rounds=config.rounds,
                     options=RunOptions(),
                 )
-        return IdleZZResult(
-            dc_values, np.arange(2, dtype=np.int64), delays, buffer.array
-        )
+        return IdleZZResult(dc_values, delays, buffer.array)
 
     def analyze(
         self,
@@ -348,7 +351,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         )
         validate_axes(
             result.dc_values,
-            result.spectator_states,
+            np.arange(2, dtype=np.int64),
             result.delays,
             result.sums,
             dc_values,
@@ -359,7 +362,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         shots = result.sums.sum(axis=(-2, -1))
         fits = []
         for dc_index in range(len(dc_values)):
-            for state in result.spectator_states:
+            for state in np.arange(2, dtype=np.int64):
                 fit = IdleBranchFit(
                     dc_index,
                     int(state),
@@ -382,7 +385,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             else f"{cfg.dc_device} ({cfg.dc_unit})"
         )
         for dc_index, dc_value in enumerate(dc_values):
-            fig, ax = plots.subplots(f"ramsey_{dc_index}", figsize=(9, 6))
+            fig, ax = plots.subplots(num=f"ramsey_{dc_index}", figsize=(9, 6))
             reasons = []
             for fit in answer.branches[2 * dc_index : 2 * dc_index + 2]:
                 label = "I" if fit.branch == 0 else "Xπ"
@@ -420,7 +423,7 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             ax.legend()
             ax.grid(True)
             fig.tight_layout()
-        fig, ax = plots.subplots("zeta", figsize=(8, 5))
+        fig, ax = plots.subplots(num="zeta", figsize=(8, 5))
         for index, (value, error) in enumerate(
             zip(answer.zeta_mhz, answer.zeta_error_mhz, strict=True)
         ):

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, TypeAlias
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -80,22 +80,15 @@ class RangeFindParams:
             raise ValueError(
                 f'Resonators must be a JSON list such as ["R2", "R1"]: {error.msg}'
             ) from error
-        if not isinstance(decoded, list):
-            raise ValueError('Resonators must be a JSON list such as ["R2", "R1"]')
-        names: list[str] = []
-        for name in decoded:
-            if not isinstance(name, str):
-                raise ValueError("Resonators JSON list must contain only strings")
-            names.append(name)
-        options = RangeFindOptions(
-            resonators=names,
-            min_separation=self.min_separation,
-            smoothing_sigma=self.smoothing_sigma,
-            prominence_factor=self.prominence_factor,
-            max_fwhm=self.max_fwhm,
+        return TypeAdapter(RangeFindOptions).validate_python(
+            {
+                "resonators": decoded,
+                "min_separation": self.min_separation,
+                "smoothing_sigma": self.smoothing_sigma,
+                "prominence_factor": self.prominence_factor,
+                "max_fwhm": self.max_fwhm,
+            }
         )
-        options.validate()
-        return options
 
 
 class ResonatorDipSummary(BaseModel):
@@ -173,15 +166,17 @@ def _make_interactive_plugin(
     options = req.analyze_params.to_options()
     result = req.run_result.result
 
+    fig, _ = plots.subplots(nrows=1, num="fit", figsize=(9, 4.5))
+
+    @plots.on_plot_thread
+    def draw(state: RangeFindState):
+        draw_range_find(fig, plugin.freqs, plugin.magnitude, state)
+        return (fig,)
+
     def build_result(state: RangeFindState) -> RangeFindAnalysis:
         analysis = _build_analysis(req, state)
-        plots.subplots("fit", nrows=1, figsize=(9, 4.5))
-        plots.draw(
-            "fit",
-            lambda figure: draw_range_find(
-                figure, plugin.freqs, plugin.magnitude, state
-            ),
-        )
+        draw(state)
+        fig.show()
         return analysis
 
     plugin = RangeFindPlugin(

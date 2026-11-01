@@ -174,7 +174,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         while abs(min_phase) > abs(min_phase + 360):
             min_phase += 360
 
-        fig, ax = plots.subplots("fit")
+        fig, ax = plots.subplots(num="fit")
 
         ax.plot(phases, real_signals, ".-", label="data")
         ax.plot(phases, y_fit, "-", label="fit")

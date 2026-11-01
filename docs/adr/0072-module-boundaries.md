@@ -114,7 +114,7 @@ Local flux reset 沿用 `reset/pulse`，由 lab 的 library 範本與 `twotone/r
 
 使用者於 2026-10-24 裁定：「框架與機制留在lib可以，live_line的定位應該是工具，可按需求擴充，但放在lib裡很難改。以及liveplot模塊應該可以考慮刪除，我以為plotting已經取代他了。」
 
-Lib 保留 Plots、FigureCollection、PlotHost 與通用 LiveUpdate。作者用不帶參數的
+Lib 保留 Plots、FigureCollection 與 PlotHost。2026-11-01，通用更新已遷移至 owner decorator。作者用不帶參數的
 `@plots.on_plot_thread` 包裝原生 matplotlib 更新函式，呼叫時先檢查 lifetime，再 deepcopy
 資料，並在 host owner 執行本體。本體回傳改了的 artists，Figure 也可回傳。框架先驗證
 所有 artists 的歸屬，再對已由此 Plots 呈現的根圖去重 refresh。None 回傳 raise TypeError，
@@ -124,27 +124,26 @@ Lib 保留 Plots、FigureCollection、PlotHost 與通用 LiveUpdate。作者用�
 `fig.show()` 顯式呈現；show 前的更新只保留 artist 修改，不 refresh、不載入 ipympl。
 之後 show 或 finish(present=True) 呈現最新內容。混合回傳只 refresh 已呈現的圖，
 未呈現的外來圖仍拒絕。Notebook 與 Qt host 的 refresh 前置條件不變。
-LiveUpdate 與字串圖名的 draw 保留舊行為直到大量遷移收縮，不決定資料格式，也不反向 import lab。
+2026-11-01，全部實驗遷移完成，LiveUpdate、字串圖名的 draw 與舊 helper 已退休。框架不決定資料格式，也不反向 import lab。
 
 使用者於 2026-10-30 裁定：「畫圖採用建議，但名字叫live不太好懂」、
 「@plots.on_plot_thread好了，隱藏執行線程的機制資訊可能在某些時候造成難以發現的bug」。
 
-四個 live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
+三個 live helpers、typed 工具 handle 與線圖、熱圖、非均勻熱圖、scatter 格式放在 lab
 共用支援套件的直接層。實驗作者可以直接修改或擴充，不另建 plotting 子套件。
 `live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是本地選用工具，只掛在給定 axes，
 在 caller thread 修改並回傳 changed artists。不建圖、不設標籤與標題、不切換執行緒、
 不 refresh、不 present。作者可在 decorator 本體內回傳 `line.set(xs, signals)`。
-這些工具與 decorator 不登記 axes，不檢查彼此或與舊 helper 的佔用。
-多個新 helper 可共用 axes，由作者協調 artists、autoscale 與色階。
-只有舊 create_live／舊 helper 保留既有 axes 佔用規則。
-`live_heatmap_with_line` 保留舊寫法，新版面由作者用 subplots 排。
+這些工具與 decorator 不登記 axes，不檢查彼此的佔用。
+多個 helper 可共用 axes，由作者協調 artists、autoscale 與色階。
+新版面由作者用 subplots 排。2026-11-01，舊 helper 遷移已完成。
 使用者於 2026-10-30 裁定：「我也傾向後者，live_line只是本地執行緒的」。
 Singleshot 分類圖與 joint-fit 診斷圖歸 lab 的 singleshot 家族，分析計算不隨圖搬移。
 獨立 liveplot plotter／backend、reference marker 與動畫錄影退休。
 Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 工具。
 
-這個分工讓 decorator 與舊 handle 共用 host 的 owner 執行與 lifetime 機制，
-新 helper 不綁 Plots lifetime。實驗格式仍可在 lab 修改。
+這個分工讓 decorator 使用 host 的 owner 執行與 lifetime 機制，
+新 helper 不綁 Plots lifetime。實驗格式仍可在 lab 修改。2026-11-01，全部實驗已完成此分工的遷移。
 依賴方向是 lab → plotting；framework 不 import lab 由 import-linter C16 保護，
 能力層與使用者層的方向沿用 C8，core 不依賴 GUI 沿用 C15。
 

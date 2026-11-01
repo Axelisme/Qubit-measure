@@ -20,9 +20,10 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "gain": Range(0.0, 1.0, expts=151),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

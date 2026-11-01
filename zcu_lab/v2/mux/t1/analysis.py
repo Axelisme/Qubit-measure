@@ -87,8 +87,6 @@ def analyze_t1(
     """
     _validate_result(result)
     times, indices, signals = result.times, result.tone_indices, result.signals
-    if type(options.skip) is not int or options.skip < 0:
-        raise ValueError("skip must be a nonnegative integer")
     outcomes: list[MuxT1Fit | MuxFitFailure] = []
     for row, raw_index in enumerate(indices):
         index = int(raw_index)
@@ -96,7 +94,7 @@ def analyze_t1(
         finite = np.isfinite(signal)
         xs = times[options.skip :][finite]
         signal = signal[finite]
-        fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
         ax.set(xlabel="Delay (us)", ylabel="Signal (a.u.)")
         fig.suptitle(f"tone {index}")
         try:
@@ -105,14 +103,16 @@ def analyze_t1(
                 raise ValueError(f"T1 fit requires at least {minimum} acquired points")
             real = t1_signal2real(signal)
             if options.dual_exp:
-                t1, err, t1b, errb, fitted, (params, covariance) = fit_dual_decay(
-                    xs, real
-                )
+                fit = fit_dual_decay(xs, real)
+                t1, err = fit.decay_time1, fit.decay_time1_err
+                t1b, errb = fit.decay_time2, fit.decay_time2_err
                 names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
             else:
-                t1, err, fitted, (params, covariance) = fit_decay(xs, real)
+                fit = fit_decay(xs, real)
+                t1, err = fit.decay_time, fit.decay_time_err
                 names = ("y0", "yscale", "decay_time")
                 t1b, errb = None, None
+            fitted, params, covariance = fit.curve, fit.params, fit.cov
             if not np.all(
                 np.isfinite(
                     np.asarray(

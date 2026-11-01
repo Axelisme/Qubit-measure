@@ -103,41 +103,9 @@ class FigureCollection(Mapping[str, Figure]):
         **figure_kwargs: Any,
     ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
 
-    @overload
     def subplots(
         self,
-        name: str,
-        *,
-        nrows: Literal[1] = 1,
-        ncols: Literal[1] = 1,
-        num: str | None = None,
-        sharex: bool | Literal["none", "all", "row", "col"] = False,
-        sharey: bool | Literal["none", "all", "row", "col"] = False,
-        squeeze: Literal[True] = True,
-        subplot_kw: dict[str, Any] | None = None,
-        gridspec_kw: dict[str, Any] | None = None,
-        **figure_kwargs: Any,
-    ) -> tuple[Figure, Axes]: ...
-
-    @overload
-    def subplots(
-        self,
-        name: str,
-        *,
-        nrows: int = 1,
-        ncols: int = 1,
-        num: str | None = None,
-        sharex: bool | Literal["none", "all", "row", "col"] = False,
-        sharey: bool | Literal["none", "all", "row", "col"] = False,
-        squeeze: bool = True,
-        subplot_kw: dict[str, Any] | None = None,
-        gridspec_kw: dict[str, Any] | None = None,
-        **figure_kwargs: Any,
-    ) -> tuple[Figure, Axes | NDArray[np.object_]]: ...
-
-    def subplots(
-        self,
-        *args: int | str,
+        *args: int,
         num: str | None = None,
         sharex: bool | Literal["none", "all", "row", "col"] = False,
         sharey: bool | Literal["none", "all", "row", "col"] = False,
@@ -151,22 +119,9 @@ class FigureCollection(Mapping[str, Figure]):
         Accept Matplotlib's positional nrows/ncols and keyword sharing, squeeze,
         subplot, gridspec and Figure options. num is a nonempty unique string;
         omitted names use the next unused figure_N in creation order. Conflicts
-        raise ValueError. A leading string remains a legacy name and cannot be
-        combined with num. Adding figures after seal raises RuntimeError.
+        raise ValueError. Adding figures after seal raises RuntimeError.
         Return a Figure and Matplotlib's scalar, 1-D or 2-D axes shape.
         """
-        if args and isinstance(args[0], str):
-            # Migration compatibility: remove the leading string name at contraction.
-            if len(args) != 1 or num is not None:
-                raise TypeError(
-                    "A legacy name cannot be combined with num or dimensions"
-                )
-            num = args[0]
-            dimensions: tuple[int, ...] = ()
-        else:
-            if any(not isinstance(arg, int) for arg in args):
-                raise TypeError("Expected integer dimensions")
-            dimensions = tuple(int(arg) for arg in args)
 
         def create(
             nrows: int = 1, ncols: int = 1, **kwargs: Any
@@ -194,7 +149,7 @@ class FigureCollection(Mapping[str, Figure]):
             self.adopt(name, figure)
             return figure, axes
 
-        return create(*dimensions, **figure_kwargs)
+        return create(*args, **figure_kwargs)
 
     def _create_canvas(self, figure: Figure) -> None:
         FigureCanvasAgg(figure)

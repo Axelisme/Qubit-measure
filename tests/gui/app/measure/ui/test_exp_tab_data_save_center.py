@@ -38,7 +38,7 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     session, ctrl, window, tab_id = live_ui
     plots = Plots(NonPresentingHost())
     for name, ys in (("fit", [0, 1]), ("diagnostic", [1, 0])):
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         axes.plot([0, 1], ys)
     plots.finish(present=False)
     commit_analysis(
@@ -78,7 +78,7 @@ def test_named_selection_drives_screenshot_and_survives_same_collection_refresh(
     ] == ["fit", "diagnostic"]
 
     replacement = Plots(NonPresentingHost())
-    replacement.subplots("new-fit")
+    replacement.subplots(num="new-fit")
     replacement.finish(present=False)
     commit_analysis(
         session.state,

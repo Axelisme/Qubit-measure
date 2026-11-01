@@ -10,21 +10,34 @@ from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_decay_fringe,
     fit_dual_decay,
+    fit_gauss_decay,
+    fit_gauss_decay_fringe,
     fit_rabi,
 )
 from zcu_tools.analysis.fitting.results import (
     DecayFit,
     DecayFringeFit,
     DualDecayFit,
+    GaussDecayFit,
+    GaussDecayFringeFit,
     RabiFit,
 )
 
 from tests.analysis.fitting._fit_contract import assert_frozen_fields
 
-type NamedFit = DecayFit | DecayFringeFit | DualDecayFit | RabiFit
+type NamedFit = (
+    DecayFit
+    | DecayFringeFit
+    | DualDecayFit
+    | GaussDecayFit
+    | GaussDecayFringeFit
+    | RabiFit
+)
 
 
-@pytest.fixture(params=("decay", "dual", "fringe", "rabi", "rabi_decay"))
+@pytest.fixture(
+    params=("decay", "dual", "fringe", "gauss", "gauss_fringe", "rabi", "rabi_decay")
+)
 def result(request: pytest.FixtureRequest) -> NamedFit:
     """Fit synthetic observations through each supported public model."""
     xs = np.linspace(0.0, 20.0, 120)
@@ -40,6 +53,12 @@ def result(request: pytest.FixtureRequest) -> NamedFit:
         )
     if request.param == "fringe":
         return fit_decay_fringe(xs, 0.2 + 0.8 * envelope * oscillation)
+    if request.param == "gauss":
+        return fit_gauss_decay(xs, 0.2 + 0.8 * np.exp(-0.5 * ((xs - 2.0) / 3.0) ** 2))
+    if request.param == "gauss_fringe":
+        return fit_gauss_decay_fringe(
+            xs, 0.2 + 0.8 * np.exp(-((xs / 5.0) ** 2)) * oscillation
+        )
     decay = request.param == "rabi_decay"
     return fit_rabi(
         xs, 0.2 + 0.8 * oscillation * (envelope if decay else 1), decay=decay

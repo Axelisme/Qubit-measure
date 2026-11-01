@@ -156,7 +156,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             freqs, real_signals, type="lor"
         )
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
         ax.plot(freqs, y_fit, label=f"fit, FWHM = {fwhm:.1g} MHz")

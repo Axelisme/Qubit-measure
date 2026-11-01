@@ -137,7 +137,7 @@ def test_snapshot_projects_analysis_presence(publication: str, stage: str) -> No
     if publication in ("figures_only", "empty"):
         plots = Plots(NonPresentingHost())
         if publication == "figures_only":
-            plots.subplots("fit")
+            plots.subplots(num="fit")
         plots.finish()
     result = object() if publication == "numeric" else None
     if publication != "absent":

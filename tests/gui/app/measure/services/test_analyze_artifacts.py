@@ -132,7 +132,7 @@ def test_typed_gui_analysis_publishes_typed_result_and_saveable_named_fit(
     tab = state.get_tab("tab")
 
     def NamedAdapter_analyze(req, *, plots):
-        _, ax = plots.subplots("fit")
+        _, ax = plots.subplots(num="fit")
         ax.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
         return PaneSummary(mean=req.analyze_params.gain)
 
@@ -316,7 +316,7 @@ def test_onetone_gui_cancel_retains_prior_analysis_and_no_new_pick(qapp) -> None
     tab.adapter = SpectrumAdapter
     previous = object()
     previous_plots = make_plots()
-    old_figure, _ = previous_plots.subplots("old")
+    old_figure, _ = previous_plots.subplots(num="old")
     previous_plots.finish()
     values = np.linspace(-0.5, 0.5, 9)
     freqs = np.linspace(4.8, 5.4, 7)
@@ -367,7 +367,7 @@ def test_onetone_gui_failed_frontend_analysis_settles_without_replacing_old_pane
     commit_run(state, "tab1", RunPaneState(result=source))
     previous = object()
     previous_plots = make_plots()
-    old_figure, _ = previous_plots.subplots("old")
+    old_figure, _ = previous_plots.subplots(num="old")
     previous_plots.finish()
     commit_analysis(
         state,

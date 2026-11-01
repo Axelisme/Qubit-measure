@@ -13,18 +13,26 @@ from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_initial_valu
 def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
     """Build starting values and shape from the captured source availability."""
     qub_pulse, length_stop = len_rabi_initial_values(ctx.parameters)
+    # The helper always supplies a Template fallback.
+    fallback = qub_pulse.fallback
+    assert fallback is not None
     # This Run accepts only const/flat_top and replaces total pulse duration.
     qub_pulse = replace(
-        qub_pulse, set={**qub_pulse.set, "waveform.length": Hidden(0.0)}
+        qub_pulse,
+        set={**qub_pulse.set, "waveform.length": Hidden(0.0)},
+        fallback=replace(
+            fallback, set={**fallback.set, "waveform.length": Hidden(0.0)}
+        ),
     )
     return Form(
         LenRabiCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "length": Range(0.03, length_stop, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 1000,

@@ -37,18 +37,25 @@ def workflow_figures(qapp):
 
 def add_figure(plots: Plots, index: int) -> Figure:
     """Produce one synthetic native figure through the framework plotting API."""
-    figure = Figure()
-    plots.adopt(f"Tone {index}", figure)
-
-    def draw(figure: Figure) -> None:
-        axes = figure.subplots()
-        axes.plot([0, 1, 2], [0, index, 0], label=f"Tone {index}")
-        axes.set_xlabel("Time")
-        axes.legend()
-
-    plots.draw(f"Tone {index}", draw)
+    figure, axes = plots.subplots(num=f"Tone {index}")
+    axes.plot([0, 1, 2], [0, index, 0], label=f"Tone {index}")
+    axes.set_xlabel("Time")
+    axes.legend()
+    figure.show()
     QApplication.processEvents()
     return figure
+
+
+def update_figure(plots: Plots, index: int) -> None:
+    """Refresh a synthetic figure through the public owner-update seam."""
+
+    @plots.on_plot_thread
+    def update(title: str):
+        figure = plots[f"Tone {index}"]
+        figure.axes[0].set_title(title)
+        return (figure,)
+
+    update(f"Updated tone {index}")
 
 
 def test_follow_latest_selects_new_figure_across_pages(workflow_figures, tmp_path):
@@ -73,12 +80,12 @@ def test_follow_latest_tracks_live_refresh_but_not_final_flush(
     figures = [add_figure(plots, index) for index in range(1, 6)]
     flow.click("Previous page")
     flow.screenshot(tmp_path / "live-before-refresh.png")
-    plots.refresh("Tone 5")
+    update_figure(plots, 5)
     QApplication.processEvents()
     flow.screenshot(tmp_path / "live-second-page.png")
     assert flow.observe("2 / 2").visible
     assert view.get_current_figure() is figures[4]
-    plots.refresh("Tone 2")
+    update_figure(plots, 2)
     QApplication.processEvents()
     flow.screenshot(tmp_path / "live-first-page.png")
     assert flow.observe("1 / 2").visible
@@ -106,12 +113,12 @@ def test_canvas_click_pins_focus_until_follow_is_enabled(
     assert not flow.observe("Follow latest").checked
     assert view.get_current_figure() is figures[tile]
     add_figure(plots, 6)
-    plots.refresh("Tone 3")
+    update_figure(plots, 3)
     QApplication.processEvents()
     flow.screenshot(tmp_path / "pinned-after-new-and-refresh.png")
     assert view.get_current_figure() is figures[tile]
     flow.click("Follow latest")
-    plots.refresh("Tone 5")
+    update_figure(plots, 5)
     QApplication.processEvents()
     flow.screenshot(tmp_path / "following-again.png")
     assert flow.observe("Follow latest").checked

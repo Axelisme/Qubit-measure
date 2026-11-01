@@ -12,7 +12,13 @@ Open and Reset take a snapshot of aliases, parameters and module choices. The pr
 
 Optional reset and pi pulse use `$qubit.module.reset` and `$qubit.module.x180`. Missing optional slots start disabled. Readout uses `$resonator.module.readout` when available, otherwise the readout template. Missing wiring or frequencies remain Invalid. Run also requires a complete circle classifier with radius on every readout ADC.
 
-Classification uses the readout's circle classifier under Readout → Advanced (per tone for Mux). Run requires classifiers on every declared ADC and positive radii; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects only with the saved readout cfg's matrix. Historical cfg without a classifier or matrix skips correction.
+Readout accepts only the pulse family.
+A mux readout in the library is incompatible.
+Classification uses the readout's circle classifier under Readout → Advanced.
+Run requires a positive radius; missing radius prompts singleshot GE Post.
+Linear has no Other state and is rejected.
+Analyze corrects populations only with the saved readout cfg's confusion matrix.
+Historical cfg without a classifier or matrix skips correction.
 
 Relax delay starts at five times the captured T1. Missing or null T1 uses a 30 us time scale, giving 150 us. An invalid stored T1 leaves the required delay empty. Defaults remain editable and separate from calibration writeback. Reps starts at 1000 and rounds at 10.
 

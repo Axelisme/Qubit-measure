@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay
@@ -104,12 +105,22 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
         # Keep the relaxation traces grouped by flux gain.
-        viewer = live_heatmap(
-            context.plots, "measurement", "Flux Pulse Gain (a.u.)", "Time (us)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Time (us)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(gains, lengths, t1_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),
-            on_update=lambda data: viewer.update(gains, lengths, t1_signal2real(data)),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

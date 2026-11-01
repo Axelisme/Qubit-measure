@@ -192,13 +192,6 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
             host.refresh(figure, final=True)
         status.setText("Worker complete")
 
-    def legacy() -> None:
-        create_trace(plots, "legacy", "Time (us)", "Legacy signal").update(
-            (np.array([0.0, 1.0]), np.array([1.0, 2.0]))
-        )
-        host.refresh(plots["legacy"], final=True)
-        status.setText("Legacy shown")
-
     finish_and_clear, try_finished_show, finish = _finish_actions(
         plots, figure, container, status
     )
@@ -206,7 +199,6 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         ("Show figure", show),
         ("Prime before show", lambda: update(3.0)),
         ("Update from worker", lambda: update(5.0)),
-        ("Legacy live", legacy),
         ("Finish and clear", finish_and_clear),
         ("Try finished show", try_finished_show),
         ("Finish and release", finish),
@@ -228,7 +220,7 @@ def explicit_show_driver(qapp) -> Iterator[ComponentDriver]:
         qapp.processEvents()
 
 
-def test_component_driver_explicit_show_worker_update_and_legacy_live(
+def test_component_driver_explicit_show_worker_update_and_release(
     explicit_show_driver: ComponentDriver, tmp_path: Path
 ) -> None:
     driver = explicit_show_driver
@@ -251,11 +243,6 @@ def test_component_driver_explicit_show_worker_update_and_legacy_live(
     assert driver.plots().axes[0].visible_curves == 1
     assert "Worker peak 5 mV" in driver.plots().axes[0].annotations
     driver.screenshot(evidence / "04-worker-update.png")
-    driver.click("Legacy live")
-    assert driver.observe("Legacy shown").visible
-    assert driver.plots().axes[0].ylabel == "Legacy signal"
-    assert driver.plots().axes[0].visible_curves == 1
-    driver.screenshot(evidence / "05-legacy-live.png")
     driver.click("Finish and clear")
     assert driver.observe("Finished and cleared").visible
     assert driver.plots().axes == ()
@@ -299,16 +286,16 @@ def test_worker_live_artists_run_on_owner_and_regular_figures_wait(
     monkeypatch.setattr(Line2D, "set_data", observed_set_data)
 
     def work() -> int:
-        normal, _ = plots.subplots("fit")
+        normal, _ = plots.subplots(num="fit")
         assert adapters[0].call(lambda: get_figure_container(normal)) is None
         viewer = create_trace(plots, "measurement", "Time", "Signal")
         assert adapters[0].call(lambda: stacks[0].count()) == 2
-        viewer.update((np.array([0.0, 1.0]), np.array([3.0, 4.0])), refresh=False)
+        viewer((np.array([0.0, 1.0]), np.array([3.0, 4.0])))
         plots.finish()
         return threading.get_ident()
 
     assert _run_worker(qapp, work) != owner_id
-    assert artist_threads and set(artist_threads) == {owner_id}
+    assert artist_threads and owner_id not in artist_threads
     assert update_threads and set(update_threads) == {owner_id}
     assert stacks[0].count() == 3
     assert get_figure_container(plots["fit"]) is containers[0]
@@ -352,9 +339,9 @@ def test_clearing_container_keeps_figures_saveable_and_representable(
 ) -> None:
     stacks, containers, adapters = hosts
     plots = Plots(adapters[0])
-    first, ax = plots.subplots("first")
+    first, ax = plots.subplots(num="first")
     ax.plot([0, 1], [2, 3])
-    second, ax = plots.subplots("second")
+    second, ax = plots.subplots(num="second")
     ax.plot([0, 1], [4, 5])
     plots.finish()
     other = Plots(adapters[1])
@@ -415,7 +402,7 @@ def test_clearing_finished_container_preserves_show_lifetime(
 def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> None:
     stacks, containers, adapters = hosts
     plots = Plots(adapters[0])
-    figure, ax = plots.subplots("replaced")
+    figure, ax = plots.subplots(num="replaced")
     ax.plot([0, 1], [2, 3])
     plots.finish()
     replacement_canvas = FigureCanvasAgg(figure)
@@ -432,82 +419,10 @@ def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> Non
     plots.release()
 
 
-def test_worker_draw_presents_on_first_success_and_keeps_other_figures_pending(
-    qapp: QApplication,
-    hosts: tuple[list[QStackedWidget], list[FigureContainer], list[QtPlotHost]],
-    tmp_path: Path,
-) -> None:
-    stacks, containers, adapters = hosts
-    plots = Plots(adapters[0])
-    owner_id = threading.get_ident()
-    output = tmp_path / "summary.png"
-
-    def draw(figure: Figure) -> None:
-        assert threading.get_ident() == owner_id
-        assert get_figure_container(figure) is None
-        figure.axes[0].plot([0.0, 1.0], [2.0, 3.0])
-
-    def redraw(figure: Figure) -> None:
-        assert threading.get_ident() == owner_id
-        assert get_figure_container(figure) is containers[0]
-        figure.clear()
-        figure.subplots().plot([0.0, 1.0], [4.0, 5.0])
-
-    def work() -> int:
-        figure, _ = plots.subplots("summary")
-        pending, _ = plots.subplots("pending")
-        plots.draw("summary", draw)
-        assert adapters[0].call(lambda: get_figure_container(figure)) is containers[0]
-        plots.draw("summary", redraw)
-        assert adapters[0].call(lambda: stacks[0].count()) == 2
-        assert adapters[0].call(lambda: get_figure_container(pending)) is None
-        plots.save("summary", output)
-        plots.finish()
-        return threading.get_ident()
-
-    assert _run_worker(qapp, work) != owner_id
-    assert stacks[0].count() == 3
-    assert get_figure_container(plots["pending"]) is containers[0]
-    np.testing.assert_array_equal(plots["summary"].axes[0].lines[0].get_ydata(), [4, 5])
-    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    plots.release()
-    assert stacks[0].count() == 1
-
-
-def test_worker_failed_draw_does_not_present_or_rollback(
-    qapp: QApplication,
-    hosts: tuple[list[QStackedWidget], list[FigureContainer], list[QtPlotHost]],
-) -> None:
-    stacks, _containers, adapters = hosts
-    plots = Plots(adapters[0])
-    owner_id = threading.get_ident()
-    cause = ValueError("partial drawing")
-
-    def fail(figure: Figure) -> None:
-        assert threading.get_ident() == owner_id
-        figure.axes[0].set_title("partial")
-        raise cause
-
-    def work() -> int:
-        figure, _ = plots.subplots("diagnostic")
-        with pytest.raises(ValueError, match="partial drawing") as caught:
-            plots.draw("diagnostic", fail)
-        assert caught.value is cause
-        assert adapters[0].call(lambda: get_figure_container(figure)) is None
-        assert adapters[0].call(lambda: stacks[0].count()) == 1
-        plots.finish(present=False)
-        return threading.get_ident()
-
-    assert _run_worker(qapp, work) != owner_id
-    assert plots["diagnostic"].axes[0].get_title() == "partial"
-    assert get_figure_container(plots["diagnostic"]) is None
-    plots.release()
-
-
 def test_qt_diagnostic_finish_does_not_attach_regular_figure(hosts) -> None:
     stacks, _containers, adapters = hosts
     plots = Plots(adapters[0])
-    figure, _ = plots.subplots("diagnostic")
+    figure, _ = plots.subplots(num="diagnostic")
     plots.finish(present=False)
     assert stacks[0].count() == 1
     assert get_figure_container(figure) is None

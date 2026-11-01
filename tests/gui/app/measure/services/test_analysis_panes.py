@@ -164,7 +164,7 @@ def test_analyze_publishes_result_from_captured_inputs() -> None:
     adapter.get_writeback_items.return_value = []
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())
-    plots.subplots("fit")
+    plots.subplots(num="fit")
     captured_run_parameters = state.get_tab(tab_id).run.parameters
     assert captured_run_parameters is not None
     service.start_analyze(tab_id, "params", plots=plots)
@@ -375,7 +375,7 @@ def test_failed_draft_build_preserves_previous_primary_and_post() -> None:
     writeback.fail_create = True
     service, bg = _analyze_service(state, writeback)
     plots = Plots(NonPresentingHost())
-    plots.subplots("fit")
+    plots.subplots(num="fit")
     service.start_analyze(tab_id, "params", plots=plots)
 
     bg.on_done(object())

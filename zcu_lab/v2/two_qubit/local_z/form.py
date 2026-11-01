@@ -7,7 +7,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
-    mux_readout_seed_metadata,
 )
 
 from .._measure import captured_roles
@@ -58,4 +57,4 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
                 "f2": Slot("$coupler.module.cz_f2", copy=True),
             },
         },
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )

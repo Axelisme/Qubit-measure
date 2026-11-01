@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -66,7 +69,7 @@ class FreqCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class FreqAnalyzeOptions:
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
@@ -85,7 +88,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -119,16 +122,21 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # Show the separation score rather than either preparation's mean IQ.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Frequency (MHz)",
-            "SNR",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return line.set(freqs, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(freqs),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(freqs, np.abs(data)),
+            on_update=update,
         )
 
         # Compare pulse-off/on branches at each hardware-swept readout frequency.
@@ -207,7 +215,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         max_freq = float(freqs[max_id])
         max_snr = float(snrs[max_id])
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(freqs, snrs)
         ax.axvline(max_freq, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")

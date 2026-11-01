@@ -83,10 +83,21 @@ Adapter 的 interrupt_timeout 是正有限秒數，預設10秒，非法值在入
 `plots` 是本次操作的繪圖能力，不是全域服務查詢器。
 
 ```python
-fig, ax = plots.subplots("fit", ...)
-viewer = live_line(plots, "measurement", ...)
+fig, ax = plots.subplots(num="measurement")
+line = live_line(ax)
+
+
+@plots.on_plot_thread
+def update(data):
+    xs, ys = data
+    return line.set(xs, ys)
+
+
+fig.show()
 plots.adopt("diagnostic", external_fig)
 ```
+
+2026-11-01，全部實驗已遷移至以上具名建圖與 owner 更新入口。
 
 `live_line` 從 lab 支援套件取得，工具與 lib 機制的分工見 [[0072]]。以上入口建立或接收 Figure 時即具名登記。所有具名圖都是本次操作的圖形產物，不做第二次 register_result。實驗直接操作原生 Figure／Axes，factory 不包裝整套 Matplotlib。
 
@@ -94,7 +105,7 @@ plots.adopt("diagnostic", external_fig)
 
 新入口不依賴 ambient plotting scope，也不要求實驗作者寫相關 with。Factory 必須明確接合 host；不能只把舊 plt.subplots 包一層，仍暗中依賴 routing 或每次切換全域 backend。
 
-Adapter／Notebook 分析工具掌握操作或 session 使用期，共用 plots 處理圖形機制。操作中的 Plots 提供建圖、create_live、adopt 與 host 接合；完成成果使用另一個純具名 Figure 容器，不將 Plots 本身當作 AnalysisRecord.figures。純容器不提供建圖、接管、liveplot 或 host commands。
+Adapter／Notebook 分析工具掌握操作或 session 使用期，共用 plots 處理圖形機制。操作中的 Plots 提供建圖、`on_plot_thread`、adopt 與 host 接合；完成成果使用另一個純具名 Figure 容器，不將 Plots 本身當作 AnalysisRecord.figures。純容器不提供建圖、接管、liveplot 或 host commands。2026-11-01，操作中的圖更新已完成此入口的遷移。
 
 Presentation owner 保留明確的呈現使用期與 release 責任，不能複製 mapping 後丟失所有權。跨存活 owner 接管仍拒絕。停止 producer、最後 refresh、釋放呈現與保留可保存的原生 Figure 分開處理。替換目前引用不關閉使用者持有的舊圖，release 後原生 artist 操作與 savefig 仍可使用。
 
@@ -165,7 +176,7 @@ FTF 的 YAML 由 resources 驗證；experiment.ftf 擁有接線、裝置與逐 r
 
 ### G1：一般圖與 liveplot
 
-一般 subplots 立即建立並具名登記，GUI 於函數完成後呈現。Liveplot 立即呈現，worker 透過 typed update 傳遞資料，GUI owner 更新 artists。Worker 不任意直接修改 active live Figure／Axes。實驗不需寫前端分支，也不能以 draw lock 取代這項執行緒契約。
+一般 subplots 立即建立並具名登記，GUI 於函數完成後呈現。Liveplot 立即呈現，worker 呼叫以 `@plots.on_plot_thread` 包裝的更新函式，本體在 host owner 執行緒修改 artists。Worker 不任意直接修改 active live Figure／Axes。實驗不需寫前端分支，也不能以 draw lock 取代這項執行緒契約。2026-11-01，全部實驗的更新已遷移至此 owner 執行路徑。
 
 ### G2：圖形生命週期
 
@@ -213,4 +224,4 @@ GUI application 統一使用插件定義的 typed 分析輸出與 plots，不另
 - Measure 的 ArtifactKey 以 stage 與圖名識別成果。`measure.artifacts` 擁有 ArtifactTracker 與 SaveService，捕捉本次保存來源與目的地。Save All 包含已保存成果，個別失敗不撤銷先前成功項。共用 `experiment.artifacts` 服務 GUI 與 Notebook，固定項目集中隱藏格式選擇、編碼與失敗隔離。Workflow 的單檔保存仍用共用 prepared writer，不強制改走 entry Save All。
 - [Session](../../lib/zcu_tools/gui/session/README.md) 說明 DeviceManager 與一般 SoC／device 操作。模擬資源由可信 startup 腳本經一般 facets 交付，不由 session coordinator 載入。一般 SoC 連線不建立 FakeDevice。選定腳本、`on_close` 與 driver 關閉責任見 [[0064]]。
 
-獨立 liveplot plotter／backend 已退休。即時更新使用 [Plots 與 LiveUpdate](../../lib/zcu_tools/plotting/README.md)，格式由 lab 工具提供。
+獨立 liveplot plotter／backend 已退休。即時更新使用 [Plots 的 `on_plot_thread`](../../lib/zcu_tools/plotting/README.md)，格式由 lab 工具提供。2026-11-01，即時更新遷移已完成。

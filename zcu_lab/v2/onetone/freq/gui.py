@@ -146,10 +146,7 @@ def _resolve_edelay_seed(
     route: tuple[int, int] | None,
 ) -> tuple[float | None, EDelaySource]:
     if params.edelay is not None:
-        seed = finite_real(params.edelay)
-        if seed is None:
-            raise ValueError("edelay must be a finite real scalar or None")
-        return seed, "manual"
+        return params.edelay, "manual"
 
     prior = _route_matched_prior(parameters, route)
     if prior is not None:
