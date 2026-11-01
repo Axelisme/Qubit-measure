@@ -202,9 +202,10 @@ class TimelineBuilder:
         count register. Optional range_hint guarantees a closed nonnegative count
         range without hardware checks; fixed counts forbid hints. Zero discards
         the body. Unhinted register counts skip generator backedge proofs only.
-        ADC backedges still require proof that the next start covers the previous
-        window; overlap or an unprovable gap raises ValueError at build. Both
-        backedge checks are skipped for a fixed count or hint maximum < 2.
+        ADC backedges still require proof that the next ADC window starts at or
+        after the previous window ends; overlap or an unprovable gap raises
+        ValueError at build. Both backedge checks are skipped for a fixed count
+        or hint maximum < 2.
         Invalid count/hint/timeline raises ValueError at build; QICK
         register exhaustion propagates. Close contexts before build. Recording
         after build raises ValueError.

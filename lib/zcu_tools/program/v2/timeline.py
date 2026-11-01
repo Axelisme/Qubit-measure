@@ -800,9 +800,10 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         Optional range_hint guarantees a closed nonnegative integer count range,
         without runtime checks. Fixed counts forbid hints. Zero discards the body.
         Unhinted register counts skip generator backedge bounds proofs only.
-        ADC backedges still require proof that the next start covers the previous
-        window; overlap or an unprovable gap raises ValueError. Both backedge
-        checks are skipped when the fixed count or range_hint maximum is < 2.
+        ADC backedges still require proof that the next ADC window starts at or
+        after the previous window ends; overlap or an unprovable gap raises
+        ValueError. Both backedge checks are skipped when the fixed count or
+        range_hint maximum is < 2.
         Invalid count/hint/name raises ValueError; QICK register exhaustion
         propagates unchanged.
         Runtime-only event getters raise RuntimeError, never return bounds.

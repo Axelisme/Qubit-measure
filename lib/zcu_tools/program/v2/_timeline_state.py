@@ -2,6 +2,7 @@
 
 import warnings
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam, WriteReg
 
@@ -41,6 +42,9 @@ from ._timeline_runtime import (
 )
 from .macro.table import TableSelection
 from .macro.write_reg import WriteRegOp
+
+if TYPE_CHECKING:
+    from .timeline import TimelineProgramV2
 
 
 @dataclass(frozen=True)
@@ -669,13 +673,13 @@ class TimelineBook:
 
     def check_adc_backedge(
         self,
-        prog,
+        prog: "TimelineProgramV2",
         timeline: str,
         channel: int,
         gap: TimeExpression,
         path: tuple[tuple[str, int], ...],
     ) -> None:
-        """Prove an ADC reentry gap without changing state or emitting delays.
+        """Prove an ADC reentry gap without advancing timelines or emitting delays.
 
         gap is next-iteration start minus the previous ADC window end in tProc
         cycles, expressed in the same relative coordinate system with loop
