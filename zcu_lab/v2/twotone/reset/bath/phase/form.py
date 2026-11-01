@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.twotone.reset.bath.phase.core import PhaseCfg
 
 
@@ -22,9 +22,10 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
                     "cavity_tone_cfg.gain": Expr("$qubit.ext.reset_bath_gain"),
                 },
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "phase": Range(-360.0, 360.0, expts=201),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

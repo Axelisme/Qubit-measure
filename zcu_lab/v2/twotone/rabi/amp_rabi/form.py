@@ -5,7 +5,7 @@ from dataclasses import replace
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
@@ -24,9 +24,10 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": pulse,
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),

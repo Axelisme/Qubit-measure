@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from zcu_tools.cfg_model import (
     ArbWaveformCfg,
-    FieldMeta,
     PulseSpec,
     Slot,
     Template,
@@ -18,58 +17,35 @@ if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext
 
 
-def len_rabi_initial_values(
+def len_rabi_length_stop(
     parameters: ParameterContext | None,
     *,
     qubit: str = "$qubit",
-    gain_path: tuple[str | int, ...] = ("qub_pulse", "module", "gain"),
-) -> tuple[Slot, float | None]:
-    """Return the Length Rabi pulse source and sweep stop in microseconds.
+) -> float | None:
+    """Return the Length Rabi sweep stop in microseconds from a fixed capture.
 
-    Every successful return contains a Slot with a Template fallback.
-    parameters is the fixed Open/Reset capture, or None. qubit is a direct
-    component name or captured alias (default $qubit). A missing/null x180
-    slot uses the Slot's fresh qub_probe Template fallback with editable gain
-    1.0 and stop 1.0 us. gain_path is the root-relative canonical Form path
-    for that fallback gain's uncalibrated hint, including module wrappers and
-    list indexes. It defaults to qub_pulse.module.gain; mux callers supply
-    ("tones", index, "drive", "module", "gain") for each original tone index.
-    An existing x180 selects its Slot without changing its gain or metadata.
-    Read pi_len from its persistent waveform, following a waveform library key
-    without materializing the pulse. A finite positive non-bool pi_len gives
-    stop=4*pi_len; an invalid stored pi_len gives None for a required blank.
-    Arb has no persistent scalar length and uses stop=1.0 us without assets.
+    parameters is the Open/Reset capture, or None. qubit is a direct component
+    name or captured alias (default $qubit). No capture, missing/null x180 or
+    an Arb waveform gives 1.0 us. Otherwise read pi_len from the persistent
+    waveform, following a waveform library key without materializing the pulse.
+    A finite positive non-bool pi_len gives 4*pi_len; an invalid stored pi_len
+    gives None for a required blank. Arb does not read asset-derived length.
 
     Reads validated Specs, not pre-validation raw source data. Scalar waveform
     length is required and non-null at this boundary. Alias, malformed
     or dangling references, source and library errors propagate unchanged.
     A non-pulse x180 raises TypeError. Nothing is refreshed or written back.
     """
-    source = Slot(
-        f"{qubit}.module.x180",
-        fallback=Template(
-            "qub_probe",
-            bindings={"qubit": qubit},
-            set={"gain": 1.0},
-            seed_metadata={
-                gain_path: FieldMeta(
-                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
-                    calibration="uncalibrated",
-                )
-            },
-        ),
-    )
     if parameters is None:
-        return source, 1.0
+        return 1.0
     pulse = _x180_spec(parameters, qubit)
     if pulse is None:
-        return source, 1.0
+        return 1.0
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
-        return source, 1.0
+        return 1.0
     pi_len = _valid_pi_len(waveform)
-    stop = None if pi_len is None else 4 * pi_len
-    return source, stop
+    return None if pi_len is None else 4 * pi_len
 
 
 def amp_rabi_initial_pulse(

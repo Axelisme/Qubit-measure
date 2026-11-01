@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, LogPoints, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 from .core import IRBCfg
 
@@ -14,17 +14,20 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
         IRBCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "X90_pulse": Slot(
+            "X90_pulse": source(
+                ctx,
                 "$qubit.module.x90",
-                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi2_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "X180_pulse": Slot(
+            "X180_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "I_pulse": Hidden(),
             "depth": LogPoints(max=128, points=9),

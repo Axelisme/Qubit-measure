@@ -6,7 +6,7 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.amp_rabi.core import AmpRabiCfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.rabi_initial_values import amp_rabi_initial_pulse
 
 
@@ -20,9 +20,10 @@ def make_form(ctx: FormContext) -> Form[AmpRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": pulse,
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(-0.3, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

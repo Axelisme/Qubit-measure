@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 from .core import DriveFreqCfg
 
@@ -21,9 +21,10 @@ def make_form(ctx: FormContext) -> Form[DriveFreqCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=51),
             "gain": Range(0.0, 1.0, expts=51),

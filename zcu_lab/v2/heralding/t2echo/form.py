@@ -8,7 +8,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.program.v2 import Pulse, Reset, SweepCfg
 from zcu_tools.program.v2.modules import PulseReadout
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
@@ -63,17 +63,20 @@ def make_form(ctx: FormContext) -> Form[HeraldingT2EchoInput]:
         HeraldingT2EchoInput,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "pi2_pulse": Slot(
+            "pi2_pulse": source(
+                ctx,
                 "$qubit.module.x90",
-                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi2_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),

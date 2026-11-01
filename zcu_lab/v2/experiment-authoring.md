@@ -135,7 +135,7 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 ## 寫法慣例
 
-實驗使用以下存檔軸、分析選項、Slot fallback 與繪圖寫法。
+實驗使用以下存檔軸、分析選項、來源選擇與繪圖寫法。
 序列、獨立分析與 docstring 的規則及短例見[前節](#讓使用者只看一個檔案就能理解實驗)。
 
 ### Cfg 名稱、順序與取數欄位
@@ -269,32 +269,73 @@ curve = fit.curve
 params, covariance, quality = fit.params, fit.cov, fit.quality
 ```
 
-### Slot fallback 與分類 read axis
+### 來源選擇與分類 read axis
 
-有 library slot 就引用，沒有才採用 Template。Metadata 放在 Template 上，只有採用該範本才合併。
-Metadata key 是 Form root-relative canonical path，同路徑以 `Form.with_seed_metadata` 的顯式值優先。
-以下宣告給 Form tree 的 readout 欄位，不會在建構 node 時讀來源：
+在 `make_form(ctx)` 用 `source(ctx, path, template)` 選來源。
+`path` 接受 module slot 或 library root，可含 `$alias`。
+Helper 查詢固定 capture 的 `ctx.has(path)`，有來源就回傳 `Slot(path)`。
+這個 Slot 保持 reference，不 copy，也不附加 set。
+缺 capture、缺 key、未設定或懸空的 slot、缺或未綁 alias 都讓 `ctx.has(path)` 回 False。
+這時 helper 原樣回傳 Template，保留作者的 `set` 與 `seed_metadata`。
+路徑語法錯誤、其他 alias 解析錯誤與來源故障直接傳出。
+來源可解析但 family 不相容時，Form 仍報錯，不改用 Template。
+
+Metadata 寫在 Template 上，Form 只有採用該範本才合併其 metadata。
+Metadata key 使用 Form root-relative canonical path，同路徑以 `Form.with_seed_metadata` 的顯式值優先。
+以下範例使用前述 core 的 `DelayCfg`，將選出的 node 放在 tree 的 readout 欄位：
 
 ```python
-from zcu_tools.cfg_model import FieldMeta, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, Template
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
+from .core import DelayCfg
 
 
-readout = Slot(
-    "$resonator.module.readout",
-    fallback=Template(
-        "readout",
-        bindings={"resonator": "$resonator"},
-        seed_metadata={
-            ("readout", "module", "gain"): FieldMeta(
-                description="Confirm readout gain before Run.",
-            ),
-        },
-    ),
-)
+def make_form(ctx: FormContext) -> Form[DelayCfg]:
+    readout = source(
+        ctx,
+        "$resonator.module.readout",
+        Template(
+            "readout",
+            bindings={"resonator": "$resonator"},
+            seed_metadata={
+                ("readout", "module", "gain"): FieldMeta(
+                    description="Confirm readout gain before Run.",
+                ),
+            },
+        ),
+    )
+    return Form(DelayCfg, tree={"readout": readout})
 ```
 
-Slot 可解析時忽略 fallback，family 不相容仍報錯，不以範本掩蓋。
-未提供 fallback 時，required 欄位缺來源保持 Invalid，nullable 且預設 None 的欄位保持停用。
+其餘必填欄位仍由實驗自己的 tree 提供。
+若只宣告 `Slot(path)` 而不提供 Template，缺來源時 required 欄位保持 Invalid。
+Nullable 且預設 None 的欄位保持停用且有效。
+
+兩分支共用 `set` 時，在選出的 node 上做一次 `dataclasses.replace`。
+以下指派放在 `make_form(ctx)` 內，再將 `pi_pulse` 放進 tree 的同名欄位。
+若實驗的 Run 會覆寫 waveform.length，用下例隱藏它，並保留 node 原有的 set：
+
+```python
+from dataclasses import replace
+
+from zcu_tools.cfg_model import Hidden, Template
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
+
+pi_pulse = source(
+    ctx,
+    "$qubit.module.x180",
+    Template("qub_probe", bindings={"qubit": "$qubit"}, set={"gain": 1.0}),
+)
+pi_pulse = replace(pi_pulse, set={**pi_pulse.set, "waveform.length": Hidden(0.0)})
+```
+
+Slot 與 Template 都有 `set`，不需分別 replace，也不擴充 `source` 的參數。
+`Slot.set` 的初值仍只套用到 copy，這段不將 reference 改為 copy。
 
 單 tone 的分類宣告用 `Classify("readout")`，不用依 readout 類型手選 tone 0。
 `shot_sums(prog, [axis])` 在 program 編譯後解析 label；pulse 或單 tone mux 自動選取。
