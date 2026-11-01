@@ -16,7 +16,9 @@ def test_main_reports_json_diagnostics_and_exit_code(
     *,
     has_declaration: bool,
 ) -> None:
-    source = "**Readers:** agent. Read this guide.\n" if has_declaration else "# Guide\n"
+    source = (
+        "**Readers:** agent. Read this guide.\n" if has_declaration else "# Guide\n"
+    )
     (tmp_path / "guide.md").write_text(source, encoding="utf-8")
     (tmp_path / "untracked.md").write_text("# Not tracked\n", encoding="utf-8")
     monkeypatch.setattr(
@@ -29,16 +31,25 @@ def test_main_reports_json_diagnostics_and_exit_code(
 
     assert main(["--root", str(tmp_path)]) == (0 if has_declaration else 1)
     captured = capsys.readouterr()
-    violations = [] if has_declaration else [
-        {"path": "guide.md", "reason": "missing reader declaration in first 8 body lines"}
-    ]
+    violations = (
+        []
+        if has_declaration
+        else [
+            {
+                "path": "guide.md",
+                "reason": "missing reader declaration in first 8 body lines",
+            }
+        ]
+    )
     assert json.loads(captured.out) == {
         "status": "PASS" if has_declaration else "FAIL",
         "violation_count": len(violations),
         "violations": violations,
     }
     assert captured.err == (
-        "" if has_declaration else "guide.md: missing reader declaration in first 8 body lines\n"
+        ""
+        if has_declaration
+        else "guide.md: missing reader declaration in first 8 body lines\n"
     )
 
 
@@ -48,7 +59,9 @@ def test_missing_declaration_reports_path_and_reason() -> None:
     )
 
 
-@pytest.mark.parametrize("readers", ["visitor", "agent, visitor", "framework-devish", ""])
+@pytest.mark.parametrize(
+    "readers", ["visitor", "agent, visitor", "framework-devish", ""]
+)
 def test_invalid_readers_are_rejected(readers: str) -> None:
     assert check_sources({"guide.md": f"**Readers:** {readers}. Run a sweep.\n"}) == (
         Violation("guide.md", "invalid reader list: " + repr(readers)),
@@ -74,15 +87,26 @@ def test_header_window_counts_only_body_lines(prefix: str, body_line: int) -> No
     expected = (
         ()
         if body_line == 8
-        else (Violation("guide.md", "missing reader declaration in first 8 body lines"),)
+        else (
+            Violation("guide.md", "missing reader declaration in first 8 body lines"),
+        )
     )
     assert check_sources({"guide.md": source}) == expected
 
 
-@pytest.mark.parametrize("path", ["lib/zcu_tools/example/README.md", "tests/tools/README.md", "tests/README.md"])
-@pytest.mark.parametrize("date_line", ["", "**Last updated:** yesterday", "**Last updated:** 2026-1-01"])
+@pytest.mark.parametrize(
+    "path",
+    ["lib/zcu_tools/example/README.md", "tests/tools/README.md", "tests/README.md"],
+)
+@pytest.mark.parametrize(
+    "date_line", ["", "**Last updated:** yesterday", "**Last updated:** 2026-1-01"]
+)
 def test_module_readme_requires_iso_date(path: str, date_line: str) -> None:
-    source = "# Module\n\n" + date_line + "\n\n**Readers:** framework-dev. Maintain this module.\n"
+    source = (
+        "# Module\n\n"
+        + date_line
+        + "\n\n**Readers:** framework-dev. Maintain this module.\n"
+    )
     assert check_sources({path: source}) == (
         Violation(path, "missing or malformed **Last updated:** YYYY-MM-DD"),
     )

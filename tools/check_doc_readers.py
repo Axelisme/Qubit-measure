@@ -12,11 +12,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Final
 
-_ALLOWED_READERS: Final = frozenset({"operator", "lab-author", "framework-dev", "agent"})
+_ALLOWED_READERS: Final = frozenset(
+    {"operator", "lab-author", "framework-dev", "agent"}
+)
 _LAST_UPDATED: Final = re.compile(
     r"^\*\*Last updated:\*\* \d{4}-\d{2}-\d{2}\b", re.MULTILINE
 )
-_DECLARATION: Final = re.compile(r"^\*\*(?:讀者：|Readers:)\*\*[ \t]*(.*)", re.MULTILINE)
+_DECLARATION: Final = re.compile(
+    r"^\*\*(?:讀者：|Readers:)\*\*[ \t]*(.*)", re.MULTILINE
+)
 
 
 @dataclass(frozen=True)
@@ -83,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     Git, decoding and file-read errors propagate rather than reporting PASS.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     root = parser.parse_args(argv).root
     tracked = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
