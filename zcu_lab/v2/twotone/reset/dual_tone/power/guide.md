@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Dual-tone reset gain map: a 2D sweep of the two reset-tone gains (pulse1 × pulse2 of the tested two-pulse reset) at the calibrated sideband frequencies, imaging the residual excitation to pick the gain pair that resets most completely. Runs on real hardware.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-01
 
 ## Parameter sources
 
@@ -17,6 +17,8 @@ Tested reset starts as an editable copy of the two_pulse_reset template. Optiona
 ## Typical writeback
 
 Proposes the best gains to `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_120` from the tested reset, replacing only the two gains with this analysis. Tested frequencies and all other fields remain. An optional `$qubit.module.reset` row selects it.
+
+The proposal uses only this Run's tested reset and captured parameters, not current aliases, ext values or an older library module. Missing saved cfg or parameter capture leaves only the scalar proposals. Source and Apply errors still propagate. Applying the library rows without the optional reset-slot row leaves the selected reset unchanged.
 
 ## Recommended
 

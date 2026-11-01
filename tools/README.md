@@ -14,9 +14,9 @@ stdout。`check_script_awaits.py`、`check_file_size.py`、`check_test_capabilit
 `check_pytest_collection.py` 只在工具本身失敗時寫 stderr。`gate.py` 是給人看的入口，輸出純文字。
 它們可以被 import，`tools/check_ratchet.py` 就是這樣使用其他幾支的。
 
-`_support.py` 放它們共用的機制——走訪樹、讀 attribute chain、透過 import 解析呼叫、載入另一支
-檢查。各支檢查**判斷什麼**仍各自獨立，共用的只有這些。它假設 `tools/` 在 `sys.path` 上，這在三種
-情況下都成立：直接執行某支檢查、`load_tool` 載入另一支、以及 pytest 的 `pythonpath`。
+`_support.py` 共用走訪樹、讀 attribute chain、透過 import 解析呼叫與載入另一支檢查的機制。
+各支檢查自行定義判準。共用模組要求 `tools/` 在 `sys.path` 上。
+直接執行某支檢查、`load_tool` 載入另一支與 pytest 的 `pythonpath` 都滿足這項要求。
 
 ## Markdown reader declarations
 
@@ -85,6 +85,8 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --with-pyright  
 ok   ruff import sort
 ok   ruff format
 ok   import contracts
+ok   script awaits
+ok   mcp text budget
 FAIL ratchet
     suppressions: <path> suppression:noqa 0 -> 1
 ```

@@ -614,153 +614,23 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 
 ## JPA 校準 family（`jpa/`）
 
-JPA（Josephson parametric amplifier）校準由六個 adapter 構成單一可發現的
-family：startup catalog（`../definitions.py` 的 `ADAPTERS`）依 bring-up 順序註冊，generic
-tab creation 與 remote adapter listing（`view.adapter_list`）因此直接列出全部六個名稱：
+各 adapter 的 seed、裝置、單位、分析與 writeback 由 leaf guide 說明：
 
-| 順序 | adapter | 角色 |
-| --- | --- | --- |
-| 1 | `jpa/freq` | 找 JPA pump frequency（FIT analysis，寫回 `$jpa.pump_freq`） |
-| 2 | `jpa/flux` | 找 JPA flux sweet spot（FIT analysis，寫回 `$jpa.flux`） |
-| 3 | `jpa/power` | 找 JPA pump power（FIT analysis，寫回 `$jpa.pump_power`） |
-| 4 | `jpa/auto_optimize` | 聯合最佳化 flux/freq/power（FIT analysis，一次提出`$jpa.flux`、`$jpa.pump_freq` 與 `$jpa.pump_power`） |
-| 5 | `jpa/flux_onetone` | flux × readout frequency 2D survey（`analysis=NONE`，無 writeback） |
-| 6 | `jpa/check` | pump off/on 比較診斷（figure-only analysis，無 writeback） |
-
-JPA 表單從 `$jpa.rf_source` 與 `$jpa.flux_dev` 取得 `jpa_rf_dev` 與
-`jpa_flux_dev` 的 direct 初值，使用者可覆寫。Core 以具名欄位從 context.devices
-取得 driver，RF 操作使用 `set_freq`／`set_power`／`set_output`，flux 操作使用 `set_flux`。六個 adapter 都顯式暴露 `reps`、
-`rounds`、`relax_delay`。`reps / rounds` 維持原值，`freq` / `flux` /
-`power` 是 `10000 / 1`，`auto_optimize` 是 `1000 / 1`，`flux_onetone` 是
-`100 / 10`，`check` 是 `1000 / 5`。`initial_delay` 維持 GUI 隱藏並使用 core
-的 `1.0 us` default。
-
-四個 qubit SNR adapter（`freq` / `flux` / `power` / `auto_optimize`）的
-`relax_delay` 初值為 `1*T1`，不是 Notebook 固定常數。Form 透過
-`support/measure/ctx_helpers.py` 的 `t1_initial_time`，從 Open／Reset 的固定
-capture 取得 `$qubit.t1`。有效 T1 是非 bool 的有限正實數。T1 leaf 缺失／null
-或沒有 capture 時，使用 `30 us` 公允時間尺度，等待初值為 `30 us`。
-已存但無效的 T1 讓等待欄位留空，不回落公允值。Alias、path、namespace 或來源
-讀取故障維持 owner 的原錯誤，不當成缺值或以留空掩蓋。初值可覆寫，不寫回校準。
-兩個純反射 adapter 不套 T1 政策，`flux_onetone` 的 `relax_delay` 維持
-`0.1 us`，`check` 維持 `0.5 us`。這些是可修改的操作 seed，不是跨 setup 的
-最佳 SNR 或安全保證。
-
-`auto_optimize` 的三軸 `start` / `stop` 是 search bounds；各 sweep 的 `expts`
-是會影響 phase-1 flux-grid 與 per-slice budget allocation 的 relative resolution
-hints，不是 Cartesian sample count，總 measurement budget 仍由 `num_points` 表達。
-JPA flux 在六個 adapter 一律以中性 device value／`a.u.` 語彙呈現（sweep label、
-liveplot 與 canonical persistence 一致，無 `1e3` 縮放或 physical-unit 宣稱）。
-capabilities 一致：四個校準 adapter 是 `analysis=FIT` 並提出
-`ParameterWriteback`，survey/diagnostic 兩個 adapter 不提供 writeback。每個 adapter
-的 operator guide 都以現在式說明 seeded bounds 是 bring-up defaults 而非 certified
-safety limits，operator 必須先 review device 與 sweep 再 run；`jpa/check` 特別警告
-run 結束時 pump output 保持 ON。真實硬體 acceptance 由 operator 在 device/sweep
-review 後執行，不屬於 adapter code。
-
----
+- [Freq](jpa/freq/guide.md)、[Flux](jpa/flux/guide.md)、[Power](jpa/power/guide.md)。
+- [Auto optimize](jpa/auto_optimize/guide.md) 說明 search bounds、relative resolution 與總點數預算。
+- [Flux onetone](jpa/flux_onetone/guide.md) 是 survey，不提出校準寫回。
+- [Check](jpa/check/guide.md) 是 pump off/on 診斷，run 後 pump 保持 ON。
 
 ## Reset 校準實驗群（`twotone/reset/`）
 
-對應 notebook `single_qubit.md` 的三種 reset 校準流程。使用者可以重複或不按順序執行。
-五個參數實驗把本次分析值累積到 qubit ext。只有指定 finisher 提出模組。
+各 leaf 擁有來源、純量累積與 tested-reset proposal，不在作者總覽維護第二份參數表：
 
-| 流程 | 校準 adapter | Finisher | 固定 library root |
-| --- | --- | --- | --- |
-| single-tone sideband | `freq`、`length` | `freq` | `$qubit.reset.reset_10` |
-| dual-tone | `freq`、`power`、`length` | `power` | `$qubit.reset.reset_120` |
-| bath cavity-assisted | `freq_gain`、`length`、`phase` | `phase` | `$qubit.reset.reset_bath` / `reset_bath_e` |
-| 共用驗證 | `check`，RabiCheck，contrast / residual analysis | 無 | 無 |
-
-`reset/check`的analysis以reset前分支決定共同IQ投影與Rabi基頻，擬合三條gain sweep
-分支；最後一條包含二次諧波。摘要提供前後半峰對峰振幅、相對contrast、相位差、
-reset-only殘餘振盪與offset、二次諧波振幅、各分支residual RMS，圖中保留原始資料、
-擬合線與殘差。無法解析的相位為`None`；頻率無法解析或資料不足時明確失敗。
-這些平均IQ指標不等於reset fidelity，也不唯一識別coherence或population機制；不提出
-writeback。cfg只設定一個`rabi_pulse`，兩次pulse使用相同波形與gain。
-
-`singleshot/reset_check`使用硬體gain／branch sweep，保存G/E/Other counts；
-analysis先按每列總計數轉成比例，再讀取confusion_matrix修正，回報reset-only平均／最大excited及最大Other，
-不提供IQ校準writeback。Other不是校準後leakage，reset population不是reset-channel fidelity。
-
-`singleshot/amp_rabi`使用硬體gain sweep保存raw IQ。Reps是每gain每round的shots，
-Rounds 的 shots 串接保存；不使用 Shots 或 Shots per batch。
-已有 readout circle／radius 才顯示 live populations，未校準仍可取得 raw IQ。
-Analysis 與 Len Rabi 共用 joint fit 及三面板診斷圖，重新估計 centers 與 confusion matrix。
-Amp 固定無衰減／零相位，提供 Initial State，保留振幅、頻率與 pi/pi2 gain 摘要。
-完整 module proposal 與 Len Rabi 共用有限值與 backend validity 檢查。
-舊population-only檔案不符合raw-IQ axes契約，無法據此重建shots或執行joint fit。
-
-### cfg seed 與純量累積
-
-Open／Reset 建表單時，form.py 從固定 capture 的 `$qubit.ext.*` 求初值。
-SingleToneFreq 用 reset_f ±1.5 reset_fwhm 建立 201 點頻率窗。SingleToneLength 用
-reset_f。DualToneFreq 用 reset_gain1/2 和 reset_f1/2，兩個頻率軸各為中心 ±50 MHz、
-201 點。DualToneLength 用兩頻率及兩 gain，DualTonePower 用兩頻率。
-BathLength 與 BathPhase 用 reset_bath_freq/gain。BathFreqGain 保留 resonator.freq 與
-qubit.ext.rabi_freq 的原 seed。Missing、null 或 invalid scalar 沿 Form 驗證失敗，
-不代用 fallback 數字。
-
-本次分析值直接形成 `ParameterWriteback`。五個 caller 保留以下順序：
-
-| Caller | `$qubit.ext.*` targets |
+| 流程 | 操作與 writeback owner |
 | --- | --- |
-| SingleToneFreq | `reset_f`、`reset_fwhm` |
-| DualToneFreq | `reset_f1`、`reset_f2` |
-| DualTonePower | `reset_gain1`、`reset_gain2` |
-| BathFreqGain | `reset_bath_gain`、`reset_bath_freq` |
-| BathPhase | `reset_bath_max_phase`、`reset_bath_min_phase` |
+| Single-tone | [Freq](twotone/reset/single_tone/freq/guide.md)、[Length](twotone/reset/single_tone/length/guide.md) |
+| Dual-tone | [Freq](twotone/reset/dual_tone/freq/guide.md)、[Power](twotone/reset/dual_tone/power/guide.md)、[Length](twotone/reset/dual_tone/length/guide.md) |
+| Bath | [Freq/gain](twotone/reset/bath/freq/guide.md)、[Length](twotone/reset/bath/length/guide.md)、[Phase](twotone/reset/bath/phase/guide.md) |
+| 驗證 | [Rabi check](twotone/reset/rabi_check/guide.md)、[Singleshot reset check](singleshot/reset_check/guide.md) |
 
-### Run-tested finisher
-
-SingleToneFreq、DualTonePower 與 BathPhase 使用該 Run 的完整
-`source.cfg.tested_reset`。`module_writeback` 從 Run 的 module dump 建立隔離的
-持久 Spec，adapter 只替換本次分析欄位，再提出 `ModuleWriteback(proposal=spec)`。
-這份來源已是 materialized runtime cfg，child pulse／waveform 因此成為 inline Spec。
-Adapter 不讀 ext、舊 module 或目前 point/alias 補欄位。手動修改後實際測過的頻率、gain、波形與其他 schema 欄位都保留。
-
-- SingleToneFreq 只換 `pulse_cfg.freq`。FWHM 只寫 ext，不是 reset module 欄位。
-- DualTonePower 只換 `pulse1_cfg.gain` 和 `pulse2_cfg.gain`，保留實測兩頻率。
-- BathPhase 分別 materialize ground/excited 兩棵獨立樹，只換 `pi2_cfg.phase`。
-  Ground 用 max_phase，excited 用 min_phase；兩者保留實測 cavity frequency/gain。
-
-Module targets 使用表中的固定 roots，不經方案 slot 選目的地。已有 root 更新，缺則建立。
-Finisher 在 module rows 後提出 `$qubit.module.reset` 的 `ParameterWriteback`。
-值由同份 capture 的 `resolve_path` 轉為具體 root，例如 `Q1.reset.reset_10`。
-Bath 預設 ground，使用者可以在 draft 中改選 excited。使用者也可以只 Apply library rows，
-不選 slot row。逐列 Apply 沿既有 accepted 與成功前綴政策，不新增聯動選取或跨檔交易。
-
-### 實驗責任與不足契約
-
-三個 length adapter 不擬合參數，返回合法空 proposal collection。它們不提出
-cfg-only module。DualToneFreq 與 BathFreqGain 只提出純量。框架不提供累積或齊全檢查。
-完整合法 tested_reset 不因 ext 缺少而略過 module。公開 nullable cfg/capture 為 None
-時，finisher 只返回純量，不讀目前全域來源。Source、alias、lowering、I/O 與 Apply
-錯誤仍傳播，不轉成空 proposal 或原因列。
-
-保留 downstream 的 reset/readout/x180/x90/probe slots。Reset 校準不讀
-sideband/dual_tone/bath_g/bath_e 方案 slots。Migration profile 將舊 reset 純量映到上述
-ext 名稱，resetf_w 映到 reset_fwhm；舊 reset modules 映到四個固定 roots，不猜
-module.reset 的目前方案。Mapping revisions 為 fluxonium 1.8、transmon 1.9。
-
-Bath `freq_gain` 保留 single-role 3D HDF5。Tomography phase 是同一 Result 的內部
-sweep axis，不拆成四個 phase-resolved sidecar，也不改 Save 政策。
-
-三個 singleshot 分析（ge / len_rabi / amp_rabi）皆提供 `Initial State`，表示 probe / swept drive pulse 之前的主要狀態；Rabi 描述 pulse 前狀態，不是第一個掃描點；啟用 phase offset 時也不等同於模型外推的零 length population。此參數只影響分析，不改量測 cfg 或 raw-IQ persistence。GE primary result 保存使用的初態，Post-Analysis 的 radius、confusion matrix 與繪圖均沿用該 snapshot，不讀取尚未重新分析的表單值。
-
-GE 的主分析與 writeback/post 邊界拒絕非有限 centers/width、重合 centers 與不合法 populations。Optimizer 未收斂不會回傳 initial guess 當作 calibration；失敗不產生新的校準 proposal。
-
-
-`twotone/rabi/len_rabi` 與 `singleshot/len_rabi` 的 analysis pane 都提供
-`Fit phase offset`（`fit_phase: bool = False`）。一般 Len Rabi 啟用後自由擬合相位；
-singleshot 在所選 Initial State 方向附近擬合 ±90° offset，結果圖顯示相位。
-兩者都可獨立切換 decay；此參數只影響 analysis，不改 acquisition 或 raw data 格式。
-一般 Len Rabi 的預設由原本自由 phase 改為固定 0°/180°，校準長度 writeback 沿用
-本次模型的結果。Singleshot 保持 Figure-only summary，typed fit result 另提供
-`phase` 與 `zero_length_populations`；四項 IQ calibration writeback 仍須通過既有
-backend validity 與 finite calibration gate。
-
-`t2ramsey`與`t2echo`的analysis pane提供`Fit phase offset (fringe only)`
-（`fit_phase: bool = False`）。開啟時自由擬合fringe phase，關閉保留固定相位；
-Ramsey停用Fit fringe或Echo選擇decay時，此選項不影響分析。既有T2與detune相關
-writeback沿用本次分析結果，量測設定與資料格式不變。
+Singleshot 的初態、joint fit 與校準條件見 [experiment authoring](experiment-authoring.md#singleshot-initial-state)
+及該節連到的 analysis owner／leaf guides。

@@ -310,43 +310,14 @@ mux_axis = Classify("readout", tone=2)
 
 ### 圖的建立、顯示與更新
 
-GUI、Notebook host 建構與離線 probe 入口會套用 `zcu_tools.plotting.DEFAULT_STYLE`。
-直接建立 `Plots` 不套用。入口初始化後，以原生 matplotlib 參數或 style context 覆寫：
+建圖、預設樣式、呈現、owner-thread 更新與 finish／release 的契約見
+[plotting README](../../lib/zcu_tools/plotting/README.md)。
+Lab 的 live artists 與多面板格式見 [v2 README](README.md#即時圖工具)。
 
-```python
-import matplotlib.pyplot as plt
-
-
-with plt.style.context({"axes.grid": False}):
-    fig, ax = plots.subplots(num="fit")
-    ax.set_xlabel("Delay (us)", fontsize=16)
-```
-
-`plots.subplots(2, 2, num="measurement", figsize=(8, 6))` 的列數、欄數、sharing 與 layout
-沿用 matplotlib。`num` 是此 Plots 內唯一的字串名字，供 GUI、MCP 與輸出檔名識別。
-省略時自動產生 `figure_N`，重複名字 raise ValueError。新 API 以 figure 物件指定圖。
-
-建圖不顯示，呼叫 `fig.show()` 才交給 host，不用 `plt.show()`。
-未 show 的分析圖可等操作的 `finish(present=True)` 呈現。
-操作結束前重複 show 不重建呈現；finish 後 show 或更新都 raise RuntimeError，release 後相同。
-Notebook 第一次呈現才載入 ipympl，並將 pyplot backend 切成 widget，不還原。
-Import notebook 模組與 show 前更新不會觸發這次載入。
-
-顯示前可直接用 matplotlib 設定。顯示後的即時更新與一次性改動一律經 `@plots.on_plot_thread`。
-裝飾後的函式接受一個可 deepcopy 的 payload，從任何執行緒呼叫都先複製，再同步在 host owner 執行本體。
-本體只改回傳 artists 所屬的圖，並回傳這次改了的 artist iterable，Figure 也可回傳。
-框架驗證全部歸屬後，對已呈現的根圖去重 refresh。回傳 None 會 raise TypeError，外來圖 raise ValueError，
-空 iterable 不重繪。本體或 copy 失敗直接傳回 caller，不 refresh，也不回滾已做的修改。
-Show 前也能呼叫，只保留修改，不 present、不 refresh，之後 show 或 finish 顯示最新內容。
-
-`live_line(ax)`、`live_heatmap(ax)`、`live_scatter(ax)` 只在 caller thread 掛到給定 axes。
-它們不建圖、不設 labels／title、不切執行緒、不 refresh 或 present，`set` 回傳改了的 artists。
-在 decorator 本體中呼叫 helper，例如下例。新 helper 與 decorator 不登記或檢查 axes 佔用，
-多個工具可共用 axes，由作者協調 artists、autoscale 與色階。
+以下片段在 show 前填入資料，show 後修改標題。實驗自行選座標、labels 與圖名：
 
 ```python
 from zcu_lab.v2.support import live_line
-
 
 fig, ax = plots.subplots(num="measurement")
 ax.set(xlabel="Delay (us)", ylabel="Signal")
@@ -370,129 +341,24 @@ def set_title(title):
 set_title("Acquired signal")
 ```
 
-此處 show 前先推一筆資料，show 後再做一次性標題更新。
-Qt 在 GUI 主執行緒執行本體，Notebook 在 caller thread 同步執行並送完整 frame，
-NonPresenting host 直接執行且不開視窗。
-多面板用 `subplots` 排列。需要掃描歷史線時，由作者在另一個 axes 建立線條，
-並在同一個 decorator 本體中更新熱圖和歷史線，回傳兩者的 changed artists。
-
 ## 使用者實驗的測試
 
-本套件的 adapter、workflow 與 recipes 是實驗定義，不寫個別實驗測試。實驗錯誤由 GUI 啟動或載入直接回報，不逐一走過 lab registry 來選取測試材料。
-
-框架 owner 用測試自己定義的最小合成 workflow／adapter 驗證公開 seam 與對外契約，不 import `zcu_lab`。刪掉 `zcu_lab/` 後整套 pytest 仍須通過，包含 slow。實驗共用 helper 留在本套件，不因可抽成 helper 就新增 pytest；框架共用機制依責任放在 lib，由該 owner 的合成材料測試驗證。
-
-實驗定義改動依 [離線驗收說明](../README.md#實驗定義的離線驗收)，在 task scratch 寫 Python probe 檔。
-用實驗自己的 Cfg／Result 型別建立物件，先過 Pyright 與 Ruff，再按需要分別呼叫
-`run_stage`、`save_stage`、`analysis_stage`。不用 Form 自動組 cfg，不增加一次跑完的 wrapper。
-Run 與 analysis 回 PNG bytes，由腳本保存，agent 逐張看圖並記錄判讀。
-Save 寫 `directory/data.h5`，回傳還原 record、比較結果與 cfg 診斷。
-分析可直接使用已知模型產生器填入 Result 的 RunRecord，不要求先執行實驗。
-案例歸屬、fixture 與搬遷規則見 [tests README](../../tests/README.md)。
-
----
+個別 adapter、workflow 與 recipes 的測試邊界見
+[程式碼品質](../../docs/code-quality.md#測試驗證可觀察契約)。
+實驗定義改動依 [tests 的驗收規則](../../tests/README.md#實驗定義) 執行離線 probe；
+最小腳本與命令見 [lab README](../README.md#實驗定義的離線驗收)。
 
 ## 實驗家族 records
 
-### T1、singleshot GE 與 OneTone 的核心入口
+RunRecord、explicit source 與具名圖的共同契約見
+[experiment README](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
+各實驗的輸入、分析選項與結果型別由 leaf 的 core 定義，操作與 writeback 見同目錄 guide。
+本頁不保存逐家族的遷移紀錄。
 
-T1、T2Echo、T2Ramsey、AmpRabi、LenRabi 的數值 Analysis 保存本次 fit_quality，普通擬合名為 fit。品質只使用 skip／mask 後的資料、已提交模型與 optimizer covariance，不重新擬合。GE 保存 joint、ground、excited 三階段，各自使用自己的資料、模型與 covariance；post 沿用 primary calibration。品質不改曲線、校正有效性或 writeback policy。
-
-`twotone.time_domain.T1Exp` 使用無跨次狀態的 `run(config, *, context)` 和 `analyze(source, options, *, plots)`。T1Result 只含 times／signals；RunRecord 將 typed cfg 與資料配成來源，`T1Cfg.uniform` 隨 record cfg 保存。T1AnalyzeOptions 提供 skip 與 dual_exp 的 defaults，T1Analysis 只含數值。T1 分析接受 cfg=None 的來源，預設 canonical saver 則拒絕缺 cfg。Run 建立具名 measurement liveplot，分析建立 fit 圖；caller 負責操作結束後 finish 及釋放呈現，不以新操作關閉舊圖。
-
-`singleshot.ge.GE_Exp` 的 run 回傳純 GE_Result，只有 signals／shot_indices／prepared_states。Analyze 接收 RunRecord；`post_analyze(source, primary, options, *, plots)` 使用同筆來源與已採用的 FIT 校準，不重新擬合。FIT 與 post 分別向本次 Plots 發布 `fit`／`post` 圖，analysis 只含數值。兩種分析都接受 cfg=None；預設 canonical saver 拒絕缺 cfg。Notebook 使用共用 NotebookAdapter 與獨立 GEPostAnalyzer，不由核心持有上次操作狀態。
-
-`onetone.flux_dep.FluxDepExp` 用 explicit context 執行同步 run，回傳只有 values／freqs／signals 的純 Result。`measurement` 使用共用 2D 熱圖與掃描線 handle，也能繪製反向通量掃描。核心只負責 acquisition 與 RunRecord 的 native restore／持久化宣告，不提供互動 analyze。Notebook 與 GUI 各自捕捉來源並完成選線，重用 Qt-free kernel 與原生圖 builder。GUI preview 不作結果圖。
-
-`onetone.freq.FreqExp` 的 run 回傳純 freqs／signals，支援 linear 與 homophasal 取樣。同步 analyze 接 explicit source 與 FreqAnalyzeOptions，回傳純 FreqAnalysis，向 Plots 發布 `fit` 圖。`onetone.power_dep.PowerDepExp` 只提供量測及保存／載入，earlystop_snr 歸 typed cfg。兩者都用 explicit context 執行 run，保留 canonical Hz 與 complex data。
-
-一般 T1、GE 與 OneTone 的 Notebook run／同步 FIT 入口是 先建立 `nb_adapter = zcu_tools.notebook.NotebookAdapter(...)`，再呼叫 `nb_adapter(core)`，不由核心 namespace 轉接。GE 的專用 post 工具由 [`singleshot/ge/notebook.py`](singleshot/ge/notebook.py) 擁有。FluxDep 的獨立選線工具由 [`zcu_tools.notebook.flux_dep`](../../lib/zcu_tools/notebook/flux_dep.py) 擁有。FluxDepAnalyzer 明確接收 RunRecord 與 caller 填入的 FluxPickInputs，不讀 NotebookAdapter 的目前來源。相關 Notebook 與 GUI callers 已採用 records 與 explicit context，下方 run 範本使用同一契約。T1WithTone／ScanT1WithTone 也使用 explicit context／source／options／Plots。T1WithTone 共用純 T1Result 與 T1Analysis，但保留原有 dual-decay 分量選擇；ScanT1WithTone 的分析輸出只有 gains／t1s／t1errs。
-
-T2Echo／T2Ramsey 的 detune 放入 typed cfg，run 回傳純 Result，analyze 使用 explicit source 與 typed options，向 Plots 發布 fit 圖。硬體 rounding 後的 true_activate_detune 是 run-only metadata；canonical axes／complex data 不包含它，load 後值為 None，不推測實際 detune。兩者分析均允許 cfg=None。
-
-### FastFlux records
-
-FastFlux 六個核心使用 `run(config, *, context) -> Result`，不保存跨次 cfg／result。
-同步分析接收 explicit `RunRecord`、options 與 `Plots`。T1 與三個 distortion 回傳
-具名數值欄位，MIST 的 `MistAnalyzeOptions` 保留 `ac_coeff`，其餘無可調選項時傳入
-`None`。三個 distortion 需要來源 cfg 來取得 pulse 時間，缺少時明確拒絕。共用
-NotebookAdapter 建立 records；核心保留既有 canonical axes、單位與分析公式。
-
-### TwoTone spectroscopy records
-
-`twotone` 的 Freq、FreqFlux、Power 與 Dispersive 使用 explicit RunContext，run 回傳純 Result。
-Freq 與 Dispersive 同步 analyze 接 RunRecord 與各自 typed options，回傳數值 Analysis，
-向本次 Plots 發布 `fit` 圖。FreqFlux 與 Power 只提供量測及保存／載入，不提供 core analyze。
-FreqFlux 的 `fail_retry` 是 typed cfg 欄位；GUI 選線由 plugin 擁有。Notebook 使用
-NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，不由核心轉接。
-
-### TwoTone Rabi records
-
-`twotone.rabi` 的 AmpRabi／LenRabi 核心以 RunContext 執行量測，回傳純 Result。同步 analyze 接 explicit RunRecord 與各自的 typed AnalyzeOptions，回傳數值 Analysis，接受 cfg=None。量測與分析分別發布 `measurement`／`fit` 具名圖；caller 負責 finish／release。LenRabi 保留 const／flat_top 的板端 sweep 與 arb waveform 的 host scan、跨 rounds 平均及部分成果。Notebook callers 透過 NotebookAdapter 保存 run 與 analysis records。
-
-### Mux qubit zip acquisition
-
-`mux.twotone_spectrum.MuxFreqExp` 與 `mux.amp_rabi.MuxAmpRabiExp` 提供無 GUI 的 `run(config, *, context)`。
-完整 `tones: list[MuxToneCfg]` 保留 readout 原始順序。Prepare 在 numeric 邊界一次選出 active indices，
-產生各 drive 自己的量化座標 `(K,P)`。只有 Amp Rabi 另建 nominal `point_pulses (P,K)`。
-Inactive tone 不限制掃描點數。
-Freq 的座標是 MHz，Amp Rabi 是 gain in a.u. within [-1, 1]。不同範圍按 index zip，不展開 Cartesian product。
-
-兩個 run 各自在函式本體用 `TimelineBuilder` 組成 reset、各 drive 的 fork／emit／join 與 active
-`MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
-Freq preparation 回傳 `MuxFreqScan`，只包含原始 indices 與量化座標。
-Amp Rabi preparation 仍回傳含逐點 pulses 的 `MuxPulseScan`。兩者都不 acquire。
-Freq 的各 drive 用 `sweep2param("point", tone.sweep)` 共用同一硬體 loop，只 compile 一次。
-Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/step 量化，
-不逐點獨立 round。Amp Rabi 仍每點 compile 一次。
-所有 branch 同時開始，短 branch 完成後等待；readout 接在最長 branch 之後。
-沒有末端 padding，也沒有第二次 compile 或自訂 Module。
-Pulse owner 提供實際事件結尾，program 的 join 取逐點最大值，保留 pulse 的 pre/post delay。
-
-`SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
-Program 擁有 reps/rounds 平均；取資料時經 `MuxReadout.collect_iq` 依該 program 已編譯的 readout emission 取得平均 IQ。
-Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
-Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。
-Acquisition 例外直接傳出。作者決定回傳資料是否足夠分析，不從 StopSignal 判斷資料完整度。
-Plots 以原始 index 命名 `measurement_i`，每條曲線用自己的座標，不靠 label 去重。
-Caller 負責 finish/release、組成含完整 cfg 的 RunRecord，以及保存 completion 狀態。
-
-兩個 leaf 的分析與 native save/load 都讀 explicit source，不從目前 cfg 補歷史輸入。
-公開入口與單位見 [Mux two-tone spectrum](mux/twotone_spectrum/guide.md) 及 [Mux Amp Rabi](mux/amp_rabi/guide.md)。
-
-### TwoTone pulse calibration records
-
-`AcStarkExp`、`AcStarkRamseyExp`、`CKP_Exp` 的 run 使用 RunContext，回傳純 Result。AcStark 的 earlystop_snr 與 Ramsey 的 acquisition detune 歸 typed cfg。Analyze 接 explicit source 和 typed options，接受 cfg=None。AcStark 回傳 ac_coeff；Ramsey 只發布 fit 圖，分析 detune 仍可獨立指定；CKP 回傳 chi／kappa／res_freq。兩種 AcStark 使用 measurement 2D with line，CKP 在同一張 measurement 圖並排 ground／excited 熱圖；三者的分析圖都具名 fit。Caller 擁有 finish／release，NotebookAdapter 管理 Notebook 的 records 與呈現。
-
-### Twotone sequence records
-
-AllXY／RB／ZigZag／ZigZagScan 使用 explicit RunContext、純 Result 與具名 measurement。AllXY 的 gate ticks／style 由 host owner 在呈現前初始化，analyze 接 AllXYAnalyzeOptions，回傳 AllXYAnalysis（相對振幅誤差、detune 參數、Bloch-z 平均偏差與 fit residual），並發布 fit 圖。RB analyze 接 None options，回傳 EPC／fidelity；ZigZagScan 接 find_range options，回傳 min_value。兩者 fit 圖另交 Plots。ZigZag 的 repeat_on 歸 typed cfg，沒有 analyze。Canonical 軸與 RB seed／recovery 演算法不變。
-
-### MIST records
-
-`mist` 的 FluxDep／DriveFreq／PowerDep 核心使用 explicit RunContext，回傳純 Result。Analyze 接 explicit RunRecord，接受 cfg=None，只發布具名 fit 圖並回傳 None。FluxDepAnalyzeOptions 保留通量換算、photon 軸及第二座標刻度；PowerDepAnalyzeOptions 保留 g0／e0／ac_coeff，DriveFreq 使用 None options。FluxDep 的熱圖為原生 Matplotlib 圖，不再接收 Plotly fig／fig_kwargs；caller 從具名圖集合取得 Figure 進行原生操作。Notebook callers 使用 NotebookAdapter 與核心 typed cfg／options。
-
-### Bath reset records
-
-Bath reset 的 FreqGain／Length／Phase 核心以 RunContext 執行，回傳純 Result。FreqGain analyze 接 smoothing options 並回傳 gain／freq；Phase 使用 None options、回傳 max_phase／min_phase；Length 使用 None options、只發布 fit。分析接受 cfg=None。四點 tomography、Length 的 host rounds 平均與 program cache、Phase 的 cosine fitting 不變。GUI 使用明確 RunRecord，數值結果與具名 fit 圖分開。
-
-### Reset tone records
-
-Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 explicit RunContext、純 Result 和 measurement／fit 具名圖。Single Freq 分析回傳 freq／fwhm，兩 Length 只發布曲線。Dual Freq／Power 接 typed smoothing options，回傳兩軸最佳頻率／gain。分析皆允許 cfg=None。Dual Freq 的 method 歸 typed cfg，預設 soft；GUI 固定 hard 並保存於來源 cfg。Soft host scan 與 hard 雙軸 sweep 保留相同 canonical 軸序，雙 pulse 長度差與 gain 掃描的背景選擇不變。
-
-### Readout optimization records
-
-`twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 使用下述 grouped record 契約。
-
-### JPA records
-
-JPA Freq／Flux／Power／Check／OneToneFlux 以 explicit RunContext 執行，回傳純 Result；cfg 與資料由前端配成 RunRecord。前三者的分析接 explicit source、None options 與 Plots，回傳最佳 scalar；Check 只發布 fit 圖，OneToneFlux 不提供 analysis。Run 的 measurement 圖歸本次 Plots。Freq／Power 保留隨機內部掃描點與無連線點圖，Flux 保留 Gaussian smoothing，pump off/on check 結束時仍保持 ON。AutoOptimize 同樣接 explicit records 與 grouped persistence，num_points 的整數及最低預算驗證由 typed cfg 擁有。最佳三參數分析發布原生四 axes fit 圖；sample_params 診斷接 explicit source，發布3D圖。即時四投影使用具名 typed scatter，保留 optimizer phase 色彩。
-
-Readout AutoOpt 同樣使用 records 與 grouped persistence，num_points 屬於 typed cfg。分析回傳最佳頻率／增益／長度，四 axes 的 fit 圖獨立發布；即時 iteration／freq／gain／length 投影各自具名並由 Plots 管理呈現。
-
-### CPMG grouped records
-
-CPMG 使用 explicit RunContext／RunRecord／Plots，不保留跨次結果。detune_ratio 與 earlystop_snr 屬於 run cfg，分析選項屬於 CPMGAnalyzeOptions，回傳 CPMGAnalysis 的 ns／t2s／t2errs；T2 與誤差使用 us，fit 圖另交 Plots。共用 GroupedAxesSpec 保存與載入 record；lengths role 保留每列時間座標，signals role 與既有 grouped v2 schema 不變。
+Mux 的 zip acquisition、participants、座標形狀與 partial data 見
+[v2 README](README.md#mux-qubit-numeric-cores)。
+操作入口見 [Mux two-tone spectrum](mux/twotone_spectrum/guide.md) 與
+[Mux Amp Rabi](mux/amp_rabi/guide.md)。
 
 ## 目錄佈局
 
@@ -555,7 +421,7 @@ Singleshot T1／T1WithTone／T1WithToneSweep 使用 explicit RunContext，unifor
 
 - **grouped experiment variables**：`CPMG_Exp` 使用 variables `lengths` / `signals`，axes 為 inner-first 的 `Time Index`、`Number of Pi`，盤上 `lengths` 單位為 seconds，記憶體內仍回復為 us。RO auto-optimize 使用 variables `readout_freq` / `readout_gain` / `readout_length` / `snr`；JPA auto-optimize 使用 variables `jpa_flux` / `jpa_freq` / `jpa_power` / `jpa_phase` / `snr`，其中 `jpa_flux` 以中性 device-native value 寫盤（unit `a.u.`、identity scale、數值不縮放），舊 auto grouped file 若 `jpa_flux` variable unit 為 `A` 不是 canonical，strict loader 不做 `A` fallback。頻率與時間在 disk 上使用 SI units（Hz、s），typed loader 重建回 Result 記憶體單位（MHz、us）；JPA phase 是 integer index。`load_run_with_metadata(path, spec=Exp.AXES_SPEC)` 讀取與 grouped spec 相符的 native `data.h5`，並透過 `restore_run` 還原 typed record。Labber 匯出由獨立的 `save_labber(record, path, spec=Exp.AXES_SPEC)` 提供，不能直接交給 native loader。既有 Labber 舊檔依 [migrations](../../migrations/README.md#legacy-resultdatabase--native-storage) 提供歷史證據並離線轉換；legacy `.npz` 或 sidecar 不是 runtime 可載入格式。
 - **legacy single-file**：舊 Labber HDF5 的 `Frequency` `MHz/Hz`、`Yoko` flux 軸或 `ADC unit` signal channel 不符合當前 `AXES_SPEC`，不由 runtime/GUI 隱式轉換。`onetone/flux_dep` 的 canonical axes 是 `(freqs, values)`，對應 Result-native `signals.shape == (Nflux, Nfreq)`。
-- **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`；analysis將pooled IQ投影至共同PCA axis，以固定共同bins的integrated readout-transition multinomial likelihood joint-fit 可選衰減包絡及phase offset的Rabi dynamics，重建g/e centers並推導nearest-center-region radius與other row為identity的confusion matrix；population points與fit curves皆從raw result衍生；舊population-only檔案缺少IQ shots，canonical loader明確拒絕而不虛構資料。
+- **single-variable 離散狀態軸**：bath reset freq-gain 把四點 pi/2 tomography phase 視為同一個 Result 的第三個 sweep axis；bath reset length 把 phase 視為第二個 axis，Result-native shape 為 `(Nlength, 4)`；`CKP_Exp` 把 ground/excited prepared state 視為 `initial_states` axis；`GE_Exp` 把 ground/excited prepared state 視為 `prepared_states` axis，Result-native shape 為 `(2, Nshot)`；singleshot `len_rabi`以`shot_indices`作inner axis，canonical `complex128` raw-IQ shape為`(Nlength, Nshot)`。分析數學見 [analysis owner](../../lib/zcu_tools/analysis/README.md#singleshot-初態與-joint-fit)。舊 population-only 檔案缺少 IQ shots，canonical loader 明確拒絕而不虛構資料。
 - **分類計數與狀態軸**：以下 Result 的 `counts` 保存完整 `[g,e,other]` 計數，`population_states=[0, 1, 2]` 是最內層軸。比例由 counts 正規化，analysis 不重建 other。
 
   | 實驗 | Result-native counts shape | 其餘軸，由外到內 |
@@ -577,7 +443,9 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 單一length的`shots`筆raw IQ，再寫入sweep-first Result row，避免FPGA同時配置完整
 `Nlength × Nshot` raw buffer。stop保留已完成rows，其餘維持partial-result NaN。
 
-Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
+Joint-fit 數學與校準有效性見 [analysis owner](../../lib/zcu_tools/analysis/README.md#singleshot-初態與-joint-fit)。
+Len Rabi 的三面板診斷圖由 `singleshot/plot_rabi.py` 擁有，操作見
+[leaf guide](singleshot/len_rabi/guide.md)。
 
 Singleshot consumers 的分類參數由 RunRecord.cfg.readout 的 classifier 提供。
 分類取數先 build program，再用 `shot_sums(prog, [Classify("readout")])` 解析讀出 label，交給 Schedule 的 `run_acquire_summed`。
@@ -587,11 +455,6 @@ Result 的 `counts` 保存各 round 的 class counts 總和，形狀與原有狀
 GUI confusion correction 只取 saved readout cfg 的 matrix；缺 cfg／classifier／matrix 時略過。
 Rabi 與 Check 保留單 ADC raw IQ。Rabi 無 classifier 仍可 Run／fit，Check 在分析才要求 circle／radius。
 Classifier 的複數持久格式由 cfg_model 與 core complex codec 擁有，lab 不另加 serializer。
-
-Singleshot Rabi joint fit依analysis選擇有衰減或純cosine population dynamics：
-`len_rabi`預設擬合衰減包絡，也可選擇純cosine。純cosine模型不擬合
-`t_r`，結果以`None`表示該參數不適用；兩種模式共用raw-IQ calibration與confusion
-matrix的估計流程。
 
 檔案格式細節見 [datafile README](../../lib/zcu_tools/datafile/README.md)。
 
@@ -765,136 +628,15 @@ Pulse 家族原有的 generator 與 template 共用規則不變。
 
 ### Timeline 範圍只切換預設名字
 
-Module 的 default timeline 與 QICK reference 分開。
-`timeline_inc` 只加 timeline 結尾，`delay_by_timeline` 才把 reference 推到該結尾。
-原生 `delay` 與 `delay_auto` 仍只推進 reference，不受 timeline 範圍影響。
-未進範圍時，省略 timeline 的 module emit 使用 default，原生 pulse／trigger 保留原生 reference timing。
-
-選擇 delay 方法時，也要考慮指令成本。
-若後續一組 pulse 都需要同一個掃描時間位移，先以掃描值推進 reference，可將這次位移集中成一次時間加總。
-若把掃描值留在 timeline，後續各 pulse 可能都需要以暫存器計算發射時間，增加指令數。
-先按排程需求決定是否推進共用 reference，再比較編譯結果的成本；這些方法的效果不同，不能只按指令數互換。
-作者自行選擇 `delay`、`delay_auto` 或 `timeline_inc`，builder 不自動替換或優化。
-
-以下是同一 builder 在 build 前的 body 片段。`drive` 是這次 build 新建的 module。
-手寫 program 可在 `_body` 將 `builder` 換成 `self`，使用已 declare 的 `self.drive`。
-
-```python
-builder.fork("default", into=["drive", "other"])
-
-with builder.timeline("drive"):
-    builder.emit(drive)
-    builder.timeline_inc(0.1, timeline="default")  # Explicit name wins.
-
-    with builder.timeline("other"):
-        builder.timeline_inc(0.2)
-
-    builder.timeline_inc(0.05)  # Restores drive after the nested scope.
-    builder.delay_by_timeline()
-    with builder.repeat("pairs", 2):
-        builder.emit(drive)
-        builder.delay_by_timeline()
-
-builder.join("drive", "other", into="default")
-builder.delay_by_timeline()
-```
-
-名字須先存在，只有 `"default"` 預先存在，其餘須先 `fork`。
-`timeline(name)` 不 fork、不自行 join，離開範圍也不移動 reference。
-省略 `timeline=` 或傳入 `None` 會選目前範圍，顯式名字優先，巢狀範圍離開後還原外層。
-`emit`、`pulse`、`trigger`、`timeline_inc`、`delay_by_timeline` 與
-`repeat` 與 `branch` 的預設母 timeline 都遵守這條規則。
-`fork` 與 `join` 是普通方法，只有 `timeline`、`repeat` 與 `branch` 使用 `with`。
-`branch` 必填 `by` 與 `align_timeline`，例如 `with builder.branch(by="scan", align_timeline=True) as cases:`。
-`branch(..., timeline="drive")` 指定母 timeline。省略或傳入 None 時選目前範圍，範圍外選 default。
-Case 用 `with cases.case(index) as name:` 宣告指定 sweep 點，index 從 0 開始，可不按順序宣告。
-未宣告的點不發射動作，重複、非整數或超界 index 報 ValueError。
-每個 case 從母 timeline 隱式 fork，`name` 是 `"<by>[<index>]"`，例如 `"scan[1]"`。
-Case 內仍對原 builder 呼叫 emit，省略名字時選 case timeline，不沿用外層範圍。
-只能使用 case timeline 與其局部 fork，使用母 timeline 或其他外部名字會在 build 時報錯。
-每個 case 保留 branch 入口的 reference。
-`align_timeline=True` 將各 case 結尾 join 回母 timeline，靜態取 max，runtime 取精確逐點 max。
-True 需要每個 case 的結尾能從 branch 入口狀態算出。
-`align_timeline=False` 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
-兩種都不推進共用 reference、不自動 delay_by_timeline，後續可在母 timeline 繼續發射。
-Case 內的 native delay、delay_auto 與 delay_by_timeline 在 build 時報錯，等待改用 timeline_inc。
-Case 內可使用 `repeat(...)`。Repeat body 內同樣不能 delay_by_timeline 或呼叫原生 reference 操作，巢狀 Repeat 也一樣。
-Repeat 內放 branch 仍合法。
-Branch 區塊內、case 外的動作在 build 時報錯，無條件 emit、fork、join 或 timeline_inc 寫在 with 區塊前或後。
-隱式 case 名字與局部 fork 名字在 case 結束後失效。
-沒有 join 回 case timeline 的局部結尾直接丟棄，不合回祖先，也不報錯。
-
-兩顆 qubit 的準備 pulse 放在各自 fork 的 timeline，才能同時發射。
-以下 body 片段使用本次 build 預先建立的 `x180_f1`、`x180_f2` 與 `readout`。
-若有 reset 或 herald，先 emit 它們，再同步完成時間：
-
-```python
-builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e, outer
-builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e, inner
-# Emit optional reset and herald here.
-builder.delay_by_timeline()  # wait for herald/reset to finish before the branch-selected preparation
-builder.fork("default", into=["f1", "f2"])
-with builder.branch(by="prepared_f1", align_timeline=True, timeline="f1") as cases:
-    with cases.case(1):
-        builder.emit(x180_f1)
-with builder.branch(by="prepared_f2", align_timeline=True, timeline="f2") as cases:
-    with cases.case(1):
-        builder.emit(x180_f2)
-builder.join("f1", "f2", into="default")
-builder.emit(readout, tag="terminal")
-```
-
-`repeat(name, n, *, timeline=None, range_hint=None)` 使用累加 timeline，不自動同步入口或回邊。
-Body 的預設名字改用循環 timeline，只可使用母 timeline 與局部 fork，離開後局部名字失效。
-作者可在 case 外的 body 明寫 delay_by_timeline、原生 delay／delay_auto 或巢狀 Repeat。
-若每圈都要推進 reference，在 body 頂層最後明寫 `delay_by_timeline()`，並先在循環前同步母 timeline。
-當入口結尾為常數 0 且最後操作是這個 delay_by_timeline，固定圈長使用常數 inc_ref，不配循環尾端 register。
-編譯器只看已錄製結構，不分析定點或重播 preprocess。
-中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步別條 timeline 或沒有 delay_by_timeline 都走變數尾端路徑。
-Body 以循環 timeline 的 delay_by_timeline 結尾但入口不是常數 0 時，UserWarning 會提示在循環前加 delay_by_timeline，編譯器不自行加入。
-變數尾端使用 s14 指針，入口載入母 timeline 結尾，每圈推進到實際結尾，離開時才捕獲尾端。
-IR 依實際時間窗口決定展開份數，address DMEM 成本維持原契約。
-
-`n` 是非負整數或既有 count register 名字。固定 0 不執行 body，也不自動同步。
-Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
-省略 hint 時不證明回邊同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
-每 shot 內初始化循環狀態，register 超限保留 QICK 錯誤。
-Runtime-only 事件 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
-Reference 操作按每圈實際推進量扣減外部結尾。
-Branch／runtime Repeat 後可直接在外部 timeline 放事件，從實際 remaining end 經 s14 放置，不必先 join、fork 或同步。
-後續事件重用 shot 收尾等 consumer 已需要的 selected-end／debit storage，不另配事件時間 register。
-沒有後續事件時，不為可能的 placement 預配 register。
-
-`DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
-它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。
-在範圍內要推 reference，直接呼叫原生 `delay_auto`。
-完整控制流與時間單位見 [program 作者 API](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+Timeline、reference、`timeline_inc`、`delay_by_timeline` 與 branch／repeat 的控制流
+契約及範例由 [program 作者 API](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)
+擁有。跨模組分工見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
 
 ### 用 run_acquire* 寫入與停止
 
-Schedule 與 scan step 都提供以下入口，接受 builder 產生或手寫的 program：
-
-| 入口 | 預設寫入 slot 的資料 |
-| --- | --- |
-| `run_acquire(prog, soc, ...)` | 第一個 ADC 的第一次 read，IQ 轉 complex |
-| `run_acquire_summed(prog, soc, processor=..., ...)` | 累積總和，不除 reps 或 rounds |
-| `run_acquire_decimated(prog, soc, ...)` | 第一個 ADC 的 complex trace，保留 repetitions 與 samples 軸 |
-
-`run` 把轉換後的資料寫進目前 Schedule 或 step 的 slot，並觸發 buffer 的 live update。
-Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_acquire(...)`。
-每次 completed round 都先轉換與寫入，再檢查 `RunOptions.stop_condition`。
-Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
-Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後續 host loop。
-外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
-一般 acquisition 失敗在 retry 耗盡後原樣傳出，KeyboardInterrupt 直接傳出。Buffer 可能仍有資料，作者自行決定是否攔截並回傳。
-`RunOptions(on_stop=callback)` 在本次 acquire 因外部停止而正常返回時通知作者，純 data stop 不通知。
-Callback 不收參數，在 acquire scope 與 progress 清理後、ndarray 返回前同步呼叫一次；callback 例外原樣傳出且不 retry。
-
-`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 同樣使用這個預算，並先還原取數前的 slot。
-外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
-`progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
-`rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
-不要把 `rounds` 放進 `RunOptions`。
+Schedule 的三種 `run_acquire*`、slot、converter、stop 與 retry 契約見
+[runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md#schedule-run-acquisition)。
+以下只示範實驗如何接上 summed 與 decimated 取數。
 
 Summed 範例先 build 再解析 read label。以下是上方 builder 範例的替代取數段，
 使用同一個 `prog`，但 slot 改為 float64 的 count、sum I、sum Q 三欄。
@@ -914,7 +656,7 @@ with Schedule(sums, scope=context.scope) as sched:
 
 需要不同形狀或 conditional mean 時，用 `RunOptions(converter=...)` 明確轉換。
 `shot_sums`、分類軸與 `split_sums` 見 [program acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
-Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用只取第一個 ADC 的預設。
+Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用單 ADC 的預設 converter。
 `MuxReadout.collect_raw_iq(prog)` 在 completed-round hook 讀取該 program 的 raw buffers，不把累積 averaged IQ 當作逐 shot IQ。
 
 Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
@@ -932,10 +674,6 @@ with Schedule(trace_buffer, scope=context.scope) as sched:
         options=RunOptions(progress=True),
     )
 ```
-
-Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數並回傳。
-它們不寫 Schedule slot，不管理 live update、retry 或 Schedule stop_condition。
-直接呼叫時，caller 自己傳入 cancel flag 並處理結果。
 
 ## v2 cfg 組合慣例
 
@@ -955,9 +693,9 @@ Core import 實際使用的 module，型別選擇見[寫法慣例](#cfg-名稱�
 
 - 除了用來產生分類參數的 `singleshot/ge`、`mux/singleshot_ge`、`singleshot/qutrit_population`、`singleshot/amp_rabi`、`singleshot/len_rabi`、`singleshot/check`，實驗不保存逐 shot 資料。分類在取數時做，Result 存計數或總和，避免為事後分類保存整批 IQ。校準實驗仍保留逐 shot 分布，供分類參數的擬合與驗證使用。
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
-- **`default_raw2signal_fn`**：Schedule 路徑使用 `zcu_tools.experiment.v2.runtime.schedule` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
+- `default_raw2signal_fn` 定義在 `zcu_tools.experiment.v2.runtime.acquisition`。預設轉換的 ADC／read 限制與多 ADC 的 converter 要求見 [runtime owner](../../lib/zcu_tools/experiment/v2/runtime/README.md#schedule-run-acquisition)。
 - **自訂 raw conversion**：integrated 與 decimated acquire 都以 `RunOptions(converter=...)` 傳入轉換。Converter 收各輪累積與最終 raw，回傳符合 slot shape 的 ndarray。
-- **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
+- Live plot 的 `signal2real` 可由實驗本地定義，或重用 lab support 的轉換工具。實驗選擇 magnitude、phase 或 real；analyze 可使用不同的轉換。
 - **scalar/array 邊界**：座標轉換工具（例如 value↔flux）可接受 scalar 或 ndarray；若後續 plotting/analysis 需要 indexing、min/max 或與另一個 sweep array 對齊，呼叫端在邊界用 `np.asarray(..., dtype=...)` 正規化成 ndarray，而不是用型別宣告假設回傳一定是 array。
 - **peak-picking smoothing**：ro-optimize 與 reset 這類以 SNR/map argmax 找最佳點的分析預設使用 `smooth_method="wavelet"`；`smooth_method="gaussian"` 保留為舊 Gaussian 對照。`smooth` 是通用強度：Gaussian 時是 sigma，wavelet 時是 threshold scale。ro-optimize length 的 `t0` 是 `SNR/sqrt(length + t0)` 的 duration-normalization term；`t0 > 0` 啟用短 readout bias，且較小的正值 bias 較強。`None` 與 `0.0` 都是純平滑 SNR argmax。
 
@@ -1010,16 +748,9 @@ distinct depths 時分析明確失敗。
 
 ## 外部中斷支援（cancel_flag）
 
-Schedule 的 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` 傳給 program。它觀察目前 acquire scope 的外部停止，包含 Schedule 祖先的停止請求。Data-driven early stop 只停止目前 acquire，不改 Schedule outcome。
-
-取消 acquire 子層時，runner 保留 completed rounds，首輪前取消則保留 NaN。Schedule 自己未停止時，其 outcome 仍是 completed，下一次 acquire 可繼續。取消 Schedule 本身才記 stopped。作者需要知道本次 acquire 是否被取消時，傳 `RunOptions(on_stop=callback)`。這個通知不交給前端，也不寫回 StopSignal。
-
-Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 retry、不轉 outcome；converter 與 update 錯誤也直接傳出。Schedule 的作者 outcome 保留 completed、stopped 或 failed，但不代表資料可用性。GUI 與 Notebook 只依 core 回傳或拋錯發布結果，不解析 buffer 或 outcome。
-
-- `RunOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(signals_buffer[step], threshold, signal2real_fn))`。Runner 寫入 completed round 後才檢查 condition，命中時只停止目前 acquire。
-- 直接呼叫 program 的 raw-shot acquire 時，明傳 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
-
----
+Schedule 的 acquire-local cancel flag、部分資料、retry 與 `on_stop` 契約見
+[runtime 的 Stop 與 Retry](../../lib/zcu_tools/experiment/v2/runtime/README.md#stop-與-retry)。
+直接呼叫 program acquire 時，作者明傳 cancel flag 並決定是否回傳已取得的資料。
 
 ## 寫新 Experiment 時的檢查清單
 
@@ -1034,26 +765,12 @@ Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分
 
 ### Singleshot initial state
 
-`GE`、`len_rabi` 與 `amp_rabi` 的 `initial_state` 是 analysis-only 的 `ground` / `excited` 選項，預設 `ground`，描述 probe / swept drive pulse 之前的主要狀態，不代表純態。GE raw rows 固定是 probe off/on；分析與 confusion diagnostic 共同映射到主要 g/e 順序，持久資料不重排。Rabi joint fit 以 pulse 前 excited population 所在半區間限制初態，對同一 pooled PCA histogram 的兩個方向進行候選擬合，以有效性及 likelihood 選擇，不將第一個非零掃描點當成初態。Population、centers 與 confusion matrix 一律保留物理 g/e 語意；len_rabi 保留可選衰減包絡。`max_calls` 限制每個方向候選的 Migrad call budget；兩個方向都會評估。
+GE、Len Rabi 與 Amp Rabi 的 Initial State 只影響分析。操作、phase offset 與校準
+writeback 分別見 [GE](singleshot/ge/guide.md)、[Len Rabi](singleshot/len_rabi/guide.md)
+及 [Amp Rabi](singleshot/amp_rabi/guide.md)。
+初態、零座標外推與 joint likelihood 的數學見
+[analysis owner](../../lib/zcu_tools/analysis/README.md#singleshot-初態與-joint-fit)。
 
-GE confusion diagnostic 使用兩組各自 refined 的 preparation populations 建立 initial matrix；不以第一列推定第二列。兩組 refinement 均從 joint fit 的同一組 seeds 出發，避免分析順序影響結果。
-
-
-兩條 Len Rabi analysis 都提供 `fit_phase: bool = False`，與 `decay` 獨立。
-一般 Len Rabi 預設固定 0°/180°（由 signed amplitude 決定方向）；啟用後沿用自由
-phase 擬合及包含 phase-frequency covariance 的 π/π/2 length 誤差傳播。
-這將一般 Len Rabi 先前的預設自由 phase 改為 opt-in；amp Rabi 不受影響。
-
-Singleshot 模型是 `p_inf + (p_e0 - p_inf) exp(-t/t_r) cos(omega*t + phase)`；
-無衰減時包絡為 1。`initial_populations` / `p_e0` 表示 pulse 前狀態；
-`zero_length_populations` 是模型外推到 length=0 的值，phase 非零時兩者不同。
-`phase` 以 radians 保存、圖上以 degrees 顯示。自由 phase 限制在初態方向的
-[-π/2, π/2] branch，以避免 180° offset 與 g/e 交換混淆；此模式另限制 baseline
-使振幅方向符合初態，且非負 length 的整條 population 曲線維持 [0, 1]。
-因此這個選項用於初態附近的 shape offset，不辨識跨半週期的未知 rotation。
-固定模式維持原有 parameterization；free-phase 模式的 backend 額外包含 phase
-參數及其 covariance，失敗結果同樣保留所選模型的參數形狀。
-
-`T2RamseyExp.analyze()`與`T2EchoExp.analyze()`提供`fit_phase: bool = False`。
-啟用時由既有`fit_decay_fringe`自由擬合phase；停用保留各自的固定相位策略。
-此選項僅作用於fringe模式，純decay分析忽略它；T2、detune與誤差仍由所選模型推導。
+一般 Len Rabi 的 phase 選項見 [leaf guide](twotone/rabi/len_rabi/guide.md)，
+Ramsey／Echo 的 fringe phase 選項見
+[Ramsey](twotone/time_domain/t2ramsey/guide.md) 與 [Echo](twotone/time_domain/t2echo/guide.md)。

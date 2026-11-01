@@ -8,6 +8,8 @@ Uses the qubit (`qubit/*`), resonator and jpa (`amplifier/jpa`) aliases. Search 
 
 Relax delay starts at 1*T1 using the parameters captured when you open or reset the form. T1 must be a finite positive real number; Boolean values count as invalid. Missing/null T1 or an unavailable parameter snapshot gives a 30 us initial delay. An invalid stored T1 leaves the required wait field empty, and parameter-source failures report an error. Edit the delay in the form as needed; the stored T1 stays unchanged.
 
+The JPA flux axis and saved values use device-native `a.u.` without scaling. This label does not assert a physical current or voltage unit; review the selected device and `flux_unit` separately.
+
 ## Module slots
 
 Module slots use `$qubit.module.x180`, `$resonator.module.readout` and optional `$qubit.module.reset`. Empty pi/readout slots use the pi_pulse/readout templates. The pi pulse uses `$qubit.freq` and `$qubit.wiring.ch`; readout uses resonator frequency/wiring and `$resonator.time_of_fly` + 0.05. An empty reset slot disables reset. Missing calibration required by these templates marks the form Invalid.
@@ -20,4 +22,4 @@ Analysis proposes the signal-maximizing settings as three separate drafts: `$jpa
 
 For each sweep, start/stop set the search bounds and expts gives a relative resolution hint. The optimizer compares all three hints to allocate its phase-1 flux slices and points per slice; the actual sample counts follow that allocation. Global optimizer points (`num_points`, at least 4, default 1001) sets the total evaluation budget. Raise it for wider bounds or lower it for a quick search. Optimizer seed fixes the Latin hypercube sampler and the Bayesian optimizer: with the same seed and the same measured SNRs, a run proposes the same points; leave it empty to draw a new search each run. Analysis reports the best evaluated point using fixed settings.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-01
