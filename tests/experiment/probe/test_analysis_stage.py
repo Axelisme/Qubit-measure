@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 
 import numpy as np
+import pytest
 from PIL import Image
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import probe
@@ -32,3 +33,17 @@ def test_analysis_returns_actual_value_and_png_bytes():
     with Image.open(BytesIO(result.pngs["analysis-fit%2Ftrace.png"])) as image:
         assert image.format == "PNG"
         assert image.size == (300, 200)
+
+
+def test_analysis_propagates_original_exception():
+    error = RuntimeError("analyze failed")
+
+    class FailingExperiment(SyntheticExperiment):
+        def analyze(self, source, options, *, plots: Plots) -> Analysis:
+            raise error
+
+    with pytest.raises(RuntimeError) as caught:
+        probe.analysis_stage(
+            FailingExperiment(), RunRecord(None, np.array([1.0])), None
+        )
+    assert caught.value is error
