@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
-from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_rabi, fitlor
+from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 from zcu_tools.experiment.probe import generators
 
@@ -80,3 +80,14 @@ def test_resonator_recovers_complex_resonance(coupling_quality: float | None):
     assert fit["edelay"] == pytest.approx(0.02, abs=1e-5)
     assert fit["bg_amp_slope"] == pytest.approx(0.002, abs=1e-5)
     assert fit["bg_phase_curvature"] == pytest.approx(0.0001, abs=1e-6)
+
+
+def test_qubit_frequency_recovers_dip_center_and_linewidth():
+    xs = np.linspace(4995.0, 5005.0, 401)
+    ys = generators.generate_qubit_frequency(
+        xs, generators.LorentzianParameters(1.0, 0.0, -0.8, 5000.4, 0.5), 0.001, 17
+    )
+    frequency, _, fwhm, _, _, (params, _) = fit_qubit_freq(xs, ys)
+    assert frequency == pytest.approx(5000.4, abs=0.003)
+    assert fwhm == pytest.approx(1.0, abs=0.01)
+    assert_allclose(params, [1.0, 0.0, -0.8, 5000.4, 0.5], atol=0.003)
