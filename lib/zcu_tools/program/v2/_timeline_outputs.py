@@ -106,7 +106,7 @@ class TimelineObservedPulse(Pulse):
         if self.source.t == "auto" and self.ch in self.book.runtime_gens:
             start = self.book.runtime_gens[self.ch]
             self.runtime_start = start
-            self.source.t_regs["t"] = start.register
+            self.source.t_regs["t"] = self.book.math.cycles(start).register
             self.book.runtime_gens[self.ch] = self.book.math.add(
                 start,
                 align_end(
@@ -145,12 +145,13 @@ class TimelinePlacedPulse(TimelineObservedPulse):
         if self.relative_t == "auto":
             end = self.book.math.maximum(end, previous)
         if isinstance(end, RuntimeEnd):
-            start = self.book.math.event_time(
+            scheduled = self.book.math.add(
                 end,
                 0.0
                 if self.relative_t == "auto"
                 else placement_time(prog, self.relative_t),
             )
+            start = self.book.math.event_time(scheduled, 0.0)
             end_limits = optional_time_bounds(prog, start)
             previous_limits = optional_time_bounds(prog, previous)
             if (
@@ -168,7 +169,7 @@ class TimelinePlacedPulse(TimelineObservedPulse):
             self.source.preprocess(prog)
             self.source.t_regs["t"] = "s_out_time"
             finish = self.book.math.add(
-                start,
+                scheduled,
                 align_end(
                     prog, prog.pulses[self.name].get_length(), self.native_length(prog)
                 ),
@@ -252,7 +253,7 @@ class TimelinePlacedConfig(ConfigReadout):
             self.source.t = self.book.math.preprocess_time(start)
             self.source.preprocess(prog)
             self.source.t_regs["t"] = "s_out_time"
-            finish = self.book.math.snapshot(start)
+            finish = self.book.math.add(origin, placement_time(prog, self.relative_t))
             self.book.set_end(self.timeline, self.book.math.maximum(0.0, finish))
             return
         self.source.t = origin + placement_time(prog, self.relative_t)
@@ -314,13 +315,16 @@ class TimelinePlacedTrigger(Trigger):
             super().preprocess(prog)
             self.t_regs["t"] = "s_out_time"
             duration = self.get_time_param("width")
-            end = self.book.math.add(start, duration)
+            scheduled = self.book.math.add(
+                origin, placement_time(prog, self.relative_t)
+            )
+            end = self.book.math.add(scheduled, duration)
             for ch in self.ros:
                 length = (
                     prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
                 )
                 duration = self.book.math.maximum(duration, length)
-                ro_end = self.book.math.add(start, align_end(prog, length))
+                ro_end = self.book.math.add(scheduled, align_end(prog, length))
                 self.book.runtime_ros[ch] = ro_end
                 self.book.record_native(prog, ch, ro_end, generator=False)
                 end = self.book.math.maximum(end, ro_end)

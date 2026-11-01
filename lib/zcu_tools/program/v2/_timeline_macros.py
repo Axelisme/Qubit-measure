@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from fractions import Fraction
 
 from qick.asm_v2 import (
+    AsmInst,
     CondJump,
     Delay,
     Jump,
@@ -18,6 +19,7 @@ from qick.asm_v2 import (
     Macro,
     OpenLoop,
     QickParam,
+    QickProgramV2,
     TimedMacro,
     Wait,
     WriteReg,
@@ -143,7 +145,7 @@ class TimelineRuntimeAdvance(Macro):
             static = 0.0
         advance = auto if isinstance(auto, RuntimeEnd) else static
         if isinstance(auto, RuntimeEnd):
-            self.source.t_regs["auto_t"] = auto.register
+            self.source.t_regs["auto_t"] = self.book.math.cycles(auto).register
         remaining = [
             self.book.math.floor(end, advance)
             for end in [
@@ -459,7 +461,20 @@ class TimelineSync(Delay):
                 [0.0, *(self.book.end(name) for name in self.sources)]
             )
         if isinstance(self.t, RuntimeEnd):
-            self.t_regs["t"] = self.t.register
+            # Split a nonnegative register + literal advance at translation;
+            # closure consumes the value without allocating storage or touching s14.
+            self.literal_advance = (
+                self.t.offset
+                if self.t.offset > 0
+                and self.t.minimum is not None
+                and self.t.minimum >= self.t.offset
+                else 0
+            )
+            self.t_regs["t"] = (
+                self.t.register
+                if self.literal_advance
+                else self.book.math.cycles(self.t).register
+            )
             self.book.native_only = True
             try:
                 if self.t.minimum is not None:
@@ -469,6 +484,22 @@ class TimelineSync(Delay):
             self.book.decrement(self.t)
         else:
             super().preprocess(prog)
+
+    def expand(self, prog: QickProgramV2) -> list[AsmInst]:
+        """Return native reference advances for the preprocessed QICK program."""
+        operations = super().expand(prog)
+        if isinstance(self.t, RuntimeEnd) and self.literal_advance:
+            operations.append(
+                AsmInst(
+                    inst={
+                        "CMD": "TIME",
+                        "C_OP": "inc_ref",
+                        "LIT": f"#{self.literal_advance}",
+                    },
+                    addr_inc=1,
+                )
+            )
+        return operations
 
 
 class ZeroEntryReferenceEnter(Macro):
@@ -581,7 +612,7 @@ class ZeroEntryReferenceExit(Macro):
                     else max(0, round((limits[1] - debit) * get_fclk(prog)))
                 )
                 runtime[name] = (
-                    RuntimeEnd(end.register, 0, upper)
+                    RuntimeEnd(end.storage, 0, upper)
                     if variable
                     else self.book.math.floor(end, frame.advance * self.count)
                 )
@@ -641,7 +672,7 @@ class ZeroEntryReferenceExit(Macro):
                             ),
                         )
                     )
-                    current[ch] = RuntimeEnd(end.register, 0, upper)
+                    current[ch] = RuntimeEnd(end.storage, 0, upper)
             else:
                 for ch, end in initial.items():
                     if ch not in written:
@@ -940,7 +971,7 @@ class NativeTimelineDelay(TimedMacro):
             self.source.preprocess(prog)
         finally:
             self.book.native_only = False
-        self.source.t_regs["t"] = actual.register
+        self.source.t_regs["t"] = self.book.math.cycles(actual).register
         self.book.decrement(actual)
 
     def translate(self, prog) -> None:

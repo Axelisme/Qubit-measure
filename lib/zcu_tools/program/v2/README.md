@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil、compilation options、外部 timeline 的後續事件與 storage 重用
+**Last updated:** 2026-11-01，timeline ceil、compilation options、runtime 結尾的字面值偏移與 storage 重用
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -31,6 +31,11 @@ runtime lengths. Timeline length-register playback still requires selection
 metadata. This does not add an arbitrary author length-register or ADC length API.
 The conversion rule also gives W=359 for ratio7/5 and W=2872 for ratio56/5, but
 ADC/PFB runtime length consumers are not exposed by the current API.
+
+編譯期已知的換算 bias 使用字面值，零 span 不配置 sweep register。
+Runtime 結尾保留既有 register 加字面值偏移，固定長度的後續事件沿用這份 storage。
+只有需要獨立 register operand 的 consumer 才物化偏移。
+同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
 
 Known scalar and affine time getters return actual quantized values. Runtime-only
 and non-affine time getters raise RuntimeError. Author-declared data tables and IR
