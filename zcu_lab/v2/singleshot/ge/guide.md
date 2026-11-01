@@ -65,6 +65,10 @@ This labels the two acquisitions; each can contain a mixture of states.
 Use a large 'shots' (~1e5) so the IQ histograms are well sampled.
 The default analysis method is 'pca'.
 Analysis also exposes histogram log scale, T1 alignment, and an optional shared length ratio.
+The dimensionless length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
+With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
+This reporting decision does not change centers, fidelity or Post-Analysis.
+If you set Length Ratio manually, Analyze returns the supplied value.
 Run once the qubit pi-pulse and the readout are both calibrated.
 Run and Analyze each show one IQ scatter, with blue g-preparation and red e-preparation shots.
 The live labels mean probe off/on; Analyze maps them using Initial State.
@@ -72,7 +76,7 @@ Histogram fitting remains internal, so histogram log scale does not change the s
 Two separated IQ clouds indicate readout separation.
 Use Post-Analysis to inspect the classified shots and 3x3 confusion diagnostic derived from the primary fit.
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-01
 
 ## Four starting situations
 
