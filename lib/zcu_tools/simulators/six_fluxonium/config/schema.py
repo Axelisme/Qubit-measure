@@ -154,9 +154,9 @@ class SixFluxoniumSettings(Values):
     qubits: SixQubits
     numerics: SixFluxoniumNumerics
     dc_source: CurrentSource
-    mux_gen_ch: Index
-    pulse_gen_ch: Index
-    pulse_ro_ch: Index
+    mux_gen_ch: Literal[0]
+    pulse_gen_ch: Literal[13]
+    pulse_ro_ch: Literal[6]
 
     @field_validator(
         "version", "mux_gen_ch", "pulse_gen_ch", "pulse_ro_ch", mode="before"
@@ -172,23 +172,19 @@ class SixFluxoniumSettings(Values):
         if self.dc_source.name != "coil_bias":
             raise ValueError("dc_source.name: must equal coil_bias")
         names = {"coil_bias", *(f"Q{i}_bias" for i in range(1, 7))}
-        if self.mux_gen_ch == self.pulse_gen_ch:
-            raise ValueError("pulse_gen_ch: duplicates mux_gen_ch")
-        generators = {self.mux_gen_ch, self.pulse_gen_ch}
-        receivers = {self.pulse_ro_ch}
         for index, qubit in enumerate(self.qubits.ordered(), 1):
             if qubit.dc_bias.source.name != f"Q{index}_bias":
                 raise ValueError(
                     f"qubits.Q{index}.dc_bias.source.name: must equal Q{index}_bias"
                 )
-            if qubit.readout.drive.gen_ch != self.mux_gen_ch:
-                raise ValueError(f"qubits.Q{index}.readout.drive.gen_ch: must equal mux_gen_ch")
-            if qubit.drive_line.gen_ch in generators:
-                raise ValueError(f"qubits.Q{index}.drive_line.gen_ch: duplicate generator")
-            if qubit.readout.adc.ro_ch in receivers:
-                raise ValueError(f"qubits.Q{index}.readout.adc.ro_ch: duplicate receiver")
-            generators.add(qubit.drive_line.gen_ch)
-            receivers.add(qubit.readout.adc.ro_ch)
+            bindings = (
+                ("drive_line.gen_ch", qubit.drive_line.gen_ch, index),
+                ("readout.drive.gen_ch", qubit.readout.drive.gen_ch, self.mux_gen_ch),
+                ("readout.adc.ro_ch", qubit.readout.adc.ro_ch, index - 1),
+            )
+            for field, actual, expected in bindings:
+                if actual != expected:
+                    raise ValueError(f"qubits.Q{index}.{field}: must equal {expected}")
             name: Name = qubit.drive_line.name
             if name in names:
                 raise ValueError(

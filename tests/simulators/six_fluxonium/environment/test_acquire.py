@@ -247,8 +247,10 @@ def test_caller_wiring_preserves_driven_cavity_and_receiver_acquisition(kind):
     remapped = parse_six_fluxonium(document)
     board = load_mux_soccfg(15, 8, gen_ch=7, ro_chs=channels)
     with environment(document, soccfg=board) as env:
+        actual_idle = wired_program(env, remapped, kind, driven=False).acquire(env.soc, progress=False)
         actual = wired_program(env, remapped, kind, driven=True).acquire(env.soc, progress=False)
-    assert actual is not None
+    assert actual_idle is not None and actual is not None
+    np.testing.assert_allclose(actual_idle[0], idle[0], rtol=0, atol=1e-8)
     np.testing.assert_allclose(actual[0], expected[0], rtol=0, atol=1e-8)
 
 

@@ -79,11 +79,11 @@ def _single_settings(
     qubits = settings.qubits.ordered()
     qubit = qubits[cavity]
     dc = qubit.dc_bias.source
-    # The pulse receiver uses Q1's calibration; mux receivers follow YAML IDs.
-    receiver = qubits[0] if channel == settings.pulse_ro_ch else next(
-        q for q in qubits if q.readout.adc.ro_ch == channel
+    # Pulse ADC6 has Q1's receiver calibration; the selected cavity supplies
+    # its physical resonator and incident-field calibration, never another ADC.
+    adc = qubits[channel if channel < 6 else 0].readout.adc.model_copy(
+        update={"ro_ch": channel}
     )
-    adc = receiver.readout.adc.model_copy(update={"ro_ch": channel})
     return SingleFluxoniumSettings(
         format=qubit.format,
         version=qubit.version,
@@ -175,8 +175,8 @@ class SixFluxoniumSource:
                 _single_settings(
                     settings,
                     index,
-                    qubit.readout.adc.ro_ch,
-                    settings.mux_gen_ch,
+                    index,
+                    0,
                     _reduced_flux(
                         qubit.dc_bias,
                         settings.dc_source.initial,
@@ -518,13 +518,10 @@ def six_fluxonium(
                 on_begin=lambda: source.begin_acquire(seed=binding.root_seed)
             ),
         )
-        mux_channels = tuple(q.readout.adc.ro_ch for q in settings.qubits.ordered())
         routes = (
-            *((settings.mux_gen_ch, ch) for ch in mux_channels),
-            (settings.pulse_gen_ch, settings.pulse_ro_ch),
-            *((q.drive_line.gen_ch, ch)
-              for q in settings.qubits.ordered()
-              for ch in (*mux_channels, settings.pulse_ro_ch)),
+            *((0, ch) for ch in range(6)),
+            (13, 6),
+            *((gen, ch) for gen in range(1, 7) for ch in range(7)),
         )
         soc = SimulationSoc(soccfg, binding, routes=routes)
         return SimulationEnvironment(

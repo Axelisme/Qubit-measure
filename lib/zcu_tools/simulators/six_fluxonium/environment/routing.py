@@ -88,7 +88,6 @@ def _route_template(
     gen: int,
     bare: NDArray[np.float64],
     time_base: TimeBase,
-    drive_channels: tuple[int, ...],
 ) -> _TemplateRoutes:
     partition = classify_readout(
         template, ReadoutDrive(gen, 1, "mux"), {}, time_base=time_base
@@ -96,7 +95,7 @@ def _route_template(
     if any(partition.cavity_drives):
         raise ValueError("six fluxonium does not support untriggered cavity drives")
     for event in template.events:
-        if event.gen_ch not in (gen, *drive_channels):
+        if event.gen_ch not in (gen, *range(1, 7)):
             raise ValueError(f"unbound six-fluxonium generator {event.gen_ch}")
     receivers = []
     for channel in channels:
@@ -130,7 +129,6 @@ def _project_template(
     compact: NDArray[np.int64],
     cavity: int,
     observed: tuple[int, ...],
-    drive_gen_ch: int,
 ) -> tuple[TimelineTemplate, ...]:
     template, tones = routes.template, routes.tones
     selected_rows = np.flatnonzero(compact[template.points] >= 0)
@@ -156,7 +154,7 @@ def _project_template(
         events = tuple(
             _event_rows(e, rows, e.active)
             for e in template.events
-            if e.gen_ch == drive_gen_ch
+            if e.gen_ch == cavity + 1
         )
         events += tuple(
             _event_rows(e, rows, mask)
@@ -204,14 +202,12 @@ def route_request(
     if not channels or not request.templates:
         raise ValueError("six fluxonium requires readout templates")
     pulse = channels == (settings.pulse_ro_ch,)
-    qubits = settings.qubits.ordered()
-    mux_channels = tuple(q.readout.adc.ro_ch for q in qubits)
-    if not pulse and any(ch not in mux_channels for ch in channels):
+    if not pulse and any(ch not in range(6) for ch in channels):
         raise ValueError("pulse and mux ADC routes must be acquired separately")
     gen = settings.pulse_gen_ch if pulse else settings.mux_gen_ch
     routing = np.empty((prod(request.point_dims), len(channels)), dtype=np.int64)
     templates = tuple(
-        _route_template(t, channels, gen, bare, request.time_base, tuple(q.drive_line.gen_ch for q in qubits))
+        _route_template(t, channels, gen, bare, request.time_base)
         for t in request.templates
     )
     for template in templates:
@@ -230,7 +226,7 @@ def route_request(
             projected = tuple(
                 t
                 for template in templates
-                for t in _project_template(template, compact, int(cavity), observed, qubits[int(cavity)].drive_line.gen_ch)
+                for t in _project_template(template, compact, int(cavity), observed)
             )
             groups.append(RoutedGroup(int(cavity), points, observed, projected, gen))
     return tuple(groups)
