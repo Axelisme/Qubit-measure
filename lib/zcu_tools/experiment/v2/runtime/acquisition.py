@@ -171,12 +171,8 @@ class _AcquireProgress:
         self,
         error: Exception,
         retry: int,
-        slot: SignalSlot,
-        initial_signal: SignalArray,
     ) -> bool:
         overrun = isinstance(error, AcquisitionContractError)
-        if overrun:
-            slot.set(initial_signal)
         if self.attempts > retry:
             return False
         reason = "shot_overrun" if overrun else type(error).__name__
@@ -202,7 +198,8 @@ class _AcquireProgress:
 class AcquisitionRunner:
     """Execute shared retry, round hooks and partial-result policy without building.
 
-    owner selects an active Schedule or step's writable default slot. soc is the
+    owner selects an active Schedule or step. Slot acquisition requires its
+    writable default slot; shot acquisition does not access storage. soc is the
     borrowed producer transport. No program assembly or module state is held.
     """
 
@@ -241,14 +238,89 @@ class AcquisitionRunner:
         Conversion/update errors propagate without retry.
         """
         require_positive_rounds(rounds)
+        if options.retry < 0:
+            raise ValueError("retry must be non-negative")
+        self._schedule.ensure_active()
+        slot = self._default_slot()
+        initial_signal = slot.view.copy()
+
+        def attempt(observation: _AcquireProgress) -> T_Raw:
+            def update_hook(
+                ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol
+            ) -> None:
+                observation.completed_rounds = ir
+                try:
+                    observation.pbar.set_progress(ir)
+                    slot.set(signal_fn(raw))
+                    if options.stop_condition is not None:
+                        observation.decision = options.stop_condition()
+                        if observation.decision:
+                            cancel_flag.set()
+                except Exception as exc:
+                    raise _CallbackError(exc) from exc
+
+            return self._acquire_once(
+                acquire=acquire,
+                options=options,
+                acquire_kwargs=dict(acquire_kwargs, rounds=rounds),
+                round_hook=update_hook,
+            )
+
+        self._run_attempts(
+            attempt=attempt,
+            rounds=rounds,
+            options=options,
+            on_completed=lambda raw: slot.set(signal_fn(raw)),
+            on_overrun=lambda: slot.set(initial_signal),
+        )
+        return slot.view
+
+    def run_shots(
+        self,
+        *,
+        acquire: Callable[..., object],
+        options: AcquireOptions,
+        acquire_kwargs: dict[str, object],
+    ) -> bool:
+        """Run one synchronous acquire without accessing a slot.
+
+        acquire borrows soc and receives native keywords plus an acquire-local
+        cancel flag and progress hook. options selects retry, native progress
+        and on_stop; data stop must be disabled by the caller. Return True on
+        completion, False on cooperative external stop. A stopped Schedule
+        records its outcome. Producer errors retry then propagate unchanged;
+        KeyboardInterrupt never retries. on_stop runs once after scope release
+        and progress cleanup. Requires an active owner and nonnegative retry.
+        """
+
+        def attempt(observation: _AcquireProgress) -> object:
+            return self._acquire_once(
+                acquire=acquire,
+                options=options,
+                acquire_kwargs=dict(acquire_kwargs, rounds=1),
+                round_hook=lambda ir, raw, flag: observation.pbar.set_progress(ir),
+            )
+
+        return self._run_attempts(
+            attempt=attempt,
+            rounds=1,
+            options=options,
+            on_completed=lambda raw: None,
+        )
+
+    def _run_attempts(
+        self,
+        *,
+        attempt: Callable[[_AcquireProgress], T_Raw],
+        rounds: int,
+        options: AcquireOptions,
+        on_completed: Callable[[T_Raw], None],
+        on_overrun: Callable[[], None] | None = None,
+    ) -> bool:
         retry = options.retry
         if retry < 0:
             raise ValueError("retry must be non-negative")
         self._schedule.ensure_active()
-
-        slot = self._default_slot()
-        initial_signal = slot.view.copy()
-
         pbar = make_pbar(
             total=rounds,
             smoothing=0,
@@ -268,14 +340,7 @@ class AcquisitionRunner:
                 observation.completed_rounds = 0
                 observation.decision = False
                 try:
-                    raw = self._acquire_once(
-                        acquire=acquire,
-                        options=options,
-                        acquire_kwargs=dict(acquire_kwargs, rounds=rounds),
-                        signal_fn=signal_fn,
-                        slot=slot,
-                        observation=observation,
-                    )
+                    raw = attempt(observation)
                 except _AcquireStopped:
                     external_stop = True
                     self._schedule.check_stop_requested()
@@ -286,7 +351,12 @@ class AcquisitionRunner:
                 except Exception as exc:
                     if self._schedule.check_stop_requested(exception=exc):
                         raise
-                    if not observation.retry_after(exc, retry, slot, initial_signal):
+                    if (
+                        isinstance(exc, AcquisitionContractError)
+                        and on_overrun is not None
+                    ):
+                        on_overrun()
+                    if not observation.retry_after(exc, retry):
                         self._schedule.mark_failed(exc)
                         raise
                     continue
@@ -296,7 +366,7 @@ class AcquisitionRunner:
                     break
 
                 pbar.set_progress(rounds)
-                slot.set(signal_fn(raw))
+                on_completed(raw)
                 observation.log_early_stop(rounds)
                 break
         finally:
@@ -304,7 +374,7 @@ class AcquisitionRunner:
 
         if external_stop and options.on_stop is not None:
             options.on_stop()
-        return slot.view
+        return not external_stop
 
     def _acquire_once(
         self,
@@ -312,32 +382,18 @@ class AcquisitionRunner:
         acquire: Callable[..., T_Raw],
         options: AcquireOptions,
         acquire_kwargs: dict[str, object],
-        signal_fn: Callable[[T_Raw], SignalArray],
-        slot: SignalSlot,
-        observation: _AcquireProgress,
+        round_hook: Callable[[int, T_Raw, CancelFlagProtocol], object],
     ) -> T_Raw:
         scope = self._schedule.scope.branch("acquire")
         token = scope.stop
         acquire_cancel_flag = AcquireCancelFlag(token)
-
-        def update_hook(ir: int, raw: T_Raw, cancel_flag: CancelFlagProtocol) -> None:
-            observation.completed_rounds = ir
-            try:
-                observation.pbar.set_progress(ir)
-                slot.set(signal_fn(raw))
-                if options.stop_condition is not None:
-                    observation.decision = options.stop_condition()
-                    if observation.decision:
-                        cancel_flag.set()
-            except Exception as exc:
-                raise _CallbackError(exc) from exc
 
         try:
             try:
                 raw = acquire(
                     self._soc,
                     progress=options.progress,
-                    round_hook=update_hook,
+                    round_hook=round_hook,
                     cancel_flag=acquire_cancel_flag,
                     **dict(acquire_kwargs),
                 )

@@ -46,11 +46,14 @@ class RunOptions(Generic[T_Raw]):
     slot shape. None selects the default: integrated requires one ADC and one
     read per shot; decimated requires one ADC and retains all repetition/read/
     sample axes; summed writes sums unchanged. Ambiguous defaults raise ValueError
-    requesting an explicit converter. Converter and live update exceptions
+    requesting an explicit converter. run_acquire_shots instead returns retained
+    raw shots without a slot and rejects converter and stop_condition policies.
+    Its rounds count must be one. Converter and live update exceptions
     propagate without retry or a failed acquisition outcome.
     on_stop optionally observes external cancellation once per cooperative return,
     after acquire scope release and progress cleanup, before returning the signal
-    view. It also runs when already stopped before acquisition. Pure data stop,
+    view or raw-shot stop result. It also runs when already stopped before
+    acquisition. Pure data stop,
     producer/converter/update failures and KeyboardInterrupt do not call it.
     Observer exceptions propagate unchanged without retry or outcome changes.
     """
@@ -96,6 +99,26 @@ class IntegratedProgram(Protocol[T_Raw_co]):
     ) -> T_Raw_co: ...
 
 
+class ShotProgram(Protocol):
+    """Synchronous acquire producer retaining integer raw shots.
+
+    acquire(soc, **kwargs) accepts SynchronousAcquireKeywords, returns averaged
+    IQ data and follows IntegratedProgram's cancellation and failure contract.
+    get_raw() returns the retained per-ADC int64 shot buffers, or None when no
+    raw buffer is available. The runner returns those buffers without conversion.
+    """
+
+    def acquire(
+        self,
+        soc: object,
+        **kwargs: Unpack[SynchronousAcquireKeywords[list[NDArray[np.float64]]]],
+    ) -> list[NDArray[np.float64]]: ...
+
+    def get_raw(self) -> list[NDArray[np.int64]] | None:
+        """Return retained per-ADC raw shots, or None if unavailable."""
+        ...
+
+
 class DecimatedProgram(Protocol[T_Raw_co]):
     """Producer requiring only synchronous acquire_decimated.
 
@@ -134,11 +157,13 @@ class RunAcquisitionMixin(ABC):
     """Schedule and step acquisition methods sharing one execution policy.
 
     Subclasses provide the existing owner via _acquisition_owner; this mixin owns
-    no scope, slot or outcome state. Each run call writes converted data into
-    that owner's default slot and triggers live updates, retries producer errors
-    and applies acquire-local data stops. It requires an active Schedule and a
-    writable SignalBuffer slot. Cancellation returns partial data with a
-    Schedule outcome. KeyboardInterrupt propagates unchanged without retry.
+    no scope, slot or outcome state. Slot entrypoints write converted data and
+    trigger live updates, with acquire-local data stops. run_acquire_shots
+    instead returns retained raw buffers without conversion or slot writes.
+    All entrypoints require an active Schedule and retry producer errors.
+    Only slot entrypoints require a writable SignalBuffer slot. Cancellation
+    returns partial slot data or None for shots; only a stopped Schedule token
+    records a stopped outcome. KeyboardInterrupt propagates unchanged without retry.
     Exhausted producer errors propagate unchanged;
     conversion/update errors propagate without retry.
     """
@@ -187,6 +212,48 @@ class RunAcquisitionMixin(ABC):
             options=acquire_options,
             acquire_kwargs=qick_options,
         )
+
+    def run_acquire_shots(
+        self,
+        program: ShotProgram,
+        soc: object,
+        *,
+        options: RunOptions[list[NDArray[np.float64]]] | None = None,
+        **qick_options: object,
+    ) -> list[NDArray[np.int64]] | None:
+        """Acquire once and return program.get_raw() without conversion or slot writes.
+
+        program supplies synchronous acquire and retained int64 raw shots; soc
+        is its borrowed transport. Requires an active Schedule, not a buffer.
+        options selects retry, native progress and on_stop. qick_options are
+        forwarded to acquire. Return None on cooperative external cancellation;
+        only a stopped Schedule token records a stopped Schedule outcome.
+        on_stop runs once after acquire scope release and progress cleanup.
+        KeyboardInterrupt and exhausted producer errors propagate unchanged.
+        Producer failures, including shot overrun, use the nonnegative retry
+        budget without slot restoration. A partial-acquire error without an
+        external stop propagates unchanged after retry is exhausted.
+        ValueError rejects negative retry, converter or stop_condition policies,
+        and rounds other than the single positive integer 1. RuntimeError means
+        program.get_raw() provided no raw shot buffer after successful acquire.
+        Neither raw-buffer access failures nor on_stop failures are retried.
+        """
+        selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
+        if selected.converter is not None or selected.stop_condition is not None:
+            raise ValueError("run_acquire_shots does not convert or apply data stop")
+        if rounds != 1:
+            raise ValueError("run_acquire_shots requires rounds=1")
+        completed = AcquisitionRunner(self._acquisition_owner, soc).run_shots(
+            acquire=program.acquire,
+            options=acquire_options,
+            acquire_kwargs=qick_options,
+        )
+        if not completed:
+            return None
+        shots = program.get_raw()
+        if shots is None:
+            raise RuntimeError("program did not provide a raw shot buffer")
+        return shots
 
     def run_acquire_decimated(
         self,
