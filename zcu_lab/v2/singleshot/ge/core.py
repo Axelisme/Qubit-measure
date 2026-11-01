@@ -18,9 +18,9 @@ from zcu_tools.experiment.utils.single_shot.ge import (
     GENumericalError,
     singleshot_ge_analysis,
 )
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
@@ -211,13 +211,12 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 program = builder.build()
 
                 # Store each cloud independently, preserving every complex shot.
-                try:
-                    program.acquire(soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
+                shots = step.run_acquire_shots(
+                    program, soc, options=RunOptions(progress=True)
+                )
+                if shots is None:
                     break
                 signals_buffer[step].set(raw_shots_to_signal(program))
-        signals_buffer.trigger_update(flush=True)
         signals = signals_buffer.array
 
         # Keep acquisition order; physical G/E mapping belongs to analysis.
