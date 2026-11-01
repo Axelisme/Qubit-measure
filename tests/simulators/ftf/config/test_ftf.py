@@ -9,6 +9,18 @@ from zcu_tools.simulators.ftf.config import load_ftf, parse_ftf
 from tests.simulators.ftf.config._data import dual_readout_document, ftf_document
 
 
+@pytest.mark.parametrize("field", ["ripple_period_mhz", "pivot_ghz"])
+def test_loader_requires_receiver_background_shape(tmp_path: Path, field: str) -> None:
+    document = ftf_document()
+    background = {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}
+    del background[field]
+    _set_field(document, "readout.adc.background", background)
+    path = tmp_path / "missing-shape.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"readout\.adc\.background\.{field}"):
+        load_ftf(path)
+
+
 @pytest.mark.parametrize("floor", [0.0, 0.1, 0.999])
 def test_projection_weight_floor_accepts_finite_probability_threshold(floor):
     document = ftf_document()
