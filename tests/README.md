@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-01，simulators package ownership
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -458,20 +458,20 @@ in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain iso
 
 ### FTF numeric and acquisition tests
 
-`tests/resources/test_ftf.py` verifies named YAML validation and dotted field
-errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
-`test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
-CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
+`tests/simulators/ftf/config/test_ftf.py` verifies named YAML validation and dotted field
+errors. `tests/simulators/ftf/physics/` owns fixed-coordinate circuits and model sources.
+Generic LC/Boltzmann/Gibbs references, CP dephasing and causal source tails stay in
+`tests/simulate/test_joint_baths.py` and `test_source_lines.py`. Independent evolution/ADC behavior stays in
 `tests/simulate/evolution/` and `test_adc.py`; model-event and multi-window
 sampling tests live in the corresponding numeric owner directories.
-`tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
+`tests/simulators/ftf/environment/test_ftf.py` covers explicit unit conversion, common carrier phase
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
-`ftf/test_projective_readout.py` covers public frontend mux heralding, retained
+`tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and elementwise terminal-only
 runtime parity against direct Engine/ADC composition. Cavity field continuation
-stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
-`ftf/test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
+stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
+`test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered

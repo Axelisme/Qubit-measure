@@ -7,6 +7,8 @@
 各環境目錄擁有自己的 startup 與模型參數。現有環境包括
 [FTF](FTF/README.md)、[single_fluxonium](single_fluxonium/README.md) 與
 [six_fluxonium](six_fluxonium/README.md)。執行 startup 才會組裝環境與資源。
+三個物理模型的 builder 位於 `zcu_tools.simulators.<model>.environment`，
+YAML loader 位於對應的 `config` package。框架不 import 這些模型。
 每份 startup 讀取同目錄的 `profile.yaml`，再用 `program.build_soccfg` 建立板子。
 板子設定獨立於物理模型 YAML。修改 profile 後須重建環境。FTF 使用四個 generator
 和三個 ADC，其中 gen1 配 mux ADC1、2。single_fluxonium 和 integer_fluxonium

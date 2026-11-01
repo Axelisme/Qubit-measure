@@ -6,7 +6,7 @@ from shlex import quote
 
 import yaml
 from pydantic import TypeAdapter
-from zcu_tools.experiment.six_fluxonium import six_fluxonium
+from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 from zcu_tools.gui.session.aliases import AliasRow

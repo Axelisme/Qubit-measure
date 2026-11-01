@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import yaml
 from zcu_tools.datafile import load
-from zcu_tools.experiment.ftf import ftf
+from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
@@ -31,7 +31,7 @@ from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
-from tests.resources._ftf_data import ftf_document
+from tests.simulators.ftf.config._data import ftf_document
 
 pytestmark = pytest.mark.sim
 

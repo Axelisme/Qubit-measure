@@ -2,9 +2,9 @@
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
-**Last updated:** 2026-10-28，flux pulse 路由、量化與 ramp 弛豫近似
+**Last updated:** 2026-11-01，simulators package ownership
 
-本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
+本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [simulators.ftf.config](../../../lib/zcu_tools/simulators/ftf/config/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 樣板的 circuit energies、couplings 與 resonator frequencies 採用《FTF Architecture for Quantum Computing》第 5 章 Table 5.1 的 Device A。DC、微波、接收器與數值設定包含本機手動調整值，不能當作其他晶片的校準結果。樣板可執行，不代表截斷已收斂或模型適用於所有工作點。
 
@@ -33,7 +33,7 @@
 
 `DriveLine.operator: flux` 使用固定 DC 工作點的一階線性算符，限於小訊號。序列內改變磁通的 pulse 使用獨立的 `flux_lines`，不沿用這個線性算符。省略 `flux_lines` 時，DC bias、靜態磁通掃描、charge drive、小訊號 flux drive 與 readout 設定不變。使用未綁定的 generator 仍會失敗。
 
-`chip` 的 flux-noise 與 flux-line loss 參數只描述物理雜訊與耗散，不建立 pulse 控制線。`flux_lines` 宣告從 generator gain 到各迴路 reduced flux 的轉換與濾波。數值接線與演化限制由 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md) 說明。
+`chip` 的 flux-noise 與 flux-line loss 參數只描述物理雜訊與耗散，不建立 pulse 控制線。`flux_lines` 宣告從 generator gain 到各迴路 reduced flux 的轉換與濾波。數值接線與演化限制由 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md) 說明。
 
 ## 文件結構與共通規則
 
@@ -168,8 +168,8 @@ Coupler 的 `q_ind`、`xqp` 為 JSON `null`。關閉漂移不寫真值 log；寫
 若要改 log 位置或保存 private replay，使用 `ftf(..., acquisition=FTFAcquisitionOptions(...))`，
 不在 YAML 或 entry 加路徑。Replay 保存當次有效設定，`drift=None`，重播不依賴時鐘或原 YAML。
 真值與 replay 檔案不進一般 Run／GUI／MCP metadata，路徑與保留期限由呼叫者管理。
-參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/experiment/ftf/README.md#acquisition-clock-and-loss-drift)
-及 [private replay](../../../lib/zcu_tools/experiment/ftf/README.md#private-replay)。
+參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)
+及 [private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
 
 ## Design：設計初猜
 
@@ -307,7 +307,7 @@ Hamiltonian 支援時變 flux，但只在每 round DC 選定的 retained 子空�
 引擎不認證物理 adiabatic 條件，短 ramp 也不是該條件成立的證據。
 終端 readout 仍固定使用 snapshot DC 模型，即使 flux tail 尚未回 DC 也不改變。
 需要 DC 讀出時，須在 readout 前留足返程 settling。
-兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/experiment/ftf/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
+兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/simulators/ftf/environment/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
 [固定 DC flux benchmark](../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md) 的結論為「未認證，僅界限」。
 M16 只是最大成功執行尺寸，不是收斂 reference。M24 首點與 M32 reference 在 phase/gauge quadrature 失敗，其餘五個 M24 候選未執行。
 這些結果不能認證 excursion 幅度可用區或裝置 reset fidelity。

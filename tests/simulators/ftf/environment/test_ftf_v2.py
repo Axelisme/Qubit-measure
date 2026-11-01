@@ -1,0 +1,88 @@
+"""V2 channel derivation, live DC and charge-drive acquisition seam."""
+
+import numpy as np
+import pytest
+from zcu_tools.device.fake import FakeDevice
+from zcu_tools.simulators.ftf.environment import ftf
+from zcu_tools.program.v2.modules.pulse import PulseCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulators.ftf.config import parse_ftf
+
+from tests.program._profiles import load_soccfg
+from tests.program._timeline import compile_modules
+from tests.simulators.ftf.config._data import ftf_document
+
+pytestmark = pytest.mark.sim
+
+
+def test_v2_uses_supplied_sparse_board_and_acquires_with_live_dc() -> None:
+    document = ftf_document()
+    numerics = document["numerics"]
+    assert isinstance(numerics, dict)
+    numerics["truncation"]["retained_levels"] = 2
+    # Use a readout hole as well as the fixture's generator hole.
+    readout = document["readout"]
+    assert isinstance(readout, dict)
+    readout["adc"]["ro_ch"] = 2
+    try:
+        settings = parse_ftf(document)
+    except ValueError as error:
+        pytest.fail(f"v2 sparse channel document must validate: {error}")
+    board = load_soccfg(3, 3)
+    env = ftf(settings, soccfg=board)
+    try:
+        assert env.soccfg is board
+        driver = env.devices.get_device("bias")
+        if not isinstance(driver, FakeDevice):
+            raise AssertionError("FTF DC source must be a fixed-unit memory device")
+        assert driver.get_info().value_unit == "V"
+        assert driver.get_value() == 0.2
+        pulse = PulseCfg(
+            ch=2,
+            nqz=1,
+            freq=250.0,
+            phase=90.0,
+            gain=-0.2,
+            waveform=ConstWaveformCfg(length=0.008),
+        )
+        ro = PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=2,
+            nqz=1,
+            freq=6000.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.016),
+            ro_length=0.016,
+        )
+        program = compile_modules(
+            env.soccfg,
+            modules=[pulse.build("charge"), ro.build("readout")],
+            reps=2,
+        )
+
+        def change_bias(*_args, **_kwargs) -> None:
+            driver.set_value(0.4)
+
+        result = program.acquire_decimated(
+            env.soc,
+            progress=False,
+            round_hook=change_bias,
+            rounds=2,
+        )
+        assert result is not None
+        assert np.isfinite(result[0]).all()
+        assert np.any(np.asarray(result[0]) != 0)
+        assert [r.snapshot.values for r in env.soc.binding.rounds] == [
+            (("bias", 0.2),),
+            (("bias", 0.4),),
+        ]
+        unbound = compile_modules(
+            env.soccfg,
+            modules=[pulse.with_updates(ch=1).build("unbound"), ro.build("readout")],
+            reps=1,
+        )
+        with pytest.raises(ValueError, match="unbound|route"):
+            unbound.acquire(env.soc, progress=False)
+    finally:
+        env.devices.close_all_devices()
