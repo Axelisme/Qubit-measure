@@ -19,6 +19,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -58,7 +59,7 @@ class PreFreqCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Preparation pulse")]
     pi_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Pi pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="MIST probe pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     freq: Annotated[SweepCfg, FieldMeta(label="Preparation freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")

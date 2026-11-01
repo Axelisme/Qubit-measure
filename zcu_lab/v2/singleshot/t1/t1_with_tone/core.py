@@ -24,6 +24,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -72,7 +73,7 @@ class T1WithToneCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[

@@ -21,6 +21,7 @@ from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -67,7 +68,7 @@ class AcStarkCfg(ConfigBase):
         Pulse.Cfg, FieldMeta(label="Cavity Stark Tone (gain sweep)")
     ]
     stark_pulse2: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Tone (freq sweep)")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     freq: Annotated[SweepCfg, FieldMeta(label="Frequency", unit="MHz")]
     reps: Annotated[

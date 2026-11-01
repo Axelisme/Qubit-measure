@@ -20,6 +20,7 @@ from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     TimelineBuilder,
@@ -37,7 +38,7 @@ class ResetCheckCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
     tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")

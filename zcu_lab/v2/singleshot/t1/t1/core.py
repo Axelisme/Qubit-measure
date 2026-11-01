@@ -24,6 +24,7 @@ from zcu_tools.program.v2 import (
     DelayAuto,
     LoadValue,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -63,7 +64,7 @@ class T1Result:
 class T1Cfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
