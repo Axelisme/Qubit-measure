@@ -16,6 +16,8 @@
 
 ## 其他格式變更
 
+- 2026-11-01，[Readout power QND](2026-11-01-readout-power-qnd.md)。新 tag 與 grouped paired-IQ sums 取代 SNR-only power，舊 tag 明確拒讀，無法由 SNR 重建 QND moments。
+
 - 2026-11-01，[MIST drive-frequency native 軸順序](2026-11-01-mist-drive-frequency-axes.md)。新檔維度為 frequency／gain；舊方陣檔的磁碟 gain 軸在前，Load 明確拒絕。目前無轉換工具，原檔不改不刪。
 
 - 2026-10-28，[Entry 名稱與量測參數快照](2026-10-28-entry-names-and-run-parameters.md)。Entry 移除 UUID，Run 保存參數環境，Load 不讀 live point，Save 依目前 roots 與記錄名稱寫入。

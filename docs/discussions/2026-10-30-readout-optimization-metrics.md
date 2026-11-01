@@ -112,3 +112,7 @@ R1 關閉時的 f 是沒有量測時的 π 基準。f(R1 開) − f(R1 關) 就�
 - repo@97cc8b441 的 `lib/zcu_tools/program/herald.py`：現行 herald 只看單一 ADC 的一次讀出，只保留判為 g 的 shot。
 - QICK 0.2.436 的 `qick_asm.py`：每個 round 在 host 用 float64 對逐發 int64 積分取平均，再平均各 round。新框架改成跨 round 累加總和，累加誤差和 QICK 原生平均同一個量級。
 - 本文的推導只用上面的兩態高斯混合模型，沒有引用外部文獻。
+
+## 後記
+
+2026-11-01 的實作將 `twotone/ro_optimize/power` 改為八分支 paired-readout gain sweep，保留 R1 開／關與中間 I／π 的比較。分析呼叫 `zcu_tools.analysis.readout_metrics.readout_metrics`，保存 paired moments 並畫各指標與 F_sep／QND-on Pareto 前緣，不自動選 gain。操作與時序限制由 [Power guide](../../zcu_lab/v2/twotone/ro_optimize/power/guide.md) 說明，native 變更見 [格式歷程](../storage-format-history/2026-11-01-readout-power-qnd.md)。此處記錄實作內容，不代表已合併或完成實機驗證。
