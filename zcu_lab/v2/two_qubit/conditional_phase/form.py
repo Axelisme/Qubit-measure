@@ -26,11 +26,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     reset starts as None and can be authored explicitly.
     """
     roles = captured_roles(ctx)
-    readout = (
-        Slot("$mux.module.readout")
-        if ctx.has("$mux.module.readout")
-        else Template("readout/mux:blank")
-    )
+    readout = Slot("$mux.module.readout", fallback=Template("readout/mux:blank"))
     return Form(
         cfg_type,
         field_order=(

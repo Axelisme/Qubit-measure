@@ -298,15 +298,21 @@ def _save_gain(
 ) -> None:
     name = f"mist/{mode}/gain"
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
 
-    def draw(figure: Figure) -> None:
+    figure = plots[name]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         axis = figure.subplots()
         axis.plot(result.gains, mist_signal2real(result.signals), ".-")
         axis.set(xlabel="MIST gain (a.u.)", ylabel="MIST")
 
-    plots.draw(name, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
     plots.save(name, directory / f"gain-{mode}.png")
 
 
@@ -314,7 +320,7 @@ def prepare_mist_map(plots: Plots, mode: str) -> None:
     """Retain a separate map for each preparation, even for an empty sweep."""
     name = f"mist/{mode}/vs_flux"
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
 
 
 def draw_mist_map(
@@ -327,7 +333,10 @@ def draw_mist_map(
     """Render a preparation's median-subtracted, three-sigma-clipped flux map."""
     prepare_mist_map(plots, mode)
 
-    def draw(figure: Figure) -> None:
+    figure = plots[f"mist/{mode}/vs_flux"]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         ax = figure.subplots()
         if plan.fluxes:
@@ -335,7 +344,10 @@ def draw_mist_map(
             ax.pcolormesh(gains, plan.fluxes, projected, shading="nearest")
         ax.set(xlabel="MIST gain (a.u.)", ylabel=f"Flux ({plan.flux_unit})")
 
-    plots.draw(f"mist/{mode}/vs_flux", draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
 
 
 async def run_mist_stage(
@@ -371,7 +383,7 @@ async def run_mist_stage(
         env,
         run_mist,
         cfg,
-        name=f"MIST {mode}",
+        name="MIST",
         output=NativeOutput(filename=f"mist-{mode}.h5", spec=PowerDepExp.AXES_SPEC),
     )
     if acquisition.result is None:

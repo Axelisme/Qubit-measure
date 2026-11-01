@@ -1,6 +1,7 @@
 """Mux group readout slots, qubit identities and shared recovery initial values."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from math import isfinite, pi
 
 from zcu_tools.cfg_model import (
@@ -85,7 +86,9 @@ def mux_readout_initial(
 ) -> Slot | Template:
     """Choose the readout source from ctx's fixed Open/Reset group capture.
 
-    With a readout slot and wait_for_ringup=False, return a library reference,
+    With wait_for_ringup=False, return a Slot with a blank Template fallback.
+    The Template owns its seed metadata, adopted only when the slot is missing.
+    With a readout slot, keep a library reference without reading fallback sources,
     preserving all stored tones and scalar settings. Without a slot, seed the
     blank template with each resonator's calibration frequency and name label,
     generator from $mux.wiring.gen_ch, tone ADCs from $mux.wiring.ro_ch in group
@@ -122,20 +125,20 @@ def mux_readout_initial(
     if parameters is None:
         raise ValueError("Mux forms require a parameter capture")
     has_readout = ctx.has("$mux.module.readout")
-    if not wait_for_ringup and has_readout:
-        return Slot("$mux.module.readout")
     tones: list[dict[str, TemplateSeed]] = []
     for index, resonator in enumerate(group.resonators):
-        kind = parameters.value(f"{resonator}.kind")
-        if not isinstance(kind, str) or kind.split("/")[0] != "resonator":
-            raise ValueError(
-                f"$mux.resonators[{index}]={resonator!r}: expected resonator"
-            )
+        # An unused fallback must not introduce new source reads for a ref slot.
+        if wait_for_ringup or not has_readout:
+            kind = parameters.value(f"{resonator}.kind")
+            if not isinstance(kind, str) or kind.split("/")[0] != "resonator":
+                raise ValueError(
+                    f"$mux.resonators[{index}]={resonator!r}: expected resonator"
+                )
         tone: dict[str, TemplateSeed] = {
             "freq": Expr(f"{resonator}.freq"),
             "label": resonator,
         }
-        if has_readout:
+        if wait_for_ringup and has_readout:
             # Preserve the existing ringup-copy defaults; only blank input changes.
             tone.update({"gain": 0.1, "ro_ch": index})
         else:
@@ -146,11 +149,15 @@ def mux_readout_initial(
     seeds: dict[str, TemplateSeed] = {"tones": tones}
     if wait_for_ringup:
         seeds.update(_ringup_timing(ctx, group))
-    if has_readout:
+    if wait_for_ringup and has_readout:
         return Slot("$mux.module.readout", copy=True, set=seeds)
     seeds["gen_ch"] = Expr("$mux.wiring.gen_ch")
     seeds["mixer_freq"] = Expr("$mux.mixer_freq")
-    return Template("readout/mux:blank", set=seeds)
+    template = Template("readout/mux:blank", set=seeds)
+    template = replace(template, seed_metadata=mux_readout_seed_metadata(template))
+    if wait_for_ringup:
+        return template
+    return Slot("$mux.module.readout", fallback=template)
 
 
 def mux_readout_seed_metadata(

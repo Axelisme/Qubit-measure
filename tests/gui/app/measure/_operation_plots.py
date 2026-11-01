@@ -18,7 +18,7 @@ class PlotCfg(ConfigBase):
 
 def acquire(cfg: PlotCfg, *, context: RunContext) -> int:
     viewer = create_trace(context.plots, "measurement", "Delay", f"Attempt {cfg.stage}")
-    viewer.update((np.array([0.0, 1.0]), np.array([1.0, float(cfg.stage)])))
+    viewer((np.array([0.0, 1.0]), np.array([1.0, float(cfg.stage)])))
     if cfg.stage == 1:
         create_trace(context.plots, "diagnostic", "Frequency", "Diagnostic")
     return cfg.stage
@@ -27,7 +27,7 @@ def acquire(cfg: PlotCfg, *, context: RunContext) -> int:
 @workflow("operation-plots", "Replace operation figures without losing workflow trends")
 async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
     trend = create_trace(env.plots, "trend", "Iteration", "Workflow trend")
-    trend.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
+    trend((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
     for stage, iteration in zip((1, 2), env.iterations(), strict=False):
         outcome = await run_core(iteration, acquire, PlotCfg(stage=stage))
         if isinstance(outcome, Failed):

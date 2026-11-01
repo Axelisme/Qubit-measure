@@ -103,11 +103,23 @@ def calc_snr(
 
 def snr_as_signal(
     raw: Sequence[MomentTracker],
-    ge_axis: int = 0,
+    ge_axis: int = 1,
     *,
     skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
-    """Compute shape-aware SNR from the first readout channel tracker."""
+    """Compute SNR from ``raw[0]``, removing its single readout axis.
+
+    The tracker's mean has shape ``(1, ..., 2)``: axis 0 is the readout,
+    the final axis is IQ, and ``ge_axis`` selects a length-2 g/e state axis
+    between them. Negative axes are relative to this mean shape. Other
+    leading axes are sweep axes and retain their order in the returned
+    float64 array. With no sweep axes, the return shape is ``()``.
+
+    Raise ValueError if the readout axis has length other than 1, ge_axis
+    points to the readout or IQ axis, or the state axis has length other
+    than 2. The tracker must have received samples through ``update``.
+    ``skew_penalty`` has the same non-negative meaning as in ``calc_snr``.
+    """
     tracker = raw[0]
     mean_d = tracker.mean
     cov_d = tracker.covariance
@@ -115,10 +127,20 @@ def snr_as_signal(
     assert mean_d is not None
     assert cov_d is not None
     assert m3_d is not None
-    assert mean_d.shape[ge_axis] == 2, (
-        f"Expected dim=2 along ge_axis, got shape {mean_d.shape} with ge_axis={ge_axis}"
+    if mean_d.shape[0] != 1:
+        raise ValueError(f"Expected one readout on axis 0, got shape {mean_d.shape}")
+    if ge_axis < 0:
+        ge_axis += mean_d.ndim
+    if not 1 <= ge_axis < mean_d.ndim - 1:
+        raise ValueError("ge_axis must select a state axis, not the readout or IQ axis")
+    if mean_d.shape[ge_axis] != 2:
+        raise ValueError(
+            f"Expected state axis length 2, got shape {mean_d.shape} with ge_axis={ge_axis}"
+        )
+    return np.squeeze(
+        calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty),
+        axis=0,
     )
-    return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty)
 
 
 def snr_checker(

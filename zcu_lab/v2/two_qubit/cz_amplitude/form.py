@@ -7,7 +7,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
-    mux_readout_seed_metadata,
 )
 
 from .._measure import captured_roles
@@ -31,10 +30,10 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     drive = {}
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
-        drive[role] = (
-            Slot(slot, copy=True)
-            if ctx.has(slot)
-            else Template(
+        drive[role] = Slot(
+            slot,
+            copy=True,
+            fallback=Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
@@ -44,7 +43,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
-            )
+            ),
         )
     readout = mux_readout_initial(ctx)
     return Form(
@@ -73,7 +72,7 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "readout": readout,
             "scales": Range(None, None, expts=101),
         },
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )
 
 
 def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:

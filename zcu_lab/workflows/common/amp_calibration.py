@@ -73,7 +73,7 @@ def analyze_amp_rabi(result: AmpRabiResult) -> AmpFit | Failed:
     )
     if isinstance(fit, Failed):
         return fit
-    pi, error, pi2, _, _, _, fitted, _ = fit
+    pi, error, pi2, fitted = fit.pi_x, fit.pi_x_err, fit.pi2_x, fit.curve
     return AmpFit(
         pi,
         error,
@@ -199,7 +199,7 @@ async def calibrate_amp_rabi(
             step=(stop - start) / (tun.rabi_points - 1),
         ),
     )
-    outcome = await run_core(scope, AmpRabiExp().run, cfg, name="AmpRabi")
+    outcome = await run_core(scope, AmpRabiExp().run, cfg, name="amp Rabi")
     observe_operation(env.summary, outcome)
     amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
     trace = None

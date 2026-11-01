@@ -43,7 +43,7 @@ def test_run_commit_retires_dependents_and_replans_native_artifacts(session):
     post = writeback.create_draft([], parameters=None, experiment_name="saving")
     host = RecordingHost()
     plots = Plots(host)
-    figure, _ = plots.subplots("fit")
+    figure, _ = plots.subplots(num="fit")
     plots.finish()
     tab.analysis.writeback_draft = primary
     tab.analysis.plots = plots
@@ -94,7 +94,7 @@ def test_analysis_commit_retires_both_stages_and_clears_post_artifacts(session):
     post = writeback.create_draft([], parameters=None, experiment_name="saving")
     host = RecordingHost()
     plots = Plots(host)
-    figure, _ = plots.subplots("old")
+    figure, _ = plots.subplots(num="old")
     plots.finish()
     tab.analysis = AnalysisPaneState(result="old", plots=plots, writeback_draft=primary)
     tab.post_analysis = PostAnalysisPaneState(result="post", writeback_draft=post)
@@ -146,14 +146,14 @@ def test_post_commit_preserves_primary_and_retires_only_previous_post(session):
     draft = writeback.create_draft([], parameters=None, experiment_name="saving")
     host = RecordingHost()
     old_plots = Plots(host)
-    old_figure, _ = old_plots.subplots("old-post")
+    old_figure, _ = old_plots.subplots(num="old-post")
     old_plots.finish()
     tab.post_analysis = PostAnalysisPaneState(
         result="old-post", plots=old_plots, writeback_draft=draft
     )
     versions = state.version.snapshot()
     plots = Plots(NonPresentingHost())
-    plots.subplots("correction")
+    plots.subplots(num="correction")
     plots.finish()
     pane = PostAnalysisPaneState(result=None, plots=plots, params={"scale": 3})
 
@@ -193,7 +193,7 @@ def test_transition_preview_is_read_only_and_matches_commit(
         if publication in ("figures_only", "empty"):
             plots = Plots(host)
             if publication == "figures_only":
-                plots.subplots("old")
+                plots.subplots(num="old")
             plots.finish()
         draft = (
             writeback.create_draft([], parameters=None, experiment_name="saving")
@@ -290,7 +290,7 @@ def test_cleanup_failure_is_logged_without_rollback_or_skipping_other_resources(
     good_draft = healthy.create_draft([], parameters=None, experiment_name="saving")
     host = RecordingHost(fail_release=True)
     plots = Plots(host)
-    figure, _ = plots.subplots("old")
+    figure, _ = plots.subplots(num="old")
     plots.finish()
     tab.analysis = AnalysisPaneState(result="primary", writeback_draft=good_draft)
     tab.post_analysis = PostAnalysisPaneState(

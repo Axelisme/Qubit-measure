@@ -53,7 +53,7 @@ def saving_form(ctx: FormContext) -> Form[SavingCfg]:
 def PaneAdapter_analyze(
     req: AnalyzeRequest[SavingRun, PaneParams], *, plots: Plots
 ) -> PaneResult:
-    _, ax = plots.subplots("fit")
+    _, ax = plots.subplots(num="fit")
     ax.plot([0, 1], [0, 1])
     return PaneResult(req.analyze_params.initial_state)
 
@@ -69,7 +69,7 @@ def PaneAdapter_post_analyze(
 ) -> PostResult:
     if req.analyze_result.initial_state != "excited":
         raise ValueError("Post must receive the adopted primary result")
-    _, ax = plots.subplots("post")
+    _, ax = plots.subplots(num="post")
     ax.plot([0, 1], [1, 0])
     return PostResult(np.eye(3))
 

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -36,7 +36,7 @@ Prominence 須同時超過相對 ptp 門檻與 `min_snr * σ`。
 
 ## Named fitting results
 
-`fit_decay`、`fit_dual_decay`、`fit_decay_fringe` 與 `fit_rabi` 回傳 frozen NamedTuple 子類。
+`fit_decay`、`fit_dual_decay`、`fit_decay_fringe`、`fit_gauss_decay`、`fit_gauss_decay_fringe` 與 `fit_rabi` 回傳 frozen NamedTuple 子類。
 以屬性讀取值與標準誤差，不需手動拆 tuple：
 
 ```python
@@ -52,6 +52,8 @@ curve, params, covariance, quality = fit.curve, fit.params, fit.cov, fit.quality
 | `fit_decay` | `DecayFit` | `decay_time`, `decay_time_err` | 4 |
 | `fit_dual_decay` | `DualDecayFit` | `decay_time1`, `decay_time1_err`, `decay_time2`, `decay_time2_err` | 6 |
 | `fit_decay_fringe` | `DecayFringeFit` | `decay_time`, `decay_time_err`, `freq`, `freq_err` | 6 |
+| `fit_gauss_decay` | `GaussDecayFit` | `decay_time`, `decay_time_err` | 4 |
+| `fit_gauss_decay_fringe` | `GaussDecayFringeFit` | `decay_time`, `decay_time_err`, `freq`, `freq_err` | 6 |
 | `fit_rabi` | `RabiFit` | `pi_x`, `pi_x_err`, `pi2_x`, `pi2_x_err`, `freq`, `freq_err` | 8 |
 
 所有結果都提供 `curve`、`params`、`cov` 與 `quality`。時間與脈衝座標沿用輸入座標的單位，
@@ -59,7 +61,8 @@ curve, params, covariance, quality = fit.curve, fit.params, fit.cov, fit.quality
 Dual decay 的 time1 是較長時間，time2 是較短時間；參數、covariance 與 fixed flags 一起重排。
 
 `quality` 以實際 observations 與同座標的曲線呼叫 `compute_fit_quality`，保留明確固定的參數。
-三個 decay fitter 套用 `decay_time_bounds` 診斷；Rabi 不套用這組界限。
+Exponential、dual exponential、exponential fringe 與 Gaussian fringe 套用 `decay_time_bounds` 診斷。
+Plain Gaussian 與 Rabi 不套用這組界限。
 Quality 不新增 tuple 位置，既有解構與最後一項 `(params, cov)` 保持原樣。
 Tuple 解構只供過渡相容，caller 遷移成具名存取後會移除。
 
@@ -82,7 +85,12 @@ Cosine 與 damped-cosine fitting 在 optimizer 內不限制 phase 的週期表�
 `fit_gauss_decay_fringe` 擬合 `baseline + A*exp(-(t/T)**2)*cos(2*pi*(f*t + phase/360))`。
 包絡中心固定零，回傳的 T 是 1/e time，不是 sigma；頻率使用 delay 的反單位。
 自由 T 沿用 `decay_time_bounds`，支援明填初值與固定參數，數值失敗 raise `AnalysisFailed`。
-無條紋的 `fit_gauss_decay` 保留原有可漂移中心契約；caller 可用 `fixedparams=(None, None, 0.0, None)` 固定中心零，其 T 為 `sqrt(2)*sigma`。
+無條紋的 `fit_gauss_decay` 保留原有可漂移中心契約；caller 可用 `fixedparams=(None, None, 0.0, None)` 固定中心零。
+`GaussDecayFit.decay_time` 為 `sqrt(2)*sigma`，`decay_time_err` 同樣乘 `sqrt(2)`。
+`params`、`cov` 與 quality 保留實際 optimizer 的 `(y0, yscale, center, sigma)` 順序，沒有把 sigma 換成衍生 T。
+Plain Gaussian 的 quality 不新增時間、中心或 sigma 界限診斷，固定 center／sigma 只略過其不確定度問題。
+Gaussian fringe 的 quality 使用 `(y0, yscale, freq, phase, decay_time)`，沿用原時間界限與明確固定參數。
+兩者都以實際 observations 與 curve 計算 quality，不重新擬合，也不決定 caller 是否接受結果。
 
 `assess_fringe_sampling` 以實際擬合的 delay 座標、擬合頻率及可選的已知頻率下界回傳
 `FringeSamplingQuality`。它用排序去重後的最大 delay gap 計算每週期點數；至少十點且

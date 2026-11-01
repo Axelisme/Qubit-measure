@@ -65,7 +65,7 @@ def make_flux_form[
     fixed = [
         FixedElements(("readout", "module", "tones")),
     ]
-    metadata = mux_readout_seed_metadata(readout)
+    metadata = {} if twotone else mux_readout_seed_metadata(readout)
     for field, description in (
         ("reps", "Fixed 1000 repetitions per round candidate"),
         ("rounds", "Fixed 10 software rounds candidate"),

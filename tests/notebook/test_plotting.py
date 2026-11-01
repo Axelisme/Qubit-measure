@@ -45,12 +45,12 @@ def test_host_initialization_styles_new_figures_and_allows_native_overrides() ->
     with matplotlib.rc_context({"axes.labelsize": 37}):
         plots = Plots(NotebookPlotHost())
         try:
-            _, axes = plots.subplots("styled")
+            _, axes = plots.subplots(num="styled")
             assert axes.xaxis.label.get_fontsize() != 37
             axes.set_xlabel("Frequency", fontsize=23)
             assert axes.xaxis.label.get_fontsize() == 23
             with plt.style.context({"axes.labelsize": 31}):
-                _, custom = plots.subplots("custom")
+                _, custom = plots.subplots(num="custom")
                 assert custom.xaxis.label.get_fontsize() == 31
             assert matplotlib.get_backend() == backend
             assert plt.get_fignums() == managers
@@ -129,7 +129,7 @@ def test_initial_frame_is_ready_before_widget_publication(
     monkeypatch.setattr(Canvas, "send_binary", record_frame)
     monkeypatch.setattr(IPython.display, "display", publish)
     plots = create()
-    figure, axes = plots.subplots("fit")
+    figure, axes = plots.subplots(num="fit")
     axes.plot([0, 1, 2], [0, 1, 0])
     plots.finish()
 
@@ -161,14 +161,14 @@ def test_live_and_ordinary_figures_present_once_without_pyplot_registration(
     before = plt.get_fignums()
     backend = plt.get_backend()
     plots = create()
-    ordinary, axes = plots.subplots("ordinary")
+    ordinary, axes = plots.subplots(num="ordinary")
     axes.plot([1, 2], [3, 4])
     assert published == []
 
     live = create_trace(plots, "live", "x", "y")
     assert published == [plots["live"].canvas]
     rendered.clear()
-    live.update((np.array([1.0, 2.0]), np.array([5.0, 6.0])))
+    live((np.array([1.0, 2.0]), np.array([5.0, 6.0])))
     assert rendered
     assert rendered[-1] == (plots["live"].canvas, [5.0, 6.0])
     plots.finish()
@@ -262,7 +262,7 @@ def test_every_live_refresh_sends_a_complete_opaque_frame(
 
     for count in range(2, 6):
         xs = np.arange(count, dtype=float)
-        live.update((xs, xs**2))
+        live((xs, xs**2))
 
     assert len(frames) == 4
     for data in frames:
@@ -276,9 +276,9 @@ def test_release_closes_widgets_and_preserves_other_operation_and_savefig(
 ) -> None:
     create, published = notebook_plots
     first, second = create(), create()
-    first.subplots("fit")
+    first.subplots(num="fit")
     first.finish()
-    second.subplots("fit")
+    second.subplots(num="fit")
     second.finish()
     old_canvas, current_canvas = published
     old_toolbar = old_canvas.toolbar
@@ -307,7 +307,7 @@ def test_toolbar_release_error_still_closes_canvas_and_keeps_figure_savable(
 ) -> None:
     create, published = notebook_plots
     plots = create()
-    figure, _axes = plots.subplots("fit")
+    figure, _axes = plots.subplots(num="fit")
     plots.finish()
     canvas = published[0]
     toolbar = canvas.toolbar
@@ -436,7 +436,7 @@ def test_manager_failure_releases_acquired_widgets_and_restores_savefig(
 ) -> None:
     create, published = notebook_plots
     other = create()
-    other.subplots("retained")
+    other.subplots(num="retained")
     other.finish()
     retained = published[0]
     acquired: list[Canvas] = []

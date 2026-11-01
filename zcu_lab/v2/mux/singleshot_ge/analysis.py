@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -11,6 +10,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Polygon
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.experiment import RunRecord
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from .core import MuxGECfg, MuxGEResult
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxGEAnalyzeOptions:
     """Existing GE fit options, common default plus original-index overrides.
 
@@ -49,7 +49,7 @@ class MuxGEAnalyzeOptions:
     overrides: Mapping[int, GEAnalyzeOptions] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxGEPostOptions:
     """Existing GE radius policy, common default plus original-index overrides.
 
@@ -80,10 +80,16 @@ class MuxGEPostAnalysis:
 
 def _failure_plot(plots: Plots, name: str, reason: str) -> None:
     if name not in plots:
-        _, ax = plots.subplots(name)
+        _, ax = plots.subplots(num=name)
         ax.text(0.02, 0.98, reason, transform=ax.transAxes, va="top", wrap=True)
     else:
-        plots[name].suptitle(reason, wrap=True)
+        figure = plots[name]
+
+        @plots.on_plot_thread
+        def update(message: str):
+            return (figure.suptitle(message, wrap=True),)
+
+        update(reason)
 
 
 def analyze_ge(
@@ -108,23 +114,11 @@ def analyze_ge(
     if any(f"fit_{i}" in plots for i in indices):
         raise ValueError("fit_i figures already exist in this operation")
     selected = [options.overrides.get(i, options.default) for i in indices]
-    for option in selected:
-        if option.backend not in ("pca", "center") or option.initial_state not in (
-            "ground",
-            "excited",
-        ):
-            raise ValueError("invalid GE backend or initial_state")
-        if option.angle is not None and not math.isfinite(option.angle):
-            raise ValueError("GE angle must be finite degrees")
-        if option.length_ratio is not None and (
-            not math.isfinite(option.length_ratio) or option.length_ratio < 0
-        ):
-            raise ValueError("GE length_ratio must be finite and nonnegative")
     outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
     for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
         name = f"fit_{index}"
         signals = ge_signals_by_state(source.result.signals[row], option.initial_state)
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         for cloud, label, color in zip(
             signals,
             ("g preparation", "e preparation"),
@@ -200,11 +194,6 @@ def post_analyze_ge(
     if any(f"post_{i}" in plots for i in indices):
         raise ValueError("post_i figures already exist in this operation")
     selected = [options.overrides.get(i, options.default) for i in indices]
-    if any(
-        o.radius is not None and (not math.isfinite(o.radius) or o.radius < 0)
-        for o in selected
-    ):
-        raise ValueError("post radius must be finite and nonnegative ADC units")
     outcomes: list[MuxGEPostAnalysis | MuxFitFailure] = []
     for row, (item, option) in enumerate(zip(primary, selected, strict=True)):
         name = f"post_{item.index}"
@@ -252,7 +241,7 @@ def _plot_confusion_matrix(
     """
     g_signals, e_signals = signals
     fig, _ = plots.subplots(
-        figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
     )
     g_iq_ax, initial_populations_ax, e_iq_ax, confusion_matrix_ax = fig.axes
 

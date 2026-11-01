@@ -16,6 +16,8 @@
 
 ## 其他格式變更
 
+- 2026-11-01，[Readout optimization SNR dtype](2026-11-01-readout-optimization-snr-dtype.md)。Frequency／power 優化明寫 float64；舊檔的零虛部 complex SNR 照常讀回，不重寫檔案。
+
 - 2026-11-01，[MIST drive-frequency native 軸順序](2026-11-01-mist-drive-frequency-axes.md)。新檔維度為 frequency／gain；舊方陣檔的磁碟 gain 軸在前，Load 明確拒絕。目前無轉換工具，原檔不改不刪。
 
 - 2026-10-28，[Entry 名稱與量測參數快照](2026-10-28-entry-names-and-run-parameters.md)。Entry 移除 UUID，Run 保存參數環境，Load 不讀 live point，Save 依目前 roots 與記錄名稱寫入。

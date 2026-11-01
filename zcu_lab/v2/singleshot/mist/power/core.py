@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -20,44 +21,37 @@ from zcu_tools.program.v2 import (
     Classify,
     GainSweep,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import (
-    PulseReadoutCfg,
     require_circle_classifiers,
 )
 
 from zcu_lab.v2.support import live_line
 
 
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
-
-
 @dataclass(frozen=True)
 class PowerResult:
     """Rounded gains in a.u. and class counts (Ngain, 3).
 
-    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    The final state axis is [g,e,other], with fixed coordinates [0,1,2].
     Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
 
     gains: NDArray[np.float64]
     counts: NDArray[np.float64]
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class PowerCfg(ConfigBase):
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Probe gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -77,7 +71,7 @@ class PowerCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class PowerAnalyzeOptions:
     ac_coeff: float | None = None
     log_scale: bool = False
@@ -90,7 +84,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis("gains", label="Drive gain", unit="a.u.", dtype=np.float64),
         ),
@@ -98,7 +92,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         result_type=PowerResult,
         cfg_type=PowerCfg,
         data_variable=DataVariable("counts"),
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/mist/power",
     )
 
@@ -122,10 +116,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
         )
 
         gains = sweep2array(

@@ -35,9 +35,12 @@ def draw_overnight_mux_trend(
             raise ValueError("Overnight mux trend requires aware UTC actual_start")
         times.append(actual)
     if "overnight_mux_trend" not in plots:
-        plots.subplots("overnight_mux_trend", nrows=2, ncols=1, sharex=True)
+        plots.subplots(nrows=2, ncols=1, sharex=True, num="overnight_mux_trend")
 
-    def draw(figure: Figure) -> None:
+    figure = plots["overnight_mux_trend"]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         axes = figure.subplots(2, 1, sharex=True, squeeze=False)[:, 0]
         for axis, member in zip(axes, ("t1", "t2"), strict=True):
@@ -80,4 +83,7 @@ def draw_overnight_mux_trend(
         axes[-1].xaxis.set_major_formatter(DateFormatter("%H:%M:%S", tz="UTC"))
         axes[-1].set_xlabel("Actual start (UTC)")
 
-    plots.draw("overnight_mux_trend", draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()

@@ -7,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from scipy.special import erfc
 from typing_extensions import (
     TypedDict,  # closed/extra_items (PEP 728) not in stdlib 3.13
@@ -193,7 +194,7 @@ class GE_FitResult(TypedDict, closed=True):
     fit_quality: dict[str, FitQuality]
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class GEFitOptions:
     """Shared paired-histogram fit and display controls.
 
@@ -349,7 +350,9 @@ def fitting_ge_and_plot(
         raise GENumericalError(str(exc)) from exc
 
     if plots is not None:
-        fig, raw_axes = plots.subplots(figure_name, nrows=2, ncols=2, figsize=(8, 8))
+        fig, raw_axes = plots.subplots(
+            num=figure_name, nrows=2, ncols=2, figsize=(8, 8)
+        )
         # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
         axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
         scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")

@@ -100,6 +100,66 @@ class DecayFit(_FrozenQuality, _DecayFitTuple):
         return self.fit[1]
 
 
+type GaussDecayParameters = tuple[float, float, float, float]
+type GaussDecayValues = tuple[
+    float, float, NDArray[np.float64], tuple[GaussDecayParameters, NDArray[np.float64]]
+]
+
+
+class _GaussDecayFitTuple(NamedTuple):
+    decay_time: float
+    decay_time_err: float
+    curve: NDArray[np.float64]
+    fit: tuple[GaussDecayParameters, NDArray[np.float64]]
+
+
+class GaussDecayFit(_FrozenQuality, _GaussDecayFitTuple):
+    """Gaussian fit; construct from the legacy four-tuple and quality.
+
+    Attributes:
+        decay_time: Gaussian 1/e distance from center, sqrt(2)*sigma, in input
+            coordinate units. The center is free unless explicitly fixed.
+        decay_time_err: Standard error of decay_time, sqrt(2) times sigma's
+            standard error, in coordinate units.
+        curve: Model values at input coordinates, in observation units.
+        fit: Legacy (parameters, covariance) pair, ordered as
+            (y0, yscale, center, sigma). y0/yscale use observation units;
+            center/sigma use coordinate units. Covariance entries use products
+            of the corresponding parameter units, before the sqrt(2) conversion.
+        params: The parameter tuple in fit, without copying.
+        cov: The covariance in fit, without copying.
+        quality: Dimensionless FitQuality from actual observations and curve,
+            keyed by (y0, yscale, center, sigma) in covariance order. Explicitly
+            fixed parameters suppress uncertainty issues only. No decay-time
+            bounds are applied: sigma is not the derived decay_time.
+
+    Fields and quality cannot be reassigned or deleted; arrays retain existing
+    mutability. Copy, deepcopy and pickle preserve all fields and quality.
+    _make and _replace raise TypeError; rerun the fitter for consistent quality.
+    Four-value tuple unpacking follows the existing transitional convention.
+    """
+
+    def __new__(cls, values: GaussDecayValues, *, quality: FitQuality) -> Self:
+        result = tuple.__new__(cls, values)
+        object.__setattr__(result, "_quality", quality)
+        return result
+
+    def __getnewargs_ex__(
+        self,
+    ) -> tuple[tuple[tuple[object, ...]], dict[str, FitQuality]]:
+        return (tuple(self),), {"quality": self.quality}
+
+    @property
+    def params(self) -> GaussDecayParameters:
+        """Offset, amplitude, center and sigma; see fit for units."""
+        return self.fit[0]
+
+    @property
+    def cov(self) -> NDArray[np.float64]:
+        """Parameter covariance in params order, with product units."""
+        return self.fit[1]
+
+
 type DualDecayParameters = FitParameters | tuple[float, float, float, float, float]
 type DualDecayValues = tuple[
     float,
@@ -229,6 +289,68 @@ class DecayFringeFit(_FrozenQuality, _DecayFringeFitTuple):
     @property
     def params(self) -> FringeParameters:
         """Offset, amplitude, frequency, phase and 1/e time; see fit for units."""
+        return self.fit[0]
+
+    @property
+    def cov(self) -> NDArray[np.float64]:
+        """Parameter covariance in params order, with product units."""
+        return self.fit[1]
+
+
+class _GaussDecayFringeFitTuple(NamedTuple):
+    decay_time: float
+    decay_time_err: float
+    freq: float
+    freq_err: float
+    curve: NDArray[np.float64]
+    fit: FitResult
+
+
+class GaussDecayFringeFit(_FrozenQuality, _GaussDecayFringeFitTuple):
+    """Zero-centered Gaussian cosine fit; construct from the six-tuple and quality.
+
+    Attributes:
+        decay_time: Envelope 1/e time T in exp(-(x/T)**2), in input coordinate
+            units, not sigma. The envelope center is fixed at zero.
+        decay_time_err: Standard error of decay_time, in coordinate units.
+        freq: Oscillation frequency, in inverse coordinate units.
+        freq_err: Standard error of freq, in inverse coordinate units.
+        curve: Model values at input coordinates, in observation units.
+        fit: Legacy (parameters, covariance) pair, ordered as
+            (y0, yscale, freq, phase, decay_time). y0/yscale use observation
+            units, phase uses degrees modulo 360, and time/frequency use
+            coordinate/inverse coordinate units. Covariance entries use products
+            of the corresponding parameter units.
+        params: The parameters in fit, without copying.
+        cov: The covariance in fit, without copying.
+        quality: Dimensionless FitQuality from actual observations and curve,
+            in the parameter order above. Explicit fixed flags suppress only
+            uncertainty issues; decay_time_bounds diagnostics still apply.
+
+    Fields and quality cannot be reassigned or deleted; arrays retain existing
+    mutability. Copy, deepcopy and pickle preserve all fields and quality.
+    _make and _replace raise TypeError; rerun the fitter for consistent quality.
+    Six-value tuple unpacking follows the existing transitional convention.
+    """
+
+    def __new__(
+        cls,
+        values: tuple[float, float, float, float, NDArray[np.float64], FitResult],
+        *,
+        quality: FitQuality,
+    ) -> Self:
+        result = tuple.__new__(cls, values)
+        object.__setattr__(result, "_quality", quality)
+        return result
+
+    def __getnewargs_ex__(
+        self,
+    ) -> tuple[tuple[tuple[object, ...]], dict[str, FitQuality]]:
+        return (tuple(self),), {"quality": self.quality}
+
+    @property
+    def params(self) -> FitParameters:
+        """Offset, amplitude, frequency, phase and Gaussian 1/e time; see fit."""
         return self.fit[0]
 
     @property
