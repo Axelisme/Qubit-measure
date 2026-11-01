@@ -450,15 +450,13 @@ class WritebackWidget(QWidget):
         show current as "entry record", and list every proposed JSON field with
         device units after dev_value. Record Copy preserves the complete JSON;
         records have no Edit action.
-        Local module editing may retain invalid State input. Its row shows proposed as
-        "Invalid configuration" and current/path as "Unavailable (invalid
-        configuration)", while preserving selection and updating unapplied
-        state. Repairing input restores owner preview facts. Valid preview
-        target/source/I/O failures still propagate; invalid input never becomes
-        a missing value or an unmarked stale preview. Unparseable view text
-        also marks the row invalid and locks Apply while its dialog is open.
-        Closing drops that view text and restores the real State result, without
-        writing the library. State model/expression errors survive closing.
+        Module dialogs edit detached copies, so pending input and local parse errors
+        do not change ledger rows or Apply readiness. Save and dialog completion
+        refresh the row from the shared Form. A shared invalid Form shows proposed
+        as "Invalid configuration" and current/path as "Unavailable (invalid
+        configuration)", preserving selection. Repairing shared input restores
+        owner preview facts. Valid preview target/source/I/O failures propagate;
+        invalid shared input never becomes a missing value or stale preview.
         """
         for item in items:
             values[item.session_id]
@@ -476,7 +474,7 @@ class WritebackWidget(QWidget):
         """Reproject items when strict bulk preview rejects an invalid module.
 
         items are the persistent pane items, as in populate. Read each module's
-        shared Form result, retaining open local errors. Invalid module rows keep
+        shared Form result. Detached dialog input does not affect it. Invalid rows keep
         selection and Edit but show Invalid configuration with unavailable current
         value/path. Read valid items through the service's single-item preview;
         parameter/record facts are unchanged. Rebuild rows without closing dialogs

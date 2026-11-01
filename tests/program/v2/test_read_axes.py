@@ -2,13 +2,15 @@
 
 import numpy as np
 import pytest
+from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program import v2
-from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
+from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse, PulseReadout
 
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
+from tests.program.v2.timing_support import shots
 
 
 def readout(name="readout", classifier=None, ch=0):
@@ -118,6 +120,140 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     np.testing.assert_array_equal(iq, original)
 
 
+@pytest.mark.parametrize("swept", [False, True])
+def test_branch_cases_share_read_labels_with_zero_gain_first_read(swept):
+    r1_on = readout("r1")
+    if swept:
+        r1_on = PulseReadout("r1", r1_on.cfg, gain=QickSweep1D("gain", 0.1, 0.2))
+    r1_off = PulseReadout("r1", r1_on.cfg, gain=0.0)
+    r2 = PulseReadout("r2", r1_on.cfg)
+    drive = Pulse(
+        "drive",
+        Pulse.Cfg(
+            ch=1,
+            nqz=1,
+            freq=100.0,
+            gain=0.2,
+            waveform=ConstWaveformCfg(length=0.2),
+        ),
+    )
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2)
+    if swept:
+        builder.add_loop("gain", 2)
+    builder.add_loop("branch", 8)
+    with builder.branch(by="branch", align_timeline=True) as cases:
+        for index in range(8):
+            with cases.case(index):
+                if index // 4:
+                    builder.emit(drive)
+                builder.emit(r1_on if index & 2 else r1_off)
+                builder.timeline_inc(1.2)
+                if index & 1:
+                    builder.emit(drive)
+                builder.emit(r2)
+    prog = builder.build()
+    prog.set_reads_per_shot(2)
+    process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")])
+    points = 16 if swept else 8
+    iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (points, 2, 1, 1))
+    result = process({0: iq})
+    assert result.shape == (points, 3, 3, 3, 3)
+    np.testing.assert_array_equal(result[:, 0, 0, 0, 0], 2)
+    np.testing.assert_array_equal(result[:, 1, 1, 0, 0], 8)
+    np.testing.assert_array_equal(result[:, 0, 0, 2, 2], 98)
+    np.testing.assert_array_equal(result[:, 1, 0, 2, 0], 28)
+    starts = [
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
+        for shot in shots(prog)
+    ]
+    assert all(len(times) == 2 for times in starts)
+    for group in range(points // 8):
+        for off in (0, 1, 4, 5):
+            assert starts[8 * group + off] == starts[8 * group + off + 2]
+    assert prog.ro_chs[0]["trigs"] == 2
+
+
+def _branch_program(case_modules, *, reads=1):
+    builder = v2.TimelineBuilder(load_soccfg(n_readouts=2))
+    builder.add_loop("choice", len(case_modules))
+    with builder.branch(by="choice", align_timeline=True) as cases:
+        for index, modules in enumerate(case_modules):
+            with cases.case(index):
+                for module in modules:
+                    builder.emit(module)
+                    builder.timeline_inc(1.5)
+    prog = builder.build()
+    prog.set_reads_per_shot(reads)
+    return prog
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ro_ch", 1),
+        ("freq", 101.0),
+        ("ro_length", 1.2),
+        ("phase", 90.0),
+        ("classifier", LinearClassifier(angle=0.0, threshold=1.0)),
+    ],
+)
+def test_branch_adc_setting_mismatch_names_cases_and_field(field, value):
+    first = readout("selected")
+    cfg = first.cfg.model_copy(update={field: value})
+    other = PulseReadout("selected", cfg)
+    prog = _branch_program([[first], [other]])
+    with pytest.raises(ValueError, match=rf"choice\[0\].*choice\[1\].*{field}"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+
+
+def test_branch_read_index_mismatch_is_rejected_even_with_equal_counts():
+    selected, auxiliary = readout("selected"), readout("auxiliary")
+    prog = _branch_program([[selected, auxiliary], [auxiliary, selected]], reads=2)
+    with pytest.raises(ValueError, match=r"choice\[0\].*choice\[1\].*read index"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+
+
+def test_branch_read_count_mismatch_names_case_and_declared_and_emitted_counts():
+    selected, auxiliary = readout("selected"), readout("auxiliary")
+    prog = _branch_program([[selected, auxiliary], [selected]], reads=2)
+    with pytest.raises(ValueError, match=r"choice\[1\].*declares 2.*emitted 1"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+    assert prog.ro_chs[0]["trigs"] == 2
+
+
+def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
+    first = readout("selected")
+    other = PulseReadout("selected", first.cfg, gain=0.0, length=0.2)
+    prog = _branch_program([[first], [other]])
+    result = v2.shot_sums(prog, [v2.IQ("selected")])(
+        {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])}
+    )
+    np.testing.assert_array_equal(result, [[1, 2, 3], [1, 5, 7]])
+
+
+def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
+    selected = readout("selected")
+    builder = v2.TimelineBuilder(load_soccfg())
+    builder.add_loop("choice", 2)
+    for index in (0, 1):
+        with (
+            builder.branch(by="choice", align_timeline=True) as cases,
+            cases.case(index),
+        ):
+            builder.trigger([0], t=0)
+            builder.timeline_inc(1.5)
+    builder.emit(selected)
+    prog = builder.build()
+    prog.set_reads_per_shot(2)
+    process = v2.shot_sums(prog, [v2.IQ("selected")])
+    result = process({0: np.array([[[[99.0, 99.0], [5.0, 7.0]]]])})
+    np.testing.assert_array_equal(result, [[1, 5, 7]])
+
+
 @pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("mux", [False, True])
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
@@ -196,7 +332,7 @@ def test_declared_reads_must_match_actual_triggers():
 @pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("control", ["Repeat", "Branch"])
 @pytest.mark.parametrize("inside", [False, True])
-def test_any_control_flow_trigger_on_selected_adc_is_rejected(
+def test_repeated_or_unbalanced_triggers_on_selected_adc_are_rejected(
     timeline, control, inside
 ):
     ro = readout()
@@ -233,7 +369,12 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
 
     prog = Program(load_soccfg())
     label = "selected"
-    with pytest.raises(ValueError, match=rf"ADC 0.*{control}"):
+    message = (
+        r"Branch cases choice\[1\].*(ADC 0.*emitted|label 'selected')"
+        if control == "Branch"
+        else r"ADC 0.*Repeat"
+    )
+    with pytest.raises(ValueError, match=message):
         v2.shot_sums(prog, [v2.IQ(label)])
 
 
@@ -267,7 +408,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
 
 
 @pytest.mark.parametrize("inner", ["Repeat", "Branch"])
-def test_nested_control_rejects_trigger_with_innermost_scope(inner):
+def test_nested_branch_and_repeat_still_reject_repeated_adc_trigger(inner):
     ro = readout()
     builder = v2.TimelineBuilder(load_soccfg())
     builder.add_loop("choice", 2)
@@ -292,7 +433,8 @@ def test_nested_control_rejects_trigger_with_innermost_scope(inner):
             # Clear each iteration before reentering the conditional read.
             builder.delay_by_timeline()
     prog = builder.build()
-    with pytest.raises(ValueError, match=rf"ADC 0.*{inner}"):
+    prog.set_reads_per_shot(1)
+    with pytest.raises(ValueError, match=r"Branch.*choice\[1\].*ADC 0.*Repeat"):
         v2.shot_sums(prog, [v2.IQ("selected")])
 
 

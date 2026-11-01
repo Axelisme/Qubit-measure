@@ -1,6 +1,6 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-01，cfg-free Schedule 與 native program acquisition
+**Last updated:** 2026-11-01，raw-shot acquisition 入口與共用 runner
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
@@ -111,10 +111,21 @@ with Schedule(signals, scope=context.scope) as sched:
 
 `Schedule` 與 scan step 提供 `run_acquire(program, soc, ...)`、
 `run_acquire_summed(program, soc, processor=..., ...)` 與
-`run_acquire_decimated(program, soc, ...)`。三個方法不建立 program。Caller 可傳入手寫或 TimelineBuilder 產生的 program，只需提供對應的同步
-acquire 方法。
+`run_acquire_decimated(program, soc, ...)`，把轉換後的資料寫進 slot。
+`run_acquire_shots(program, soc, ...)` 則回傳 `program.get_raw()` 的逐 shot int64 buffers，
+不做轉換、不寫 slot，也不需要預建 buffer。四個方法都不建立 program。
+Caller 可傳入手寫或 TimelineBuilder 產生的 program，只需提供對應的同步 acquire 方法。
+Raw-shot 入口還要求 `get_raw()`；成功 acquire 後沒有 raw buffer 時拋出 `RuntimeError`。
 
-Run 會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 live update。
+`run_acquire_shots` 每次只執行一輪，`rounds` 省略或設為整數 1，其他值在入口拋出
+`ValueError`。多輪 raw shots 由 caller 的 host loop 重複呼叫。
+它接受 `RunOptions(retry=..., progress=..., on_stop=...)`，但拒絕非 None 的
+`converter` 與 `stop_condition`，在 acquire 前拋出 `ValueError`。
+它沿用同一個 runner 的 acquire child scope、cancel flag、retry 與 progress 清理。
+外部取消時回傳 `None`，不讀取 raw buffer；Schedule 自己的 stop token 已設時記錄
+`stopped` outcome。Acquire-only cancel 不停止 Schedule，後續 acquire 仍可執行。
+
+三個 slot 入口會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 live update。
 它依 `RunOptions.retry` 自動重試，耗盡後向 caller 拋出原 producer 例外，不回傳 failed partial。
 `RunOptions.stop_condition` 只停止目前 acquire。
 `RunOptions[T_Raw]` 提供 retry、progress、stop_condition 與 converter。`rounds` 等 native 參數直接傳給 run 方法。
@@ -126,7 +137,7 @@ Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並�
 只接受單一 ADC，將 IQ 轉成複數並保留全部 repetition／read／sample 軸；多 ADC 時
 拋出 `ValueError`，訊息列出 ADC 數並要求提供 converter。
 
-`run_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
+`run_acquire.py` 的 mixin 集中 Schedule 與 Step 的四個入口，不持有 scope、slot
 或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
 partial-result、overrun 與 progress。
 `AcquireOptions`、同步 producer keyword 型別與 raw converters 也由該模組提供。
@@ -164,7 +175,7 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 - 一般 producer failure 直接傳播，不轉成 workflow 的 `Failed` 回傳值。錯誤原因只保留在作者工具的 Schedule outcome，不寫入 StopSignal。
   Notebook 不發布失敗當次的 record。GUI 將例外交給 operation failure 收尾。
 - `AcquireOptions.on_stop` 與 `RunOptions.on_stop` 是選用的無參數作者 callback。單次 acquire 因外部停止而合作返回時呼叫一次，包含起跑前已停止與首輪前取消。
-  Callback 在 acquire scope release、progress cleanup 後同步執行，早於 ndarray 返回。純 data stop、producer／converter／update 例外與 KeyboardInterrupt 不呼叫。
+  Callback 在 acquire scope release、progress cleanup 後同步執行，早於 slot view 或 raw-shot 停止結果返回。純 data stop、producer／converter／update 例外與 KeyboardInterrupt 不呼叫。
   Callback 自己的例外原樣傳出，不 retry、不改 Schedule outcome。停止觀察只存於該次呼叫，不污染重用 options 的下一次 acquire，也不交給前端。
   Acquire-only cancel 不改 Schedule outcome 或父 stop；作者可用 callback 記自己的分類，不能用父 stop 判斷 acquire 是否被取消。
 - `sched.run_acquire(program, soc, options=RunOptions(retry=N))` 設定單次 program acquire retry。
@@ -183,6 +194,9 @@ Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 `test_run_acquire.py` 經 Schedule 公開入口覆蓋三種 acquisition 的 simulator 路徑、
 slot/live update、converter、retry、data stop、取消、部分 round 與 callback 錯誤。
+`test_run_acquire_shots.py` 經 Schedule／ScheduleStep 覆蓋 raw buffer 回傳、無 slot 取數、
+native keyword 轉送、取消與 child release、stop observer 清理順序、retry、原始例外傳播，
+以及拒絕 slot policy、多輪與缺少 raw buffer 的失敗契約。
 `test_run_timeline.py` 以 deterministic transport 跑 emit program 的一般 QICK
 acquisition pipeline。
 `test_schedule.py` 覆蓋 typed env 與 host scan/repeat；`test_schedule_buffers.py` 覆蓋

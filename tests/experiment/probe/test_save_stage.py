@@ -1,13 +1,13 @@
 """Save-stage contracts from independently constructed typed records."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.experiment import AxesSpec, native_persistence, probe
+from zcu_tools.experiment import AxesSpec, Axis, ZSpec, native_persistence, probe
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 
@@ -131,3 +131,65 @@ def test_save_propagates_original_native_restore_error(
     with pytest.raises(ValueError, match="native restore failed") as caught:
         probe.save_stage(record, spec, tmp_path)
     assert caught.value is error
+
+
+@dataclass
+class _RunOnlyScalarResult:
+    """Coordinate and signal arrays plus a scalar estimate only run produces."""
+
+    coordinate: NDArray[np.float64]
+    estimate: float | None
+    signal: NDArray[np.complex128]
+
+
+@pytest.fixture
+def run_only_scalar_spec() -> AxesSpec[_RunOnlyScalarResult, SavingCfg]:
+    return AxesSpec(
+        axes=(Axis("coordinate", "coordinate", "s"),),
+        z=ZSpec("signal", "signal", "V"),
+        result_type=_RunOnlyScalarResult,
+        cfg_type=SavingCfg,
+        tag="test/run_only_scalar",
+    )
+
+
+def test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing(
+    run_only_scalar_spec: AxesSpec[_RunOnlyScalarResult, SavingCfg],
+    caplog: pytest.LogCaptureFixture,
+):
+    original = _RunOnlyScalarResult(
+        coordinate=np.array([1.0, 2.0]),
+        estimate=0.5,
+        signal=np.array([1 + 2j, 3 - 4j]),
+    )
+    restored = replace(original, estimate=None, signal=np.array([1 + 2j, 5 - 4j]))
+    assert probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is False
+    warnings = [
+        record.message
+        for record in caplog.records
+        if record.name == "zcu_tools.experiment.probe" and record.levelname == "WARNING"
+    ]
+    assert len(warnings) == 2
+    estimate_warning, signal_warning = warnings
+    assert "field=estimate" in estimate_warning
+    assert "dtype float64 != object" in estimate_warning
+    assert "field=signal" in signal_warning
+    assert "value" in signal_warning.lower()
+
+
+def test_scalar_field_none_on_both_sides_is_equal(
+    run_only_scalar_spec: AxesSpec[_RunOnlyScalarResult, SavingCfg],
+    caplog: pytest.LogCaptureFixture,
+):
+    original = _RunOnlyScalarResult(
+        coordinate=np.array([1.0, 2.0]),
+        estimate=None,
+        signal=np.array([1 + 2j, 3 - 4j]),
+    )
+    restored = replace(original, signal=original.signal.copy())
+    assert probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is True
+    assert not [
+        record
+        for record in caplog.records
+        if record.name == "zcu_tools.experiment.probe"
+    ]

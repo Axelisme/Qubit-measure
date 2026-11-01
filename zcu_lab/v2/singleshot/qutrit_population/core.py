@@ -13,9 +13,9 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, PulseReadout, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import raw_shots_to_signal
@@ -126,10 +126,10 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                     builder.emit(Pulse("pi32", cfg.pi32))
                 builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
-                try:
-                    program.acquire(context.soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
+                shots = step.run_acquire_shots(
+                    program, context.soc, options=RunOptions(progress=True)
+                )
+                if shots is None:
                     break
                 buffer[step].set(raw_shots_to_signal(program))
         result = QutritPopulationResult(

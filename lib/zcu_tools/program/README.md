@@ -99,8 +99,17 @@ Timeline read labels use emit tags, falling back to module names for untagged
 emissions. Missing or ambiguous labels
 raise ValueError listing available labels. Explicit tags retain QICK's global
 compile-time uniqueness check and RuntimeError, including collisions with native
-timed macros. Any Repeat/Branch trigger on a selected ADC or a declared/actual
-read-count mismatch is rejected. Other ADCs may still use control flow.
+timed macros. Branch paths may share an untagged module name when each selected
+read keeps the same ADC-local index, ADC channel, frequency, integration window,
+phase and cfg classifier. Generator gain and waveform may differ: a zero-gain
+`PulseReadout("r1", cfg, gain=0.0)` retains its generator time slot and ADC trigger.
+Every path must have the same read count on each selected ADC. Missing labels or
+unequal counts, indices or ADC settings raise ValueError with case indices and
+the differing item. Triggers inside Repeat remain unsupported on selected ADCs.
+Other ADCs may still use control flow. After building a program with Branch
+readouts, call `prog.set_reads_per_shot(count)` with the per-shot count, then
+construct `shot_sums`, then acquire. QICK counts the source triggers across all
+cases; neither the processor nor its construction changes that declaration.
 `v2.split_sums(sums)` splits a final IQ axis into counts and complex conditional
 means. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.

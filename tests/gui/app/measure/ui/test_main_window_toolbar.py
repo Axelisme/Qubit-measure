@@ -137,6 +137,30 @@ def test_promoted_tools_fold_and_restore_without_changing_commands(
     assert host.commands == ["results"] * 3
 
 
+def test_promoted_tool_shortcuts_survive_overflow(toolbar_ui, tmp_path) -> None:
+    _, host, driver = toolbar_ui
+    for step, (width, height) in enumerate(((1100, 700), (620, 300), (1100, 700)), 1):
+        driver.resize_window(width, height)
+        driver.screenshot(tmp_path / f"{step}-01-resized.png")
+        driver.press_key(Qt.Key.Key_P, modifiers=Qt.KeyboardModifier.ControlModifier)
+        driver.screenshot(tmp_path / f"{step}-02-predictor.png")
+        assert host.opened == [DialogName.PREDICTOR] * step
+        driver.press_key(Qt.Key.Key_R, modifiers=Qt.KeyboardModifier.ControlModifier)
+        driver.screenshot(tmp_path / f"{step}-03-results.png")
+        assert host.commands == ["results"] * step
+        if width == 620:
+            actions = driver.menu_actions(
+                "More ▾", evidence=tmp_path / f"{step}-04-more.png"
+            )
+            assert [(a.text, a.shortcut) for a in actions[-2:]] == [
+                ("Predictor…", "Ctrl+P"),
+                ("Results browser…", "Ctrl+R"),
+            ]
+        else:
+            assert "Ctrl+P" in driver.observe("Predictor…").tooltip
+            assert "Ctrl+R" in driver.observe("Results browser…").tooltip
+
+
 def test_toolbar_dialog_buttons_and_more_menu_route_commands(
     toolbar_ui, tmp_path
 ) -> None:

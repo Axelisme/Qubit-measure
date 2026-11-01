@@ -144,6 +144,9 @@ The cfg-based APIs delegate to these same word decoders.
   為 Mux collection 與 shot sums 提供 readout provenance、Trigger 順序及控制 scope。
   它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
   Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
+  `observe_readout_paths(prog)` 另提供 case-aware 的 `ReadoutPath`：包含 selector/case
+  與該路徑的 observations，同一 selector 的多次 Branch 共用 case index。
+  它保留 Repeat scope，含未宣告的空 case，不改既有 flatten traversal。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## 原生寫法與具名 timeline
@@ -363,6 +366,14 @@ Branch 區塊內、case 外的 emit、fork、join、timeline_inc 等動作在 bu
 隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
 沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
 跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
+
+Case 內有 readout 時，作者與 Repeat 一樣，在 build 後以 `prog.set_reads_per_shot(n)`
+宣告每 shot 的讀數，再呼叫 `shot_sums` 和 acquire。QICK 預設會把各 case 的 source
+trigger 加總，不是每條實際路徑的讀數。`shot_sums` 不修改宣告，並逐路徑比對。
+互斥 case 的同名 untagged readout 可共用 label，但選中的 ADC、read index、freq、
+ro_length/window、phase 與 cfg classifier 必須一致。Gain、waveform 可以不同。
+R1 關閉使用 `PulseReadout("r1", cfg, gain=0.0)`，仍保留 generator 時槽與 ADC trigger。
+不一致會報 ValueError，訊息列出 case index 與不符項目。Repeat 內的 trigger 仍拒絕。
 
 `repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
 `timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。

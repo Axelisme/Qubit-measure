@@ -18,9 +18,9 @@ from zcu_tools.experiment.utils.single_shot.ge import (
     GENumericalError,
     singleshot_ge_analysis,
 )
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
@@ -57,6 +57,8 @@ class GEAnalysis:
     selected edge in rotated ADC units. ge_s and g_center/e_center are fitted
     width and original-frame complex centers in normalized ADC units.
     init_pops is the fitted (2,2) g/e population matrix for the preparation rows.
+    length_ratio is readout length / T1 (dimensionless), or None when the data
+    cannot identify it.
     fit_quality describes those histogram fits, or None when unavailable.
     Poor histogram residuals make populations and the population-corrected post
     confusion matrix unreliable even when empirical assignment is high.
@@ -70,6 +72,7 @@ class GEAnalysis:
     g_center: complex
     e_center: complex
     init_pops: NDArray[np.float64]
+    length_ratio: float | None
     fit_quality: Mapping[str, FitQuality] | None = None
 
     def validate_calibration(self) -> None:
@@ -211,13 +214,12 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 program = builder.build()
 
                 # Store each cloud independently, preserving every complex shot.
-                try:
-                    program.acquire(soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
+                shots = step.run_acquire_shots(
+                    program, soc, options=RunOptions(progress=True)
+                )
+                if shots is None:
                     break
                 signals_buffer[step].set(raw_shots_to_signal(program))
-        signals_buffer.trigger_update(flush=True)
         signals = signals_buffer.array
 
         # Keep acquisition order; physical G/E mapping belongs to analysis.
@@ -289,9 +291,15 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             g_center=fit["g_center"],
             e_center=fit["e_center"],
             init_pops=init_pops,
+            length_ratio=fit["length_ratio"],
             fit_quality=fit["fit_quality"],
         )
         analysis.validate_calibration()
+        axes.set_title(
+            "GE IQ (length ratio: not identifiable)"
+            if analysis.length_ratio is None
+            else f"GE IQ (length ratio = {analysis.length_ratio:.2f})"
+        )
         return analysis
 
     def post_analyze(

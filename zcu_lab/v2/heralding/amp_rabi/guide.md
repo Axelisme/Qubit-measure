@@ -14,8 +14,14 @@ Choose the Rabi pulse frequency, waveform and fixed duration. A prior pi amplitu
 
 1. Select an optional Reset module if needed. The experiment then emits a herald readout, the optional init pulse, the gain-swept drive and the terminal readout. The herald and signal readouts use separate instances with the same pulse/ADC settings and classifier. Heralding itself adds no active reset or joint-qubit classification.
 2. Click Run. Each point averages only signal shots whose herald was classified as ground. Rounds are weighted by their accepted-shot counts. The live plot shows selected IQ magnitude versus the hardware-quantized gain.
-3. Open Analysis and set Skip points if leading gain points should be excluded. Skip applies to the original grid. Analyze removes nonfinite gain/IQ points before calling the ordinary amplitude-Rabi fit. Pass fraction is not a fit weight. Too few finite points cannot produce a usable fit.
-4. Inspect the rotated-IQ fit, pi/pi2 markers, uncertainties and fit quality. These estimates calibrate pulse amplitudes; they do not measure gate fidelity.
+3. Open Analysis and set Skip points, `skip`, if leading gain points should be excluded. Analyze takes the herald-g conditional mean IQ and skips points on the original gain grid. It then removes nonfinite gain/IQ points, rotates IQ onto its signal axis and takes the real part. This experiment calls `fit_rabi` with `decay=False`. If the real signal nearest zero gain is above the midpoint of the trace's maximum and minimum, the fit fixes phase at 0°; otherwise it fixes phase at 180°. Pass fraction is not a fit weight. Analysis does not require saved cfg. Negative skip is rejected; empty or insufficient traces raise errors.
+4. Inspect the `fit` plot drawn by this experiment. It shows rotated IQ, the fitted curve, pi/pi2 markers and uncertainty spans. These estimates calibrate pulse amplitudes; they do not measure gate fidelity.
+
+Analyze returns `HeraldingAmpRabiAnalysis`:
+
+- `pi_amp` and `pi_amp_err` give the fitted pi gain and its standard uncertainty in native gain units, a.u.
+- `pi2_amp` and `pi2_amp_err` give the fitted pi/2 gain and its standard uncertainty in a.u.
+- None of these four numeric fields is None. `fit_quality["fit"]` contains dimensionless residual and relative-error diagnostics. The type allows `fit_quality=None` when diagnostics are not supplied; this experiment's Analyze always supplies them on success.
 
 ## Pass fraction and saving
 
