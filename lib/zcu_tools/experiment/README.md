@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，離線階段按需載入與 array-like 模型輸出
+**Last updated:** 2026-11-01，獨立離線階段、array-like 模型輸出與 grouped 逐 slice 比較
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -158,7 +158,11 @@ Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，sc
 eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
 固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
 NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
-同一 Result 欄位在分組宣告使用不同 scale 時，compare_roundtrip 拋出 ValueError，訊息列出欄位與各 scale。
+同一 Result 欄位在分組宣告使用不同 scale 時，各 slice 按自己的 scale 比較，回傳仍為 bool。
+Slice 由 VariableZSpec 的 index 與 index_axis 選取。
+每個不符 slice 由 `zcu_tools.experiment.probe` logger 記 WARNING，其餘可比 slice 繼續比較，相符 slice 不記錄。
+Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。整欄 shape 不符時 index_axis 與 index 為 None。
+重疊區域須符合每個宣告的比較規則，未宣告區域維持 exact。
 
 ## 實驗介面與資料
 
@@ -189,7 +193,9 @@ NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保
   `field_name` 與 `values` 必須恰好給一個，否則宣告時 raise `ValueError`。
   固定軸與欄位軸使用相同保存格式與比例。z 的 shape 須符合所有軸長度，不符在保存時 raise `ValueError`。
   讀回固定軸不會把座標傳入 Result constructor。
-  Grouped 使用 `VariableAxisSpec(..., values=...)`，與 `field_name`、`generated_arange` 互斥。
+  Grouped 的 `VariableAxisSpec` 全部使用關鍵字，`values` 與 `field_name`、`generated` 互斥。
+  `generated_arange(label=..., unit=...)` 也使用關鍵字。
+  `VariableZSpec` 可用位置參數指定 field_name，其餘選項使用關鍵字。
   `GroupedLoadData` 仍提供固定座標，由 Result builder 決定是否保留。
 
   `AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。單檔 save 與 artifact 保存都遵守這項宣告，不自動切換，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。

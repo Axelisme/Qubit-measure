@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -76,16 +78,19 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
-                        VariableAxisSpec.generated_arange("herald_f2", ""),
-                        VariableAxisSpec.generated_arange("herald_f1", ""),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                         VariableAxisSpec(
-                            "Drive duration", "s", field_name="durations", scale=1e-6
+                            label="Drive duration",
+                            unit="s",
+                            field_name="durations",
+                            scale=1e-6,
                         ),
                         VariableAxisSpec(
-                            "Common drive frequency",
-                            "Hz",
+                            label="Common drive frequency",
+                            unit="Hz",
                             field_name="coordinates",
                             scale=1e6,
                         ),
@@ -128,18 +133,18 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00 | herald (g,g)",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums
             counts = terminal_counts(ordered, ("g", "g"))
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -205,18 +210,18 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00 | herald (g,g)",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00 | herald (g,g)")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums.swapaxes(0, 1)
             counts = terminal_counts(ordered, ("g", "g"))
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3, 3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -315,7 +320,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             totals,
             herald_probabilities(result.sums),
         )
-        fig, ax = plots.subplots("chevron", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
             result.coordinates,
@@ -334,7 +339,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
         )
         fig, _ = plots.subplots(
-            "return",
+            num="return",
             nrows=3,
             ncols=3,
             figsize=(13, 10),
@@ -356,7 +361,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
         herald_matrix = herald_probabilities(result.sums)
         fig, _ = plots.subplots(
-            "herald",
+            num="herald",
             nrows=3,
             ncols=3,
             figsize=(13, 10),
@@ -382,7 +387,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
 
         ee_counts = terminal_counts(result.sums, ("e", "e"))
         ee_not_returned = 1.0 - joint_probabilities(ee_counts)[..., 1, 1]
-        fig, ax = plots.subplots("ee_control", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(num="ee_control", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             durations, coordinates, ee_not_returned, shading="nearest", vmin=0, vmax=1
         )
@@ -393,7 +398,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             title="Drive disturbance of |00⟩ · ee control, no shared fit",
         )
         rates = fit_duration_rates(durations, answer)
-        _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(
             coordinates,
             [rate.rate if rate.rate is not None else np.nan for rate in rates],
@@ -421,7 +426,7 @@ class ChevronHeraldedExp(Experiment[ChevronHeraldedResult, ChevronHeraldedCfg]):
             ylabel="Rabi rate (MHz)",
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
-        _, ax = plots.subplots("rabi_traces", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
         for coordinate, rate in zip(coordinates, rates, strict=True):
             if rate.fitted is not None:
                 ax.plot(durations, rate.fitted, label=f"{coordinate:g}")

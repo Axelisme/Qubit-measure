@@ -135,7 +135,7 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 ## 寫法慣例
 
-以下寫法供新實驗採用。既有實驗可保留舊寫法，全面改名與移除舊介面留待大量遷移。
+實驗使用以下存檔軸、分析選項、Slot fallback 與繪圖寫法。
 序列、獨立分析與 docstring 的規則及短例見[前節](#讓使用者只看一個檔案就能理解實驗)。
 
 ### Cfg 名稱、順序與取數欄位
@@ -228,7 +228,9 @@ signal = AxesSpec.Z("signals", label="Signal", unit="a.u.")
 
 `field_name` 與 `values` 必須恰好給一個，否則建構時 raise ValueError。
 Z 的每個維度仍須匹配軸長，固定軸也計入。固定值不會在 load 時寫進 Result。
-同樣寫法也適用 `GroupedAxesSpec`，原有位置參數寫法保留到遷移收縮。
+`GroupedAxesSpec` 的 `VariableAxisSpec` 全部使用關鍵字。
+`VariableZSpec` 可用位置參數指定 field_name，label、unit 與其餘選項使用關鍵字。
+`VariableAxisSpec.generated_arange(label=..., unit=...)` 也使用關鍵字。
 
 ### 分析選項自行驗證，fit 結果用屬性讀取
 
@@ -371,8 +373,8 @@ set_title("Acquired signal")
 此處 show 前先推一筆資料，show 後再做一次性標題更新。
 Qt 在 GUI 主執行緒執行本體，Notebook 在 caller thread 同步執行並送完整 frame，
 NonPresenting host 直接執行且不開視窗。
-舊字串圖名 `plots.draw(name, fn)` 與舊 live helper 保留原有隱式顯示及 axes 佔用規則。
-`live_heatmap_with_line` 只保留舊寫法，新版面由作者用 subplots 排列。
+多面板用 `subplots` 排列。需要掃描歷史線時，由作者在另一個 axes 建立線條，
+並在同一個 decorator 本體中更新熱圖和歷史線，回傳兩者的 changed artists。
 
 ## 使用者實驗的測試
 
@@ -600,8 +602,8 @@ matrix的估計流程。
 一般核心實驗的入口是 `run(cfg, *, context: RunContext) -> Result`。硬體與具名 devices 由 context 傳入，cfg 只含這次操作的設定。Result 只含資料。NotebookAdapter 或 GUI adapter 將原始 cfg 與 Result 配成 RunRecord，不在核心快取上一輪結果。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
-2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2.support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
-3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 不持有 cfg，透過 `run_acquire*` 取數並寫回 buffer。
+2. 用 `fig, ax = context.plots.subplots(num="measurement")` 建圖並設定 labels。從 `zcu_lab.v2.support` import `live_line`，以 `line = live_line(ax)` 掛上曲線。呼叫 `fig.show()` 顯示圖，不使用 pyplot current state。
+3. 以 `@context.plots.on_plot_thread` 裝飾 update 函式，本體回傳 `line.set(xs, signals)`。`SignalBuffer` 的 on_update 將完整 buffer 交給 update。Schedule 不持有 cfg，透過 `run_acquire*` 取數並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 

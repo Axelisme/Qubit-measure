@@ -15,20 +15,22 @@ def make_form(ctx: FormContext) -> Form[HeraldingT1Cfg]:
     return Form(
         HeraldingT1Cfg,
         tree={
-            "pi_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "delay": Range(0.0, relax_delay, expts=101),
             "relax_delay": relax_delay,
             "sampling": "linear",
             "reps": 1000,
             "rounds": 10,
         },
-    ).with_seed_metadata(
-        {}
-        if ctx.has("$resonator.module.readout")
-        else pulse_readout_seed_metadata(gain=0.1)
     )

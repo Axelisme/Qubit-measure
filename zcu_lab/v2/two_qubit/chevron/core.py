@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
@@ -87,14 +89,17 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        "Drive duration", "s", field_name="durations", scale=1e-6
+                        label="Drive duration",
+                        unit="s",
+                        field_name="durations",
+                        scale=1e-6,
                     ),
                     VariableAxisSpec(
-                        "Common drive frequency",
-                        "Hz",
+                        label="Common drive frequency",
+                        unit="Hz",
                         field_name="coordinates",
                         scale=1e6,
                     ),
@@ -135,18 +140,18 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums
             counts = ordered
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -209,18 +214,18 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         validate_classifiers(config.readout, config.roles)
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Drive duration (us)",
-            "Terminal P00",
-            num_lines=len(coordinates),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
+        viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             ordered = sums.swapaxes(0, 1)
             counts = ordered
-            viewer.update(durations, joint_probabilities(counts)[..., 0, 0])
+            return viewer.set(durations, joint_probabilities(counts)[..., 0, 0])
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)
@@ -316,7 +321,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             totals,
             None,
         )
-        fig, ax = plots.subplots("chevron", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(num="chevron", figsize=(9, 6), layout="constrained")
         image = ax.pcolormesh(
             result.durations,
             result.coordinates,
@@ -335,7 +340,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             f"({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
         )
         fig, _ = plots.subplots(
-            "return",
+            num="return",
             nrows=3,
             ncols=3,
             figsize=(13, 10),
@@ -356,7 +361,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             )
             ax.legend(title="Common drive frequency (MHz)", fontsize="x-small", ncols=2)
         rates = fit_duration_rates(durations, answer)
-        _, ax = plots.subplots("rabi_rate", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_rate", figsize=(10, 6), layout="constrained")
         ax.errorbar(
             coordinates,
             [rate.rate if rate.rate is not None else np.nan for rate in rates],
@@ -384,7 +389,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
             ylabel="Rabi rate (MHz)",
             title="Undamped cosine model · rates below 1/duration span excluded",
         )
-        _, ax = plots.subplots("rabi_traces", figsize=(10, 6), layout="constrained")
+        _, ax = plots.subplots(num="rabi_traces", figsize=(10, 6), layout="constrained")
         for coordinate, rate in zip(coordinates, rates, strict=True):
             if rate.fitted is not None:
                 ax.plot(durations, rate.fitted, label=f"{coordinate:g}")

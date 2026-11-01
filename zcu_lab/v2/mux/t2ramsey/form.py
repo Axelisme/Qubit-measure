@@ -8,7 +8,6 @@ from zcu_lab.v2.support.measure.mux_forms import (
     captured_mux_names,
     captured_mux_participants,
     mux_readout_initial,
-    mux_readout_seed_metadata,
     mux_relax_delay,
     mux_tone_initials,
 )
@@ -30,9 +29,10 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,
-            "drive": Slot(f"{name}.module.x90")
-            if ctx.has(f"{name}.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": name}),
+            "drive": Slot(
+                f"{name}.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": name}),
+            ),
             "detune": 0.0,
         }
         for name in names
@@ -55,4 +55,4 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )

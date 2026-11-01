@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import zcu_tools.analysis.fitting as ft
+from matplotlib.ticker import MaxNLocator
+from pydantic.dataclasses import dataclass
 from zcu_tools.analysis.fitting import (
     fit_decay,
     fit_dual_decay,
@@ -93,16 +94,21 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Time (us)",
-            "Amplitude",
-            title="T1 relaxation",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set_title("T1 relaxation")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, t1_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             # 2. Sweep the tone after excitation, then acquire the readout IQ.
@@ -161,7 +167,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us" if dual_exp else "N/A"
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")

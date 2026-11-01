@@ -657,7 +657,7 @@ def test_loaded_same_entry_different_point_resaves_original_run(
         if save_all:
             declare_panes(session, ("fit",))
             post_plots = Plots(NonPresentingHost())
-            post_plots.subplots("post")
+            post_plots.subplots(num="post")
             post_plots.finish(present=False)
             commit_post_analysis(
                 session.state,

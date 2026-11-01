@@ -187,7 +187,7 @@ def test_plots_and_named_bar_are_retained_across_commits(rig: Rig) -> None:
             bar = env.pbar("points", 10)
             bar.set_progress(3)
             viewer = create_trace(env.plots, "main", "x", "y")
-            viewer.update((np.array([0.0, 1.0]), np.array([2.0, 3.0])))
+            viewer((np.array([0.0, 1.0]), np.array([2.0, 3.0])))
             iteration.commit(Point(value=3))
             iteration = next(iterations)
             assert env.pbar("points", 10) is bar

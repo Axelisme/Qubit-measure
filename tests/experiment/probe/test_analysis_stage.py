@@ -28,7 +28,7 @@ class Analysis:
 
 class SyntheticExperiment(Experiment[np.ndarray, ConfigBase]):
     def analyze(self, source, options, *, plots: Plots) -> Analysis:
-        _, axes = plots.subplots("fit/trace", figsize=(3, 2))
+        _, axes = plots.subplots(num="fit/trace", figsize=(3, 2))
         axes.plot(source.result * options)
         return Analysis(float(np.mean(source.result) * options))
 

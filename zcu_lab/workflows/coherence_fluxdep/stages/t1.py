@@ -6,6 +6,7 @@ from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
 from zcu_tools.experiment.workflows import Failed
@@ -13,9 +14,9 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.support import LinePlot, live_line
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
+from zcu_lab.workflows.coherence_fluxdep.stages.t2_support import decay_plot
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.common.analysis import (
     DecayFit,
@@ -150,26 +151,13 @@ def estimate_t1_time_s(
     )
 
 
-def _plot(plots: Plots) -> LinePlot:
-    if "t1" not in plots:
-        plots.subplots("t1", nrows=2)
-
-    def rebuild(figure: Figure) -> None:
-        figure.set_layout_engine("constrained")
-        # Give this point its own handle, not the previous live template's axis.
-        figure.axes[1].remove()
-        figure.add_subplot(2, 1, 2)
-
-    plots.draw("t1", rebuild)
-    return live_line(
-        plots, "t1", "Time (us)", "Signal (raw I)", axes=plots["t1"].axes[1]
-    )
-
-
 def _draw_fit(
     plots: Plots, fit: DecayFit, comparison: LifetimeComparison, reason: str | None
 ) -> None:
-    def overlay(figure: Figure) -> None:
+    figure = plots["t1"]
+
+    @plots.on_plot_thread
+    def overlay(_payload: None) -> tuple[Figure]:
         ax = figure.axes[1]
         ax.clear()
         ax.plot(fit.times, fit.observed, ".", label="observed")
@@ -184,7 +172,9 @@ def _draw_fit(
         )
         ax.legend()
 
-    plots.draw("t1", overlay)
+        return (figure,)
+
+    overlay(None)
 
 
 async def measure_t1(
@@ -211,7 +201,7 @@ async def measure_t1(
     first, followed by each failed numeric gate. No point record or history is modified.
     """
     cfg, gain_clamped = _cfg(pulses, settings, points=points, guess_us=guess_us)
-    plot = _plot(env.plots)
+    plot = decay_plot(env.plots, "t1")
     acquisition = await acquire_saved(
         scope,
         env,
@@ -227,7 +217,12 @@ async def measure_t1(
             file=acquisition.file,
             gain_clamped=gain_clamped,
         )
-    plot.update(acquisition.result.times, acquisition.result.signals.real)
+
+    @env.plots.on_plot_thread
+    def update_raw(data: tuple[NDArray[np.float64], NDArray[np.float64]]):
+        return plot.set(*data)
+
+    update_raw((acquisition.result.times, acquisition.result.signals.real))
     fit = analyze_t1(acquisition.result)
     if isinstance(fit, Failed):
         return T1Result(

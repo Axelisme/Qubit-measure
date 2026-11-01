@@ -73,7 +73,7 @@ def analyze_amp_rabi(result: AmpRabiResult) -> AmpFit | Failed:
     )
     if isinstance(fit, Failed):
         return fit
-    pi, error, pi2, _, _, _, fitted, _ = fit
+    pi, error, pi2, fitted = fit.pi_x, fit.pi_x_err, fit.pi2_x, fit.curve
     return AmpFit(
         pi,
         error,

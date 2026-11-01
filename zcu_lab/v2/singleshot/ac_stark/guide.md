@@ -8,7 +8,13 @@ Single-shot AC-Stark calibration: drives a cavity Stark tone and a qubit probe t
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay starts at 5*T1. Qubit sweep is `$qubit.freq` - 700 to `$qubit.freq` + 100 MHz. Qubit probe length/mixer use `$qubit.module.x180.waveform.length` and `$qubit.module.x180.mixer_freq`. Pre/post delay are 1.0/`$resonator.kappa` and 0.5/`$resonator.kappa`; cavity tone length adds 1.0/`$resonator.kappa` to the pi length.
 
-Classification uses the readout module's circle classifier, visible under Readout → Advanced (per tone for Mux). Run requires a classifier on every declared ADC and a positive radius; missing radius prompts singleshot GE Post. Linear has no Other state and is rejected. Analyze corrects populations only with the saved readout cfg's confusion matrix. Historical cfg without a classifier or matrix skips correction.
+Readout accepts only the pulse family.
+A mux readout in the library is incompatible.
+Classification uses the readout's circle classifier under Readout → Advanced.
+Run requires a positive radius; missing radius prompts singleshot GE Post.
+Linear has no Other state and is rejected.
+Analyze corrects populations only with the saved readout cfg's confusion matrix.
+Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 

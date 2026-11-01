@@ -6,7 +6,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from .core import PowerCfg
 
 
-def make_form(ctx: FormContext) -> Form[PowerCfg]:
+def make_form(_ctx: FormContext) -> Form[PowerCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         PowerCfg,
@@ -18,9 +18,10 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "gain": Range(0.001, 1.0, expts=101),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=201),
             "relax_delay": 1.0,

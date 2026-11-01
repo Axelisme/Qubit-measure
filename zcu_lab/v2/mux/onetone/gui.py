@@ -35,7 +35,7 @@ from zcu_lab.v2.mux.onetone.core import (
 from zcu_lab.v2.mux.onetone.form import make_form
 from zcu_lab.v2.onetone.freq.gui import OneToneFreqAnalyzeParams
 from zcu_lab.v2.support.measure.mux_save_names import mux_readout_save_stem
-from zcu_lab.v2.support.resonator import finite_real, route_matched_delay
+from zcu_lab.v2.support.resonator import route_matched_delay
 
 MuxOnetoneRunResult: TypeAlias = RunRecord[MuxOnetoneCfg, MuxOnetoneResult]
 
@@ -156,9 +156,7 @@ def _analyze(
     # 1. Validate numeric inputs before resolving capture-dependent sources.
     cfg = validate_analysis_source(req.run_result)
     params = req.analyze_params
-    manual_seed = finite_real(params.edelay)
-    if params.edelay is not None and manual_seed is None:
-        raise ValueError("edelay must be a finite real scalar or None")
+    manual_seed = params.edelay
     resonators, diagnostic = _resonators(req.parameters, len(cfg.readout.tones))
 
     # 2. Resolve route priors from the fixed capture, never the current point.

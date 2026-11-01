@@ -368,7 +368,7 @@ def test_closing_window_leaves_plot_host_available_until_app_quits(
     owner = QtOwnerScheduler()
     try:
         plots = Plots(QtPlotHost(container, owner))
-        plots.subplots("fresh")
+        plots.subplots(num="fresh")
         plots.finish()
         assert stack.count() == 2
         plots.release()

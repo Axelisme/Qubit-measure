@@ -24,7 +24,7 @@ def test_subplots_are_native_registered_and_saveable_without_presentation() -> N
     figures = FigureCollection()
     managers = plt.get_fignums()
     backend = matplotlib.get_backend()
-    figure, ax = figures.subplots("fit", figsize=(4, 3), dpi=80)
+    figure, ax = figures.subplots(num="fit", figsize=(4, 3), dpi=80)
     assert isinstance(ax, Axes)
     assert ax.figure is figure
     assert figures["fit"] is figure
@@ -39,7 +39,7 @@ def test_subplots_are_native_registered_and_saveable_without_presentation() -> N
 
 def test_subplots_preserve_native_array_shape_and_shared_axes() -> None:
     figures = FigureCollection()
-    figure, axes = figures.subplots("panels", nrows=2, ncols=2, sharex="col")
+    figure, axes = figures.subplots(num="panels", nrows=2, ncols=2, sharex="col")
     assert isinstance(axes, np.ndarray)
     assert axes.shape == (2, 2)
     top, bottom = axes[0, 0], axes[1, 0]
@@ -49,20 +49,20 @@ def test_subplots_preserve_native_array_shape_and_shared_axes() -> None:
     for ax in axes.flat:
         assert isinstance(ax, Axes)
         assert ax.figure is figure
-    _, unsqueezed = figures.subplots("single", squeeze=False)
+    _, unsqueezed = figures.subplots(num="single", squeeze=False)
     assert isinstance(unsqueezed, np.ndarray)
     assert unsqueezed.shape == (1, 1)
 
 
 def test_subplots_conflict_and_seal_leave_existing_figure_unchanged() -> None:
     figures = FigureCollection()
-    figure, ax = figures.subplots("fit")
+    figure, ax = figures.subplots(num="fit")
     ax.set_title("original")
     with pytest.raises(ValueError, match="already belongs"):
-        figures.subplots("fit")
+        figures.subplots(num="fit")
     figures.seal()
     with pytest.raises(RuntimeError, match="sealed"):
-        figures.subplots("new")
+        figures.subplots(num="new")
     assert dict(figures) == {"fit": figure}
     assert ax.get_title() == "original"
 

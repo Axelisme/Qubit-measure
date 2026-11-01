@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Annotated, ClassVar
 
 import numpy as np
+from pydantic import Field, field_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.dips import DipFinderOptions, find_spectrum_dips
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -65,7 +67,7 @@ class RangeFindCfg(ConfigBase):
 DEFAULT_MIN_SEPARATION_MHZ = 1.0
 
 
-@dataclass
+@pydantic_dataclass
 class RangeFindOptions:
     """Choose frequency-ordered names and minimum spacing for coarse dip detection.
 
@@ -75,26 +77,37 @@ class RangeFindOptions:
     nonnegative Gaussian sigma in samples, default zero (no smoothing).
     prominence_factor is the nonnegative noise multiplier, default five.
     max_fwhm is finite positive MHz, default 25. Selection ranks depth / FWHM.
-    Validation occurs on Analyze, allowing initial GUI values to be edited.
+    Validation occurs on construction, before analysis or picker setup.
     """
 
-    resonators: list[str] = field(default_factory=list)
-    min_separation: float = DEFAULT_MIN_SEPARATION_MHZ
-    smoothing_sigma: float = 0.0
-    prominence_factor: float = 5.0
-    max_fwhm: float = 25.0
+    resonators: Annotated[list[str], Field(strict=True)] = field(default_factory=list)
+    min_separation: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = (
+        DEFAULT_MIN_SEPARATION_MHZ
+    )
+    smoothing_sigma: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)] = (
+        0.0
+    )
+    prominence_factor: Annotated[
+        float, Field(ge=0, strict=True, allow_inf_nan=False)
+    ] = 5.0
+    max_fwhm: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = 25.0
 
-    def validate(self) -> None:
-        """Reject invalid names or numerical controls with ValueError."""
-        self.to_dip_options()
+    @field_validator("resonators")
+    @classmethod
+    def unique_nonblank_names(cls, names: list[str]) -> list[str]:
+        """Keep names in input order, rejecting blank or duplicate labels."""
+        if any(not name.strip() for name in names):
+            raise ValueError("resonators must contain nonblank strings")
+        if len(set(names)) != len(names):
+            raise ValueError("resonators must contain unique names")
+        return names
 
     def to_dip_options(self) -> DipFinderOptions:
-        """Validate names and return pure numerical controls for this selection.
+        """Return numerical dip controls, using the name count as max_dips.
 
-        The name count limits selected dips; empty names discover all candidates.
-        Invalid names or controls raise ValueError.
+        Empty names leave max_dips unlimited. Names are validated when the
+        Options object is constructed, not by this conversion.
         """
-        _validate_resonators(self.resonators)
         return DipFinderOptions(
             smoothing_sigma=self.smoothing_sigma,
             prominence_factor=self.prominence_factor,
@@ -102,16 +115,6 @@ class RangeFindOptions:
             min_separation=self.min_separation,
             max_dips=len(self.resonators) if self.resonators else None,
         )
-
-
-def _validate_resonators(resonators: object) -> None:
-    # GUI editors and notebook callers can supply values outside annotations.
-    if not isinstance(resonators, list) or any(
-        not isinstance(name, str) or not name.strip() for name in resonators
-    ):
-        raise ValueError("resonators must be a list of nonblank strings")
-    if len(set(resonators)) != len(resonators):
-        raise ValueError("resonators must contain unique names")
 
 
 @dataclass(frozen=True)

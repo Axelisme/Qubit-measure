@@ -11,7 +11,8 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import StrictInt, ValidationInfo, field_validator
+from pydantic import Field, StrictInt, ValidationInfo, field_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -27,12 +28,11 @@ from zcu_lab.v2.support.mux import averaged_mux_signal
 from zcu_lab.v2.support.resonator import (
     ResonanceFit,
     ResonanceOptions,
-    finite_real,
     fit_resonance,
 )
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxOnetoneAnalyzeOptions:
     """Fit controls shared by every active spectrum.
 
@@ -43,23 +43,12 @@ class MuxOnetoneAnalyzeOptions:
     Invalid models, non-bool switches and nonfinite/non-real seeds raise ValueError.
     """
 
-    edelay_seeds: tuple[float | None, ...]
+    edelay_seeds: tuple[
+        Annotated[float, Field(strict=True, allow_inf_nan=False)] | None, ...
+    ]
     model_type: Literal["hm", "t", "auto"] = "hm"
-    fit_bg_amp_slope: bool = True
-    fit_bg_phase_curvature: bool = False
-
-    def __post_init__(self) -> None:
-        if self.model_type not in ("hm", "t", "auto"):
-            raise ValueError(f"Invalid model type: {self.model_type!r}")
-        if (
-            type(self.fit_bg_amp_slope) is not bool
-            or type(self.fit_bg_phase_curvature) is not bool
-        ):
-            raise ValueError("Background fit options must be bool")
-        if any(
-            seed is not None and finite_real(seed) is None for seed in self.edelay_seeds
-        ):
-            raise ValueError("edelay_seeds must contain finite real scalars or None")
+    fit_bg_amp_slope: bool = Field(default=True, strict=True)
+    fit_bg_phase_curvature: bool = Field(default=False, strict=True)
 
 
 @dataclass(frozen=True)
@@ -282,7 +271,7 @@ def _fit_tone(
     index = int(source.result.tone_indices[column])
     tone = cfg.readout.tones[index]
     freqs = tone.freq + source.result.dfs
-    fig, _ = plots.subplots(f"fit_{index}", figsize=(9, 8))
+    fig, _ = plots.subplots(num=f"fit_{index}", figsize=(9, 8))
     try:
         fit = fit_resonance(
             freqs,

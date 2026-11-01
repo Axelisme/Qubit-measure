@@ -39,9 +39,14 @@ def test_run_returns_record_and_in_memory_live_png_without_save_or_analysis(
             assert context.soccfg is environment.soccfg
             result = super().run(config, context=context)
             config.gain = 99
-            context.plots.draw(
-                "signal/trace", lambda figure: figure.set_size_inches(9, 3)
-            )
+
+            @context.plots.on_plot_thread
+            def resize(size: tuple[float, float]):
+                figure = context.plots["signal/trace"]
+                figure.set_size_inches(*size)
+                return (figure,)
+
+            resize((9, 3))
             return result
 
         def analyze(
@@ -113,10 +118,11 @@ def test_run_propagates_original_run_or_live_update_error(
                 raise error
             result = super().run(config, context=context)
 
-            def broken_draw(_figure):
+            @context.plots.on_plot_thread
+            def broken_draw(_payload: None):
                 raise error
 
-            context.plots.draw("signal/trace", broken_draw)
+            broken_draw(None)
             return result
 
     with pytest.raises(RuntimeError) as caught:

@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -71,7 +72,7 @@ class FreqCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class FreqAnalyzeOptions:
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
@@ -274,7 +275,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
         # 3. Mark the selected pair on the original, unsmoothed IQ map.
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             rotate2real(signals.T).real,
