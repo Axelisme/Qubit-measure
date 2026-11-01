@@ -104,16 +104,28 @@ def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
     populations = np.array([0.0, 1.0, 0.2, 0.8, 0.5])
     state = np.random.get_state(legacy=True)
     samples = generators.sample_iq_shots(
-        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
-        width=0.0, shots=30000, seed=17,
+        populations,
+        g_center=-2.0 + 1j,
+        e_center=3.0 - 1j,
+        width=0.0,
+        shots=30000,
+        seed=17,
     )
     repeated = generators.sample_iq_shots(
-        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
-        width=0.0, shots=30000, seed=17,
+        populations,
+        g_center=-2.0 + 1j,
+        e_center=3.0 - 1j,
+        width=0.0,
+        shots=30000,
+        seed=17,
     )
     different = generators.sample_iq_shots(
-        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
-        width=0.0, shots=30000, seed=18,
+        populations,
+        g_center=-2.0 + 1j,
+        e_center=3.0 - 1j,
+        width=0.0,
+        shots=30000,
+        seed=18,
     )
     assert samples.shape == (5, 30000)
     assert samples.dtype == np.complex128
@@ -131,12 +143,20 @@ def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
 def test_sample_iq_shots_adds_independent_gaussian_quadrature_width():
     populations = np.array([0.0, 1.0, 0.25, 0.75])
     samples = generators.sample_iq_shots(
-        populations, g_center=-3.0 + 2j, e_center=3.0 - 2j,
-        width=0.3, shots=30000, seed=17,
+        populations,
+        g_center=-3.0 + 2j,
+        e_center=3.0 - 2j,
+        width=0.3,
+        shots=30000,
+        seed=17,
     )
     repeated = generators.sample_iq_shots(
-        populations, g_center=-3.0 + 2j, e_center=3.0 - 2j,
-        width=0.3, shots=30000, seed=17,
+        populations,
+        g_center=-3.0 + 2j,
+        e_center=3.0 - 2j,
+        width=0.3,
+        shots=30000,
+        seed=17,
     )
     assert_array_equal(samples, repeated)
     excited = samples.real > 0
@@ -179,17 +199,26 @@ def test_sample_iq_shots_rejects_declared_invalid_inputs(
 ):
     with pytest.raises(ValueError, match=message):
         generators.sample_iq_shots(
-            populations, g_center=g_center, e_center=e_center,
-            width=width, shots=shots, seed=17,
+            populations,
+            g_center=g_center,
+            e_center=e_center,
+            width=width,
+            shots=shots,
+            seed=17,
         )
 
 
 @pytest.mark.parametrize(
     "populations, shots, shape",
-    [(np.array([]), 3, (0, 3)), (np.array([0.0, 1.0]), 0, (2, 0)),
-     (np.array([]), 0, (0, 0))],
+    [
+        (np.array([]), 3, (0, 3)),
+        (np.array([0.0, 1.0]), 0, (2, 0)),
+        (np.array([]), 0, (0, 0)),
+    ],
 )
-def test_sample_iq_shots_allows_empty_population_and_zero_shots(populations, shots, shape):
+def test_sample_iq_shots_allows_empty_population_and_zero_shots(
+    populations, shots, shape
+):
     samples = generators.sample_iq_shots(
         populations, g_center=-1j, e_center=1j, width=0.0, shots=shots, seed=17
     )

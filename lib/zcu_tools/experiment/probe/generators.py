@@ -86,7 +86,11 @@ def sample_iq_shots(
         raise ValueError("g_center and e_center must be finite")
     if not np.isfinite(width) or width < 0:
         raise ValueError("width must be finite and nonnegative")
-    if isinstance(shots, bool) or not np.issubdtype(type(shots), np.integer) or shots < 0:
+    if (
+        isinstance(shots, bool)
+        or not np.issubdtype(type(shots), np.integer)
+        or shots < 0
+    ):
         raise ValueError("shots must be a nonnegative integer, not bool")
     rng = np.random.default_rng(seed)
     excited = rng.random((len(excited_population), shots)) < excited_population[:, None]
