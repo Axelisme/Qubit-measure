@@ -491,14 +491,17 @@ class TimelineBook:
     def snapshot_branch_provenance(self, prog) -> BranchProvenance:
         """Copy current register sources and all declared native channel tails."""
         return BranchProvenance(
-            self.source_expressions.copy(), self.snapshot_native_expressions(prog),
+            self.source_expressions.copy(),
+            self.snapshot_native_expressions(prog),
             frozenset(self.unknown_native_adcs),
         )
 
     def finish_branch_sources(self, prog, selector: str) -> None:
         """Select channel tails and register sources defined on every branch path."""
         frame = self.branch_provenance.pop()
-        self.unknown_native_adcs = set().union(*(path.unknown_adcs for path in frame.paths))
+        self.unknown_native_adcs = set().union(
+            *(path.unknown_adcs for path in frame.paths)
+        )
         self.native_expressions = {
             key: select_time(
                 source_expression(prog, selector),

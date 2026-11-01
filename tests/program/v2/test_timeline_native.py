@@ -323,15 +323,23 @@ def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
         prog.add_loop("scan", 2)
 
     def body(prog):
-        start = QickSweep1D("scan", 0.2 / 430.08, 1.2 / 430.08) if swept else 0.2 / 430.08
+        start = (
+            QickSweep1D("scan", 0.2 / 430.08, 1.2 / 430.08) if swept else 0.2 / 430.08
+        )
         prog.trigger([0], t=start, width=10 / 430.08)
-        next_start = QickSweep1D("scan", 140 / 430.08, 141 / 430.08) if swept else 140 / 430.08
+        next_start = (
+            QickSweep1D("scan", 140 / 430.08, 141 / 430.08) if swept else 140 / 430.08
+        )
         prog.timeline_inc(next_start)
         prog.trigger([0], timeline="default")
 
     prog = _program(body, initialize)
     assert [
-        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
         for shot in _shots(prog)
     ] == ([[0, 140], [1, 141]] if swept else [[0, 140]] * 2)
 
@@ -344,10 +352,18 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
         prog.trigger([0], t=0.2 / 430.08, width=10 / 430.08)
 
     def qick(prog):
-        prog.append_macro(Trigger(
-            ros=[0], tts=None, pins=None, t=0.2 / 430.08, width=10 / 430.08,
-            ddr4=False, mr=False, tag=None,
-        ))
+        prog.append_macro(
+            Trigger(
+                ros=[0],
+                tts=None,
+                pins=None,
+                t=0.2 / 430.08,
+                width=10 / 430.08,
+                ddr4=False,
+                mr=False,
+                tag=None,
+            )
+        )
 
     prog = _program(native, initialize)
     reference = _program(qick, initialize)
@@ -379,7 +395,10 @@ def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
             prog.timeline_inc(200 / 430.08)
             prog.trigger([0], timeline="default")
 
-    with pytest.raises(ValueError, match=r"channel 0.*cannot locate previous native trigger.*cycles unknown"): 
+    with pytest.raises(
+        ValueError,
+        match=r"channel 0.*cannot locate previous native trigger.*cycles unknown",
+    ):
         _program(body, initialize)
 
 
@@ -395,7 +414,11 @@ def test_known_native_adc_window_replaces_unlocatable_predecessor():
         prog.trigger([0], timeline="default")
 
     prog = _program(body, initialize)
-    assert [e.cycle for e in _shot(prog).events if e.kind == "data" and e.value] == [0, 0, 140]
+    assert [e.cycle for e in _shot(prog).events if e.kind == "data" and e.value] == [
+        0,
+        0,
+        140,
+    ]
 
 
 def test_native_adc_tail_is_checked_before_a_named_trigger():
