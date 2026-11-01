@@ -12,6 +12,7 @@ from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
+from .. import native_persistence
 from ..base import Experiment
 from ..records import RunRecord
 from ..simulation import SimulationEnvironment
@@ -49,7 +50,8 @@ def run_stage(
     NonPresentingHost update figures without opening views. Return PNG bytes at
     current figure size, 100 dpi, under live-{URL-escaped name}.png keys.
     Missing AXES_SPEC raises ValueError. Acquisition, plotting and rendering
-    errors propagate unchanged. This stage neither saves nor calls analyze.
+    errors propagate unchanged. Result shape must agree with AXES_SPEC or native
+    validation raises ValueError. This stage neither saves nor calls analyze.
     """
     # The package defines the existing acquisition helper after its export imports.
     from . import _acquire
@@ -61,6 +63,7 @@ def run_stage(
     plots = Plots(NonPresentingHost())
     try:
         record = _acquire(experiment, cfg, environment, plots)
+        native_persistence.prepare_run_data(record, spec=experiment.AXES_SPEC, comment="")
         plots.finish()
         pngs: dict[str, bytes] = {}
         for name, figure in plots.items():
