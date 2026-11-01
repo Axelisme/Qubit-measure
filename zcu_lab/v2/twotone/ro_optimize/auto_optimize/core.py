@@ -214,7 +214,7 @@ def _build_auto_opt_result(data: GroupedLoadData[AutoOptCfg]) -> AutoOptResult:
 
 
 _RO_AUTO_ITERATION_AXIS = (
-    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+    VariableAxisSpec.generated_arange(label="Iteration", unit="a.u.", dtype=np.int64),
 )
 # Keep schema 1.0: Direct readout failed at Run's first frequency write, so no
 # valid Direct artifacts exist. Existing Pulse artifacts remain readable. A major

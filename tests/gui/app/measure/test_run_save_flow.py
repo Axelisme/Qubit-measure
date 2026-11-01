@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from matplotlib.figure import Figure
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 from zcu_tools.experiment.context import RunContext

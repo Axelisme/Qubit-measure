@@ -3,7 +3,6 @@
 import base64
 
 import pytest
-from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, create_model
 from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.experiment.simulation import white_noise
