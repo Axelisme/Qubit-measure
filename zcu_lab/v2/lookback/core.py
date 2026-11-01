@@ -4,6 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
@@ -24,7 +26,7 @@ class LookbackResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class LookbackAnalyzeOptions:
     ratio: float = 0.3
     smooth: float | None = None

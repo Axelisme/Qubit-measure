@@ -20,9 +20,7 @@ def make_form(ctx: FormContext) -> Form[HeraldingLenRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
             "init_pulse": Hidden(),
             "length": Range(0.03, length_stop, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
@@ -31,11 +29,6 @@ def make_form(ctx: FormContext) -> Form[HeraldingLenRabiCfg]:
         },
     ).with_seed_metadata(
         {
-            **(
-                {}
-                if ctx.has("$resonator.module.readout")
-                else pulse_readout_seed_metadata(gain=0.1)
-            ),
             **(
                 {
                     ("qub_pulse", "module", "gain"): FieldMeta(

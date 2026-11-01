@@ -105,12 +105,18 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # Keep one mean IQ value for each pair-start/projection-phase setting.
-        viewer = live_heatmap(context.plots, "measurement", "Time (us)", "Phase (deg)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Phase (deg)")
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, phases, phase_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
-            on_update=lambda data: viewer.update(
-                lengths, phases, phase_signal2real(data)
-            ),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

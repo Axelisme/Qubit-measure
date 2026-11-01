@@ -228,8 +228,6 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         not an additional fit weight. Insufficient finite data fails in the T1
         analysis owner. Saved cfg is not needed for analysis.
         """
-        if options.skip < 0:
-            raise ValueError("Skip leading points must be nonnegative")
         times = source.result.times[options.skip :]
         signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
         finite = np.isfinite(times) & np.isfinite(signals)

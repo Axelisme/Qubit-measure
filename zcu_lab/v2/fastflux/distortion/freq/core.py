@@ -126,14 +126,18 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # Keep the delayed spectroscopy map in wait-major order.
-        viewer = live_heatmap(
-            context.plots, "measurement", "Time (us)", "Frequency (MHz)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Frequency (MHz)")
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, freqs, freq_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths), len(freqs)),
-            on_update=lambda data: viewer.update(
-                lengths, freqs, freq_signal2real(data)
-            ),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

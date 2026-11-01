@@ -186,8 +186,6 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         a fit weight. Insufficient data fails in the existing analysis owner.
         Saved cfg is not required. Negative skip raises ValueError.
         """
-        if options.skip < 0:
-            raise ValueError("Skip leading points must be nonnegative")
         gains = source.result.amps[options.skip :]
         signals = split_sums(source.result.sums)[1][..., 0][options.skip :]
         finite = np.isfinite(gains) & np.isfinite(signals)

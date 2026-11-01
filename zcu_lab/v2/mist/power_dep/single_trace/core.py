@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
@@ -35,7 +37,7 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(mist_signals)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class PowerDepAnalyzeOptions:
     g0: complex | None = None
     e0: complex | None = None
@@ -110,10 +112,18 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        viewer = live_line(context.plots, "measurement", "Pulse gain", "MIST")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain", ylabel="MIST")
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(gains, mist_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains),),
-            on_update=lambda data: viewer.update(gains, mist_signal2real(data)),
+            on_update=update,
         )
 
         # 2. Bind the board gain sweep without changing the other probe settings.

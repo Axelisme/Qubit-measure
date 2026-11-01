@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
 import numpy as np
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
@@ -62,7 +64,7 @@ class MistCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class MistAnalyzeOptions:
     ac_coeff: Annotated[
         float | None, FieldMeta(label="Photon number / gain squared")
@@ -114,17 +116,18 @@ class MistExp(Experiment[MistResult, MistCfg]):
         )
 
         # Display the averaged response without classifying individual shots.
-        viewer = live_heatmap(
-            context.plots,
-            "measurement",
-            "Flux Pulse Gain (a.u.)",
-            "Mist Pulse Gain (a.u.)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Mist Pulse Gain (a.u.)")
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(flux_gains), len(mist_gains)),
-            on_update=lambda data: viewer.update(
-                flux_gains, mist_gains, mist_signal2real(data)
-            ),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

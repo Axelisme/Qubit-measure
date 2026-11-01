@@ -111,14 +111,18 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
-        viewer = live_heatmap(
-            context.plots, "measurement", "Pulse frequency (MHz)", "Pulse gain (a.u.)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse frequency (MHz)", ylabel="Pulse gain (a.u.)")
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(freqs, gains, drivefreq_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(freqs), len(gains)),
-            on_update=lambda data: viewer.update(
-                freqs, gains, drivefreq_signal2real(data)
-            ),
+            on_update=update,
         )
 
         # 2. Bind frequency and gain sweeps to the same probe pulse.

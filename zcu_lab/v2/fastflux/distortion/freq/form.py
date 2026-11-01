@@ -23,9 +23,7 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 # Run supplies the spectroscopy frequency scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 0.05},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
             "length": Range(0.0, 1.0, expts=101),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=101),
             "readout_t": 2.0,

@@ -100,14 +100,18 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         )
 
         # Keep one averaged spectrum per flux gain.
-        viewer = live_heatmap(
-            context.plots, "measurement", "Flux Pulse Gain (a.u.)", "Frequency (MHz)"
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Flux Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(gains, freqs, twotone_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),
-            on_update=lambda data: viewer.update(
-                gains, freqs, twotone_signal2real(data)
-            ),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar, Self
+
+from pydantic import model_validator, Literal
+
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,7 +26,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate import value2flux
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import set_flux
 
 
@@ -48,13 +52,20 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class FluxDepAnalyzeOptions:
     flux_half: float | None = None
     flux_period: float | None = None
     ac_coeff: float | None = None
     secondary_xaxis: bool = True
     auto_range: bool = True
+
+    @model_validator(mode="after")
+    def require_flux_calibration(self) -> Self:
+        """Require both calibration coordinates when showing the secondary axis."""
+        if self.secondary_xaxis and (self.flux_half is None or self.flux_period is None):
+            raise ValueError("Secondary flux axis requires flux_half and flux_period")
+        return self
 
 
 class FluxDepCfg(ConfigBase):
@@ -133,18 +144,32 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.probe_pulse.ch},
         )
 
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Flux device value",
-            "Readout power (a.u.)",
-            line_axis=1,
-            num_lines=5,
-            title="MIST over FLux",
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(
+            xlabel="Flux device value", ylabel="Readout power (a.u.)", title="MIST over FLux"
         )
+        line_ax.set(xlabel="Readout power (a.u.)", title="MIST over FLux")
+        heatmap = live_heatmap(heat_ax)
+        lines = live_line(line_ax, num_lines=5)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+
+        @context.plots.on_plot_thread
+        def update(data):
+            real = mist_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((5, len(gains)), np.nan)
+            for offset in range(min(5, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            return (*heatmap.set(values, gains, real), *lines.set(gains, history))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(values), len(gains)),
-            on_update=lambda data: viewer.update(values, gains, mist_signal2real(data)),
+            on_update=update,
         )
 
         # 2. Set each external bias before acquiring its full gain trace.
@@ -192,8 +217,6 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         """
         result = source.result
         flux_half, flux_period = options.flux_half, options.flux_period
-        if options.secondary_xaxis and (flux_half is None or flux_period is None):
-            raise ValueError("Secondary flux axis requires flux_half and flux_period")
 
         dev_values, gains, signals = result.values, result.gains, result.signals
         if flux_half is not None and flux_period is not None:
