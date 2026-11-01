@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -66,7 +69,7 @@ class PowerCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class PowerAnalyzeOptions:
     penalty_ratio: float = 0.0
     smooth: float = 1.0
@@ -120,16 +123,21 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         )
 
         # Display ground/excited separation rather than either mean IQ trace.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Readout Power",
-            "SNR",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Readout Power", ylabel="SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return line.set(gains, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(gains, np.abs(data)),
+            on_update=update,
         )
 
         # Compare pulse-off/on branches at each hardware-swept readout gain.
@@ -210,7 +218,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         max_power = float(powers[max_id])
         max_snr = float(snrs[max_id])
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(powers, snrs)
         ax.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")

@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, cast
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.artist import Artist
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from skopt import Optimizer
@@ -315,49 +316,58 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         point_indices = np.arange(num_points, dtype=np.float64)
 
-        def configure_scatter(ax: Axes) -> None:
-            ax.lines[0].set_linestyle("None")
-            ax.lines[0].set_marker("o")
-
         # Show search progress and the sampled score along each readout coordinate.
-        figure, initial_ax = context.plots.subplots("measurement", figsize=(8, 5))
+        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
         initial_ax.remove()
         figure.suptitle("Readout Auto Optimization")
         grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
-        viewers = [
-            live_line(
-                context.plots,
-                "measurement",
-                xlabel,
-                "SNR (a.u.)",
-                configure_axes=configure_scatter,
-                axes=figure.add_subplot(cell),
-            )
-            for xlabel, cell in (
-                ("Iteration", grid[:, 0]),
-                ("Frequency (MHz)", grid[0, 1]),
-                ("Readout Gain (a.u.)", grid[1, 1]),
-                ("Readout Length (us)", grid[2, 1]),
-            )
-        ]
+        axes = []
+        lines = []
+        for xlabel, cell in (
+            ("Iteration", grid[:, 0]),
+            ("Frequency (MHz)", grid[0, 1]),
+            ("Readout Gain (a.u.)", grid[1, 1]),
+            ("Readout Length (us)", grid[2, 1]),
+        ):
+            ax = figure.add_subplot(cell)
+            ax.set(xlabel=xlabel, ylabel="SNR (a.u.)")
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            ax.grid(False)
+            lines.append(live_line(ax))
+            ax.lines[0].set_linestyle("None")
+            ax.lines[0].set_marker("o")
+            axes.append(ax)
+
+        figure.show()
         current_index = 0
 
-        def plot_fn(data: NDArray[np.float64]) -> None:
-            idx = current_index
+        @context.plots.on_plot_thread
+        def update(
+            payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
+        ) -> list[Artist]:
+            data, sampled_params, idx = payload
             snrs = np.abs(data)
-            cur_freq, cur_gain, cur_len = params[idx, :]
+            cur_freq, cur_gain, cur_len = sampled_params[idx, :]
             title = (
                 f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
                 f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
             )
-            for viewer, xs, viewer_title in zip(
-                viewers,
-                (point_indices, params[:, 0], params[:, 1], params[:, 2]),
-                (title, None, None, None),
+            artists: list[Artist] = [axes[0].set_title(title)]
+            for line, xs in zip(
+                lines,
+                (
+                    point_indices,
+                    sampled_params[:, 0],
+                    sampled_params[:, 1],
+                    sampled_params[:, 2],
+                ),
                 strict=True,
             ):
-                viewer.update(xs, snrs, title=viewer_title, refresh=False)
-            context.plots.refresh("measurement")
+                artists.extend(line.set(xs, snrs))
+            return artists
+
+        def plot_fn(data: NDArray[np.float64]) -> None:
+            update((data, params, current_index))
 
         signals_buffer = SignalBuffer(
             (num_points,),
@@ -444,7 +454,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         best_params = params[max_id, :]
 
         figsize = (8, 5)
-        fig, ax = plots.subplots("fit", figsize=figsize)
+        fig, ax = plots.subplots(num="fit", figsize=figsize)
         ax.remove()
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 

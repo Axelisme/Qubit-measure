@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
@@ -115,16 +117,21 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Display the score for each integration window, not averaged state IQ.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Readout Length (us)",
-            "SNR",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Readout Length (us)", ylabel="SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return line.set(lengths, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(lengths, np.abs(data)),
+            on_update=update,
         )
 
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
@@ -210,7 +217,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, snrs)
         ax.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
