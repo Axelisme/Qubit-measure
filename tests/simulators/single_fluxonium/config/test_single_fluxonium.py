@@ -60,6 +60,23 @@ numerics:
 """
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["numerics.seed", "numerics.slow_envelope_segments_per_period", "numerics.projection_prune_floor", "readout.resonator.thermal_occupation"],
+)
+def test_loader_requires_model_inputs(tmp_path: Path, path: str) -> None:
+    document = _parse(yaml.safe_load(DOCUMENT)).model_dump(mode="json")
+    parent = document
+    *parts, field = path.split(".")
+    for part in parts:
+        parent = parent[part]
+    del parent[field]
+    model_path = tmp_path / "missing-model-input.yaml"
+    model_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=path):
+        _load(model_path)
+
+
 @pytest.mark.parametrize("floor", [0.0, 0.25])
 def test_projection_floor_accepts_finite_probability_threshold(floor):
     document = yaml.safe_load(DOCUMENT)

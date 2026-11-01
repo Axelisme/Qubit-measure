@@ -66,7 +66,7 @@ def ftf_document() -> dict[str, object]:
                 "noise_psd_adc2_ns": [[0.0, 0.0], [0.0, 0.0]],
             },
         },
-        "numerics": {
+        "numerics": {"projection_weight_floor": 1e-9, 
             "truncation": {
                 "f1": {"levels": 2, "native_cutoff": 8},
                 "coupler": {"levels": 2, "charge_cutoff": 3},

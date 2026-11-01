@@ -63,7 +63,7 @@ def isolated_carrier_plan(
         for tone, frequency in enumerate(frequencies)
     )
     config = FTFReadoutConfig(
-        pulse=FTFReceiverConfig(0, 100, ((0.0, 0.0), (0.0, 0.0))),
+        pulse=FTFReceiverConfig(0, 100, ((0.0, 0.0), (0.0, 0.0)), ripple_period_mhz=1000.0, pivot_ghz=0.0),
         mux=FTFMuxReadoutConfig(
             gen_ch=1,
             input_per_gain=1.0,
@@ -72,7 +72,7 @@ def isolated_carrier_plan(
                     ro_ch=tone + 1,
                     gain=100,
                     noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0)),
-                )
+                ripple_period_mhz=1000.0, pivot_ghz=0.0)
                 for tone in range(len(frequencies))
             ),
         ),

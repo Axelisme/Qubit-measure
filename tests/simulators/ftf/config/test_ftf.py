@@ -21,6 +21,23 @@ def test_loader_requires_receiver_background_shape(tmp_path: Path, field: str) -
         load_ftf(path)
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["numerics.seed", "numerics.projection_weight_floor", "readout.resonators.r1.thermal_occupation"],
+)
+def test_loader_requires_model_inputs(tmp_path: Path, path: str) -> None:
+    document = parse_ftf(ftf_document()).model_dump(mode="json")
+    parent = document
+    *parts, field = path.split(".")
+    for part in parts:
+        parent = parent[part]
+    del parent[field]
+    model_path = tmp_path / "missing-model-input.yaml"
+    model_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=path):
+        load_ftf(model_path)
+
+
 @pytest.mark.parametrize("floor", [0.0, 0.1, 0.999])
 def test_projection_weight_floor_accepts_finite_probability_threshold(floor):
     document = ftf_document()

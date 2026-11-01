@@ -30,6 +30,16 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
     assert loaded.model_dump()["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] == 4
 
 
+@pytest.mark.parametrize("field", ["routing_cache_bytes", "slow_envelope_segments_per_period"])
+def test_loader_requires_environment_numeric_inputs(tmp_path: Path, field: str) -> None:
+    document = api.parse_six_fluxonium(six_document()).model_dump(mode="json")
+    del document["numerics"][field]
+    path = tmp_path / "missing-numeric-input.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"numerics\.{field}"):
+        api.load_six_fluxonium(path)
+
+
 def test_per_qubit_drift_accepts_positive_losses_and_rejects_disabled_targets():
     document = six_document()
     document["qubits"]["Q2"]["chip"]["qubit"]["xqp"] = 1e-7

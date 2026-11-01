@@ -23,7 +23,7 @@ def test_readout_configuration_preserves_pulse_without_mux() -> None:
     config = readout_configuration(parse_ftf(ftf_document()))
     expected = ftf_module.FTFReceiverConfig(
         ro_ch=0, gain=10000.0, noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0))
-    )
+    , ripple_period_mhz=1000.0, pivot_ghz=0.0)
     assert getattr(config, "pulse", None) == expected
     assert getattr(config, "mux", "missing") is None
 
@@ -47,7 +47,7 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
             offset_adc=(0.1, -0.2),
             noise_psd_adc2_ns=((1.0, 0.0), (0.0, 2.0)),
             time_of_flight_ns=20.0,
-        ),
+        ripple_period_mhz=1000.0, pivot_ghz=0.0),
         ftf_module.FTFReceiverConfig(
             ro_ch=1,
             gain=1001.0,
@@ -55,7 +55,7 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
             offset_adc=(1.1, -0.2),
             noise_psd_adc2_ns=((2.0, 0.0), (0.0, 2.0)),
             time_of_flight_ns=21.0,
-        ),
+        ripple_period_mhz=1000.0, pivot_ghz=0.0),
     )
     assert config.pulse == readout_configuration(parse_ftf(ftf_document())).pulse
 
@@ -63,7 +63,7 @@ def test_readout_configuration_preserves_both_paths_and_all_calibrations() -> No
 def test_readout_configuration_preserves_optional_background_for_both_paths() -> None:
     document = dual_readout_document()
     background = ReceiverBackground.model_validate(
-        {
+        {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0, 
             "extra_ripples": [{"depth": 0.04, "period_mhz": 44.0}],
             "roughness": {"amplitude": 0.02, "correlation_mhz": 50.0, "seed": 82},
             "band_edges": {"low": {"corner_ghz": 3.7, "rolloff_db_per_ghz": 30.0}},
@@ -141,7 +141,7 @@ def mux_configuration(channels: tuple[int, ...] = (4, 1)):
         receivers=tuple(
             ftf_module.FTFReceiverConfig(
                 ro_ch=ch, gain=1.0, noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0))
-            )
+            , ripple_period_mhz=1000.0, pivot_ghz=0.0)
             for ch in channels
         ),
     )
@@ -185,6 +185,6 @@ def test_detached_readout_rejects_receiver_shared_by_pulse_and_mux() -> None:
     mux = mux_configuration()
     pulse = ftf_module.FTFReceiverConfig(
         ro_ch=4, gain=1.0, noise_psd_adc2_ns=((0.0, 0.0), (0.0, 0.0))
-    )
+    , ripple_period_mhz=1000.0, pivot_ghz=0.0)
     with pytest.raises(ValueError, match="duplicate.*receiver|receiver.*duplicate"):
         ftf_module.FTFReadoutConfig(pulse=pulse, mux=mux)
