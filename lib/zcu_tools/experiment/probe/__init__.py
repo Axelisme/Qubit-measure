@@ -25,20 +25,20 @@ from zcu_tools.plotting import DEFAULT_STYLE
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 from zcu_tools.resources.yaml import load_yaml
 
-from . import native_persistence
-from .acquisition import (
+from .. import native_persistence
+from ..acquisition import (
     capture_device_snapshot,
     capture_software_provenance,
     new_run_id,
 )
-from .axes_spec import AxesSpec, GroupedAxesSpec
-from .base import Experiment
-from .context import RunContext
-from .metadata import RunMetadata, RunSnapshot
-from .records import RunRecord
-from .scope import Scope
-from .simulation import SimulationEnvironment, white_noise
-from .single_fluxonium import single_fluxonium
+from ..axes_spec import AxesSpec, GroupedAxesSpec
+from ..base import Experiment
+from ..context import RunContext
+from ..metadata import RunMetadata, RunSnapshot
+from ..records import RunRecord
+from ..scope import Scope
+from ..simulation import SimulationEnvironment, white_noise
+from ..single_fluxonium import single_fluxonium
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
@@ -428,6 +428,3 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
     print(json.dumps(report, default=_json_default, indent=2))
     return report
 
-
-if __name__ == "__main__":
-    raise SystemExit(0 if main().exception is None else 1)
