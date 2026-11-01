@@ -1,5 +1,6 @@
 """Detached private-input storage, not normal data.h5 or waveform assets."""
 
+import json
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -25,6 +26,23 @@ from tests.core._simulation import (
     ticks,
 )
 from tests.simulators.ftf.config._data import ftf_document
+
+
+@pytest.mark.parametrize("field", ["reps", "relax_delay_ticks"])
+def test_replay_reader_requires_runtime_inputs(field: str) -> None:
+    from pydantic import ValidationError
+    from zcu_tools.simulators.replay import ReplayAcquire
+
+    request = AcquireRequest(
+        "integrated", (1,), 0, (), 123, 0, "test-rng-v1", time_base=TIME_BASE
+    )
+    fixed = ReplayAcquire(
+        settings=parse_ftf(ftf_document()), request=request, versions=()
+    )
+    document = json.loads(fixed.model_dump_json())
+    del document["request"][field]
+    with pytest.raises(ValidationError, match=rf"request\.{field}"):
+        ReplayAcquire.model_validate_json(json.dumps(document))
 
 
 @pytest.mark.parametrize("requirements", [(), (ChargeDriveRequirement("drive", 2),)])
