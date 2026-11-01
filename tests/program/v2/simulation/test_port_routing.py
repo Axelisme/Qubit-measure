@@ -51,3 +51,21 @@ def test_shared_wave_port_routes_carrier_and_each_readout_config():
         assert all(read.gen_ch == 0 for read in point.readouts)
     finally:
         env.devices.close_all_devices()
+
+
+def test_tport_set_and_clear_preserve_dport_ticks_and_declared_read_counts():
+    points = []
+    for name in ("separate_dport", "tmux_tport"):
+        soccfg = profile_soccfg(name)
+        env = white_noise(soccfg, std_adc=0, seed=None, routes=((0, 0), (0, 1)))
+        try:
+            result = request(port_program(soccfg), env)
+            points.append(result.materialize_point(0))
+        finally:
+            env.devices.close_all_devices()
+    dport, tport = points
+    for expected, actual in zip(dport.readouts, tport.readouts, strict=True):
+        assert actual.trigger_ticks == expected.trigger_ticks
+        # QICK emits clr after each set; only the two sets count as reads.
+        assert len(actual.trigger_ticks) == 2
+        assert actual.frequency_mhz == expected.frequency_mhz
