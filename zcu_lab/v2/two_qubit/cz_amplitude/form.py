@@ -1,9 +1,13 @@
 """Fixed-capture two-line CZ amplitude inputs, never borrowed from another Form."""
 
+from dataclasses import replace
+
 from typing import TypeVar
 
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
@@ -30,10 +34,10 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     drive = {}
     for role in ("f1", "f2"):
         slot = f"$coupler.module.cz_{role}"
-        drive[role] = Slot(
+        node = source(
+            ctx,
             slot,
-            copy=True,
-            fallback=Template(
+            Template(
                 "pulse:blank",
                 set={
                     "ch": Expr(f"${role}.wiring.ch"),
@@ -45,6 +49,9 @@ def amplitude_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
                 },
             ),
         )
+        if isinstance(node, Slot):
+            node = replace(node, copy=True)
+        drive[role] = node
     readout = mux_readout_initial(ctx)
     return Form(
         cfg_type,
