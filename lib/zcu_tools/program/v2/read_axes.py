@@ -81,7 +81,7 @@ def shot_sums(
     prog is a compiled TimelineProgramV2. axes lists vectors
     in output-axis order; repeat a read for second moments. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
-    emit tags, or module names when untagged. Modular labels are module names.
+    emit tags, or module names when untagged.
     Each label must identify one emission; missing/ambiguous labels raise
     ValueError listing available labels. QICK rejects duplicate explicit tags
     during compilation with RuntimeError, before this helper runs. Repeat/Branch

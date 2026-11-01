@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -486,7 +486,7 @@ and the template engine contract.
 outcome histories, pruning, partial ADC observations and elementwise terminal-only
 runtime parity against direct Engine/ADC composition. Cavity field continuation
 stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
-`ftf/test_drift.py`. Repeated frontend readouts use `Repeat` and the public
+`ftf/test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
