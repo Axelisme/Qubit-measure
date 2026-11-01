@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from numpy.testing import assert_allclose, assert_array_equal
+from numpy.testing import assert_allclose, assert_array_equal, assert_equal
 from numpy.typing import NDArray
 from zcu_tools.experiment.probe import generators
 
@@ -51,10 +51,7 @@ def test_synthesize_adds_independent_gaussian_noise_with_local_seed(complex_outp
         assert noise.imag.mean() == pytest.approx(0.0, abs=0.005)
         assert noise.imag.std() == pytest.approx(0.4, abs=0.005)
         assert abs(np.corrcoef(noise.real.ravel(), noise.imag.ravel())[0, 1]) < 0.02
-    after = np.random.get_state(legacy=True)
-    assert state[0] == after[0]
-    assert_array_equal(state[1], after[1])
-    assert state[2:] == after[2:]
+    assert_equal(np.random.get_state(legacy=True), state)
     assert_allclose(values, 2.0 + 3.0j if complex_output else 2.0, atol=0, rtol=0)
 
 
@@ -127,10 +124,7 @@ def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
     assert_array_equal(samples[1], np.full(30000, 3.0 - 1j))
     assert_allclose(np.mean(samples == 3.0 - 1j, axis=1), populations, atol=0.007)
     assert abs(np.corrcoef((samples[2:4] == 3.0 - 1j).astype(float))[0, 1]) < 0.02
-    after = np.random.get_state(legacy=True)
-    assert state[0] == after[0]
-    assert_array_equal(state[1], after[1])
-    assert state[2:] == after[2:]
+    assert_equal(np.random.get_state(legacy=True), state)
     assert_array_equal(populations, [0.0, 1.0, 0.2, 0.8, 0.5])
 
 
