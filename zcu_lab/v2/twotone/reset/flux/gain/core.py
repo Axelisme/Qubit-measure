@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -29,19 +29,13 @@ from zcu_lab.v2.support.reset import reset_scan_buffer
 class GainResult:
     """Quantized gains (a.u.) and complex IQ shaped (before_pi, after_pi, gain).
 
-    before_pi and after_pi each store [0, 1]: calibrated pi off, then on.
+    Both pi switch dimensions are ordered off, then on.
     signals[a, b, i] is mean IQ at gains[i] with those two switches.
     Unacquired values remain NaN.
     """
 
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    before_pi: NDArray[np.int64] = field(
-        default_factory=lambda: np.array([0, 1], dtype=np.int64)
-    )
-    after_pi: NDArray[np.int64] = field(
-        default_factory=lambda: np.array([0, 1], dtype=np.int64)
-    )
 
 
 @dataclass(frozen=True)
@@ -110,13 +104,13 @@ class GainExp(Experiment[GainResult, GainCfg]):
         axes=(
             AxesSpec.Axis("gains", label="Flux reset gain", unit="a.u."),
             AxesSpec.Axis(
-                "after_pi",
+                values=(0, 1),
                 label="After reset pi (0=off, 1=on)",
                 unit="None",
                 dtype=np.int64,
             ),
             AxesSpec.Axis(
-                "before_pi",
+                values=(0, 1),
                 label="Before reset pi (0=off, 1=on)",
                 unit="None",
                 dtype=np.int64,
@@ -217,10 +211,6 @@ class GainExp(Experiment[GainResult, GainCfg]):
         gains, signals = result.gains, result.signals
         if gains.ndim != 1 or signals.shape != (2, 2, gains.size):
             raise ValueError("Flux reset IQ must have shape (2, 2, number of gains)")
-        if not np.array_equal(result.before_pi, [0, 1]) or not np.array_equal(
-            result.after_pi, [0, 1]
-        ):
-            raise ValueError("Both pi switch axes must be [0, 1] (off, on)")
 
         # After-pi differences cancel the common readout offset, not p0.
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
@@ -248,7 +238,7 @@ class GainExp(Experiment[GainResult, GainCfg]):
 
         # Keep the measured branches visible beside the uncalibrated estimate.
         fig, _ = plots.subplots(
-            "fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
+            num="fit", nrows=4, sharex=True, figsize=(10, 10), layout="constrained"
         )
         axes = fig.axes
         for a in range(2):

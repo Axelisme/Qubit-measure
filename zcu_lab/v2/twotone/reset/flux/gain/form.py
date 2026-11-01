@@ -13,17 +13,13 @@ def make_form(ctx: FormContext) -> Form[GainCfg]:
         GainCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
             "tested_reset": Template(
                 "flux_reset",
                 bindings={"qubit": "$qubit"},
                 set={"pulse_cfg.gain": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
             "gain": Range(0.0, 0.0, expts=1),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

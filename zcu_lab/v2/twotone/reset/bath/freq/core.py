@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.artist import Artist
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -29,10 +30,6 @@ from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signa
 from zcu_lab.v2.support import live_heatmap
 
 
-def _default_phase_values() -> NDArray[np.float64]:
-    return np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float64)
-
-
 @dataclass(frozen=True)
 class FreqGainResult:
     """Mean IQ (phase, gain, frequency); phases are offsets in degrees, freqs in MHz."""
@@ -40,10 +37,9 @@ class FreqGainResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    phases: NDArray[np.float64] = field(default_factory=_default_phase_values)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class FreqGainAnalyzeOptions:
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
@@ -104,7 +100,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             AxesSpec.Axis(
                 "gains", label="Cavity drive Gain", unit="a.u.", dtype=np.float64
             ),
-            AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
+            AxesSpec.Axis(values=(0.0, 90.0, 180.0, 270.0), label="Pi2 Phase", unit="deg", dtype=np.float64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
@@ -134,7 +130,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         soc, soccfg = context.soc, context.soccfg
 
         reset_cfg = cfg.tested_reset
-        phases = _default_phase_values()
         gains = sweep2array(
             cfg.gain,
             "gain",
@@ -186,7 +181,6 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         return FreqGainResult(
             gains=gains,
             freqs=freqs,
-            phases=phases,
             signals=signals_buffer.array,
         )
 
@@ -223,7 +217,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
         freq_opt = freqs[np.argmax(np.max(real_signals, axis=0))]
 
-        fig, ax = plots.subplots("fit")
+        fig, ax = plots.subplots(num="fit")
 
         ax.imshow(
             real_signals,
