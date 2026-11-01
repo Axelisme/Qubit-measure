@@ -13,7 +13,6 @@ from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 
-
 PROFILE_PATH = Path(__file__).resolve().parent.parent / "profiles" / "qick_216_v2.yaml"
 
 
