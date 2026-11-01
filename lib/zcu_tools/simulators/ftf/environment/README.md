@@ -324,8 +324,8 @@ not accepted.
 
 Optional `flux_lines.f1`, `flux_lines.coupler` and `flux_lines.f2` each bind one
 generator to one loop. A pulse on that generator contributes signed gain times
-`flux_phi0_per_gain` in Phi0. The public `ftf` builder includes these channels in
-the mock QICK profile. Line display names may repeat across loops. Pulses on
+`flux_phi0_per_gain` in Phi0. The caller's board profile must include those
+generator channels. Line display names may repeat across loops. Pulses on
 unbound generators still fail. With no flux lines, the existing fixed-DC batch
 and microwave controls remain unchanged.
 

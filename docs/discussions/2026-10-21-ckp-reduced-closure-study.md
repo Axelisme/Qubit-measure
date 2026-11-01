@@ -4,7 +4,7 @@ status: active
 superseded_by: null
 related:
   - zcu_lab/simulation_envs/FTF/field-guide.md
-  - lib/zcu_tools/experiment/ftf/README.md
+  - lib/zcu_tools/simulators/ftf/environment/README.md
   - docs/discussions/2026-10-16-ftf-simulation-speedup.md
   - docs/discussions/2026-10-17-ftf-dyson-guard-and-classification.md
 basis:
@@ -73,5 +73,5 @@ DF 的做法：兩條 no-flip pointer 從 cavity onset 連續演化，以 displa
 ## 依據
 
 - 研究於 2026-10-21 在固定 commit 上以三條平行 lane 完成（歷史項分解、候選推導、成本估計），工作檔與 JSON 輸出未入庫；本文數字取自其綜合報告。
-- 半古典模型與 Cavity 段文字：[field-guide](../../zcu_lab/simulation_envs/FTF/field-guide.md#cavity)、[FTF engine README](../../lib/zcu_tools/experiment/ftf/README.md)。
+- 半古典模型與 Cavity 段文字：[field-guide](../../zcu_lab/simulation_envs/FTF/field-guide.md#cavity)、[FTF engine README](../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 - 先前的速度工作：[FTF 模擬加速](2026-10-16-ftf-simulation-speedup.md)、[Dyson guard 與分類](2026-10-17-ftf-dyson-guard-and-classification.md)。

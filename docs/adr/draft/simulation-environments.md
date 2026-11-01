@@ -249,7 +249,7 @@ Dissipator 依 filtered flux 分段更新，用無 microwave、含耦合 H 建 i
 
 現行 flux 路由依 waveform 與微波控制選擇。沒有微波時，零 tau、無 distortion 的理想常數 baseband 階躍走 `t4` 與 sudden 換基底，continuous waveform 的 motion rows 走 `adiabatic_map`。有微波的 continuous flux rows 走 `flux_dop853`。
 
-`adiabatic_map` 即使 row bath 含 rates，也只衰減 coherence，不做 population 弛豫。只有 ramp 遠短於 T1 才能忽略缺少的弛豫，接近 T1 的 ramp 會低估弛豫。T1 reset 需要真正 constant park row 走 `t4`，仍在變動的 filter tail 或全程 `adiabatic_map` 不構成 T1 reset。引擎的 quadrature 收斂不認證物理 adiabatic 條件。路由與兩態 reset 驗證的範圍見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#flux-pulses)。這裡記錄既定近似，不更換引擎或 cache policy。
+`adiabatic_map` 即使 row bath 含 rates，也只衰減 coherence，不做 population 弛豫。只有 ramp 遠短於 T1 才能忽略缺少的弛豫，接近 T1 的 ramp 會低估弛豫。T1 reset 需要真正 constant park row 走 `t4`，仍在變動的 filter tail 或全程 `adiabatic_map` 不構成 T1 reset。引擎的 quadrature 收斂不認證物理 adiabatic 條件。路由與兩態 reset 驗證的範圍見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#flux-pulses)。這裡記錄既定近似，不更換引擎或 cache policy。
 
 事件區間不等於常數 H 區間。Backend 依使用者精度設定處理時變 envelope／carrier／flux；固定 generator 可重用傳播作用，時變區間重用算子並積分。段間接續量子態、filter、phase 與讀出場；進入狀態不同時不可直接重用上一段輸出。
 
@@ -295,7 +295,7 @@ Private replay 保存模型設定、模板 request、snapshot 與抽樣身份。
 
 Readout 採弱讀出、dispersive、線性 resonator 與能量基底 QND mixture，不增加 resonator quantum Hilbert space。引擎在各 projective read 與終端 readout 起點回到 DC 能量基底。ADC 固定使用 DC 格點的 basis、rates／pulls，忽略殘餘 flux tail 及重疊 controls。量子演化仍包含 herald 之後、終端 readout 起點之前的 controls。每點可有多組 projective read 與一組末端 readout，每組使用單 pulse 或共同起點的 mux tones。這是讀出近似，不宣稱 tail 已消失或 ADC 支援時變 flux。二階 dispersive pulls 對所有可佔據 retained states 計算，virtual transitions 可來自較大的 parent space，不給 leakage／coupler states 任意零 pull。
 
-2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 共用一次 outcome history 抽樣，觀測同一 event 時共用 CTMC path，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/experiment/ftf/README.md)。
+2026-10-14，使用者提出：「readout_source/receiver一個就好，因為共用傳輸線。」對是否也只用一個 generator 與一個 ADC readout channel 的追問，確認：「是的，只有一個gen_ch與ro_ch」。初版 FTF 的 readout_source 與 receiver 各一個，分別綁定 YAML 指定的 gen_ch 與 ro_ch，不合併 microwave／flux control 的其他 generators。現行 FTF 另支援 mux readout，一個 generator 發出共同起點的有序 tones，每個 ADC receiver 接收全部 incident carriers，再以自己的頻率解調。同一 shot 的全部 ADC 共用一次 outcome history 抽樣，觀測同一 event 時共用 CTMC path，receiver noise 各自獨立。單 pulse 與 mux 的現行設定及數值契約見 [FTF README](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 R1、R2 共用 reciprocal、co-located two-port transmission line，包含 off-diagonal radiative damping，不等同兩條獨立 Lorentzian 相加或僅共用 ADC。Two-port 指物理端口，不代表雙 ADC。每個 receiver 觀測共同線路輸出，其接收 noise 的 PSD matrix 定義在 I,Q 空間，為2×2實對稱正半定矩陣。有限 pulse 經 classical field evolution，ADC 以總讀取線延遲推遲物理輸出，再解調、取共軛成微波 I+iQ，套 receiver gain／phase／offset 並加入 noise。各 resonator 的 mismatch 相位只旋轉其散射項，不改 shared-line 動力學。數值與欄位契約見 [ADC README](../../../lib/zcu_tools/simulate/adc/README.md) 及 [FTF 欄位指南](../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
 
