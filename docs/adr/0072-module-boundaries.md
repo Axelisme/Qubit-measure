@@ -22,10 +22,11 @@ status: accepted
 |---|---|---|
 | `datafile` | 量測資料檔的儲存工具：Labber、`data.h5`、streaming、grouped。包括版面慣例、讀回時依 schema 驗證、通道型別與 metadata 編碼 | 存檔位置與批次（見 ADR-0063）；實驗語意 |
 | `device` | 各 pyvisa 儀器的定義與控制介面 | 實驗流程 |
-| `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括模擬板 | 參數與資產的保存 |
+| `program` | 控制 ZCU216 與底層 QICK 的工具和類別，包括由呼叫端 profile mapping 建 QickConfig 的 `build_soccfg` 與模擬 SoC binding；時脈、channel 型別與數量等硬體 profile 數值不留在 lib | 參數與資產的保存 |
 | `analysis` | 分析工具 | 檔案讀寫；畫圖 |
 | `plotting` | 具名 Figure、owner 更新機制與共用診斷圖 | 分析計算；lab 的 live 工具與格式 |
 | `simulate` | 數值模擬 | 讀取資料容器；呼叫端傳入數值 |
+| `simulators` | 具體物理模擬器（FTF、single_fluxonium、six_fluxonium）的模型、environment 與私有 replay | 通用演化、ADC、bath、元件 Hamiltonian 等機制，留在 `simulate` |
 | `resources` | 實驗領域資料容器與 YAML、JSON、CSV 的讀寫；waveform 資產的命名、formula 語意與 NPZ 實體 I/O | 量測資料檔；program 的執行機制；重複 waveform codec |
 | `core` | 共用的無狀態型別與格式。`core.waveform_format` 驗證 samples、編解碼 NPZ 與 opaque JSON recipe | 檔案 I/O、formula 語意、GUI、資源 scope 或硬體 |
 | `cfg_model` | 配置 schema 與注入依賴契約，見下節。搬進 core 尚未排定 | 執行行為與 I/O |
@@ -39,6 +40,14 @@ status: accepted
 | `zcu_lab`（repo 根目錄） | 具體實驗、recipes 與其 gui、notebook 附件 | 離線遷移的對照與宣告（放 `migrations/`） |
 
 放置新程式碼時，先找最貼近的類別；所有類別都不合，才放 `utils`。
+
+### 框架機制與模型參數
+
+2026-11-01，使用者要求：「框架應該只有機制本身以及最簡單的範例，比如white_noise，絕對不可以hardcode參數」。
+
+板子 profile 由呼叫端 YAML 提供獨立設定。使用者對此來源選項的原話是「b，模擬器就是要能設定模擬參數」。
+
+具體物理模型放在新增的 `zcu_tools.simulators` package。使用者對此位置選項的原話是「A」。
 
 ### 真實 acquire 與模擬邊界
 
@@ -56,7 +65,7 @@ Charge admission 是 caller 對 generator 必須綁定 charge drive line 的明�
 
 ### Mux PFB channel 查詢與 carrier selection 的 owner
 
-`program` 的 mock-profile owner 提供具名 PFB channel 查詢 `pfb_channel`，包裝 QICK 公開的 `calc_ro_freq` 並取其 `pfb_ch`。FTF 只做 event／carrier selection，不組 QICK register 結構，也不複製 channel folding 算式。這讓 QICK 的 channel assignment 留在 program owner，而非由 experiment 重做。
+`program.v2.mocksoc.pfb_channel` 對呼叫端提供的 QickConfig 查 PFB channel，包裝 QICK 公開的 `calc_ro_freq` 並取其 `pfb_ch`。FTF 只做 event／carrier selection，不組 QICK register 結構，也不複製 channel folding 算式。這讓 QICK 的 channel assignment 留在 program owner，而非由 experiment 重做。
 
 依賴方向沿用 C8、C9 的 `experiment` → `program`，不新增或放寬 import contract。
 
@@ -166,6 +175,7 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 使用者於 2026-10-19 裁定：「不要把依賴放在scripts, 後者的每個檔案都該被理解為獨立腳本入口，需要用到的內容可以放lib裡」。
 
 - `zcu_tools` 不 import `zcu_lab`。定義由組合根注入，框架不反向載入使用者實驗。
+- 框架 package 不得 import `simulators`，由 import-linter `framework-no-simulators` forbidden contract 保護。
 - tests 不依賴 `zcu_lab`，不 import、不綁定實驗流程或預設值。
 
 框架測試使用最小合成 workflow／adapter，不綁定實驗流程或預設值。Tests 不 import `zcu_lab`，也不增加個別實驗的 durable 測試。使用者於 2026-10-12 裁定：「我給你一個判斷方法，如果我刪除zcu_lab測試會報錯，那測試就是寫錯了。」
