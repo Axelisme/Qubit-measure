@@ -239,11 +239,15 @@ class TestReadoutIntegration:
     @pytest.mark.parametrize("runtime", [False, True])
     def test_same_named_readouts_keep_program_owned_templates(self, runtime):
         cfg = _readout_cfg()
-        options = (
-            {"gain_val": "gain_word", "ro_freq_val": "ro_freq_word"} if runtime else {}
-        )
-        first = PulseReadout("r1", cfg, **options)
-        second = PulseReadout("r1", cfg, gain=0.0, **options)
+        def readout_module(gain):
+            return PulseReadout(
+                "r1", cfg, gain=gain,
+                gain_val="gain_word" if runtime else None,
+                ro_freq_val="ro_freq_word" if runtime else None,
+            )
+
+        first = readout_module(cfg.gain)
+        second = readout_module(0.0)
 
         def build(modules):
             builder = TimelineBuilder(make_mock_soccfg())

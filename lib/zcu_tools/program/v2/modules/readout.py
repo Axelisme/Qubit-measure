@@ -311,6 +311,11 @@ class PulseReadout(AbsReadout):
     Timeline completion is generator end plus post-delay once. ADC integration
     stays on its channel, independent of the author timeline, until shot closure.
     A later timeline trigger on that ADC must prove the previous window complete.
+    Same-named instances receive separate program-owned ADC/runtime templates;
+    adc_name(prog) returns the declared ADC name. A zero gain suppresses output
+    amplitude, not generator timing or ADC acquisition. Mutually exclusive
+    same-named emissions may share a shot_sums label when their ADC settings,
+    read indices and per-path counts agree; generator gain/waveform may differ.
     """
 
     Cfg: TypeAlias = PulseReadoutCfg

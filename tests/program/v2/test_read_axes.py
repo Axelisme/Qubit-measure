@@ -168,6 +168,81 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
     assert prog.ro_chs[0]["trigs"] == 2
 
 
+def _branch_program(case_modules, *, reads=1):
+    builder = v2.TimelineBuilder(v2.make_mock_soccfg(n_readouts=2))
+    builder.add_loop("choice", len(case_modules))
+    with builder.branch(by="choice", align_timeline=True) as cases:
+        for index, modules in enumerate(case_modules):
+            with cases.case(index):
+                for module in modules:
+                    builder.emit(module)
+                    builder.timeline_inc(1.5)
+    prog = builder.build()
+    prog.set_reads_per_shot(reads)
+    return prog
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ro_ch", 1),
+        ("freq", 101.0),
+        ("ro_length", 1.2),
+        ("phase", 90.0),
+        ("classifier", LinearClassifier(angle=0.0, threshold=1.0)),
+    ],
+)
+def test_branch_adc_setting_mismatch_names_cases_and_field(field, value):
+    first = readout("selected")
+    cfg = first.cfg.model_copy(update={field: value})
+    other = PulseReadout("selected", cfg)
+    prog = _branch_program([[first], [other]])
+    with pytest.raises(ValueError, match=rf"choice\[0\].*choice\[1\].*{field}"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+
+
+def test_branch_read_index_mismatch_is_rejected_even_with_equal_counts():
+    selected, auxiliary = readout("selected"), readout("auxiliary")
+    prog = _branch_program([[selected, auxiliary], [auxiliary, selected]], reads=2)
+    with pytest.raises(ValueError, match=r"choice\[0\].*choice\[1\].*read index"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+
+
+def test_branch_read_count_mismatch_names_case_and_declared_and_emitted_counts():
+    selected, auxiliary = readout("selected"), readout("auxiliary")
+    prog = _branch_program([[selected, auxiliary], [selected]], reads=2)
+    with pytest.raises(ValueError, match=r"choice\[1\].*declares 2.*emitted 1"):
+        v2.shot_sums(prog, [v2.IQ("selected")])
+    assert prog.ro_chs[0]["trigs"] == 2
+
+
+def test_branch_generator_waveform_can_differ_with_identical_adc_settings():
+    first = readout("selected")
+    other = PulseReadout("selected", first.cfg, gain=0.0, length=0.2)
+    prog = _branch_program([[first], [other]])
+    result = v2.shot_sums(prog, [v2.IQ("selected")])(
+        {0: np.array([[[[2.0, 3.0]]], [[[5.0, 7.0]]]])}
+    )
+    np.testing.assert_array_equal(result, [[1, 2, 3], [1, 5, 7]])
+
+
+def test_correlated_branches_keep_one_selector_choice_for_the_whole_path():
+    selected = readout("selected")
+    builder = v2.TimelineBuilder(v2.make_mock_soccfg())
+    builder.add_loop("choice", 2)
+    for index in (0, 1):
+        with builder.branch(by="choice", align_timeline=True) as cases:
+            with cases.case(index):
+                builder.trigger([0], t=0)
+                builder.timeline_inc(1.5)
+    builder.emit(selected)
+    prog = builder.build()
+    prog.set_reads_per_shot(2)
+    process = v2.shot_sums(prog, [v2.IQ("selected")])
+    result = process({0: np.array([[[[99.0, 99.0], [5.0, 7.0]]]])})
+    np.testing.assert_array_equal(result, [[1, 5, 7]])
+
+
 @pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("mux", [False, True])
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
