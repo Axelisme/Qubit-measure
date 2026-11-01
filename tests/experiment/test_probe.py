@@ -49,9 +49,7 @@ def test_save_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
         variables=(
             VariableSpec(
                 "response",
-                axes=(
-                    VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),
-                ),
+                axes=(VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),),
                 z=VariableZSpec("signal", "signal", "V", dtype=np.complex128),
             ),
         ),
