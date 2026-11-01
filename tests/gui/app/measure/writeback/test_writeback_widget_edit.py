@@ -357,6 +357,7 @@ def _apply(widget: WritebackWidget) -> QPushButton:
 def module_ui(module_widget, tmp_path, request):
     _, widget, _, _ = _populate_module(module_widget)
     driver = ComponentDriver(widget)
+    driver.resize_window(900, 400)
     evidence = Path(os.environ.get("WRITEBACK_UI_EVIDENCE", str(tmp_path)))
     evidence = evidence / request.node.name
     return driver, evidence
