@@ -125,4 +125,3 @@ def compare_roundtrip(
         elif not np.array_equal(before, after, equal_nan=before.dtype.kind in "fc"):
             return False
     return True
-

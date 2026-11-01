@@ -70,4 +70,3 @@ def acquire_record(
                 device_snapshot=devices,
             ).model_dump(mode="json"),
         )
-

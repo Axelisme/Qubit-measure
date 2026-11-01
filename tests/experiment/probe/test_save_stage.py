@@ -32,13 +32,20 @@ def test_save_returns_restored_record_and_native_roundtrip_without_run(tmp_path:
     assert outcome.record is not record
     assert outcome.record.cfg == record.cfg
     assert outcome.record.metadata == record.metadata
-    np.testing.assert_allclose(outcome.record.result.frequency, [1000.123456789, 1001.987654321], rtol=1e-15, atol=0)
+    np.testing.assert_allclose(
+        outcome.record.result.frequency,
+        [1000.123456789, 1001.987654321],
+        rtol=1e-15,
+        atol=0,
+    )
     np.testing.assert_array_equal(outcome.record.result.signal, [2 + 4j, 6 - 8j])
     loaded = load_run_with_metadata(outcome.native_path, spec=spec)
     np.testing.assert_array_equal(loaded.result.signal, outcome.record.result.signal)
 
 
-def test_save_reports_a_differing_result_field_through_public_comparison(tmp_path: Path):
+def test_save_reports_a_differing_result_field_through_public_comparison(
+    tmp_path: Path,
+):
     @dataclass
     class AuxiliaryResult(SavingResult):
         auxiliary: NDArray[np.float64] = field(default_factory=lambda: np.array([0.0]))
@@ -59,10 +66,15 @@ def test_save_reports_a_differing_result_field_through_public_comparison(tmp_pat
     outcome = probe.save_stage(record, spec, tmp_path)
     assert outcome.roundtrip_equal is False
     np.testing.assert_array_equal(outcome.record.result.auxiliary, [0.0])
-    assert probe.compare_roundtrip(record.result, outcome.record.result, spec=spec) is False
+    assert (
+        probe.compare_roundtrip(record.result, outcome.record.result, spec=spec)
+        is False
+    )
     # A correctly supplied field must compare equal through the same public seam.
     outcome.record.result.auxiliary[:] = 7.0
-    assert probe.compare_roundtrip(record.result, outcome.record.result, spec=spec) is True
+    assert (
+        probe.compare_roundtrip(record.result, outcome.record.result, spec=spec) is True
+    )
 
 
 def test_save_preserves_native_cfg_diagnostic(tmp_path: Path):

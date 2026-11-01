@@ -26,7 +26,9 @@ def environment():
 
 
 def test_run_returns_record_and_in_memory_live_png_without_save_or_analysis(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: SimulationEnvironment,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: SimulationEnvironment,
 ):
     class RunOnly(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
@@ -49,11 +51,15 @@ def test_run_returns_record_and_in_memory_live_png_without_save_or_analysis(
     assert outcome.record.metadata["experiment"] == "test/saving"
     assert outcome.elapsed_seconds >= 0
     assert set(outcome.pngs) == {"live-signal%2Ftrace.png"}
-    assert mpl_image.imread(BytesIO(outcome.pngs["live-signal%2Ftrace.png"])).shape[:2] == (300, 900)
+    assert mpl_image.imread(BytesIO(outcome.pngs["live-signal%2Ftrace.png"])).shape[
+        :2
+    ] == (300, 900)
     assert list(tmp_path.iterdir()) == []
 
 
-def test_run_rejects_result_shape_that_disagrees_with_axes(environment: SimulationEnvironment):
+def test_run_rejects_result_shape_that_disagrees_with_axes(
+    environment: SimulationEnvironment,
+):
     class WrongShape(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
             result = super().run(config, context=context)
@@ -66,7 +72,8 @@ def test_run_rejects_result_shape_that_disagrees_with_axes(environment: Simulati
 
 @pytest.mark.parametrize("field", ["frequency", "signal"])
 def test_run_rejects_result_dtype_that_disagrees_with_axes(
-    environment: SimulationEnvironment, field: str,
+    environment: SimulationEnvironment,
+    field: str,
 ):
     class WrongDtype(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
@@ -80,7 +87,8 @@ def test_run_rejects_result_dtype_that_disagrees_with_axes(
 
 @pytest.mark.parametrize("failure", ["run", "live"])
 def test_run_propagates_original_run_or_live_update_error(
-    environment: SimulationEnvironment, failure: str,
+    environment: SimulationEnvironment,
+    failure: str,
 ):
     error = RuntimeError("synthetic stage error")
 

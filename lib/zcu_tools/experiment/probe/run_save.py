@@ -93,7 +93,9 @@ def _validate_dtypes(
     declarations = (
         (*spec.axes, spec.z)
         if isinstance(spec, AxesSpec)
-        else tuple(item for variable in spec.variables for item in (*variable.axes, variable.z))
+        else tuple(
+            item for variable in spec.variables for item in (*variable.axes, variable.z)
+        )
     )
     for declaration in declarations:
         if declaration.field_name is None:
@@ -133,7 +135,9 @@ def run_stage(
     try:
         record = acquire_record(experiment, cfg, environment, plots)
         _validate_dtypes(record.result, experiment.AXES_SPEC)
-        native_persistence.prepare_run_data(record, spec=experiment.AXES_SPEC, comment="")
+        native_persistence.prepare_run_data(
+            record, spec=experiment.AXES_SPEC, comment=""
+        )
         plots.finish()
         pngs: dict[str, bytes] = {}
         for name, figure in plots.items():

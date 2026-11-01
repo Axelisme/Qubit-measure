@@ -271,4 +271,3 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
             environment.devices.close_all_devices()
     print(json.dumps(report, default=_json_default, indent=2))
     return report
-
