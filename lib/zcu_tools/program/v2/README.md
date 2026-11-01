@@ -390,7 +390,9 @@ Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，�
 
 `n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
 Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。
-省略 hint 時使用實際 count，不證明回邊的同 channel overlap。固定次數不接受 hint。
+省略 hint 時使用實際 count，只跳過 generator 回邊的同 channel overlap 證明。
+ADC 回邊仍須證明下一圈的起點不早於前一個視窗結尾，重疊或無法證明時 raise ValueError。
+固定次數或 hint 的 maximum 小於 2 時，兩種回邊檢查都跳過。固定次數不接受 hint。
 每 shot／sweep 點重新初始化循環狀態，局部 counter 不加入 QICK top-level sweep metadata。
 Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
 Producer audit 仍只接受相符的初始化、回邊與重設寫入。

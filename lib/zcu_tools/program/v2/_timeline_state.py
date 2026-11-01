@@ -667,6 +667,41 @@ class TimelineBook:
                 )
             )
 
+    def check_adc_backedge(
+        self,
+        prog,
+        timeline: str,
+        channel: int,
+        gap: TimeExpression,
+        path: tuple[tuple[str, int], ...],
+    ) -> None:
+        """Prove an ADC reentry gap without changing state or emitting delays.
+
+        gap is next-iteration start minus the previous ADC window end in tProc
+        cycles, expressed in the same relative coordinate system with loop
+        progress removed. path lists enclosing (sweep selector, case index)
+        pairs from outermost to innermost; an empty path means unconditional.
+        prog supplies selector point counts and their count expressions.
+        Only the selected path must have a nonnegative gap; zero is safe.
+        Raise ValueError with timeline, ADC channel and overlap cycles if the
+        lower bound is negative, or an unknown-overlap diagnostic if unprovable.
+        """
+        for selector, index in reversed(path):
+            gap = select_time(
+                self.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
+                tuple(
+                    gap if i == index else TimeVariable()
+                    for i in range(prog.loop_dict[selector])
+                ),
+            )
+        lower, _ = difference_limits(gap, TimeVariable())
+        if lower is None or lower < 0:
+            detail = "unknown overlap cycles" if lower is None else f"{-lower} cycles"
+            raise ValueError(
+                f"{timeline}: channel {channel} ADC overlap across repeat backedge; "
+                f"{detail}; cannot prove runtime start >= previous end"
+            )
+
     def check_reference_adc_backedge(self, prog, frame: RepeatFrame) -> None:
         """Prove reference-loop reentry against the final relative ADC tails."""
         for timeline, channel, start, path in frame.adc_starts:
@@ -674,23 +709,7 @@ class TimelineBook:
                 start,
                 scale_time(self.native_expression(prog, channel, generator=False), -1),
             )
-            for selector, index in reversed(path):
-                gap = select_time(
-                    self.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
-                    tuple(
-                        gap if i == index else TimeVariable()
-                        for i in range(prog.loop_dict[selector])
-                    ),
-                )
-            lower, _ = difference_limits(gap, TimeVariable())
-            if lower is None or lower < 0:
-                detail = (
-                    "unknown overlap cycles" if lower is None else f"{-lower} cycles"
-                )
-                raise ValueError(
-                    f"{timeline}: channel {channel} ADC overlap across repeat backedge; "
-                    f"{detail}; cannot prove runtime start >= previous end"
-                )
+            self.check_adc_backedge(prog, timeline, channel, gap, path)
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""

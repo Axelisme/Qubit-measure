@@ -583,6 +583,9 @@ class LoopTimelineExit(Macro):
             gap = substitute_time(
                 gap, {f.progress: TimeVariable() for f in [*book.loop_timelines, frame]}
             )
+            if not generator:
+                book.check_adc_backedge(prog, timeline, ch, gap, path)
+                continue
             for selector, index in reversed(path):
                 gap = select_time(
                     book.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
@@ -591,21 +594,7 @@ class LoopTimelineExit(Macro):
                         for i in range(prog.loop_dict[selector])
                     ),
                 )
-            if not generator:
-                lower, _ = difference_limits(gap, TimeVariable())
-                if lower is None or lower < 0:
-                    detail = (
-                        "unknown overlap cycles"
-                        if lower is None
-                        else f"{-lower} cycles"
-                    )
-                    raise ValueError(
-                        f"{timeline}: channel {ch} ADC overlap across repeat backedge; "
-                        f"{detail}; cannot prove runtime start >= previous end"
-                    )
-            elif (
-                not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0
-            ):
+            if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
                 raise ValueError(
                     f"repeat: channel {ch} pulse overlap across backedge; use timeline_inc"
                 )

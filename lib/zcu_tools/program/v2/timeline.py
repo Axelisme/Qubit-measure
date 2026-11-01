@@ -799,8 +799,12 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         n is a nonnegative integer or existing count register distinct from name.
         Optional range_hint guarantees a closed nonnegative integer count range,
         without runtime checks. Fixed counts forbid hints. Zero discards the body.
-        Unhinted counts skip backedge bounds proofs. Invalid count/hint/name
-        raises ValueError; QICK register exhaustion propagates unchanged.
+        Unhinted register counts skip generator backedge bounds proofs only.
+        ADC backedges still require proof that the next start covers the previous
+        window; overlap or an unprovable gap raises ValueError. Both backedge
+        checks are skipped when the fixed count or range_hint maximum is < 2.
+        Invalid count/hint/name raises ValueError; QICK register exhaustion
+        propagates unchanged.
         Runtime-only event getters raise RuntimeError, never return bounds.
         Table loads written in the body are available to subsequent consumers in
         that iteration. A hint or certified count bounds the counter's table

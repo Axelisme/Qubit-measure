@@ -201,7 +201,11 @@ class TimelineBuilder:
         name identifies the counter. n is a nonnegative integer or existing
         count register. Optional range_hint guarantees a closed nonnegative count
         range without hardware checks; fixed counts forbid hints. Zero discards
-        the body. Invalid count/hint/timeline raises ValueError at build; QICK
+        the body. Unhinted register counts skip generator backedge proofs only.
+        ADC backedges still require proof that the next start covers the previous
+        window; overlap or an unprovable gap raises ValueError at build. Both
+        backedge checks are skipped for a fixed count or hint maximum < 2.
+        Invalid count/hint/timeline raises ValueError at build; QICK
         register exhaustion propagates. Close contexts before build. Recording
         after build raises ValueError.
         """
