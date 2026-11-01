@@ -46,6 +46,8 @@ def test_independent_clocks_and_channel_groups_are_derived(profile):
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_mux_clocks_follow_refclk_and_channelization(profile):
     # 200*12/3/8 = 100 MHz; 200*9/2/3/(64/2) = 9.375 MHz.
+    # RF fabric precedes PFB output and uses 900/(3*8) = 37.5 MHz.
+    profile["readouts"][0]["samps_per_clk"] = 8
     cfg = program.build_soccfg(profile)
     assert cfg["gens"][1]["f_dds"] == 100.0
     assert cfg["gens"][1]["fdds_div"] == 24
