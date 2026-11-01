@@ -8,6 +8,10 @@ They are synthetic inputs, not laboratory calibration.
 The model has one fluxonium, two charge-drive lines and one terminal cavity
 readout. It has no fast-flux route, coupler, mux or real hardware connection.
 
+The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
+it as required `soccfg=`. The board has three generators and one ADC. Board
+clocks and channel types stay separate from the physical settings.
+
 ## Trusted startup and working copy
 
 From the checkout root, create your local settings file:

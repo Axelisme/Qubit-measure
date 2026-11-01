@@ -1,15 +1,17 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-10-31, integer request clocks
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
-`single_fluxonium(path_or_settings, *, private_replay=None)` returns the normal
+`single_fluxonium(path_or_settings, *, soccfg, private_replay=None)` returns the normal
 `SimulationEnvironment`. It creates one fixed-unit DC FakeDevice, a mock SoC,
 one route per named microwave line, an optional fast-flux route and one readout generator/ADC route.
 All generators bind to that ADC for transport admission. Only the configured
 readout generator supplies physical readout pulses. No real hardware or numeric
-warmup runs at construction.
+warmup runs at construction. The caller builds required `soccfg` from its own
+board YAML with `program.build_soccfg`. Board channel counts and clocks are not
+inferred from model wiring or stored in the physical settings schema.
 
 The caller owns resources after return. After acquisition drains, call
 `environment.close_backend()` when present, then clean up caller-owned devices.

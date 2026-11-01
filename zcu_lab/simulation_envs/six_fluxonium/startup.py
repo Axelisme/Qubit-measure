@@ -2,6 +2,9 @@
 
 import logging
 from pathlib import Path
+
+import yaml
+from zcu_tools.program import build_soccfg
 from shlex import quote
 
 from pydantic import TypeAdapter
@@ -57,7 +60,8 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx)
 
     ctx.progress("Building offline six-fluxonium resources")
-    environment = six_fluxonium(settings_path)
+    soccfg = build_soccfg(yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text()))
+    environment = six_fluxonium(settings_path, soccfg=soccfg)
     transferred: set[str] = set()
 
     def close_environment() -> None:

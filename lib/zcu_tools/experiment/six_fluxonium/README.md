@@ -1,16 +1,18 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-10-29 (UTC), explicit charge requirements
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
-`six_fluxonium(configuration)` accepts `SixFluxoniumSettings` or a YAML path and
+`six_fluxonium(configuration, *, soccfg)` accepts `SixFluxoniumSettings` or a YAML path and
 returns `SimulationEnvironment`. The builder creates seven addressed FakeDevices
 in A, `Q1_bias` through `Q6_bias` and `coil_bias`. Each local line affects only
 its own circuit. The shared coil affects all six, with each circuit's own
 current offsets and periods. There is no local-line crosstalk, joint Hilbert
 space or fast-flux input. Construction does not evolve states, warm numeric
-caches or open hardware.
+caches or open hardware. Required `soccfg` comes from caller-owned board YAML
+through `program.build_soccfg`. It supplies the mux and ordinary channel
+capabilities independently of the physical model settings.
 
 Every round captures all seven native currents without changing the devices.
 The six owner computes `(I_coil - coil_offset)/coil_period +

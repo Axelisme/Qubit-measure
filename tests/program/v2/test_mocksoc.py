@@ -1,16 +1,7 @@
 import pytest
-from zcu_tools.program.v2.mocksoc import (
-    make_mock_soccfg,
-    make_mux_mock_soccfg,
-    pfb_channel,
-)
+from zcu_tools.program.v2.mocksoc import pfb_channel
 
-
-def test_make_mock_soccfg():
-    cfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-    assert cfg is not None
-    assert len(cfg["gens"]) == 2
-    assert len(cfg["readouts"]) == 1
+from tests.program._profiles import load_mux_soccfg
 
 
 @pytest.mark.parametrize(
@@ -29,7 +20,7 @@ def test_make_mock_soccfg():
 def test_pfb_channel_matches_qick_physical_frequency_assignment(
     frequency_mhz: float, expected: int
 ):
-    cfg = make_mux_mock_soccfg(2, 5, gen_ch=1, ro_chs=(4, 1))
+    cfg = load_mux_soccfg(2, 5, gen_ch=1, ro_chs=(4, 1))
     rocfg = cfg["readouts"][4]
     registers = cfg.calc_ro_regs(rocfg, phase=0.0, sel="product")
     cfg.calc_ro_freq(
@@ -40,13 +31,13 @@ def test_pfb_channel_matches_qick_physical_frequency_assignment(
 
 @pytest.mark.parametrize("ro_ch", [-1, 1, 2, True])
 def test_pfb_channel_rejects_missing_or_non_pfb_adc(ro_ch: int):
-    cfg = make_mux_mock_soccfg(1, 2, gen_ch=0, ro_chs=(0,))
+    cfg = load_mux_soccfg(1, 2, gen_ch=0, ro_chs=(0,))
     with pytest.raises(ValueError, match="PFB"):
         pfb_channel(cfg, ro_ch, 6000.0)
 
 
 @pytest.mark.parametrize("frequency_mhz", [float("nan"), float("inf"), -float("inf")])
 def test_pfb_channel_rejects_nonfinite_frequency(frequency_mhz: float):
-    cfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    cfg = load_mux_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
     with pytest.raises(ValueError, match="finite MHz"):
         pfb_channel(cfg, 0, frequency_mhz)

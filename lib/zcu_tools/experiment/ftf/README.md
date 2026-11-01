@@ -1,14 +1,16 @@
 # FTF environment composition
 
-**Last updated:** 2026-10-31, empty mux channel receiver noise
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
-`ftf(configuration, *, acquisition=None, workers=1, warmup=False, time_scale=None)`
+`ftf(configuration, *, soccfg, acquisition=None, workers=1, warmup=False, time_scale=None)`
 builds the same `SimulationEnvironment` for GUI startup and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
 `DeviceManager`, uses each source name as its explicit FakeDevice address,
-applies initial values at environment construction and binds the derived channel
-counts to the fixed mock QICK profile. The returned manager owns cleanup. A
+applies initial values at environment construction and binds the caller's required
+`soccfg`. The caller builds that board from independent YAML with `program.build_soccfg`.
+The builder does not infer channel counts from wiring. `FTFSource` and
+`plan_template` require the same acquisition profile for numeric PFB carrier selection. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The GUI example is `zcu_lab/simulation_envs/FTF/startup.py`, which calls `ftf(...)`
 with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`.
@@ -306,7 +308,7 @@ is the first carrier; that carrier's phase stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
 ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
-shift. Mux ADCs select incident carriers by the fixed profile's PFB channel
+shift. Mux ADCs select incident carriers by the supplied board's PFB channel
 before demodulation. The profile determines Nyquist folding, channel spacing and
 offset; its PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz passband.
 Different-channel carriers are excluded, including when only one carrier is
@@ -608,8 +610,11 @@ memory. They need only agree with direct means in expectation, not realization.
 checked private input archives. Acquire and round JSON use schema version 2.
 Version 1 archives fail rather than converting float times. Import `FTFAcquisitionOptions` from
 `zcu_tools.experiment.ftf`. Relative replay roots raise `ValueError`.
-`replay_round(round_path)` recomputes one round without drivers, earlier rounds,
-current YAML or numeric records. Import it from `zcu_tools.experiment.ftf`.
+`replay_round(round_path, soccfg=recording_profile)` recomputes one round without
+drivers, earlier rounds, current YAML or numeric records. Import it from
+`zcu_tools.experiment.ftf`. The caller must supply the board profile used during
+recording. Archives do not store that profile, and replay does not verify its
+identity. It never infers board settings from saved model wiring.
 `ReplayAcquire.settings` stores that acquisition's effective settings with
 `drift=None`, so replay neither reads the simulation clock nor samples drift.
 `ReplayRound.snapshot.model_identity` stores the effective model identity.

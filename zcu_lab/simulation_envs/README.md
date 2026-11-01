@@ -1,15 +1,22 @@
 # Simulation environments
 
-**Last updated:** 2026-11-01，獨立 compile profiles
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
 各環境目錄擁有自己的 startup 與模型參數。現有環境包括
 [FTF](FTF/README.md)、[single_fluxonium](single_fluxonium/README.md) 與
 [six_fluxonium](six_fluxonium/README.md)。執行 startup 才會組裝環境與資源。
-新增 profile 本身不會變更現有 startup 的行為。
+每份 startup 讀取同目錄的 `profile.yaml`，再用 `program.build_soccfg` 建立板子。
+板子設定獨立於物理模型 YAML。修改 profile 後須重建環境。FTF 使用四個 generator
+和三個 ADC，其中 gen1 配 mux ADC1、2。single_fluxonium 和 integer_fluxonium
+各用三個 generator 和一個 ADC。six_fluxonium 用十四個 generator 和七個 ADC，
+其中 gen0 配 mux ADC0..5。
 
-`profiles/ordinary.yaml` 與 `profiles/mux.yaml` 是環境用的獨立板子設定。
+`white_noise/profile.yaml` 提供白噪音範例的板子，呼叫時另填 `std_adc`、`seed` 與
+明確接線或 `routes="all"`。它沒有物理模型參數。見 [white_noise](white_noise/README.md)。
+
+`profiles/ordinary.yaml` 與 `profiles/mux.yaml` 是獨立板子格式的範例。
 前者提供兩個一般 generator 與一個 ADC。後者提供兩個 generator 與五個 ADC，
 其中 generator 1 使用 mixmux8，ADC 4、1 依序連到同一 PFB 的 output 0、1。
 兩份設定均使用 MHz，明填 QICK 0.2.436 metadata 與 tProc revision 27。

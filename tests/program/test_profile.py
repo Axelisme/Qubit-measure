@@ -1,8 +1,4 @@
-"""Profile-to-QICK contract.
-
-The legacy helper comparisons are migration pins. Remove them when the fixed
-helpers are deleted; retain clock, validation and real-compile contracts.
-"""
+"""Profile-to-QICK clock, validation and real-compile contracts."""
 
 from copy import deepcopy
 from pathlib import Path
@@ -11,7 +7,6 @@ import pytest
 import yaml
 from zcu_tools import program
 from zcu_tools.program.v2 import TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 
 
 @pytest.fixture
@@ -20,19 +15,6 @@ def profile(request):
         Path(__file__).parent / "profiles" / f"{request.param}.yaml"
     ).open() as stream:
         return yaml.safe_load(stream)
-
-
-@pytest.mark.parametrize("profile", ["ordinary"], indirect=True)
-def test_yaml_profile_matches_ordinary_compile_config(profile):
-    assert program.build_soccfg(profile).get_cfg() == make_mock_soccfg(2, 1).get_cfg()
-
-
-@pytest.mark.parametrize("profile", ["mux"], indirect=True)
-def test_yaml_profile_matches_mux_compile_config(profile):
-    assert (
-        program.build_soccfg(profile).get_cfg()
-        == make_mux_mock_soccfg(2, 5, gen_ch=1, ro_chs=(4, 1)).get_cfg()
-    )
 
 
 @pytest.mark.parametrize("profile", ["ordinary"], indirect=True)

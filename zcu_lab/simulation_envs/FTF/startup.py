@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import yaml
+from zcu_tools.program import build_soccfg
+
 from pydantic import TypeAdapter
 from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
@@ -73,7 +76,8 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx, template)
 
     ctx.progress("Building offline FTF resources")
-    environment = ftf(settings, workers=1, warmup=False)
+    soccfg = build_soccfg(yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text()))
+    environment = ftf(settings, workers=1, warmup=False, soccfg=soccfg)
     transferred: set[str] = set()
 
     def close_environment() -> None:

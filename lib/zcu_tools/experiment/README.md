@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01（operation 能力與 core helper）
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -44,7 +44,10 @@ Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
 optional opaque `simulation_id`; private replay inputs remain on the binding.
-WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
+`white_noise(soccfg, *, std_adc, seed, routes)` requires a caller-built QICK
+profile, ADC sample standard deviation, seed and wiring. `routes` is a tuple of
+(generator, ADC) pairs or `"all"` for every generator × ADC pair. The environment
+does not infer board settings or select a profile file. WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
 wraps its statistics and complete raw source in program's `IntegratedRound`.
 Decimated acquisition keeps per-execution `RoundSignals`. ADC and white_noise
 structurally satisfy program's `RawShots` without importing program. Processing

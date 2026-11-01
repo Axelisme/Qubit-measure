@@ -2,11 +2,14 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-28，flux pulse 能力、路由與 reset 近似
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
-這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
+這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。
+Startup 另讀相鄰 `profile.yaml`，用 `program.build_soccfg` 建立板子後以 `soccfg=`
+交給 FTF。這份板子設定有四個 generator、三個 ADC，gen1 與 ADC1、2 提供 mux。
+板子的時脈與型別不放入物理模型 YAML。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
 `default.yaml` 是納入 Git 的樣板；`ftf.yaml` 是各自的工作副本，不納入 Git。第一次使用時複製一份：
 
@@ -146,4 +149,4 @@ FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, 
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-從 `zcu_tools.experiment.ftf` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前 YAML 或較早的 rounds。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
+從 `zcu_tools.experiment.ftf` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path, soccfg=recording_profile)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前物理 YAML 或較早的 rounds。Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。

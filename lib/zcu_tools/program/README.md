@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-01，YAML compile profile builder
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -51,7 +51,6 @@ readouts lose tProc control and receive PFB output ports and trigger bits in lis
 order. RF converter settings do not change when a logical channel becomes mux/PFB.
 These mappings describe virtual compile capabilities, not an attached board.
 
-The fixed helpers in `v2.mocksoc` remain available during caller migration.
 
 ## Native acquisition
 

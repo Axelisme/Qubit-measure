@@ -2,10 +2,14 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-10-27, fixed multiplicative readout background.
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
+The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
+it as required `soccfg=`. The board has three generators and one ADC. Board clocks and channel types stay separate
+from the physical settings.
+
 `default.yaml` is the tracked physical-settings template. Each user edits
 `single_fluxonium.yaml`, an untracked working copy beside the startup script.
 `entry-template.yaml` contains working components, wiring and aliases. Neither

@@ -27,6 +27,8 @@ For the GUI, use `uv run --directory . --no-sync -- python -m apps.measure --scr
 import os
 from pathlib import Path
 
+import yaml
+from zcu_tools.program import build_soccfg
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
@@ -40,6 +42,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 settings_path = Path("zcu_lab/simulation_envs/FTF/ftf.yaml").resolve()
 env = ftf(
     settings_path,
+    soccfg=build_soccfg(yaml.safe_load(Path("zcu_lab/simulation_envs/FTF/profile.yaml").read_text())),
     workers=max(1, (os.cpu_count() or 1) - 2),
     warmup=True,
 )

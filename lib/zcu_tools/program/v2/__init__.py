@@ -1,7 +1,6 @@
 from . import modules, utils
 from .base import MyProgramV2
 from .builder import BuilderBranchCases, TimelineBuilder
-from .mocksoc import make_mock_soccfg
 from .modules import (
     AbsModuleCfg,
     AbsReadoutCfg,

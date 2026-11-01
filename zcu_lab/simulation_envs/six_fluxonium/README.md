@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author, agent. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -14,6 +14,11 @@ current offsets and periods.
 There are no fast-flux lines. One mux generator drives all six readout tones.
 A separate pulse generator and ADC handle single-tone scans. The environment
 has no coupler, qubit-qubit interaction or crosstalk matrix.
+
+The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
+it as required `soccfg=`. The board has fourteen generators and seven ADCs, with
+mux gen0 bound to ADC0..5. Board clocks and channel types stay separate
+from the physical settings.
 
 `default.yaml` is the tracked physical-settings template. Each user edits
 `six_fluxonium.yaml`, an untracked working copy beside the startup script.
