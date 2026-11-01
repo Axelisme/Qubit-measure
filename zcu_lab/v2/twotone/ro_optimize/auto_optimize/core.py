@@ -408,7 +408,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
                             [tracker],
                             ge_axis=1,
                             skew_penalty=run_cfg.skew_penalty,
-                        )
+                        ).reshape(())
                     ),
                     trackers=[tracker],
                     **(acquire_kwargs or {}),
