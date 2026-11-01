@@ -37,6 +37,7 @@ from zcu_tools.simulate.evolution import (
     SecularModel,
     quantize_ns,
 )
+from zcu_tools.simulators.ftf.physics.flux import DELTA
 from zcu_tools.simulators.ftf.physics.local import (
     Matrix,
     local_circuit,
@@ -50,6 +51,13 @@ from zcu_tools.simulators.ftf.physics.parameters import (
 )
 
 RealArray = NDArray[np.float64]
+
+# Bound exact-input eigensystem and bath-rate memo residency per joint model.
+_MEMO_CAPACITY = 8
+# Round bath updates to the existing physical integration grid in ns.
+_BATH_GRID_NS = 2.0
+# Avoid overflow when the Bose occupation is below representable significance.
+_BOSE_EXP_LIMIT = 700
 
 
 @dataclass(frozen=True)
@@ -232,7 +240,7 @@ class JointModel:
             energies, vectors = np.linalg.eigh(self.hamiltonian(flux))
             energies.setflags(write=False)
             vectors.setflags(write=False)
-            if len(self._eigensystems) == 8:
+            if len(self._eigensystems) == _MEMO_CAPACITY:
                 self._eigensystems.pop(next(iter(self._eigensystems)))
             self._eigensystems[key] = energies, vectors
         return self._eigensystems[key]
@@ -271,7 +279,7 @@ class JointModel:
                     energies, joint, channel, temperature_k=self.temperature_k
                 )
         rates.setflags(write=False)
-        if len(self._rates) == 8:
+        if len(self._rates) == _MEMO_CAPACITY:
             self._rates.pop(next(iter(self._rates)))
         self._rates[key] = rates
         return rates
@@ -413,7 +421,7 @@ class JointModel:
         ):
             raise ValueError("finite evolution end and positive bath segment required")
         dynamics = FluxDynamics() if dynamics is None else dynamics
-        step = max(2.0, 2 * float(np.rint(bath_segment_ns / 2)))
+        step = max(_BATH_GRID_NS, _BATH_GRID_NS * float(np.rint(bath_segment_ns / _BATH_GRID_NS)))
         boundaries = tuple(
             sorted(
                 {
@@ -441,7 +449,7 @@ class JointModel:
         if self.temperature_k == 0:
             return 0.0
         x = H_OVER_K * resonator.frequency_ghz / self.temperature_k
-        return 0.0 if x > 700 else float(1 / np.expm1(x))
+        return 0.0 if x > _BOSE_EXP_LIMIT else float(1 / np.expm1(x))
 
     def _pure_dephasing(
         self,
@@ -507,7 +515,7 @@ class JointModel:
         """
         if len(level) != 3 or np.asarray(level).dtype.kind not in "iu":
             raise ValueError("FTF level must contain three integers")
-        flux = self.dc_flux + 1e-3 * np.array(level)
+        flux = self.dc_flux + DELTA * np.array(level)
         energy, vectors = self.eigensystem(flux)
         try:
             rates = self._bath_rates(flux, energy, vectors)

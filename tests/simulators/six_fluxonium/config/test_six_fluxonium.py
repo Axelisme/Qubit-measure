@@ -102,7 +102,7 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
             "pulse": "pulse_gen_ch",
             "pulse_adc": "pulse_ro_ch",
         }[defect]
-        document[field] = 99
+        document[field] = -1
     elif defect == "source":
         document["dc_source"]["name"] = "other"
     else:
@@ -110,7 +110,7 @@ def test_invalid_topology_or_material_is_rejected(defect, diagnostic):
         if defect == "local_source":
             q["dc_bias"]["source"]["name"] = "Q1_bias"
         elif defect == "drive":
-            q["drive_line"]["gen_ch"] = 12
+            q["drive_line"]["gen_ch"] = 1
         elif defect == "adc":
             q["readout"]["adc"]["ro_ch"] = 0
         else:

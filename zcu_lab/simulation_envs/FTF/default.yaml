@@ -215,6 +215,7 @@ readout:
 
 numerics:
   # Increase native/local/global dimensions independently to check convergence.
+  projection_weight_floor: 1.0e-9
   truncation:
     f1:
       native_cutoff: 24

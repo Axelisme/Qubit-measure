@@ -58,6 +58,10 @@ from zcu_tools.simulators.ftf.physics import (
 )
 
 
+# Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
+_WAVEFORM_SAMPLE_NS = 2.0
+
+
 class FTFModelFacts:
     """Physical inputs for one complete settings/snapshot/numeric revision.
 
@@ -266,7 +270,7 @@ def _timeline_batch(
         tuple(flux_tracks),
         dc_flux=joint.dc_flux,
         lines=tuple(lines.values()),
-        sample_period_ns=2.0,
+        sample_period_ns=_WAVEFORM_SAMPLE_NS,
         points=len(template.points),
     )
     by_source = {line.source: line for line in lines.values()}
@@ -285,7 +289,7 @@ def _timeline_batch(
             tuple(flux_tracks),
             dc_flux=joint.dc_flux,
             lines=tuple(lines.values()),
-            sample_period_ns=2.0,
+            sample_period_ns=_WAVEFORM_SAMPLE_NS,
             points=len(template.points),
         )
         if continuous

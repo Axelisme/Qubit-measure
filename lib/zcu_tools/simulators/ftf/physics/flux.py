@@ -15,7 +15,10 @@ from zcu_tools.simulate.lines import FluxLine
 
 RealArray = NDArray[np.float64]
 ComplexArray = NDArray[np.complex128]
+# Reduced-flux lattice spacing for midpoint baths and tail bounds, in Phi0.
 DELTA = 1e-3
+# Switch to the cancellation-safe series for the lowpass integral.
+_TAYLOR_SWITCH = 1e-3
 
 
 @dataclass(frozen=True)
@@ -146,7 +149,7 @@ def _moments(length: RealArray, lam: ComplexArray) -> tuple[ComplexArray, Comple
     first = -np.expm1(-x) / lam
     # The series avoids cancellation in the integral of u*exp(-lambda*u).
     numerator = np.where(
-        np.abs(x) < 1e-3,
+        np.abs(x) < _TAYLOR_SWITCH,
         x**2 * (0.5 - x / 3 + x**2 / 8 - x**3 / 30),
         -np.expm1(-x) - x * decay,
     )

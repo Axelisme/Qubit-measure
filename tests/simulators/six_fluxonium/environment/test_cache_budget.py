@@ -16,7 +16,8 @@ from tests.simulators.six_fluxonium.config._data import six_document
 
 @contextmanager
 def backend(**limits: int):
-    document: dict[str, object] = {**six_document(), "numerics": limits}
+    document = six_document()
+    document["numerics"].update(limits)
     try:
         settings = parse_six_fluxonium(document)
     except ValueError as error:

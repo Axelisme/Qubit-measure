@@ -1,5 +1,6 @@
 """Small disposable numeric workloads covering common FTF compilation families.
 
+Synthetic literals serve JIT compilation only; their outputs must not enter results.
 This manifest is deliberately finite, not a promise to compile every route or
 specialization. Update inputs and remeasure compile events when routing changes.
 No YAML, device, acquisition binding, sampling or global RNG is involved.

@@ -36,6 +36,12 @@ from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumS
 from zcu_tools.simulators.single_fluxonium.environment.numeric import dc_flux
 
 
+# Sample filtered fast-flux waveforms on the existing 2 ns DAC grid.
+_WAVEFORM_SAMPLE_NS = 2.0
+# Quantize bath midpoint offsets relative to DC in reduced-flux units.
+_FLUX_LATTICE_PHI0 = 1e-3
+
+
 @dataclass(frozen=True)
 class SingleFluxoniumPlan:
     """Detached numeric inputs for all points of one structural template.
@@ -123,7 +129,7 @@ def _point_flux(
     events = [t for t in filtered.event_times_ns if 0 < t <= end]
     times = np.unique(
         np.r_[
-            np.arange(0, end, 2.0),
+            np.arange(0, end, _WAVEFORM_SAMPLE_NS),
             end,
             events,
             [np.nextafter(t, -np.inf) for t in events],
@@ -136,7 +142,7 @@ def _point_flux(
     starts = starts[(starts < end) | (starts == 0)]
     stops = np.r_[starts[1:], end]
     levels = np.rint(
-        (np.array([filtered.at(float(t))[0] for t in (starts + stops) / 2]) - dc) / 1e-3
+        (np.array([filtered.at(float(t))[0] for t in (starts + stops) / 2]) - dc) / _FLUX_LATTICE_PHI0
     ).astype(np.int64)
     changed = np.r_[True, levels[1:] != levels[:-1]]
     return times, values, starts[changed], levels[changed]

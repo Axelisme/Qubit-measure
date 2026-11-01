@@ -11,6 +11,9 @@ from zcu_tools.simulators.ftf.physics.parameters import FluxoniumCircuit, SquidC
 
 Matrix = NDArray[np.complex128]
 
+# Bound reusable native oscillator operators, independent of joint projection.
+_NATIVE_MEMO_CAPACITY = 8
+
 
 @dataclass(frozen=True)
 class LocalCircuit:
@@ -64,7 +67,7 @@ class LocalCircuit:
         )
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=_NATIVE_MEMO_CAPACITY)
 def _fluxonium(ec_ghz: float, el_ghz: float, n: int) -> tuple[Matrix, ...]:
     # Compute n² before truncation; retain the missing raising matrix element
     # at the top oscillator level instead of squaring an already cut n.

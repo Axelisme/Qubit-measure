@@ -17,6 +17,10 @@ from zcu_tools.experiment.readout_plan import ReadoutDrive, classify_readout
 from zcu_tools.simulators.six_fluxonium.config import SixFluxoniumSettings
 
 
+# Cover floating subtraction at nearest-cavity ties, in MHz.
+_ROUTING_TIE_MHZ = 1e-9
+
+
 @dataclass(frozen=True)
 class RoutedGroup:
     """One observed routing pattern and cavity, with original point ownership.
@@ -52,7 +56,7 @@ def _nearest_cavity(
     best = distances.min(axis=-1, keepdims=True)
     # Subtraction tolerance in MHz, not a physical acceptance band. Never
     # choose a lowest-index cavity when roundoff makes a midpoint ambiguous.
-    if np.any(np.sum(np.abs(distances - best) <= 1e-9, axis=-1) != 1):
+    if np.any(np.sum(np.abs(distances - best) <= _ROUTING_TIE_MHZ, axis=-1) != 1):
         raise ValueError("ambiguous equidistant readout tone: nearest-cavity tie")
     return distances.argmin(axis=-1).astype(np.int64)
 
