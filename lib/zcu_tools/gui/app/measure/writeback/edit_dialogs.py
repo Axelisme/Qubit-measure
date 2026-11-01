@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pydantic import JsonValue
 from qtpy.QtCore import QEvent, QObject, Qt
 from qtpy.QtWidgets import (
     QDialog,
@@ -21,7 +20,7 @@ from qtpy.QtWidgets import (
 )
 
 from zcu_tools.gui.expected_error import ExpectedError
-from zcu_tools.gui.form import FormErrors, FormModel, FormWritePath, WriteRejected
+from zcu_tools.gui.form import FormErrors, FormInputRejected, FormModel, WriteRejected
 from zcu_tools.gui.lifetime import LifetimeScope
 from zcu_tools.gui.widgets import error_colour, secondary_colour
 from zcu_tools.gui.widgets.form import FormEditor
@@ -121,10 +120,11 @@ class WritebackEditDialogs:
         item: ModuleWriteback,
         refresh: Callable[[bool], None],
     ) -> None:
-        """Open the shared draft form, or an inline refusal if it is unavailable.
+        """Edit a detached copy; Save admits input installation, then a rename.
 
-        Re-admit every field/option write and retarget through the controller.
-        Report local and shared validity to the ledger until the view closes.
+        Cancel leaves the shared draft untouched. If a synchronous handler changes
+        admission between install and rename, input stays installed; the inline
+        error leaves the dialog open so Save can retry the rename.
         """
         try:
             form = self._ctrl.writeback_control.get_writeback_item_form_for_pane(
@@ -142,29 +142,17 @@ class WritebackEditDialogs:
             existing.activateWindow()
             return
 
-        def write(batch: Mapping[FormWritePath, JsonValue]) -> None:
-            self._edit_module_form(
-                item.session_id, lambda form: form.state.write(batch, form.env)
-            )
+        copy = form.detached_copy()
 
-        def select(path: FormWritePath, selection: JsonValue) -> None:
+        def save(name: str) -> None:
             self._edit_module_form(
-                item.session_id,
-                lambda form: form.state.select(path, selection, form.env),
+                item.session_id, lambda form: form.state.install_input(copy.state.input)
             )
-
-        def run_command(path: FormWritePath, name: str) -> None:
-            self._edit_module_form(
-                item.session_id,
-                lambda form: form.state.run_command(path, name, form.env),
-            )
-
-        def retarget(name: str) -> None:
-            self._ctrl.writeback_control.set_writeback_item_for_pane(
-                self._tab_id, self._pane, item.session_id, target_name=name
-            )
-            item.target_name = name
-            refresh_preview()
+            if name != item.target_name:
+                self._ctrl.writeback_control.set_writeback_item_for_pane(
+                    self._tab_id, self._pane, item.session_id, target_name=name
+                )
+                item.target_name = name
 
         def preview() -> WritebackValues:
             return self._ctrl.writeback_control.get_writeback_values_for_pane(
@@ -172,22 +160,28 @@ class WritebackEditDialogs:
             )[item.session_id]
 
         editor = FormEditor(
-            form.state, form.env, write=write, select=select, run_command=run_command
+            copy.state,
+            copy.env,
+            write=lambda batch: copy.state.write(batch, copy.env),
+            select=lambda path, selection: copy.state.select(path, selection, copy.env),
+            run_command=lambda path, name: copy.state.run_command(path, name, copy.env),
         )
-        dialog = _ModuleDialog(self._parent, item, editor, retarget)
+        dialog = _ModuleDialog(self._parent, item, editor, save)
         self._track(dialog)
 
         def refresh_preview(*_: object) -> None:
             valid = editor.errors() is None and not isinstance(
-                form.result(), FormErrors
+                copy.result(), FormErrors
             )
-            refresh(valid)
-            dialog.refresh_feedback(preview() if valid else None)
+            values = preview()
+            dialog.refresh_feedback(
+                values, copy.spec().model_dump(mode="python") if valid else None
+            )
 
         scope = LifetimeScope(dialog)
         scope.add_cleanup(editor.detach)
         scope.connect(editor.errors_changed, refresh_preview)
-        scope.add_cleanup(form.state.subscribe(scope.callback(refresh_preview)))
+        scope.add_cleanup(copy.state.subscribe(scope.callback(refresh_preview)))
         self._module_dialogs[item.session_id] = dialog
         refresh_preview()
         dialog.adjustSize()
@@ -342,22 +336,21 @@ class _ModuleDialog(_EditDialog):
         parent: QWidget,
         item: ModuleWriteback,
         editor: FormEditor[FormModel],
-        retarget: Callable[[str], None],
+        save: Callable[[str], None],
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Edit module — {item.target_name}")
         self.setMinimumSize(520, 420)
         self._item = item
         self._editor = editor
-        self._retarget = retarget
-        self._retarget_error = ""
+        self._save = save
+        self._save_error = ""
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.addWidget(self.context_label(item.description))
         self._path = self.context_label("")
         self.foregrounds.set(self._path, secondary_colour)
         layout.addWidget(self._path)
-        layout.addWidget(self._draft_hint())
         name_row = QFormLayout()
         name_row.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
@@ -387,61 +380,43 @@ class _ModuleDialog(_EditDialog):
         layout.addWidget(self._error)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        done = QPushButton("Done")
+        cancel = QPushButton("Cancel")
+        cancel.setAutoDefault(False)
+        self.scope.connect(cancel.clicked, self.reject)
+        buttons.addWidget(cancel)
+        self._save_button = QPushButton("Save")
         # Enter finishes a field, not the dialog, like the shared FormEditor.
-        done.setAutoDefault(False)
-        self.scope.connect(done.clicked, lambda: self.accept())
-        buttons.addWidget(done)
+        self._save_button.setAutoDefault(False)
+        self.scope.connect(self._save_button.clicked, self._commit)
+        buttons.addWidget(self._save_button)
         layout.addLayout(buttons)
-        self.scope.connect(self._name.editingFinished, self._commit_name)
+        self.scope.connect(self._name.textChanged, self._refresh_errors)
         self.scope.connect(editor.errors_changed, self._refresh_errors)
 
-    def _draft_hint(self) -> QLabel:
-        hint = self.context_label(
-            "Changes go to the writeback draft at once.\nThe library is only written by Apply Selected."
-        )
-        hint.setObjectName("writebackDraftHint")
-        hint.setStyleSheet(
-            "QLabel#writebackDraftHint { background: palette(alternate-base); "
-            "border: 1px solid palette(mid); border-radius: 4px; padding: 8px; }"
-        )
-        return hint
+    def detach(self) -> None:
+        """Reject the local copy when its ledger retires."""
+        self.reject()
 
-    def _commit_name(self) -> bool:
-        text = self._name.text().strip()
-        if not text:
-            self._name.setText(self._item.target_name)
-            self._retarget_error = ""
-            self._refresh_errors()
-            return True
-        if text == self._item.target_name:
-            return True
+    def _commit(self) -> None:
         try:
-            self._retarget(text)
-        except Exception as exc:
-            logger.exception(
-                "failed to retarget writeback module %s", self._item.session_id
-            )
-            self._retarget_error = str(exc)
+            name = _require_target_name(self._name.text())
+            self._save(name)
+        except (ExpectedError, WriteRejected, FormInputRejected) as exc:
+            self._save_error = str(exc)
             self._refresh_errors()
-            return False
-        self._retarget_error = ""
-        self._refresh_errors()
-        return True
+            return
+        self.accept()
 
-    def done(self, a0: int) -> None:
-        if self.scope.closed or self._commit_name():
-            super().done(a0)
-
-    def refresh_feedback(self, values: WritebackValues | None) -> None:
-        if values is None:
-            self._path.setText("Writes to library  Unavailable (invalid configuration)")
+    def refresh_feedback(
+        self, values: WritebackValues, proposed: object | None
+    ) -> None:
+        self._path.setText(f"Writes to library  {values.actual_path}")
+        if proposed is None:
             self._changes_title.setText("Changes from library")
             self._changes.setText("Unavailable while the configuration is invalid")
             self._changes.setToolTip("")
         else:
-            self._path.setText(f"Writes to library  {values.actual_path}")
-            changes = module_changes(values.current, values.proposed)
+            changes = module_changes(values.current, proposed)
             self._changes_title.setText(f"Changes from library ({len(changes)})")
             lines = [change.text() for change in changes]
             if values.current is None:
@@ -465,12 +440,11 @@ class _ModuleDialog(_EditDialog):
             ]
         )
         text = _bounded_lines(lines, 5)
-        if self._retarget_error:
-            text = "\n".join(filter(None, [self._retarget_error, text]))
-        if self._editor.local_parse_errors() is not None:
-            text = "\n".join(
-                filter(None, [text, "Invalid text is discarded when you press Done."])
-            )
+        if not self._name.text().strip():
+            text = "\n".join(filter(None, [text, "Apply-as name must not be empty"]))
+        self._save_button.setEnabled(not text)
+        if self._save_error:
+            text = "\n".join(filter(None, [self._save_error, text]))
         self._error.setText(text)
         self._error.setToolTip("\n".join(lines))
         self._error.setVisible(bool(text))
