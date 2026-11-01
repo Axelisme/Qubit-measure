@@ -11,7 +11,6 @@ from tests.program._timing_expectations import generator_duration, tproc_ceil
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 
-
 PULSE_END = tproc_ceil(load_soccfg(), generator_duration(load_soccfg(), 0.1))
 
 
@@ -285,7 +284,9 @@ def test_cross_timeline_pulse_on_same_channel_cannot_bypass_overlap_guard():
 
 
 def test_same_channel_pulses_may_touch_exactly_and_cross_channel_pulses_overlap():
-    exact_end = tproc_ceil(load_soccfg(), generator_duration(load_soccfg(), 25 / GEN_MHZ))
+    exact_end = tproc_ceil(
+        load_soccfg(), generator_duration(load_soccfg(), 25 / GEN_MHZ)
+    )
 
     def initialize(prog):
         prog.add_pulse(

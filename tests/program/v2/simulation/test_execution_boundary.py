@@ -179,9 +179,9 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
             request.materialize_point(p)
             for p in range(int(np.prod(request.point_dims)))
         )
-    ] == pytest.approx([
-        i * int(prog.us2cycles(0.007) / 2) / TPROC_MHZ for i in range(3)
-    ])
+    ] == pytest.approx(
+        [i * int(prog.us2cycles(0.007) / 2) / TPROC_MHZ for i in range(3)]
+    )
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():

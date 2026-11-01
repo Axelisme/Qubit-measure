@@ -240,9 +240,10 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
     starts = [i * step for i in range(3)] * 2
     period = result.time_base.period_ticks(prog.tproccfg["f_time"])
     assert slot.start_ticks.tolist() == [start * period for start in starts]
-    assert slot.duration_ticks.tolist() == [
-        result.time_base.ticks(generator_duration(env.soccfg, 0.1))
-    ] * 6
+    assert (
+        slot.duration_ticks.tolist()
+        == [result.time_base.ticks(generator_duration(env.soccfg, 0.1))] * 6
+    )
     events = [result.materialize_point(i).events[0] for i in range(6)]
     assert [e.frequency_mhz for e in events] == pytest.approx(
         [80, 90, 100, 180, 190, 200], abs=1e-5

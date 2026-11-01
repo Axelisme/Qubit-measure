@@ -14,7 +14,6 @@ from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformC
 
 from tests.program._profiles import (
     GEN_MAXV,
-    GEN_MHZ,
     GEN_SAMPLE_MHZ,
     RO_MHZ,
     TPROC_MHZ,

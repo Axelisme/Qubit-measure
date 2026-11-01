@@ -188,9 +188,13 @@ def test_repeated_request_preserves_numeric_controls(environment, case):
                 if case != "computed_flat_top":
                     assert time_us(
                         request.time_base, event.duration_ticks
-                    ) == pytest.approx(float(generator_duration(
-                        environment.soccfg, 0.055 if inner == 0 else 0.1, 1
-                    )))
+                    ) == pytest.approx(
+                        float(
+                            generator_duration(
+                                environment.soccfg, 0.055 if inner == 0 else 0.1, 1
+                            )
+                        )
+                    )
             if case == "computed_tables":
                 second = [
                     event

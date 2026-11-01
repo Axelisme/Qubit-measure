@@ -152,7 +152,9 @@ def test_compiled_sweeps_step_and_reset_register_times_and_trigger_edges():
         expected_boundaries.append((start, body_end, end))
         expected_events.append([start, body_end + 20 + 2 * scan, trigger, trigger + 2])
         start = end
-    assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == expected_boundaries
+    assert [
+        (s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots
+    ] == expected_boundaries
     assert [[e.cycle for e in s.events] for s in result.shots] == expected_events
     assert [s.loop_indices for s in result.shots] == [
         (0, 0),

@@ -1,6 +1,7 @@
 """Timed native entry points select lexical scope through both author frontends."""
 
 from contextlib import nullcontext
+from math import ceil
 from typing import TypedDict
 
 import pytest
@@ -8,8 +9,11 @@ from zcu_tools.program import v2
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
-from tests.program._timing_expectations import generator_duration, runtime_cycles, tproc_ceil
-from math import ceil
+from tests.program._timing_expectations import (
+    generator_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2.timing_support import shots, waves
 
 

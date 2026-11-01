@@ -56,9 +56,9 @@ def test_acquire_uses_each_calls_rounds_and_preserves_iq_layout(decimated):
             np.testing.assert_array_equal(result[0], 0)
             request = env.soc.binding.last_request
             assert request is not None
-            assert time_us(request.time_base, request.relax_delay_ticks) == prog.cycles2us(
-                prog.us2cycles(12.5)
-            )
+            assert time_us(
+                request.time_base, request.relax_delay_ticks
+            ) == prog.cycles2us(prog.us2cycles(12.5))
     finally:
         env.devices.close_all_devices()
 
