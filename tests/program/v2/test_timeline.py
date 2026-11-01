@@ -6,8 +6,7 @@ import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 
@@ -68,7 +67,9 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(
     def body(prog):
         prog.timeline_inc(subcycle / TPROC_MHZ)
         prog.timeline_inc(subcycle / TPROC_MHZ)
-        prog.timeline_inc(QickSweep1D("scan", 0.2 / TPROC_MHZ, 3.8 / TPROC_MHZ), tag="end")
+        prog.timeline_inc(
+            QickSweep1D("scan", 0.2 / TPROC_MHZ, 3.8 / TPROC_MHZ), tag="end"
+        )
         prog.pulse(0, "p0", timeline="default", tag="pulse")
 
     prog = _program(body, lambda p: p.add_loop("scan", 4))
@@ -79,9 +80,9 @@ def test_each_delay_ceil_and_author_sweep_uses_native_affine_steps(
     assert prog.get_time_param("end", "t", as_array=True) * TPROC_MHZ == pytest.approx(
         expected
     )
-    assert prog.get_time_param("pulse", "t", as_array=True) * TPROC_MHZ == pytest.approx(
-        expected
-    )
+    assert prog.get_time_param(
+        "pulse", "t", as_array=True
+    ) * TPROC_MHZ == pytest.approx(expected)
     assert prog.compile_datamem() is None
 
 
@@ -214,8 +215,12 @@ def test_join_proves_swept_order_by_difference_and_resets_each_shot():
 
     def body(prog):
         prog.fork("default", into=["a", "b"])
-        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 30 / TPROC_MHZ), timeline="a")
-        prog.timeline_inc(QickSweep1D("scan", 20 / TPROC_MHZ, 40 / TPROC_MHZ), timeline="b")
+        prog.timeline_inc(
+            QickSweep1D("scan", 10 / TPROC_MHZ, 30 / TPROC_MHZ), timeline="a"
+        )
+        prog.timeline_inc(
+            QickSweep1D("scan", 20 / TPROC_MHZ, 40 / TPROC_MHZ), timeline="b"
+        )
         prog.join("a", "b", into="default")
         prog.pulse(0, "p0", timeline="default")
         prog.pulse(1, "p1", timeline="a")

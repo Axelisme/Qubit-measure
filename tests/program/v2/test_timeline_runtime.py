@@ -16,8 +16,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
 
 from .timing_support import recompile, shots, waves
 
@@ -182,8 +181,12 @@ def rebased_runtime_end_program():
     def body(prog):
         prog.emit(loader)
         prog.fork("default", into=["a", "b", "c"])
-        prog.timeline_inc(QickSweep1D("scan", 20 / TPROC_MHZ, 180 / TPROC_MHZ), timeline="a")
-        prog.timeline_inc(QickSweep1D("scan", 180 / TPROC_MHZ, 20 / TPROC_MHZ), timeline="b")
+        prog.timeline_inc(
+            QickSweep1D("scan", 20 / TPROC_MHZ, 180 / TPROC_MHZ), timeline="a"
+        )
+        prog.timeline_inc(
+            QickSweep1D("scan", 180 / TPROC_MHZ, 20 / TPROC_MHZ), timeline="b"
+        )
         prog.timeline_inc("c_duration", timeline="c")
         prog.join("a", "b", into="default")
         prog.delay_by_timeline(timeline="default")
@@ -232,7 +235,11 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    offset = QickSweep1D("scan", 7 / TPROC_MHZ, 8 / TPROC_MHZ) if swept_offset else 7 / TPROC_MHZ
+    offset = (
+        QickSweep1D("scan", 7 / TPROC_MHZ, 8 / TPROC_MHZ)
+        if swept_offset
+        else 7 / TPROC_MHZ
+    )
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
@@ -1073,7 +1080,9 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
             with prog.branch(by="scan", align_timeline=True) as branch:
                 for index in range(3):
                     with branch.case(index):
-                        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
+                        prog.timeline_inc(
+                            QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ)
+                        )
             prog.delay_by_timeline()
         prog.timeline_inc(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")

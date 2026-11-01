@@ -26,8 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us

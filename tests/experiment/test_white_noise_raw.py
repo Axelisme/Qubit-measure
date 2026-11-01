@@ -47,8 +47,12 @@ def test_white_noise_returns_deferred_full_raw_with_independent_round_totals():
             reps=1200,
             readouts=(
                 ReadoutWindow(
-                    0, 0, 8,
-                    time_base.period_ticks(environment.soccfg["readouts"][0]["f_output"]),
+                    0,
+                    0,
+                    8,
+                    time_base.period_ticks(
+                        environment.soccfg["readouts"][0]["f_output"]
+                    ),
                     (0, time_base.ticks(0.1)),
                 ),
             ),

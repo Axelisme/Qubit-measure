@@ -15,8 +15,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 
@@ -134,7 +133,9 @@ def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
     a = _pulse("a")
     # 25 generator clocks per step is exactly28 tProc cycles.
     b = _pulse(
-        "b", ch=1, length=QickSweep1D("scan", 77 / GEN_MHZ, 127 / GEN_MHZ) if swept else 0.2
+        "b",
+        ch=1,
+        length=QickSweep1D("scan", 77 / GEN_MHZ, 127 / GEN_MHZ) if swept else 0.2,
     )
     tail = _pulse("tail", ch=2)
 

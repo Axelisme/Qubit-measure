@@ -3,8 +3,7 @@
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 
 def test_body_layout_tracks_reference_and_native_shell_across_shots():

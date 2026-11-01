@@ -25,8 +25,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.timing_support import shots, waves
 
 
@@ -294,7 +293,9 @@ def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
 def test_runtime_cross_grid_length_sweep_ceil_without_implicit_time_table():
     pulse = Pulse(
         "cross_grid",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0),
+        _pulse_cfg(
+            length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0
+        ),
     )
     tail = Pulse("tail", _pulse_cfg(1, length=10 / GEN_MHZ, pre=0, post=0))
 
@@ -372,7 +373,9 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
 def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
     pulse = Pulse(
         "wide",
-        _pulse_cfg(length=QickSweep1D("scan", 3 / GEN_MHZ, 65535 / GEN_MHZ), pre=0, post=0),
+        _pulse_cfg(
+            length=QickSweep1D("scan", 3 / GEN_MHZ, 65535 / GEN_MHZ), pre=0, post=0
+        ),
     )
     tail = Pulse("tail", _pulse_cfg(1, length=3 / GEN_MHZ, pre=0, post=0))
 
@@ -390,7 +393,9 @@ def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
 def test_branch_merge_preserves_runtime_cross_grid_length_producer(align):
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 77 / GEN_MHZ), pre=0, post=0),
+        _pulse_cfg(
+            length=QickSweep1D("scan", 39 / GEN_MHZ, 77 / GEN_MHZ), pre=0, post=0
+        ),
     )
     other = Pulse("other", _pulse_cfg(length=35 / GEN_MHZ, pre=0, post=0))
     tail = Pulse("tail", _pulse_cfg(1, length=3 / GEN_MHZ, pre=0, post=0))
@@ -431,7 +436,9 @@ def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
         val_reg="selected",
         pulses=[
             _pulse_cfg(
-                length=QickSweep1D("scan", n / GEN_MHZ, (n + 76) / GEN_MHZ), pre=0, post=0
+                length=QickSweep1D("scan", n / GEN_MHZ, (n + 76) / GEN_MHZ),
+                pre=0,
+                post=0,
             )
             for n in (39, 40)
         ],
@@ -493,8 +500,12 @@ def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
 def test_nonaffine_post_and_repeated_emissions_keep_exact_same_channel_spacing(
     descending, swept_post
 ):
-    start, stop = (115 / GEN_MHZ, 39 / GEN_MHZ) if descending else (39 / GEN_MHZ, 115 / GEN_MHZ)
-    post = QickSweep1D("scan", 0.0002, 0.0002 + 0.1 / TPROC_MHZ) if swept_post else 0.0002
+    start, stop = (
+        (115 / GEN_MHZ, 39 / GEN_MHZ) if descending else (39 / GEN_MHZ, 115 / GEN_MHZ)
+    )
+    post = (
+        QickSweep1D("scan", 0.0002, 0.0002 + 0.1 / TPROC_MHZ) if swept_post else 0.0002
+    )
     pulse = Pulse(
         "drive", _pulse_cfg(length=QickSweep1D("scan", start, stop), pre=0, post=post)
     )
@@ -522,7 +533,9 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
     pulse = Pulse(
         "drive",
         _pulse_cfg(
-            length=39 / GEN_MHZ + QickSpan("scan", 76 / GEN_MHZ) + QickSpan("fine", 2 / GEN_MHZ),
+            length=39 / GEN_MHZ
+            + QickSpan("scan", 76 / GEN_MHZ)
+            + QickSpan("fine", 2 / GEN_MHZ),
             pre=0,
             post=0,
         ),
@@ -617,7 +630,9 @@ def test_readout_post_follows_generator_without_waiting_for_adc(
 def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_padding():
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0),
+        _pulse_cfg(
+            length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0
+        ),
     )
     tail = Pulse("tail", _pulse_cfg(2, pre=0, post=0))
     loader = LoadValue("other", [60, 20, 100], "scan", "other_end")
@@ -646,7 +661,9 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
 def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 25 / GEN_MHZ, 75 / GEN_MHZ), pre=0, post=0),
+        _pulse_cfg(
+            length=QickSweep1D("scan", 25 / GEN_MHZ, 75 / GEN_MHZ), pre=0, post=0
+        ),
         pulse_id="drive",
     )
 
@@ -699,7 +716,9 @@ def test_readout_length_sweep_adds_post_to_generator_without_adc_padding():
             nqz=1,
             freq=1000,
             gain=0.5,
-            waveform=ConstWaveformCfg(length=QickSweep1D("scan", 40 / GEN_MHZ, 116 / GEN_MHZ)),
+            waveform=ConstWaveformCfg(
+                length=QickSweep1D("scan", 40 / GEN_MHZ, 116 / GEN_MHZ)
+            ),
             pre_delay=0,
             post_delay=0.0002,
             ro_ch=0,

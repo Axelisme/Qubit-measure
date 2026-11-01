@@ -19,8 +19,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -353,7 +352,9 @@ def test_program_join_only_merges_runtime_ends():
         ]
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
-        ] == pytest.approx([(start + t) / TPROC_MHZ for t in [0, 43, 0, 87, 130, 87, 174]])
+        ] == pytest.approx(
+            [(start + t) / TPROC_MHZ for t in [0, 43, 0, 87, 130, 87, 174]]
+        )
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
         ) == pytest.approx(((start + 174) / TPROC_MHZ,))
@@ -361,10 +362,16 @@ def test_program_join_only_merges_runtime_ends():
 
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
     left = TableLengthPulse(
-        "left", drive(), lengths=[25 / GEN_MHZ, 50 / GEN_MHZ, 75 / GEN_MHZ], idx_reg="scan"
+        "left",
+        drive(),
+        lengths=[25 / GEN_MHZ, 50 / GEN_MHZ, 75 / GEN_MHZ],
+        idx_reg="scan",
     )
     right = TableLengthPulse(
-        "right", drive(ch=2), lengths=[75 / GEN_MHZ, 50 / GEN_MHZ, 25 / GEN_MHZ], idx_reg="scan"
+        "right",
+        drive(ch=2),
+        lengths=[75 / GEN_MHZ, 50 / GEN_MHZ, 25 / GEN_MHZ],
+        idx_reg="scan",
     )
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
     readout = receiver().build("readout")
@@ -393,7 +400,10 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
         ] == pytest.approx(
-            [(origin_cycle + t) / TPROC_MHZ for t in [0, 0, maximum, maximum, 2 * maximum]]
+            [
+                (origin_cycle + t) / TPROC_MHZ
+                for t in [0, 0, maximum, maximum, 2 * maximum]
+            ]
         )
         assert [
             time_us(result.time_base, e.duration_ticks) for e in point.events[:2]

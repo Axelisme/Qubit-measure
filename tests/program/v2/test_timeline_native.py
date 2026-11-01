@@ -5,8 +5,7 @@ from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
 
 from .timing_support import shots as _shots
 
@@ -64,7 +63,9 @@ def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
 
     prog = _program(body)
     assert prog.get_time_param("native", "t") == 0
-    assert prog.get_time_param("default", "t") * TPROC_MHZ == pytest.approx(200 - advance)
+    assert prog.get_time_param("default", "t") * TPROC_MHZ == pytest.approx(
+        200 - advance
+    )
     assert prog.get_time_param("other", "t") * TPROC_MHZ == pytest.approx(220 - advance)
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [
         0,
@@ -142,7 +143,11 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
             0, "ro", t=0.2 / TPROC_MHZ, timeline="default", tag="config"
         )
         prog.trigger(
-            [0], t=0.2 / TPROC_MHZ, width=0.2 / TPROC_MHZ, timeline="default", tag="edge"
+            [0],
+            t=0.2 / TPROC_MHZ,
+            width=0.2 / TPROC_MHZ,
+            timeline="default",
+            tag="edge",
         )
         prog.delay_by_timeline()
         prog.pulse(0, "pulse", timeline="default", tag="after")
@@ -245,7 +250,8 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
         prog.trigger([0], timeline="default")
         if placement == "sweep":
             prog.timeline_inc(
-                QickSweep1D("scan", 100 / TPROC_MHZ, 180 / TPROC_MHZ), timeline="next_read"
+                QickSweep1D("scan", 100 / TPROC_MHZ, 180 / TPROC_MHZ),
+                timeline="next_read",
             )
         else:
             prog.timeline_inc(100 / TPROC_MHZ, timeline="next_read")
@@ -326,11 +332,15 @@ def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
 
     def body(prog):
         start = (
-            QickSweep1D("scan", 0.2 / TPROC_MHZ, 1.2 / TPROC_MHZ) if swept else 0.2 / TPROC_MHZ
+            QickSweep1D("scan", 0.2 / TPROC_MHZ, 1.2 / TPROC_MHZ)
+            if swept
+            else 0.2 / TPROC_MHZ
         )
         prog.trigger([0], t=start, width=10 / TPROC_MHZ)
         next_start = (
-            QickSweep1D("scan", 140 / TPROC_MHZ, 141 / TPROC_MHZ) if swept else 140 / TPROC_MHZ
+            QickSweep1D("scan", 140 / TPROC_MHZ, 141 / TPROC_MHZ)
+            if swept
+            else 140 / TPROC_MHZ
         )
         prog.timeline_inc(next_start)
         prog.trigger([0], timeline="default")

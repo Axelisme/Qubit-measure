@@ -100,7 +100,11 @@ def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
     gen_row = next(line for line in text.splitlines() if "axis_sg_int4_v1" in line)
     ro_row = next(line for line in text.splitlines() if "axis_readout_v3" in line)
     assert gen_row.split() == [
-        "0", "axis_sg_int4_v1", "1_230", f"{cfg['rf']['dacs'][gen['dac']]['fs']:.3f}", "-"
+        "0",
+        "axis_sg_int4_v1",
+        "1_230",
+        f"{cfg['rf']['dacs'][gen['dac']]['fs']:.3f}",
+        "-",
     ]
     assert ro_row.split() == [
         "0",

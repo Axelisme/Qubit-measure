@@ -14,8 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MAXV, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MAXV, RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import (
@@ -58,8 +57,12 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     gen = env.soccfg["gens"][0]
     ro = env.soccfg["readouts"][0]
     expected_base = TimeBase.from_clocks(
-        (prog.tproccfg["f_time"], gen["f_fabric"],
-         gen["f_fabric"] * gen["samps_per_clk"], ro["f_output"])
+        (
+            prog.tproccfg["f_time"],
+            gen["f_fabric"],
+            gen["f_fabric"] * gen["samps_per_clk"],
+            ro["f_output"],
+        )
     )
     assert result.time_base == expected_base
     assert result.relax_delay_ticks == (
@@ -105,14 +108,20 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
         original, expanded = build(False), build(True)
         gen, extra = env.soccfg["gens"][:2]
         expected_base = TimeBase.from_clocks(
-            (env.soccfg["tprocs"][0]["f_time"], gen["f_fabric"],
-             gen["f_fabric"] * gen["samps_per_clk"],
-             env.soccfg["readouts"][0]["f_output"])
+            (
+                env.soccfg["tprocs"][0]["f_time"],
+                gen["f_fabric"],
+                gen["f_fabric"] * gen["samps_per_clk"],
+                env.soccfg["readouts"][0]["f_output"],
+            )
         )
         assert original.time_base == expected_base
         assert expanded.time_base == TimeBase.from_clocks(
-            (float(expected_base.ticks_per_us), extra["f_fabric"],
-             extra["f_fabric"] * extra["samps_per_clk"])
+            (
+                float(expected_base.ticks_per_us),
+                extra["f_fabric"],
+                extra["f_fabric"] * extra["samps_per_clk"],
+            )
         )
         a, b = original.templates[0], expanded.templates[0]
         (event_a,), (event_b,) = a.events, b.events
@@ -493,7 +502,8 @@ def test_flag_alu_uses_prewrite_operands_and_conditions_are_per_lane(condition, 
     assert [
         result.materialize_point(i).events[0].gain for i in range(3)
     ] == pytest.approx(
-        np.asarray(gains) / (env.soccfg["gens"][0]["maxv"] * env.soccfg["gens"][0]["maxv_scale"])
+        np.asarray(gains)
+        / (env.soccfg["gens"][0]["maxv"] * env.soccfg["gens"][0]["maxv_scale"])
     )
 
 
@@ -913,7 +923,9 @@ def test_dmem_lane_addresses_and_simultaneous_side_writes_use_prewrite_sources(s
     for point in range(3):
         assert [
             e.gain for e in result.materialize_point(point).events
-        ] == pytest.approx(np.array([stored[point], point - 1, stored[point]]) / GEN_MAXV)
+        ] == pytest.approx(
+            np.array([stored[point], point - 1, stored[point]]) / GEN_MAXV
+        )
 
 
 def test_dmem_live_in_is_rejected_across_points():

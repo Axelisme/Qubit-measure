@@ -7,8 +7,7 @@ from qick.asm_v2 import AsmInst, Pulse, QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
 
-from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
 
 
 class ScalarProgram(MyProgramV2):

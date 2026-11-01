@@ -12,8 +12,14 @@ from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
 
-from tests.program._profiles import GEN_MAXV, GEN_MHZ, GEN_SAMPLE_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import (
+    GEN_MAXV,
+    GEN_MHZ,
+    GEN_SAMPLE_MHZ,
+    RO_MHZ,
+    TPROC_MHZ,
+    load_soccfg,
+)
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import (
@@ -73,8 +79,12 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     assert envelope is not None
     values = np.asarray(envelope.values, dtype=np.complex128)
     assert envelope_times_us(observed.time_base, envelope)[0] == 0
-    assert envelope_times_us(observed.time_base, envelope)[1] == pytest.approx(1 / GEN_SAMPLE_MHZ)
-    assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(38 / GEN_MHZ)
+    assert envelope_times_us(observed.time_base, envelope)[1] == pytest.approx(
+        1 / GEN_SAMPLE_MHZ
+    )
+    assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(
+        38 / GEN_MHZ
+    )
     assert values.real.min() == pytest.approx(-0.2, abs=1 / GEN_MAXV)
     assert np.max(np.abs(values)) < 0.23  # never normalize this to a unit peak
     assert values[0].imag == pytest.approx(0.1, abs=1 / GEN_MAXV)

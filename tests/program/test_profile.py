@@ -108,9 +108,7 @@ def test_pfb_channelization_requires_an_integer_clock_divider(profile, channels)
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
 def test_mux_generator_outside_profile_reports_path(profile):
-    profile["mux"][0]["gen_ch"] = sum(
-        group["count"] for group in profile["generators"]
-    )
+    profile["mux"][0]["gen_ch"] = sum(group["count"] for group in profile["generators"])
     with pytest.raises(ValueError, match=r"mux\.0\.gen_ch"):
         program.build_soccfg(profile)
 

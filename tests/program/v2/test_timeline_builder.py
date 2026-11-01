@@ -25,8 +25,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_mux_soccfg, load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_mux_soccfg, load_soccfg
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -131,7 +130,9 @@ def test_named_time_operations_keep_end_and_reference_separate(
     assert waves(shot) == [0, 143]
     assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
     expected_offset = 143 if operation == "timeline_inc" else 0
-    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(expected_offset)
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(
+        expected_offset
+    )
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])
@@ -1154,7 +1155,8 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9)
+        "duration",
+        v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9),
     )
     for name, length in (("prepare", 77 / GEN_MHZ), ("drive", duration)):
         parallel_modules = list(
@@ -1193,7 +1195,8 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9)
+        "duration",
+        v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9),
     )
     for name, length in (
         ("prepare", 77 / GEN_MHZ),

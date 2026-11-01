@@ -28,7 +28,9 @@ def test_time_sweep_matches_signed_qick_clock_grid(
     soccfg: QickConfig, reverse: bool
 ) -> None:
     cycle = 1 / soccfg["gens"][0]["f_fabric"]
-    start, stop = (3413.2 * cycle, 13.2 * cycle) if reverse else (13.2 * cycle, 3413.2 * cycle)
+    start, stop = (
+        (3413.2 * cycle, 13.2 * cycle) if reverse else (13.2 * cycle, 3413.2 * cycle)
+    )
     sweep = make_sweep(start, stop, expts=201)
     expected = (13 + 17 * np.arange(201)) * cycle
     if reverse:

@@ -80,8 +80,12 @@ def isolated_carrier_plan(
     return plan_template(
         settings(),
         snapshot(),
-        replace(base, events=pulses, readouts=windows,
-                duration_ticks=np.full(2, time_base.ticks(4.0), dtype=np.int64)),
+        replace(
+            base,
+            events=pulses,
+            readouts=windows,
+            duration_ticks=np.full(2, time_base.ticks(4.0), dtype=np.int64),
+        ),
         soccfg=soccfg,
         readout=config,
         time_base=time_base,

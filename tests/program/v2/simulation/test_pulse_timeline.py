@@ -16,8 +16,7 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
-from tests.program._profiles import GEN_MAXV, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MAXV, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import (
     envelope_times_us,

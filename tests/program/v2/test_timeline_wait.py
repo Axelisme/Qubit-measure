@@ -21,8 +21,13 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_mux_soccfg, load_soccfg
+from tests.program._profiles import (
+    GEN_MHZ,
+    RO_MHZ,
+    TPROC_MHZ,
+    load_mux_soccfg,
+    load_soccfg,
+)
 
 from .timing_support import shots, waves
 
@@ -73,7 +78,13 @@ def t1_program(
                 self.declare(native_gap)
             self.declare_gen(1, nqz=1)
             self.add_pulse(
-                1, "pi", style="const", freq=1000, phase=0, gain=0.5, length=25 / GEN_MHZ
+                1,
+                "pi",
+                style="const",
+                freq=1000,
+                phase=0,
+                gain=0.5,
+                length=25 / GEN_MHZ,
             )
             self.declare(readout)
 
@@ -151,7 +162,9 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
     else:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ)
+            prog = Program(
+                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ
+            )
         result = shots(prog)
         body = [shot.body_end_cycle - shot.start_cycle for shot in result]
         assert body == [10, 20]
@@ -335,10 +348,14 @@ def variable_tail_program(
             self.emit(origin)
             self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
-            self.timeline_inc(69 / TPROC_MHZ)  # Explicitly reach the ADC end before post.
+            self.timeline_inc(
+                69 / TPROC_MHZ
+            )  # Explicitly reach the ADC end before post.
             self.timeline_inc(
                 QickSweep1D(
-                    "post_axis", -tail_cycles[0] / TPROC_MHZ, -tail_cycles[1] / TPROC_MHZ
+                    "post_axis",
+                    -tail_cycles[0] / TPROC_MHZ,
+                    -tail_cycles[1] / TPROC_MHZ,
                 )
             )
 
@@ -530,7 +547,9 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
         with pytest.warns(
             UserWarning, match=r"WAIT.*count_cycles.*slack=10 cycles"
         ) as caught:
-            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ)
+            prog = Program(
+                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ
+            )
         assert all("upper bound" not in str(item.message) for item in caught)
         body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
         assert body == [10, 20]
@@ -584,7 +603,9 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
                 self.emit(delays)
                 self.timeline_inc(60 / TPROC_MHZ)
                 self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
-                self.timeline_inc(69 / TPROC_MHZ)  # Preserve a nonoverlapping ADC cadence.
+                self.timeline_inc(
+                    69 / TPROC_MHZ
+                )  # Preserve a nonoverlapping ADC cadence.
                 self.timeline_inc(-40 / TPROC_MHZ)
                 self.timeline_inc("delay_cycles")
                 self.delay_by_timeline()
@@ -618,7 +639,9 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
 
     slack = 15 if branch else 10
     with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
-        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=slack / TPROC_MHZ)
+        prog = Program(
+            load_soccfg(0, 1), initial_delay=0, relax_delay=slack / TPROC_MHZ
+        )
     assert shell_wait(prog) == 30
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         100,

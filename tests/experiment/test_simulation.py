@@ -92,8 +92,11 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
             reps=100,
             readouts=(
                 ReadoutWindow(
-                    0, 0, 8,
-                    time_base.period_ticks(env.soccfg["readouts"][0]["f_output"]), (0,)
+                    0,
+                    0,
+                    8,
+                    time_base.period_ticks(env.soccfg["readouts"][0]["f_output"]),
+                    (0,),
                 ),
             ),
             root_seed=17,

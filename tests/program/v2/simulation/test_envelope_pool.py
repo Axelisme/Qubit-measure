@@ -98,7 +98,10 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
         changed_request = build_compiled_request(
             prog, "integrated", soc.binding, 2, routes=soc.routes
         )
-        assert changed_request.time_base.ticks_per_us % old_request.time_base.ticks_per_us == 0
+        assert (
+            changed_request.time_base.ticks_per_us % old_request.time_base.ticks_per_us
+            == 0
+        )
         assert changed_request.time_base.ns(changed.sample_period_ticks) == (
             old_request.time_base.ns(first.sample_period_ticks) / 2
         )

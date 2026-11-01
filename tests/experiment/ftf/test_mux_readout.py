@@ -132,8 +132,12 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
         (wider, (carrier_mhz, companion_mhz)),
     ):
         plan = ftf_module.plan_template(
-            settings(), snapshot(), content, soccfg=soccfg,
-            readout=configuration(), time_base=TIME_BASE,
+            settings(),
+            snapshot(),
+            content,
+            soccfg=soccfg,
+            readout=configuration(),
+            time_base=TIME_BASE,
         )
         assert tuple(
             p.frequency_ghz for p in plan.readouts[0].batch.events[0][0].pulses
@@ -186,7 +190,9 @@ def test_mux_channel_passband_keeps_only_in_channel_carriers(
     channels = []
     for frequency in (carrier_mhz, companion_mhz):
         registers = soccfg.calc_ro_regs(adc, phase=0.0, sel="product")
-        soccfg.calc_ro_freq(adc, {"freq": frequency, "gen_ch": None}, registers, True, 0.0)
+        soccfg.calc_ro_freq(
+            adc, {"freq": frequency, "gen_ch": None}, registers, True, 0.0
+        )
         channels.append(registers["pfb_ch"])
     retained = 1 + (channels[0] == channels[1])
     base = mux_template()

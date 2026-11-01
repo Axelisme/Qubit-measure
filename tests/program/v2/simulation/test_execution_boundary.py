@@ -11,8 +11,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationSoc
 
-from tests.program._profiles import TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import times_us

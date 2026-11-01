@@ -7,8 +7,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 
 def compile_lookup(
@@ -49,7 +48,9 @@ def compile_lookup(
                     }
                 )
 
-    return Program(load_soccfg(), initial_delay=5 / TPROC_MHZ, relax_delay=7 / TPROC_MHZ)
+    return Program(
+        load_soccfg(), initial_delay=5 / TPROC_MHZ, relax_delay=7 / TPROC_MHZ
+    )
 
 
 def compiled_words(prog: TimelineProgramV2) -> list[int]:

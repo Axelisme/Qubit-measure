@@ -6,8 +6,7 @@ from qick.asm_v2 import Macro, QickSweep1D
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
-from tests.program._profiles import TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 from .timing_support import shots, waves
 
@@ -24,7 +23,9 @@ def v6_profile() -> QickConfig:
 def test_complementary_tproc_pulses_leave_a_literal_constant_end():
     cfg = load_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
-        clock.update(fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=TPROC_MHZ)
+        clock.update(
+            fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=TPROC_MHZ
+        )
     cfg["gens"][0].update(
         type="axis_sg_int4_v1",
         has_mixer=True,

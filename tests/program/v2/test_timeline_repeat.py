@@ -8,8 +8,7 @@ from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.macro.wmem import PulseFromRegs
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 
@@ -591,7 +590,11 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
-            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / GEN_MHZ)
+            ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
         ),
         lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
         idx_reg="scan",
@@ -641,7 +644,11 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
-            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / GEN_MHZ)
+            ch=0,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
         ),
         lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
         idx_reg="scan",
@@ -661,9 +668,9 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     assert [_waves(s) for s in _shots(prog)] == [[0, 8, 16], [0, 13, 26]]
     with pytest.raises(RuntimeError, match="runtime-only"):
         prog.get_time_param("inside", "t", as_array=True)
-    assert prog.get_time_param("after", "t", as_array=True) * TPROC_MHZ == pytest.approx(
-        [16, 26]
-    )
+    assert prog.get_time_param(
+        "after", "t", as_array=True
+    ) * TPROC_MHZ == pytest.approx([16, 26])
 
 
 @pytest.mark.parametrize("parent", ["default", "drive"])
@@ -1249,7 +1256,9 @@ def test_register_repeat_clamps_crossing_wait_bound_or_partial_consumption(
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc((100 if consume_after else 30) / TPROC_MHZ, timeline="external")
+        prog.timeline_inc(
+            (100 if consume_after else 30) / TPROC_MHZ, timeline="external"
+        )
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
             prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
@@ -1515,7 +1524,9 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
                 prog.pulse(0, "p0", timeline="default")
                 prog.append_macro(
                     Pulse(
-                        ch=0, name="p0", t=QickSweep1D("scan", 56 / TPROC_MHZ, 66 / TPROC_MHZ)
+                        ch=0,
+                        name="p0",
+                        t=QickSweep1D("scan", 56 / TPROC_MHZ, 66 / TPROC_MHZ),
                     )
                 )
                 if safe:

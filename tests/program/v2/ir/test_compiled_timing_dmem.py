@@ -11,8 +11,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.macro.loop import CloseInnerLoop, OpenInnerLoop
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-from tests.program._profiles import GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 
 
 class DispatchProgram(TimelineProgramV2):

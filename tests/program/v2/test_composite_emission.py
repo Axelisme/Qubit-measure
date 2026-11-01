@@ -26,8 +26,7 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
-from tests.program._profiles import GEN_MHZ, TPROC_MHZ
-from tests.program._profiles import load_soccfg
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -176,8 +175,12 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
         "selected_integer",
         val_reg="selector",
         pulses=[
-            _pulse_cfg(25 / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0}),
-            _pulse_cfg(50 / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+            _pulse_cfg(25 / GEN_MHZ).model_copy(
+                update={"pre_delay": 0, "post_delay": 0}
+            ),
+            _pulse_cfg(50 / GEN_MHZ).model_copy(
+                update={"pre_delay": 0, "post_delay": 0}
+            ),
         ],
     )
     prog = _program(
@@ -398,7 +401,10 @@ def _negative_selected(kind: str, cycles: tuple[int, int] = (39, 64)) -> Module:
     if kind == "computed":
         return ComputedPulse("negative", val_reg="index", pulses=candidates)
     return TableLengthPulse(
-        "negative", candidates[0], lengths=[n / GEN_MHZ for n in cycles], idx_reg="index"
+        "negative",
+        candidates[0],
+        lengths=[n / GEN_MHZ for n in cycles],
+        idx_reg="index",
     )
 
 
@@ -618,7 +624,9 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
     ]
     following = Pulse(
         "following",
-        _pulse_cfg(39 / GEN_MHZ).model_copy(update={"ch": following_ch, "pre_delay": 0.0}),
+        _pulse_cfg(39 / GEN_MHZ).model_copy(
+            update={"ch": following_ch, "pre_delay": 0.0}
+        ),
     )
 
     def initialize(prog):
@@ -688,7 +696,9 @@ def _flat_selected(kind: str) -> Module:
             update={
                 "waveform": FlatTopWaveformCfg(
                     length=(cycles + 16) / GEN_MHZ,
-                    raise_waveform=GaussWaveformCfg(length=16 / GEN_MHZ, sigma=4 / GEN_MHZ),
+                    raise_waveform=GaussWaveformCfg(
+                        length=16 / GEN_MHZ, sigma=4 / GEN_MHZ
+                    ),
                 )
             }
         )
@@ -910,7 +920,9 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
 @pytest.mark.parametrize("flat", [False, True])
 def test_native_address_playback_keeps_deferred_register_resolution(flat):
     pulse = (
-        _flat_selected("computed") if flat else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
+        _flat_selected("computed")
+        if flat
+        else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
     )
 
     def body(prog):
