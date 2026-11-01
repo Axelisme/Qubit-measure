@@ -12,6 +12,16 @@ from .result import IntegratedRound
 from .signals import StatisticsCopier, materialize_shots, pack_signals
 
 
+def _validate_routes(routes: object) -> None:
+    if not isinstance(routes, tuple) or any(
+        not isinstance(route, tuple)
+        or len(route) != 2
+        or any(not isinstance(channel, int) for channel in route)
+        for route in routes
+    ):
+        raise TypeError("routes must be a tuple of (int, int) generator/ADC pairs")
+
+
 class SimulationSoc(QickConfig):
     """Bound offline SoC; no implicit noise mode and no driver ownership.
 
@@ -32,13 +42,7 @@ class SimulationSoc(QickConfig):
         *,
         routes: tuple[tuple[int, int], ...],
     ) -> None:
-        if not isinstance(routes, tuple) or any(
-            not isinstance(route, tuple)
-            or len(route) != 2
-            or any(not isinstance(channel, int) for channel in route)
-            for route in routes
-        ):
-            raise TypeError("routes must be a tuple of (int, int) generator/ADC pairs")
+        _validate_routes(routes)
         super().__init__(soccfg.get_cfg())
         self.binding = binding
         self.routes = routes
