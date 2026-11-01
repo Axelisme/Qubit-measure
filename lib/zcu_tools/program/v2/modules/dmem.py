@@ -191,6 +191,9 @@ class LoadValue(Module):
             # range. A shared capture may have other ranges in other emissions;
             # their whole-program union is not this lookup's index range.
             dependencies=(captured,),
+            dependency_ranges=(
+                {captured: index_limits} if captured_index is None else None
+            ),
             selection=relation,
         ):
             self._emit_lookup(prog, captured)
