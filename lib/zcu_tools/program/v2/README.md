@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-01，公開 API 與文件 owner 分層
+**Last updated:** 2026-11-02，公開 API 與文件 owner 分層
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -76,7 +76,8 @@ Form 座標投影後使用相同驗證器。Start=-1、stop=1.1、step=0.5 的�
 
 [`program.build_soccfg(profile)`](../README.md#yaml-compile-profiles) 從 caller-owned YAML mapping 推導時脈。
 Channel 數、型別、時脈、記憶體限制與 QICK metadata 都必填，builder 不查已安裝 QICK 版本、不建立硬體或 acquisition source。
-Tests 自備 [`tests/program/profiles/`](../../../../tests/program/profiles/)；lab 環境擁有相鄰 `profile.yaml`，板子設定與物理模型 YAML 分開。
+Tests 自備 [`tests/program/profiles/`](../../../../tests/program/profiles/)。Lab 板子 YAML 位於 `zcu_lab/simulation_envs/`，由 startup 或範例呼叫端選定路徑。
+板子設定與物理模型 YAML 分開。
 欄位與數值由各 YAML 擁有，測試的 fixture 與替身慣例見 [tests README](../../../../tests/README.md#qick-編譯-fixture)。
 
 `pfb_channel(soccfg, ro_ch, frequency_mhz)` 透過 QICK 公開 readout 計算解析絕對物理頻率，使用該 ADC 的 PFB 時脈與 channelization。

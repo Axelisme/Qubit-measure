@@ -2,6 +2,8 @@
 
 **Readers:** operator, lab-author, agent. Interpret the synthetic basis and readout checks without treating model inputs as measured calibration.
 
+**Last updated:** 2026-11-01, historical pre-v2 board annotations
+
 ## Circuit, bath and routing
 
 The circuit uses EJ/EC/EL = 6.78/1.47/0.22 GHz, Φ/Φ0 = 0 and a 20 mK qubit bath.
@@ -104,6 +106,9 @@ centroid IQ classifier. The remaining 2048 evaluated it.
 The minimum separation uses pooled within-preparation covariance.
 The selected 80/15 settings gave these results with seed 20261029:
 
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
+
 | Observable | Approved threshold | Selection-dataset result |
 | --- | ---: | ---: |
 | Minimum pooled Mahalanobis separation | ≥ 2 | 2.53274 |
@@ -118,6 +123,9 @@ The 80/20 default regression used independent seed 20261105 and the same
 acquired reference controls. Each preparation again supplied 4096 shots,
 with the first 2048 for training and the remaining 2048 for evaluation.
 It did not select new controls or move shots between the halves.
+
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
 
 | Observable | Approved threshold | 80/20 regression |
 | --- | ---: | ---: |
@@ -135,6 +143,9 @@ clipping hides calibration uncertainty. Neither the error nor the separation
 is pure readout fidelity or evidence of a hardware gate.
 
 ## STIRAP acquired-IQ characterization
+
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
 
 The following acquired estimates use IQ and preparation labels only.
 Operators, GUI, MCP and measurement Results must not read simulator truth.
@@ -202,6 +213,9 @@ gate fidelity.
 
 ## Bounded 80/20 STIRAP acquisition regression
 
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
+
 At the recorded lead +0.3 us working point, 80/20 gave raw g/e/f fractions
 0.036376953125 / 0.03515625 / 0.928466796875.
 The corrected fractions were -0.0000180691 / 0.0328592004 / 0.9671588687.
@@ -212,6 +226,9 @@ stayed fixed. This regression did not repeat or revalidate any scan grid.
 The historical STIRAP numbers above retain their original 80/15 scope.
 
 ## Acquisition wall time
+
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
 
 Historical acquisition timings below predate TimelineBuilder. They cover two single points
 at both 80/15 and 80/20. Each condition has three cold and three warm samples.
@@ -262,6 +279,9 @@ These are simulator acquire timings, not measurement-agent evidence.
 
 ## Raman acquired-IQ characterization
 
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
+
 The recorded 12 points used two-photon detunings -50, 0 and +50 MHz with
 requested gains 0, 0.3, 0.6 and 0.9 at seed 20261106 and 4096 shots per point.
 The carrier center came from acquired spectroscopy as
@@ -290,6 +310,9 @@ The e label is not all higher-state leakage. Transfer is not gate fidelity.
 The [Raman guide](../../v2/twotone/raman_gf/guide.md) describes that workflow.
 
 ## STIRAP environment oracle, lab-author only
+
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
 
 Only the simulator/environment-validation owner uses the oracle in this section.
 The owner reconstructed the recorded Gaussian programs through the public
@@ -365,6 +388,9 @@ receiver. An early pilot with sigma 0.05 us and gains 0.06/0.20 is outside
 this plateau acceptance scope.
 
 ## Raman environment oracle, lab-author only
+
+These values were measured on the pre-switch board, with v6 logical fabric
+384 MHz and 43008 ticks/us. They have not been re-recorded on v2.
 
 The same 12 compiled Raman controls were evolved through public Engine.evolve.
 Driven segments selected full-drive non-RWA dop853; idle segments used t4.

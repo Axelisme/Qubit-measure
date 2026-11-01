@@ -2,15 +2,18 @@
 
 **Readers:** operator, lab-author, agent. Start the offline zero-flux environment and measure transition frequencies before preparing higher states.
 
+**Last updated:** 2026-11-01, shared v2 board profile
+
 This environment uses the Mencia 2024 Device D circuit inputs
 EJ/EC/EL = 6.78/1.47/0.22 GHz, zero flux and a 20 mK qubit bath.
 They are synthetic inputs, not laboratory calibration.
 The model has one fluxonium, two charge-drive lines and one terminal cavity
 readout. It has no fast-flux route, coupler, mux or real hardware connection.
 
-The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
-it as required `soccfg=`. The board has three generators and one ADC. Board
-clocks and channel types stay separate from the physical settings.
+The startup loads `../profiles/qick_216_v2.yaml` with `program.build_soccfg`
+and passes it as required `soccfg=`. This shared v2 board has 16 generators and
+10 ADCs. This environment uses generators 0–2, all v6, and ADC 0, a dyn readout.
+Board clocks and channel types stay separate from the physical settings.
 
 ## Trusted startup and working copy
 
