@@ -147,21 +147,21 @@ class ReceiverBackground(Values):
     """Fixed complex transmission background, applied per absolute carrier.
 
     ripple_depth: finite reflected amplitude in [0,1), default zero.
-    ripple_period_mhz: finite positive standing-wave period in MHz, default 1000.
+    ripple_period_mhz: required finite positive standing-wave period in MHz.
     ripple_phase_deg: finite standing-wave phase in degrees, default zero.
     slope_db_per_ghz: finite amplitude slope in dB/GHz, default zero.
-    pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
+    pivot_ghz: required finite absolute GHz where the slope factor is unity.
     extra_ripples: multiplicative standing waves, default empty.
     roughness: optional fixed complex random field, default disabled.
     band_edges: optional continuous attenuation outside low/high corners.
-    With these omitted, zero depth and slope give unity at every frequency.
+    Zero depth and slope give unity at every frequency.
     """
 
     ripple_depth: Annotated[Finite, Field(ge=0, lt=1)] = 0.0
-    ripple_period_mhz: Positive = 1000.0
+    ripple_period_mhz: Positive
     ripple_phase_deg: Finite = 0.0
     slope_db_per_ghz: Finite = 0.0
-    pivot_ghz: Finite = 0.0
+    pivot_ghz: Finite
     extra_ripples: tuple[BackgroundRipple, ...] = ()
     roughness: BackgroundRoughness | None = None
     band_edges: BackgroundBandEdges | None = None
@@ -181,14 +181,15 @@ class Receiver(Values):
     there is no independent electronic-delay parameter. Calibration/noise follow
     the demodulated field's conversion to microwave I+iQ by conjugation.
     background: optional fixed frequency-dependent transmission before gain/phase;
-    omitted or empty gives unity. Does not change noise, offset or cavity fields.
+    required shape values with zero depth/slope give unity. Does not change noise,
+    offset or cavity fields.
     """
 
     ro_ch: Index
     gain: Finite
     phase_deg: Finite = 0.0
     time_of_flight_ns: Nonnegative = 0.0
-    background: ReceiverBackground = Field(default_factory=ReceiverBackground)
+    background: ReceiverBackground
     offset_adc: tuple[Finite, Finite] = (0.0, 0.0)
     noise_psd_adc2_ns: tuple[tuple[Finite, Finite], tuple[Finite, Finite]]
 

@@ -51,6 +51,7 @@ readout:
   adc:
     ro_ch: 0
     gain: 100.0
+    background: {ripple_period_mhz: 1000.0, pivot_ghz: 0.0}
     noise_psd_adc2_ns: [[1.0, 0.5], [0.5, 0.25]]
 numerics:
   truncation: {native_cutoff: 12, levels: 4}

@@ -10,7 +10,7 @@ def test_receiver_background_roundtrips_optional_line_structure():
         "ro_ch": 0,
         "gain": 1.0,
         "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
-        "background": {
+        "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0, 
             "extra_ripples": [{"depth": 0.04, "period_mhz": 44.0, "phase_deg": 10.0}],
             "roughness": {"amplitude": 0.02, "correlation_mhz": 50.0, "seed": 9},
             "band_edges": {
@@ -24,14 +24,11 @@ def test_receiver_background_roundtrips_optional_line_structure():
     assert Receiver.model_validate(receiver.model_dump()) == receiver
 
 
-def test_receiver_omitted_background_matches_explicit_flat_background():
-    values = {"ro_ch": 0, "gain": 1.0, "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0))}
-    omitted = Receiver.model_validate(values)
-    assert hasattr(omitted, "background"), "schema must accept optional background"
-    explicit = Receiver.model_validate({**values, "background": {}})
-    assert omitted == explicit
-    assert omitted.background.ripple_depth == 0.0
-    assert omitted.background.slope_db_per_ghz == 0.0
+def test_receiver_background_defaults_disable_ripple_and_slope():
+    values = {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 0, "gain": 1.0, "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0))}
+    receiver = Receiver.model_validate(values)
+    assert receiver.background.ripple_depth == 0.0
+    assert receiver.background.slope_db_per_ghz == 0.0
     configured = Receiver.model_validate(
         {
             **values,
@@ -157,6 +154,6 @@ def test_receiver_schema_rejects_out_of_range_background_depth(depth):
                 "ro_ch": 0,
                 "gain": 1.0,
                 "noise_psd_adc2_ns": ((0.0, 0.0), (0.0, 0.0)),
-                "background": {"ripple_depth": depth},
+                "background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0, "ripple_depth": depth},
             }
         )

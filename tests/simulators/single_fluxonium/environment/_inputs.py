@@ -53,7 +53,7 @@ def settings() -> SingleFluxoniumSettings:
                     "kappa_external_mhz": 1,
                     "kappa_internal_mhz": 0,
                 },
-                "adc": {"ro_ch": 0, "gain": 1, "noise_psd_adc2_ns": [[0, 0], [0, 0]]},
+                "adc": {"background": {"ripple_period_mhz": 1000.0, "pivot_ghz": 0.0}, "ro_ch": 0, "gain": 1, "noise_psd_adc2_ns": [[0, 0], [0, 0]]},
             },
             "numerics": {
                 "truncation": {"native_cutoff": 12, "levels": 4},
