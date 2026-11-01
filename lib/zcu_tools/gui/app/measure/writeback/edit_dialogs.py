@@ -173,7 +173,7 @@ class WritebackEditDialogs:
             valid = editor.errors() is None and not isinstance(
                 copy.result(), FormErrors
             )
-            values = preview()
+            values = None if isinstance(form.result(), FormErrors) else preview()
             dialog.refresh_feedback(
                 values, copy.spec().model_dump(mode="python") if valid else None
             )
@@ -183,8 +183,6 @@ class WritebackEditDialogs:
         scope.connect(editor.errors_changed, refresh_preview)
         scope.add_cleanup(copy.state.subscribe(scope.callback(refresh_preview)))
         self._module_dialogs[item.session_id] = dialog
-        refresh_preview()
-        dialog.adjustSize()
 
         def on_finished(*_: object) -> None:
             # Ignore late/duplicate finished delivery after this editor was removed.
@@ -197,6 +195,8 @@ class WritebackEditDialogs:
 
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.scope.add_cleanup(on_finished)
+        refresh_preview()
+        dialog.adjustSize()
         dialog.open()
 
 
@@ -411,10 +411,16 @@ class _ModuleDialog(_EditDialog):
         self.accept()
 
     def refresh_feedback(
-        self, values: WritebackValues, proposed: object | None
+        self, values: WritebackValues | None, proposed: object | None
     ) -> None:
-        self._path.setText(f"Writes to library  {values.actual_path}")
-        if proposed is None:
+        """Show unavailable previews until the shared draft has a valid result."""
+        path = (
+            "Unavailable while the shared configuration is invalid"
+            if values is None
+            else values.actual_path
+        )
+        self._path.setText(f"Writes to library  {path}")
+        if values is None or proposed is None:
             self._changes_title.setText("Changes from library")
             self._changes.setText("Unavailable while the configuration is invalid")
             self._changes.setToolTip("")

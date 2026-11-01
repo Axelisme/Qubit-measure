@@ -377,6 +377,15 @@ def invalid_shared_module_ui(module_widget, module_ui, qapp, monkeypatch):
     assert not callback_errors, callback_errors
 
 
+def _assert_shared_preview_unavailable(editor: ComponentDriver) -> None:
+    assert editor.observe(
+        "Writes to library  Unavailable while the shared configuration is invalid"
+    ).visible
+    assert editor.observe(object_name="writebackModuleChanges").text == (
+        "Unavailable while the configuration is invalid"
+    )
+
+
 @pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
 def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     module_widget, invalid_shared_module_ui
@@ -389,11 +398,13 @@ def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     editor = ComponentDriver(_find_open_dialog("Edit module —"))
     editor.resize_window(700, 700)
     editor.screenshot(evidence / "02-open-invalid.png")
+    _assert_shared_preview_unavailable(editor)
     assert not editor.observe("Save").enabled
     assert "gain" in editor.observe(object_name="writebackEditError").text
     assert editor.text_input(object_name="form.input.gain").text == "missing.value"
     editor.enter_text(object_name="form.input.gain", value="0.25")
     editor.screenshot(evidence / "03-local-repair.png")
+    _assert_shared_preview_unavailable(editor)
     assert editor.observe("Save").enabled
     editor.click("Cancel")
     driver.screenshot(evidence / "04-cancelled.png")
@@ -403,10 +414,12 @@ def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     editor = ComponentDriver(_find_open_dialog("Edit module —"))
     editor.resize_window(700, 700)
     editor.screenshot(evidence / "05-reopened-invalid.png")
+    _assert_shared_preview_unavailable(editor)
     assert editor.text_input(object_name="form.input.gain").text == "missing.value"
     assert not editor.observe("Save").enabled
     editor.enter_text(object_name="form.input.gain", value="0.3")
     editor.screenshot(evidence / "06-repaired.png")
+    _assert_shared_preview_unavailable(editor)
     assert editor.observe("Save").enabled
     editor.click("Save")
     driver.screenshot(evidence / "07-saved.png")
