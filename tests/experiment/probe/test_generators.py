@@ -105,8 +105,9 @@ def test_singleshot_ge_raw_iq_recovers_centers_width_and_misassignment():
     edges = np.linspace(-3.0, 3.0, 121)
     centers = (edges[:-1] + edges[1:]) / 2
     histograms = np.array([np.histogram(row.real, edges)[0] for row in signals])
+    masses = histograms / histograms.sum(axis=1, keepdims=True)
     params, _ = fit_singleshot(
-        centers, *histograms, fixedparams=[None, None, None, None, None, 0.5, 0.0]
+        centers, *masses, fixedparams=[None, None, None, None, None, 0.5, 0.0]
     )
     assert_allclose(params[:5], [-1.0, 1.0, 0.2, 0.95, 0.05], atol=0.01)
     assert_allclose(np.mean(signals.imag, axis=1), [0.4, 0.4], atol=0.005)

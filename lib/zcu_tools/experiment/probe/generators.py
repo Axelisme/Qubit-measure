@@ -13,9 +13,6 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc, lorfunc
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 
-from .shot_generators import GaussianCloudParameters as GaussianCloudParameters
-from .shot_generators import generate_singleshot_ge as generate_singleshot_ge
-
 
 @dataclass(frozen=True)
 class DecayParameters:
