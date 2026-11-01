@@ -5,6 +5,7 @@ import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
+from zcu_tools.analysis.fitting.singleshot import fit_singleshot
 from zcu_tools.experiment.probe import generators
 
 
@@ -91,3 +92,22 @@ def test_qubit_frequency_recovers_dip_center_and_linewidth():
     assert frequency == pytest.approx(5000.4, abs=0.003)
     assert fwhm == pytest.approx(1.0, abs=0.01)
     assert_allclose(params, [1.0, 0.0, -0.8, 5000.4, 0.5], atol=0.003)
+
+
+def test_singleshot_ge_raw_iq_recovers_centers_width_and_misassignment():
+    signals = generators.generate_singleshot_ge(
+        np.linspace(-3.0, 3.0, 1201),
+        generators.GaussianCloudParameters(-1.0 + 0.4j, 1.0 + 0.4j, 0.2, 100000, 0.05),
+        17,
+    )
+    assert signals.shape == (2, 100000)
+    assert signals.dtype == np.complex128
+    edges = np.linspace(-3.0, 3.0, 121)
+    centers = (edges[:-1] + edges[1:]) / 2
+    histograms = np.array([np.histogram(row.real, edges)[0] for row in signals])
+    params, _ = fit_singleshot(
+        centers, *histograms, fixedparams=[None, None, None, None, None, 0.5, 0.0]
+    )
+    assert_allclose(params[:5], [-1.0, 1.0, 0.2, 0.95, 0.05], atol=0.01)
+    assert_allclose(np.mean(signals.imag, axis=1), [0.4, 0.4], atol=0.005)
+    assert_allclose(np.std(signals.imag, axis=1), [0.2, 0.2], atol=0.005)
