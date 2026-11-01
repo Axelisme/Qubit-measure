@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01（grouped probe 的逐 slice 比較）
+**Last updated:** 2026-11-01，獨立離線階段、array-like 模型輸出與 grouped 逐 slice 比較
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -114,26 +114,55 @@ decimated outputs.
 
 ## Offline experiment probe
 
-`probe.probe(experiment, cfg, environment, output_dir, *, options=None)` 用 caller
-建立的 `SimulationEnvironment` 執行公開 run、native save、restore 與 analyze。
-每次建立新的 Scope 與 headless Plots，以 Agg canvas 保存 live／analysis PNG，不建立 Qt application。
-建立 Plots 前以 `matplotlib.style.use` 套用[共用樣式](../plotting/README.md#預設外觀)，
-不切換 backend 或登記 pyplot figure。實驗內的原生 Matplotlib 參數與 `style.context` 可覆寫外觀。
-Caller 仍負責環境的 backend 與 devices 清理，probe 不更改 seed 或接線。
-`ProbeReport` 保留 Result 欄位的 shape／dtype、讀回比較、分析摘要、PNG 路徑與階段秒數。
+`probe` 是 Python 工具庫。Caller 在 task scratch 寫 Python 檔，用實驗自己的 Cfg／Result
+型別組物件，先過 Pyright 與 Ruff，再依需要呼叫以下階段。
+操作與看圖驗收見 [tests](../../../tests/README.md#實驗定義)，
+腳本片段與命令見 [lab 驗收說明](../../../zcu_lab/README.md#實驗定義的離線驗收)。
+
+| API | 輸入與效果 | 回傳 |
+| --- | --- | --- |
+| `probe.run_stage(experiment, cfg, environment)` | 借用 caller 的 SimulationEnvironment 執行公開 run，驗 Result shape／dtype 與 AXES_SPEC，更新 live 圖。不存檔或分析。 | RunStageResult 的 record、elapsed_seconds 與 pngs。 |
+| `probe.save_stage(record, spec, directory)` | 寫 directory/data.h5，再 native restore 並逐欄比較。不執行 run 或 analyze。 | SaveStageResult 的還原 record、native_path、roundtrip_equal 與 cfg_issue。 |
+| `probe.analysis_stage(experiment, record, options)` | 對明確來源呼叫公開 analyze。不執行 run 或存檔。 | AnalysisStageResult 的 analysis 與 pngs，analysis 保留實際回傳物件。 |
+
+Save 與 analysis 可直接接 caller 構造的 RunRecord，無須先呼叫 run。
+分析 options 沿用 experiment.analyze 的簽名，caller 明填。各階段傳出原始例外。
+Save 比較不符時回 `roundtrip_equal=False`；I/O 或 restore 失敗仍拋錯。
+`cfg_issue` 是 native restore 的 cfg 診斷，cfg 無法還原時 record.cfg 為 None。
+
+Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，階段不寫圖片或建立暫存目錄。
+Key 是 `live-`／`analysis-` 加 URL-escaped 圖名與 `.png`。
+兩者使用 Agg canvas、NonPresentingHost、figure 目前尺寸與 100 dpi。
+Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式](../plotting/README.md#預設外觀)，
+實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
+Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
+
+`probe` 按公開名稱載入 stage owner。單獨 import `probe.generators` 不載入 acquisition 或 simulation。
+`probe.generators` 提供兩個資料生成機制，所有參數都由 caller 明填。
+`synthesize(model, xs, params, *, noise_std, seed)` 只做一次 `np.asarray(model(xs, *params))`，
+再對每個輸出元素加獨立高斯噪聲，complex 的實部與虛部分別抽樣。
+Model 可回傳 array-like，兩個長度 N 陣列的 tuple 會轉成 `(2, N)` 陣列。
+Caller 直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`，
+按該模型簽名填 params。Model 決定 shape，probe 只驗 xs 有限非空及 noise_std 有限非負。
+`sample_iq_shots(population, *, g_center, e_center, width, shots, seed)` 按每列的 excited
+population 選 g／e 中心，再以 width 作為每個 quadrature 的高斯 sigma。
+它回傳 shape 為 `(len(population), shots)` 的 raw complex128 IQ，不回 histogram。
+Population 是一維有限的 [0,1] 機率，可空。Width 有限且非負，兩個中心有限。
+Shots 是非負整數，不接受 bool，零 shots 回零欄。GE 用 `[0,1]`，對稱錯置用 `[p,1-p]`，
+population 曲線也用同一函式。兩個機制都只使用本地 RNG。
+Caller 用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 save 或 analysis。
+工具與框架測試不 import `zcu_lab`，測試用最小合成模型、population 與實驗。
+
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
 Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
 eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
 固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
 NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
 同一 Result 欄位在分組宣告使用不同 scale 時，各 slice 按自己的 scale 比較，回傳仍為 bool。
-每個不符 slice 由 module logger 記 WARNING，其餘可比 slice 繼續比較，相符 slice 不記錄。
+Slice 由 VariableZSpec 的 index 與 index_axis 選取。
+每個不符 slice 由 `zcu_tools.experiment.probe` logger 記 WARNING，其餘可比 slice 繼續比較，相符 slice 不記錄。
+Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。整欄 shape 不符時 index_axis 與 index 為 None。
 重疊區域須符合每個宣告的比較規則，未宣告區域維持 exact。
-階段失敗時回傳原始 exception 與 failed_stage，並記錄 traceback；成功前已產生的檔案保留。
-
-`probe.main(argv)` 載入 caller 指定的可信任 `module:class`，依 AXES_SPEC 的 cfg 型別驗證 YAML／JSON，
-建立並清理 white_noise 或 single_fluxonium 環境。它印出 JSON 並回傳同型報告。
-`python -m zcu_tools.experiment.probe --help` 列出參數；module shell 以 exit status 區分成功與階段失敗。
 
 ## 實驗介面與資料
 
