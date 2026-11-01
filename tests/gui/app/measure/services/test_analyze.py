@@ -67,7 +67,7 @@ def test_analyze_errors_settle_failed_with_original_message(qapp, phase, error_t
         bg.last_on_done(bg.last_work())
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == str(error)
+    assert outcome.error == repr(error)
 
 
 @pytest.mark.parametrize("has_run_source", [True, False])
@@ -409,6 +409,6 @@ def test_on_analyze_finished_post_processing_raise_settles_failed(qapp):
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == "failed"
-    assert outcome.error == str(boom)
+    assert outcome.error == repr(boom)
     assert failed == [("tab1", str(boom))]
     assert handles.live_count() == 0

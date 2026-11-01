@@ -148,6 +148,8 @@ def test_active_switch_does_not_stale_and_terminal_cannot_reenter(search_case):
 @pytest.mark.parametrize("closing", [False, True])
 def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing):
     ctrl, bg, _owner, _progress, result = search_case
+    facts: list[SearchChangedPayload] = []
+    ctrl.bus.subscribe(SearchChangedPayload, facts.append)
     token = ctrl.search.start()
     ctrl.search.cancel(token)
     assert ctrl.search.outcome(token) is None
@@ -161,7 +163,9 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
     elif terminal == "failed":
         bg.fail(ValueError("bad database"))
         expected = "failed"
-        assert ctrl.search.outcome(token).error == "bad database"
+        assert ctrl.search.outcome(token).error == "ValueError('bad database')"
+        assert ctrl.search.current.error == "bad database"
+        assert facts[-1].error == "bad database"
     else:
         bg.deliver(result)
         expected = "cancelled" if closing else "finished"
@@ -175,12 +179,17 @@ def test_cancel_and_close_follow_worker_terminal(search_case, terminal, closing)
 def test_submit_failure_cleanup_and_known_token_queries(search_case):
     ctrl, bg, _owner, progress, _result = search_case
     bg.fail_submit = True
+    facts: list[SearchChangedPayload] = []
+    ctrl.bus.subscribe(SearchChangedPayload, facts.append)
     with pytest.raises(RuntimeError, match="submit failed") as caught:
         ctrl.search.start()
     assert not isinstance(caught.value, ExpectedError)
     activity = ctrl.search.current
     assert activity is not None and activity.status == "failed"
-    assert ctrl.search.outcome(activity.token).status == "failed"
+    assert ctrl.search.outcome(activity.token) == OperationOutcome(
+        "failed", "RuntimeError('submit failed')"
+    )
+    assert activity.error == facts[-1].error == "operation failed to start"
     assert ctrl.search.active_token is None
     assert progress.bars_for_owner("fluxdep-search") == ()
     bg.fail_submit = False
@@ -303,7 +312,8 @@ def test_failed_publication_releases_admission(search_case):
     token = ctrl.search.start()
     bg.deliver(short)
     assert ctrl.search.outcome(token) == OperationOutcome(
-        "failed", "captured coordinates must match kernel attribution shape"
+        "failed",
+        "ValueError('captured coordinates must match kernel attribution shape')",
     )
     assert ctrl.search.current.status == "failed"
     assert ctrl.search.active_token is None

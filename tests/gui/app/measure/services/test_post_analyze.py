@@ -446,6 +446,6 @@ def test_on_post_analyze_finished_post_processing_raise_settles_failed(qapp):
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == "failed"
-    assert outcome.error == str(boom)
+    assert outcome.error == repr(boom)
     assert failed == [("tab1", str(boom))]
     assert handles.live_count() == 0

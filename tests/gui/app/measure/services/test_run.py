@@ -412,7 +412,7 @@ def test_result_commit_failure_settles_run_as_failed(
 
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "commit refused"
+    assert outcome.error == "RuntimeError('commit refused')"
     assert svc.active_token is None
     assert not state.is_tab_running(tab_id)
     assert state.get_tab(tab_id).run.result is None

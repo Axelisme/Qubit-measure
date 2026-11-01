@@ -345,7 +345,7 @@ def test_wait_setup_done_wakes_from_worker_thread_without_deadlock(
         assert outcome.outcome is not None
         assert outcome.outcome.status == ("failed" if failure else "finished")
         if failure:
-            assert "hardware boom" in str(outcome.outcome.error)
+            assert outcome.outcome.error == "RuntimeError('hardware boom')"
     finally:
         block.release.set()
         try:

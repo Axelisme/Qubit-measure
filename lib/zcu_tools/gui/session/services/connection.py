@@ -199,9 +199,7 @@ class SoCConnectionService:
                 soc, soccfg = self._run_connect_work(req)
                 self._apply_connection(soc, soccfg, req)
             except Exception as exc:
-                # Keep connection error classification as domain policy; the
-                # runner still owns settlement and release failure isolation.
-                lease.settle(OperationOutcome("failed", _format_error(exc)))
+                lease.settle(OperationOutcome.from_exception(exc))
                 raise
             return soc, soccfg
 
@@ -233,7 +231,7 @@ class SoCConnectionService:
             else:
                 assert bg.error is not None
                 msg = _format_error(bg.error)
-                settle(OperationOutcome("failed", msg))
+                settle(OperationOutcome.from_exception(bg.error))
                 self._bus.emit(
                     ConnectionFinishedPayload(
                         success=False,

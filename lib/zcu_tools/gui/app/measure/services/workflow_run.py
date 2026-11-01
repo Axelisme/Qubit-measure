@@ -303,7 +303,7 @@ class WorkflowController[F: FormModel, C]:
         if status is not None and status.lifecycle == "failed":
             outcome = OperationOutcome("failed", status.reason)
         elif error is not None:
-            outcome = OperationOutcome("failed", str(error))
+            outcome = OperationOutcome.from_exception(error)
         elif status is None or status.lifecycle == "cancelled":
             outcome = OperationOutcome("cancelled")
         else:

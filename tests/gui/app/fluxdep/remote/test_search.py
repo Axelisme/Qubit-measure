@@ -257,7 +257,7 @@ def test_cancel_receipt_is_not_outcome_and_terminal_cancel_is_noop(
     assert h.ctrl.search.outcome(token) is None
     assert not waiting.done()
     search_case.release.set()
-    error = "database read failed" if terminal == "failed" else None
+    error = "OSError('database read failed')" if terminal == "failed" else None
     expected = {
         "token": token,
         "reason": "completed",

@@ -193,7 +193,7 @@ class StagedAnalyzeService:
             self._active_tokens.pop(tab_id, None)
             self._state.set_tab_analyzing(tab_id, analyzing=False)
             # settle before facts — State visible to awaiter on wake.
-            settle(OperationOutcome("failed", str(error)))
+            settle(OperationOutcome.from_exception(error))
             self._bus.emit(
                 TabInteractionChangedPayload(tab_id=tab_id, fact=self.FAILED_FACT)
             )
