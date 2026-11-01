@@ -26,6 +26,7 @@ def len_rabi_initial_values(
 ) -> tuple[Slot, float | None]:
     """Return the Length Rabi pulse source and sweep stop in microseconds.
 
+    Every successful return contains a Slot with a Template fallback.
     parameters is the fixed Open/Reset capture, or None. qubit is a direct
     component name or captured alias (default $qubit). A missing/null x180
     slot uses the Slot's fresh qub_probe Template fallback with editable gain

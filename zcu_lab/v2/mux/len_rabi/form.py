@@ -31,10 +31,23 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     names = captured_mux_names(ctx)
     participants = captured_mux_participants(ctx, names)
     tones: list[dict[str, FormNode]] = []
-    for name in names:
-        drive, stop = len_rabi_initial_values(ctx.parameters, qubit=name)
+    for index, name in enumerate(names):
+        drive, stop = len_rabi_initial_values(
+            ctx.parameters,
+            qubit=name,
+            gain_path=("tones", index, "drive", "module", "gain"),
+        )
+        # The helper always supplies a Template fallback.
+        fallback = drive.fallback
+        assert fallback is not None
         # Core requires const/flat_top and replaces each total duration.
-        drive = replace(drive, set={**drive.set, "waveform.length": Hidden(0.0)})
+        drive = replace(
+            drive,
+            set={**drive.set, "waveform.length": Hidden(0.0)},
+            fallback=replace(
+                fallback, set={**fallback.set, "waveform.length": Hidden(0.0)}
+            ),
+        )
         tones.append(
             {"name": name, "drive": drive, "length": {"start": 0.03, "stop": stop}}
         )
