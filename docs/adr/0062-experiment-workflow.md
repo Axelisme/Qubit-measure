@@ -39,9 +39,9 @@ Completed.value 是 callable 的原始值，Completed.facts 是 OperationFacts�
 Completed 不帶 stop_requested。`facts.stopped` 只記 operation 自己的停止位元，不推斷子孫取消或結果完整度。不再寫 partial／failed operation outcome 或 ExperimentFailed journal，也不保留這些舊值的讀取相容。RunMetadata.completion 的既有存檔值不改。2026-10-31，使用者對 Stop 後錯誤仍 failed、舊 workflow 值不保留，以及 metadata 值不改的三題答覆為「Ba Cb , 因為還沒用過 Da」。
 
 使用者於 2026-10-26 裁決：「是作者的自由，框架只提供工具。」及「我想把AcquisitionFacts機制刪除或取代」。
-框架不要求 run 使用 ProgramBuilder，也不收集僅覆蓋該路徑的 acquisition facts。
-ProgramBuilder 每次 acquire retry 寫一行 warning，包含原因與下一次 attempt number。
-Data-driven early stop 寫一行 info，包含 stop value 與完成 rounds。
+框架不要求 run 使用 Schedule，也不收集僅覆蓋該路徑的 acquisition facts。
+Schedule 的 AcquisitionRunner 每次 acquire retry 寫一行 warning，包含原因與下一次 attempt number。
+AcquisitionRunner 在 data-driven early stop 時寫一行 info，包含 stop value 與完成 rounds。
 Operation、native RunMetadata 與 RPC 不攜帶這些 program observations，workflow 摘要也不聚合其計數。
 舊文件與 journal 的 `acquisitions` key 在載入時忽略，不轉換或寫回；缺少此 key 不影響載入。
 

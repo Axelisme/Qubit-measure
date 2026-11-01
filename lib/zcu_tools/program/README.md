@@ -10,7 +10,7 @@
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
-`v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行兩種 program 的受支援 instruction effects。
+`v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
 
 ## Native acquisition
 
@@ -82,8 +82,7 @@ Retry, progress and stop conditions follow the other Schedule run methods.
 ## Conditional readout
 
 Declare separate read labels for herald and terminal emissions. One readout
-module may be emitted twice with distinct timeline tags. With modular programs,
-use separate module names. Both paths keep every herald class:
+module may be emitted twice with distinct emit tags. Every herald class is kept:
 
 ```python
 from zcu_tools.program.v2 import Classify, IQ, shot_sums, split_sums
