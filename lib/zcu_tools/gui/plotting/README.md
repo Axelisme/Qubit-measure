@@ -11,7 +11,8 @@ host、shutdown guard 與 mathtext lock／prewarm，不切換 process-wide backe
 ## Figures 與 presentation
 
 Caller 透過 Plots 持有具名原生 Figure，並注入 QtPlotHost。Host 使用 owner scheduler
-執行 live artist 更新與 presentation。普通圖首次成功 draw 後即呈現，後續 draw 共用同一 canvas；未 draw 的圖仍完成後才呈現。Callback 失敗不呈現或 refresh，也不 rollback，診斷結果仍保留。
+執行 artist 更新與 presentation。`fig.show()` 顯式呈現，未 show 的圖在 finish 時呈現。
+Callback 失敗不 refresh，也不 rollback，診斷結果仍保留。
 QtPlotHost 只收合 presentation，不丟棄資料更新。每次 live callback 都同步在 owner
 更新 artists；密集 refresh 可以合成較少的 canvas draws。Producer 停止後的 final
 refresh 立即 flush 最新圖，不等待下一次呈現。RPC PNG 讀同一份原生 Figure，
@@ -36,11 +37,10 @@ Figure-to-container registry，不讀取容器內部 layout，並透過 GUI-thre
 ## Thread 與 rendering 邊界
 
 Host 必須先在 GUI thread 初始化。Runtime 與 FigureContainer 建構都確保此條件。
-Qt widget 操作、`@plots.on_plot_thread` 本體與通用 LiveUpdate callback
-都透過 host owner 在 GUI thread 執行。Decorator 從 worker 同步等待 owner，並對已呈現
+Qt widget 操作與 `@plots.on_plot_thread` 本體都透過 host owner 在 GUI thread 執行。Decorator 從 worker 同步等待 owner，並對已呈現
 的根圖去重 refresh，沿用 host 的 50 ms 繪製合併。Show 前只保留 artist 修改，
 不呼叫 host.refresh，也不呈現。圖顯示後的原生修改一律經此 decorator。
-LiveUpdate 在送入 owner 前複製 caller 的資料，host 不選擇線圖、熱圖或其他格式。
+Decorator 在送入 owner 前複製 caller 的資料，host 不選擇線圖、熱圖或其他格式。
 Lab 的繪圖工具提供格式與 callback，lib 只管理具名圖、更新與呈現。
 Shared mathtext lock／prewarm 保護字型解析，不代表任意 Matplotlib 操作都 thread-safe。
 

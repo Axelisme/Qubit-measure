@@ -86,9 +86,8 @@ Host 路徑在回傳前對可用 rounds 取平均，未取數的點保留 NaN，
 
 ## 即時圖工具
 
-`zcu_lab.v2.support` 匯出 `live_line`、`live_scatter`、`live_heatmap` 與舊版面工具
-`live_heatmap_with_line`。新實驗可從下例開始，顯示、owner 更新、artist 回傳與
-舊介面的界線統一見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
+`zcu_lab.v2.support` 匯出 `live_line`、`live_scatter` 與 `live_heatmap`。
+顯示、owner 更新與 artist 回傳規則見[圖的建立、顯示與更新](experiment-authoring.md#圖的建立顯示與更新)。
 
 ```python
 fig, ax = context.plots.subplots(num="signal")
@@ -104,8 +103,9 @@ def update(data):
 fig.show()
 ```
 
-`support/live.py` 選擇格式與 scan-line 呈現，私有格式及 handle 檔保存 artists 與輸入檢查。
-作者要改 ticks、顏色、最近掃描線或增添工具時，從這裡修改。
+`support/live.py` 提供掛到 axes 的工具，`_live_attached.py` 擁有資料檢查與 artists，
+`_live_format.py` 處理格式。`support.live.AttachedLine` 可用於作者的型別標註。
+作者直接在 axes 設 ticks、顏色與標題。掃描歷史線由作者在另一個 axes 建立並更新。
 Reference marker 與動畫錄影不在這些工具中。
 
 Singleshot 的分類 IQ／區域圖在 `singleshot/plot.py`，joint-fit population／histogram／

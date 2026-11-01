@@ -207,11 +207,11 @@ def population_specs(
             "population",
             (
                 VariableAxisSpec(
-                    "Population", "None", values=(0, 1, 2), dtype=np.int64, scale=2.0
+                    label="Population", unit="None", values=(0, 1, 2), dtype=np.int64, scale=2.0
                 ),
-                VariableAxisSpec("Frequency", "Hz", "frequency", scale=1e6),
+                VariableAxisSpec(label="Frequency", unit="Hz", field_name="frequency", scale=1e6),
             ),
-            VariableZSpec("signal", "Signal", "V", scale=0.125, dtype=np.complex128),
+            VariableZSpec("signal", label="Signal", unit="V", scale=0.125, dtype=np.complex128),
         )
         fixed_spec = GroupedAxesSpec(
             variables=(variable,),
@@ -226,7 +226,7 @@ def population_specs(
                     variable,
                     axes=(
                         VariableAxisSpec(
-                            "Population", "None", "population", 2.0, np.int64
+                            label="Population", unit="None", field_name="population", scale=2.0, dtype=np.int64
                         ),
                         variable.axes[1],
                     ),
@@ -357,7 +357,7 @@ def test_axis_declaration_requires_exactly_one_source(
 
 def test_fixed_coordinates_cannot_also_be_generated() -> None:
     with pytest.raises(ValueError, match="exactly one"):
-        VariableAxisSpec("Population", "None", generated="arange", values=(0, 1, 2))
+        VariableAxisSpec(label="Population", unit="None", generated="arange", values=(0, 1, 2))
 
 
 class SingleExperiment(Experiment[SingleResult, NativeCfg]):
@@ -382,13 +382,13 @@ GROUPED = GroupedAxesSpec(
     variables=(
         VariableSpec(
             "resonator",
-            (VariableAxisSpec("Frequency", "Hz", "frequency", scale=1e6),),
-            VariableZSpec("signal", "Signal", "V", scale=1e-3, dtype=np.complex128),
+            (VariableAxisSpec(label="Frequency", unit="Hz", field_name="frequency", scale=1e6),),
+            VariableZSpec("signal", label="Signal", unit="V", scale=1e-3, dtype=np.complex128),
         ),
         VariableSpec(
             "decay",
-            (VariableAxisSpec("Delay", "s", "delay", scale=1e-6),),
-            VariableZSpec("decay", "Amplitude", "", dtype=np.float64),
+            (VariableAxisSpec(label="Delay", unit="s", field_name="delay", scale=1e-6),),
+            VariableZSpec("decay", label="Amplitude", unit="", dtype=np.float64),
         ),
     ),
     result_type=GroupedResult,

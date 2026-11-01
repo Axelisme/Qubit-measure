@@ -54,7 +54,7 @@ class CalibrationSchema(ComponentSchema):
 def PlottedSavingAdapter_analyze(
     req: AnalyzeRequest[RunRecord[SavingCfg, SavingResult], PaneParams], *, plots: Plots
 ) -> PaneSummary:
-    _, axes = plots.subplots("fit")
+    _, axes = plots.subplots(num="fit")
     axes.plot(
         req.run_result.result.frequency,
         req.run_result.result.signal.real,
@@ -77,14 +77,10 @@ def PlottedSavingAdapter_run(
     cfg: SavingCfg, *, context: RunContext
 ) -> RunRecord[SavingCfg, SavingResult]:
     record = SavingAdapter.run(cfg, context=context)
-    context.plots.subplots("signal")
-
-    def draw(figure: Figure) -> None:
-        axes = figure.axes[0]
-        axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
-        axes.legend()
-
-    context.plots.draw("signal", draw)
+    figure, axes = context.plots.subplots(num="signal")
+    axes.plot(record.result.frequency, record.result.signal.real, label="Signal")
+    axes.legend()
+    figure.show()
     return record
 
 

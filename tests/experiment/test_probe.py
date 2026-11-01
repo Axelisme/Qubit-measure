@@ -43,7 +43,7 @@ def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path:
 
     class StyledExperiment(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
-            _, axes = context.plots.subplots("style-default")
+            _, axes = context.plots.subplots(num="style-default")
             observed.append(axes.xaxis.label.get_fontsize())
             axes.set_xlabel("Frequency", fontsize=23)
             assert axes.xaxis.label.get_fontsize() == 23
@@ -56,10 +56,10 @@ def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path:
             *,
             plots: Plots,
         ) -> dict[str, object]:
-            _, axes = plots.subplots("style-default")
+            _, axes = plots.subplots(num="style-default")
             observed.append(axes.xaxis.label.get_fontsize())
             with plt.style.context({"axes.labelsize": 31}):
-                _, custom = plots.subplots("style-override")
+                _, custom = plots.subplots(num="style-override")
                 assert custom.xaxis.label.get_fontsize() == 31
             return super().analyze(source, options, plots=plots)
 
@@ -125,9 +125,13 @@ def test_probe_exports_current_figure_sizes(
     class SizedExperiment(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
             result = super().run(config, context=context)
-            context.plots.draw(
-                "signal/trace", lambda figure: figure.set_size_inches(*live_size)
-            )
+            @context.plots.on_plot_thread
+            def resize(size: tuple[float, float]):
+                figure = context.plots["signal/trace"]
+                figure.set_size_inches(*size)
+                return (figure,)
+
+            resize(live_size)
             return result
 
         def analyze(
@@ -185,9 +189,9 @@ def test_probe_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
                 VariableSpec(
                     "response",
                     axes=(
-                        VariableAxisSpec("coordinate", "s", "frequency", scale=1e-6),
+                        VariableAxisSpec(label="coordinate", unit="s", field_name="frequency", scale=1e-6),
                     ),
-                    z=VariableZSpec("signal", "signal", "V", dtype=np.complex128),
+                    z=VariableZSpec("signal", label="signal", unit="V", dtype=np.complex128),
                 ),
             ),
             result_type=SavingResult,
@@ -267,13 +271,13 @@ def grouped_comparison_spec() -> GroupedAxesSpec[_ComparisonResult, SavingCfg]:
         variables=(
             VariableSpec(
                 "response",
-                axes=(VariableAxisSpec("coordinate", "s", "coordinate", scale=1e-6),),
-                z=VariableZSpec("signal", "signal", "V", scale=1e-3),
+                axes=(VariableAxisSpec(label="coordinate", unit="s", field_name="coordinate", scale=1e-6),),
+                z=VariableZSpec("signal", label="signal", unit="V", scale=1e-3),
             ),
             VariableSpec(
                 "coordinate_copy",
-                axes=(VariableAxisSpec.generated_arange("sample", ""),),
-                z=VariableZSpec("coordinate", "coordinate", "s", scale=1e-6),
+                axes=(VariableAxisSpec.generated_arange(label="sample", unit=""),),
+                z=VariableZSpec("coordinate", label="coordinate", unit="s", scale=1e-6),
             ),
         ),
         result_type=_ComparisonResult,
@@ -318,9 +322,9 @@ def mixed_scale_spec() -> GroupedAxesSpec[_ColumnResult, SavingCfg]:
         variables=tuple(
             VariableSpec(
                 f"column_{column}",
-                axes=(VariableAxisSpec("sample", "", values=(0, 1)),),
+                axes=(VariableAxisSpec(label="sample", unit="", values=(0, 1)),),
                 z=VariableZSpec(
-                    "params", f"parameter_{column}", "", scale=scale, index=column
+                    "params", label=f"parameter_{column}", unit="", scale=scale, index=column
                 ),
             )
             for column, scale in enumerate((1e-6, 1.0, 1e6))
@@ -486,9 +490,9 @@ def test_grouped_axes_without_result_fields_do_not_relax_undeclared_arrays(
 ):
     response = grouped_comparison_spec.variables[0]
     axis = (
-        replace(VariableAxisSpec.generated_arange("sample", ""), scale=1e-6)
+        replace(VariableAxisSpec.generated_arange(label="sample", unit=""), scale=1e-6)
         if generated
-        else VariableAxisSpec("sample", "", values=(0, 1, 2), scale=1e-6)
+        else VariableAxisSpec(label="sample", unit="", values=(0, 1, 2), scale=1e-6)
     )
     spec = replace(
         grouped_comparison_spec, variables=(replace(response, axes=(axis,)),)

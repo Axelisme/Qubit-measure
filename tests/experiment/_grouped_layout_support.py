@@ -41,15 +41,15 @@ MIXED_COMMON = GroupedAxesSpec(
         VariableSpec(
             "signals",
             (
-                VariableAxisSpec("Delay", "s", "delays", scale=1e-6),
-                VariableAxisSpec("Tone", "", "tones", dtype=np.int64),
+                VariableAxisSpec(label="Delay", unit="s", field_name="delays", scale=1e-6),
+                VariableAxisSpec(label="Tone", unit="", field_name="tones", dtype=np.int64),
             ),
-            VariableZSpec("signals", "Signal", "V", scale=1e-3, dtype=np.complex128),
+            VariableZSpec("signals", label="Signal", unit="V", scale=1e-3, dtype=np.complex128),
         ),
         VariableSpec(
             "detunes",
-            (VariableAxisSpec("Tone", "", "tones", dtype=np.int64),),
-            VariableZSpec("detunes", "Detune", "Hz", scale=1e6, dtype=np.float64),
+            (VariableAxisSpec(label="Tone", unit="", field_name="tones", dtype=np.int64),),
+            VariableZSpec("detunes", label="Detune", unit="Hz", scale=1e6, dtype=np.float64),
         ),
     ),
     result_type=MixedResult,
