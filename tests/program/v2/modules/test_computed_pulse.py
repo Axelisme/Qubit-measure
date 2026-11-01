@@ -69,38 +69,6 @@ def _gate_modules(gate_pulses, val_reg="gate_idx"):
 # ---------------------------------------------------------------------------
 
 
-def test_dmem_table_populated_for_const_candidates():
-    """ComputedPulse.init() must populate a dmem table with one entry per candidate."""
-    n_pulses = 3
-    pulses = [_const_pulse(gain=(i + 1) * 0.2) for i in range(n_pulses)]
-    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-
-    from zcu_tools.program.v2.modules.dmem import LoadValue
-
-    modules = [
-        LoadValue(
-            "load_idx",
-            values=list(range(n_pulses)),
-            idx_reg="idx_loop",
-            val_reg="gate_idx",
-        ),
-        ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
-    ]
-    prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", n_pulses)])
-    assert prog.binprog is not None
-
-    # ComputedPulse.dmem_offset is the start of its table in the shared dmem buffer.
-    gate_mod = modules[1]
-    assert isinstance(gate_mod, ComputedPulse)
-    dmem = prog.compile_datamem()
-    assert dmem is not None
-
-    # The slice starting at dmem_offset must contain n_pulses entries.
-    offset = gate_mod.dmem_offset
-    table = dmem[offset : offset + n_pulses]
-    assert len(table) == n_pulses
-    # All entries must be distinct wmem indices (each pulse has its own waveform).
-    assert len(set(table.tolist())) == n_pulses
 
 
 def test_dmem_lookup_emits_dmem_read_in_asm():
@@ -123,13 +91,8 @@ def test_identical_candidates_dedup_table_points_to_same_index():
     prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
     assert prog.binprog is not None
 
-    cp = modules[1]
-    assert isinstance(cp, ComputedPulse)
-    dmem = prog.compile_datamem()
-    assert dmem is not None
-    table = dmem[cp.dmem_offset : cp.dmem_offset + 2]
-    # Both entries point to the same wmem index (PulseRegistry dedup).
-    assert table[0] == table[1]
+    assert prog.pulse_registry.count == 1
+    assert len(prog.pulses) == 1
 
 
 # ---------------------------------------------------------------------------

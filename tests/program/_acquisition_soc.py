@@ -75,6 +75,7 @@ def make_chunk_acquisition(
     *,
     reps: int = 4,
     reads: int = 2,
+    reps_innermost: bool = False,
     sweep: list[tuple[str, int]] | None = None,
 ) -> tuple[AcquisitionSoc, TimelineProgramV2]:
     """Build unbound single-ADC shots with repeated reads and optional point sweeps."""
@@ -95,6 +96,7 @@ def make_chunk_acquisition(
         soccfg,
         modules=readouts,
         reps=reps,
+        reps_innermost=reps_innermost,
         sweep=None if sweep is None else [(name, count) for name, count in sweep],
     )
     return soc, program

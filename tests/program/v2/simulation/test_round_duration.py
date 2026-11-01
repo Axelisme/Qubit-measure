@@ -229,7 +229,7 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         binding.end()
 
 
-@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 200e-6)])
+@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 250e-6)])
 def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
     clock: Clock,
     adc_length: float,

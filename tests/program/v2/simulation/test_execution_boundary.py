@@ -83,11 +83,19 @@ def test_raw_content_after_terminal_jump_rejected_before_backend(method):
 
 def test_raw_loop_nop_preserves_sweep_readouts():
     env = white_noise(std_adc=0)
-    prog = compile_modules(
-        env.soccfg, modules=[readout("readout")], sweep=[("axis", 2)]
-    )
-    prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
-    prog.compile()
+    module = readout("readout")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("axis", 2)
+            self.declare(module)
+            self.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
+
+        def _body(self, cfg):
+            self.emit(module)
+            self.delay_by_timeline()
+
+    prog = Program(env.soccfg)
     result = prog.acquire(env.soc, progress=False)
     assert result[0].shape == (1, 2, 2)
     np.testing.assert_array_equal(result[0], 0)

@@ -328,7 +328,7 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
         prog.acquire(env.soc, progress=False)
         request = request_of(env)
         timelines = [request.materialize_point(point) for point in range(3)]
-        # Machine scheduling emits literal tProc timestamps 84, 93 and 181.
+        # Each native point covers the actual waveform plus pre/post once.
         # The two swept waveforms remain 19, 38 and 57 generator clocks long.
         for point, timeline in enumerate(timelines):
             assert [event.source for event in timeline.events] == [
@@ -342,12 +342,12 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
             ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
             assert time_us(
                 request.time_base, timeline.events[-1].start_ticks
-            ) == pytest.approx(84 / 430.08)
+            ) == pytest.approx([40, 62, 83][point] / 430.08)
             assert times_us(
                 request.time_base, timeline.readouts[0].trigger_ticks
-            ) == pytest.approx((93 / 430.08,))
+            ) == pytest.approx(([48, 70, 91][point] / 430.08,))
             assert time_us(request.time_base, timeline.duration_ticks) == pytest.approx(
-                181 / 430.08
+                [135, 157, 178][point] / 430.08
             )
     finally:
         env.devices.close_all_devices()

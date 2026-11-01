@@ -74,8 +74,8 @@ def test_real_compile_and_acquire_all_tones(channels):
         mask=list(range(len(channels))),
         length=cfg.length,
     )
-    assert prog.triggers == [(list(channels), dict(t=cfg.trig_offset))]
-    assert prog.playbacks == [dict(ch=0, name="mux", t=cfg.pre_delay)]
+    assert prog.triggers == [(list(channels), dict(t=cfg.trig_offset, timeline="default"))]
+    assert prog.playbacks == [dict(t=cfg.pre_delay, tag=None, timeline="default")]
     soc = AcquisitionSoc(soccfg.get_cfg())
     raw = prog.acquire(soc, progress=False)
     assert raw is not None

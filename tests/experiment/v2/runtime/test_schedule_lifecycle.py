@@ -9,7 +9,7 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
-from tests.experiment.v2.runtime._flow_fakes import RecordingBuffer
+from tests.experiment.v2.runtime._flow_fakes import FakeScalarProgram, RecordingBuffer
 
 
 def test_schedule_uses_own_stop_signal():
@@ -74,7 +74,7 @@ def test_schedule_operations_require_context():
     )
 
     try:
-        sched.run_acquire(object(), "soc")
+        sched.run_acquire(FakeScalarProgram("soccfg", modules=[], sweep=None), "soc")
     except RuntimeError as exc:
         assert "with Schedule" in str(exc)
     else:

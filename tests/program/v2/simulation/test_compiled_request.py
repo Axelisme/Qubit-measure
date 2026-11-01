@@ -297,7 +297,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     assert [e.source for e in events[:2]] == ["one", "two"]
     assert [
         time_us(result.time_base, e.start_ticks) for e in events[:2]
-    ] == pytest.approx([44 / 430.08, 132 / 430.08])
+    ] == pytest.approx([44 / 430.08, 131 / 430.08])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 

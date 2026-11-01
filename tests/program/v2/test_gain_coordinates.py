@@ -33,7 +33,7 @@ def _compile_scalar_word(soccfg: QickConfig, gain: float) -> int:
         ),
     )
     prog = compile_modules(soccfg, [pulse])
-    actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=False)
+    actual = prog.get_pulse_param(pulse.pulse_name(prog), "gain", as_array=False)
     factor = soccfg["gens"][0]["maxv"] * soccfg["gens"][0]["maxv_scale"]
     return round(actual * factor)
 
@@ -52,7 +52,7 @@ def _compile_sweep_words(
         ),
     )
     prog = compile_modules(soccfg, [pulse], sweep=[("gain", sweep)])
-    actual = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=True)
+    actual = prog.get_pulse_param(pulse.pulse_name(prog), "gain", as_array=True)
     factor = soccfg["gens"][0]["maxv"] * soccfg["gens"][0]["maxv_scale"]
     return np.rint(actual * factor).astype(int)
 
@@ -259,7 +259,7 @@ def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
         prog = compile_modules(
             soccfg, [pulse, readout], sweep=[("freq", frequencies)], reps=200
         )
-        compiled_gain = prog.get_pulse_param(pulse.pulse_id, "gain", as_array=False)
+        compiled_gain = prog.get_pulse_param(pulse.pulse_name(prog), "gain", as_array=False)
         words.append(round(compiled_gain * soccfg.get_maxv(1)))
 
     np.testing.assert_array_equal(words, [3276, 6552, 9828, 13104])

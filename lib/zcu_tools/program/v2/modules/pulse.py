@@ -108,7 +108,6 @@ class Pulse(Module):
         self.name = name
         self.cfg = deepcopy(cfg) if cfg is not None else None
         apply_cfg_overrides(self.cfg, overrides, PulseOverrides.__annotations__)
-        self.pulse_id = pulse_id
         self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 

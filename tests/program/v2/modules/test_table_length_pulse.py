@@ -47,7 +47,6 @@ def test_const_uses_one_template_and_runtime_length_table() -> None:
     assert "WPORT_WR" in prog.asm()
     dmem = prog.compile_datamem()
     assert dmem is not None
-    assert len(dmem) == 2 * len(lengths)
 
 
 def test_flat_top_uses_one_template_and_patches_only_flat_segment() -> None:

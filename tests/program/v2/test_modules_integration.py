@@ -190,15 +190,15 @@ class TestPulseIntegration:
     def test_swept_blocking_alignment_leaves_no_generator_residual_sweep(self) -> None:
         grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
         pulse = Pulse("drive", _pulse_cfg(length=sweep2param("length", grid)))
-        prog = _make_prog(
-            modules=[
-                pulse,
-                Delay("advance", 0.0),
-                DelayAuto("residual", gens=True, ros=False, tag="residual"),
-                Readout("readout", _readout_cfg()),
-            ],
-            sweep=[("length", grid)],
-        )
+        from zcu_tools.program.v2 import TimelineBuilder
+
+        builder = TimelineBuilder(make_mock_soccfg())
+        builder.add_loop("length", grid.expts)
+        builder.emit(pulse)
+        builder.delay_by_timeline()
+        builder.delay_auto(gens=True, ros=False, tag="residual")
+        builder.emit(Readout("readout", _readout_cfg()))
+        prog = builder.build()
         residual = prog.get_time_param("residual", "t")
         assert isinstance(residual, float)
         assert residual == 0.0
@@ -458,7 +458,7 @@ class TestDmemIntegration:
         soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
 
         with pytest.raises(ValueError, match="dmem must be one-dimensional"):
-            TwoDimensionalDmemProgram(soccfg, modules=[])
+            TwoDimensionalDmemProgram(soccfg)
 
 
 
@@ -472,10 +472,10 @@ def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
     pulses = [Pulse(f"p{idx}", cfg, ro_ch=ch) for idx, ch in enumerate((None, 0, 0, 1))]
     prog = compile_modules(soccfg, modules=pulses)
     assert prog.pulse_registry.count == 3
-    assert pulses[1].pulse_id == pulses[2].pulse_id
-    assert len({pulses[idx].pulse_id for idx in (0, 1, 3)}) == 3
+    assert pulses[1].pulse_name(prog) == pulses[2].pulse_name(prog)
+    assert len({pulses[idx].pulse_name(prog) for idx in (0, 1, 3)}) == 3
     for pulse, ch in zip(pulses, (None, 0, 0, 1), strict=True):
-        assert prog.pulses[pulse.pulse_id].params["ro_ch"] == ch
+        assert prog.pulses[pulse.pulse_name(prog)].params["ro_ch"] == ch
 
 
 @pytest.mark.parametrize("swept", [False, True])
@@ -502,7 +502,7 @@ def test_table_readout_requires_named_loop(sweep):
         "table", _readout_cfg(), idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
     )
     with pytest.raises(
-        ValueError, match="requires a sweep loop|exactly one sweep loop"
+        ValueError, match="requires one sweep loop"
     ):
         _make_prog(modules=[ro], sweep=sweep)
 
