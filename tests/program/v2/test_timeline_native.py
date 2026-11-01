@@ -248,7 +248,7 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
         _program(body, initialize)
 
 
-@pytest.mark.parametrize("control", ["repeat", "nested_repeat", "branch_then_trigger", "trigger_then_branch"])
+@pytest.mark.parametrize("control", ["repeat", "repeat_sync", "nested_repeat", "branch_then_trigger", "trigger_then_branch"])
 def test_adc_overlap_is_rejected_across_control_flow(control):
     def initialize(prog):
         prog.declare_readout(0, length=100 / 307.2)
@@ -259,9 +259,11 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
         prog.timeline_inc(90 / 430.08, timeline=timeline)
 
     def body(prog):
-        if control == "repeat":
+        if control in {"repeat", "repeat_sync"}:
             with prog.repeat("reads", 2):
                 trigger(prog)
+                if control == "repeat_sync":
+                    prog.delay_by_timeline()
         elif control == "nested_repeat":
             with prog.repeat("outer", 2):
                 with prog.repeat("inner", 1):
