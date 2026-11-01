@@ -44,7 +44,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     freq/mixer_freq are MHz, gain is normalized, phase is degrees. waveform is
     an expanded native envelope (arb holds its absolute asset path). pre_delay
     and post_delay are in us. pre_delay offsets generator playback; post_delay
-    follows the later of generator and ADC completion. ro_length is the ADC
+    follows generator completion once. ro_length is the independent ADC
     window and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
     QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
     offset-free normalized ADC calibration (including radians for linear angle);
@@ -74,17 +74,18 @@ class PulseReadoutCfg(AbsReadoutCfg):
         """Return scalar readout completion time in us without clock rounding.
 
         Timing fields and waveform length must be finite nonnegative scalar us.
-        Return the later of ADC trigger + window and generator pre-delay +
-        waveform length, then add post-delay once. No program or hardware is
-        needed, and this cfg is unchanged. This nominal estimate does not
-        quantize either event or the final duration to hardware clocks.
+        Return pre-delay + generator waveform length + post-delay once.
+        ADC trigger and integration do not extend this duration. No program or
+        hardware is needed, and this cfg is unchanged. This nominal estimate
+        does not quantize playback or the final duration to hardware clocks.
         Non-scalar timing raises TypeError during float conversion; waveform
         length lookup errors (for example an unreadable arb asset) propagate.
         """
-        return max(
-            float(self.trig_offset) + float(self.ro_length),
-            float(self.pre_delay) + float(self.waveform.length),
-        ) + float(self.post_delay)
+        return (
+            float(self.pre_delay)
+            + float(self.waveform.length)
+            + float(self.post_delay)
+        )
 
     def to_pulse_cfg(self) -> PulseCfg:
         """Return a fresh outer PulseCfg containing only generator settings.
@@ -393,7 +394,7 @@ class PulseReadout(AbsReadout):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Configure/trigger/play at one origin, then ceil max end plus post_delay.
+        """Configure/trigger/play at one origin, then ceil generator end plus post_delay.
 
         All times are relative to the selected timeline. tag identifies the
         configuration event; generator pre_delay and ADC trig_offset are retained.
@@ -533,7 +534,7 @@ class TablePulseReadout(AbsReadout):
     def lower(
         self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
     ) -> None:
-        """Play the current paired templates with fixed duration and rule-b end.
+        """Play paired templates, ending at generator completion plus post-delay.
 
         Hook updates affect only frequency words, not placement or duration.
         timeline=None selects default; tag names this occurrence's config.
@@ -613,7 +614,8 @@ class MuxReadout(AbsReadout):
     ) -> None:
         """Play all tones and trigger all ADCs at one origin, then add post once.
 
-        The end covers the actual all-tone waveform and every rounded ADC window.
+        The end covers the all-tone generator waveform plus post-delay once.
+        ADC windows remain on their channels and do not extend this timeline.
         timeline=None selects default. Collection validates this compiled emission.
         """
         timeline = timeline if timeline is not None else "default"
