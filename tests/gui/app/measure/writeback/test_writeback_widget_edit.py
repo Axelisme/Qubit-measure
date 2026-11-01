@@ -1,9 +1,8 @@
 """Writeback Edit dialogs: scalar parameter values and module item Forms."""
 
-import sys
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from types import TracebackType
 from typing import Literal
 from unittest.mock import MagicMock
 
@@ -38,7 +37,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.gui.session.library_entry import LibraryEntryInvalid
 from zcu_tools.gui.widgets.form import FormEditor
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
@@ -53,7 +51,6 @@ from tests.gui.app.measure._synthetic import (
     ModuleProposalAdapter,
     SampleParams,
 )
-from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
@@ -356,187 +353,142 @@ def _apply(widget: WritebackWidget) -> QPushButton:
     return control
 
 
-def test_module_dialog_edits_shared_form_and_applies_as_new_name(module_widget):
-    ctrl, widget, tab_id, pane = _populate_module(module_widget)
-    dialog = _module_dialog(widget)
-    # This public owner returns the actual module Edit draft and fixed capture.
-    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
-    assert MODULE_PROPOSAL_WAVEFORM in form.parameters.library.waveform_keys()
-    current = form.state.input.data["waveform"]
-    assert current == {"kind": "ref", "name": MODULE_PROPOSAL_WAVEFORM}
-    options = module_form(PulseSpec).model.options(form.env)[("waveform",)]
-    selected = next(option for option in options if option.matches(current))
-    assert selected.label == MODULE_PROPOSAL_WAVEFORM
-    assert selected.value == current
-    waveform = dialog.findChild(QComboBox, "form.input.waveform")
-    assert waveform is not None
-    assert waveform.currentText() == selected.label
-    assert waveform.currentData() == selected.value
-    assert (selected.label, selected.value) in [
-        (waveform.itemText(index), waveform.itemData(index))
-        for index in range(waveform.count())
-    ]
-    assert not any(
-        "(missing)" in waveform.itemText(index) for index in range(waveform.count())
+@pytest.fixture
+def module_ui(module_widget, tmp_path, request):
+    _, widget, _, _ = _populate_module(module_widget)
+    driver = ComponentDriver(widget)
+    evidence = Path(os.environ.get("WRITEBACK_UI_EVIDENCE", str(tmp_path)))
+    evidence = evidence / request.node.name
+    return driver, evidence
+
+
+def test_module_cancel_then_save_updates_only_saved_ledger(module_ui):
+    driver, evidence = module_ui
+    original = driver.observe(object_name="writebackProposed")
+    driver.screenshot(evidence / "01-ledger.png")
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "02-edit.png")
+    editor.enter_text(object_name="form.input.freq", value="5100.125")
+    editor.screenshot(evidence / "03-changed.png")
+    editor.click("Cancel")
+    driver.screenshot(evidence / "04-cancelled.png")
+    assert not driver.dialogs()
+    assert driver.observe(object_name="writebackProposed").text == original.text
+    assert driver.observe(object_name="writebackProposed").tooltip == original.tooltip
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "05-reopen.png")
+    assert editor.text_input(object_name="form.input.freq").text != "5100.125"
+    editor.enter_text(object_name="form.input.freq", value="5100.125")
+    editor.screenshot(evidence / "06-changed.png")
+    editor.click("Save")
+    driver.screenshot(evidence / "07-saved.png")
+    assert not driver.dialogs()
+    assert "5100.125" in driver.observe(object_name="writebackProposed").tooltip
+
+
+def test_module_save_keeps_captured_expression_and_waveform_key(module_widget, module_ui):
+    ctrl, widget, tab_id, pane = module_widget
+    driver, evidence = module_ui
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "01-edit.png")
+    editor.enter_text(object_name="form.input.freq", value="5100.125")
+    editor.screenshot(evidence / "02-frequency.png")
+    editor.invoke_context_action(
+        object_name="form.input.gain", action="Expression",
+        evidence=evidence / "03-expression-menu.png",
     )
-    assert not isinstance(form.state.result(form.env), FormErrors)
-    initial = form.spec()
-    assert isinstance(initial, PulseSpec)
-    assert initial.waveform == MODULE_PROPOSAL_WAVEFORM
-    commit_text(_input(dialog, "freq"), "5100.125")
-    mode = dialog.findChild(QAction, "form.mode.gain")
-    assert mode is not None
-    mode.trigger()
-    commit_text(_input(dialog, "gain"), "general.ext.gain / 2")
-    name = dialog.findChild(QLineEdit, "writebackApplyAs")
-    name.setText("Q1.pulses.retuned")
-    name.editingFinished.emit()
-    # A blank Apply-as does not erase the last destination.
-    name.setText("  ")
-    name.editingFinished.emit()
-    assert name.text() == "Q1.pulses.retuned"
-    assert widget.findChildren(QCheckBox)[0].text() == "Q1.pulses.retuned*"
-    proposed = ctrl.writeback_control.get_writeback_values_for_pane(tab_id, pane)[
-        "ml-1"
-    ].proposed
-    assert proposed["freq"] == 5100.125
-    assert proposed["gain"] == pytest.approx(0.2)
-    assert selected.matches(form.state.input.data["waveform"])
-    assert not isinstance(form.state.result(form.env), FormErrors)
-    assert proposed["waveform"] == MODULE_PROPOSAL_WAVEFORM
-    # Preview and Apply use the opening capture, not subsequently changed values.
+    editor.screenshot(evidence / "04-expression.png")
+    editor.enter_text(object_name="form.input.gain", value="general.ext.gain / 2")
+    editor.screenshot(evidence / "05-gain.png")
+    editor.enter_text(object_name="writebackApplyAs", value="Q1.pulses.retuned")
+    editor.screenshot(evidence / "06-name.png")
     context = ctrl.context_control
-    context.set_parameter(
-        require_target(context.read_context()), "general.ext.gain", 0.8
-    )
-    widget.apply_requested.connect(
-        lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-    )
-    dialog.accept()
-    _apply(widget).click()
-    spec = _pulse(ctrl, "Q1.pulses.retuned")
+    context.set_parameter(require_target(context.read_context()), "general.ext.gain", 0.8)
+    editor.click("Save")
+    driver.screenshot(evidence / "07-saved.png")
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    spec = form.spec()
+    assert isinstance(spec, PulseSpec)
     assert spec.freq == 5100.125
     assert spec.gain == pytest.approx(0.2)
     assert spec.waveform == MODULE_PROPOSAL_WAVEFORM
-    assert MODULE_PROPOSAL_TARGET not in context.read_context().library.module_keys()
+    widget.apply_requested.connect(
+        lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
+    )
+    driver.click("Apply Selected")
+    driver.screenshot(evidence / "08-applied.png")
+    assert _pulse(ctrl, "Q1.pulses.retuned") == spec
 
 
-@pytest.mark.parametrize("busy", [False, True], ids=["convert", "busy-refusal"])
-def test_module_option_command_uses_captured_source_and_current_admission(
-    module_widget, busy: bool
-):
-    ctrl, widget, tab_id, pane = _populate_module(module_widget)
-    errors: list[BaseException] = []
-
-    def record_qt_exception(
-        _kind: type[BaseException],
-        error: BaseException,
-        _traceback: TracebackType | None,
-    ) -> None:
-        errors.append(error)
-
-    previous_hook = sys.excepthook
+@pytest.mark.parametrize("busy", [False, True], ids=["convert", "busy-save-refusal"])
+def test_module_option_command_is_local_until_save(module_widget, module_ui, busy):
+    ctrl, _, tab_id, pane = module_widget
+    driver, evidence = module_ui
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "01-edit.png")
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    before = form.state.input.data
+    captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
+    context = ctrl.context_control
+    context.set_waveform(
+        require_target(context.read_context()), MODULE_PROPOSAL_WAVEFORM,
+        ConstWaveformCfg(length=0.75),
+    )
+    ctrl.set_running(tab_id, running=busy)
     try:
-        sys.excepthook = record_qt_exception
-        _edit_button(widget).click()
-        assert not errors, f"Module Edit must open through the public Qt seam: {errors}"
-        dialog = _find_open_dialog("Edit module —")
-        form = ctrl.writeback_control.get_writeback_item_form_for_pane(
-            tab_id, pane, "ml-1"
+        editor.invoke_context_action(
+            object_name="form.input.waveform", action="Convert to inline",
+            evidence=evidence / "02-convert-menu.png",
         )
-        captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
-        ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-        assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
-            "ml-1"
-        ]
-        before = form.state.input.data
-        context = ctrl.context_control
-        context.set_waveform(
-            require_target(context.read_context()),
-            MODULE_PROPOSAL_WAVEFORM,
-            ConstWaveformCfg(length=0.75),
-        )
-        action = dialog.findChild(QAction, "form.command.waveform.to_inline")
-        assert action is not None
+        editor.screenshot(evidence / "03-converted.png")
+        assert form.state.input.data == before
+        editor.click("Save")
+        driver.screenshot(evidence / "04-save.png")
         if busy:
-            ctrl.set_running(tab_id, running=True)
-        action.trigger()
-        assert not errors, f"Option commands must use the public editor route: {errors}"
-        if busy:
+            assert driver.dialogs()
+            assert "busy" in editor.observe(object_name="writebackEditError").text.lower()
             assert form.state.input.data == before
-            assert "busy" in field_error(dialog, "waveform").lower()
-            assert ctrl.writeback_control.get_writeback_applied_for_pane(tab_id, pane)[
-                "ml-1"
-            ]
         else:
-            assert form.state.input.data["waveform"] != before["waveform"]
-            result = form.spec()
-            assert isinstance(result, PulseSpec)
-            assert result.waveform == captured
-            preview = ctrl.writeback_control.get_writeback_values_for_pane(tab_id, pane)
-            assert preview["ml-1"].proposed["waveform"] == captured.model_dump(
-                mode="python"
-            )
-            assert not ctrl.writeback_control.get_writeback_applied_for_pane(
-                tab_id, pane
-            )["ml-1"]
-            ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-            assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).waveform == captured
-        assert dialog.isVisible()
+            assert not driver.dialogs()
+            assert form.spec().waveform == captured
     finally:
-        sys.excepthook = previous_hook
         ctrl.set_running(tab_id, running=False)
 
 
 @pytest.mark.parametrize("invalid_kind", ["unparsed", "expression"])
-def test_invalid_module_dialog_marks_row_refuses_apply_and_repairs(
-    module_widget, invalid_kind: str
+def test_invalid_module_copy_keeps_ledger_and_can_be_cancelled(
+    module_ui, invalid_kind
 ):
-    ctrl, widget, tab_id, pane = _populate_module(module_widget)
-    dialog = _module_dialog(widget)
-    gain = _input(dialog, "gain")
+    driver, evidence = module_ui
+    original = driver.observe(object_name="writebackProposed")
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "01-edit.png")
     if invalid_kind == "expression":
-        mode = dialog.findChild(QAction, "form.mode.gain")
-        assert mode is not None
-        mode.trigger()
-        commit_text(_input(dialog, "gain"), "missing.value")
-    else:
-        commit_text(gain, "not-a-number")
-    proposed = widget.findChild(QLabel, "writebackProposed")
-    assert proposed is not None
-    assert proposed.text() == "Invalid configuration"
-    assert not _apply(widget).isEnabled()
-    writes: list[bool] = []
-    widget.apply_requested.connect(lambda: writes.append(True))
-    _apply(widget).click()
-    assert writes == []
-    assert (
-        MODULE_PROPOSAL_TARGET
-        not in ctrl.context_control.read_context().library.module_keys()
-    )
-    if invalid_kind == "expression":
-        with pytest.raises(LibraryEntryInvalid, match="gain"):
-            ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-    dialog.accept()
-    # Closing drops only unparsed view text; invalid State input survives.
-    assert _apply(widget).isEnabled() == (invalid_kind == "unparsed")
-    assert (
-        MODULE_PROPOSAL_TARGET
-        not in ctrl.context_control.read_context().library.module_keys()
-    )
-    dialog = _module_dialog(widget)
-    if invalid_kind == "expression":
-        assert _input(dialog, "gain").text() == "missing.value"
-    else:
-        assert float(_input(dialog, "gain").text()) == pytest.approx(0.3)
-    commit_text(_input(dialog, "gain"), "0.45")
-    assert proposed.text().endswith(" changes")
-    assert _apply(widget).isEnabled()
-    widget.apply_requested.connect(
-        lambda: ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-    )
-    _apply(widget).click()
-    assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
+        editor.invoke_context_action(
+            object_name="form.input.gain", action="Expression",
+            evidence=evidence / "02-expression-menu.png",
+        )
+        editor.screenshot(evidence / "03-expression.png")
+    editor.enter_text(object_name="form.input.gain", value="missing.value")
+    editor.screenshot(evidence / "04-invalid.png")
+    assert not editor.observe("Save").enabled
+    assert "gain" in editor.observe(object_name="writebackEditError").text
+    editor.click("Cancel")
+    driver.screenshot(evidence / "05-cancelled.png")
+    assert not driver.dialogs()
+    assert driver.observe(object_name="writebackProposed").text == original.text
+    assert driver.observe(object_name="writebackProposed").tooltip == original.tooltip
+    assert driver.observe("Apply Selected").enabled
 
 
 def test_module_dialog_reports_retired_draft_without_opening_form(module_widget, qapp):
@@ -547,60 +499,6 @@ def test_module_dialog_reports_retired_draft_without_opening_form(module_widget,
     assert tab_id in "\n".join(label.text() for label in dialog.findChildren(QLabel))
     assert dialog.findChild(FormEditor) is None
     dialog.accept()
-
-
-@pytest.mark.parametrize("scenario", ["open-local", "closed-state"])
-def test_module_validity_refresh_uses_current_view_or_repaired_state(
-    module_widget, scenario: str
-):
-    ctrl, widget, tab_id, pane = _populate_module(module_widget)
-    dialog = _module_dialog(widget)
-    if scenario == "open-local":
-        commit_text(_input(dialog, "gain"), "not-a-number")
-        _populate_module(module_widget)
-        proposed = widget.findChild(QLabel, "writebackProposed")
-        # Old rows awaiting Qt deletion are not the new rendered preview.
-        assert proposed is not None
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        proposed = widget.findChild(QLabel, "writebackProposed")
-        assert proposed is not None and proposed.text() == "Invalid configuration"
-        assert not _apply(widget).isEnabled()
-    else:
-        mode = dialog.findChild(QAction, "form.mode.gain")
-        assert mode is not None
-        mode.trigger()
-        commit_text(_input(dialog, "gain"), "missing.value")
-        dialog.accept()
-        assert not _apply(widget).isEnabled()
-        ctrl.writeback_control.set_writeback_item_for_pane(
-            tab_id, pane, "ml-1", edits={("gain",): 0.5}
-        )
-        _populate_module(module_widget)
-        assert _apply(widget).isEnabled()
-
-
-def test_busy_module_field_edit_is_rejected_and_dialog_keeps_authored_input(
-    module_widget,
-):
-    ctrl, widget, tab_id, pane = _populate_module(module_widget)
-    dialog = _module_dialog(widget)
-    commit_text(_input(dialog, "freq"), "5100.125")
-    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
-    before = form.state.input.data
-    ctrl.set_running(tab_id, running=True)
-    try:
-        commit_text(_input(dialog, "gain"), "0.6")
-        assert "busy" in field_error(dialog, "gain").lower()
-        assert form.state.input.data == before
-        assert dialog.isVisible()
-        assert _input(dialog, "freq").text() == "5100.125"
-        assert _input(dialog, "gain").text() == "0.6"
-        assert (
-            MODULE_PROPOSAL_TARGET
-            not in ctrl.context_control.read_context().library.module_keys()
-        )
-    finally:
-        ctrl.set_running(tab_id, running=False)
 
 
 def test_busy_edit_request_shows_guard_reason_without_opening_dialog(
@@ -659,43 +557,6 @@ def test_tab_retirement_closes_its_open_writeback_editor(module_host, tmp_path):
     ctrl.tab_control.close_tab(tab_id)
     assert not editor.visible().widgets
     driver.screenshot(tmp_path / "02-retired-tab.png")
-
-
-@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
-def test_host_module_invalid_edit_keeps_row_dialog_and_draft(module_host):
-    ctrl, window, widget, tab_id, pane, presenter = module_host
-    dialog = _module_dialog(widget)
-    commit_text(_input(dialog, "freq"), "5100.125")
-    mode = dialog.findChild(QAction, "form.mode.gain")
-    assert mode is not None
-    mode.trigger()
-    commit_text(_input(dialog, "gain"), "missing.value")
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    proposed = widget.findChild(QLabel, "writebackProposed")
-    assert proposed is not None and proposed.text() == "Invalid configuration"
-    assert dialog.isVisible() and _input(dialog, "freq").text() == "5100.125"
-    assert not _apply(widget).isEnabled()
-    with pytest.raises(LibraryEntryInvalid):
-        ctrl.writeback_control.apply_writeback_for_pane(tab_id, pane)
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    proposed = widget.findChild(QLabel, "writebackProposed")
-    assert proposed is not None and proposed.text() == "Invalid configuration"
-    selection = widget.findChild(QCheckBox)
-    assert selection is not None and selection.isChecked()
-    assert not _apply(widget).isEnabled()
-    assert dialog.isVisible()
-    assert _input(dialog, "freq").text() == "5100.125"
-    assert _input(dialog, "gain").text() == "missing.value"
-    assert (
-        MODULE_PROPOSAL_TARGET
-        not in ctrl.context_control.read_context().library.module_keys()
-    )
-    assert presenter.calls == []
-    commit_text(_input(dialog, "gain"), "0.45")
-    dialog.accept()
-    window.apply_tab_writeback(tab_id, pane=pane)
-    assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).gain == 0.45
-    assert _pulse(ctrl, MODULE_PROPOSAL_TARGET).freq == 5100.125
 
 
 @pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
