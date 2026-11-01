@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。具名原生圖、owner 更新與診斷圖的分工。
 
