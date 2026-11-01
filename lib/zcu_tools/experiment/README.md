@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，獨立離線階段、caller 自備板子 profile 與 grouped 逐 slice 比較
+**Last updated:** 2026-11-01，獨立離線階段、caller 自備板子 profile、grouped 逐 slice 比較與 simulators owner
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -54,18 +54,20 @@ structurally satisfy program's `RawShots` without importing program. Processing
 or a getter requests shots from a separate retained identity. Direct means keep
 their existing moment calculation and RNG stream.
 
-[`ftf`](ftf/README.md) composes a named YAML sample, fixed V/A memory devices,
+The physical models live in [`simulators`](../simulators/README.md), above the framework.
+The `framework-no-simulators` import contract prevents framework packages from importing them.
+[`ftf`](../simulators/ftf/environment/README.md) composes a named YAML sample, fixed V/A memory devices,
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
 
-[`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
+[`single_fluxonium`](../simulators/single_fluxonium/environment/README.md) plans complete microwave/fast-flux
 timelines and assembles a one-source mock environment. Its source composes DC-basis
 population conversion, one-cavity ADC statistics, deferred raw shots and decimated
 traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
 acquisition drains; device cleanup remains separate.
 
-[`six_fluxonium`](six_fluxonium/README.md) composes six independent single-cavity
+[`six_fluxonium`](../simulators/six_fluxonium/environment/README.md) composes six independent single-cavity
 sources with six local DC drivers and one shared coil. Each circuit uses the sum
 of its local and coil reduced flux. Mux gen0/ADC0..5 and pulse gen13/ADC6 use
 per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
@@ -109,9 +111,9 @@ reads. Integrated counts flatten the outcome and terminal-state axes. ADC CTMC
 jumps during herald affect IQ only, not later density evolution. This excludes
 MIST, IQ-clustered projection and data-dependent feedback for active reset.
 Pruning thresholds and diagnostics belong to the
-[single](single_fluxonium/README.md#complete-timelines),
-[six](six_fluxonium/README.md#routing-and-acquisition) and
-[FTF](ftf/README.md#cavity-drives) settings/runtime contracts.
+[single](../simulators/single_fluxonium/environment/README.md#complete-timelines),
+[six](../simulators/six_fluxonium/environment/README.md#routing-and-acquisition) and
+[FTF](../simulators/ftf/environment/README.md#cavity-drives) settings/runtime contracts.
 Templates without projective reads retain their existing raw, integrated and
 decimated outputs.
 

@@ -1,6 +1,6 @@
 # Six-fluxonium settings guide
 
-**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
+**Last updated:** 2026-11-01，simulators package ownership
 
 **Readers:** operator, lab-author, framework-dev, agent. Read physical units, per-qubit parameters and approximation limits before changing this environment.
 
@@ -86,7 +86,7 @@ residency are removed. Existing working YAML files must remove
 `prepare_cache_bytes`, `result_memo_bytes` and `adc_cache_bytes` before restart.
 The loader does not silently accept those retired fields.
 Single-source structure and complete preparations retain their own
-[lifetimes](../../../lib/zcu_tools/experiment/single_fluxonium/README.md#reuse-and-lifetime).
+[lifetimes](../../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime).
 The six sources remain independent and do not share receiver calibrations.
 
 The measurements below describe the earlier prepare/result/ADC budget design,

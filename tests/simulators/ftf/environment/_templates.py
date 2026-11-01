@@ -1,0 +1,159 @@
+"""Synthetic FTF template builders and result narrowing shared by composition tests."""
+
+from dataclasses import replace
+
+import numpy as np
+from zcu_tools.core.simulation import (
+    AcquireRequest,
+    AcquisitionMode,
+    EnvironmentSnapshot,
+    EventSlot,
+    PulseEnvelope,
+    ReadoutSlot,
+    ReadoutWindow,
+    RoundSignals,
+    RoundStatistics,
+    TimelineTemplate,
+)
+from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import (
+    FTFMuxReadoutConfig,
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+)
+
+from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
+from tests.simulators.ftf.config._data import ftf_document
+
+
+def template(*, tones: int = 0) -> TimelineTemplate:
+    """Two points; controls stop at 4 ns, readout starts at 8/10 ns."""
+
+    def slot(channel: int, start, duration, frequency, phase, gain) -> EventSlot:
+        return EventSlot(
+            channel,
+            "synthetic",
+            (),
+            tick_array(np.array(start, dtype=float)),
+            tick_array(np.full(2, duration)),
+            np.full(2, frequency),
+            np.full(2, phase),
+            np.full(2, gain),
+            (None,),
+            np.zeros(2, dtype=np.int64),
+            np.ones(2, dtype=bool),
+            ticks(0.001),
+        )
+
+    drives = tuple(
+        slot(2, [0.0, 0.002], 0.002, 250.0 + i * 100, 90.0, -0.2) for i in range(tones)
+    )
+    ro = slot(0, [0.008, 0.010], 0.020, 6000.0, 30.0, 0.1)
+    ro = replace(ro, envelopes=(PulseEnvelope(ticks(0.02), (2j, 2j)),))
+    readout = ReadoutSlot(
+        0,
+        4,
+        TIME_BASE.period_ticks(1000.0),
+        tick_array(np.array([[0.008], [0.010]])),
+        np.full((2, 1), 6000.0),
+        np.full((2, 1), 45.0),
+        np.zeros((2, 1), dtype=np.int64),
+    )
+    return TimelineTemplate(
+        np.array([0, 1], dtype=np.int64),
+        (*drives, ro),
+        (readout,),
+        tick_array(np.full(2, 0.030)),
+    )
+
+
+def herald_template() -> tuple[TimelineTemplate, FTFReadoutConfig]:
+    """Two mux blocks; ADC4 reads both, ADC1 only reads the terminal block."""
+    base = template()
+    terminal = replace(base.events[0], gen_ch=1)
+    herald = replace(
+        terminal,
+        start_ticks=tick_array(np.array([0.0, 0.002])),
+        duration_ticks=tick_array(np.full(2, 0.002)),
+        frequency_mhz=np.full(2, 5900.0),
+        gain=np.full(2, 0.3),
+    )
+    # Herald triggers are in ringdown, not inside the incident pulse support.
+    both = replace(
+        base.readouts[0],
+        channel=4,
+        trigger_ticks=tick_array(np.array([[0.003, 0.008], [0.005, 0.010]])),
+        frequency_mhz=np.tile([5900.0, 6000.0], (2, 1)),
+        phase_deg=np.tile([10.0, 45.0], (2, 1)),
+        generator_channels=np.ones((2, 2), dtype=np.int64),
+    )
+    terminal_only = replace(
+        base.readouts[0],
+        channel=1,
+        frequency_mhz=np.full((2, 1), 6080.0),
+        generator_channels=np.ones((2, 1), dtype=np.int64),
+    )
+    receiver = FTFReceiverConfig(0, 1000.0, ((0.0, 0.0), (0.0, 0.0)))
+    config = FTFReadoutConfig(
+        receiver,
+        FTFMuxReadoutConfig(
+            1, 1.0, tuple(replace(receiver, ro_ch=ch) for ch in (4, 1))
+        ),
+    )
+    return (
+        replace(
+            base,
+            events=(
+                herald,
+                replace(herald, frequency_mhz=herald.frequency_mhz + 80),
+                terminal,
+                replace(terminal, frequency_mhz=terminal.frequency_mhz + 80),
+            ),
+            readouts=(both, terminal_only),
+        ),
+        config,
+    )
+
+
+def settings():
+    value = parse_ftf(ftf_document())
+    return value.model_copy(
+        update={
+            "numerics": value.numerics.model_copy(
+                update={
+                    "truncation": value.numerics.truncation.model_copy(
+                        update={"retained_levels": 2}
+                    )
+                }
+            )
+        }
+    )
+
+
+def snapshot(value: float = 0.2) -> EnvironmentSnapshot:
+    return EnvironmentSnapshot("ftf-v2", "synthetic", (("bias", value),))
+
+
+def request(mode: AcquisitionMode = "integrated", *, templates=None) -> AcquireRequest:
+    return AcquireRequest(
+        mode,
+        (3, 2),
+        0,
+        (ReadoutWindow(0, 0, 4, TIME_BASE.period_ticks(1000.0), tick_tuple((0.008,))),),
+        123,
+        7,
+        f"PCG64/SeedSequence-v2/numpy-{np.__version__}",
+        point_dims=(2,),
+        point_names=("sweep",),
+        reps=3,
+        templates=(template(),) if templates is None else templates,
+        time_base=TIME_BASE,
+    )
+
+
+def expect_statistics(result: IntegratedRound | RoundSignals) -> RoundStatistics:
+    """Narrow the integrated result once for typed numerical assertions."""
+    if not isinstance(result, IntegratedRound):
+        raise AssertionError("integrated FTF round must return IntegratedRound")
+    return result.statistics

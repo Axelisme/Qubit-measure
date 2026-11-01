@@ -7,7 +7,6 @@ from pydantic import TypeAdapter
 from zcu_tools.analysis.flux import DevicePeriod, offset_for_flux
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDeviceInfo
-from zcu_tools.experiment.ftf import ftf
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 from zcu_tools.gui.session.aliases import AliasRow
@@ -17,8 +16,6 @@ from zcu_tools.resources.entry import (
     EntryTemplate,
     load_entry_template,
 )
-from zcu_tools.resources.ftf import load_ftf
-from zcu_tools.resources.ftf.schema import FTFSettings
 from zcu_tools.resources.predictor_file import (
     PredictorFile,
     PredictorFlux,
@@ -26,6 +23,9 @@ from zcu_tools.resources.predictor_file import (
     save_predictor_file,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumParams
+from zcu_tools.simulators.ftf.config import load_ftf
+from zcu_tools.simulators.ftf.config.schema import FTFSettings
+from zcu_tools.simulators.ftf.environment import ftf
 
 from zcu_lab.components.fluxonium import QubitSchema
 

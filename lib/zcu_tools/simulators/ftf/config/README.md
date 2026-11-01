@@ -1,0 +1,63 @@
+# FTF YAML values
+
+**讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
+
+**Last updated:** 2026-11-01，simulators package ownership
+
+`load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
+
+中性的 physical values、receiver PSD 與 solver 欄位由 `resources.simulation_schema` 擁有，與 single-fluxonium 共用。共用型別由 `simulators.ftf.config.schema` 使用。YAML decoding 使用公開 `resources.yaml.load_yaml`，重複明寫 key 的拒絕與 merge override 行為不變。
+
+使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
+
+文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`flux_lines` 宣告各迴路的 fast-flux 校準與濾波，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。接線與校準的迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。`drift` 與 `flux_lines` 的迴路則為選填。
+
+省略 `drift` 或設為 `null` 會關閉跨 acquisition 漂移。
+啟用時，`FTFDrift` 的選填 `f1`、`coupler`、`f2` 各自指定獨立 log-OU 過程。
+F1／F2 共用 `simulators.single_fluxonium.config.schema.CoherenceDrift` 的 `q_cap`、`xqp`、`aphi`。
+Coupler 使用 `SquidDrift`，只接受 `q_cap`、`aphi`，拒絕 `q_ind` 與 `xqp`。
+每個選取的 chip 損耗必須為正，不能選擇 `null` 或零損耗。
+共用 `DriftParameter` 的 `sigma` 是 ln(loss) 穩態標準差，必須有限且非負。
+`tau_s` 是有限正秒數。Log mean 是 `ln(chip 初值)`，不是線性平均值。
+省略或設為 `null` 的迴路或損耗保持不變，`q_ind` 不漂移。
+
+第一次 acquisition 使用 chip 初值，後續 begin 依 simulated seconds 更新。
+整次 points／rounds 固定使用當次值。Schema 只驗證漂移參數與正損耗前提，不建立時鐘或寫檔。
+環境級 `SimulationClock`、獨立 stream、真值 log 與 I/O 失敗語意由
+[FTF runtime](../environment/README.md#acquisition-clock-and-loss-drift) 擁有。
+預設路徑為 `~/.local/state/zcu-tools/simulation/ftf/<session>/truth.jsonl`。
+每次啟用漂移的 begin 寫三行，coupler 的 `q_ind`／`xqp` 為 `null`。
+Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘。
+這些檔案不進一般 Run／GUI／MCP metadata。
+啟用步驟與註解範例見 [Drift 指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md#drift跨-acquisition-損耗漂移)。
+`drift` 只屬於 FTF 環境設定，不屬於 entry。
+
+可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
+
+`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
+
+`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，省略為 `1e-9`。Runtime 在每次 projective read 後剪除低於此值的全域 outcome 權重，將權重按比例歸到其餘 outcomes。設為 0 保留零權重 outcomes。若某 point 剪空，runtime 會報錯並指名 point 與 floor。Telemetry 記錄保留數與剪除機率。
+
+`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
+
+錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
+
+`readout.adc.time_of_flight_ns` 是有限非負總讀取線延遲，單位 ns。`readout.resonators.r1.mismatch_phase_rad` 與 `r2.mismatch_phase_rad` 分別是有限散射相位，單位 radians。三個欄位省略都為 0，不接受 null 或非有限值。Resources 只驗證這些值；`simulators.ftf.environment` 接到 `simulate.adc` 的數值模型，由 ADC 決定物理延遲、微波 IQ 與散射響應。
+
+每條 `drive_lines.<name>` 的 `operator` 接受 `charge` 或 `flux`，省略為 `charge`，不接受 null。Charge 使用 `charge_drive_ghz_per_gain` 乘完整電荷算符 n；flux 使用 `flux_drive_phi0_per_gain` 乘固定 DC 工作點的 ∂(H/h)/∂f，f = Phi/Phi0。兩種校準都含三迴路的有限複數 real/imag。每條線只接受所選 operator 的校準欄位，不能錯配、同時提供或省略。
+
+`flux_lines` 是選填的 `FTFFluxLines` record，接受 `f1`、`coupler`、`f2`，每個迴路最多一條線。省略或填 `{}` 不宣告 pulsed flux，保留原本 DC 與 drive 設定；頂層不接受 `null`。各迴路省略或填 `null` 都表示沒有該線。每條線直接使用 `simulators.single_fluxonium.config.schema.FluxLine`，必填 `name`、非負整數 `gen_ch`、有限 signed `flux_phi0_per_gain`。選填 `delay_ns`、`tau_ns` 預設為 0，`distortion_terms` 預設為空。延遲與時間常數使用 ns，校準使用 Phi0/gain。Flux 線不能與另一 flux loop、任一 `drive_lines`、`readout.drive` 或可選的 `readout.mux` 共用 `gen_ch`。錯誤會列出兩端的欄位路徑與 channel，例如 `flux_lines.f1.gen_ch: channel 2 is also bound to drive_lines.mw.gen_ch`。這項限制不新增線路名稱的全域唯一性規則，也不改變未宣告 flux line 時的契約。
+
+`DriveLine.operator: flux` 仍使用固定 DC 的線性導數，限於小訊號驅動。它不取代 `flux_lines` 的時變磁通校準，也不隨 pulse 振幅重算 Hamiltonian。Flux pulse 的數值接線與演化限制由 [FTF runtime](../environment/README.md) 擁有，schema 不建立數值模型。
+
+`readout.drive` 綁定 pulse generator 與 incident amplitude 校準，`readout.adc` 維持單一 receiver object。
+可省略的 `readout.mux` 另綁 `gen_ch`、`input_per_gain` 與 1 至 8 個 receiver 的 `adc` list。
+Mux generator 不可與 pulse 或 drive lines 重複，mux 的 `ro_ch` 彼此唯一，也不可與 pulse ADC 重複。
+省略或設 `mux: null` 只關閉 mux，不影響 pulse。`readout.drive.kind` 已移除，出現時載入會指出該欄位已移除。
+Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑的 generator 與 receiver 校準。
+兩條路徑共用兩個物理 resonator，不新增 tone-to-qubit mapping。
+`readout.receivers` 依 pulse、mux 設定順序回傳全部 receiver，不決定 program 輸出順序。
+
+Generator 數量是所有 drive、flux、pulse readout 與可選 mux generator index 的最大值加一，ADC 數量是所有 `ro_ch` 最大值加一。索引必須是非負整數，不設固定上限。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
+
+[default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。
