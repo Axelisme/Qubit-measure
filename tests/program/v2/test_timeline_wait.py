@@ -682,7 +682,9 @@ def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
             self.emit(playback)
 
     profile = load_soccfg(1, 1)
-    ends = [math.ceil(runtime_cycles(profile, int(profile.us2cycles(n / RO_MHZ, gen_ch=0)))) for n in (50, 100)]
+    # Integer tProc candidates remain exact; only cross-grid candidates use k=8.
+    physical = [generator_duration(profile, n / RO_MHZ) * Fraction(str(TPROC_MHZ)) for n in (50, 100)]
+    ends = [int(ticks) if ticks.denominator == 1 else math.ceil(runtime_cycles(profile, int(profile.us2cycles(n / RO_MHZ, gen_ch=0)))) for n, ticks in zip((50, 100), physical, strict=True)]
     slack = max(ends) - min(ends)
     with pytest.raises(ValueError, match=rf"selected.*slack={slack} cycles.*relax={slack - 1} cycles"):
         Program(profile, initial_delay=0, relax_delay=(slack - 1) / TPROC_MHZ)
