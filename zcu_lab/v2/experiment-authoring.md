@@ -850,16 +850,20 @@ Body 的預設名字改用循環 timeline，只可使用母 timeline 與局部 f
 若每圈都要推進 reference，在 body 頂層最後明寫 `delay_by_timeline()`，並先在循環前同步母 timeline。
 當入口結尾為常數 0 且最後操作是這個 delay_by_timeline，固定圈長使用常數 inc_ref，不配循環尾端 register。
 編譯器只看已錄製結構，不分析定點或重播 preprocess。
-中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步別條 timeline 或沒有 delay_by_timeline 都用 shot-local register 累加器。
+中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步別條 timeline 或沒有 delay_by_timeline 都走變數尾端路徑。
 Body 以循環 timeline 的 delay_by_timeline 結尾但入口不是常數 0 時，UserWarning 會提示在循環前加 delay_by_timeline，編譯器不自行加入。
-這條變數尾端路徑仍沿用現有 IR 展開與 address DMEM 成本，尚未改成 s14 指針。
+變數尾端使用 s14 指針，入口載入母 timeline 結尾，每圈推進到實際結尾，離開時才捕獲尾端。
+IR 依實際時間窗口決定展開份數，address DMEM 成本維持原契約。
 
 `n` 是非負整數或既有 count register 名字。固定 0 不執行 body，也不自動同步。
 Register 次數可提供 `range_hint=(minimum, maximum)`，單位是次數。
 省略 hint 時不證明回邊同 channel 重疊，作者自行保證合法次數與時序。Hint 不增加硬體檢查。
 每 shot 內初始化循環狀態，register 超限保留 QICK 錯誤。
 Runtime-only 事件 getter 會報 RuntimeError，不回傳上界。編譯期可知的累積結尾仍可讀取。
-Reference 操作按每圈實際推進量扣減外部結尾。Runtime 推進後未消耗的外部來源可能是 wait-only，先經 join/fork 建立普通排程點，或明寫 delay_by_timeline 完整消耗。
+Reference 操作按每圈實際推進量扣減外部結尾。
+Branch／runtime Repeat 後可直接在外部 timeline 放事件，從實際 remaining end 經 s14 放置，不必先 join、fork 或同步。
+後續事件重用 shot 收尾等 consumer 已需要的 selected-end／debit storage，不另配事件時間 register。
+沒有後續事件時，不為可能的 placement 預配 register。
 
 `DelayAuto` module 是例外，它只可在範圍外且未指定 timeline 時 emit。
 它包裝原生 reference advance，不能用來增加具名 timeline 的結尾。
