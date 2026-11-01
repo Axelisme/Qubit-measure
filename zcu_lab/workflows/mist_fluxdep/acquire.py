@@ -18,14 +18,17 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 
 
-def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
+def run_mist(
+    cfg: PowerDepCfg, *, context: RunContext, retry: int
+) -> PowerDepResult:
     """Acquire a disturbance gain trace after optional pi preparation.
 
     Supply native PowerDepCfg: init_pulse is the calibrated pi pulse for excited
     preparation, or None for ground. probe_pulse is the fixed disturbance.
     Native optional reset retains its meaning. gain SweepCfg is fixed by plan.
     Return actual rounded gains and complex IQ with partial data on stop.
-    context supplies SoC, plots and the cancellation token.
+    context supplies SoC, plots and the cancellation token. retry is the number
+    of retries after a transient acquisition failure, from workflow settings.
     Schedule records acquisition failures
     on the token; other errors propagate. No fitting, device setup or saving
     occurs, and cfg remains unchanged.
@@ -61,6 +64,6 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext) -> PowerDepResult:
             builder.build(),
             soc,
             rounds=cfg.rounds,
-            options=RunOptions(retry=cfg.acquire_retry),
+            options=RunOptions(retry=retry),
         )
     return PowerDepResult(gains, buffer.array)
