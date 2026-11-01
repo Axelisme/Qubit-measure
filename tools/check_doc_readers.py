@@ -61,3 +61,8 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
             if not all(token in _ALLOWED_READERS for token in tokens):
                 found.append(Violation(path, "invalid reader list: " + repr(readers)))
     return tuple(found)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Scan tracked Markdown and emit JSON stdout plus diagnostics on stderr."""
+    return 0

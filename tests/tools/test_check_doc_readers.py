@@ -1,7 +1,45 @@
 """Reader-checker behavior through synthetic source mappings."""
 
+import json
+import subprocess
+from pathlib import Path
+
 import pytest
-from check_doc_readers import Violation, check_sources
+from check_doc_readers import Violation, check_sources, main
+
+
+@pytest.mark.parametrize("has_declaration", [False, True])
+def test_main_reports_json_diagnostics_and_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    has_declaration: bool,
+) -> None:
+    source = "**Readers:** agent. Read this guide.\n" if has_declaration else "# Guide\n"
+    (tmp_path / "guide.md").write_text(source, encoding="utf-8")
+    (tmp_path / "untracked.md").write_text("# Not tracked\n", encoding="utf-8")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout=b"guide.md\\0", stderr=b""
+        ),
+    )
+
+    assert main(["--root", str(tmp_path)]) == (0 if has_declaration else 1)
+    captured = capsys.readouterr()
+    violations = [] if has_declaration else [
+        {"path": "guide.md", "reason": "missing reader declaration in first 8 body lines"}
+    ]
+    assert json.loads(captured.out) == {
+        "status": "PASS" if has_declaration else "FAIL",
+        "violation_count": len(violations),
+        "violations": violations,
+    }
+    assert captured.err == (
+        "" if has_declaration else "guide.md: missing reader declaration in first 8 body lines\n"
+    )
 
 
 def test_missing_declaration_reports_path_and_reason() -> None:
