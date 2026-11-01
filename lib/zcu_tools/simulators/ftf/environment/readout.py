@@ -1,6 +1,6 @@
 """Detached author readout values and the sole FTF YAML-to-readout adapter."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -25,10 +25,10 @@ class FTFReceiverConfig:
     noise_psd_adc2_ns: symmetric positive-semidefinite two-sided noise PSD.
     offset_adc: per-sample I/Q offset. time_of_flight_ns: nonnegative line delay.
     ripple_depth: finite reflected amplitude in [0,1), default zero.
-    ripple_period_mhz: finite positive standing-wave period in MHz, default 1000.
+    ripple_period_mhz: required finite positive standing-wave period in MHz.
     ripple_phase_deg: finite standing-wave phase in degrees, default zero.
     slope_db_per_ghz: finite amplitude slope in dB/GHz, default zero.
-    pivot_ghz: finite absolute GHz where the slope factor is unity, default zero.
+    pivot_ghz: required finite absolute GHz where the slope factor is unity.
         These five scalars describe fixed transmission before receiver gain/phase;
         zero depth and slope give unity without changing physical cavities.
     extra_ripples: immutable multiplicative waves in MHz/degrees, default empty.
@@ -44,10 +44,10 @@ class FTFReceiverConfig:
     offset_adc: tuple[float, float] = (0.0, 0.0)
     time_of_flight_ns: float = 0.0
     ripple_depth: float = 0.0
-    ripple_period_mhz: float = 1000.0
+    ripple_period_mhz: float = field(kw_only=True)
     ripple_phase_deg: float = 0.0
     slope_db_per_ghz: float = 0.0
-    pivot_ghz: float = 0.0
+    pivot_ghz: float = field(kw_only=True)
     extra_ripples: tuple[BackgroundRipple, ...] = ()
     roughness: BackgroundRoughness | None = None
     band_edges: BackgroundBandEdges | None = None

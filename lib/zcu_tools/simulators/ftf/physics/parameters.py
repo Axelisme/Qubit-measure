@@ -149,7 +149,7 @@ class Resonator:
     charge_coefficients_ghz: tuple[float, float, float]
     kappa_external_per_ns: float
     kappa_internal_per_ns: float
-    thermal_occupation: float | None = None
+    thermal_occupation: float | None
 
     def __post_init__(self) -> None:
         _positive(self.frequency_ghz)

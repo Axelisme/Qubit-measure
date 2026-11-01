@@ -48,12 +48,15 @@ readout:
     charge_coefficient_ghz: 0.03
     kappa_external_mhz: 1.0
     kappa_internal_mhz: 0.1
+    thermal_occupation: null
   adc:
     ro_ch: 0
     gain: 100.0
     background: {ripple_period_mhz: 1000.0, pivot_ghz: 0.0}
     noise_psd_adc2_ns: [[1.0, 0.5], [0.5, 0.25]]
 numerics:
+  slow_envelope_segments_per_period: 20
+  projection_prune_floor: 1.0e-9
   truncation: {native_cutoff: 12, levels: 4}
   solver: {rtol: 0.00000001, atol: 0.0000000001, max_step_ns: 0.1, bath_segment_ns: 2.0}
   seed: 123

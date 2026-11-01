@@ -24,7 +24,7 @@ def test_parse_and_load_preserve_complete_independent_material(tmp_path: Path):
     path = tmp_path / "material.yaml"
     path.write_text(yaml.safe_dump(document), encoding="utf-8")
     loaded = api.load_six_fluxonium(path)
-    assert parsed.model_dump(mode="json", exclude={"numerics"}) == document
+    assert parsed.model_dump(mode="json") == document
     assert loaded == parsed
     document["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] = 99
     assert loaded.model_dump()["qubits"]["Q1"]["chip"]["qubit"]["ej_ghz"] == 4

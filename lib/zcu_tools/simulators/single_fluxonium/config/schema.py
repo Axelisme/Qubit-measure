@@ -151,8 +151,8 @@ class Resonator(Values):
     frequency_ghz: positive bare H/h GHz. charge_coefficient_ghz: finite signed
     coupling GHz (not g01). kappa_external_mhz: positive external linewidth
     kappa/(2*pi) MHz; kappa_internal_mhz: nonnegative internal linewidth in the
-    same convention. thermal_occupation: optional nonnegative residual photons;
-    omitted/None uses Bose(temperature_k, bare frequency), zero disables.
+    same convention. thermal_occupation: required nullable nonnegative residual photons;
+    None uses Bose(temperature_k, bare frequency), zero disables.
     mismatch_phase_rad: finite scattering phase in radians, default zero;
     rotates the scattering contribution without changing cavity dynamics.
     """
@@ -161,7 +161,7 @@ class Resonator(Values):
     charge_coefficient_ghz: Finite
     kappa_external_mhz: Positive
     kappa_internal_mhz: Nonnegative
-    thermal_occupation: Nonnegative | None = None
+    thermal_occupation: Nonnegative | None
     mismatch_phase_rad: Finite = 0.0
 
 
@@ -199,9 +199,9 @@ class Truncation(Values):
 class Numerics(RoundPacing):
     """truncation: oscillator/retained sizes; solver: explicit numerical accuracy.
 
-    seed: nonnegative integer root RNG seed or None (default: choose once at
-    startup, not per round). slow_envelope_segments_per_period: strict positive
-    integer midpoint subdivisions per carrier period, default 20.
+    seed: required nonnegative integer root RNG seed or None (choose once at
+    startup, not per round). slow_envelope_segments_per_period: required strict
+    positive integer midpoint subdivisions per carrier period.
     time_scale: finite nonnegative physical-time multiplier per binding round,
     default 1.0; zero disables pacing. These
     values do not guarantee convergence and do not specify any pulse sequence.
@@ -209,9 +209,9 @@ class Numerics(RoundPacing):
 
     truncation: Truncation
     solver: Solver
-    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
-    seed: Index | None = None
-    projection_prune_floor: Annotated[Nonnegative, Field(lt=1)] = 1e-9
+    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)]
+    seed: Index | None
+    projection_prune_floor: Annotated[Nonnegative, Field(lt=1)]
     """Discard global projective outcome weights below this finite threshold.
 
     Zero disables pruning. If every outcome of a point falls below the floor,

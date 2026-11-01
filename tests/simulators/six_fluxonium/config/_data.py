@@ -43,6 +43,7 @@ class SixDocument(TypedDict):
     pulse_ro_ch: int
     dc_source: dict[str, object]
     qubits: dict[str, QubitDocument]
+    numerics: dict[str, int]
     surprise: NotRequired[bool]
 
 
@@ -95,4 +96,5 @@ def six_document() -> SixDocument:
             "ramp_step": 0.01,
         },
         "qubits": qubits,
+        "numerics": {"routing_cache_bytes": 4 * 1024**2, "slow_envelope_segments_per_period": 20},
     }

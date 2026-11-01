@@ -273,7 +273,7 @@ class Resonator(Values):
 
     coupling GHz, never hidden g01. kappa_external_mhz/kappa_internal_mhz:
     nonnegative linewidth kappa/(2*pi) MHz, total positive. thermal_occupation:
-    nonnegative residual nth; omitted uses Bose(common Temp,bare f), explicit 0
+    required nullable nonnegative residual nth; None uses Bose(common Temp,bare f), 0
     disables. Both resonators share one reciprocal co-located two-port line.
     mismatch_phase_rad: finite phase in radians, default zero (symmetric line).
     Rotates this resonator's scattering relative to direct transmission, with
@@ -284,7 +284,7 @@ class Resonator(Values):
     charge_coefficients_ghz: LoopMap[Finite]
     kappa_external_mhz: Nonnegative
     kappa_internal_mhz: Nonnegative
-    thermal_occupation: Nonnegative | None = None
+    thermal_occupation: Nonnegative | None
     mismatch_phase_rad: Finite = 0.0
 
     @model_validator(mode="after")
@@ -391,19 +391,19 @@ class TelemetrySettings(Values):
 class Numerics(RoundPacing):
     """truncation: basis sizes; solver: accuracy; seed: nonnegative root RNG seed.
 
-    Omitted/None seed generates once at environment startup, not once per round.
+    Required nullable seed: None generates once at environment startup, not once per round.
     time_scale: finite nonnegative physical-time multiplier per binding round,
     default 1.0; zero disables pacing.
     telemetry: local acquire-summary policy; omitted settings enable logging.
-    projection_weight_floor: finite probability in [0, 1), default 1e-9;
+    projection_weight_floor: required finite probability in [0, 1);
         outcome histories below it are removed and survivors renormalized.
     """
 
     truncation: Truncation
     solver: Solver
-    seed: Index | None = None
+    seed: Index | None
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
-    projection_weight_floor: Annotated[Finite, Field(ge=0, lt=1)] = 1e-9
+    projection_weight_floor: Annotated[Finite, Field(ge=0, lt=1)]
 
 
 class SquidDrift(Values):

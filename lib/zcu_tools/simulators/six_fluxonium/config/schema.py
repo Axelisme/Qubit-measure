@@ -118,18 +118,18 @@ class SixFluxoniumNumerics(Values):
     """Environment cache allowances and midpoint subdivisions.
 
     Cache allowances are strict nonnegative integer byte counts.
-    routing_cache_bytes: environment-wide routing facts and metadata, default
-        4 MiB, divided equally between six independent sources, rounding down
+    routing_cache_bytes: required environment-wide routing facts and metadata,
+        divided equally between six independent sources, rounding down
         (at most five bytes unused). Zero disables routing-facts residency.
     No fixed upper bound is imposed. Negative/noninteger values fail validation.
     These allowances exclude active work, models and process RSS.
     slow_envelope_segments_per_period: strict positive integer midpoint
-        subdivisions per carrier period, default 20, overriding all six nested
+        subdivisions per carrier period, required and overriding all six nested
         single-qubit values when composing sources.
     """
 
-    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)] = 20
-    routing_cache_bytes: Index = 4 * 1024**2
+    slow_envelope_segments_per_period: Annotated[int, Field(ge=1, strict=True)]
+    routing_cache_bytes: Index
 
 
 class SixFluxoniumSettings(Values):
@@ -145,15 +145,14 @@ class SixFluxoniumSettings(Values):
     Q1's seed selects the environment root stream. The maximum of the six
     time_scale values sets successful-round pacing. Per-qubit solver
     tolerances, truncations and physical calibrations remain independent.
-    numerics: environment cache allowances and midpoint subdivisions, default
-    SixFluxoniumNumerics.
+    numerics: required environment cache allowances and midpoint subdivisions.
     No devices are created. Validation does not certify physical convergence.
     """
 
     format: Literal["zcu.six-fluxonium"]
     version: Literal[1]
     qubits: SixQubits
-    numerics: SixFluxoniumNumerics = Field(default_factory=SixFluxoniumNumerics)
+    numerics: SixFluxoniumNumerics
     dc_source: CurrentSource
     mux_gen_ch: Literal[0]
     pulse_gen_ch: Literal[13]
