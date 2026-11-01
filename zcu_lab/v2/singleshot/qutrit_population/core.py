@@ -94,7 +94,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
             z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
             result_type=QutritPopulationResult,
             cfg_type=QutritPopulationCfg,
-            cfg_schema_version="4.0",
+            cfg_schema_version="3.0",
             tag="singleshot/qutrit_population",
         )
     )

@@ -147,7 +147,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="3.0",
         tag="singleshot/ge",
     )
 

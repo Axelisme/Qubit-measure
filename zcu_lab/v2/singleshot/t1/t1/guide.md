@@ -17,6 +17,7 @@ Open and Reset take a snapshot of the current aliases, parameters and module cho
 Readout accepts only the pulse family.
 A mux readout in the library is incompatible.
 Classification uses the readout's circle classifier under Readout → Advanced.
+It divides raw ADC sums by integration length without subtracting IQ offset.
 Run requires a positive radius; missing radius prompts singleshot GE Post.
 Linear has no Other state and is rejected.
 Analyze corrects populations only with the saved readout cfg's confusion matrix.
