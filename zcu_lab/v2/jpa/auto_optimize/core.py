@@ -375,13 +375,12 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 step.run_acquire(
                     prog,
                     soc,
-                    # A host scalar step stores exactly one tracker's SNR.
                     options=RunOptions(
                         converter=lambda _raw, tracker=tracker: snr_as_signal(
                             [tracker],
                             ge_axis=1,
                             skew_penalty=cfg.skew_penalty,
-                        ).reshape(()),
+                        ),
                     ),
                     trackers=[tracker],
                     rounds=cfg.rounds,
