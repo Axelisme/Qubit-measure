@@ -40,9 +40,7 @@ def run_mux_t1(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Result
 def _run_t1_linear(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Result:
     times = sweep2array(cfg.delay, "none")
     indices = list(cfg.participants)
-    readout = cfg.readout.with_updates(
-        tones=[cfg.readout.tones[i] for i in indices]
-    )
+    readout = cfg.readout.with_updates(tones=[cfg.readout.tones[i] for i in indices])
     viewers = []
     for i in indices:
         fig, ax = context.plots.subplots(num=f"measurement_{i}")
@@ -93,22 +91,19 @@ def _run_t1_linear(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Re
             options=RunOptions(
                 converter=partial(averaged_mux_signal, prog, readout_module),
                 retry=retry,
-                stop_condition=mux_snr_checker(
-                    signals, cfg.earlystop_snr, tone_axis=1
-                ),
+                stop_condition=mux_snr_checker(signals, cfg.earlystop_snr, tone_axis=1),
             ),
         )
     return MuxT1Result(
         times, np.asarray(indices, dtype=np.int64), signals.array.T.copy()
     )
 
+
 def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Result:
     table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
     times = table.times_us
     indices = list(cfg.participants)
-    readout = cfg.readout.with_updates(
-        tones=[cfg.readout.tones[i] for i in indices]
-    )
+    readout = cfg.readout.with_updates(tones=[cfg.readout.tones[i] for i in indices])
     viewers = []
     for i in indices:
         fig, ax = context.plots.subplots(num=f"measurement_{i}")
@@ -169,9 +164,7 @@ def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Res
             options=RunOptions(
                 converter=partial(averaged_mux_signal, prog, readout_module),
                 retry=retry,
-                stop_condition=mux_snr_checker(
-                    signals, cfg.earlystop_snr, tone_axis=1
-                ),
+                stop_condition=mux_snr_checker(signals, cfg.earlystop_snr, tone_axis=1),
             ),
         )
     return MuxT1Result(
@@ -179,7 +172,9 @@ def _run_t1_decay(cfg: MuxT1Cfg, *, context: RunContext, retry: int) -> MuxT1Res
     )
 
 
-def run_mux_t2echo(cfg: MuxT2EchoCfg, *, context: RunContext, retry: int) -> MuxCoherenceResult:
+def run_mux_t2echo(
+    cfg: MuxT2EchoCfg, *, context: RunContext, retry: int
+) -> MuxCoherenceResult:
     """Measure x90 → half wait → x180 → half wait → x90 → mux readout.
 
     cfg supplies full tones, ordered participants and a total delay sweep
@@ -297,13 +292,9 @@ def run_mux_t2echo(cfg: MuxT2EchoCfg, *, context: RunContext, retry: int) -> Mux
             context.soc,
             rounds=cfg.rounds,
             options=RunOptions(
-                converter=lambda raw: (
-                    averaged_mux_signal(prog, readout_module, raw).T
-                ),
+                converter=lambda raw: averaged_mux_signal(prog, readout_module, raw).T,
                 retry=retry,
-                stop_condition=mux_snr_checker(
-                    signals, cfg.earlystop_snr, tone_axis=0
-                ),
+                stop_condition=mux_snr_checker(signals, cfg.earlystop_snr, tone_axis=0),
             ),
         )
     return MuxCoherenceResult(
@@ -313,4 +304,3 @@ def run_mux_t2echo(cfg: MuxT2EchoCfg, *, context: RunContext, retry: int) -> Mux
         detunes,
         frequencies,
     )
-

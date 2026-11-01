@@ -10,7 +10,6 @@ from zcu_lab.workflows.common.analysis import (
     fit_or_failed,
     validate_fit_trace,
 )
-
 from zcu_lab.workflows.common.lifetime_acquire import t2echo_signal2real
 
 
