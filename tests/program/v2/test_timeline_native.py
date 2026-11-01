@@ -1,7 +1,7 @@
 """Native QICK operations retain reference/channel selection around B1 ends."""
 
 import pytest
-from qick.asm_v2 import QickSweep1D
+from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -314,6 +314,48 @@ def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
         (0, 1),
         (10, 0),
     ]
+
+
+@pytest.mark.parametrize("swept", [False, True])
+def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        start = QickSweep1D("scan", 0.2 / 430.08, 1.2 / 430.08) if swept else 0.2 / 430.08
+        prog.trigger([0], t=start, width=10 / 430.08)
+        next_start = QickSweep1D("scan", 140 / 430.08, 141 / 430.08) if swept else 140 / 430.08
+        prog.timeline_inc(next_start)
+        prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    assert [
+        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        for shot in _shots(prog)
+    ] == ([[0, 140], [1, 141]] if swept else [[0, 140]] * 2)
+
+
+def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+
+    def native(prog):
+        prog.trigger([0], t=0.2 / 430.08, width=10 / 430.08)
+
+    def qick(prog):
+        prog.append_macro(Trigger(
+            ros=[0], tts=None, pins=None, t=0.2 / 430.08, width=10 / 430.08,
+            ddr4=False, mr=False, tag=None,
+        ))
+
+    prog = _program(native, initialize)
+    reference = _program(qick, initialize)
+    assert [i for i in prog.prog_list if i["CMD"] == "DPORT_WR"] == [
+        i for i in reference.prog_list if i["CMD"] == "DPORT_WR"
+    ]
+    (wait,) = [i for i in prog.prog_list if i["CMD"] == "WAIT"]
+    assert wait["TIME"] == "@140"
 
 
 def test_native_adc_tail_is_checked_before_a_named_trigger():
