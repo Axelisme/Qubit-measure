@@ -85,8 +85,8 @@ def test_preview_axis_labels_follow_transpose_and_restore(
         driver.click("Axis: X=Flux, Y=Frequency")
         driver.screenshot(tmp_path / "final-transposed.png")
     driver.click("OK")
-    driver.screenshot(tmp_path / "accepted.png")
-    assert not driver.visible().dialogs
+    # The accepted dialog has no visible pixels to capture.
+    assert not driver.visible().widgets
     request = dialog.result_request()
     assert request is not None
     assert request.transpose_axes is final_transposed

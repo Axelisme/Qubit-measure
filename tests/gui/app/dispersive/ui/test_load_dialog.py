@@ -108,8 +108,8 @@ def test_transpose_toggle_flips_request(
             driver.click("Axis: X=Flux, Y=Frequency")
             driver.screenshot(tmp_path / "final-transposed.png")
         driver.click("OK")
-        driver.screenshot(tmp_path / "accepted.png")
-        assert not driver.visible().dialogs
+        # The accepted dialog has no visible pixels to capture.
+        assert not driver.visible().widgets
         assert dialog.result_request() == LoadOnetoneRequest(path, final_transposed)
     finally:
         dialog.close()
