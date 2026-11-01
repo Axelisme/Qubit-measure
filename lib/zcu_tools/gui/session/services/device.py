@@ -308,7 +308,7 @@ class DeviceService:
                 _on_connect_succeeded(bg.result, settle)
             else:
                 assert bg.error is not None
-                _on_operation_failed(str(bg.error), settle)
+                _on_operation_failed(bg.error, settle)
 
         def _on_connect_succeeded(info: BaseDeviceInfo, settle: SettleFn) -> None:
             self._state.put_device(
@@ -336,12 +336,14 @@ class DeviceService:
                 )
             )
 
-        def _on_operation_failed(message: str, settle: SettleFn) -> None:
+        def _on_operation_failed(error: BackgroundError, settle: SettleFn) -> None:
+            """Settle with the exception while preserving device event/state text."""
+            message = str(error)
             logger.warning("device operation failed: name=%r error=%s", name, message)
             self._inflight.pop(name, None)
             self._restore_prior_device_from(name, prior, message)
             # State is observable before settle.
-            settle(OperationOutcome("failed", message))
+            settle(OperationOutcome.from_exception(error))
             self._emit_device_changed(name)
             self._bus.emit(
                 DeviceOperationFinishedPayload(
@@ -415,7 +417,7 @@ class DeviceService:
                 _on_disconnect_succeeded(settle)
             else:
                 assert bg.error is not None
-                _on_operation_failed(str(bg.error), settle)
+                _on_operation_failed(bg.error, settle)
 
         def _on_disconnect_succeeded(settle: SettleFn) -> None:
             if req.remember:
@@ -443,12 +445,14 @@ class DeviceService:
                 )
             )
 
-        def _on_operation_failed(message: str, settle: SettleFn) -> None:
+        def _on_operation_failed(error: BackgroundError, settle: SettleFn) -> None:
+            """Settle with the exception while preserving device event/state text."""
+            message = str(error)
             logger.warning("device operation failed: name=%r error=%s", name, message)
             self._inflight.pop(name, None)
             self._restore_prior_device_from(name, prior, message)
             # State is observable before settle.
-            settle(OperationOutcome("failed", message))
+            settle(OperationOutcome.from_exception(error))
             self._emit_device_changed(name)
             self._bus.emit(
                 DeviceOperationFinishedPayload(
@@ -516,7 +520,7 @@ class DeviceService:
                     _on_setup_finished(bg.result, settle)
             else:
                 assert bg.error is not None
-                _on_setup_failed(str(bg.error), settle)
+                _on_setup_failed(bg.error, settle)
 
         def _on_setup_finished(info: BaseDeviceInfo, settle: SettleFn) -> None:
             logger.info("device setup finished: name=%r", name)
@@ -535,12 +539,14 @@ class DeviceService:
             self._emit_device_changed(name)
             self._bus.emit(DeviceSetupFinishedPayload(name=name, outcome="finished"))
 
-        def _on_setup_failed(error: str, settle: SettleFn) -> None:
+        def _on_setup_failed(exception: BackgroundError, settle: SettleFn) -> None:
+            """Settle with the exception while preserving setup event/state text."""
+            error = str(exception)
             logger.warning("device setup failed: name=%r error=%s", name, error)
             self._inflight.pop(name, None)
             self._restore_prior_device_from(name, prior, error)
             # State is observable before settle.
-            settle(OperationOutcome("failed", error))
+            settle(OperationOutcome.from_exception(exception))
             self._emit_device_changed(name)
             self._bus.emit(
                 DeviceSetupFinishedPayload(

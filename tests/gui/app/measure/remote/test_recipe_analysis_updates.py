@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.gui.form import FormModel
@@ -20,7 +21,8 @@ from tests.gui.app.measure._synthetic import (
     SampleResult,
 )
 
-from ._helpers import mcp_client
+from ._helpers import call as rpc_call
+from ._helpers import mcp_client, open_client
 from ._recipe_analysis_adapter import RecipePicker
 
 
@@ -39,41 +41,94 @@ class Report(BaseModel):
     written: int
 
 
-@pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError])
-def test_analyze_errors_reach_recipe_author_with_original_message(
-    fx, tmp_path: Path, request: pytest.FixtureRequest, error_type: type[Exception]
+@pytest.mark.parametrize("stage", ["run", "analyze"])
+@pytest.mark.parametrize("boundary", ["wire", "recipe"])
+@pytest.mark.parametrize(
+    ("error_type", "message", "expected"),
+    [
+        (ValueError, "", "ValueError()"),
+        (ValueError, "no result", "ValueError('no result')"),
+        (AnalysisFailed, "no result", "AnalysisFailed('no result')"),
+    ],
+)
+def test_operation_errors_reach_wire_and_recipe_author(
+    fx,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    stage: str,
+    boundary: str,
+    error_type: type[Exception],
+    message: str,
+    expected: str,
 ) -> None:
-    message = "synthetic analyze could not produce a result"
+    """Run and Analyze expose the exception representation without classifying it."""
+    error = error_type(message) if message else error_type()
+
+    def run(
+        cfg: SampleCfg, *, context: RunContext
+    ) -> RunRecord[SampleCfg, SampleResult]:
+        """Acquire a synthetic record or raise the selected Run failure."""
+        if stage == "run":
+            raise error
+        return SampleAdapter.run(cfg, context=context)
 
     def analyze(
         req: AnalyzeRequest[RunRecord[SampleCfg, SampleResult], SampleParams],
         *,
         plots: Plots,
     ) -> SampleAnalysis:
-        raise error_type(message)
+        """Raise the selected failure for any analysis request and plot host."""
+        raise error
 
     fx.registry.register(
         "synthetic/failing-analysis",
         Adapter(
             spec=SampleAdapter.spec,
             make_form=SampleAdapter.make_form,
-            run=SampleAdapter.run,
+            run=run,
             guide=None,
             analysis=Analysis(fn=analyze, options=lambda source, env: SampleParams()),
         ),
     )
+    if boundary == "wire":
+        with open_client(fx.service.port) as sock:
+            opened = rpc_call(
+                sock, "tab.new", {"adapter_name": "synthetic/failing-analysis"}
+            )
+            tab_id = opened["result"]["tab_id"]
+            started = rpc_call(sock, "tab.run_start", {"tab_id": tab_id})
+            terminal = rpc_call(
+                sock,
+                "operation.await",
+                {"operation_id": started["result"]["operation_id"], "timeout": 5},
+            )
+            if stage == "analyze":
+                assert terminal["result"]["status"] == "finished", terminal
+                started = rpc_call(sock, "tab.analyze", {"tab_id": tab_id})
+                terminal = rpc_call(
+                    sock,
+                    "operation.await",
+                    {"operation_id": started["result"]["operation_id"], "timeout": 5},
+                )
+            assert terminal["result"] == {
+                "reason": "completed",
+                "status": "failed",
+                "error": {"reason": "failed", "message": expected},
+            }
+        return
+
     observed: list[str] = []
 
-    @recipe("analyze-error", "Let the author handle any analyze failure")
+    @recipe("analyze-error", "Let the author handle any operation failure")
     async def analyze_error(session: RecipeSession, inputs: Inputs) -> Report:
         tab = session.open_tab("synthetic/failing-analysis")
-        await tab.run()
         try:
+            await tab.run()
             await tab.analyze("primary", result=Picked)
         except GuiRpcError as error:
             observed.append(str(error))
         else:
-            raise AssertionError("Analyze failure must raise to its author")
+            raise AssertionError("Operation failure must raise to its author")
         return Report(half=0.0, written=0)
 
     _, call = mcp_client(
@@ -82,7 +137,7 @@ def test_analyze_errors_reach_recipe_author_with_original_message(
     call("connect", {"port": fx.service.port})
     result = call("analyze-error", {})
     assert result["status"] == "completed", result
-    assert observed == [message]
+    assert observed == [expected]
 
 
 def test_updates_reach_owner_and_done_resumes_same_recipe_before_writeback_answer(

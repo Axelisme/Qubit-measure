@@ -10,9 +10,9 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from threading import RLock
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, model_validator
 
 from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
@@ -31,6 +31,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionPhase,
     InvalidAnalysisValue,
 )
+from zcu_tools.mcp.measure.operation_wait import require_operation_failure_message
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -159,11 +160,21 @@ class _Completion(BaseModel):
     status: Literal["finished", "cancelled", "failed"] | None = None
     error: str | _OperationError | None = None
 
-    @property
+    @model_validator(mode="after")
+    def require_failure_message(self) -> Self:
+        """Reject failed wire replies that omit a non-empty diagnostic."""
+        if self.status == "failed":
+            self.error_message()
+        return self
+
     def error_message(self) -> str:
-        if isinstance(self.error, _OperationError):
-            return self.error.message
-        return self.error or "Operation failed"
+        """Return the native non-empty error text or raise ValueError."""
+        message = (
+            self.error.message
+            if isinstance(self.error, _OperationError)
+            else self.error
+        )
+        return require_operation_failure_message(message)
 
 
 class _Candidate(BaseModel):
@@ -790,7 +801,7 @@ class RecipeRuntime:
             if completion.reason == "completed":
                 if completion.status == "failed":
                     raise GuiRpcError(
-                        completion.error_message,
+                        completion.error_message(),
                         reason="operation_failed",
                     )
                 if completion.status not in ("finished", "cancelled"):

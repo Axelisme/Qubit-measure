@@ -443,7 +443,7 @@ def test_device_read_failure_rejects_run_before_core() -> None:
     assert flux.get_value() == 0.0
     outcome = handles.poll(token)
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "snapshot read failed"
+    assert outcome.error == "OSError('snapshot read failed')"
     assert not gate.has_active(OperationKind.RUN)
 
 
