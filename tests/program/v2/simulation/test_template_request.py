@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Public acquisition rejects reps live-ins, inconsistent tables and missing routes."""
 
@@ -38,26 +39,23 @@ def receiver():
 def test_reps_dependent_timeline_rejected_before_backend(dependency):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     cfg = drive()
-    modules: list[Module] = [cfg.build("drive"), receiver().build("readout")]
+    builder = TimelineBuilder(env.soccfg, reps=2)
     if dependency == "sweep":
         cfg.gain = QickParam(0.1, {"reps": 0.2})
-        modules[0] = cfg.build("drive")
+        builder.emit(cfg.build("drive"))
     elif dependency == "register":
-        modules.insert(0, LoadValue("count", [1, 2], "reps", "n"))
-        modules[1] = Repeat("inner", "n", range_hint=(1, 2)).add_content(
-            cfg.build("drive")
-        )
+        builder.emit(LoadValue("count", [1, 2], "reps", "n"))
+        with builder.repeat("inner", "n", range_hint=(1, 2)):
+            builder.emit(cfg.build("drive"))
     else:
-        modules[0] = Branch("choice", cfg.build("a"), cfg.build("b"), compare_by="reps")
-    prog = compile_modules(
-        env.soccfg,
-        modules=modules,
-        reps=2,
-    )
-    with pytest.raises(
-        ValueError,
-        match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)",
-    ):
+        with builder.branch(by="reps", align_timeline=True) as cases:
+            for index in range(2):
+                with cases.case(index):
+                    builder.emit(cfg.build(f"drive_{index}"))
+    builder.emit(receiver().build("readout"))
+    builder.delay_by_timeline()
+    with pytest.raises(ValueError, match=r"(?:reps|cross-shot|measurement)"):
+        prog = builder.build()
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 

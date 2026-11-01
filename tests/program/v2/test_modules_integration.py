@@ -17,7 +17,6 @@ from qick.asm_v2 import Label, QickParam, WriteReg
 from zcu_tools.program.v2 import SweepCfg, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -35,8 +34,6 @@ from zcu_tools.program.v2.modules.reset import (
 )
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    GaussWaveformCfg,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 

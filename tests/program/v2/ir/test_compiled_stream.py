@@ -21,26 +21,14 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
     WaitInst,
 )
-from zcu_tools.program.v2.ir.io_instructions import DmemReadInst, PortWriteInst
+from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import (
-    Branch,
-    Join,
-    LoadWord,
     Repeat,
-    ScanWith,
     SoftDelay,
 )
 from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
-from zcu_tools.program.v2.modules.readout import (
-    PulseReadout,
-    PulseReadoutCfg,
-    TablePulseReadout,
-)
-from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
-from zcu_tools.program.v2.utils import readout_freq_words
 
 
 def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:

@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Mux frontend emits all coherent carriers and preserves explicit ADC order."""
 
@@ -12,12 +13,14 @@ from tests.program.v2.simulation.time_observations import time_us, times_us
 @pytest.mark.parametrize("placement", ["direct", "repeat"])
 def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
     mux = native_mux().build("mux_probe")
-    module = Repeat("container", 1).add_content(mux) if placement == "repeat" else mux
-    prog = compile_modules(
-        mux_soccfg(),
-        modules=[module],
-        reps=2,
-    )
+    builder = TimelineBuilder(mux_soccfg(), reps=2)
+    if placement == "repeat":
+        with builder.repeat("container", 1):
+            builder.emit(mux)
+    else:
+        builder.emit(mux)
+    builder.delay_by_timeline()
+    prog = builder.build()
     env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
     try:
         try:

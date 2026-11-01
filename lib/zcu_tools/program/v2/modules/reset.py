@@ -17,7 +17,6 @@ from qick.asm_v2 import QickParam
 
 from .base import AbsModuleCfg, Module, apply_cfg_overrides, resolve_module_ref
 from .pulse import Pulse, PulseCfg, PulseOverrides
-from .util import calc_max_length
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2

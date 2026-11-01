@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Constructor overrides preserve cfg routing at the public compile boundary."""
 
 from collections.abc import Sequence

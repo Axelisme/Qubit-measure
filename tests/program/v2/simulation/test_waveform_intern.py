@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Compiled waveform reuse observed through detached request records."""
 
@@ -41,26 +42,22 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
         )
         for i in range(2)
     ]
-    prog = compile_modules(
-        env.soccfg,
-        modules=[
-            LoadValue("select", [0, 1], "axis", "selected"),
-            Repeat("repeat", 3).add_content(
-                ComputedPulse("gate", val_reg="selected", pulses=candidates)
-            ),
-            PulseReadoutCfg(
-                gen_ch=0,
-                ro_ch=0,
-                nqz=1,
-                freq=100,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.1),
-                ro_length=0.1,
-            ).build("readout"),
-        ],
-        sweep=[("axis", 2)],
-        reps=2,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=2)
+    builder.add_loop("axis", 2)
+    builder.emit(LoadValue("select", [0, 1], "axis", "selected"))
+    with builder.repeat("repeat", 3):
+        builder.emit(ComputedPulse("gate", val_reg="selected", pulses=candidates))
+    builder.emit(PulseReadoutCfg(
+            gen_ch=0,
+            ro_ch=0,
+            nqz=1,
+            freq=100,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=0.1,
+        ).build("readout"))
+    builder.delay_by_timeline()
+    prog = builder.build()
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
     buffers = list(table.values())

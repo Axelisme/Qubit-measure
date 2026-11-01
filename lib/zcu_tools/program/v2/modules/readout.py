@@ -26,7 +26,6 @@ from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
-from .util import calc_max_length, round_timestamp
 from .waveform import WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:

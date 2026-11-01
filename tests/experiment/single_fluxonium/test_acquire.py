@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Single-cavity acquisition at the public source and program boundaries.
 
@@ -462,14 +463,14 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
                 ro_length=0.016,
                 trig_offset=0.002,
             )
-            program = compile_modules(
-                env.soccfg,
-                modules=[
-                    Join(first.build("first"), second.build("second")),
-                    readout.build("ro"),
-                ],
-                reps=100_000,
-            )
+            builder = TimelineBuilder(env.soccfg, reps=100_000)
+            builder.fork("default", into="second")
+            builder.emit(first.build("first"))
+            builder.emit(second.build("second"), timeline="second")
+            builder.join("default", "second", into="default")
+            builder.emit(readout.build("ro"))
+            builder.delay_by_timeline()
+            program = builder.build()
             average = program.acquire(
                 env.soc,
                 progress=False,
@@ -745,30 +746,21 @@ def test_fixed_seed_acquire_preserves_flux_controls(case, expected):
             ro_length=0.016,
             trig_offset=0.002,
         )
-        flux_modules = []
+        builder = TimelineBuilder(env.soccfg, reps=8, initial_delay=0.0, relax_delay=0.0)
+        if case in ("inactive", "mixed"):
+            builder.add_loop("axis", 2)
+        builder.emit(microwave.build("mw"))
         if case in ("inactive", "mixed"):
             counts = [0, 0] if case == "inactive" else [0, 1]
-            flux_modules = [
-                LoadValue("count", counts, "axis", "n"),
-                Repeat("ff_repeat", "n", range_hint=(0, 1)).add_content(
-                    fast_flux.build("ff")
-                ),
-            ]
+            builder.emit(LoadValue("count", counts, "axis", "n"))
+            with builder.repeat("ff_repeat", "n", range_hint=(0, 1)):
+                builder.emit(fast_flux.build("ff"))
         elif case != "absent":
-            flux_modules = [fast_flux.build("ff")]
-        program = compile_modules(
-            env.soccfg,
-            modules=[
-                microwave.build("mw"),
-                *flux_modules,
-                Delay("wait", 0.004),
-                readout.build("ro"),
-            ],
-            sweep=[("axis", 2)] if case in ("inactive", "mixed") else None,
-            reps=8,
-            initial_delay=0.0,
-            relax_delay=0.0,
-        )
+            builder.emit(fast_flux.build("ff"))
+        builder.timeline_inc(0.004)
+        builder.emit(readout.build("ro"))
+        builder.delay_by_timeline()
+        program = builder.build()
         average = program.acquire(env.soc, rounds=1, progress=False)
         assert average is not None
         np.testing.assert_array_equal(np.asarray(average).reshape(-1, 2), expected)

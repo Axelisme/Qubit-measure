@@ -1,4 +1,5 @@
 from zcu_tools.program.v2 import TimelineProgramV2
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Emission order and fail-fast capability checks at public acquisition."""
 
@@ -151,17 +152,16 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
     env = white_noise(std_adc=0)
-    modules = [
-        Join(
-            [readout("first"), SoftDelay("later", 0.3), readout("third")],
-            [SoftDelay("middle", 0.2), readout("second")],
-        )
-    ]
-    prog = compile_modules(
-        env.soccfg,
-        modules=modules,
-        reps=2,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=2)
+    builder.fork("default", into="middle")
+    builder.emit(readout("first"))
+    builder.timeline_inc(0.2, timeline="middle")
+    builder.emit(readout("second"), timeline="middle")
+    builder.timeline_inc(0.3)
+    builder.emit(readout("third"))
+    builder.join("default", "middle", into="default")
+    builder.delay_by_timeline()
+    prog = builder.build()
     seen = []
 
     def execute(request):

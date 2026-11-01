@@ -7,13 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, TypedDict, Unpack
 
 from pydantic import BeforeValidator
-from qick.asm_v2 import QickParam, QickRawParam
+from qick.asm_v2 import QickParam
 
 from .._timeline_selected import PlaybackChoice, SelectedPlayback
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
-from .delay import DelayAuto
 from .dmem import LoadValue
-from .util import get_fclk, round_timestamp
 from .waveform import (
     AbsWaveform,
     ConstWaveformCfg,

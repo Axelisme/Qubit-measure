@@ -1,17 +1,14 @@
-from zcu_tools.program.v2 import TimelineProgramV2
 from tests.program._timeline import compile_modules
 """Read labels, classifiers and shot outer products through compiled programs."""
 
 import numpy as np
 import pytest
-from qick.asm_v2 import QickParam
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import (
     Branch,
     ConstWaveformCfg,
     Join,
-    Module,
     PulseReadout,
     Repeat,
 )

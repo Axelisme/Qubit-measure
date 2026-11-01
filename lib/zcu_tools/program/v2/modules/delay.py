@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam
 
-from ..utils import is_qick_param
-from .base import Module, ModuleGroup, as_modules
-from .util import merge_max_length, round_timestamp
+from .base import Module
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
-    from .pulse import TableLengthPulse
 
 logger = logging.getLogger(__name__)
 

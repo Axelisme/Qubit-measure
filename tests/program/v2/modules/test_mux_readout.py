@@ -170,14 +170,14 @@ def test_invalid_routes_or_rounded_windows_fail(fault):
 class UnrelatedReadout(Module):
     name = "unrelated"
 
-    def init(self, prog):
+    def declare(self, prog):
         prog.declare_readout(ch=8, length=0.2)
         prog.add_readoutconfig(ch=8, name="unrelated", freq=100.0)
 
-    def run(self, prog, t=0.0):
-        prog.send_readoutconfig(8, "unrelated", t=t)
-        prog.trigger([8])
-        return t + 0.3
+    def lower(self, prog, *, timeline, tag):
+        prog.send_readoutconfig(8, "unrelated", t=0, timeline=timeline)
+        prog.trigger([8], timeline=timeline)
+        prog.timeline_inc(0.3, timeline=timeline)
 
 
 @pytest.mark.parametrize("unrelated_first", [True, False])
@@ -284,13 +284,22 @@ class RawBufferProgram(TimelineProgramV2):
 
 def raw_buffer_program(preparations=4):
     module = native_mux().build("mux")
-    repeated = Repeat("reads", 2).add_content(module)
-    prog = RawBufferProgram(
-        mux_soccfg(),
-        [UnrelatedReadout(), repeated],
-        sweep=[("preparation", preparations), ("point", 2)],
-        reps=3,
-    )
+    unrelated = UnrelatedReadout()
+
+    class Program(RawBufferProgram):
+        def _initialize(self, cfg):
+            self.add_loop("preparation", preparations)
+            self.add_loop("point", 2)
+            self.declare(unrelated)
+            self.declare(module)
+
+        def _body(self, cfg):
+            self.emit(unrelated)
+            with self.repeat("reads", 2):
+                self.emit(module)
+            self.delay_by_timeline()
+
+    prog = Program(mux_soccfg(), reps=3)
     # QICK counts a trigger macro once even when Repeat executes it twice.
     prog.set_reads_per_shot(2)
     # Each loop/read has a distinct sentinel. The unrelated channel deliberately

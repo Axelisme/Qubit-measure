@@ -1,8 +1,6 @@
-from tests.program._timeline import compile_modules
 """Shared dmem allocation and route ownership through concrete program APIs."""
 
 from collections.abc import Callable, Sequence
-from typing import Literal
 
 import numpy as np
 import pytest

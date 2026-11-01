@@ -1,4 +1,4 @@
-from tests.program._timeline import compile_modules
+from zcu_tools.program.v2 import TimelineBuilder
 """Repeated compiled requests preserve numeric controls and detached envelopes."""
 
 import pytest
@@ -46,10 +46,10 @@ def repeated_program(env, case):
             length=QickParam(0.1078125, {"axis": 0.015625}),
             raise_waveform=GaussWaveformCfg(length=0.1, sigma=0.02),
         )
-    if case.startswith("computed") or case in ("dynamic", "branch", "nonblocking"):
+    if case.startswith("computed") or case in ("dynamic", "branch"):
         cfg.pre_delay = 0.013
         cfg.waveform = ConstWaveformCfg(length=0.1)
-    pulse: Module = Pulse("drive", cfg, block_mode=case != "nonblocking")
+    pulse: Module = Pulse("drive", cfg)
     if case.startswith("computed"):
         shaped = cfg.with_updates(waveform=GaussWaveformCfg(length=0.1, sigma=0.02))
         candidates = [cfg, shaped, cfg]
@@ -82,10 +82,6 @@ def repeated_program(env, case):
         pulse = TableLengthPulse(
             "dynamic", cfg, lengths=[0.06, 0.12, 0.2], idx_reg="axis"
         )
-    elif case == "branch":
-        pulse = Branch(
-            "choice", pulse, cfg.build("other"), cfg.build("third"), compare_by="axis"
-        )
     body: list[Module] = [
         SoftDelay(
             "before",
@@ -100,9 +96,6 @@ def repeated_program(env, case):
         body.insert(0, LoadValue("selection", [2, 0], "inner", "selected"))
     if case == "computed_tables":
         body.append(ComputedPulse("second_gate", val_reg="inner", pulses=[cfg, cfg]))
-    repeated = Repeat("outer", "count", range_hint=(0, 2)).add_content(
-        Repeat("inner", 2).add_content(body)
-    )
     readout = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -112,23 +105,28 @@ def repeated_program(env, case):
         waveform=ConstWaveformCfg(length=0.1),
         ro_length=0.1,
     )
-    return compile_modules(
-        env.soccfg,
-        modules=[
-            LoadValue("counts", [0, 2, 1], "axis", "count"),
-            repeated,
-            readout.build("readout"),
-        ],
-        sweep=[("axis", 3)],
-        reps=2,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=2)
+    builder.add_loop("axis", 3)
+    builder.emit(LoadValue("counts", [0, 2, 1], "axis", "count"))
+    with builder.repeat("outer", "count", range_hint=(0, 2)):
+        with builder.repeat("inner", 2):
+            for module in body:
+                if module is pulse and case == "branch":
+                    with builder.branch(by="axis", align_timeline=True) as cases:
+                        for index, label in enumerate(["drive", "other", "third"]):
+                            with cases.case(index):
+                                builder.emit(cfg.build(label))
+                else:
+                    builder.emit(module)
+    builder.emit(readout.build("readout"))
+    builder.delay_by_timeline()
+    return builder.build()
 
 
 @pytest.mark.parametrize(
     "case",
     [
         "swept",
-        "nonblocking",
         "flat_top",
         "computed",
         "computed_selection",

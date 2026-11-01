@@ -1,12 +1,8 @@
-from tests.program._timeline import compile_modules
+from zcu_tools.program.v2 import TimelineBuilder
 """Public builder/acquire integration with fixed mux, not physical simulation."""
 
 import numpy as np
 import pytest
-from zcu_tools.experiment import Scope
-from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2.modules import readout
 
 from tests.program.v2._mux_support import AcquisitionSoc, mux_soccfg, native_mux
 
@@ -42,12 +38,12 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
     soccfg["readouts"][1]["iq_offset"] = 7.0
     soc = ShotSentinelSoc(soccfg.get_cfg())
     module = native_mux().build("mux")
-    prog = compile_modules(
-        soccfg,
-        [Repeat("reads", 2).add_content(module)],
-        sweep=[("preparation", 4)],
-        reps=3,
-    )
+    builder = TimelineBuilder(soccfg, reps=3)
+    builder.add_loop("preparation", 4)
+    with builder.repeat("reads", 2):
+        builder.emit(module)
+    builder.delay_by_timeline()
+    prog = builder.build()
     with pytest.raises(ValueError, match="mux.*raw"):
         module.collect_raw_iq(prog)
     # Repeated trigger execution needs an explicit QICK runtime read count.

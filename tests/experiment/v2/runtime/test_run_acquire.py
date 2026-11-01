@@ -16,7 +16,6 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.runtime.acquisition import (
-    AcquireOptions,
     SynchronousAcquireKeywords,
 )
 from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor

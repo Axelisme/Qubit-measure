@@ -1,4 +1,4 @@
-from tests.program._timeline import compile_modules
+from zcu_tools.program.v2 import TimelineBuilder
 """Generator and ADC timing observed at the public acquisition boundary."""
 
 import math
@@ -53,14 +53,15 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
         ro_length=0.5,
         trig_offset=0.02,
     ).build("readout")
-    prog = compile_modules(
-        env.soccfg,
-        modules=[
-            Delay("origin", 0.5),
-            Join(pulse, [SoftDelay("offset", 0.1), readout]),
-        ],
-        reps=2,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=2)
+    builder.timeline_inc(0.5)
+    builder.fork("default", into="receiver")
+    builder.emit(pulse)
+    builder.timeline_inc(0.1, timeline="receiver")
+    builder.emit(readout, timeline="receiver")
+    builder.join("default", "receiver", into="default")
+    builder.delay_by_timeline()
+    prog = builder.build()
     try:
         prog.acquire(env.soc, progress=False)
     except ValueError as exc:

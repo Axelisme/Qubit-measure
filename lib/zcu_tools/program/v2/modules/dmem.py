@@ -4,9 +4,8 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Self, override
+from typing import TYPE_CHECKING, override
 
-from qick.asm_v2 import QickParam
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -15,7 +14,7 @@ if TYPE_CHECKING:
 from .._timeline_bounds import CycleBounds
 from ..macro.dmem import DmemLookup
 from ..macro.table import DeclaredTable, TableSelection
-from .base import Module, ModuleGroup
+from .base import Module
 
 logger = logging.getLogger(__name__)
 

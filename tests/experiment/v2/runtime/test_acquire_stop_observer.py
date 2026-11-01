@@ -21,7 +21,6 @@ from zcu_tools.program.acquisition import (
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_fakes import (
-    FakeModule,
     RecordingProgressBar,
     recording_pbar_factory,
 )

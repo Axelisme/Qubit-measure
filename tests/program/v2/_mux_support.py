@@ -1,5 +1,4 @@
 from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 """Synthetic mixmux/PFB wiring and a deterministic, non-physical transport."""
 
 import numpy as np

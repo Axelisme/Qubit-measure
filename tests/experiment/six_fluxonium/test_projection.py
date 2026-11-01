@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Independent cavity histories through the public source and program seams.
 
@@ -116,15 +117,12 @@ def repeated_mux_program(env: SimulationEnvironment, *, reads=2, reps=4096):
         ],
     )
     module = readout.build("readout")
-    program = compile_modules(
-        env.soccfg,
-        modules=[
-            Repeat("reads", reads).add_content([module, SoftDelay("wait", 0.096)])
-        ],
-        reps=reps,
-        initial_delay=0,
-        relax_delay=0,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=reps, initial_delay=0, relax_delay=0)
+    with builder.repeat("reads", reads):
+        builder.emit(module)
+        builder.timeline_inc(0.096)
+    builder.delay_by_timeline()
+    program = builder.build()
     program.set_reads_per_shot(reads)
     return program
 

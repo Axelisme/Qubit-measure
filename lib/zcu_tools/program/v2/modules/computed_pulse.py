@@ -4,7 +4,6 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
-from qick.asm_v2 import QickParam
 
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.dmem import LoadValue

@@ -32,7 +32,7 @@ def compile_modules(
         **kwargs,
     )
     for name, values in sweep or []:
-        builder.add_loop(name, values)
+        builder.add_loop(name, values.expts if isinstance(values, SweepCfg) else values)
     for module in modules:
         if module is not None:
             builder.emit(module)

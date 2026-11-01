@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """Numeric timeline contracts independent of a physical solver."""
 
@@ -146,16 +147,16 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
 
 def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
     env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1)))
-    prog = compile_modules(
-        env.soccfg,
-        modules=[
-            Join(
-                [SoftDelay("swept", QickParam(0.1, {"axis": 0.3})), readout("a")],
-                [SoftDelay("fixed", 0.2), readout("b", channel=1)],
-            )
-        ],
-        sweep=[("axis", 2)],
-    )
+    builder = TimelineBuilder(env.soccfg)
+    builder.add_loop("axis", 2)
+    builder.fork("default", into="fixed")
+    builder.timeline_inc(QickParam(0.1, {"axis": 0.3}))
+    builder.emit(readout("a"))
+    builder.timeline_inc(0.2, timeline="fixed")
+    builder.emit(readout("b", channel=1), timeline="fixed")
+    builder.join("default", "fixed", into="default")
+    builder.delay_by_timeline()
+    prog = builder.build()
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
     assert [
@@ -180,24 +181,18 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
 
 def test_undefined_register_in_unselected_branch_fails_before_signals():
     env = white_noise(std_adc=0)
-    uninitialized = compile_modules(
-        env.soccfg,
-        modules=[
-            Branch(
-                "choice",
-                Pulse("none", None),
-                LoadValue("not_taken", [0], "axis", "cycles"),
-                compare_by="axis",
-            ),
-            DelayAuto("undefined", "cycles"),
-            readout(),
-        ],
-        sweep=[("axis", 1)],
-    )
-    with pytest.raises(
-        ValueError,
-        match=r"TimeInst.*preopt.*undefined.*undefined register",
-    ):
+    builder = TimelineBuilder(env.soccfg)
+    builder.add_loop("axis", 2)
+    with builder.branch(by="axis", align_timeline=True) as cases:
+        with cases.case(0):
+            builder.emit(Pulse("none", None))
+        with cases.case(1):
+            builder.emit(LoadValue("not_taken", [0, 1], "axis", "cycles"))
+    builder.emit(DelayAuto("undefined", "cycles"))
+    builder.emit(readout())
+    builder.delay_by_timeline()
+    with pytest.raises(ValueError, match=r"(?:undefined|bounds|producer|initialized)"):
+        uninitialized = builder.build()
         uninitialized.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 

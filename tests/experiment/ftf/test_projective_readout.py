@@ -1,3 +1,4 @@
+from zcu_tools.program.v2 import TimelineBuilder
 from tests.program._timeline import compile_modules
 """FTF outcome histories connect herald reads to continued terminal populations."""
 
@@ -248,15 +249,12 @@ def herald_program(env, *, reads=2, reps=256):
             for ch, freq in ((4, 6000.0), (1, 6200.0))
         ],
     )
-    prog = compile_modules(
-        env.soccfg,
-        modules=[
-            Repeat("reads", reads).add_content(
-                [mux.build("joint"), Delay("wait", 0.020)]
-            )
-        ],
-        reps=reps,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=reps)
+    with builder.repeat("reads", reads):
+        builder.emit(mux.build("joint"))
+        builder.timeline_inc(0.020)
+    builder.delay_by_timeline()
+    prog = builder.build()
     # QICK counts the trigger macro once; Repeat executes it once per event.
     prog.set_reads_per_shot(reads)
     return prog

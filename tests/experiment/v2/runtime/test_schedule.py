@@ -7,9 +7,7 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
-from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
-    FakeModule,
     FakeScalarProgram,
     identity_array,
 )
