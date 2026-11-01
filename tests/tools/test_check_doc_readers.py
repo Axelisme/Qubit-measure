@@ -1,7 +1,6 @@
 """Reader-checker behavior through synthetic source mappings."""
 
 import pytest
-
 from check_doc_readers import Violation, check_sources
 
 
