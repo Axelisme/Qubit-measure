@@ -39,6 +39,8 @@ from ..records import RunRecord
 from ..scope import Scope
 from ..simulation import SimulationEnvironment, white_noise
 from ..single_fluxonium import single_fluxonium
+from .run_save import RunStageResult as RunStageResult
+from .run_save import run_stage as run_stage
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
