@@ -185,7 +185,9 @@ class LoadDataDialog(QDialog):
     def _on_axes_changed(self) -> None:
         self._transpose = self._axis_button.isChecked()
         self._axis_button.setText(
-            "Axis: X=Frequency, Y=Flux" if self._transpose else "Axis: X=Flux, Y=Frequency"
+            "Axis: X=Frequency, Y=Flux"
+            if self._transpose
+            else "Axis: X=Flux, Y=Frequency"
         )
         self._render_preview()
 
