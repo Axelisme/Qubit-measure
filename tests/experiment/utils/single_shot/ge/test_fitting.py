@@ -28,6 +28,14 @@ def test_fit_options_reject_invalid_types_at_construction(kwargs):
         GEFitOptions(**kwargs)
 
 
+@pytest.mark.parametrize("relative_error", [0.0, -1.0, np.inf, -np.inf, np.nan])
+def test_fit_options_reject_nonpositive_or_nonfinite_length_ratio_error(
+    relative_error,
+):
+    with pytest.raises(ValidationError):
+        GEFitOptions(length_ratio_max_relative_error=relative_error)
+
+
 @pytest.mark.parametrize("swap_rows", [False, True])
 @pytest.mark.parametrize("reflect_axis", [False, True])
 def test_assignment_fidelity_scores_the_selected_histogram_edge(
