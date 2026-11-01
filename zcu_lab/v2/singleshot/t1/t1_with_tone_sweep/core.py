@@ -109,7 +109,6 @@ def _plot_transition_rates(
         ax.set_xlim(xs[0], xs[-1])
 
 
-
 def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
     invalid = lengths[~np.isfinite(lengths) | (lengths <= 0.0)]
     if invalid.size:

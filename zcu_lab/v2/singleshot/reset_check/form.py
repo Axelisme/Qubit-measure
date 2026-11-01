@@ -13,11 +13,21 @@ def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
         ResetCheckCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "rabi_pulse": Slot("$qubit.module.x180", set={"gain": Hidden(0.0)}, fallback=Template(
-                "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
-            )),
-            "tested_reset": Slot("$qubit.module.reset", fallback=Template("reset", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "rabi_pulse": Slot(
+                "$qubit.module.x180",
+                set={"gain": Hidden(0.0)},
+                fallback=Template(
+                    "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
+                ),
+            ),
+            "tested_reset": Slot(
+                "$qubit.module.reset",
+                fallback=Template("reset", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "gain": Range(0.0, "4.0 * $qubit.module.x180.gain", expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

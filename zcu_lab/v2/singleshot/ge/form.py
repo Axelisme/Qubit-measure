@@ -26,8 +26,18 @@ def make_form(ctx: FormContext) -> Form[GE_Cfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Slot("$qubit.module.x180"),
-            "probe_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
+            "probe_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 100000,
             "initial_delay": Hidden(),

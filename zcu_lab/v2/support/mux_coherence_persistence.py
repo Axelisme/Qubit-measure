@@ -26,7 +26,9 @@ def coherence_spec[T: ConfigBase](
     current cfg. No I/O occurs. Invalid declarations or mismatched loaded tone
     axes raise ValueError via native persistence.
     """
-    tone = VariableAxisSpec(label="Tone", unit="", field_name="tone_indices", dtype=np.int64)
+    tone = VariableAxisSpec(
+        label="Tone", unit="", field_name="tone_indices", dtype=np.int64
+    )
 
     def build(data: GroupedLoadData[T]) -> MuxCoherenceResult:
         # Align IQ and frequency metadata by the saved original tone indices.
@@ -58,7 +60,10 @@ def coherence_spec[T: ConfigBase](
                 variable="signals",
                 axes=(
                     VariableAxisSpec(
-                        label="Requested delay", unit="s", field_name="times", scale=US_TO_S
+                        label="Requested delay",
+                        unit="s",
+                        field_name="times",
+                        scale=US_TO_S,
                     ),
                     tone,
                 ),

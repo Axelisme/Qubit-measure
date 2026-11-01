@@ -34,7 +34,6 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_lab.v2.support import live_heatmap
 
 
-
 @dataclass(frozen=True)
 class FreqPowerResult:
     """Measured class counts (Ngain, Nfreq, 3) on rounded gain/frequency grids.
@@ -128,7 +127,6 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-
         )
 
         freq_sweep = cfg.freq

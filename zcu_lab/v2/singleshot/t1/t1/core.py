@@ -38,7 +38,6 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 
-
 @dataclass(frozen=True)
 class T1Result:
     """G/E/Other shot counts summed over acquired rounds in (delay, initial state, population state) order.

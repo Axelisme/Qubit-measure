@@ -63,7 +63,9 @@ def analyze_length(
                 raise ValueError("Len Rabi fit requires at least six acquired points")
             real = rabi_signal2real(signal)
             fit = fit_rabi(
-                xs, real, decay=options.decay,
+                xs,
+                real,
+                decay=options.decay,
                 init_phase=None if options.fit_phase else 0.0,
             )
             pi, pierr = fit.pi_x, fit.pi_x_err

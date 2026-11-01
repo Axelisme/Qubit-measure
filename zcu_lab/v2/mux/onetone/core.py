@@ -11,8 +11,8 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pydantic import Field, StrictInt, ValidationInfo, field_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -43,10 +43,13 @@ class MuxOnetoneAnalyzeOptions:
     Invalid models, non-bool switches and nonfinite/non-real seeds raise ValueError.
     """
 
-    edelay_seeds: tuple[Annotated[float, Field(strict=True, allow_inf_nan=False)] | None, ...]
+    edelay_seeds: tuple[
+        Annotated[float, Field(strict=True, allow_inf_nan=False)] | None, ...
+    ]
     model_type: Literal["hm", "t", "auto"] = "hm"
     fit_bg_amp_slope: bool = Field(default=True, strict=True)
     fit_bg_phase_curvature: bool = Field(default=False, strict=True)
+
 
 @dataclass(frozen=True)
 class ToneFitSuccess:

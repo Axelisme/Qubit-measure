@@ -118,7 +118,8 @@ def fit_coherence_trace(
     # Fit with the caller's numeric phase choice, never an experiment name.
     if fit_fringe:
         fit = fit_decay_fringe(
-            trace.times, real,
+            trace.times,
+            real,
             fixedparams=None if phase is None else [None, None, None, phase, None],
         )
         detune, detune_error = fit.freq, fit.freq_err

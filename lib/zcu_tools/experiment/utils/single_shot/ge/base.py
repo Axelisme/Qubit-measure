@@ -350,7 +350,9 @@ def fitting_ge_and_plot(
         raise GENumericalError(str(exc)) from exc
 
     if plots is not None:
-        fig, raw_axes = plots.subplots(num=figure_name, nrows=2, ncols=2, figsize=(8, 8))
+        fig, raw_axes = plots.subplots(
+            num=figure_name, nrows=2, ncols=2, figsize=(8, 8)
+        )
         # tolerated(cast): Plots keeps a native 2x2 object array, not typed Axes rows.
         axs = cast("tuple[tuple[Axes, Axes], tuple[Axes, Axes]]", raw_axes)
         scatter_ge_plot(axs[0][0], (Ig, Ie), (Qg, Qe), "Rotated")

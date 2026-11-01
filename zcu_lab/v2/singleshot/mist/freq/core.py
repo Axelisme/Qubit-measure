@@ -34,7 +34,6 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_lab.v2.support import live_line
 
 
-
 @dataclass(frozen=True)
 class FreqResult:
     """Rounded freqs in MHz and class counts (Nfreq, 3).
@@ -116,7 +115,6 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-
         )
 
         freqs = sweep2array(

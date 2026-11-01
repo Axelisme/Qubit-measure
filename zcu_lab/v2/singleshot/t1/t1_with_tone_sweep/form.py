@@ -20,14 +20,20 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
         T1WithToneSweepCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "probe_pulse": Template(
                 "res_probe",
                 bindings={"resonator": "$resonator"},
                 # Run supplies the outer gain scan; keep waveform baseline.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "delay": _length_sweep(ctx),
             "gain": Range(0.0, 1.0, expts=21),
             "freq": Hidden(),
@@ -46,14 +52,20 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
         T1WithToneSweepCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "probe_pulse": Template(
                 "res_probe",
                 bindings={"resonator": "$resonator"},
                 # Run supplies the outer freq scan; keep waveform baseline.
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "delay": _length_sweep(ctx),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=21),
             "gain": Hidden(),

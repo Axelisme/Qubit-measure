@@ -14,8 +14,14 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
         T1Cfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "delay": Range(0.0, relax_delay, expts=101),
             "relax_delay": relax_delay,
             "sampling": "decay",

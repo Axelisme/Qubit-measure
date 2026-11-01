@@ -38,7 +38,6 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.support import live_line
 
 
-
 def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
     """Sum acquired host rounds, leaving entirely unmeasured cells as NaN."""
     acquired = np.any(np.isfinite(data), axis=0)
@@ -185,7 +184,6 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             program = builder.build()
             axis = Classify(
                 "readout",
-
             )
             sched.run_acquire_summed(
                 program,
@@ -237,7 +235,6 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     program = programs[length_key]
                     axis = Classify(
                         "readout",
-
                     )
                     step.run_acquire_summed(
                         program,

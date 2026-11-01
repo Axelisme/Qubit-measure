@@ -135,7 +135,6 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         result = QutritPopulationResult(
             signals=buffer.array,
             shot_indices=np.arange(cfg.shots, dtype=np.int64),
-
         )
         plots = context.plots
         figure, _ = plots.subplots(num="measurement")

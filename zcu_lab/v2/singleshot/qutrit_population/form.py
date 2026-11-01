@@ -28,10 +28,20 @@ def make_form(ctx: FormContext) -> Form[QutritPopulationCfg]:
             "initial_delay",
         ),
         tree={
-            "pi01": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi01": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "pi03": Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "pi32": Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "shots": 4096,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "initial_delay": Hidden(),

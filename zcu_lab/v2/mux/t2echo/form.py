@@ -30,8 +30,14 @@ def make_form(ctx: FormContext) -> Form[MuxT2EchoCfg]:
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,
-            "drive": Slot(f"{name}.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": name})),
-            "pi_pulse": Slot(f"{name}.module.x180", fallback=Template("pi_pulse", bindings={"qubit": name})),
+            "drive": Slot(
+                f"{name}.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": name}),
+            ),
+            "pi_pulse": Slot(
+                f"{name}.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": name}),
+            ),
             "detune": 0.0,
         }
         for name in names

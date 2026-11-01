@@ -332,10 +332,7 @@ def run_flux_scan(
     return result
 
 
-
-def _make_flux_update(
-    plots: Plots, result: MuxFluxResult, flux_unit: str
-):
+def _make_flux_update(plots: Plots, result: MuxFluxResult, flux_unit: str):
     """Create per-tone magnitude maps and ten scan-history lines.
 
     Return a plot-thread updater accepting the complete tone-major IQ array.
@@ -436,7 +433,9 @@ def mux_flux_spec[C: ConfigBase](
     planned axes and NaN gaps after Stop. Loading validates shapes and axes;
     no current library or alias is consulted.
     """
-    tone = VariableAxisSpec(label="Tone", unit="", field_name="tone_indices", dtype=np.int64)
+    tone = VariableAxisSpec(
+        label="Tone", unit="", field_name="tone_indices", dtype=np.int64
+    )
     point = VariableAxisSpec.generated_arange("Point", "", dtype=np.int64)
     flux = VariableAxisSpec.generated_arange("Flux point", "", dtype=np.int64)
 

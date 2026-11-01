@@ -30,7 +30,10 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,
-            "drive": Slot(f"{name}.module.x180", fallback=Template("pi_pulse", bindings={"qubit": name})),
+            "drive": Slot(
+                f"{name}.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": name}),
+            ),
         }
         for name in names
     ]

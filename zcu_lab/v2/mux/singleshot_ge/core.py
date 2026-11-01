@@ -213,10 +213,8 @@ def validate_ge_result(result: MuxGEResult) -> None:
         or signals.shape[2] == 0
     ):
         raise ValueError("signals must be complex128 (K,2,S), K,S>0")
-    if (
-        result.shot_indices.dtype != np.int64
-        or not np.array_equal(result.shot_indices, np.arange(signals.shape[2]))
-
+    if result.shot_indices.dtype != np.int64 or not np.array_equal(
+        result.shot_indices, np.arange(signals.shape[2])
     ):
         raise ValueError("shot/preparation axes must preserve acquisition order")
     for preparation in range(2):

@@ -34,7 +34,6 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_lab.v2.support import live_line
 
 
-
 @dataclass(frozen=True)
 class PowerResult:
     """Rounded gains in a.u. and class counts (Ngain, 3).
@@ -117,7 +116,6 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-
         )
 
         gains = sweep2array(

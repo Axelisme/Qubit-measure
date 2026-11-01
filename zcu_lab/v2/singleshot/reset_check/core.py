@@ -218,10 +218,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Check population axes before optional readout-confusion correction.
         result = source.result
         confusion_matrix = options.confusion_matrix
-        if (
-            result.counts.shape != (result.gains.size, 3, 3)
-
-        ):
+        if result.counts.shape != (result.gains.size, 3, 3):
             raise ValueError(
                 "Reset check requires (gain, branch, G/E/Other) populations"
             )

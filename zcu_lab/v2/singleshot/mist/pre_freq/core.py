@@ -34,7 +34,6 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_lab.v2.support import live_line
 
 
-
 @dataclass(frozen=True)
 class PreFreqResult:
     """Rounded preparation freqs in MHz and class counts (Nfreq, 3).
@@ -122,7 +121,6 @@ class PreFreqExp(Experiment[PreFreqResult, PreFreqCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-
         )
 
         freqs = sweep2array(

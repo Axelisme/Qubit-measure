@@ -38,7 +38,6 @@ from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
-
 @dataclass(frozen=True)
 class AcStarkResult:
     """Measured class counts (Ngain, Nfreq, 3) on rounded gain/frequency grids.
@@ -154,7 +153,6 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-
         )
 
         gain_sweep = cfg.gain

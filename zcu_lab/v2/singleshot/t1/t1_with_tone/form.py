@@ -16,9 +16,15 @@ def make_form(ctx: FormContext) -> Form[T1WithToneCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "init_pulse": Slot("$qubit.module.x180"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "probe_pulse": Template("res_probe", bindings={"resonator": "$resonator"}),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "delay": Range(0.0, sweep_stop, expts=101),
             "relax_delay": relax_delay,
             "sampling": "decay",

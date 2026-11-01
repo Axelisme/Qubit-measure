@@ -27,7 +27,6 @@ from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to
 from .analysis import GEConfusionResult, calc_confusion_matrix, plot_confusion_matrix
 
 
-
 @dataclass(frozen=True)
 class GE_Result:
     """Raw probe-off/on rows; prepared_states=[0, 1] records that acquisition order."""
