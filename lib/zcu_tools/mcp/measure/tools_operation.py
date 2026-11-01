@@ -15,6 +15,7 @@ from zcu_tools.mcp.measure.execution_reply import (
     project_control,
     project_execution,
 )
+from zcu_tools.mcp.measure.operation_wait import require_operation_failure_message
 from zcu_tools.mcp.measure.script_recipe_execution import (
     ScriptRecipeExecution,
     ScriptRecipeSnapshot,
@@ -235,8 +236,7 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
         if reply["status"] == "failed":
             error = reply.get("error")
             message = error.get("message") if isinstance(error, dict) else None
-            if not isinstance(message, str) or not message:
-                raise ValueError("failed operation requires a non-empty error message")
+            require_operation_failure_message(message)
         result["status"] = reply["status"]
         if "error" in reply:
             result["error"] = reply["error"]

@@ -387,17 +387,19 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert str(blocked) in terminal.error_message
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == "IsADirectoryError(21, 'Is a directory')"
+    logged_error = next(
+        record.exc_info[1]
+        for record in caplog.records
+        if record.name == "zcu_tools.gui.app.measure.services.run"
+        and record.levelno >= logging.ERROR
+        and record.exc_info is not None
+    )
+    assert outcome.error == repr(logged_error)
     tab = session.state.get_tab("tab")
     assert require_record(tab.run) is not None
     metadata = RunMetadataContent(require_record(tab.run).metadata)
     assert tab.run.source_operation_id == token
     assert tab.run.confirmed_run_id is None
-    assert any(
-        record.name == "zcu_tools.gui.app.measure.services.run"
-        and record.levelno >= logging.ERROR
-        for record in caplog.records
-    )
     assert not (session.entry.database_path / "runs").exists()
     blocked.rmdir()
     saved = session.save()

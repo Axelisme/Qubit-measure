@@ -25,6 +25,19 @@ class OperationCompletion:
     native: Mapping[str, object]
 
 
+def require_operation_failure_message(message: object) -> str:
+    """Return a non-empty operation failure diagnostic unchanged.
+
+    Callers project their accepted operation.await error shape to its message
+    before calling this function. A missing, non-string or empty message raises
+    ValueError; whitespace is preserved. This validates only the diagnostic,
+    not the reply status or error shape, and never supplies a default message.
+    """
+    if not isinstance(message, str) or not message:
+        raise ValueError("failed operation requires a non-empty error message")
+    return message
+
+
 def await_operation(
     connection: GuiConnection,
     handle: int,

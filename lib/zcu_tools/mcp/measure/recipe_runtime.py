@@ -31,6 +31,7 @@ from zcu_tools.mcp.measure.analysis_execution import (
     ExecutionPhase,
     InvalidAnalysisValue,
 )
+from zcu_tools.mcp.measure.operation_wait import require_operation_failure_message
 from zcu_tools.mcp.measure.raw_save import RawDataState, SaveReport
 from zcu_tools.mcp.measure.recipe_api import (
     AnalysisResult,
@@ -162,18 +163,18 @@ class _Completion(BaseModel):
     @model_validator(mode="after")
     def require_failure_message(self) -> Self:
         """Reject failed wire replies that omit a non-empty diagnostic."""
-        if self.status == "failed" and not self.error_message:
-            raise ValueError("failed operation requires a non-empty error message")
+        if self.status == "failed":
+            self.error_message()
         return self
 
-    @property
     def error_message(self) -> str:
-        """Return the native error text; raise ValueError when none was supplied."""
-        if isinstance(self.error, _OperationError):
-            return self.error.message
-        if self.error is None:
-            raise ValueError("failed operation requires a non-empty error message")
-        return self.error
+        """Return the native non-empty error text or raise ValueError."""
+        message = (
+            self.error.message
+            if isinstance(self.error, _OperationError)
+            else self.error
+        )
+        return require_operation_failure_message(message)
 
 
 class _Candidate(BaseModel):
@@ -800,7 +801,7 @@ class RecipeRuntime:
             if completion.reason == "completed":
                 if completion.status == "failed":
                     raise GuiRpcError(
-                        completion.error_message,
+                        completion.error_message(),
                         reason="operation_failed",
                     )
                 if completion.status not in ("finished", "cancelled"):
