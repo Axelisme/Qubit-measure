@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，program 測試慣例與 IR 行為 owner 分層
+**Last updated:** 2026-11-02，program 測試慣例與 IR 行為 owner 分層
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -607,8 +607,8 @@ Lookup 回歸須涵蓋 [tProc shift-count 限制](../lib/zcu_tools/program/v2/RE
 
 ### Dispatch 與最佳化 guard 驗收
 
-Pass 行為由 [simulation 的 IR pass 速查](../lib/zcu_tools/program/v2/simulation/README.md#ir-pass-behavior)
-擁有。Register-driven unroll 案例要提供非空 body、可用 register 與足夠的時間／PMEM 預算。
+Pass 行為由 [IR pass reference](../docs/reference/ir-pass-behavior.md) 擁有。
+Register-driven unroll 案例要提供非空 body、可用 register 與足夠的時間／PMEM 預算。
 例如 `NopInst` body、`pmem_budget=1024`、`cost_default=1`、`cost_jump_flush=40`、
 `max_unroll_factor=32` 可覆蓋 jump-table 路徑。
 經 pipeline 驗證 dispatch 時檢查 branch 目標，不依賴舊的 `BasicBlockNode` 回傳型別。
