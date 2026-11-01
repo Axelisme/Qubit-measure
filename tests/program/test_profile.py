@@ -49,6 +49,16 @@ def test_duplicate_dac_reports_the_later_generator(profile):
         program.build_soccfg(profile)
 
 
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+@pytest.mark.parametrize("field,value", [("fs_mult", 18), ("fs_div", 4),
+                                         ("decimation", 6), ("samps_per_clk", 10),
+                                         ("coupling", "DC")])
+def test_shared_adc_requires_identical_rf_settings(profile, field, value):
+    profile["readouts"][1][field] = value
+    with pytest.raises(ValueError, match=r"readouts\.1\.adc"):
+        program.build_soccfg(profile)
+
+
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_channel_clocks_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
