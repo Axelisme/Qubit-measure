@@ -11,6 +11,7 @@ from ._timeline_expression import (
     add_time,
     choose_time,
     cycle_axis,
+    difference_limits,
     exact_bounds,
     expression_axes,
     multiply_time,
@@ -603,6 +604,27 @@ class TimelineBook:
         self.loop_timelines[-1].starts.append(
             (channel, expression, tuple(self.case_path))
         )
+
+    def check_adc(self, prog, timeline: str, channel: int, start: Time) -> None:
+        """Reject a trigger unless its integer start covers the ceiled ADC tail.
+
+        Diagnostics report the worst overlap in tProc cycles, or an unprovable
+        runtime ordering when the input has no sufficient bounds.
+        """
+        expression = time_expression(prog, start)
+        previous = self.native_expression(prog, channel, generator=False)
+        gap = add_time(expression, scale_time(previous, -1))
+        gap = substitute_time(
+            gap, {frame.progress: TimeVariable() for frame in self.loop_timelines}
+        )
+        lower, _ = difference_limits(gap, TimeVariable())
+        if lower is None or lower < 0:
+            detail = (
+                "cannot prove runtime start >= previous end (overlap cycles unknown)"
+                if lower is None
+                else f"{-lower} cycles; cannot prove start >= previous end"
+            )
+            raise ValueError(f"{timeline}: channel {channel} ADC overlap; {detail}")
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
