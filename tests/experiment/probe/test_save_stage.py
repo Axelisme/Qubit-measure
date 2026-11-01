@@ -163,7 +163,9 @@ def test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing(
         signal=np.array([1 + 2j, 3 - 4j]),
     )
     restored = replace(original, estimate=None, signal=np.array([1 + 2j, 5 - 4j]))
-    assert probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is False
+    assert (
+        probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is False
+    )
     warnings = [
         record.message
         for record in caplog.records
@@ -187,7 +189,9 @@ def test_scalar_field_none_on_both_sides_is_equal(
         signal=np.array([1 + 2j, 3 - 4j]),
     )
     restored = replace(original, signal=original.signal.copy())
-    assert probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is True
+    assert (
+        probe.compare_roundtrip(original, restored, spec=run_only_scalar_spec) is True
+    )
     assert not [
         record
         for record in caplog.records
