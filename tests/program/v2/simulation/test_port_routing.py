@@ -20,11 +20,11 @@ def port_program(soccfg: QickConfig) -> TimelineProgramV2:
             )
             for ch, freq in enumerate((80, 120)):
                 self.declare_readout(ch, length=0.2)
-                self.add_readoutconfig(ch, "config", freq=freq, gen_ch=0)
+                self.add_readoutconfig(ch, f"config{ch}", freq=freq, gen_ch=0)
 
         def _body(self, cfg):
             for ch in self.ro_chs:
-                self.send_readoutconfig(ch, "config", t=0)
+                self.send_readoutconfig(ch, f"config{ch}", t=0)
             self.pulse(0, "carrier", t=0.1)
             self.trigger([0, 1], t=0.1)
             self.trigger([0, 1], t=0.5)
