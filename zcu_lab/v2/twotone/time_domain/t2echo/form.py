@@ -31,13 +31,6 @@ class T2EchoInput(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(

@@ -63,13 +63,6 @@ class T2RamseyCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -190,7 +183,6 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
                 soc,
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
                         signals_buffer.at(), cfg.earlystop_snr, t2ramsey_signal2real
                     ),

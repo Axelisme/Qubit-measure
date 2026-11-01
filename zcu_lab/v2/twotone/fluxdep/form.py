@@ -39,7 +39,6 @@ def make_form(_ctx: FormContext) -> Form[FreqFluxCfg]:
             "relax_delay": 1.0,
             "reps": 1000,
             "rounds": 10,
-            "fail_retry": Hidden(),
         },
     ).with_seed_metadata(
         {

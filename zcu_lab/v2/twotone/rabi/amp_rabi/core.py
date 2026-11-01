@@ -71,13 +71,6 @@ class AmpRabiCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     earlystop_snr: Annotated[
         float | None,
         FieldMeta(
@@ -119,8 +112,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         Reset, apply the optional init pulse, play the gain-swept qubit
         pulse, then read out. Return gains and mean complex IQ; subsequent
         analysis uses the oscillation period to infer pi and pi/2 gains.
-        acquire_retry retries transient acquisition failures; earlystop_snr stops
-        averaging at completed-round boundaries. None disables SNR early stop.
+        earlystop_snr stops averaging at completed-round boundaries. None disables SNR early stop.
         """
         # Prepare the hardware gain grid and display the mean IQ projection.
         cfg = deepcopy(cfg)
@@ -167,7 +159,6 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 soc,
                 rounds=cfg.rounds,
                 options=RunOptions(
-                    retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
                         signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
                     ),
