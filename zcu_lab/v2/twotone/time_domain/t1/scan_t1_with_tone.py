@@ -123,7 +123,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
         )
 
         # 2. Scan gains on the host; sweep tone duration inside each program.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

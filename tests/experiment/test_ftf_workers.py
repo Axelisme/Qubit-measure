@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Worker selection and numerical parity at public FTF composition/acquire seams."""
 
 import numpy as np
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.simulate.evolution import Engine
 
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim

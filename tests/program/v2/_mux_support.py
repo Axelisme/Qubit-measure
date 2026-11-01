@@ -1,10 +1,10 @@
-from zcu_tools.program.v2 import TimelineProgramV2
 """Synthetic mixmux/PFB wiring and a deterministic, non-physical transport."""
 
 import numpy as np
 import pytest
 from qick import QickConfig
 from zcu_tools.cfg_model import MuxReadoutCfg, MuxReadoutTone
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import ModuleCfgFactory, readout
 

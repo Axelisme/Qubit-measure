@@ -179,7 +179,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             dtype=np.float64,
             on_update=plot_fn,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for gain, step in sched.scan("gain", gains.tolist()):
                 # Fix gain for this row and sweep probe frequency after preparation.
                 builder = TimelineBuilder(

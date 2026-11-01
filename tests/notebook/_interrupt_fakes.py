@@ -1,4 +1,3 @@
-from zcu_tools.experiment.v2.runtime import RunOptions
 """Synthetic acquisition at real Schedule/program interruption seams."""
 
 import signal
@@ -9,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
@@ -101,16 +101,25 @@ class InterruptedCore(SavingCore):
                 raise TypeError("This synthetic experiment requires FakeDevice")
             device.set_value(0.5)
         buffer = SignalBuffer(3)
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             if self.mode == "program-round":
-                sched.run_acquire(RoundInterruptedProgram(), context.soc , rounds=2, options=RunOptions(converter=identity_signal))
+                sched.run_acquire(
+                    RoundInterruptedProgram(),
+                    context.soc,
+                    rounds=2,
+                    options=RunOptions(converter=identity_signal),
+                )
             else:
                 for index, step in sched.scan("point", range(3)):
                     if self.mode == "software" and index == 1:
                         signal.raise_signal(signal.SIGINT)
                         break
                     if self.mode == "program":
-                        step.run_acquire(PartialProgram(float(index + 1), interrupt=index == 1), context.soc , options=RunOptions(converter=identity_signal))
+                        step.run_acquire(
+                            PartialProgram(float(index + 1), interrupt=index == 1),
+                            context.soc,
+                            options=RunOptions(converter=identity_signal),
+                        )
                     else:
                         buffer[step].set(np.array(index + 1, dtype=np.complex128))
         return SavingResult(

@@ -278,7 +278,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         )
         target = config.x90_f1 if config.target == "f1" else config.x90_f2
         spectator = config.x180_f2 if config.target == "f1" else config.x180_f1
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
@@ -297,7 +297,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 projection = Pulse(
                     "projection", target, phase=target.phase + quadrature
                 )
-                drive = (Pulse("cz_f1", config.drive.f1, freq=frequency), Pulse("cz_f2", config.drive.f2, freq=frequency))
+                drive = (
+                    Pulse("cz_f1", config.drive.f1, freq=frequency),
+                    Pulse("cz_f2", config.drive.f2, freq=frequency),
+                )
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
@@ -308,10 +311,17 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     builder.emit(x180)
                 builder.emit(prepare)
                 for gate_index in range(n):
-                    builder.fork("default", into=(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"))
+                    builder.fork(
+                        "default",
+                        into=(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"),
+                    )
                     builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
                     builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
-                    builder.join(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}", into="default")
+                    builder.join(
+                        f"drive_f1_{gate_index}",
+                        f"drive_f2_{gate_index}",
+                        into="default",
+                    )
                 builder.emit(projection)
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()

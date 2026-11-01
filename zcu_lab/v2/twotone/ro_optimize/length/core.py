@@ -127,7 +127,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("length", lengths.tolist()):
                 cfg.readout.set_param("ro_length", step.value)
                 cfg.readout.set_param("length", lengths.max() + 0.11)

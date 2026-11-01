@@ -39,5 +39,3 @@ def test_concrete_programs_compile_empty_and_nonempty_dmem(values: Sequence[int]
     else:
         assert words is None
         assert prog.binprog["dmem"] is None
-
-

@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Joint-ADC per-point sums and completed-round lifecycle at the public seam."""
 
 from collections.abc import Mapping
@@ -165,7 +164,9 @@ def test_summed_normalizes_moves_reps_and_adds_rounds(
     monkeypatch: pytest.MonkeyPatch, reps_innermost: bool
 ) -> None:
     soc, prog = make_chunk_acquisition(
-        reps=2, sweep=[("outer", 2), ("inner", 2)], reps_innermost=reps_innermost,
+        reps=2,
+        sweep=[("outer", 2), ("inner", 2)],
+        reps_innermost=reps_innermost,
     )
     prog.soccfg["readouts"][0]["iq_offset"] = 17.0
     iq = np.arange(1, 33, dtype=np.float64).reshape(2, 2, 2, 2, 2)

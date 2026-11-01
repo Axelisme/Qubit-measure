@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Compiled request outputs from public native and Module compile seams."""
 
 import numpy as np
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import (
     clock_invariance_program,

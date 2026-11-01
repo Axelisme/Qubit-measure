@@ -331,7 +331,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         )
 
         # Acquire both preparations and the full frequency grid in one program.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

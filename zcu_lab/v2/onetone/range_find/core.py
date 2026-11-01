@@ -156,7 +156,7 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         cfg = deepcopy(config)
         freqs = linear_freqs(cfg.freq, cfg.readout, context=context)
         signals = spectrum_buffer(freqs, plots=context.plots)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,

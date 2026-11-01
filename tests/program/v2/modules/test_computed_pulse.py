@@ -1,7 +1,6 @@
 """Integration tests for ComputedPulse, including flat_top support."""
 
 from __future__ import annotations
-from tests.program._timeline import compile_modules
 
 import pytest
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
@@ -14,6 +13,8 @@ from zcu_tools.program.v2.modules.waveform import (
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
+
+from tests.program._timeline import compile_modules
 
 GEN_CH = 0
 GEN_FREQ = 1000.0
@@ -67,8 +68,6 @@ def _gate_modules(gate_pulses, val_reg="gate_idx"):
 # ---------------------------------------------------------------------------
 # dmem lookup: verify dmem table is populated correctly
 # ---------------------------------------------------------------------------
-
-
 
 
 def test_dmem_lookup_emits_dmem_read_in_asm():
@@ -217,7 +216,3 @@ def test_different_channel_rejected():
     )
     with pytest.raises(ValueError, match="channel"):
         ComputedPulse("gate", val_reg="gate_idx", pulses=[p0, p1])
-
-
-
-

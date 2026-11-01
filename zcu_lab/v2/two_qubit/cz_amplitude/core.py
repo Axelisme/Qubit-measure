@@ -222,25 +222,25 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         readout = MuxReadout("readout", config.readout)
         if config.reset is not None:
             builder.emit(Reset("reset", config.reset))
-        builder.fork("default", into=('prepare_f1_time', 'prepare_f2_time'))
-        builder.emit(Pulse("prepare_f1", config.x180_f1), timeline='prepare_f1_time')
-        builder.emit(Pulse("prepare_f2", config.x180_f2), timeline='prepare_f2_time')
-        builder.join(*('prepare_f1_time', 'prepare_f2_time'), into="default")
-        builder.fork("default", into=('drive_f1_time', 'drive_f2_time'))
-        builder.emit(drive_f1, timeline='drive_f1_time')
-        builder.emit(drive_f2, timeline='drive_f2_time')
-        builder.join(*('drive_f1_time', 'drive_f2_time'), into="default")
-        builder.fork("default", into=('contrast_f1_time', 'contrast_f2_time'))
-        builder.emit(Pulse("contrast_f1", config.x180_f1), timeline='contrast_f1_time')
-        builder.emit(Pulse("contrast_f2", config.x180_f2), timeline='contrast_f2_time')
-        builder.join(*('contrast_f1_time', 'contrast_f2_time'), into="default")
+        builder.fork("default", into=("prepare_f1_time", "prepare_f2_time"))
+        builder.emit(Pulse("prepare_f1", config.x180_f1), timeline="prepare_f1_time")
+        builder.emit(Pulse("prepare_f2", config.x180_f2), timeline="prepare_f2_time")
+        builder.join(*("prepare_f1_time", "prepare_f2_time"), into="default")
+        builder.fork("default", into=("drive_f1_time", "drive_f2_time"))
+        builder.emit(drive_f1, timeline="drive_f1_time")
+        builder.emit(drive_f2, timeline="drive_f2_time")
+        builder.join(*("drive_f1_time", "drive_f2_time"), into="default")
+        builder.fork("default", into=("contrast_f1_time", "contrast_f2_time"))
+        builder.emit(Pulse("contrast_f1", config.x180_f1), timeline="contrast_f1_time")
+        builder.emit(Pulse("contrast_f2", config.x180_f2), timeline="contrast_f2_time")
+        builder.join(*("contrast_f1_time", "contrast_f2_time"), into="default")
         builder.emit(readout, tag="terminal")
         prog = builder.build()
         axes = [
             Classify("terminal", config.roles.f1_tone),
             Classify("terminal", config.roles.f2_tone),
         ]
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             sched.run_acquire_summed(
                 prog,
                 context.soc,

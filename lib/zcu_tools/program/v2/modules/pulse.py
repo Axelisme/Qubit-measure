@@ -111,8 +111,6 @@ class Pulse(Module):
         self._requested_pulse_id = pulse_id
         self.ro_ch = ro_ch
 
-
-
     def _add_pulse(
         self,
         prog: TimelineProgramV2,
@@ -140,8 +138,6 @@ class Pulse(Module):
             gain=cfg.gain,
             **waveform.to_wav_kwargs(),
         )
-
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Register this program's pulse template; QICK errors propagate."""
@@ -206,9 +202,6 @@ class Pulse(Module):
         )
 
 
-
-
-
 class TableLengthPulse(Module):
     """Sweep const/flat-top pulse length from dmem with one wmem template.
 
@@ -243,7 +236,6 @@ class TableLengthPulse(Module):
         prefix = f"{name}_table_length"
         self._length_reg = f"{prefix}_gen_cycles"
         self._template = Pulse(f"{name}_template", self.cfg)
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare one template and the actual generator-length table, not durations.
@@ -301,9 +293,7 @@ class TableLengthPulse(Module):
             self.cfg.post_delay, timeline="default" if timeline is None else timeline
         )
 
-    def _wave_length_cycles(
-        self, prog: TimelineProgramV2, length: float
-    ) -> int:
+    def _wave_length_cycles(self, prog: TimelineProgramV2, length: float) -> int:
         wave_length = length
         if isinstance(self.cfg.waveform, FlatTopWaveformCfg):
             wave_length -= float(self.cfg.waveform.raise_waveform.length)
@@ -325,8 +315,3 @@ class TableLengthPulse(Module):
                 "generator cycles; hardware limit is less than 2**16"
             )
         return cycles
-
-
-
-
-

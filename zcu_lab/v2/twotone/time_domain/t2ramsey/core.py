@@ -149,7 +149,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t2ramsey_signal2real(data)),
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

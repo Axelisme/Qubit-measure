@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Semantic loop/table scheduling through real program acquisition.
 
 Remove the scalar diagnostic reset parameter when the Module-tree interpreter
@@ -10,7 +8,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
@@ -28,6 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -63,8 +62,6 @@ def acquire(modules, *, sweep=None, reps=1):
     except ValueError as exc:
         pytest.fail(f"supported semantic control must acquire: {exc}")
     return request_of(env), prog, env
-
-
 
 
 def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
@@ -357,7 +354,9 @@ def test_reps_counter_lookup_rejected_before_backend():
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     builder = TimelineBuilder(env.soccfg)
     builder.emit(LoadValue("writer", [0], "reps", "selection"))
-    builder.emit(ComputedPulse("reader", val_reg="selection", pulses=[drive(), drive(0.2)]))
+    builder.emit(
+        ComputedPulse("reader", val_reg="selection", pulses=[drive(), drive(0.2)])
+    )
     builder.emit(receiver().build("readout"))
     builder.delay_by_timeline()
     prog = builder.build()

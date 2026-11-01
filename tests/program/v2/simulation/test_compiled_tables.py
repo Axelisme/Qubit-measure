@@ -1,8 +1,8 @@
-from zcu_tools.program.v2 import TimelineBuilder
 """Table and reset effects read from public compiled programs, not Module trees."""
 
 import pytest
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
@@ -18,7 +18,6 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation._compiled_support import request
@@ -65,9 +64,7 @@ def module_program(modules, *, sweep=(), reps=2, body=None, data_registers=16):
 
 def test_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
-    prog, env = module_program(
-        [cfg.build("herald"), cfg.build("terminal")]
-    )
+    prog, env = module_program([cfg.build("herald"), cfg.build("terminal")])
     observed = request(prog, env)
     point = observed.materialize_point(0)
     assert [event.source for event in point.events] == ["herald", "terminal"]
@@ -106,7 +103,7 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
     )
     prog, env = module_program(
         [loader, computed, receiver().build("readout")],
-                sweep=(("scan", 32),),
+        sweep=(("scan", 32),),
     )
     result = request(prog, env)
     assert result.point_dims == (32,)
@@ -185,8 +182,6 @@ def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps():
     assert request(prog, env).materialize_point(0) == result.materialize_point(0)
 
 
-
-
 def test_join_preserves_readout_owner_and_author_pulse_child():
     readout = receiver().build("readout")
     child = drive(ch=1).build("author_child")
@@ -204,8 +199,6 @@ def test_join_preserves_readout_owner_and_author_pulse_child():
     assert point.readouts[0].generator_channels == (0,)
 
 
-
-
 def test_branch_dispatch_and_repeat_preserve_selected_sources():
     first = drive(gain=0.2).build("first")
     second = drive(gain=-0.4).build("second")
@@ -220,7 +213,9 @@ def test_branch_dispatch_and_repeat_preserve_selected_sources():
                     p.emit(second)
         p.emit(readout)
 
-    prog, env = module_program([first, second, readout], sweep=(("scan", 2),), body=body)
+    prog, env = module_program(
+        [first, second, readout], sweep=(("scan", 2),), body=body
+    )
     result = request(prog, env)
     assert [e.source for e in result.materialize_point(0).events] == [
         "first",
@@ -235,10 +230,6 @@ def test_branch_dispatch_and_repeat_preserve_selected_sources():
         (("inner", 0),),
         (("inner", 1),),
     ]
-
-
-
-
 
 
 @pytest.mark.parametrize("kind", ["single", "parallel", "bath"])
@@ -346,7 +337,10 @@ def test_program_join_only_merges_runtime_ends():
         p.emit(readout)
 
     prog, env = module_program(
-        [origin, left, right, readout], sweep=(("scan", 3),), body=body, data_registers=32
+        [origin, left, right, readout],
+        sweep=(("scan", 3),),
+        body=body,
+        data_registers=32,
     )
     result = request(prog, env)
     for index, start in enumerate([7, 20, 10]):
@@ -384,7 +378,10 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         p.emit(readout)
 
     prog, env = module_program(
-        [origin, left, right, readout], sweep=(("scan", 3),), body=body, data_registers=32
+        [origin, left, right, readout],
+        sweep=(("scan", 3),),
+        body=body,
+        data_registers=32,
     )
     result = request(prog, env)
     for index, (origin_cycle, maximum) in enumerate([(7, 84), (20, 56), (10, 84)]):

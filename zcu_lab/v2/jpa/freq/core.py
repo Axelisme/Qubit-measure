@@ -135,7 +135,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # 2. Tune the external pump once per host-side scan point.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for jpa_freq, step in sched.scan("JPA Frequency", jpa_freqs.tolist()):
                 if cfg.jpa_rf_dev is not None:
                     set_rf_frequency(context.devices[cfg.jpa_rf_dev], jpa_freq * 1e6)

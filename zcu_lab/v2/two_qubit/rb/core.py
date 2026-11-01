@@ -241,7 +241,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # Host depth/seed/arm change the gate sequence. Host rounds preserve paired slots.
             for depth, depth_step in sched.scan("depth", config.depths):
                 for seed, seed_step in depth_step.scan("seed", config.seeds):
@@ -278,10 +278,28 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                     )
                                 )
                             elif gate == TwoQubitGate.CZ:
-                                builder.fork("default", into=(f'gate_{index}_cz_f1_time', f'gate_{index}_cz_f2_time'))
-                                builder.emit(Pulse(f"gate_{index}_cz_f1", config.drive.f1), timeline=f'gate_{index}_cz_f1_time')
-                                builder.emit(Pulse(f"gate_{index}_cz_f2", config.drive.f2), timeline=f'gate_{index}_cz_f2_time')
-                                builder.join(*(f'gate_{index}_cz_f1_time', f'gate_{index}_cz_f2_time'), into="default")
+                                builder.fork(
+                                    "default",
+                                    into=(
+                                        f"gate_{index}_cz_f1_time",
+                                        f"gate_{index}_cz_f2_time",
+                                    ),
+                                )
+                                builder.emit(
+                                    Pulse(f"gate_{index}_cz_f1", config.drive.f1),
+                                    timeline=f"gate_{index}_cz_f1_time",
+                                )
+                                builder.emit(
+                                    Pulse(f"gate_{index}_cz_f2", config.drive.f2),
+                                    timeline=f"gate_{index}_cz_f2_time",
+                                )
+                                builder.join(
+                                    *(
+                                        f"gate_{index}_cz_f1_time",
+                                        f"gate_{index}_cz_f2_time",
+                                    ),
+                                    into="default",
+                                )
                                 frames[0] = (
                                     frames[0] + config.phase_pair.correction_f1_deg
                                 ) % 360.0

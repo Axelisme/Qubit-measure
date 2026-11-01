@@ -1,4 +1,3 @@
-from zcu_tools.experiment.v2.runtime import RunOptions
 """Operation outcomes, cooperative cancellation and author-owned persistence."""
 
 from collections.abc import Callable, Iterator
@@ -14,7 +13,11 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import (
+    RunOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.experiment.workflows import (
     Actor,
     Completed,
@@ -24,7 +27,6 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2.modules import SoftDelay
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
@@ -117,7 +119,7 @@ def test_call_delivers_the_original_experiment_exception_to_the_author(
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        with Schedule( buffer, scope=ctx.scope):
+        with Schedule(buffer, scope=ctx.scope):
             raise cause
         return 99
 
@@ -166,10 +168,14 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
         acquire_decimated = acquire
 
     def operation(ctx: CallContext) -> int:
-        with Schedule( SignalBuffer(1), scope=ctx.scope) as schedule:
+        with Schedule(SignalBuffer(1), scope=ctx.scope) as schedule:
             assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
-                schedule.run_acquire(Program(), "soc" , options=AcquireOptions(retry=1), options=RunOptions(converter=lambda raw: raw))
+                schedule.run_acquire(
+                    Program(),
+                    "soc",
+                    options=RunOptions(retry=1, converter=lambda raw: raw),
+                )
             else:
                 schedule.set_stop()
             assert not ctx.scope.stop.is_set()
@@ -246,7 +252,7 @@ def test_unhandled_exception_fails_run(rig: Rig) -> None:
 
 def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
-        with Schedule( scope=ctx.scope):
+        with Schedule(scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
@@ -350,7 +356,7 @@ def test_author_failure_retains_files_without_committing(
 def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((3,))
-        with Schedule( buffer, scope=ctx.scope) as schedule:
+        with Schedule(buffer, scope=ctx.scope) as schedule:
             for _value, step in schedule.scan("sample", (0, 1, 2)):
                 step.set_data(np.complex128(2))
                 break
@@ -397,9 +403,11 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule( buffer, scope=ctx.scope) as schedule:
+        with Schedule(buffer, scope=ctx.scope) as schedule:
             program = Program("soccfg")
-            schedule.run_acquire(program, "soc", options=RunOptions(converter=convert, retry=1))
+            schedule.run_acquire(
+                program, "soc", options=RunOptions(converter=convert, retry=1)
+            )
         return 99
 
     observed = start_call(rig, operation)
@@ -438,8 +446,12 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule( buffer, scope=ctx.scope) as schedule:
-            acquire = schedule.run_acquire if mode == "integrated" else schedule.run_acquire_decimated
+        with Schedule(buffer, scope=ctx.scope) as schedule:
+            acquire = (
+                schedule.run_acquire
+                if mode == "integrated"
+                else schedule.run_acquire_decimated
+            )
             acquire(Program(), "soc", options=RunOptions(converter=lambda raw: raw))
         return 99
 

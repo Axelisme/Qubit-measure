@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Projective reads preserve shot histories through the program/source contract."""
 
 from collections.abc import Generator
@@ -20,6 +19,8 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate import adc
+
+from tests.program._timeline import compile_modules
 
 from ._inputs import settings
 

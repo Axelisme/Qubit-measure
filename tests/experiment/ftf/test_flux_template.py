@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Public fast-flux template conversion and engine family selection.
 
 The no-fast-flux compatibility pin retires if that batch contract changes.
@@ -23,6 +22,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._timeline import compile_modules
 
 pytestmark = pytest.mark.sim
 

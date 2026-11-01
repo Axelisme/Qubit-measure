@@ -191,5 +191,3 @@ def test_native_pulse_tag_and_call_order_sources_reset_only_on_actual_compile(ti
             ("SOURCE_START", "native:pulse:3"),
             ("SOURCE_END", "native:pulse:3"),
         ]
-
-

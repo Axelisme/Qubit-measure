@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Single-cavity acquisition at the public source and program boundaries.
 
 Small retained spaces isolate composition. Production-sized cost is measured by
@@ -27,8 +25,7 @@ from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import LoadValue
-from zcu_tools.program.v2.modules.delay import Delay
+from zcu_tools.program.v2 import LoadValue, TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -43,6 +40,7 @@ from zcu_tools.resources.single_fluxonium import parse_single_fluxonium
 from zcu_tools.simulate.evolution import Engine
 
 from tests.core._simulation import TIME_BASE, tick_array, tick_tuple
+from tests.program._timeline import compile_modules
 
 from ._inputs import settings, slot
 
@@ -746,7 +744,9 @@ def test_fixed_seed_acquire_preserves_flux_controls(case, expected):
             ro_length=0.016,
             trig_offset=0.002,
         )
-        builder = TimelineBuilder(env.soccfg, reps=8, initial_delay=0.0, relax_delay=0.0)
+        builder = TimelineBuilder(
+            env.soccfg, reps=8, initial_delay=0.0, relax_delay=0.0
+        )
         if case in ("inactive", "mixed"):
             builder.add_loop("axis", 2)
         builder.emit(microwave.build("mw"))

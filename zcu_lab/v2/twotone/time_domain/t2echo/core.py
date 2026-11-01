@@ -156,7 +156,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

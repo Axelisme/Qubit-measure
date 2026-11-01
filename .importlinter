@@ -440,7 +440,7 @@ name = Program classes use the simulation entry, not frontend or adapter interna
 type = forbidden
 source_modules =
     zcu_tools.program.v2.base
-    zcu_tools.program.v2.modular
+    zcu_tools.program.v2.timeline
     zcu_tools.program.v2.modules
     zcu_tools.program.v2.ir
     zcu_tools.program.v2.macro

@@ -279,7 +279,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             )
 
         signals = SignalBuffer((len(indices), times.size), on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             # Each stage starts all drives together and waits for its longest pulse.
             builder = TimelineBuilder(
                 context.soccfg,

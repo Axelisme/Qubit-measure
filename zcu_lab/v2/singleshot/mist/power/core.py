@@ -158,7 +158,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             dtype=np.float64,
             on_update=update,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             gain_sweep = cfg.gain
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.

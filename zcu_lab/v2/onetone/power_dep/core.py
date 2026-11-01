@@ -163,7 +163,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             (len(gains), len(freqs)),
             on_update=update,
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 # Repeat reset/readout across frequency at this fixed gain.
                 builder = TimelineBuilder(

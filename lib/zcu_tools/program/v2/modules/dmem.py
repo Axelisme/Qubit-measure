@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
-
 if TYPE_CHECKING:
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -182,11 +181,7 @@ class LoadValue(Module):
         """Whether several values share one dmem word."""
         return self._is_compressed
 
-
-
-    def _emit_lookup(
-        self, prog: TimelineProgramV2, index: str
-    ) -> None:
+    def _emit_lookup(self, prog: TimelineProgramV2, index: str) -> None:
         if self._is_empty:
             return
 
@@ -233,7 +228,6 @@ class LoadValue(Module):
                 prog.write_reg_op(self.val_reg, self.val_reg, "SR", shift_reg)
 
             prog.write_reg_op(self.val_reg, self.val_reg, "AND", self._value_mask)
-
 
     @staticmethod
     def _bits_needed(value: int) -> int:
@@ -352,8 +346,6 @@ class LoadWord(Module):
             ):
                 self._emit_lookup(prog)
 
-
-
     def dmem_offset(self, prog: TimelineProgramV2) -> int:
         """Return this program's raw-word table base for loop update consumers.
 
@@ -375,6 +367,3 @@ class LoadWord(Module):
             else:
                 prog.write_reg_op(addr_reg, self.idx_reg, "+", offset)
             prog.read_dmem(dst=self.val_reg, addr=addr_reg)
-
-
-

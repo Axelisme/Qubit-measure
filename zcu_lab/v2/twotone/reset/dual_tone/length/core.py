@@ -128,7 +128,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         signals_buffer = SignalBuffer((len(lengths),), on_update=update)
 
         # Sweep both durations together before reading out the reset response.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

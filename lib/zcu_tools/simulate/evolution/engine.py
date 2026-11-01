@@ -684,7 +684,7 @@ class Engine:
                         geometry, kernels, context, cancel
                     ).resolve(pool, self._chunks)
                     dispatch = classify(geometry, kernels, context, pool=pool)
-                    schedule = Schedule(  context, cancel)
+                    schedule = Schedule(geometry, dispatch, context, cancel)
                     result = schedule.run(
                         kernels,
                         pool,

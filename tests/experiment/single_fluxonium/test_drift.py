@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
 import json
@@ -29,6 +28,7 @@ from zcu_tools.resources.single_fluxonium import (
 )
 
 from tests.core._simulation import TIME_BASE, tick_tuple
+from tests.program._timeline import compile_modules
 
 from ._inputs import settings, template
 

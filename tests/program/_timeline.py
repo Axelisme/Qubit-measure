@@ -3,7 +3,6 @@
 from collections.abc import Sequence
 
 from qick import QickConfig
-
 from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.sweep import SweepCfg

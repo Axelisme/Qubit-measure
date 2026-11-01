@@ -1,10 +1,9 @@
-from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 from collections.abc import Callable
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.ir.instructions import RegWriteInst
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -15,6 +14,8 @@ from zcu_tools.program.v2.ir.operands import (
 )
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
+
+from tests.program._timeline import compile_modules
 
 
 @pytest.mark.parametrize("invalid_call", [LoadValue], ids=["LoadValue"])
@@ -121,10 +122,6 @@ def _make_dmem_prog(temp_regs=("r10", "r11")):
     return prog
 
 
-
-
-
-
 def test_negative_values_rejected():
     with pytest.raises(ValueError, match=r"\[0,"):
         LoadValue("x", [1, -1, 2], idx_reg="i", val_reg="v")
@@ -146,8 +143,6 @@ def test_auto_compress_off_keeps_values():
     assert lv.is_compressed is False
 
 
-
-
 # ---------------------------------------------------------------------------
 # LoadValue.run — uncompressed path
 # ---------------------------------------------------------------------------
@@ -164,26 +159,14 @@ def test_uncompressed_scalar_lookup_reaches_legacy_register_consumer(padding):
     assert [_execute_lookup_body(program, index) for index in range(3)] == values
 
 
-
-
 # ---------------------------------------------------------------------------
 # LoadValue.run — compressed path
 # ---------------------------------------------------------------------------
 
 
-
-
 # ---------------------------------------------------------------------------
 # ScanWith
 # ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -205,24 +188,12 @@ def test_large_value_max_16bits_gets_compressed():
     assert lv.is_compressed is True
 
 
-
-
 # ---------------------------------------------------------------------------
 # LoadWord
 # ---------------------------------------------------------------------------
-
-
 
 
 @pytest.mark.parametrize("value", [-1, 2**32])
 def test_load_word_rejects_values_outside_uint32_range(value):
     with pytest.raises(ValueError, match="raw uint32"):
         LoadWord("w", [value], idx_reg="i", val_reg="v")
-
-
-
-
-
-
-
-

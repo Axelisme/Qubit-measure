@@ -1,10 +1,9 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Compiled waveform reuse observed through detached request records."""
 
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -18,6 +17,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import envelope_times_us
 
 
@@ -47,7 +47,8 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
     builder.emit(LoadValue("select", [0, 1], "axis", "selected"))
     with builder.repeat("repeat", 3):
         builder.emit(ComputedPulse("gate", val_reg="selected", pulses=candidates))
-    builder.emit(PulseReadoutCfg(
+    builder.emit(
+        PulseReadoutCfg(
             gen_ch=0,
             ro_ch=0,
             nqz=1,
@@ -55,7 +56,8 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.1),
             ro_length=0.1,
-        ).build("readout"))
+        ).build("readout")
+    )
     builder.delay_by_timeline()
     prog = builder.build()
     table = prog.envelopes[1]["envs"]

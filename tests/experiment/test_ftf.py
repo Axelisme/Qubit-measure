@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Public FTF composition and acquisition, without GUI truth or lab recipes."""
 
 import numpy as np
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim

@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Startup preparation is observable and does not consume acquisition identity."""
 
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +11,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim

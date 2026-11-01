@@ -205,7 +205,7 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         scan = cfg.scan
         xs, ys, x_label = _scan_coordinates(scan)
         buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for y, row in sched.scan("stokes_detuning", ys.tolist()):
                 for x, step in row.scan("scan_x", xs.tolist()):
                     lead, scale = cfg.stokes_lead, 1.0

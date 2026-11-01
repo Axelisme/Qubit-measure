@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """FTF outcome histories connect herald reads to continued terminal populations."""
 
 import json
@@ -12,7 +10,7 @@ from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundSignals, SamplingIdentity
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, plan_template
-from zcu_tools.program.v2.modules.delay import Delay
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf.schema import MuxReadoutSource

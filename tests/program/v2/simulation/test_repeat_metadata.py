@@ -1,9 +1,9 @@
-from zcu_tools.program.v2 import TimelineBuilder
 """Repeated compiled requests preserve numeric controls and detached envelopes."""
 
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.delay import SoftDelay

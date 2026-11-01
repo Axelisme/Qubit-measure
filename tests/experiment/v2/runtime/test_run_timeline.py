@@ -64,9 +64,7 @@ def test_cfg_optional_schedule_acquires_into_root_scan_and_child_buffers(
     schedule = (
         Schedule(scope=Scope("run"))
         if cfg_mode == "omitted"
-        else Schedule(
-             buffer, scope=Scope("run")
-        )
+        else Schedule(buffer, scope=Scope("run"))
     )
     with schedule:
         if cfg_mode == "omitted":
@@ -134,7 +132,7 @@ def test_timeline_acquires_through_schedule_and_real_qick_pipeline(
         on_update=lambda data: updates.append(data.copy()),
     )
     expected = np.full(shape, np.nan, dtype=dtype)
-    with Schedule( buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
             result = schedule.run_acquire(program, soc, rounds=2)
             expected = np.array(3 + 4j)

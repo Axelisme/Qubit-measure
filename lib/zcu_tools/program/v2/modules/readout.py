@@ -255,7 +255,6 @@ class AbsReadout(Module):
     """Base declaration for readout modules emitted on a TimelineProgramV2."""
 
 
-
 class PulseReadoutOverrides(TypedDict, total=False):
     """Optional readout knobs, with None retaining each cfg value.
 
@@ -346,7 +345,6 @@ class PulseReadout(AbsReadout):
         """Registered ADC template name, also used for table-backed word updates."""
         return f"{self.name}_adc"
 
-
     def _declare_resources(
         self,
         prog: TimelineProgramV2,
@@ -381,11 +379,9 @@ class PulseReadout(AbsReadout):
             )
         return _ReadoutDeclaration(runtime_pulse, runtime_ro_name)
 
-
     @property
     def _uses_runtime_pulse(self) -> bool:
         return self.gain_val is not None or self.freq_val is not None
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare generator/ADC templates on prog before emission."""
@@ -438,7 +434,6 @@ class PulseReadout(AbsReadout):
         else:
             self.pulse.play(prog, timeline=timeline)
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
-
 
 
 class TablePulseReadout(AbsReadout):
@@ -512,7 +507,6 @@ class TablePulseReadout(AbsReadout):
         """
         return self._readout
 
-
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare independent templates and paired words for a public sweep loop.
 
@@ -566,9 +560,6 @@ class TablePulseReadout(AbsReadout):
             ),
         )
 
-
-
-
     def _validate_loop_count(self, prog: TimelineProgramV2) -> None:
         sweep_dict = prog.sweep_dict
         if sweep_dict is None:
@@ -606,7 +597,6 @@ class MuxReadout(AbsReadout):
         """Copy numeric cfg; name identifies the const mask pulse and diagnostics."""
         self.name = name
         self.cfg = deepcopy(cfg)
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare tones/routes for playback and compiled-emission IQ collection.
@@ -667,9 +657,7 @@ class MuxReadout(AbsReadout):
             length=cfg.length,
         )
 
-    def _validate_generator(
-        self, prog: TimelineProgramV2
-    ) -> None:
+    def _validate_generator(self, prog: TimelineProgramV2) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -691,9 +679,7 @@ class MuxReadout(AbsReadout):
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(
-        self, prog: TimelineProgramV2
-    ) -> None:
+    def _validate_readouts(self, prog: TimelineProgramV2) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
@@ -701,10 +687,7 @@ class MuxReadout(AbsReadout):
         for i, tone in enumerate(self.cfg.tones):
             ch = tone.ro_ch
             where = f"{self.name}.tones[{i}].ro_ch: ADC {ch}"
-            if (
-                ch >= len(readouts)
-                or ch in channels
-            ):
+            if ch >= len(readouts) or ch in channels:
                 raise ValueError(f"{where} missing or duplicate readout route")
             ro = readouts[ch]
             if (
@@ -730,8 +713,6 @@ class MuxReadout(AbsReadout):
                 )
             channels.add(ch)
             ports.add(port)
-
-
 
     def collect_raw_iq(
         self,
@@ -804,15 +785,14 @@ class MuxReadout(AbsReadout):
             selected.append(iq if read_index is None else iq[..., read_index, :])
         return np.stack(selected, axis=-2)
 
-    def _validate_collection_program(
-        self, prog: TimelineProgramV2
-    ) -> None:
+    def _validate_collection_program(self, prog: TimelineProgramV2) -> None:
         from .._timeline_macros import (
             ModuleEmission,
             PreparedTimelineMacro,
             TimelineBranch,
             TimeProducer,
         )
+
         def emitted(macros: Sequence[Macro]) -> bool:
             for macro in macros:
                 source = (

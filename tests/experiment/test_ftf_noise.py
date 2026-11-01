@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Receiver PSD conversion and public rounded ADC noise, independent of truth."""
 
 import numpy as np
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim

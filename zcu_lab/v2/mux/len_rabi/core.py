@@ -354,7 +354,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         # 2. One hardware point loop selects all participants' length tables.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = [
                 TableLengthPulse(
                     f"drive_{index}",
@@ -441,7 +441,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             )
 
         signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for point, step in rep.scan("point", list(range(cfg.expts))):
                     if point not in programs:

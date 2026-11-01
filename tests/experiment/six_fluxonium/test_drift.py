@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Independent acquisition-frozen coherence losses through six-source seams."""
 
 import json
@@ -18,6 +17,7 @@ from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
 from tests.core._simulation import TIME_BASE, tick_tuple
 from tests.experiment.single_fluxonium._inputs import slot, template
+from tests.program._timeline import compile_modules
 from tests.resources._six_fluxonium_data import six_document
 
 

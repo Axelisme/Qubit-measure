@@ -119,9 +119,6 @@ class TestResetFactory:
         assert r.name == "myname"
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Cfg → Module construction + runtime via mock prog
 # ---------------------------------------------------------------------------
@@ -138,8 +135,6 @@ class TestTwoPulseResetRuntime:
         )
 
 
-
-
 class TestBathResetRuntime:
     def _make(self):
         return BathReset(
@@ -150,5 +145,3 @@ class TestBathResetRuntime:
                 pi2_cfg=_make_pi2_cfg(),
             ),
         )
-
-

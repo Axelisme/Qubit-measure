@@ -153,7 +153,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
         )
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -201,7 +201,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             cfg.earlystop_snr,
             lambda data: rabi_signal2real(average_round(data)),
         )
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", cfg.rounds):
                 for length, step in rep.scan("length", lengths.tolist()):
                     length_key = float(length)

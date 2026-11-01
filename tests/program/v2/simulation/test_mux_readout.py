@@ -1,11 +1,11 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Mux frontend emits all coherent carriers and preserves explicit ADC order."""
 
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program.v2 import TimelineBuilder
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation.time_observations import time_us, times_us
 

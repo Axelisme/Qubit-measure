@@ -22,12 +22,14 @@ class FlowEnv:
 def test_schedule_scan_targets_buffer_step_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule( signals_buffer, scope=Scope("run")) as sched:
+    with Schedule(signals_buffer, scope=Scope("run")) as sched:
         for value, step in sched.scan("value", [10.0, 20.0, 30.0]):
             assert step.value == value
             assert isinstance(step.index, int)
             program = FakeScalarProgram("soccfg", value=value, modules=[], sweep=None)
-            step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
+            step.run_acquire(
+                program, "soc", options=RunOptions(converter=identity_array)
+            )
 
         assert sched.env == {}
 
@@ -37,13 +39,15 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
 def test_schedule_repeat_targets_step_buffer_without_mutating_env():
     signals_buffer = SignalBuffer((3,), dtype=np.float64)
 
-    with Schedule( signals_buffer, scope=Scope("run")) as sched:
+    with Schedule(signals_buffer, scope=Scope("run")) as sched:
         for index, step in sched.repeat("round", 3, interval=0.0):
             assert step.index == index
             assert step.value == index
             assert step.path == (index,)
             program = FakeScalarProgram("soccfg", value=index, modules=[], sweep=None)
-            step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
+            step.run_acquire(
+                program, "soc", options=RunOptions(converter=identity_array)
+            )
 
     assert np.allclose(signals_buffer.array, [0.0, 1.0, 2.0])
 
@@ -51,7 +55,7 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
 def test_schedule_env_accepts_dataclass_context():
     env = FlowEnv(label="typed", scale=2.0)
 
-    with Schedule( env=env, scope=Scope("run")) as sched:
+    with Schedule(env=env, scope=Scope("run")) as sched:
         assert sched.env.label == "typed"
         for value, step in sched.scan("value", [3.0]):
             assert step.env is env
@@ -61,15 +65,19 @@ def test_schedule_env_accepts_dataclass_context():
 def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
     signals_buffer = SignalBuffer((2, 3), dtype=np.float64)
 
-    with Schedule( signals_buffer, scope=Scope("run")) as sched:
+    with Schedule(signals_buffer, scope=Scope("run")) as sched:
         for repeat_index, repeat_step in sched.repeat("round", 2):
             for length_value, step in repeat_step.scan("length", [10.0, 20.0, 30.0]):
                 assert step.path == (repeat_index, step.index)
                 program = FakeScalarProgram(
-                    "soccfg", value=repeat_index * 100.0 + length_value,
-                    modules=[], sweep=None,
+                    "soccfg",
+                    value=repeat_index * 100.0 + length_value,
+                    modules=[],
+                    sweep=None,
                 )
-                step.run_acquire(program, "soc", options=RunOptions(converter=identity_array))
+                step.run_acquire(
+                    program, "soc", options=RunOptions(converter=identity_array)
+                )
 
     assert np.allclose(
         signals_buffer.array,
@@ -78,7 +86,7 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
 
 
 def test_schedule_repeat_validates_times_and_interval():
-    with Schedule( scope=Scope("run")) as sched:
+    with Schedule(scope=Scope("run")) as sched:
         try:
             list(sched.repeat("round", -1))
         except ValueError as exc:

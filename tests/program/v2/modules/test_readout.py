@@ -80,7 +80,6 @@ class TestReadoutFactory:
         assert ro.name == "myro"
 
 
-
 class TestTablePulseReadout:
     def test_rejects_empty_tables(self) -> None:
         with pytest.raises(ValueError, match="at least one"):
@@ -101,10 +100,6 @@ class TestTablePulseReadout:
                 freq_words=[1, 2],
                 ro_freq_words=[3],
             )
-
-
-
-
 
 
 @pytest.mark.parametrize("flat_top", [False, True])
@@ -148,5 +143,3 @@ def test_native_readout_conversion_binds_arb_to_explicit_capture(tmp_path, flat_
     assert waveform.length == 0.5
     with pytest.raises(ValueError, match="assets"):
         ModuleCfgFactory.from_core(source, context=None)
-
-

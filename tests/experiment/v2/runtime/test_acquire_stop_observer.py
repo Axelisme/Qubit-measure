@@ -132,8 +132,6 @@ def run_entry(
     return method(producer, object(), rounds=2, options=direct)
 
 
-
-
 @pytest.mark.parametrize("entry", ENTRIES)
 @pytest.mark.parametrize(
     "ending",
@@ -149,7 +147,7 @@ def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquir
     producer = Producer(root, ending)
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
 
         def on_stop() -> None:
@@ -191,7 +189,7 @@ def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
     root = Scope("run")
     producer = Producer(root, "finite")
     observed: list[bool] = []
-    with Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
+    with Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
         if mode == "summed":
             sums_options: RunOptions[NDArray[np.float64]] = RunOptions(
                 on_stop=lambda: observed.append(True)
@@ -253,7 +251,6 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule(
-            
             SignalBuffer(
                 (1,), dtype=np.float64, on_update=update, update_interval=None
             ),
@@ -293,7 +290,7 @@ def test_stop_callback_failure_propagates_without_retry_or_outcome_change(
 
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule( SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
         with pytest.raises(ValueError, match="observer failed") as caught:
             run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=on_stop))

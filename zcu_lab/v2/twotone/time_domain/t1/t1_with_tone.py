@@ -104,7 +104,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # 2. Sweep the tone after excitation, then acquire the readout IQ.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

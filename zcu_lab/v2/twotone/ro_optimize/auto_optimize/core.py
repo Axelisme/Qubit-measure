@@ -366,7 +366,7 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         )
 
         # Feed back the previous score before asking for the next candidate.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for idx, (_, step) in enumerate(sched.scan("Iteration", range(num_points))):
                 current_index = idx
 

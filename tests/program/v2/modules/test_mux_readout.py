@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 """Fixed mux compile, hardware validation and averaged-I/Q selection contracts."""
 
 from copy import deepcopy
@@ -8,9 +6,11 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import (
     AcquisitionSoc,
     RecordingProgram,
@@ -74,7 +74,9 @@ def test_real_compile_and_acquire_all_tones(channels):
         mask=list(range(len(channels))),
         length=cfg.length,
     )
-    assert prog.triggers == [(list(channels), dict(t=cfg.trig_offset, timeline="default"))]
+    assert prog.triggers == [
+        (list(channels), dict(t=cfg.trig_offset, timeline="default"))
+    ]
     assert prog.playbacks == [dict(t=cfg.pre_delay, tag=None, timeline="default")]
     soc = AcquisitionSoc(soccfg.get_cfg())
     raw = prog.acquire(soc, progress=False)
@@ -87,8 +89,6 @@ def test_real_compile_and_acquire_all_tones(channels):
     assert soc.pfb_configs[0][0] == "pfb0"
     assert soc.pfb_configs[0][2] is None
     assert [r["pfb_port"] for r in soc.pfb_configs[0][1]] == list(channels)
-
-
 
 
 @pytest.mark.parametrize(
@@ -402,7 +402,3 @@ class RouteReuse(Module):
 
     def run(self, prog, t=0.0):
         return t
-
-
-
-

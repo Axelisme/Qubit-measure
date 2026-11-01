@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Compact rounds preserve QICK layouts and defer shot creation until needed."""
 
 from dataclasses import replace
@@ -18,6 +17,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 
 from tests.program._acquisition_soc import AcquisitionSoc
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
 

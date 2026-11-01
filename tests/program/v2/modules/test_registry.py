@@ -52,7 +52,3 @@ def test_runtime_adc_channel_is_part_of_registry_identity():
         assert reg.register("first", cfg, ro_ch=ch) is True
         assert reg.register("again", cfg, ro_ch=ch) is False
     assert reg.count == 3
-
-
-
-

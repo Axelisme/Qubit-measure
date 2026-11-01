@@ -223,9 +223,13 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
 
     with Schedule(SignalBuffer(1), scope=root, name="readout") as schedule:
         assert schedule.scope.active_path == "run/schedule:readout#1"
-        schedule.run_acquire(program, object(), options=RunOptions(converter=lambda value: value))
+        schedule.run_acquire(
+            program, object(), options=RunOptions(converter=lambda value: value)
+        )
         assert not schedule.scope.cancelled
-        schedule.run_acquire(program, object(), options=RunOptions(converter=lambda value: value))
+        schedule.run_acquire(
+            program, object(), options=RunOptions(converter=lambda value: value)
+        )
         assert schedule.data[0] == 2.0
     assert root.active_path == "run"
     assert not root.cancelled

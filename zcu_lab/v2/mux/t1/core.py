@@ -336,7 +336,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             )
 
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,
@@ -403,7 +403,7 @@ class MuxT1Exp(Experiment[MuxT1Result, MuxT1Cfg]):
             )
 
         signals = SignalBuffer((len(times), len(indices)), on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=cfg.reps,

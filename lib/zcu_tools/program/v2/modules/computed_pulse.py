@@ -4,7 +4,6 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
-
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -99,7 +98,6 @@ class ComputedPulse(Module):
             ),
         )
 
-
     def _declare_candidates(
         self,
         prog: TimelineProgramV2,
@@ -136,6 +134,3 @@ class ComputedPulse(Module):
             base_idxs.append(prog.wave2idx[wave_names[0]])
 
         return base_idxs
-
-
-

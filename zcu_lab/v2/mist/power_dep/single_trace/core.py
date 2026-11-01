@@ -117,7 +117,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         )
 
         # 2. Bind the board gain sweep without changing the other probe settings.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # Build the pulse sequence without changing the caller's cfg.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

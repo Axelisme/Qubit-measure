@@ -1,16 +1,16 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Public acquisition rejects reps live-ins, inconsistent tables and missing routes."""
 
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, TablePulseReadout
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
+
+from tests.program._timeline import compile_modules
 
 
 def drive(*, ch=1, waveform=None):

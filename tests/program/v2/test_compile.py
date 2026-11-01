@@ -6,15 +6,16 @@ _initialize / _body / compile pipeline.
 """
 
 from __future__ import annotations
-from tests.program._timeline import compile_modules
 
 from collections.abc import Mapping
 
 import pytest
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2 import TimelineProgramV2
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
+
+from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,8 +61,6 @@ def _expected_line(prog: TimelineProgramV2) -> int:
 def test_empty_program_compiles():
     prog = _make_prog()
     assert prog.binprog is not None
-
-
 
 
 def test_binprog_has_pmem():

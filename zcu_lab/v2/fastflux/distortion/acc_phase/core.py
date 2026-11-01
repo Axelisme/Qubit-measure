@@ -114,7 +114,7 @@ class AccPhaseExp(Experiment[AccPhaseResult, AccPhaseCfg]):
             ),
         )
 
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

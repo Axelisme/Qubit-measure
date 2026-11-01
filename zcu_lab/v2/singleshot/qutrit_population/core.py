@@ -112,7 +112,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         measured pulse calibrations and a relaxation interval suitable for g.
         """
         buffer = SignalBuffer((3, cfg.shots))
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for label, step in sched.scan("preparation", [0, 1, 2]):
                 builder = TimelineBuilder(
                     context.soccfg,

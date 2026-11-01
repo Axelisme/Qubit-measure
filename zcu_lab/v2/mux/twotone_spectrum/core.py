@@ -289,7 +289,7 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
 
         # 3. A shared DAC register loop advances the independent frequency ranges.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]

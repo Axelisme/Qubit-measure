@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Independent cavity histories through the public source and program seams.
 
 Terminal-only numeric pins retire when the versioned ADC/RNG contract changes.
@@ -29,7 +27,7 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.routing import route_request
 from zcu_tools.experiment.six_fluxonium.runtime import SixFluxoniumSource
-from zcu_tools.program.v2.modules.delay import SoftDelay
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium

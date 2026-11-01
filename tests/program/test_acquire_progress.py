@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Accumulated acquisition progress through the public context-local factory."""
 
 from collections.abc import Callable
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.program._acquisition_soc import make_acquisition_soc
+from tests.program._timeline import compile_modules
 
 
 class RecordingTransport:

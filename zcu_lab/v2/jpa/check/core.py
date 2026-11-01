@@ -115,7 +115,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         )
 
         # 2. Acquire OFF first, then ON; the final pump state is not restored.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for output, step in sched.scan("JPA on/off", outputs.tolist()):
                 set_output(context.devices[cfg.jpa_rf_dev], self.OUTPUT_MAP[output])
 

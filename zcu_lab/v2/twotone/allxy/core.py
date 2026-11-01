@@ -237,7 +237,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
                 allxy_signal2real(data),
             ),
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
             I_pulse = cfg.I_pulse
             X180_pulse = cfg.X180_pulse

@@ -1,8 +1,8 @@
-from zcu_tools.program.v2 import TimelineBuilder
 """Public builder/acquire integration with fixed mux, not physical simulation."""
 
 import numpy as np
 import pytest
+from zcu_tools.program.v2 import TimelineBuilder
 
 from tests.program.v2._mux_support import AcquisitionSoc, mux_soccfg, native_mux
 
@@ -71,5 +71,3 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
         module.collect_iq(prog, averaged, read_index=1)[0],
         [[1909, -1909], [1602, -1616]],
     )
-
-

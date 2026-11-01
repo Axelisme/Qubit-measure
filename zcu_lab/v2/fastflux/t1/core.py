@@ -112,7 +112,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             on_update=lambda data: viewer.update(gains, lengths, t1_signal2real(data)),
         )
 
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # Build the pulse sequence without changing the caller's cfg.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

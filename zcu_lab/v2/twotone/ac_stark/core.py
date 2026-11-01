@@ -177,7 +177,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         )
 
         # Acquire one frequency trace per Stark gain, retaining its SNR early stop.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("gain", gains.tolist()):
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

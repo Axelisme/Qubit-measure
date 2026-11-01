@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """FTF environment pacing and its opt-out leave public acquisition unchanged."""
 
 import time
@@ -11,6 +10,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of
 from tests.resources._ftf_data import ftf_document
 

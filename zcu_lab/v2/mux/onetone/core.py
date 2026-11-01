@@ -414,7 +414,7 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
         signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)
 
         # 3. Rebuild reset -> mux readout at each offset, always from the base tones.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for df, step in sched.scan("df", dfs.tolist()):
                 readout = active_readout.with_updates(
                     tones=[

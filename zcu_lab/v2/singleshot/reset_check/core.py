@@ -179,7 +179,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             dtype=np.float64,
             on_update=update,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

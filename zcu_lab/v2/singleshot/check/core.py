@@ -84,7 +84,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
         cfg = deepcopy(cfg)
 
         signals_buffer = SignalBuffer((cfg.shots,))
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # Prepare the same state for every shot before probing and readout.
             builder = TimelineBuilder(
                 soccfg,

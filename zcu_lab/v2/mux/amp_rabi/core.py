@@ -295,7 +295,7 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
 
         # Advance each drive gain in the same tProc point loop.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]

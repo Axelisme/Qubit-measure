@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Host gain coordinates retain their intended words through QICK compilation."""
 
 import numpy as np
@@ -19,6 +18,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._timeline import compile_modules
 
 
 def _compile_scalar_word(soccfg: QickConfig, gain: float) -> int:
@@ -259,7 +260,9 @@ def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
         prog = compile_modules(
             soccfg, [pulse, readout], sweep=[("freq", frequencies)], reps=200
         )
-        compiled_gain = prog.get_pulse_param(pulse.pulse_name(prog), "gain", as_array=False)
+        compiled_gain = prog.get_pulse_param(
+            pulse.pulse_name(prog), "gain", as_array=False
+        )
         words.append(round(compiled_gain * soccfg.get_maxv(1)))
 
     np.testing.assert_array_equal(words, [3276, 6552, 9828, 13104])

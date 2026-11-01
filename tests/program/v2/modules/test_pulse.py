@@ -20,5 +20,3 @@ def test_pulse_cfg_namespace_validates_nested_input():
     assert modules.pulse.freq == 500.0
     assert modules.pulse.waveform.length == 1.0
     assert Pulse("drive", modules.pulse).cfg == modules.pulse
-
-

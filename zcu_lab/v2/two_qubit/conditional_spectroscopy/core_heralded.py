@@ -189,7 +189,7 @@ class SpectroscopyHeraldedExp(
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # DC stays on the host because each point sets an external instrument.
             for dc_value, step in sched.scan("dc", dc_values.tolist()):
                 if config.dc_device is not None:
@@ -230,10 +230,16 @@ class SpectroscopyHeraldedExp(
                 ):
                     builder.emit(x180_f2)
                 builder.join("f1", "f2", into="default")
-                builder.fork("default", into=('probe_f1_time', 'probe_f2_time'))
-                builder.emit(Pulse("probe_f1", config.drive.f1, freq=frequency), timeline='probe_f1_time')
-                builder.emit(Pulse("probe_f2", config.drive.f2, freq=frequency), timeline='probe_f2_time')
-                builder.join(*('probe_f1_time', 'probe_f2_time'), into="default")
+                builder.fork("default", into=("probe_f1_time", "probe_f2_time"))
+                builder.emit(
+                    Pulse("probe_f1", config.drive.f1, freq=frequency),
+                    timeline="probe_f1_time",
+                )
+                builder.emit(
+                    Pulse("probe_f2", config.drive.f2, freq=frequency),
+                    timeline="probe_f2_time",
+                )
+                builder.join(*("probe_f1_time", "probe_f2_time"), into="default")
                 if config.contrast:
                     builder.emit(Pulse("contrast_f1", config.x180_f1))
                     builder.emit(Pulse("contrast_f2", config.x180_f2))

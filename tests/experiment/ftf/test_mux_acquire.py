@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Persisted mux settings drive the real program-to-FTF acquisition path."""
 
 import numpy as np
@@ -11,6 +10,7 @@ from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.ftf.schema import MuxReadoutSource
 
 from tests.experiment._ftf_templates import settings
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import mux_document
 
 pytestmark = pytest.mark.sim

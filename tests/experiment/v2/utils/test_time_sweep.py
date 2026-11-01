@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 import numpy as np
 import pytest
 from zcu_tools.experiment.utils.sweep import make_sweep
@@ -11,6 +10,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._timeline import compile_modules
 
 
 @pytest.mark.parametrize("reverse", [False, True])

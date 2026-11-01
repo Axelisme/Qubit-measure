@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
 from contextlib import ExitStack
@@ -18,6 +17,7 @@ from tests.experiment._ftf_templates import (
     snapshot,
     template,
 )
+from tests.program._timeline import compile_modules
 
 pytestmark = pytest.mark.sim
 
@@ -456,7 +456,6 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
 
 def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
     from zcu_tools.experiment.ftf import ftf
-    from zcu_tools.program.v2 import TimelineProgramV2
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 

@@ -150,7 +150,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
@@ -183,7 +183,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule( signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

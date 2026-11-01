@@ -119,7 +119,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         )
         cache: dict[tuple[int, int], TimelineProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for round_index, round_step in sched.repeat("round", run_cfg.rounds):
                 for seed_index, (seed, seed_step) in enumerate(
                     round_step.scan("seed", seeds.tolist())

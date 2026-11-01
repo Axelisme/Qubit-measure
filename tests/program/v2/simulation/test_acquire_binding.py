@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 """QICK callable metadata and argument semantics at public simulation acquire."""
 
 import gc
@@ -12,9 +10,11 @@ import pytest
 from qick.qick_asm import AcquireMixin
 from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 
 

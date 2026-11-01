@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Read labels, classifiers and shot outer products through compiled programs."""
 
 import numpy as np
@@ -7,6 +6,7 @@ from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearCla
 from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
 
@@ -122,6 +122,7 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
     cfg = mux_soccfg() if mux else v2.make_mock_soccfg()
     ro = native_mux((4, 1)).build("readout") if mux else readout()
+
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(ro)
@@ -195,6 +196,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
     timeline, control, inside
 ):
     ro = readout()
+
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(ro)
@@ -274,6 +276,7 @@ def test_split_sums_returns_counts_and_nan_means_without_warnings():
 @pytest.mark.parametrize("collision", [False, True])
 def test_missing_and_ambiguous_labels_list_available_labels(timeline, collision):
     ro = readout()
+
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(ro)
@@ -321,6 +324,7 @@ def test_missing_or_incomplete_classification_fails_at_construction(classifier):
 def test_parallel_readout_emissions_keep_labels_without_changing_admission():
     first = readout("first", ch=0)
     second = readout("second", ch=1)
+
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(first)

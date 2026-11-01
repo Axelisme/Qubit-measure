@@ -166,7 +166,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs2), len(freqs1)),
             on_update=update,
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for freq2, step in sched.scan("freq2", freqs2.tolist()):
                 builder = TimelineBuilder(
                     soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -212,7 +212,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             (len(freqs1), len(freqs2)),
             on_update=update,
         )
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )

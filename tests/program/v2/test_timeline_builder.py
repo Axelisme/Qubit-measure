@@ -494,28 +494,32 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
         builder.emit(module, timeline=timeline)
     builder.join(*parallel_timelines, into="default")
-    parallel_modules = list((
-                v2.Pulse(
-                    f"drive_{ch}",
-                    v2.PulseCfg(
-                        ch=ch,
-                        nqz=1,
-                        freq=5766.479855812597,
-                        gain=0.03583655619862781,
-                        waveform=ConstWaveformCfg(length=0.736),
-                        post_delay=0.01,
-                    ),
-                    freq=frequency,
-                    length=duration,
-                )
-                for ch in (2, 3)
-            ))
+    parallel_modules = list(
+        (
+            v2.Pulse(
+                f"drive_{ch}",
+                v2.PulseCfg(
+                    ch=ch,
+                    nqz=1,
+                    freq=5766.479855812597,
+                    gain=0.03583655619862781,
+                    waveform=ConstWaveformCfg(length=0.736),
+                    post_delay=0.01,
+                ),
+                freq=frequency,
+                length=duration,
+            )
+            for ch in (2, 3)
+        )
+    )
     parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
     builder.fork("default", into=parallel_timelines)
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
         builder.emit(module, timeline=timeline)
     builder.join(*parallel_timelines, into="default")
-    parallel_modules = list((v2.Pulse(f"contrast_{cfg.ch}", cfg) for cfg in preparation))
+    parallel_modules = list(
+        (v2.Pulse(f"contrast_{cfg.ch}", cfg) for cfg in preparation)
+    )
     parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
     builder.fork("default", into=parallel_timelines)
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
@@ -1074,22 +1078,24 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
         "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
     )
     for name, length in (("prepare", 77 / 384), ("drive", duration)):
-        parallel_modules = list((
-                    v2.Pulse(
-                        f"{name}_{ch}",
-                        v2.PulseCfg(
-                            ch=ch,
-                            nqz=1,
-                            freq=100,
-                            gain=0.5,
-                            waveform=ConstWaveformCfg(length=0.1),
-                            post_delay=4.3 / 430.08,
-                        ),
-                        length=length,
-                        freq=frequency,
-                    )
-                    for ch in (0, 1)
-                ))
+        parallel_modules = list(
+            (
+                v2.Pulse(
+                    f"{name}_{ch}",
+                    v2.PulseCfg(
+                        ch=ch,
+                        nqz=1,
+                        freq=100,
+                        gain=0.5,
+                        waveform=ConstWaveformCfg(length=0.1),
+                        post_delay=4.3 / 430.08,
+                    ),
+                    length=length,
+                    freq=frequency,
+                )
+                for ch in (0, 1)
+            )
+        )
         parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
         builder.fork("default", into=parallel_timelines)
         for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
@@ -1115,30 +1121,28 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         ("drive", duration),
         ("contrast", 77 / 384),
     ):
-        parallel_modules = list((
-                    v2.Pulse(
-                        f"{name}_{ch}",
-                        v2.PulseCfg(
-                            ch=ch,
-                            nqz=1,
-                            freq=100,
-                            gain=0.5,
-                            waveform=ConstWaveformCfg(length=0.1),
-                            post_delay=(
-                                4.3
-                                + (
-                                    extra_post_cycles
-                                    if name == "drive" and ch == 1
-                                    else 0
-                                )
-                            )
-                            / 430.08,
-                        ),
-                        length=length,
-                        freq=frequency,
-                    )
-                    for ch in (0, 1)
-                ))
+        parallel_modules = list(
+            (
+                v2.Pulse(
+                    f"{name}_{ch}",
+                    v2.PulseCfg(
+                        ch=ch,
+                        nqz=1,
+                        freq=100,
+                        gain=0.5,
+                        waveform=ConstWaveformCfg(length=0.1),
+                        post_delay=(
+                            4.3
+                            + (extra_post_cycles if name == "drive" and ch == 1 else 0)
+                        )
+                        / 430.08,
+                    ),
+                    length=length,
+                    freq=frequency,
+                )
+                for ch in (0, 1)
+            )
+        )
         parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
         builder.fork("default", into=parallel_timelines)
         for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):

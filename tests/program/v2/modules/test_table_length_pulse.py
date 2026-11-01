@@ -1,15 +1,15 @@
 from __future__ import annotations
-from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 
 import pytest
-from zcu_tools.program.v2 import PulseCfg, TableLengthPulse
+from zcu_tools.program.v2 import PulseCfg, TableLengthPulse, TimelineProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
+
+from tests.program._timeline import compile_modules
 
 
 def _pulse(waveform) -> PulseCfg:

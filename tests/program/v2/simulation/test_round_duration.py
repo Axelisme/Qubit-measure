@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Physical round pacing at the public binding seam with virtual time."""
 
 import time
@@ -26,6 +25,8 @@ from zcu_tools.program.v2.simulation import (
     SimulationTiming,
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+
+from tests.program._timeline import compile_modules
 
 
 class Clock:

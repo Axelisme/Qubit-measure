@@ -6,15 +6,13 @@ integrates with the actual QICK ASM backend without hardware.
 """
 
 from __future__ import annotations
-from zcu_tools.program.v2 import TimelineProgramV2
-from tests.program._timeline import compile_modules
 
 from typing import Literal
 
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
-from zcu_tools.program.v2 import SweepCfg, sweep2param
+from zcu_tools.program.v2 import SweepCfg, TimelineProgramV2, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -36,6 +34,8 @@ from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
+
+from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg
@@ -164,7 +164,6 @@ class TestDelayIntegration:
         prog = _make_prog(modules=[DelayAuto("a", gens=True, ros=False)])
         assert prog.binprog is not None
 
-
     def test_delay_resets_time(self):
         modules = [SoftDelay("pre", 0.1), Delay("d", 1.0), SoftDelay("post", 0.2)]
         prog = _make_prog(modules=modules)
@@ -186,7 +185,6 @@ class TestPulseIntegration:
         prog = _make_prog(modules=[Pulse("p", _pulse_cfg())])
         assert prog.binprog is not None
 
-
     def test_swept_blocking_alignment_leaves_no_generator_residual_sweep(self) -> None:
         grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
         pulse = Pulse("drive", _pulse_cfg(length=sweep2param("length", grid)))
@@ -202,7 +200,6 @@ class TestPulseIntegration:
         residual = prog.get_time_param("residual", "t")
         assert isinstance(residual, float)
         assert residual == 0.0
-
 
     def test_pulse_none_cfg_compiles(self):
         prog = _make_prog(modules=[Pulse("p", None)])
@@ -226,7 +223,6 @@ class TestPulseIntegration:
         ]
         prog = _make_prog(modules=modules, n_gens=2)
         assert prog.binprog is not None
-
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +377,6 @@ class TestReadoutIntegration:
 
 
 class TestResetIntegration:
-
     def test_pulse_reset_compiles(self):
         cfg = PulseResetCfg(pulse_cfg=_pulse_cfg(ch=GEN_CH))
         prog = _make_prog(modules=[Reset("r", cfg)])
@@ -423,32 +418,21 @@ class TestControlIntegration:
         assert isinstance(macros[2], Label)
 
 
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Dmem module
 # ---------------------------------------------------------------------------
 
 
 class TestDmemIntegration:
-
     def _scan_values_small(self):
         return list(range(5))
 
     def _scan_values_large(self):
         return list(range(40))
 
-
-
     def test_load_value_negative_rejected(self):
         with pytest.raises(ValueError, match=r"\[0,"):
             LoadValue("lv", [-1, 0, 1], idx_reg="myloop", val_reg="myval")
-
-
-
 
     def test_binprog_rejects_non_vector_dmem(self):
         class TwoDimensionalDmemProgram(TimelineProgramV2):
@@ -459,8 +443,6 @@ class TestDmemIntegration:
 
         with pytest.raises(ValueError, match="dmem must be one-dimensional"):
             TwoDimensionalDmemProgram(soccfg)
-
-
 
 
 @pytest.mark.parametrize("mixer", [None, 500.0])
@@ -501,9 +483,7 @@ def test_table_readout_requires_named_loop(sweep):
     ro = TablePulseReadout(
         "table", _readout_cfg(), idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
     )
-    with pytest.raises(
-        ValueError, match="requires one sweep loop"
-    ):
+    with pytest.raises(ValueError, match="requires one sweep loop"):
         _make_prog(modules=[ro], sweep=sweep)
 
 
@@ -527,7 +507,3 @@ def test_unprotected_routes_keep_qick_redeclaration_semantics():
     prog.declare_readout(0, length=0.413)
     prog.declare_readout(0, length=0.827)
     assert prog.get_time_axis(0, length_only=True) == prog.us2cycles(0.827, ro_ch=0)
-
-
-
-

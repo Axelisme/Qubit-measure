@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
 from dataclasses import replace
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.simulation_replay import read_replay, replay_paths
 
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim

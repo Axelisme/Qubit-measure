@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Explicit environments exercise the real QICK acquisition/packing pipeline."""
 
 import importlib
@@ -22,6 +21,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
@@ -35,18 +35,18 @@ def environment(**kwargs):
 
 def readout_modules(env, *, channels=(0,), samples=16, reads=1):
     return [
-            PulseReadoutCfg(
-                gen_ch=ch,
-                ro_ch=ch,
-                nqz=1,
-                freq=100.0,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.1),
-                ro_length=env.soccfg.cycles2us(samples, ro_ch=ch),
-            ).build(f"readout_{ch}_{read}")
-            for read in range(reads)
-            for ch in channels
-        ]
+        PulseReadoutCfg(
+            gen_ch=ch,
+            ro_ch=ch,
+            nqz=1,
+            freq=100.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=env.soccfg.cycles2us(samples, ro_ch=ch),
+        ).build(f"readout_{ch}_{read}")
+        for read in range(reads)
+        for ch in channels
+    ]
 
 
 def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):

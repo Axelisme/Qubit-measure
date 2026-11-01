@@ -15,13 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class Delay(Module):
-    def __init__(
-        self, name: str, delay: float | QickParam
-    ) -> None:
+    def __init__(self, name: str, delay: float | QickParam) -> None:
         self.name = name
         self.delay = delay
-
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Delay needs no hardware resources; prog owns the emission timeline."""
@@ -37,13 +33,10 @@ class Delay(Module):
         )
 
 
-
 class SoftDelay(Module):
     def __init__(self, name: str, delay: float | QickParam) -> None:
         self.name = name
         self.delay = delay
-
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """SoftDelay needs no hardware resources on prog."""
@@ -57,7 +50,6 @@ class SoftDelay(Module):
             timeline=timeline if timeline is not None else "default",
             tag=tag,
         )
-
 
 
 class DelayAuto(Module):
@@ -85,9 +77,6 @@ class DelayAuto(Module):
         self.gens = gens
         self.ros = ros
 
-
-
-
     def declare(self, prog: TimelineProgramV2) -> None:
         """DelayAuto consumes existing channel/register declarations on prog."""
 
@@ -110,6 +99,3 @@ class DelayAuto(Module):
             prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
         else:
             prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=tag)
-
-
-

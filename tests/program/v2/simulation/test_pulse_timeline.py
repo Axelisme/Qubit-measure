@@ -1,4 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
 """Generator and ADC timing observed at the public acquisition boundary."""
 
 import math
@@ -6,7 +5,7 @@ import math
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.delay import Delay, SoftDelay
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import (

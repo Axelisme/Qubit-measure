@@ -200,7 +200,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             dtype=np.complex128,
             on_update=update_view,
         )
-        with Schedule( buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # The board sweeps gain within each reset/drive/readout acquisition.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay

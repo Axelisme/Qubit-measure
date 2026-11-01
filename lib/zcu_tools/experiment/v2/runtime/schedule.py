@@ -283,9 +283,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
             parent=self, name=name, times=times, interval=interval
         )
 
-
-
-
     @property
     def _acquisition_owner(self) -> Schedule[T_Env]:
         return self
@@ -402,7 +399,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
                     name=name,
                     index=index,
                     value=value,
-
                     path=parent.path + (index,),
                 )
                 try:
@@ -467,7 +463,6 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
                     name=name,
                     index=index,
                     value=index,
-
                     path=parent.path + (index,),
                 )
                 try:
@@ -480,9 +475,7 @@ class Schedule(RunAcquisitionMixin, Generic[T_Env]):
             iter_pbar.close()
             time_pbar.close()
 
-    def get_data_for(
-        self, owner: Schedule[Any] | ScheduleStep[Any, Any]
-    ) -> Any:
+    def get_data_for(self, owner: Schedule[Any] | ScheduleStep[Any, Any]) -> Any:
         """Return the live result node at owner's path in this active schedule.
 
         owner must be this schedule or one of its steps. An inactive scope raises
@@ -646,18 +639,13 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Value, T_Env]):
     def trigger_update(self, *, flush: bool = False) -> None:
         self.schedule.trigger_update_for(self, flush=flush)
 
-
-
-    def child(
-        self, addr: Hashable
-    ) -> ScheduleStep[Hashable, T_Env]:
+    def child(self, addr: Hashable) -> ScheduleStep[Hashable, T_Env]:
         self.schedule.ensure_active()
         return ScheduleStep(
             schedule=self.schedule,
             name=str(addr),
             index=addr,
             value=addr,
-
             path=self.path + (addr,),
         )
 
@@ -690,9 +678,6 @@ class ScheduleStep(RunAcquisitionMixin, Generic[T_Value, T_Env]):
         yield from self.schedule.repeat_from(
             parent=self, name=name, times=times, interval=interval
         )
-
-
-
 
 
 def _make_nan_array(shape: int | Sequence[int], dtype: DTypeLike) -> NDArray[Any]:

@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Six independent physical cavities through the normal compiled acquire seam."""
 
 from contextlib import contextmanager
@@ -20,6 +19,7 @@ from zcu_tools.program.v2.simulation import IntegratedRound, SimulationBinding
 from zcu_tools.program.v2.utils import readout_freq_words
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import request_of
 from tests.resources._six_fluxonium_data import six_document
 

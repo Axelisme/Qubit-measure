@@ -95,7 +95,6 @@ class AbsReset(Module):
     """Base declaration for reset modules emitted on a TimelineProgramV2."""
 
 
-
 class PulseResetOverrides(PulseOverrides, total=False):
     """Optional pulse-reset knobs; None keeps each cfg value.
 
@@ -233,9 +232,6 @@ class PulseReset(AbsReset):
         apply_cfg_overrides(self.cfg, overrides, PulseResetOverrides.__annotations__)
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
 
-
-
-
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the reset pulse's resources on prog."""
         self.reset_pulse.declare(prog)
@@ -270,9 +266,6 @@ class TwoPulseReset(AbsReset):
         apply_cfg_overrides(self.cfg, overrides, TwoPulseResetOverrides.__annotations__)
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.cfg.pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.cfg.pulse2_cfg)
-
-
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare both reset pulses on prog."""
@@ -317,9 +310,6 @@ class BathReset(AbsReset):
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=self.cfg.cavity_tone_cfg)
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=self.cfg.qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=self.cfg.pi2_cfg)
-
-
-
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare the cavity, qubit and final pi/2 pulses on prog."""

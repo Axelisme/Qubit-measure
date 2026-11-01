@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Cross-preparation waveform ownership through the public frontend seam."""
 
 import math
@@ -11,6 +10,8 @@ from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+
+from tests.program._timeline import compile_modules
 
 
 @pytest.fixture

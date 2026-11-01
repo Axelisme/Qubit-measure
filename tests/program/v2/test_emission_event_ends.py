@@ -72,9 +72,7 @@ def _program(
 
 @pytest.mark.parametrize("post, spacing", [(0.0005, 49), (0.001, 50)])
 @pytest.mark.parametrize("timeline", [None, "drive"])
-def test_pulse_ceil_covers_actual_playback_plus_post_once(
-    post, spacing, timeline
-):
+def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, timeline):
     pulse = Pulse("drive", _pulse_cfg(post=post))
 
     def body(prog):

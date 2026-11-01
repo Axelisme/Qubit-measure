@@ -132,7 +132,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
         )
 
         # Set the external flux bias before acquiring each complete spectrum.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("flux", dev_values.tolist()):
                 set_flux(
                     context.devices[cfg.flux_dev],

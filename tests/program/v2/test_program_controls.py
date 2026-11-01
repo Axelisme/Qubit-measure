@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """Explicit program repetition and timing controls at the compiled public seam."""
 
 import numpy as np
@@ -8,6 +7,7 @@ from zcu_tools.program.v2 import make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import time_us
 
 

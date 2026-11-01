@@ -66,9 +66,6 @@ def apply_cfg_overrides(
 class Module(ABC):
     name: str
 
-
-
-
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare resources on prog before emission.
 
@@ -90,7 +87,6 @@ class Module(ABC):
         raise NotImplementedError.
         """
         raise NotImplementedError(f"{type(self).__name__} has no timeline lowering")
-
 
 
 ModuleGroup: TypeAlias = Module | Sequence[Module | None] | None

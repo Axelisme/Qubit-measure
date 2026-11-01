@@ -1,7 +1,6 @@
 """Public compilation publishes a detached, pre-optimization IR artifact."""
 
 from __future__ import annotations
-from tests.program._timeline import compile_modules
 
 from collections.abc import Callable
 from copy import deepcopy
@@ -10,7 +9,7 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 from qick.asm_v2 import Pulse as NativePulse
-from qick.asm_v2 import QickParam, QickProgramV2, QickSweep1D
+from qick.asm_v2 import QickProgramV2, QickSweep1D
 from qick.qick_asm import AbsQickProgram
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
@@ -23,8 +22,6 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import SoftDelay
-from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -208,10 +205,6 @@ def test_invalidated_binary_cannot_expose_a_stale_snapshot(path: str):
     assert prog.compiled_stream is not saved
 
 
-
-
-
-
 def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
     class NativeSweep(TimelineProgramV2):
         def _initialize(self, cfg: None) -> None:
@@ -252,16 +245,6 @@ def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
     np.testing.assert_equal(prog.binprog, original.binprog)
 
 
-
-
-
-
-
-
-
-
-
-
 def _port_sources(snapshot: ir.CompiledStream) -> list[str]:
     scopes: list[str] = []
     sources: list[str] = []
@@ -275,8 +258,6 @@ def _port_sources(snapshot: ir.CompiledStream) -> list[str]:
             sources.append(scopes[-1])
     assert not scopes
     return sources
-
-
 
 
 def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():

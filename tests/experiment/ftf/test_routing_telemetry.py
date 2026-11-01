@@ -1,4 +1,3 @@
-from tests.program._timeline import compile_modules
 """One bounded, best-effort routing record per admitted FTF acquisition."""
 
 import json
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment._ftf_templates import settings
+from tests.program._timeline import compile_modules
 
 
 @pytest.mark.sim

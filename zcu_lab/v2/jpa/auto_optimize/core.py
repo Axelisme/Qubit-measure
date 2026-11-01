@@ -325,7 +325,7 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         )
 
         # 2. Use the previous SNR to choose and apply the next pump/bias setting.
-        with Schedule( signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for idx, step in sched.scan("Iteration", range(num_points)):
                 current_index = idx
                 last_snr = None

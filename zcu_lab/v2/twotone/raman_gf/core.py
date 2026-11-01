@@ -213,7 +213,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         counts = SignalBuffer((len(point_gains), 3), dtype=np.float64)
 
         # One carrier and one envelope, immediately followed by the same readout.
-        with Schedule( counts, scope=context.scope) as sched:
+        with Schedule(counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
                 builder = TimelineBuilder(
                     context.soccfg,

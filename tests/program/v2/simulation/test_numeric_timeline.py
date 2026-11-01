@@ -1,5 +1,3 @@
-from zcu_tools.program.v2 import TimelineBuilder
-from tests.program._timeline import compile_modules
 """Numeric timeline contracts independent of a physical solver."""
 
 import numpy as np
@@ -7,12 +5,14 @@ import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2.modules.delay import DelayAuto, SoftDelay
+from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2.modules.delay import DelayAuto
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import (
     envelope_times_us,
