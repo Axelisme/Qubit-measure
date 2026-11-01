@@ -125,7 +125,10 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
     drive = Pulse(
         "drive",
         Pulse.Cfg(
-            ch=1, nqz=1, freq=100.0, gain=0.2,
+            ch=1,
+            nqz=1,
+            freq=100.0,
+            gain=0.2,
             waveform=ConstWaveformCfg(length=0.2),
         ),
     )
@@ -143,9 +146,7 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
                 builder.emit(r2)
     prog = builder.build()
     prog.set_reads_per_shot(2)
-    process = v2.shot_sums(
-        prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")]
-    )
+    process = v2.shot_sums(prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")])
     iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (8, 2, 1, 1))
     result = process({0: iq})
     assert result.shape == (8, 3, 3, 3, 3)
@@ -154,7 +155,11 @@ def test_branch_cases_share_read_labels_with_zero_gain_first_read():
     np.testing.assert_array_equal(result[:, 0, 0, 2, 2], 98)
     np.testing.assert_array_equal(result[:, 1, 0, 2, 0], 28)
     starts = [
-        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
         for shot in shots(prog)
     ]
     assert all(len(times) == 2 for times in starts)
@@ -280,7 +285,8 @@ def test_repeated_or_unbalanced_triggers_on_selected_adc_are_rejected(
     label = "selected"
     message = (
         r"Branch cases choice\[1\].*(ADC 0.*emitted|label 'selected')"
-        if control == "Branch" else r"ADC 0.*Repeat"
+        if control == "Branch"
+        else r"ADC 0.*Repeat"
     )
     with pytest.raises(ValueError, match=message):
         v2.shot_sums(prog, [v2.IQ(label)])

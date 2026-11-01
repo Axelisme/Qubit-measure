@@ -80,9 +80,7 @@ def shot_sums(
     resolved = _resolve_path(prog, axes, reference, labels, counts, unsupported)
     for path in paths:
         other_labels, other_counts, other_unsupported = _collect_reads(prog, path)
-        _resolve_path(
-            prog, axes, path, other_labels, other_counts, other_unsupported
-        )
+        _resolve_path(prog, axes, path, other_labels, other_counts, other_unsupported)
         for axis in axes:
             _check_path_read(axis, labels, other_labels, reference, path)
     counts = {ch: counts[ch] for ch, _, _ in resolved}
@@ -190,7 +188,8 @@ def _check_path_read(
 
 
 def _collect_reads(
-    prog: TimelineProgramV2, path: ReadoutPath,
+    prog: TimelineProgramV2,
+    path: ReadoutPath,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
     """Resolve labels and ADC-local trigger indices along one feasible source path."""
     counts = dict.fromkeys(prog.ro_chs, 0)

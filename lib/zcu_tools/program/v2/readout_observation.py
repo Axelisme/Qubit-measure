@@ -130,16 +130,21 @@ def _source_paths(
                             continue
                         next_choices = (
                             (*selected, (source.by, index))
-                            if previous is None else selected
+                            if previous is None
+                            else selected
                         )
                         expanded.extend(
                             (cases, prefix + body)
-                            for cases, body in _source_paths(case, next_choices, scopes[-1])
+                            for cases, body in _source_paths(
+                                case, next_choices, scopes[-1]
+                            )
                         )
                 else:
                     expanded.extend(
                         (cases, prefix + body)
-                        for cases, body in _source_paths(source.macros, selected, scopes[-1])
+                        for cases, body in _source_paths(
+                            source.macros, selected, scopes[-1]
+                        )
                     )
             paths = expanded
         else:

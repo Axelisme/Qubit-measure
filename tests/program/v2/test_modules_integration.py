@@ -12,7 +12,12 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
-from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, TimelineProgramV2, sweep2param
+from zcu_tools.program.v2 import (
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    sweep2param,
+)
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -235,8 +240,7 @@ class TestReadoutIntegration:
     def test_same_named_readouts_keep_program_owned_templates(self, runtime):
         cfg = _readout_cfg()
         options = (
-            {"gain_val": "gain_word", "ro_freq_val": "ro_freq_word"}
-            if runtime else {}
+            {"gain_val": "gain_word", "ro_freq_val": "ro_freq_word"} if runtime else {}
         )
         first = PulseReadout("r1", cfg, **options)
         second = PulseReadout("r1", cfg, gain=0.0, **options)
