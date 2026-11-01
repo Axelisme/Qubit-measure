@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
@@ -39,7 +40,7 @@ class GE_Result:
     prepared_states: NDArray[np.int64]
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class GEAnalyzeOptions:
     initial_state: Literal["ground", "excited"] = "ground"
     backend: Literal["pca", "center"] = "pca"
@@ -100,7 +101,7 @@ class GEAnalysis:
             )
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class GEPostAnalyzeOptions:
     radius: float | None = None
     consider_other: bool = False

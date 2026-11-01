@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Literal
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.singleshot_rabi import (
     RabiJointFitResult,
     fit_rabi_joint,
@@ -61,7 +62,7 @@ class LenRabiCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class LenRabiAnalyzeOptions:
     decay: bool = True
     fit_phase: bool = False

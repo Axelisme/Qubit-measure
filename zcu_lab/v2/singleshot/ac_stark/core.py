@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
@@ -89,7 +90,7 @@ class AcStarkCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class AcStarkAnalyzeOptions:
     chi: float
     kappa: float
@@ -102,7 +103,7 @@ class AcStarkAnalysis:
     ac_stark_coeff: float
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class AcStarkPlotOptions:
     ac_coeff: float
     confusion_matrix: NDArray[np.float64] | None = None

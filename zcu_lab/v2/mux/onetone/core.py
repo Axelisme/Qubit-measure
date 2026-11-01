@@ -11,6 +11,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pydantic import StrictInt, ValidationInfo, field_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -32,7 +33,7 @@ from zcu_lab.v2.support.resonator import (
 )
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxOnetoneAnalyzeOptions:
     """Fit controls shared by every active spectrum.
 

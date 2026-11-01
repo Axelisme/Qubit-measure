@@ -5,6 +5,8 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
@@ -85,9 +87,9 @@ class T1Cfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class T1AnalyzeOptions:
-    skip: int = 0
+    skip: int = Field(default=0, ge=0)
 
 
 class T1Exp(Experiment[T1Result, T1Cfg]):

@@ -11,6 +11,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.patches import Polygon
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.experiment import RunRecord
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from .core import MuxGECfg, MuxGEResult
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxGEAnalyzeOptions:
     """Existing GE fit options, common default plus original-index overrides.
 
@@ -49,7 +50,7 @@ class MuxGEAnalyzeOptions:
     overrides: Mapping[int, GEAnalyzeOptions] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class MuxGEPostOptions:
     """Existing GE radius policy, common default plus original-index overrides.
 
