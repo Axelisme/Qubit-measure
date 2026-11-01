@@ -116,6 +116,14 @@ def test_invalid_mux_routes_report_path(profile, channels):
 
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
+@pytest.mark.parametrize("channels", [1, 63])
+def test_pfb_channelization_requires_an_integer_clock_divider(profile, channels):
+    profile["mux"][0]["readout"]["pfb_nch"] = channels
+    with pytest.raises(ValueError, match=r"mux\.0\.readout\.pfb_nch"):
+        program.build_soccfg(profile)
+
+
+@pytest.mark.parametrize("profile", ["mux"], indirect=True)
 def test_mux_generator_outside_profile_reports_path(profile):
     profile["mux"][0]["gen_ch"] = 2
     with pytest.raises(ValueError, match=r"mux\.0\.gen_ch"):
@@ -164,5 +172,5 @@ def test_yaml_profile_compiles_real_qick_pulse_and_readout(profile):
     compiled = ReadoutProgram(
         program.build_soccfg(profile), reps=1, initial_delay=0, relax_delay=0
     )
-    assert compiled.binprog["pmem"].size > 0
+    assert len(compiled.binprog["pmem"]) > 0
     assert compiled.ro_chs[ro_ch]["length"] > 0
