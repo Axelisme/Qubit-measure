@@ -118,9 +118,7 @@ def _coordinates(xs: NDArray[np.float64]) -> NDArray[np.float64]:
     return xs
 
 
-def _noise(
-    shape: tuple[int, ...], noise_std: float, seed: int
-) -> NDArray[np.float64]:
+def _noise(shape: tuple[int, ...], noise_std: float, seed: int) -> NDArray[np.float64]:
     if not np.isfinite(noise_std) or noise_std < 0:
         raise ValueError("noise_std must be finite and nonnegative")
     return np.random.default_rng(seed).normal(0, noise_std, shape)
@@ -222,16 +220,27 @@ def generate_resonator(
         raise ValueError("frequency and loaded_quality must be positive")
     if truth.coupling_quality is None:
         signals = TransmissionModel.calc_signals(
-            freqs, truth.frequency, truth.loaded_quality, truth.amplitude,
-            truth.electrical_delay, truth.amplitude_slope, truth.phase_curvature
+            freqs,
+            truth.frequency,
+            truth.loaded_quality,
+            truth.amplitude,
+            truth.electrical_delay,
+            truth.amplitude_slope,
+            truth.phase_curvature,
         )
     else:
         if truth.coupling_quality <= 0:
             raise ValueError("coupling_quality must be positive or None")
         signals = HangerModel.calc_signals(
-            freqs, truth.frequency, truth.loaded_quality, truth.coupling_quality,
-            truth.asymmetry_phase, truth.amplitude, truth.electrical_delay,
-            truth.amplitude_slope, truth.phase_curvature
+            freqs,
+            truth.frequency,
+            truth.loaded_quality,
+            truth.coupling_quality,
+            truth.asymmetry_phase,
+            truth.amplitude,
+            truth.electrical_delay,
+            truth.amplitude_slope,
+            truth.phase_curvature,
         )
     noise = _noise((2, freqs.size), noise_std, seed)
     return signals + noise[0] + 1j * noise[1]
@@ -268,9 +277,9 @@ def generate_anticrossing(
     _coordinates(xs)
     if truth.c == 0:
         raise ValueError("conic c must be nonzero")
-    branches = np.stack(get_predict_ys(
-        xs, truth.a, truth.b, truth.c, truth.d, truth.e, truth.f
-    ))
+    branches = np.stack(
+        get_predict_ys(xs, truth.a, truth.b, truth.c, truth.d, truth.e, truth.f)
+    )
     if not np.all(np.isfinite(branches)):
         raise ValueError("conic must have finite real branches on xs")
     return branches + _noise(branches.shape, noise_std, seed)
@@ -293,8 +302,11 @@ def generate_multi_decay(
     rates = truth.rates.as_array()
     if np.any(times < 0) or not np.all(np.isfinite(rates)) or np.any(rates < 0):
         raise ValueError("times and rates must be finite and nonnegative")
-    if not (0 <= truth.initial_g <= 1 and 0 <= truth.initial_e <= 1
-            and truth.initial_g + truth.initial_e <= 1):
+    if not (
+        0 <= truth.initial_g <= 1
+        and 0 <= truth.initial_e <= 1
+        and truth.initial_g + truth.initial_e <= 1
+    ):
         raise ValueError("initial populations must lie in the probability simplex")
     populations = model_func(
         times, *truth.rates.as_tuple(), truth.initial_g, truth.initial_e

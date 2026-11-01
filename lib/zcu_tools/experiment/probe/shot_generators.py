@@ -32,7 +32,9 @@ class GaussianCloudParameters:
 
 def _iq_axis(axis: NDArray[np.float64]) -> None:
     if (
-        axis.ndim != 1 or axis.size < 3 or not np.all(np.isfinite(axis))
+        axis.ndim != 1
+        or axis.size < 3
+        or not np.all(np.isfinite(axis))
         or np.any(np.diff(axis) <= 0)
     ):
         raise ValueError("IQ axis must have at least three finite increasing points")
