@@ -429,7 +429,7 @@ def test_case_rejects_reference_owner_advances_through_repeat(operation, nested)
             cases.case(0),
             prog.repeat("r", 2) if nested else nullcontext(),
         ):
-            prog.timeline_inc(28 / TPROC_MHZ)
+            prog.timeline_inc(PULSE_END / TPROC_MHZ)
             if operation == "delay":
                 prog.delay(PULSE_END / TPROC_MHZ)
             else:
@@ -481,18 +481,18 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
             ):
                 prog.pulse(0, "p0")
             with cases.case(1):
-                prog.timeline_inc(28 / TPROC_MHZ)
+                prog.timeline_inc(PULSE_END / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize, reps=2))
     n = 2 if count == 2 else 3
     duration = PULSE_END * outer * n
     case0 = [14 + PULSE_END * i for i in range(outer * n)] + [14 + duration]
-    case1 = [14 + (duration if align else 28)]
+    case1 = [14 + (duration if align else PULSE_END)]
     assert [_waves(s) for s in shots] == [case0, case1] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
         14 + PULSE_END + duration,
-        14 + PULSE_END + (duration if align else 28),
+        14 + PULSE_END + (duration if align else PULSE_END),
     ] * 2
 
 
@@ -509,7 +509,7 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
                 prog.pulse(0, "p0", timeline="local")
             else:
                 # Raw native timing can leave a tail beyond the managed end.
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+                prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
         _program(body)
@@ -1076,7 +1076,7 @@ def test_register_repeat_external_source_allows_placement_after_deriving_point(
     assert _waves(shot) == ([100] if operation == "pulse" else [])
     expected_end = {
         "pulse": 100 + PULSE_END,
-        "trigger": 100 + int(PROFILE.us2cycles(0.02)),
+        "trigger": 110,
         "emit": 100 + tproc_ceil(PROFILE, 0.01),
         "delay": 100,
     }[operation]
@@ -1472,10 +1472,10 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
         with prog.repeat("r", count, range_hint=hint):
             if native_prefix:
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(28 / TPROC_MHZ)
+                prog.timeline_inc(PULSE_END / TPROC_MHZ)
             prog.pulse(0, "p0", timeline="default")
             prog.append_macro(
-                Pulse(ch=0, name="p0", t=(56 if native_prefix else 28) / TPROC_MHZ)
+                Pulse(ch=0, name="p0", t=(2 * PULSE_END if native_prefix else PULSE_END) / TPROC_MHZ)
             )
             prog.delay_by_timeline()
 
@@ -1491,7 +1491,7 @@ def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, i
             prog.delay_by_timeline()
             with prog.repeat("inner", inner):
                 prog.pulse(0, "p0", timeline="default")
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+                prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
@@ -1508,12 +1508,12 @@ def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, h
         prog.delay_by_timeline()
         with prog.repeat("r", count, range_hint=hint):
             prog.pulse(0, "p0", timeline="default")
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+            prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    assert _waves(shot) == ([] if count == 0 else [0, 28])
-    assert (shot.body_end_cycle, shot.end_cycle) == ((0, 0) if count == 0 else (28, 56))
+    assert _waves(shot) == ([] if count == 0 else [0, PULSE_END])
+    assert (shot.body_end_cycle, shot.end_cycle) == ((0, 0) if count == 0 else (PULSE_END, 2 * PULSE_END))
 
 
 @pytest.mark.parametrize("register", [False, True])
@@ -1527,13 +1527,13 @@ def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
             "r", "count" if register else 2, range_hint=(0, 2) if register else None
         ):
             prog.pulse(0, "p0", timeline="default")
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
-            prog.timeline_inc(28 / TPROC_MHZ)
+            prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
+            prog.timeline_inc(PULSE_END / TPROC_MHZ)
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
     assert _waves(shot) == [i * PULSE_END for i in range(4)]
-    assert (shot.body_end_cycle, shot.end_cycle) == (112, 112)
+    assert (shot.body_end_cycle, shot.end_cycle) == (4 * PULSE_END,) * 2
 
 
 @pytest.mark.parametrize("actual", [0, 1, 2, 3, 4])
@@ -1547,15 +1547,15 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
             prog.delay_by_timeline()
             with prog.repeat("inner", "count", range_hint=(0, 4)):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(28 / TPROC_MHZ)
+                prog.timeline_inc(PULSE_END / TPROC_MHZ)
                 prog.pulse(0, "p0", timeline="default")
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    expected = [t for i in range(2 * actual) for t in (56 * i, 56 * i + 28)]
+    expected = [t for i in range(2 * actual) for t in (2 * PULSE_END * i, (2 * i + 1) * PULSE_END)]
     assert _waves(shot) == expected
-    assert (shot.body_end_cycle, shot.end_cycle) == (112 * actual,) * 2
+    assert (shot.body_end_cycle, shot.end_cycle) == (4 * PULSE_END * actual,) * 2
 
 
 @pytest.mark.parametrize("register", [False, True])
@@ -1575,17 +1575,17 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
                 range_hint=(1, 3) if register else None,
             ):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(QickSweep1D("scan", 28 / TPROC_MHZ, 38 / TPROC_MHZ))
+                prog.timeline_inc(QickSweep1D("scan", PULSE_END / TPROC_MHZ, (PULSE_END + 10) / TPROC_MHZ))
                 prog.pulse(0, "p0", timeline="default")
                 prog.append_macro(
                     Pulse(
                         ch=0,
                         name="p0",
-                        t=QickSweep1D("scan", 56 / TPROC_MHZ, 66 / TPROC_MHZ),
+                        t=QickSweep1D("scan", 2 * PULSE_END / TPROC_MHZ, (2 * PULSE_END + 10) / TPROC_MHZ),
                     )
                 )
                 if safe:
-                    prog.timeline_inc(28 / TPROC_MHZ)
+                    prog.timeline_inc(PULSE_END / TPROC_MHZ)
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
@@ -1594,13 +1594,11 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
             _program(body, initialize)
         return
     shots = _shots(_program(body, initialize))
-    assert [_waves(s) for s in shots] == [
-        [0, 28, 56, 84, 112, 140, 168, 196, 224, 252, 280, 308],
-        [0, 33, 61, 89, 122, 150, 178, 211, 239, 267, 300, 328],
-        [0, 38, 66, 94, 132, 160, 188, 226, 254, 282, 320, 348],
-    ]
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
-    assert [s.end_cycle - s.start_cycle for s in shots] == [336, 356, 376]
+    expected = [[i * (3 * PULSE_END + offset) + delta for i in range(4) for delta in (0, PULSE_END + offset, 2 * PULSE_END + offset)] for offset in (0, 5, 10)]
+    ends = [4 * (3 * PULSE_END + offset) for offset in (0, 5, 10)]
+    assert [_waves(s) for s in shots] == expected
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == ends
+    assert [s.end_cycle - s.start_cycle for s in shots] == ends
 
 
 @pytest.mark.parametrize("register", [False, True])
@@ -1628,13 +1626,11 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
 
     shots = _shots(_program(body, initialize))
     # Inner iterations advance20/30/40; managed start is ref +30, length28.
-    assert [_waves(s) for s in shots] == [
-        [0, 20, 70, 98, 118, 168],
-        [0, 30, 90, 118, 148, 208],
-        [0, 40, 110, 138, 178, 248],
-    ]
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
-    assert [s.end_cycle - s.start_cycle for s in shots] == [196, 236, 276]
+    expected = [[outer * (2 * advance + 30 + PULSE_END) + offset for outer in range(2) for offset in (0, advance, 2 * advance + 30)] for advance in (20, 30, 40)]
+    ends = [2 * (2 * advance + 30 + PULSE_END) for advance in (20, 30, 40)]
+    assert [_waves(s) for s in shots] == expected
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == ends
+    assert [s.end_cycle - s.start_cycle for s in shots] == ends
 
 
 @pytest.mark.parametrize("native", ["macro", "runtime-words", "auto"])
@@ -1644,10 +1640,10 @@ def test_repeat_guard_observes_native_pulse_entrypoints(native):
         with prog.repeat("r", 2):
             prog.pulse(0, "p0", timeline="default")
             if native == "macro":
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+                prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
             elif native == "runtime-words":
                 prog.append_macro(
-                    PulseFromRegs(ch=0, name="p0", gain_reg="count", t=28 / TPROC_MHZ)
+                    PulseFromRegs(ch=0, name="p0", gain_reg="count", t=PULSE_END / TPROC_MHZ)
                 )
             else:
                 prog.append_macro(Pulse(ch=0, name="p0", t="auto"))
@@ -1680,7 +1676,7 @@ def test_repeat_guard_protects_module_emission_after_native_tail():
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
             prog.emit(pulse)
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+            prog.append_macro(Pulse(ch=0, name="p0", t=PULSE_END / TPROC_MHZ))
             prog.delay_by_timeline()
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):

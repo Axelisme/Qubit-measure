@@ -210,9 +210,7 @@ def test_sync_rebases_unjoined_runtime_end_after_crossing_join():
     result = shots(rebased_runtime_end_program())
     assert [waves(shot) for shot in result] == [[200], [100], [220]]
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        228,
-        128,
-        248,
+        t + PULSE_END for t in (200, 100, 220)
     ]
 
 

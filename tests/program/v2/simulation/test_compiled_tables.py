@@ -19,6 +19,10 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._timing_expectations import generator_duration, runtime_cycles, tproc_ceil
+from math import ceil
+from fractions import Fraction
+
 from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -86,13 +90,13 @@ def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
     assert [event.gen_ch for event in point.events] == [1, 1, 0]
     first, second, _ = point.events
     for event in (first, second):
-        assert time_us(observed.time_base, event.duration_ticks) == 38 / GEN_MHZ
+        assert time_us(observed.time_base, event.duration_ticks) == float(generator_duration(prog.soccfg, 0.1, 1))
         assert event.frequency_mhz == pytest.approx(80, abs=1e-5)
         assert event.gain == pytest.approx(0.2, abs=1e-4)
     assert [
         time_us(observed.time_base, first.start_ticks),
         time_us(observed.time_base, second.start_ticks),
-    ] == [0, 43 / TPROC_MHZ]
+    ] == [0, tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.1, 1)) / TPROC_MHZ]
     assert len(times_us(observed.time_base, point.readouts[0].trigger_ticks)) == 1
 
 
@@ -114,7 +118,7 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
         event = result.materialize_point(index).events[0]
         assert event.gain == pytest.approx(-0.4 if index % 2 == 0 else 0.2, abs=1e-4)
         assert time_us(result.time_base, event.duration_ticks) == pytest.approx(
-            (115 if index % 2 == 0 else 38) / GEN_MHZ
+            float(generator_duration(prog.soccfg, 0.3 if index % 2 == 0 else 0.1, 1))
         )
 
 
@@ -124,12 +128,12 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length()
         [table, receiver().build("readout")], sweep=(("scan", 2),)
     )
     result = request(prog, env)
-    ends = [43, 129]
-    for index, (duration, end) in enumerate(zip([38, 115], ends, strict=True)):
+    ends = [ceil(runtime_cycles(prog.soccfg, int(prog.us2cycles(length, gen_ch=1)), 1)) for length in (0.1, 0.3)]
+    for index, (length, end) in enumerate(zip((0.1, 0.3), ends, strict=True)):
         events = result.materialize_point(index).events
         assert events[0].source == "length"
         assert time_us(result.time_base, events[0].duration_ticks) == pytest.approx(
-            duration / GEN_MHZ
+            float(generator_duration(prog.soccfg, length, 1))
         )
         assert time_us(result.time_base, events[1].start_ticks) == pytest.approx(
             end / TPROC_MHZ
@@ -236,22 +240,27 @@ def test_branch_dispatch_and_repeat_preserve_selected_sources():
 
 @pytest.mark.parametrize("kind", ["single", "parallel", "bath"])
 def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
+    profile = load_soccfg(n_gens=3)
+    cavity_end = tproc_ceil(profile, generator_duration(profile, 0.1, 1) + Fraction("0.02"))
+    qubit_end = tproc_ceil(profile, generator_duration(profile, 0.3, 2))
+    pi2_end = tproc_ceil(profile, generator_duration(profile, 0.05, 1))
     cavity = drive(0.1, ch=1, post=0.02)
     qubit = drive(0.3, ch=2)
     if kind == "single":
         reset = PulseResetCfg(pulse_cfg=cavity).build("reset")
         expected = [(1, 0)]
-        readout_start = 52
+        readout_start = cavity_end
     elif kind == "parallel":
         reset = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit).build("reset")
         expected = [(1, 0), (2, 0)]
-        readout_start = 129
+        readout_start = max(cavity_end, qubit_end)
     else:
         reset = BathResetCfg(
             cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive(0.05, ch=1)
         ).build("reset")
-        expected = [(1, 0), (2, 0), (1, 52)]
-        readout_start = 129
+        expected = [(1, 0), (2, 0), (1, cavity_end)]
+        readout_start = max(qubit_end, cavity_end + pi2_end)
+        readout_start = max(cavity_end, qubit_end)
     prog, env = module_program([reset, receiver().build("readout")])
     observed = request(prog, env)
     events = observed.materialize_point(0).events
@@ -294,13 +303,16 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
 
     prog, env = module_program([short, long, readout], sweep=(("scan", 3),), body=body)
     result = request(prog, env)
+    short_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 25 / GEN_MHZ, 1))
+    long_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 50 / GEN_MHZ, 2))
+    branch_end = short_end + long_end
     assert result.point_names == ("scan",)
     for index, (sources, times) in enumerate(
         [
-            (["short", "long", "short", "long", "readout"], [0, 28, 84, 112, 168]),
+            (["short", "long", "short", "long", "readout"], [0, short_end, branch_end, branch_end + short_end, 2 * branch_end]),
             # Both emissions account max(84,0,28)=84, including nested Branch.
-            (["readout"], [168]),
-            (["short", "short", "readout"], [0, 84, 168]),
+            (["readout"], [2 * branch_end]),
+            (["short", "short", "readout"], [0, branch_end, 2 * branch_end]),
         ]
     ):
         point = result.materialize_point(index)
@@ -345,6 +357,9 @@ def test_program_join_only_merges_runtime_ends():
         data_registers=32,
     )
     result = request(prog, env)
+    left_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 38 / GEN_MHZ, 1))
+    right_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 77 / GEN_MHZ, 2))
+    joined = max(2 * left_end, right_end)
     for index, start in enumerate([7, 20, 10]):
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == ["left", "left", "right"] * 2 + [
@@ -353,11 +368,11 @@ def test_program_join_only_merges_runtime_ends():
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
         ] == pytest.approx(
-            [(start + t) / TPROC_MHZ for t in [0, 43, 0, 87, 130, 87, 174]]
+            [(start + t) / TPROC_MHZ for t in [0, left_end, 0, joined, joined + left_end, joined, 2 * joined]]
         )
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
-        ) == pytest.approx(((start + 174) / TPROC_MHZ,))
+        ) == pytest.approx(((start + 2 * joined) / TPROC_MHZ,))
 
 
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
@@ -394,7 +409,8 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         data_registers=32,
     )
     result = request(prog, env)
-    for index, (origin_cycle, maximum) in enumerate([(7, 84), (20, 56), (10, 84)]):
+    maxima = [max(ceil(runtime_cycles(prog.soccfg, left_n, 1)), ceil(runtime_cycles(prog.soccfg, right_n, 2))) for left_n, right_n in ((25, 75), (50, 50), (75, 25))]
+    for index, (origin_cycle, maximum) in enumerate(zip((7, 20, 10), maxima, strict=True)):
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == ["left", "right"] * 2 + ["readout"]
         assert [

@@ -784,7 +784,7 @@ def test_ordinary_adc_triggers_are_distinct_output_effects():
     reads = result.materialize_point(0).readouts
     assert times_us(result.time_base, reads[0].trigger_ticks) == (0,)
     assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx(
-        (43 / TPROC_MHZ,)
+        (prog.cycles2us(prog.us2cycles(0.1)),)
     )
 
 

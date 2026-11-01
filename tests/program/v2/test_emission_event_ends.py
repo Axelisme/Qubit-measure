@@ -166,7 +166,7 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
     )
     adc_cycles = readout_duration(prog.soccfg, 13 / RO_MHZ) * Fraction(str(TPROC_MHZ))
     adc_shell = ceil(adc_cycles) if origin else round(adc_cycles)
-    width = int(prog.us2cycles(0.02))
+    width = 10  # Native Trigger default width is expressed in tProc cycles.
     assert [
         [
             (event.cycle - shot.start_cycle, event.value)
@@ -294,7 +294,7 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
                 if event.kind == "data"
             ]
             for shot in result
-        ] == [[(40 + PRE, 1), (40 + PRE + int(PROFILE.us2cycles(0.02)), 0)]] * (
+        ] == [[(40 + PRE, 1), (40 + PRE + 10, 0)]] * (
             2 * len(ends)
         )
 
@@ -701,7 +701,7 @@ def test_readout_post_follows_generator_without_waiting_for_adc(length, swept_po
             if event.kind == "data"
         ]
         for shot in result
-    ] == [[(PRE, 1), (PRE + int(PROFILE.us2cycles(0.02)), 0)]] * (2 * len(ends))
+    ] == [[(PRE, 1), (PRE + 10, 0)]] * (2 * len(ends))
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         point_end + TAIL for point_end in ends
     ] * 2
