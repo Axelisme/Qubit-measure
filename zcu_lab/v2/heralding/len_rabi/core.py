@@ -1,5 +1,6 @@
 """Single-qubit length Rabi with ground-herald post-selection."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
@@ -7,6 +8,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -15,6 +17,7 @@ from zcu_tools.experiment import (
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
+    config,
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -35,15 +38,10 @@ from zcu_tools.program.v2 import (
     split_sums,
 )
 from zcu_tools.program.v2.modules import PulseReadout
+from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.twotone.rabi.len_rabi.core import (
-    LenRabiAnalysis,
-    LenRabiAnalyzeOptions,
-    LenRabiExp,
-    LenRabiResult,
-    rabi_signal2real,
-)
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 
 @dataclass(frozen=True)
@@ -56,6 +54,30 @@ class HeraldingLenRabiResult:
 
     lengths: NDArray[np.float64]
     sums: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class HeraldingLenRabiAnalysis:
+    """Herald-g duration calibration, not gate fidelity.
+
+    Attributes:
+        pi_len: Fitted pi-pulse duration in us; never None.
+        pi_len_err: Pi-duration standard uncertainty in us; never None.
+        pi2_len: Fitted pi/2-pulse duration in us; never None.
+        pi2_len_err: Pi/2-duration standard uncertainty in us; never None.
+        rabi_f: Fitted Rabi oscillation frequency in MHz; never None.
+        rabi_f_err: Frequency standard uncertainty in MHz; never None.
+        fit_quality: Dimensionless diagnostics keyed by "fit"; None when not
+            supplied. analyze always supplies the fit diagnostics.
+    """
+
+    pi_len: float
+    pi_len_err: float
+    pi2_len: float
+    pi2_len_err: float
+    rabi_f: float
+    rabi_f_err: float
+    fit_quality: Mapping[str, FitQuality] | None = None
 
 
 class HeraldingLenRabiCfg(ConfigBase):
@@ -187,7 +209,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(lengths, rabi_signal2real(split_sums(data)[1][..., 0]))
+            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
 
         fig.show()
         buffer = SignalBuffer(
@@ -198,7 +220,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         check_snr = snr_checker(
             buffer.at(),
             cfg.earlystop_snr,
-            lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
+            lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
         )
 
         with Schedule(buffer, scope=context.scope) as sched:
@@ -239,7 +261,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(lengths, rabi_signal2real(split_sums(data)[1][..., 0]))
+            return viewer.set(lengths, rotate2real(split_sums(data)[1][..., 0]).real)
 
         fig.show()
         buffer = SignalBuffer(
@@ -250,7 +272,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         check_snr = snr_checker(
             buffer.at(),
             cfg.earlystop_snr,
-            lambda data: rabi_signal2real(split_sums(data)[1][..., 0]),
+            lambda data: rotate2real(split_sums(data)[1][..., 0]).real,
         )
 
         acquisition_buffer = SignalBuffer(
@@ -302,21 +324,93 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
         options: LenRabiAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> LenRabiAnalysis:
-        """Fit finite selected IQ through the ordinary length-Rabi analysis owner.
+    ) -> HeraldingLenRabiAnalysis:
+        """Fit herald-g IQ and return pi/pi2 lengths (us), frequency and errors.
 
-        Remove nonfinite lengths and complex IQ before PCA projection. Pass
-        fraction is diagnostic, not an additional fit weight. decay and fit_phase
-        retain the ordinary fit semantics; insufficient data fails in that owner.
+        Discard nonfinite lengths and complex IQ, then rotate onto a real
+        contrast axis. options.decay enables the envelope; options.fit_phase
+        frees the otherwise fixed zero phase. Compute fit quality and publish
+        fit with pi/pi2 markers, uncertainty spans and frequency in MHz.
+        Pass fraction is diagnostic, not a fit weight. Saved cfg is not
+        required. All-NaN data raise ValueError("All data are NaN!"); other
+        invalid traces propagate the fit tool's errors.
         """
         result = source.result
         signals = split_sums(result.sums)[1][..., 0]
         finite = np.isfinite(result.lengths) & np.isfinite(signals)
-        return LenRabiExp().analyze(
-            RunRecord(
-                cfg=None,
-                result=LenRabiResult(result.lengths[finite], signals[finite]),
-            ),
-            options,
-            plots=plots,
+        lens, signals = result.lengths[finite], signals[finite]
+        real_signals = rotate2real(signals).real
+
+        nan_mask = np.isnan(real_signals)
+        if np.all(nan_mask):
+            raise ValueError("All data are NaN!")
+        lens = lens[~nan_mask]
+        real_signals = real_signals[~nan_mask]
+
+        fit = fit_rabi(
+            lens,
+            real_signals,
+            decay=options.decay,
+            init_phase=None if options.fit_phase else 0.0,
+        )
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = (
+            fit.pi_x,
+            fit.pi_x_err,
+            fit.pi2_x,
+            fit.pi2_x_err,
+            fit.freq,
+            fit.freq_err,
+            fit.curve,
+            fit.params,
+            fit.cov,
+        )
+
+        names = ("y0", "yscale", "freq", "phase") + (
+            ("decay_time",) if options.decay else ()
+        )
+        quality = compute_fit_quality(
+            real_signals,
+            y_fit,
+            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
+            pCov,
+        )
+
+        # 3. Show the oscillation and the fitted calibration lengths.
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
+
+        ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(lens, y_fit, label="fit")
+        ax.axvline(
+            pi_len,
+            ls="--",
+            c="red",
+            label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} μs",
+        )
+        ax.axvspan(pi_len - pi_len_err, pi_len + pi_len_err, color="red", alpha=0.2)
+        ax.axvline(
+            pi2_len,
+            ls="--",
+            c="red",
+            label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
+        )
+        ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
+        ax.set_xlabel("Pulse length (μs)")
+        ax.set_ylabel("Signal Real (a.u.)")
+        ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
+        ax.legend(loc=4)
+        ax.grid(True)
+
+        fig.tight_layout()
+
+        # fit_rabi computes the per-quantity fit uncertainties; surface them so the
+        # GUI summary carries pi_len_err / pi2_len_err / rabi_f_err (the figure
+        # labels already show pi/pi2 errors and the title shows the freq error).
+        return HeraldingLenRabiAnalysis(
+            pi_len,
+            pi_len_err,
+            pi2_len,
+            pi2_len_err,
+            freq,
+            freq_err,
+            fit_quality={"fit": quality},
         )

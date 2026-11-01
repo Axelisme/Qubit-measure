@@ -27,7 +27,12 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import (
 )
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI
 
-from .core import HeraldingLenRabiCfg, HeraldingLenRabiExp, HeraldingLenRabiResult
+from .core import (
+    HeraldingLenRabiAnalysis,
+    HeraldingLenRabiCfg,
+    HeraldingLenRabiExp,
+    HeraldingLenRabiResult,
+)
 from .form import make_form
 
 LenRabiRunResult: TypeAlias = RunRecord[HeraldingLenRabiCfg, HeraldingLenRabiResult]
@@ -35,8 +40,8 @@ LenRabiRunResult: TypeAlias = RunRecord[HeraldingLenRabiCfg, HeraldingLenRabiRes
 
 def analyze(
     req: AnalyzeRequest[LenRabiRunResult, LenRabiAnalyzeOptions], *, plots: Plots
-) -> LenRabiAnalysis:
-    """Fit finite selected IQ through the existing length-Rabi owner."""
+) -> HeraldingLenRabiAnalysis:
+    """Fit finite herald-g IQ and publish this experiment's calibration plot."""
     return HeraldingLenRabiExp().analyze(
         req.run_result,
         req.analyze_params,
@@ -45,7 +50,7 @@ def analyze(
 
 
 def writeback(
-    req: WritebackRequest[LenRabiRunResult, LenRabiAnalysis],
+    req: WritebackRequest[LenRabiRunResult, HeraldingLenRabiAnalysis],
 ) -> Sequence[WritebackItem]:
     """Reuse ordinary writeback rules and captured Run facts, labeled Heralded.
 
@@ -65,8 +70,18 @@ def writeback(
         ),
         metadata=source.metadata,
     )
+    analysis = req.analyze_result
+    ordinary_analysis = LenRabiAnalysis(
+        pi_len=analysis.pi_len,
+        pi_len_err=analysis.pi_len_err,
+        pi2_len=analysis.pi2_len,
+        pi2_len_err=analysis.pi2_len_err,
+        rabi_f=analysis.rabi_f,
+        rabi_f_err=analysis.rabi_f_err,
+        fit_quality=analysis.fit_quality,
+    )
     items = LEN_RABI.get_writeback_items(
-        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+        WritebackRequest(ordinary, ordinary_analysis, req.ctx)
     )
     return [replace(item, description=f"Heralded {item.description}") for item in items]
 
