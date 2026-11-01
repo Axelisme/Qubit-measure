@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QDialogButtonBox, QFileDialog, QPushButton
 from zcu_tools.gui.app.analysis_project.native_dialog import NativeDeviceChoices
@@ -68,18 +69,52 @@ def test_result_request_after_file_chosen(qapp, onetone_hdf5, monkeypatch):
     assert dialog.result_request() == LoadOnetoneRequest(path, False)
 
 
-def test_transpose_toggle_flips_request(qapp, onetone_hdf5, monkeypatch):
+@pytest.mark.parametrize("final_transposed", [False, True])
+def test_transpose_toggle_flips_request(
+    qapp, onetone_hdf5, tmp_path, final_transposed: bool
+):
     path, *_ = onetone_hdf5
-    monkeypatch.setattr(
-        QFileDialog, "getOpenFileName", lambda *args, **kwargs: (path, "")
-    )
     dialog = LoadOnetoneDialog(start_dir="")
-    _button(dialog, "Browse…").click()
     dialog.show()
     qapp.processEvents()
     driver = ComponentDriver(dialog)
-    driver.choose_option("X=Flux, Y=Frequency", value="X=Frequency, Y=Flux")
-    assert dialog.result_request() == LoadOnetoneRequest(path, True)
+    try:
+        driver.resize_window(1100, 700)
+        driver.screenshot(tmp_path / "initial.png")
+        driver.enter_text(object_name="load.file", value=path, commit=False)
+        driver.screenshot(tmp_path / "entered-path.png")
+        driver.press_key(Qt.Key.Key_Tab)
+        driver.screenshot(tmp_path / "original.png")
+        original = driver.plots().axes[0]
+        assert (original.xlabel, original.ylabel) == ("Device value (flux)", "Frequency")
+        assert driver.observe("Axis: X=Flux, Y=Frequency").checked is False
+
+        driver.click("Axis: X=Flux, Y=Frequency")
+        driver.screenshot(tmp_path / "transposed.png")
+        assert driver.observe("Axis: X=Frequency, Y=Flux").checked is True
+        transposed = driver.plots().axes[0]
+        assert (transposed.xlabel, transposed.ylabel) == ("Frequency", "Device value (flux)")
+        assert transposed.xlim == pytest.approx(original.ylim)
+        assert transposed.ylim == pytest.approx(original.xlim)
+
+        driver.click("Axis: X=Frequency, Y=Flux")
+        driver.screenshot(tmp_path / "restored.png")
+        assert driver.observe("Axis: X=Flux, Y=Frequency").checked is False
+        restored = driver.plots().axes[0]
+        assert (restored.xlabel, restored.ylabel) == (original.xlabel, original.ylabel)
+        assert restored.xlim == pytest.approx(original.xlim)
+        assert restored.ylim == pytest.approx(original.ylim)
+        if final_transposed:
+            driver.click("Axis: X=Flux, Y=Frequency")
+            driver.screenshot(tmp_path / "final-transposed.png")
+        driver.click("OK")
+        driver.screenshot(tmp_path / "accepted.png")
+        assert not driver.visible().dialogs
+        assert dialog.result_request() == LoadOnetoneRequest(path, final_transposed)
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qapp.processEvents()
 
 
 def test_bad_preview_does_not_prevent_file_selection(qapp, tmp_path, monkeypatch):
