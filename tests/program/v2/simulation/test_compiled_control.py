@@ -153,9 +153,7 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
             e for e in result.materialize_point(index).events if e.source != "carrier"
         ]
         expected = (
-            [i * step for i in range(5)]
-            if index == 0
-            else [(4 if align else 1) * step]
+            [i * step for i in range(5)] if index == 0 else [(4 if align else 1) * step]
         )
         assert [
             time_us(result.time_base, e.start_ticks) for e in events

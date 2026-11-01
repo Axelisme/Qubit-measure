@@ -40,9 +40,7 @@ def test_native_arb_preserves_actual_compiled_dac_samples_and_scale():
     assert envelope_times_us(observed.time_base, event.envelope)[:2] == pytest.approx(
         (0, 1 / sample_mhz)
     )
-    assert event.envelope.values[0] == pytest.approx(
-        complex(-8191, 4096) / gen["maxv"]
-    )
+    assert event.envelope.values[0] == pytest.approx(complex(-8191, 4096) / gen["maxv"])
     assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(
         48 / sample_mhz
     )
@@ -157,7 +155,9 @@ def test_ordinary_outsel_preserves_command_occupancy_and_envelope(outsel):
     assert len(events) == (1 if outsel == "zero" else 2)
     gen = env.soccfg["gens"][0]
     duration = 48 / (gen["samps_per_clk"] * gen["f_fabric"])
-    assert time_us(observed.time_base, events[-1].start_ticks) == pytest.approx(duration)
+    assert time_us(observed.time_base, events[-1].start_ticks) == pytest.approx(
+        duration
+    )
     if outsel == "product":
         envelope = events[0].envelope
         assert envelope is not None
@@ -295,6 +295,4 @@ def test_wave_register_readback_and_wmem_field_widths_are_distinct():
     )
     assert [
         time_us(observed.time_base, e.duration_ticks) for e in events
-    ] == pytest.approx([
-        env.soccfg.cycles2us(length_word & 0xFFFF, gen_ch=0)
-    ] * 4)
+    ] == pytest.approx([env.soccfg.cycles2us(length_word & 0xFFFF, gen_ch=0)] * 4)
