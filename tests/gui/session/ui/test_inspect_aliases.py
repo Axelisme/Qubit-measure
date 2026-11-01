@@ -224,6 +224,7 @@ def test_alias_cell_completion_add_and_remove_write_through(
         Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
         / "aliases-cell-written.png"
     )
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
     assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
     ui.click(object_name="inspect.aliases.add")
     ui.screenshot(
@@ -249,6 +250,23 @@ def test_alias_cell_completion_add_and_remove_write_through(
         / "aliases-row-removed.png"
     )
     assert _fresh_rows(entry_session.entry) == (AliasRow("qubit", "Q2"),)
+
+
+def test_external_point_switch_clears_saved_hint(entry_session, tmp_path: Path) -> None:
+    """An external context actor changes point; only the rendered hint is read."""
+    entry_session.entry.new_point("second")
+    ui = ComponentDriver(_open(entry_session))
+    evidence = Path(os.environ.get("INSPECT_IMPLICIT_EVIDENCE", str(tmp_path)))
+    ui.select_tab("Aliases")
+    ui.screenshot(evidence / "saved-switch-01-aliases.png")
+    ui.edit_table_value("Q1", "Q2", object_name="inspect.aliases.table", column="Value")
+    ui.screenshot(evidence / "saved-switch-02-written.png")
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
+
+    # External actor at the public context seam, not a simulated UI operation.
+    entry_session.control.use_point(PointUseRequest("second"))
+    ui.screenshot(evidence / "saved-switch-03-cleared.png")
+    assert ui.observe(object_name="inspect.saved").text == ""
 
 
 def test_edit_without_entry_shows_actionable_error(

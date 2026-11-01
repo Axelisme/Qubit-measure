@@ -140,6 +140,8 @@ def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None
     ui.edit_tree_value(("Q1", "rate"), object_name="component_tree", value="1250")
     ui.screenshot(evidence / "02-parameters-saved.png")
     observer.screenshot(evidence / "03-parameters-observer.png")
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
+    assert observer.observe(object_name="inspect.saved").text.startswith("Saved")
     assert _parameter(observer) == "1250.0"
     ui.choose_option(
         object_name="inspect.parameters.destination", value="Active documents"
@@ -152,6 +154,8 @@ def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None
     ui.enter_text(object_name="form.input.length", value="0.35")
     ui.screenshot(evidence / "05-library-saved.png")
     observer.screenshot(evidence / "06-library-observer.png")
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
+    assert observer.observe(object_name="inspect.saved").text.startswith("Saved")
     assert observer.observe(object_name="form.input.length").text == "0.35"
     ui.click("New")
     ui.screenshot(evidence / "07-new-entry-capture.png")
@@ -170,6 +174,8 @@ def test_entry_destinations_commit_and_notify_clean_inspectors(entry_ui) -> None
     ui.edit_table_value("Q1", "Q2", object_name="inspect.aliases.table", column="Value")
     ui.screenshot(evidence / "09-aliases-saved.png")
     observer.screenshot(evidence / "10-aliases-observer.png")
+    assert ui.observe(object_name="inspect.saved").text.startswith("Saved")
+    assert observer.observe(object_name="inspect.saved").text.startswith("Saved")
     assert (
         observer.table_rows(object_name="inspect.aliases.table")[0].columns[1] == "Q2"
     )
