@@ -1,10 +1,12 @@
 """Build compile-only QICK configurations from independent board settings."""
 
 from collections.abc import Mapping
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from qick import QickConfig
+
+from .wave_ports import wave_port_conflicts
 
 _PositiveInt = Annotated[int, Field(gt=0)]
 _Count = Annotated[int, Field(ge=0)]
@@ -30,7 +32,6 @@ class _Tproc(_Settings):
 
 
 class _ClockGroup(_Settings):
-    count: _Count
     type: str
     fs_mult: _PositiveInt
     fs_div: _PositiveInt
@@ -43,6 +44,9 @@ class _ClockGroup(_Settings):
 
 
 class _Generator(_ClockGroup):
+    dac: Annotated[str, Field(pattern=r"^[0-9]{2}$")]
+    tproc_ch: _Count
+    tmux_ch: _Count | None
     interpolation: _PositiveInt
     fabric_div: _PositiveInt
     rf_fabric_div: _PositiveInt
@@ -56,6 +60,12 @@ class _Generator(_ClockGroup):
 
 
 class _Readout(_ClockGroup):
+    adc: Annotated[str, Field(pattern=r"^[0-9]{2}$")]
+    tproc_ctrl: _Count | None
+    tmux_ch: _Count | None
+    tproc_ch: Annotated[int, Field(ge=-1)]
+    b_phase: _PositiveInt | None
+    trigger_bit: _Count
     ro_type: str
     decimation: _PositiveInt
     buf_maxlen: _PositiveInt
@@ -66,7 +76,7 @@ class _Readout(_ClockGroup):
     has_weights: bool
     has_outsel: bool
     iq_offset: Annotated[float, Field(allow_inf_nan=False)]
-    trigger_type: str
+    trigger_type: Literal["dport", "tport"]
     trigger_port: _Count
     coupling: str
 
@@ -94,7 +104,6 @@ class _PFB(_Settings):
     pfb_ch_offset: _Count
     pfb_dds_on_output: bool
     has_outsel: bool
-    b_phase: _PositiveInt
 
 
 class _Mux(_Settings):
@@ -117,68 +126,86 @@ class _Profile(_Settings):
     mux: list[_Mux]
 
 
+def _validate_wave_ports(profile: _Profile) -> None:
+    users = [
+        (f"generators.{index}.tproc_ch", channel.tproc_ch, channel.tmux_ch)
+        for index, channel in enumerate(profile.generators)
+    ]
+    users.extend(
+        (f"readouts.{index}.tproc_ctrl", channel.tproc_ctrl, channel.tmux_ch)
+        for index, channel in enumerate(profile.readouts)
+        if channel.tproc_ctrl is not None
+    )
+    ports: dict[int, set[int | None]] = {}
+    for path, port, selector in users:
+        selectors = ports.setdefault(port, set())
+        if wave_port_conflicts(selector, selectors):
+            raise ValueError(
+                f"{path}: shared wave-output port requires distinct tmux_ch"
+            )
+        selectors.add(selector)
+
+
 def _generators(
     profile: _Profile,
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
     gens: list[dict[str, object]] = []
     dacs: dict[str, dict[str, object]] = {}
-    for group in profile.generators:
-        fs = group.sample_rate(profile.refclk_freq)
-        for _ in range(group.count):
-            ch = len(gens)
-            dac = f"{ch:02d}"
-            cfg = group.model_dump(exclude={"count", "fabric_div", "rf_fabric_div"})
-            cfg.update(
-                dac=dac,
-                tproc_ch=ch,
-                fs=fs,
-                f_dds=fs / group.interpolation,
-                f_fabric=fs / group.fabric_div,
-                fdds_div=group.fs_div * group.interpolation,
-            )
-            gens.append(cfg)
-            dacs[dac] = {
-                "fs": fs,
-                "fs_mult": group.fs_mult,
-                "fs_div": group.fs_div,
-                "interpolation": group.interpolation,
-                "f_fabric": fs / group.rf_fabric_div,
-            }
+    for index, channel in enumerate(profile.generators):
+        if channel.dac in dacs:
+            raise ValueError(f"generators.{index}.dac: requires a unique DAC name")
+        fs = channel.sample_rate(profile.refclk_freq)
+        cfg = channel.model_dump(
+            exclude={"fabric_div", "rf_fabric_div"}, exclude_none=True
+        )
+        cfg.update(
+            fs=fs,
+            f_dds=fs / channel.interpolation,
+            f_fabric=fs / channel.fabric_div,
+            fdds_div=channel.fs_div * channel.interpolation,
+        )
+        gens.append(cfg)
+        dacs[channel.dac] = {
+            "fs": fs,
+            "fs_mult": channel.fs_mult,
+            "fs_div": channel.fs_div,
+            "interpolation": channel.interpolation,
+            "f_fabric": fs / channel.rf_fabric_div,
+        }
     return gens, dacs
 
 
 def _readouts(
     profile: _Profile,
-    n_gens: int,
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
     readouts: list[dict[str, object]] = []
     adcs: dict[str, dict[str, object]] = {}
-    for group in profile.readouts:
-        fs = group.sample_rate(profile.refclk_freq)
-        f_output = fs / (group.decimation * group.samps_per_clk)
-        for _ in range(group.count):
-            ch = len(readouts)
-            adc = f"{ch:02d}"
-            cfg = group.model_dump(exclude={"count", "samps_per_clk", "coupling"})
-            cfg.update(
-                adc=adc,
-                tproc_ctrl=n_gens + ch,
-                tproc_ch=ch,
-                trigger_bit=ch,
-                fs=fs,
-                f_dds=fs / group.decimation,
-                f_output=f_output,
-                fdds_div=group.fs_div * group.decimation,
+    for index, channel in enumerate(profile.readouts):
+        fs = channel.sample_rate(profile.refclk_freq)
+        f_output = fs / (channel.decimation * channel.samps_per_clk)
+        cfg = channel.model_dump(
+            exclude={"samps_per_clk", "coupling"}, exclude_none=True
+        )
+        cfg.update(
+            fs=fs,
+            f_dds=fs / channel.decimation,
+            f_output=f_output,
+            fdds_div=channel.fs_div * channel.decimation,
+        )
+        readouts.append(cfg)
+        adc: dict[str, object] = {
+            "fs": fs,
+            "fs_mult": channel.fs_mult,
+            "fs_div": channel.fs_div,
+            "decimation": channel.decimation,
+            "f_fabric": f_output,
+            "coupling": channel.coupling,
+        }
+        if channel.adc in adcs and adcs[channel.adc] != adc:
+            raise ValueError(
+                f"readouts.{index}.adc: shared ADC requires identical RF settings"
             )
-            readouts.append(cfg)
-            adcs[adc] = {
-                "fs": fs,
-                "fs_mult": group.fs_mult,
-                "fs_div": group.fs_div,
-                "decimation": group.decimation,
-                "f_fabric": f_output,
-                "coupling": group.coupling,
-            }
+        adcs[channel.adc] = adc
     return readouts, adcs
 
 
@@ -187,8 +214,6 @@ def _apply_mux(
     gens: list[dict[str, object]],
     readouts: list[dict[str, object]],
 ) -> None:
-    gen_groups = [group for group in profile.generators for _ in range(group.count)]
-    ro_groups = [group for group in profile.readouts for _ in range(group.count)]
     used_gens: set[int] = set()
     used_readouts: set[int] = set()
     for index, mux in enumerate(profile.mux):
@@ -203,10 +228,12 @@ def _apply_mux(
             raise ValueError(
                 f"{path}.ro_chs: requires unique unused in-range ADCs within pfb_nout"
             )
+        if any(profile.readouts[ch].tproc_ctrl is not None for ch in mux.ro_chs):
+            raise ValueError(f"{path}.ro_chs: mux readouts require tproc_ctrl: null")
         used_gens.add(mux.gen_ch)
         used_readouts.update(mux.ro_chs)
         gen = gens[mux.gen_ch]
-        gen_group = gen_groups[mux.gen_ch]
+        gen_group = profile.generators[mux.gen_ch]
         gen.update(mux.generator.model_dump())
         gen.update(
             f_dds=gen_group.sample_rate(profile.refclk_freq)
@@ -215,9 +242,8 @@ def _apply_mux(
         )
         for port, ch in enumerate(mux.ro_chs):
             ro = readouts[ch]
-            ro.pop("tproc_ctrl")
             ro.update(mux.readout.model_dump())
-            ro_group = ro_groups[ch]
+            ro_group = profile.readouts[ch]
             fs = ro_group.sample_rate(profile.refclk_freq)
             output_div = ro_group.decimation * (mux.readout.pfb_nch // 2)
             dds_div = (
@@ -225,7 +251,6 @@ def _apply_mux(
             )
             ro.update(
                 pfb_port=port,
-                trigger_bit=port,
                 f_output=fs / output_div,
                 f_dds=fs / dds_div,
                 fdds_div=ro_group.fs_div * dds_div,
@@ -233,21 +258,38 @@ def _apply_mux(
 
 
 def build_soccfg(profile: Mapping[str, object]) -> QickConfig:
-    """Build an isolated compile profile from a YAML-decoded mapping.
+    """Build a detached QickConfig from caller-loaded board settings.
 
-    All settings are required; no files, installed-version metadata, hardware or
-    environment state are read. See program/README.md for the mapping schema.
-    Frequencies are MHz. Groups expand in list order with consecutive DAC/ADC
-    names, wave-output ports and ADC trigger bits. Readback inputs use a separate
-    channel namespace. RF and logical generator fabric dividers are independent.
-    Derived frequency fields must not appear in the input. Invalid, missing or
-    redundant fields raise ValueError with their dotted field paths. Neither
-    the mapping nor its nested values are mutated or shared with the result.
+    The mapping supplies board/software metadata, refclk_freq in MHz, tprocs,
+    ordered generators/readouts, rf metadata and a mux list (empty if unused).
+    Each generator supplies dac (two decimal digits), tproc_ch (wave-output
+    port) and tmux_ch (nonnegative selector or explicit None). Each readout
+    supplies adc (two decimal digits), tproc_ctrl (wave-output port or None),
+    tmux_ch (selector or None), trigger_type ('dport' or 'tport'), trigger_port,
+    trigger_bit, tproc_ch (readback input, -1 if absent) and b_phase (positive
+    bits or None). Ports/selectors/bits are nonnegative integers. None keys
+    are omitted from QICK channel entries; all input fields remain required.
+
+    Channels supply capability fields and positive integer clock ratios.
+    Sample rate is refclk_freq * fs_mult / fs_div. Generator DDS divides by
+    interpolation, logical fabric by fabric_div and RF fabric by rf_fabric_div.
+    Readout DDS divides by decimation and output by decimation*samps_per_clk.
+    Mux blocks select gen_ch and ordered ro_chs, override capabilities and
+    derive PFB output/DDS clocks from pfb_nch and pfb_dds_on_output. Mux readouts
+    must have tproc_ctrl=None; trigger wiring and per-readout b_phase stay intact.
+
+    Duplicate DACs, inconsistent shared ADC clocks/metadata and ambiguous shared
+    wave-output ports raise ValueError at the later user's dotted field path.
+    Shared ports require distinct non-None tmux_ch values across generators and
+    controlled readouts. Unknown, derived, missing or invalid fields also raise
+    ValueError with dotted paths. No files, hardware, installed-version metadata
+    or environment state are read. Input and output share no mutable values.
     """
     settings = _Profile.model_validate(profile)
     gens, dacs = _generators(settings)
-    readouts, adcs = _readouts(settings, len(gens))
+    readouts, adcs = _readouts(settings)
     _apply_mux(settings, gens, readouts)
+    _validate_wave_ports(settings)
     cfg = settings.model_dump(exclude={"generators", "readouts", "rf", "mux"})
     cfg.update(
         gens=gens,

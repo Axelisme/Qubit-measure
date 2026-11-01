@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-01，independent board and model YAML ownership
+**Last updated:** 2026-11-02，共用 v2 板子載入範例
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -55,7 +55,7 @@ from zcu_tools.simulators.ftf.environment import ftf
 
 configuration = Path("zcu_lab/simulation_envs/FTF/ftf.yaml")
 settings = load_ftf(configuration)
-board_yaml = configuration.with_name("profile.yaml")
+board_yaml = configuration.parent.parent / "profiles" / "qick_216_v2.yaml"
 soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
 env = ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)
 ```

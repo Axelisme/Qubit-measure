@@ -2,13 +2,13 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-01，獨立板子與物理接線
+**Last updated:** 2026-11-02，共用 v2 板子與手動遷移
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
 這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。
-Startup 另讀相鄰 `profile.yaml`，用 `program.build_soccfg` 建立板子後以 `soccfg=`
-交給 FTF。這份板子設定有四個 generator、三個 ADC，gen1 與 ADC1、2 提供 mux。
+Startup 的 `PROFILE_PATH` 指向共用 [qick_216_v2.yaml](../profiles/qick_216_v2.yaml)，用 `program.build_soccfg` 建立板子後以 `soccfg=`
+交給 FTF。板子使用 v6 gen0–6 與 mixmux8 gen7，dyn readout 0、1 與 mux generator 共用 wave port，以 `tmux_ch` 區分。PFB readout 2–9 共用 ADC、使用 decimation 2，所有 readout 使用 tport trigger。Channel 編號是模擬環境的接線，不是實機 channel 清單。
 板子的時脈與型別不放入物理模型 YAML。Startup 與 Notebook 直接呼叫公開 `zcu_tools.simulators.ftf.environment.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
 `default.yaml` 是納入 Git 的樣板；`ftf.yaml` 是各自的工作副本，不納入 Git。第一次使用時複製一份：
@@ -16,6 +16,9 @@ Startup 另讀相鄰 `profile.yaml`，用 `program.build_soccfg` 建立板子後
 ```bash
 cp zcu_lab/simulation_envs/FTF/default.yaml zcu_lab/simulation_envs/FTF/ftf.yaml
 ```
+
+切換到共用 v2 板子時，先保存既有工作副本，再重新複製 `default.yaml`，或手動把 `ftf.yaml` 的 `readout.mux.gen_ch` 改為 7，兩筆 `readout.mux.adc[].ro_ch` 依序改為 2、3。保留自己的物理參數與校準。
+既有 `ftf-demo` 不會套用新 template。請手動把 MG12 wiring 改為 `gen_ch: 7`、`ro_ch: [2, 3]`，並核對已保存的 mux library 模組與 tab 輸入。也可先備份，再刪除專案 `result/ftf-demo` 與 `Database/ftf-demo`，重跑 startup 重建 entry。MG12 的 `mixer_freq: 7135` 不變。程式不自動遷移工作副本或 entry，kickstart 範本也不隨這次切板更新。
 
 缺少 `ftf.yaml` 時，`ftf(...)` 直接報錯。完整欄位、單位、合法範圍、三迴路映射與 entry 接線對照見 [FTF YAML v2 欄位指南](field-guide.md)。
 
@@ -60,7 +63,7 @@ Attach 不重跑腳本；在 attach 傳 script 會報錯。自訂 script 取代�
 不先執行預設 startup。`--clean` 跳過所有腳本，不能與 `--script` 同用。
 
 可將 `startup.py`、`entry-template.yaml` 與工作副本 `ftf.yaml` 複製到自己的目錄，
-再指定該處的 startup。範本與設定按 startup 檔案位置定位，不跟隨 shell cwd。
+再指定該處的 startup。Entry 範本與模型設定按 startup 檔案位置定位，不跟隨 shell cwd。板子另由 `PROFILE_PATH` 定位；複製 startup 到其他目錄後，須把它改成共用板子 YAML 的實際路徑。
 要改 entry、point 或 tab 名稱，編輯自己的 startup 副本。
 
 模擬用 `entry-template.yaml` 省略 qubit energies，但預填 `ftf.yaml` 的 resonator 頻率 7190／7080 MHz、總 linewidth 1.1 MHz 與 DC 線校準。這些值標為 simulated-truth，不是量測結果。DC 校準以 `schema_version: 3` 的 qubit `flux: {offset, period}` 保存。Offset 是零輸出時的 Φ0，各主線 period 是係數的倒數，單位為原生儀器單位／Φ0。不使用 `design` 猜值。既有 v1／v2 entry 須先用[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。獨立 `design` 的 `flux_half` 等欄位不變，startup 將它們換算成 predictor v2 的 flux frame。Qubit 頻率隨 bias 改變，範本保留 null，不推算頻譜。量測前仍須填入有效的 qubit 頻率與其他輸入，範本不提供 module library。[Kickstart 範本](../../kickstart/FTF/entry-template.yaml) 用於從接線開始的走查。若修改工作副本的物理值或接線，也要調整 entry 範本或已建立的 entry。
@@ -69,7 +72,7 @@ Startup 腳本建好初始 alias。`mux` 指向 MG12，mux 表單透過 `$mux` �
 MG12 的 `mixer_freq: 7135` 是 mux LO 初值，缺值時 mixer 留空必填，不由 tone 頻率或 κ 推算。
 模擬範本的 `MG12.time_of_fly: 0.4` us 對應 `ftf.yaml` 的 mux receivers 400 ns。R1／R2 的頂層 `time_of_fly: 0.4` us 則對應 pulse ADC 的 400 ns。Kickstart 的 group 與 resonator TOF 保留 null，等待各自路徑的量測。
 `mux/onetone` 缺 slot 時，trigger 初值取 group TOF 加 `5/(2π·min κ)`，length 取 trigger 加固定 1.0 us ADC window。Group TOF 或任一 κ 缺值時，trigger 與 length 留空必填，mixer 不受影響。有 slot 時沿用 slot mixer 與既有 timing 規則。
-R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 1`、`ro_ch: [1, 2]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
+R1／R2 的 wiring 保留 pulse gen0／ADC0。MG12 的 mux wiring 填 `gen_ch: 7`、`ro_ch: [2, 3]`，依序對應 R1／R2，不讀 resonator 的 pulse ADC。
 範本不附 library assets，也不預填 module key。八張 mux 表單缺 readout slot 時，Open／Reset 從已知的 group wiring 補通道，tone gain 補 0.1。文件允許 `wiring: {}`；`ro_ch` 未知時，各 tone ADC 留空必填，其餘缺失的必填輸入仍保持 Invalid。有 slot 時沿既有 library 路徑，細節與核對步驟見[接線對照](field-guide.md#generatoradc-與-entry-接線對照)。
 初始 alias `qubit` 指向 Q1，`resonator` 讀取其 resonator。把 `qubit` 改為 Q2 後，`resonator` 跟著切換。重新 Open／Reset 後，scalar flux 表單從 `$qubit.flux_dev` 取得 Q2 的 DC 裝置名稱，不需要 flux 裝置 alias。`qubit1`、`qubit2` 分別指向 Q1、Q2，`coupler` 是普通 alias，指向 qubit/transmon 元件，不是 Notebook role。
 
@@ -108,7 +111,7 @@ FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線�
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
-`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由獨立的 [profile.yaml](profile.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。隨附的板子 YAML 明確設定 4 個 generator 與 3 個 readout，並指定 mux 型別。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由共用的 [qick_216_v2.yaml](../profiles/qick_216_v2.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen7／PFB readout 2 與 3，以及 f1_charge gen2、f2_charge gen3。共用板子 YAML 提供 8 個 generator 與 10 個 readout，FTF 只綁定其中所需的通道。ADC output sample interval `dt_ns` 由 caller 的板子 YAML 決定，模型 YAML 不設定 ADC clock。空出的 v6 gen1 可供註解中的 fast-flux 範例使用。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 

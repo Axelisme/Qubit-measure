@@ -29,13 +29,16 @@ from zcu_tools.simulators.ftf.environment import ftf
 
 from zcu_lab.components.fluxonium import QubitSchema
 
+PROFILE_PATH = Path(__file__).resolve().parents[1] / "profiles" / "qick_216_v2.yaml"
+
 
 def startup(ctx: StartupContext) -> None:
     """Select ftf-demo/initial, seeding it from the template on first use.
 
     The template binds f1=Q1, f2=Q2, coupler=coupler and mux=MG12 for FTF
     forms. Existing entries keep their aliases; add missing roles in Aliases.
-    The template seeds MG12 mux gen1 and ADCs [1, 2] in resonator order.
+    The template seeds pulse gen0/ADC0, charge gen2/gen3 and MG12 mux
+    gen7/ADCs [2, 3] in resonator order on the shared v2 board.
     The GUI is then ready for the user to open experiment tabs.
 
     ctx is the GUI's typed startup capability, called on its background worker
@@ -75,9 +78,7 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx, template)
 
     ctx.progress("Building offline FTF resources")
-    soccfg = build_soccfg(
-        yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text())
-    )
+    soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
     environment = ftf(settings, workers=1, warmup=False, soccfg=soccfg)
     transferred: set[str] = set()
 

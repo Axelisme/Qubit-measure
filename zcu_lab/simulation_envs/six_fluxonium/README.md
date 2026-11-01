@@ -2,7 +2,7 @@
 
 **Readers:** operator, lab-author, agent. Start six independent fluxonium models and prepare mux measurements without hardware.
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-02，shared v2 board wiring
 
 For existing entries, move resonator and mux-group `ext.time_of_fly` to top-level `time_of_fly`. The loader does not migrate it.
 
@@ -15,10 +15,15 @@ There are no fast-flux lines. One mux generator drives all six readout tones.
 A separate pulse generator and ADC handle single-tone scans. The environment
 has no coupler, qubit-qubit interaction or crosstalk matrix.
 
-The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
-it as required `soccfg=`. The board has fourteen generators and seven ADCs, with
-mux gen0 bound to ADC0..5. Board clocks and channel types stay separate
-from the physical settings.
+Startup loads [`../profiles/qick_216_v2.yaml`](../profiles/qick_216_v2.yaml)
+through `PROFILE_PATH`, builds it with `program.build_soccfg` and passes it as
+required `soccfg=`. This shared board YAML follows the port types in
+`bitfiles/qick_216_v2.hwh`, not its channel count or numbering.
+Q1 through Q6 use drive generators 1 through 6. Pulse readout uses gen0/ADC0;
+mux readout uses gen7/ADC2..7 in Q1 through Q6 order.
+All seven non-mux generators are v6. Drives need no int4 configuration or extra
+`mixer_freq`; `MG123456` retains its existing 7250 MHz mux mixer setting.
+Board clocks and channel types stay separate from the physical settings.
 
 `default.yaml` is the tracked physical-settings template. Each user edits
 `six_fluxonium.yaml`, an untracked working copy beside the startup script.
@@ -143,13 +148,34 @@ The script closes the backend, releases borrowed driver references and closes
 any drivers that failed to transfer. Backend cleanup failure does not skip
 device cleanup. Simultaneous cleanup failures retain both diagnostics.
 
+## Migrate existing working copies and entries
+
+Startup does not rewrite `six_fluxonium.yaml` or existing `six-fluxonium-demo`
+entries. Back up your working copy and saved entry before changing them.
+
+In your working YAML, set `mux_gen_ch: 7`, `pulse_gen_ch: 0` and
+`pulse_ro_ch: 0`. Set every qubit's `readout.drive.gen_ch` to 7 and set
+`readout.adc.ro_ch` to 2 through 7 for Q1 through Q6. Keep drive generators
+1 through 6. Preserve physical parameters, backgrounds, seeds and local edits.
+
+For an existing entry, set each R1 through R6 `wiring.ch` and `wiring.ro_ch`
+to 0. Set `MG123456.wiring.gen_ch` to 7 and `wiring.ro_ch` to
+`[2, 3, 4, 5, 6, 7]` in resonator order. Keep Q1 through Q6 drive wiring at
+1 through 6 and preserve the group's mux mixer setting.
+Review saved readout modules, pulse modules and form inputs for explicit old
+channel IDs. Update pulse routes to gen0/ADC0 and mux routes to gen7/ADC2..7;
+do not add a drive mixer setting. Restart to load the working YAML, then reopen
+or Reset forms before Run. A new project root can seed a fresh entry from
+`entry-template.yaml`, but it does not migrate saved calibrations or modules.
+The loader has no old-board fallback.
+
 ## First measurements
 
 Open `onetone/range_find` and scan 6900 to 7600 MHz with 300 points to locate
 six resonator dips.
-The scalar resonator alias supplies pulse generator 13 and ADC 6. All six
-resonators share that pulse route. The mux group instead uses generator 0 and
-ADCs 0 through 5. Do not copy the pulse route into a mux readout module.
+The scalar resonator alias supplies pulse generator 0 and ADC 0. All six
+resonators share that pulse route. The mux group instead uses generator 7 and
+ADCs 2 through 7. Do not copy the pulse route into a mux readout module.
 Both routes assign each frequency to the nearest bare cavity; an exact tie
 between cavities raises an error. Choose a grid that avoids those midpoints.
 Use the measured centers to prepare `mux/onetone`, then review its readout

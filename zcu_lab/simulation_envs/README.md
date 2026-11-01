@@ -1,6 +1,6 @@
 # Simulation environments
 
-**Last updated:** 2026-11-02，共用 v2 profile 與暫定 PFB 限制
+**Last updated:** 2026-11-02，共用 v2 接線與 tmux／tport
 
 **讀者：** lab-author、agent。查找 GUI／Notebook 模擬環境、參數與 compile profile 的入口。
 
@@ -16,12 +16,10 @@ YAML loader 位於對應的 `config` package。框架不 import 這些模型。
 板子 YAML 由 startup 或範例呼叫端指名，再交給 `program.build_soccfg` 建立 compile config。
 各環境目前使用的來源如下。
 
-- single_fluxonium 與 integer_fluxonium 的 startup 共讀唯一一份
-  `profiles/qick_216_v2.yaml`，不在各環境目錄複製它。這份板子有 16 個 generator
-  與 10 個 ADC，依 `bitfiles/qick_216_v2.hwh` 與 QICK 0.2.436 driver 規則填寫。
-- FTF 與 six_fluxonium 暫讀各自相鄰的 `profile.yaml`。第二步須先讓 builder 與模擬器
-  支援共用 control port 的 `tmux_ch` 分流、`tport` 與其餘實機拓撲，才切到 v2。
-  第二步開工前仍須取得使用者對 PFB decimation 的答案。
+- single_fluxonium、integer_fluxonium、FTF 與 six_fluxonium 的 startup 共讀
+  `profiles/qick_216_v2.yaml`，不在各環境目錄複製它。Generator／readout 型別與
+  時脈公式依 `bitfiles/qick_216_v2.hwh` 與 QICK 0.2.436 driver 規則填寫。
+  Channel 數量、位置與接線依模擬環境需要配置，不複製實機 inventory。
 - white_noise 範例保留相鄰的 `white_noise/profile.yaml`，提供兩個一般 generator
   與一個 ADC，不切到 v2。呼叫時另填 `std_adc`、`seed` 與明確接線或 `routes="all"`。
 
@@ -29,26 +27,31 @@ YAML loader 位於對應的 `config` package。框架不 import 這些模型。
 模型 YAML 必填 seed、thermal occupation、pruning floor 及既有 numerical controls。
 Seed 與 occupation 可以明填 `null`，分別表示 startup 選一次與使用 Bose equilibrium。
 每個 receiver 都必填 background period 與 pivot，零 depth／slope 仍關閉效果。
-Six 的接線也由模型 YAML 明填，channel 必須存在於 caller 的 board profile。FTF 使用四個 generator
-和三個 ADC，其中 gen1 配 mux ADC1、2。single_fluxonium 和 integer_fluxonium
-各使用板上的 gen0..2 與 ADC0。gen0..2 皆為 v6，ADC0 為 dyn readout。
-six_fluxonium 用十四個 generator 和七個 ADC，其中 gen0 配 mux ADC0..5。
+模型 YAML 明填接線，channel 必須存在於 caller 的 board profile。
+下表的 ro 是 QICK readout channel，不是 RF converter 名稱。
 
-共用 v2 YAML 以現有 builder schema 表達 compile 能力，不是完整實機拓撲。
-它與 hwh 有五項偏離。
+| 環境 | 模型使用的 generator | 模型使用的 readout |
+| --- | --- | --- |
+| single_fluxonium | gen0 pulse readout、gen1 charge、gen2 fast flux，皆為 v6 | dyn ro0 |
+| integer_fluxonium | gen0 pulse readout、gen1 pump、gen2 Stokes，皆為 v6 | dyn ro0 |
+| FTF | gen0 pulse readout、gen2／3 charge、gen7 mux | dyn ro0、PFB ro2／3，依 resonator 順序 |
+| six_fluxonium | gen0 pulse readout、gen1..6 charge，七個皆為 v6；gen7 mux | dyn ro0、PFB ro2..7，依 Q1..Q6 順序 |
 
-1. Dyn readout 的 control port 連號為 16、17，不表達實機與 mixmux8 共用 port 12
-   及 `tmux_ch` 0、1、2 的分流。
-2. Readout trigger 使用 `dport`，不是實機的 `tport` 10..19、bit 0。
-   Dyn readout 使用 dport 0，PFB 暫用 dport 1，避免兩者的 trigger bit 重疊。
-3. DAC／ADC 名稱連號，不沿用實機 DAC 20..23、00..13、30..33 與 ADC 20、21、22。
-   每個 PFB output 各有一個 ADC 名稱，不表達八個 output 共用實機 ADC 21。
-4. PFB readback 的 `tproc_ch` 連號，不表達實機 readout channel 8、9 的 `tproc_ch=-1`。
-5. Dyn readout 不含 `b_phase`，無法表達實機的 32-bit phase 欄位。
+FTF 的 fast-flux 範例仍是模型 YAML 中的註解，不在預設接線中。
+Six 的 v6 drive 不要求額外填 `mixer_freq`；既有 mux mixer 設定保持不變。
 
-PFB `decimation` 暫填 hwh 設計值 2，來源為 `C_ADC_Decimation_Mode21=2`。
-這個值待使用者確認，未在板上驗證。由它推導的頻率與 channel 間距也只是暫定配置，
-不是已確認的實機值。任何驗收都不依賴 PFB 數值。
+共用 v2 YAML 的 gen7 與 dyn ro0／1 共用 tProc wave-output port 7，分別以
+`tmux_ch` 0／1／2 分派。Gen0..6 各用 wave port 0..6。
+Dyn ro0／1 分別使用 ADC "20"／"22"，PFB ro2..9 共用 ADC "21"。
+所有 readout 使用 `tport`，ro0..9 分別接 trigger port 10..19、bit 0。
+PFB readout 的 `tproc_ctrl` 與 `tmux_ch` 明填 `null`，不接動態 control port。
+Ro0..7 的 readback `tproc_ch` 為 0..7，ro8／9 明填 -1 表示沒有 readback。
+各 readout 明填 `b_phase: 32`。
+
+PFB 使用 `axis_pfb_readout_v4`，`decimation: 2` 已由使用者確認，對應
+hwh 的 `C_ADC_Decimation_Mode21=2`。Builder 依這些設定推導時脈與 PFB channel 間距。
+這份 YAML 不代表已完成板上驗證。tProc pins、`rf.clk_groups` 與 mux generator
+的部分必填能力欄位仍保留 compile 佔位值，詳見 YAML 註解。
 
 `profiles/ordinary.yaml` 與 `profiles/mux.yaml` 是獨立板子格式的範例。
 前者提供兩個一般 generator 與一個 ADC。後者提供兩個 generator 與五個 ADC，
@@ -77,7 +80,7 @@ with profile_path.open() as stream:
 
 GUI 使用 [FTF startup 與 entry 流程](FTF/README.md#建立-entry-與啟動)，Notebook 使用
 [single_qubit](../../notebook_md/single_qubit.md)，兩者都直接呼叫公開 `ftf(...)`。
-先將 [default.yaml](FTF/default.yaml) 複製為自己的 `ftf.yaml`，再明確指定模型 YAML 與獨立的 `profile.yaml`。
+先將 [default.yaml](FTF/default.yaml) 複製為自己的 `ftf.yaml`，再明確指定模型 YAML 與共用的 `profiles/qick_216_v2.yaml`。
 工作副本、欄位單位與接線對照由 [FTF README](FTF/README.md#工作副本與調參) 及
 [field guide](FTF/field-guide.md) 擁有，schema 與診斷見 [FTF config](../../lib/zcu_tools/simulators/ftf/config/README.md)。
 修改 startup 或 YAML 後須重建環境，GUI 操作步驟仍以 FTF leaf 為準。
@@ -85,7 +88,7 @@ GUI 使用 [FTF startup 與 entry 流程](FTF/README.md#建立-entry-與啟動)�
 ### 關閉補等與 telemetry
 
 Profiling 時可明確覆寫 `time_scale=0`，不改 numeric settings、RNG、density、readout 或 routes。
-以下片段從 repo root 讀取已準備的工作副本與相鄰板子 YAML：
+以下片段從 repo root 讀取已準備的工作副本與共用 v2 板子 YAML：
 
 ```python
 from pathlib import Path
@@ -95,7 +98,7 @@ from zcu_tools.program import build_soccfg
 from zcu_tools.simulators.ftf.environment import ftf
 
 configuration = Path("zcu_lab/simulation_envs/FTF/ftf.yaml")
-board_yaml = configuration.with_name("profile.yaml")
+board_yaml = configuration.parent.parent / "profiles" / "qick_216_v2.yaml"
 soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
 env = ftf(configuration, soccfg=soccfg, time_scale=0)
 ```

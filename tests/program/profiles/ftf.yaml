@@ -16,42 +16,160 @@ tprocs:
   start_pin: none
   stop_pin: none
 generators:
-- count: 8
-  type: axis_signal_gen_v6
-  fs_mult: 50
-  fs_div: 1
-  interpolation: 1
-  fabric_div: 32
-  rf_fabric_div: 16
-  samps_per_clk: 16
-  b_dds: 32
-  b_phase: 32
-  maxlen: 65536
-  complex_env: true
-  has_dds: true
-  has_mixer: false
-  maxv: 32766
-  maxv_scale: 1.0
+  - &generators0
+    type: axis_signal_gen_v6
+    fs_mult: 50
+    fs_div: 1
+    interpolation: 1
+    fabric_div: 32
+    rf_fabric_div: 16
+    samps_per_clk: 16
+    b_dds: 32
+    b_phase: 32
+    maxlen: 65536
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 32766
+    maxv_scale: 1.0
+    dac: '00'
+    tproc_ch: 0
+    tmux_ch: null
+  - <<: *generators0
+    dac: '01'
+    tproc_ch: 1
+    tmux_ch: null
+  - <<: *generators0
+    dac: '02'
+    tproc_ch: 2
+    tmux_ch: null
+  - <<: *generators0
+    dac: '03'
+    tproc_ch: 3
+    tmux_ch: null
+  - <<: *generators0
+    dac: '04'
+    tproc_ch: 4
+    tmux_ch: null
+  - <<: *generators0
+    dac: '05'
+    tproc_ch: 5
+    tmux_ch: null
+  - <<: *generators0
+    dac: '06'
+    tproc_ch: 6
+    tmux_ch: null
+  - <<: *generators0
+    dac: '07'
+    tproc_ch: 7
+    tmux_ch: null
 readouts:
-- count: 10
-  type: axis_readout_v2
-  ro_type: axis_readout_v2
-  fs_mult: 10
-  fs_div: 1
-  decimation: 1
-  samps_per_clk: 8
-  b_dds: 32
-  buf_maxlen: 8192
-  avg_maxlen: 8192
-  avgbuf_type: axis_avg_buffer
-  avgbuf_version: v2
-  has_edge_counter: false
-  has_weights: false
-  has_outsel: true
-  iq_offset: 0.0
-  trigger_type: dport
-  trigger_port: 0
-  coupling: AC
+  - &readouts0
+    type: axis_readout_v2
+    ro_type: axis_readout_v2
+    fs_mult: 10
+    fs_div: 1
+    decimation: 1
+    samps_per_clk: 8
+    b_dds: 32
+    buf_maxlen: 8192
+    avg_maxlen: 8192
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: v2
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: true
+    iq_offset: 0.0
+    coupling: AC
+    adc: '00'
+    tproc_ctrl: 8
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 0
+    tproc_ch: 0
+    b_phase: null
+  - <<: *readouts0
+    adc: '01'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 1
+    tproc_ch: 1
+    b_phase: 32
+  - <<: *readouts0
+    adc: '02'
+    tproc_ctrl: 10
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 2
+    tproc_ch: 2
+    b_phase: null
+  - <<: *readouts0
+    adc: '03'
+    tproc_ctrl: 11
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 3
+    tproc_ch: 3
+    b_phase: null
+  - <<: *readouts0
+    adc: '04'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 0
+    tproc_ch: 4
+    b_phase: 32
+  - <<: *readouts0
+    adc: '05'
+    tproc_ctrl: 13
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 5
+    tproc_ch: 5
+    b_phase: null
+  - <<: *readouts0
+    adc: '06'
+    tproc_ctrl: 14
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 6
+    tproc_ch: 6
+    b_phase: null
+  - <<: *readouts0
+    adc: '07'
+    tproc_ctrl: 15
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 7
+    tproc_ch: 7
+    b_phase: null
+  - <<: *readouts0
+    adc: 08
+    tproc_ctrl: 16
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 8
+    tproc_ch: 8
+    b_phase: null
+  - <<: *readouts0
+    adc: 09
+    tproc_ctrl: 17
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 9
+    tproc_ch: 9
+    b_phase: null
 rf:
   dac_power: VOP
   clk_groups: []
@@ -76,4 +194,3 @@ mux:
     pfb_ch_offset: 32
     pfb_dds_on_output: true
     has_outsel: false
-    b_phase: 32

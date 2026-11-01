@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-02，program 測試慣例與 IR 行為 owner 分層
+**Last updated:** 2026-11-02，逐 channel 編譯 fixture 接線
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -359,8 +359,13 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 ### QICK 編譯 fixture
 
 `tests/program/_profiles.py` 讀取 `tests/program/profiles/` 的獨立 YAML，交給
-公開 `program.build_soccfg`。`load_soccfg` 和 `load_mux_soccfg` 只覆寫 caller
-指定的 channel 數與 mux 接線；時脈、型別及 QICK metadata 留在 YAML。
+公開 `program.build_soccfg`。`load_soccfg` 和 `load_mux_soccfg` 複製第一個
+generator／readout 項目，依 caller 指定的數量產生逐 channel 項目。
+Helper 明寫連號 DAC／ADC 名稱、generator wave port、接在 generators 之後的
+readout control port，以及連號 readback input 和 trigger bit。
+`load_mux_soccfg` 另按 caller 的 `ro_chs` 將 PFB readout 設為
+`tproc_ctrl: null`，以 list 順序填 trigger bit，並保留 fixture 的 PFB `b_phase`。
+時脈、型別及 QICK metadata 留在 YAML。
 `profile_soccfg` 讀取具名模型的測試板子，不從模型 wiring 推導 channel 數。
 這些支援函式不建立硬體、IQ source 或隱式白噪音。
 

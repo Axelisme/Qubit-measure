@@ -2,13 +2,14 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-11-01, shared v2 board profile
+**Last updated:** 2026-11-02, caller-owned shared board inventory
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
 The startup loads `../profiles/qick_216_v2.yaml` with `program.build_soccfg`
-and passes it as required `soccfg=`. This shared v2 board has 16 generators and
-10 ADCs. This environment uses generators 0–2, all v6, and ADC 0, a dyn readout.
+and passes it as required `soccfg=`. The caller-owned shared YAML defines the
+board's channel inventory. This environment uses generators 0–2, all v6,
+and readout 0, a dyn readout on ADC "20".
 Board clocks and channel types stay separate from the physical settings.
 
 `default.yaml` is the tracked physical-settings template. Each user edits

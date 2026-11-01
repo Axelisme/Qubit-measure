@@ -17,7 +17,7 @@ tprocs:
     start_pin: none
     stop_pin: none
 generators:
-  - count: 2
+  - &generators0
     type: axis_signal_gen_v6
     fs_mult: 12
     fs_div: 3
@@ -33,8 +33,15 @@ generators:
     has_mixer: false
     maxv: 1024
     maxv_scale: 1.0
+    dac: '00'
+    tproc_ch: 0
+    tmux_ch: null
+  - <<: *generators0
+    dac: '01'
+    tproc_ch: 1
+    tmux_ch: null
 readouts:
-  - count: 5
+  - &readouts0
     type: axis_readout_v2
     ro_type: axis_readout_v2
     fs_mult: 9
@@ -50,9 +57,51 @@ readouts:
     has_weights: false
     has_outsel: true
     iq_offset: 0.0
+    coupling: AC
+    adc: '00'
+    tproc_ctrl: 2
+    tmux_ch: null
     trigger_type: dport
     trigger_port: 0
-    coupling: AC
+    trigger_bit: 0
+    tproc_ch: 0
+    b_phase: null
+  - <<: *readouts0
+    adc: '01'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 1
+    tproc_ch: 1
+    b_phase: 32
+  - <<: *readouts0
+    adc: '02'
+    tproc_ctrl: 4
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 2
+    tproc_ch: 2
+    b_phase: null
+  - <<: *readouts0
+    adc: '03'
+    tproc_ctrl: 5
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 3
+    tproc_ch: 3
+    b_phase: null
+  - <<: *readouts0
+    adc: '04'
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 0
+    trigger_bit: 0
+    tproc_ch: 4
+    b_phase: 32
 rf:
   dac_power: VOP
   clk_groups: []
@@ -75,4 +124,3 @@ mux:
       pfb_ch_offset: 32
       pfb_dds_on_output: true
       has_outsel: false
-      b_phase: 32

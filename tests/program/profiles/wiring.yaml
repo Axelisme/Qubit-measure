@@ -1,0 +1,74 @@
+# Small, independent wiring inputs for builder contract tests.
+board: ZCU216
+sw_version: 0.2.436
+fw_timestamp: '2025-01-01'
+refclk_freq: 200.0
+extra_description: []
+tprocs:
+  - type: qick_processor
+    revision: 27
+    f_time: 100.0
+    f_core: 100.0
+    pmem_size: 128
+    wmem_size: 128
+    dmem_size: 128
+    dreg_qty: 16
+    output_pins: []
+    start_pin: none
+    stop_pin: none
+generators:
+  - dac: '30'
+    tproc_ch: 7
+    tmux_ch: 0
+    type: axis_signal_gen_v6
+    fs_mult: 12
+    fs_div: 3
+    interpolation: 2
+    fabric_div: 4
+    rf_fabric_div: 8
+    samps_per_clk: 2
+    b_dds: 32
+    b_phase: 32
+    maxlen: 128
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 1024
+    maxv_scale: 1.0
+readouts:
+  - &adc
+    adc: '21'
+    tproc_ctrl: 7
+    tmux_ch: 1
+    trigger_type: tport
+    trigger_port: 11
+    trigger_bit: 0
+    tproc_ch: -1
+    b_phase: 24
+    type: axis_dyn_readout_v1
+    ro_type: axis_dyn_readout_v1
+    fs_mult: 9
+    fs_div: 2
+    decimation: 3
+    samps_per_clk: 5
+    b_dds: 32
+    buf_maxlen: 128
+    avg_maxlen: 128
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: v2
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: true
+    iq_offset: 0.0
+    coupling: AC
+  - <<: *adc
+    tproc_ctrl: null
+    tmux_ch: null
+    trigger_port: 13
+    trigger_bit: 2
+    tproc_ch: 5
+    b_phase: null
+rf:
+  dac_power: VOP
+  clk_groups: []
+mux: []

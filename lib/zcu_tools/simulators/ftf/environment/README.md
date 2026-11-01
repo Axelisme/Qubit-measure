@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-01，startup／YAML 與 runtime 契約分層
+**Last updated:** 2026-11-02，caller 板子決定 PFB 間距
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -297,9 +297,9 @@ is the first carrier; that carrier's phase stays unchanged. The existing
 ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
 shift. Mux ADCs select incident carriers by the supplied board's PFB channel
-before demodulation. The profile determines Nyquist folding, channel spacing and
-offset. The example board's PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz
-passband; changing independent ADC clocks in YAML changes this selection.
+before demodulation. The caller's board YAML determines Nyquist folding,
+PFBv4 channel spacing, offset and passband. Changing its ADC clock ratios or
+decimation changes carrier selection.
 Different-channel carriers are excluded, including when only one carrier is
 incident. If an observed event has no in-channel carrier, planning retains its
 grids with empty pulses. Acquisition emits receiver background offset and noise

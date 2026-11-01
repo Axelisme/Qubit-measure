@@ -124,7 +124,8 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
     # Start at an exact channel center. The companion is outside its half-width.
     carrier_mhz = 2 * adc["fs"]
     companion_mhz = carrier_mhz + 0.75 * spacing
-    profile["readouts"][0]["fs_mult"] *= 2
+    for ch in profile["mux"][0]["ro_chs"]:
+        profile["readouts"][ch]["fs_mult"] *= 2
     wider = build_soccfg(profile)
     base = mux_template()
     carrier = replace(base.events[0], frequency_mhz=np.full(2, carrier_mhz))
