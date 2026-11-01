@@ -18,6 +18,8 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
 
+from tests.program._profiles import load_soccfg
+
 from ._workflow_harness import StartHarness
 
 RUN_ID = "21ed5156dc9b441a8b5cda3cf26633f7"
@@ -51,7 +53,7 @@ def make_control(tmp_path):
 
     from zcu_tools.experiment.simulation import white_noise
 
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     control = facet_type(harness.state, harness.services)
 

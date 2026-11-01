@@ -3,17 +3,17 @@
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import time_us
 
 
 def test_constructor_controls_define_repetition_loop_and_delays():
     prog = compile_modules(
-        make_mock_soccfg(), modules=[], reps=3, initial_delay=0.25, relax_delay=12.5
+        load_soccfg(), modules=[], reps=3, initial_delay=0.25, relax_delay=12.5
     )
     assert prog.loop_dict["reps"] == 3
     assert prog.initial_delay == 0.25
@@ -23,12 +23,12 @@ def test_constructor_controls_define_repetition_loop_and_delays():
 @pytest.mark.parametrize("reps", [0, -1, True, 1.5])
 def test_constructor_rejects_non_positive_integer_reps(reps):
     with pytest.raises(ValueError, match="reps must be a positive integer"):
-        compile_modules(make_mock_soccfg(), modules=[], reps=reps)
+        compile_modules(load_soccfg(), modules=[], reps=reps)
 
 
 @pytest.mark.parametrize("decimated", [False, True])
 def test_acquire_uses_each_calls_rounds_and_preserves_iq_layout(decimated):
-    env = white_noise(std_adc=0, seed=123)
+    env = white_noise(load_soccfg(), std_adc=0, seed=123, routes=((0, 0),))
     try:
         module = PulseReadoutCfg(
             gen_ch=0,
@@ -56,7 +56,9 @@ def test_acquire_uses_each_calls_rounds_and_preserves_iq_layout(decimated):
             np.testing.assert_array_equal(result[0], 0)
             request = env.soc.binding.last_request
             assert request is not None
-            assert time_us(request.time_base, request.relax_delay_ticks) == 12.5
+            assert time_us(
+                request.time_base, request.relax_delay_ticks
+            ) == prog.cycles2us(prog.us2cycles(12.5))
     finally:
         env.devices.close_all_devices()
 
@@ -64,7 +66,7 @@ def test_acquire_uses_each_calls_rounds_and_preserves_iq_layout(decimated):
 @pytest.mark.parametrize("decimated", [False, True])
 @pytest.mark.parametrize("rounds", [0, -1, True, 1.5])
 def test_acquire_rejects_non_positive_integer_rounds(decimated, rounds):
-    prog = compile_modules(make_mock_soccfg(), modules=[])
+    prog = compile_modules(load_soccfg(), modules=[])
     acquire = prog.acquire_decimated if decimated else prog.acquire
     with pytest.raises(ValueError, match="rounds must be a positive integer"):
         acquire(object(), rounds=rounds)

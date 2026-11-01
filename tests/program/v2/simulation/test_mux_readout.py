@@ -5,6 +5,7 @@ import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -21,7 +22,12 @@ def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
         builder.emit(mux)
     builder.delay_by_timeline()
     prog = builder.build()
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=9),
+        std_adc=0,
+        routes=((0, 4), (0, 1)),
+        seed=None,
+    )
     try:
         try:
             prog.acquire(env.soc, progress=False)
@@ -58,18 +64,19 @@ def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
 
 
 @pytest.mark.parametrize("channels", [(4, 1), (1,)])
-def test_fixed_mux_compile_profile_runs_real_mux_with_every_adc(channels):
-    from zcu_tools.program.v2 import mocksoc
-
-    factory = getattr(mocksoc, "make_mux_mock_soccfg", None)
-    assert factory is not None, "offline mux acquisition needs a fixed compile profile"
-    soccfg = factory(3, 5, gen_ch=0, ro_chs=channels)
+def test_yaml_mux_compile_profile_runs_real_mux_with_every_adc(channels):
+    soccfg = load_mux_soccfg(3, 5, gen_ch=0, ro_chs=channels)
     prog = compile_modules(
         soccfg,
         modules=[native_mux(channels).build("mux")],
         reps=3,
     )
-    env = white_noise(n_gens=3, n_readouts=5, routes=tuple((0, ch) for ch in channels))
+    env = white_noise(
+        load_soccfg(n_gens=3, n_readouts=5),
+        routes=tuple((0, ch) for ch in channels),
+        std_adc=1.0,
+        seed=None,
+    )
     try:
         prog.acquire_decimated(env.soc, progress=False)
         raw = prog.get_raw()

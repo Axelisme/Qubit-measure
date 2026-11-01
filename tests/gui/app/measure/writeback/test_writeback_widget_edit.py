@@ -48,6 +48,7 @@ from tests.gui.app.measure._synthetic import (
     SampleParams,
 )
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 
@@ -264,7 +265,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         context.set_parameter(
             require_target(context.read_context()), "general.ext.gain", 0.4
         )
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         tab_id = ctrl.tab_control.new_tab("synthetic/module")
         ctrl.run_analyze_control.start_run(tab_id)

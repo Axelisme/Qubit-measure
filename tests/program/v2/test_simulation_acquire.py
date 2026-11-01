@@ -21,16 +21,28 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
+from tests.program._timing_expectations import tproc_ceil
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
-def environment(**kwargs):
+def environment(*, std_adc=1.0, seed=None, n_gens=None, n_readouts=None, routes=None):
     name = "zcu_tools.experiment.simulation"
     assert importlib.util.find_spec(name) is not None, (
         "explicit environment API required"
     )
-    return importlib.import_module(name).white_noise(**kwargs)
+    soccfg = load_soccfg(n_gens=n_gens, n_readouts=n_readouts)
+    return importlib.import_module(name).white_noise(
+        soccfg,
+        std_adc=std_adc,
+        seed=seed,
+        routes=(
+            tuple((ch, ch) for ch in range(len(soccfg["readouts"])))
+            if routes is None
+            else routes
+        ),
+    )
 
 
 def readout_modules(env, *, channels=(0,), samples=16, reads=1):
@@ -803,7 +815,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
     assert times_us(request.time_base, request.readouts[0].trigger_ticks) == (
         expected_trigger,
     )
-    expected_pulse = prog.cycles2us(646)  # ceil(1.5 us * 430.08 MHz)
+    expected_pulse = prog.cycles2us(tproc_ceil(env.soccfg, 1.5))
     assert (
         time_us(request.time_base, request.materialize_point(0).events[0].start_ticks)
         == expected_pulse

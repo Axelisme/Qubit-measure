@@ -55,7 +55,6 @@ from zcu_tools.gui.session.ports import (
     OperationKind,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
 from tests.gui._controller_adapter import (
     InteractiveAdapter,
@@ -65,6 +64,7 @@ from tests.gui._controller_adapter import (
 )
 from tests.gui._qt_waits import qt_until as _wait_for
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
+from tests.program._profiles import load_soccfg
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -75,7 +75,7 @@ def _make_ctx() -> SessionEnv:
     return SessionEnv(
         parameters=None,
         soc=MagicMock(),  # simulate connected soc
-        soccfg=make_mock_soccfg(),
+        soccfg=load_soccfg(),
     )
 
 

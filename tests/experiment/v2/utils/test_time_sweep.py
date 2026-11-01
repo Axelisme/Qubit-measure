@@ -3,14 +3,10 @@ import pytest
 from zcu_tools.experiment.utils.sweep import make_sweep
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
-from zcu_tools.program.v2 import (
-    Pulse,
-    PulseCfg,
-    make_mock_soccfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, PulseCfg, sweep2param
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -18,7 +14,7 @@ from tests.program._timeline import compile_modules
 def test_planned_time_window_preserves_span_and_compiled_coordinates(
     reverse: bool,
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     cycle = soccfg.cycles2us(1, gen_ch=0)
     start, stop = (193, 20) if reverse else (20, 193)
     requested = make_sweep(start * cycle, stop * cycle, expts=101)
@@ -58,7 +54,7 @@ def test_planned_time_window_preserves_span_and_compiled_coordinates(
 
 @pytest.mark.parametrize("cycles,points", [(0.5, 101), (1.2, 101), (0.0, 1)])
 def test_unusable_time_plan_reports_clock_and_available_points(cycles, points) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     cycle = soccfg.cycles2us(1, gen_ch=0)
     # At 20.51 cycles the rounded start leaves < 1 cycle even for a 1.2-cycle span.
     requested = make_sweep(20.51 * cycle, (20.51 + cycles) * cycle, expts=points)
@@ -70,13 +66,11 @@ def test_unusable_time_plan_reports_clock_and_available_points(cycles, points) -
 @pytest.mark.parametrize("scaler", [0.0, np.nan, np.inf])
 def test_time_plan_rejects_invalid_scaler(scaler: float) -> None:
     with pytest.raises(ValueError, match="scaler"):
-        plan_time_sweep(
-            make_sweep(0.05, 0.56, expts=101), make_mock_soccfg(), scaler=scaler
-        )
+        plan_time_sweep(make_sweep(0.05, 0.56, expts=101), load_soccfg(), scaler=scaler)
 
 
 def test_scaled_readout_clock_plan_matches_preview() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     cycle = soccfg.cycles2us(1, ro_ch=0) / 2
     requested = make_sweep(20 * cycle, 193 * cycle, expts=101)
     planned = plan_time_sweep(requested, soccfg, ro_ch=0, scaler=2)

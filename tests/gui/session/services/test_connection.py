@@ -34,6 +34,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from tests.gui._completion_helpers import on_connection_failed
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture
@@ -55,7 +56,7 @@ def released_boards(monkeypatch) -> list[object]:
     from zcu_tools.experiment.simulation import white_noise
 
     def proxy(ip, port):
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         return env.soc, env.soccfg
 
     released: list[object] = []
@@ -218,7 +219,7 @@ def test_successful_endpoint_changes_and_failed_reconnect_preserves_it(
 
     def proxy(ip: str, port: int):
         assert (ip, port) == ("192.0.2.1", 8888)
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         return env.soc, env.soccfg
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)
@@ -243,7 +244,7 @@ def test_gui_async_remote_connect_updates_the_successful_endpoint(qapp, monkeypa
 
     def proxy(ip: str, port: int):
         assert (ip, port) == ("192.0.2.3", 8000)
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         return env.soc, env.soccfg
 
     monkeypatch.setattr(remote, "make_soc_proxy", proxy)

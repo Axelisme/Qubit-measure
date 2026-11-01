@@ -4,6 +4,9 @@ Remove the scalar diagnostic reset parameter when the Module-tree interpreter
 is deleted. Keep the acquisition case on the public acquisition route.
 """
 
+from fractions import Fraction
+from math import ceil
+
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
@@ -26,7 +29,15 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timeline import compile_modules
+from tests.program._timing_expectations import (
+    generator_duration,
+    native_sweep,
+    readout_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -50,7 +61,9 @@ def receiver():
 
 
 def acquire(modules, *, sweep=None, reps=1):
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     prog = compile_modules(
         env.soccfg,
         modules=modules,
@@ -65,7 +78,9 @@ def acquire(modules, *, sweep=None, reps=1):
 
 
 def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     builder = TimelineBuilder(env.soccfg)
     builder.add_loop("shot", 2)
     builder.emit(LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles"))
@@ -80,7 +95,9 @@ def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
     assert request.point_dims == (2,)
-    for point, readout_start in enumerate([0.4, 0.5]):
+    drive_end = tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1, 1))
+    for point, wait in enumerate((43, 86)):
+        readout_start = (3 * drive_end + wait) / TPROC_MHZ
         timeline = request.materialize_point(point)
         assert [e.source for e in timeline.events] == [
             "drive",
@@ -90,7 +107,7 @@ def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
         ]
         assert time_us(
             request.time_base, timeline.events[-1].start_ticks
-        ) == pytest.approx(readout_start, abs=0.015)
+        ) == pytest.approx(readout_start)
     prog.acquire(env.soc, progress=False)
     for point in range(2):
         assert request_of(env).materialize_point(point) == request.materialize_point(
@@ -108,16 +125,22 @@ def test_tablelength_uses_selected_duration_and_sweeps_use_quantized_controls():
         [pulse, cfg.build("readout")], sweep=[("length_axis", 2)], reps=2
     )
     assert request.loop_dims == (2, 2)
+    profile = prog.soccfg
+    lengths = (0.1, 0.3)
+    ends = [
+        ceil(runtime_cycles(profile, int(profile.us2cycles(t, gen_ch=1)), 1))
+        for t in lengths
+    ]
     for i, events in enumerate(
         request.materialize_point(p).events
         for p in range(int(np.prod(request.point_dims)))
     ):
         assert events[0].source == "length"
         assert time_us(request.time_base, events[0].duration_ticks) == pytest.approx(
-            [0.1, 0.3][i % 2], abs=0.003
+            float(generator_duration(profile, lengths[i % 2], 1))
         )
         assert time_us(request.time_base, events[1].start_ticks) == pytest.approx(
-            [0.1, 0.3][i % 2], abs=0.006
+            ends[i % 2] / TPROC_MHZ
         )
         assert events[1].gain == pytest.approx([0.1, 0.2][i % 2], abs=1e-4)
     assert raw_of(prog)[0].shape == (2, 2, 1, 2)
@@ -136,7 +159,9 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         GaussWaveformCfg,
     )
 
-    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
+    )
     first = drive()
     first.pre_delay = 0.02
     first.post_delay = 0.03
@@ -163,8 +188,28 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
     prog = builder.build()
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
-    origin = 0.04 if preceding_pulse else 0.0
-    waits = [0.15, 0.35] if branches == 1 else [0.2, 0.35]
+    origin_cycles = (
+        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.04, 1))
+        if preceding_pulse
+        else 0
+    )
+    origin = origin_cycles / TPROC_MHZ
+    first_ends = [
+        tproc_ceil(env.soccfg, 0.02)
+        + ceil(
+            runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=1)), 1)
+            + Fraction("0.03") * Fraction(str(TPROC_MHZ))
+        )
+        for t in (0.1, 0.3)
+    ]
+    second_ends = [
+        ceil(runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=2)), 2))
+        for t in (0.2, 0.1)
+    ]
+    waits = [
+        max(a, b) if branches == 2 else a
+        for a, b in zip(first_ends, second_ends, strict=True)
+    ]
     for point, expected_wait in enumerate(waits):
         events = request.materialize_point(point).events
         actual_sources = [event.source for event in events]
@@ -178,21 +223,23 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         first_event = next(e for e in events if e.source == "first")
         readout = next(e for e in events if e.gen_ch == 0)
         assert time_us(request.time_base, first_event.start_ticks) == pytest.approx(
-            origin + 0.02, abs=0.003
+            origin + tproc_ceil(env.soccfg, 0.02) / TPROC_MHZ
         )
         if branches == 2:
             second_event = next(e for e in events if e.gen_ch == 2)
             assert time_us(
                 request.time_base, second_event.start_ticks
-            ) == pytest.approx(origin, abs=0.003)
+            ) == pytest.approx(origin)
         assert time_us(request.time_base, readout.start_ticks) == pytest.approx(
-            origin + expected_wait, abs=0.007
+            origin + expected_wait / TPROC_MHZ,
+            # Splitting an odd ramp can trim one fabric cycle from flat-top playback.
+            abs=2 / env.soccfg["gens"][1]["f_fabric"] if flat_top else 1e-9,
         )
     env.devices.close_all_devices()
 
 
 def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     gen, adc = readout_freq_words(
         env.soccfg, [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -223,7 +270,7 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
             request.materialize_point(p).events
             for p in range(int(np.prod(request.point_dims)))
         )
-    ] == pytest.approx([3276 / 32766, -6552 / 32766])
+    ] == pytest.approx([3276 / GEN_MAXV, -6552 / GEN_MAXV])
     assert [
         t.readouts[0].frequency_mhz[0]
         for t in (
@@ -234,7 +281,7 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
 
 
 def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -286,11 +333,15 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
     ] == [0, 0]
     assert time_us(
         request.time_base, request.materialize_point(0).events[-1].start_ticks
-    ) == pytest.approx(0.2, abs=0.004)
+    ) == pytest.approx(
+        tproc_ceil(load_soccfg(), generator_duration(load_soccfg(), 0.2)) / TPROC_MHZ
+    )
 
 
 def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
-    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
+    )
     pulses = [
         PulseCfg(
             ch=ch,
@@ -326,7 +377,23 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
         request = request_of(env)
         timelines = [request.materialize_point(point) for point in range(3)]
         # Each native point covers the actual waveform plus pre/post once.
-        # The two swept waveforms remain 19, 38 and 57 generator clocks long.
+        lengths = native_sweep(env.soccfg, 0.05, 0.15, 3, gen_ch=1)
+        starts = [
+            2 * tproc_ceil(env.soccfg, 0.01)
+            + ceil(
+                runtime_cycles(env.soccfg, n, 1)
+                + Fraction("0.02") * Fraction(str(TPROC_MHZ))
+            )
+            for n in lengths
+        ]
+        triggers = [
+            start - tproc_ceil(env.soccfg, 0.01) + int(env.soccfg.us2cycles(0.03))
+            for start in starts
+        ]
+        readout_end = tproc_ceil(
+            env.soccfg, generator_duration(env.soccfg, 0.2) + Fraction("0.02")
+        )
+        adc_end = tproc_ceil(env.soccfg, readout_duration(env.soccfg, 0.1))
         for point, timeline in enumerate(timelines):
             assert [event.source for event in timeline.events] == [
                 "reset",
@@ -336,22 +403,24 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
             assert [
                 time_us(request.time_base, event.duration_ticks)
                 for event in timeline.events[:2]
-            ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
+            ] == pytest.approx([lengths[point] / GEN_MHZ] * 2)
             assert time_us(
                 request.time_base, timeline.events[-1].start_ticks
-            ) == pytest.approx([40, 62, 83][point] / 430.08)
+            ) == pytest.approx(starts[point] / TPROC_MHZ)
             assert times_us(
                 request.time_base, timeline.readouts[0].trigger_ticks
-            ) == pytest.approx(([48, 70, 91][point] / 430.08,))
+            ) == pytest.approx((triggers[point] / TPROC_MHZ,))
             assert time_us(request.time_base, timeline.duration_ticks) == pytest.approx(
-                [135, 157, 178][point] / 430.08
+                max(starts[point] + readout_end, triggers[point] + adc_end) / TPROC_MHZ
             )
     finally:
         env.devices.close_all_devices()
 
 
 def test_reps_counter_lookup_rejected_before_backend():
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     builder = TimelineBuilder(env.soccfg)
     builder.emit(LoadValue("writer", [0], "reps", "selection"))
     builder.emit(
@@ -373,7 +442,7 @@ def test_reps_counter_word_lookup_rejected_before_backend():
         DelayAuto("invalid_wait", t="cycles"),
         receiver().build("readout"),
     ]
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     prog = compile_modules(env.soccfg, modules=modules)
     with pytest.raises(
         ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"

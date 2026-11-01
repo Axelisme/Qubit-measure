@@ -4,9 +4,10 @@ from collections.abc import Callable, Sequence
 
 import pytest
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 
 def compile_lookup(
@@ -30,7 +31,7 @@ def compile_lookup(
             if before_body is not None:
                 before_body()
             self.fork("default", into="lookup")
-            self.timeline_inc(13 / 430.08, timeline="lookup")
+            self.timeline_inc(13 / TPROC_MHZ, timeline="lookup")
             for index in range(len(loader.values)) if indices is None else indices:
                 self.write_reg("index", index)
                 self.emit(loader, timeline="lookup")
@@ -47,7 +48,9 @@ def compile_lookup(
                     }
                 )
 
-    return Program(make_mock_soccfg(), initial_delay=5 / 430.08, relax_delay=7 / 430.08)
+    return Program(
+        load_soccfg(), initial_delay=5 / TPROC_MHZ, relax_delay=7 / TPROC_MHZ
+    )
 
 
 def compiled_words(prog: TimelineProgramV2) -> list[int]:
@@ -194,7 +197,7 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
 
         def _body(self, cfg):
             self.write_reg("value", 29)
-            self.timeline_inc(13 / 430.08)
+            self.timeline_inc(13 / TPROC_MHZ)
             self.emit(loader)
             self.write_reg("output", "value")
             self.asm_inst(
@@ -207,7 +210,7 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
                 }
             )
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     assert prog.compile_datamem() is None
     result = analyze(prog)
     assert [(event.cycle, event.value) for event in result.shots[0].events] == [(3, 29)]
@@ -252,7 +255,7 @@ def test_lookup_reports_register_exhaustion(values):
             self.emit(loader)
 
     with pytest.raises(RuntimeError, match="more data registers than are available"):
-        Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+        Program(load_soccfg(), initial_delay=0, relax_delay=0)
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])

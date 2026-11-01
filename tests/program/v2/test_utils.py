@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
 from zcu_tools.program.v2 import utils
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -13,6 +12,8 @@ from zcu_tools.program.v2.utils import (
     readout_freq_words,
     sweep2param,
 )
+
+from tests.program._profiles import load_soccfg
 
 
 def test_sweep2param():
@@ -45,7 +46,7 @@ def test_param2str():
 def test_readout_freq_words_match_qick_manager_waveforms(
     mixer_freq: float | None,
 ) -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     if mixer_freq is not None:
         soccfg["gens"][0]["has_mixer"] = True
     freq_mhz = 6000.0
@@ -116,7 +117,7 @@ def test_readout_freq_words_match_qick_manager_waveforms(
 
 
 def test_readout_freq_from_words_rejects_corrupt_readout_word() -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     cfg = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -146,7 +147,7 @@ def test_readout_freq_from_words_rejects_corrupt_readout_word() -> None:
 
 
 def test_generator_word_decode_preserves_uint32_high_bit() -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     freq_mhz = 7000.0
     cfg = PulseReadoutCfg(
         gen_ch=0,
@@ -177,7 +178,7 @@ def test_generator_word_decode_preserves_uint32_high_bit() -> None:
 
 
 def test_generator_word_decode_handles_negative_mixer_relative_dds() -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     soccfg["gens"][0]["has_mixer"] = True
     mixer_freq = 5000.123
     freq_mhz = 4900.0
@@ -211,7 +212,7 @@ def test_generator_word_decode_handles_negative_mixer_relative_dds() -> None:
 
 @pytest.mark.parametrize("mixer_freq", [None, 5000.123])
 def test_array_word_decoding_matches_scalar_bit_exactly(mixer_freq):
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     soccfg["gens"][0]["has_mixer"] = mixer_freq is not None
     freqs = [100.123, 7000.0, 4900.0]
     cfg = PulseReadoutCfg(
@@ -271,7 +272,7 @@ def test_array_word_decoding_matches_scalar_bit_exactly(mixer_freq):
 
 
 def test_array_paired_word_validation_rejects_one_bit_corruption():
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     cfg = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,

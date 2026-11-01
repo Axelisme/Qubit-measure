@@ -19,12 +19,12 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.program.v2 import make_mock_soccfg
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.widgets.form._text_input import commit_text
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture
@@ -35,13 +35,13 @@ def diagnostic_window(
     registry = Registry()
     registry.register("sample", SampleAdapter)
     ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=load_soccfg())),
         registry,
         None,
         BaseEventBus(),
         project_root=str(tmp_path),
     )
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

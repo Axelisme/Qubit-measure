@@ -28,7 +28,7 @@ class SimulationSoc(QickConfig):
     routes is a tuple of (generator, ADC) integer pairs. Other containers,
     malformed pairs and non-integer channels raise TypeError at construction.
     Out-of-range channels raise ValueError. The fixed capability profile is
-    supplied by make_mock_soccfg; using an unbound route fails before acquisition.
+    supplied by the caller's compile profile; using an unbound route fails before acquisition.
     Getters retain the last completed realization, never execute or resample it.
     """
 

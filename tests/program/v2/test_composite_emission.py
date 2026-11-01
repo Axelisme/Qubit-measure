@@ -1,6 +1,8 @@
 """Composite declarations and runtime playback at the public compiler seam."""
 
 from collections.abc import Callable, Sequence
+from fractions import Fraction
+from math import ceil
 
 import numpy as np
 import pytest
@@ -10,7 +12,6 @@ from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -27,8 +28,21 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import (
+    generator_duration,
+    generator_tproc_grid,
+    native_sweep,
+    readout_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import recompile, shots, waves
+
+PROFILE = load_soccfg()
+PRE = tproc_ceil(PROFILE, 0.01)
+RELAX = int(PROFILE.us2cycles(0.02))
 
 
 def _program(
@@ -50,10 +64,8 @@ def _program(
     return Program(soccfg, reps=2, initial_delay=0, relax_delay=0.02)
 
 
-@pytest.mark.parametrize("length, spacing", [(0.101, 49), (0.201, 92)])
-def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(
-    length, spacing
-):
+@pytest.mark.parametrize("length", [0.101, 0.201])
+def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(length):
     readout = MuxReadout(
         "mux",
         native_mux(
@@ -72,22 +84,27 @@ def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(
 
     prog = _program(mux_soccfg(), [readout], body)
     result = shots(prog)
-    # Pre-delay ceils to 5 ticks. Generator lengths round to 39/77 at 384 MHz.
-    # ceil(5 + (39 or 77) * 430.08/384 + .0005 * 430.08) gives 49/92.
-    # ADC length rounds to 8 at 76.8 MHz: 44.8 tProc ticks after trigger.
-    # Final native relaxation rounds the remaining ADC tail plus .02 us once:
-    # round(max(0, 5 + 44.8 - spacing) + .02 * 430.08) = 9 for both lengths.
-    assert [waves(shot) for shot in result] == [[5, spacing + 5]] * 2
+    profile = prog.soccfg
+    pre = tproc_ceil(profile, 0.01)
+    spacing = pre + tproc_ceil(
+        profile, generator_duration(profile, length) + Fraction("0.0005")
+    )
+    adc_tail = max(
+        Fraction(0),
+        pre + readout_duration(profile, 0.1, 4) * Fraction(str(TPROC_MHZ)) - spacing,
+    )
+    relaxation = round(adc_tail + Fraction("0.02") * Fraction(str(TPROC_MHZ)))
+    assert [waves(shot) for shot in result] == [[pre, spacing + pre]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        2 * spacing + 9
+        2 * spacing + relaxation
     ] * 2
     assert [
         [(e.cycle - shot.start_cycle, e.value) for e in shot.events if e.kind == "data"]
         for shot in result
-    ] == [[(5, 18), (15, 0), (spacing + 5, 18), (spacing + 15, 0)]] * 2
+    ] == [[(pre, 18), (pre + 10, 0), (spacing + pre, 18), (spacing + pre + 10, 0)]] * 2
     assert list(prog.ro_chs) == [4, 1]
     assert prog.gen_chs[0]["mux_tones"][0]["gain_int"] > 0
     prog.compile()
@@ -95,7 +112,7 @@ def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(
 
 
 def _table_readout() -> TablePulseReadout:
-    soccfg = make_mock_soccfg(1, 1)
+    soccfg = load_soccfg(1, 1)
     freq_words, ro_words = readout_freq_words(
         soccfg, [1000.0, 1010.0, 1020.0], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -122,17 +139,18 @@ def _table_readout() -> TablePulseReadout:
 def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
     readout = _table_readout()
     prog = _program(
-        make_mock_soccfg(1, 1),
+        load_soccfg(1, 1),
         [readout],
         lambda p: p.emit(readout),
         lambda p: p.add_loop("frequency", 3),
     )
     result = shots(prog)
-    # ADC .1us rounds31 clocks at307.2MHz =>43.4 cycles, pulse39=>43.68.
-    # Config at0; trigger/pulse at5; ceil(5+43.68+.21504)=49.
-    assert [waves(shot) for shot in result] == [[0, 5]] * 6
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [49] * 6
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [58] * 6
+    end = PRE + tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 0.101) + Fraction("0.0005")
+    )
+    assert [waves(shot) for shot in result] == [[0, PRE]] * 6
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [end] * 6
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [end + RELAX] * 6
     # The loop owns paired updates after body closure, before the next point.
     writes = [i for i, inst in enumerate(prog.prog_list) if inst["CMD"] == "WMEM_WR"]
     body_end = next(
@@ -171,23 +189,29 @@ def _pulse_cfg(length: float, *, ch: int = 0) -> PulseCfg:
 
 
 def test_integer_candidate_selection_uses_only_author_waveform_table():
+    # Author candidates on the common clock grid so exact selection stays covered.
+    step = generator_tproc_grid(PROFILE)
+    lengths = (step, 2 * step)
     pulse = ComputedPulse(
         "selected_integer",
         val_reg="selector",
         pulses=[
-            _pulse_cfg(25 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
-            _pulse_cfg(50 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+            _pulse_cfg(n / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0})
+            for n in lengths
         ],
     )
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         lambda p: p.emit(pulse),
         lambda p: p.add_loop("selector", 2),
     )
     result = shots(prog)
     assert [waves(s) for s in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [28, 56] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, n / GEN_MHZ))
+        for n in lengths
+    ] * 2
     memory = prog.compile_datamem()
     # Only the author-declared two waveform addresses occupy data memory.
     assert memory is not None and len(memory) == 2
@@ -198,7 +222,7 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
     pulse = ComputedPulse(
         "selected",
         val_reg="selector",
-        pulses=[_pulse_cfg(39 / 384), _pulse_cfg(89 / 384)],
+        pulses=[_pulse_cfg(39 / GEN_MHZ), _pulse_cfg(89 / GEN_MHZ)],
     )
 
     def body(prog):
@@ -206,42 +230,64 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
         prog.emit(pulse)
 
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         body,
         lambda p: p.add_loop("selector", 2),
     )
-    # First start is ceil(.01 * 430.08) = 5; selected spacing is 49 or 105.
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 89)
+    ]
     result = shots(prog)
-    assert [waves(shot) for shot in result] == [[5, 54], [5, 110]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [98, 210] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [107, 219] * 2
+    assert [waves(shot) for shot in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
+    ] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
 
 def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
-    first = _pulse_cfg(39 / 384)
+    first = _pulse_cfg(39 / GEN_MHZ)
     second = first.model_copy(update={"post_delay": 0.001})
     pulse = ComputedPulse("selected_post", val_reg="selector", pulses=[first, second])
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         lambda p: p.emit(pulse),
         lambda p: p.add_loop("selector", 2),
     )
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    assert [waves(shot) for shot in result] == [[5]] * 4
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [49, 50] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [58, 59] * 2
+    ends = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, 39)
+            + Fraction(str(post)) * Fraction(str(TPROC_MHZ))
+        )
+        for post in (0.0005, 0.001)
+    ]
+    assert [waves(shot) for shot in result] == [[PRE]] * 4
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        end + RELAX for end in ends
+    ] * 2
 
 
 def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
     pulse = TableLengthPulse(
         "length_table",
-        _pulse_cfg(39 / 384),
-        lengths=[39 / 384, 64 / 384, 89 / 384],
+        _pulse_cfg(39 / GEN_MHZ),
+        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
         idx_reg="index",
     )
 
@@ -250,37 +296,46 @@ def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
         prog.emit(pulse)
 
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         body,
         lambda p: p.add_loop("index", 3),
     )
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    assert [waves(shot) for shot in result] == [[5, 54], [5, 82], [5, 110]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        98,
-        154,
-        210,
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 64, 89)
+    ]
+    assert [waves(shot) for shot in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
     ] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [107, 163, 219] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
 
 def _runtime_selected(kind: str, *, pre_delay: float = 0.01) -> Module:
-    first = _pulse_cfg(39 / 384).model_copy(update={"pre_delay": pre_delay})
-    second = _pulse_cfg(89 / 384).model_copy(update={"pre_delay": pre_delay})
+    first = _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
+    second = _pulse_cfg(89 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
     if kind == "computed":
         return ComputedPulse("selected", val_reg="index", pulses=[first, second])
     return TableLengthPulse(
-        "selected", first, lengths=[39 / 384, 89 / 384], idx_reg="index"
+        "selected", first, lengths=[39 / GEN_MHZ, 89 / GEN_MHZ], idx_reg="index"
     )
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
-    soccfg = make_mock_soccfg(1, 0)
+    soccfg = load_soccfg(1, 0)
     shared = _runtime_selected(kind)
     others = []
 
@@ -329,11 +384,25 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
                         prog.emit(pulse)
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    assert [waves(s) for s in result] == [[5, 54], [5, 110]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [98, 210] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [107, 219] * 2
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (39, 89)
+    ]
+    assert [waves(s) for s in result] == [
+        [PRE, PRE + spacing] for spacing in spacings
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        2 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        2 * spacing + RELAX for spacing in spacings
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -350,7 +419,7 @@ def test_selected_playback_requires_full_selector_bounds(kind, index):
         prog.add_reg("index")
 
     with pytest.raises(ValueError, match="index"):
-        _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+        _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -367,7 +436,7 @@ def test_selected_runtime_origin_rejects_possible_signed_overflow(kind):
         prog.emit(pulse)
 
     with pytest.raises(ValueError, match="overflow"):
-        _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+        _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -377,7 +446,7 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
 
     def body(prog):
         if negative_pre:
-            prog.timeline_inc(100 / 430.08, timeline="default")
+            prog.timeline_inc(100 / TPROC_MHZ, timeline="default")
             prog.emit(pulse)
             prog.emit(pulse)
         else:
@@ -386,20 +455,21 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
             prog.emit(pulse, timeline="other")
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(
-            make_mock_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2)
-        )
+        _program(load_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2))
 
 
 def _negative_selected(kind: str, cycles: tuple[int, int] = (39, 64)) -> Module:
     candidates = [
-        _pulse_cfg(n / 384).model_copy(update={"post_delay": -60 / 430.08})
+        _pulse_cfg(n / GEN_MHZ).model_copy(update={"post_delay": -60 / TPROC_MHZ})
         for n in cycles
     ]
     if kind == "computed":
         return ComputedPulse("negative", val_reg="index", pulses=candidates)
     return TableLengthPulse(
-        "negative", candidates[0], lengths=[n / 384 for n in cycles], idx_reg="index"
+        "negative",
+        candidates[0],
+        lengths=[n / GEN_MHZ for n in cycles],
+        idx_reg="index",
     )
 
 
@@ -416,21 +486,22 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / TPROC_MHZ, timeline="default")
         prog.emit(pulse)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Integer origin 100 plus ceil(.01 * 430.08) = 105.
-    assert [waves(s) for s in result] == [[105]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [89, 117] * 2
+    assert [waves(s) for s in result] == [[100 + PRE]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60) for n in (39, 64)
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
 @pytest.mark.parametrize("wait", [False, True])
 def test_selected_negative_post_retains_physical_channel_end(kind, wait):
     pulse = _negative_selected(kind, (39, 39))
-    following = Pulse("following", _pulse_cfg(39 / 384))
+    following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -441,22 +512,29 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
         prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
         if wait:
-            prog.timeline_inc(60 / 430.08, timeline="default")
+            prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
     if not wait:
         with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-            _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+            _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     else:
-        prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
-        assert [waves(s) for s in shots(prog)] == [[105, 154]] * 4
-        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [198] * 4
+        prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
+        physical_end = 100 + PRE + ceil(runtime_cycles(prog.soccfg, 39))
+        following_end = PRE + tproc_ceil(
+            prog.soccfg,
+            generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+        )
+        assert [waves(s) for s in shots(prog)] == [[100 + PRE, physical_end + PRE]] * 4
+        assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+            physical_end + following_end
+        ] * 4
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(kind):
     pulse = _negative_selected(kind)
-    following = Pulse("following", _pulse_cfg(39 / 384))
+    following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -469,11 +547,18 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
         prog.delay_auto(0, gens=True, ros=False)
         prog.emit(following)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    assert [waves(s) for s in result] == [[105, 154], [105, 182]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [198, 226] * 2
+    physical_ends = [100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)]
+    following_end = PRE + tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005")
+    )
+    assert [waves(s) for s in result] == [
+        [100 + PRE, end + PRE] for end in physical_ends
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        end + following_end for end in physical_ends
+    ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -484,7 +569,7 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -493,20 +578,31 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / TPROC_MHZ, timeline="default")
         prog.emit(pulse)
         for cycles in advances:
-            prog.timeline_inc(cycles / 430.08, timeline="default")
+            prog.timeline_inc(cycles / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
     if sum(advances) < 60:
         with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-            _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+            _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     else:
-        prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
         result = shots(prog)
-        assert [waves(s) for s in result] == [[105, 149], [105, 177]] * 2
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [193, 221] * 2
+        physical_ends = [
+            100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+        ]
+        following_end = tproc_ceil(
+            prog.soccfg,
+            generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+        )
+        assert [waves(s) for s in result] == [
+            [100 + PRE, end] for end in physical_ends
+        ] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [
+            end + following_end for end in physical_ends
+        ] * 2
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -516,7 +612,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -527,7 +623,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
         prog.write_reg("origin", 100)
         prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
-        prog.timeline_inc(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.fork("default", into="stale")
         if delay_by_timeline:
             prog.delay_by_timeline()
@@ -535,14 +631,14 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
         prog.emit(following, timeline="stale")
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -557,11 +653,11 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         with prog.branch(by="path", align_timeline=False) as branch:
             for index, amount in enumerate((60, 59)):
                 with branch.case(index):
-                    prog.timeline_inc(amount / 430.08)
+                    prog.timeline_inc(amount / TPROC_MHZ)
         prog.emit(following)
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -571,7 +667,7 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -590,14 +686,22 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
         prog.fork("default", into="other")
         prog.emit(pulse)
         prog.join("other", into="default")
-        prog.timeline_inc(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
-    # max(89/117,100) +60 =>160/177. No sweep-wide max177.
-    assert [waves(s) for s in result] == [[105, 160], [105, 177]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [204, 221] * 2
+    starts = [
+        max(100, 100 + PRE + ceil(runtime_cycles(prog.soccfg, n) - 60)) + 60
+        for n in (39, 64)
+    ]
+    following_end = tproc_ceil(
+        prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005")
+    )
+    assert [waves(s) for s in result] == [[100 + PRE, start] for start in starts] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        start + following_end for start in starts
+    ] * 2
 
 
 @pytest.mark.parametrize("following_ch", [0, 1])
@@ -609,17 +713,19 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
     selected = [
         TableLengthPulse(
             f"selected_{ch}",
-            _pulse_cfg(39 / 384).model_copy(
-                update={"ch": ch, "post_delay": post / 430.08}
+            _pulse_cfg(39 / GEN_MHZ).model_copy(
+                update={"ch": ch, "post_delay": post / TPROC_MHZ}
             ),
-            lengths=[39 / 384, 64 / 384],
+            lengths=[39 / GEN_MHZ, 64 / GEN_MHZ],
             idx_reg="index",
         )
         for ch in (0, 1)
     ]
     following = Pulse(
         "following",
-        _pulse_cfg(39 / 384).model_copy(update={"ch": following_ch, "pre_delay": 0.0}),
+        _pulse_cfg(39 / GEN_MHZ).model_copy(
+            update={"ch": following_ch, "pre_delay": 0.0}
+        ),
     )
 
     def initialize(prog):
@@ -634,13 +740,11 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         prog.emit(selected[1], timeline="other")
         source, target = ("default", "other") if reverse else ("other", "default")
         prog.join(source, into=target)
-        prog.timeline_inc(advance / 430.08, timeline=target)
+        prog.timeline_inc(advance / TPROC_MHZ, timeline=target)
         prog.emit(following, timeline=target)
 
     def build():
-        return _program(
-            make_mock_soccfg(2, 0), [*selected, following], body, initialize
-        )
+        return _program(load_soccfg(2, 0), [*selected, following], body, initialize)
 
     if post + advance < 0:
         with pytest.raises(ValueError, match="pulse overlap"):
@@ -649,14 +753,20 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         prog = build()
         for _ in range(2):
             result = shots(prog)
-            # The 0.01 us pre-delay ceils to 5 cycles. Both selected physical
-            # ends are 149/177. Equal aggregates must retain both channels'
-            # coverage, including the 60-cycle debt.
+            # Equal aggregates retain both channels' physical coverage.
+            physical_ends = [
+                100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+            ]
+            following_end = tproc_ceil(
+                prog.soccfg,
+                generator_duration(prog.soccfg, 39 / GEN_MHZ) + Fraction("0.0005"),
+            )
             assert [waves(s) for s in result] == [
-                [105, 105, 149],
-                [105, 105, 177],
+                [100 + PRE, 100 + PRE, end] for end in physical_ends
             ] * 2
-            assert [s.body_end_cycle - s.start_cycle for s in result] == [193, 221] * 2
+            assert [s.body_end_cycle - s.start_cycle for s in result] == [
+                end + following_end for end in physical_ends
+            ] * 2
             recompile(prog)
 
 
@@ -674,24 +784,33 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
             prog.write_reg("origin", 100)
             prog.timeline_inc("origin", timeline="default")
             prog.emit(pulse)
-            prog.timeline_inc(60 / 430.08, timeline="default")
+            prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    assert [waves(s) for s in result] == [[105, 254], [105, 282]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [298, 354] * 2
+    iteration_ends = [
+        100 + PRE + ceil(runtime_cycles(prog.soccfg, n)) for n in (39, 64)
+    ]
+    assert [waves(s) for s in result] == [
+        [100 + PRE, end + 100 + PRE] for end in iteration_ends
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        2 * end for end in iteration_ends
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
 
 def _flat_selected(kind: str) -> Module:
     def cfg(cycles):
-        return _pulse_cfg((cycles + 16) / 384).model_copy(
+        return _pulse_cfg((cycles + 16) / GEN_MHZ).model_copy(
             update={
                 "waveform": FlatTopWaveformCfg(
-                    length=(cycles + 16) / 384,
-                    raise_waveform=GaussWaveformCfg(length=16 / 384, sigma=4 / 384),
+                    length=(cycles + 16) / GEN_MHZ,
+                    raise_waveform=GaussWaveformCfg(
+                        length=16 / GEN_MHZ, sigma=4 / GEN_MHZ
+                    ),
                 )
             }
         )
@@ -699,7 +818,7 @@ def _flat_selected(kind: str) -> Module:
     if kind == "computed":
         return ComputedPulse("flat", val_reg="index", pulses=[cfg(39), cfg(89)])
     return TableLengthPulse(
-        "flat", cfg(39), lengths=[55 / 384, 105 / 384], idx_reg="index"
+        "flat", cfg(39), lengths=[55 / GEN_MHZ, 105 / GEN_MHZ], idx_reg="index"
     )
 
 
@@ -720,15 +839,26 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
             prog.emit(pulse)
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Origin 7 plus pre-delay 5 starts at 12; selected spacing is 67 or 123.
+    spacings = [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, n)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for n in (55, 105)
+    ]
     assert [waves(s) for s in result] == [
-        [12] * 3 + [79] * 3 + [146] * 3,
-        [12] * 3 + [135] * 3 + [258] * 3,
+        [7 + PRE + i * spacing for i in range(3) for _ in range(3)]
+        for spacing in spacings
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [208, 376] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [217, 385] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        7 + 3 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        7 + 3 * spacing + RELAX for spacing in spacings
+    ] * 2
     prog.compile()
     assert shots(prog) == result
 
@@ -736,14 +866,14 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin():
     left = TableLengthPulse(
         "left",
-        _pulse_cfg(39 / 384),
-        lengths=[39 / 384, 64 / 384, 89 / 384],
+        _pulse_cfg(39 / GEN_MHZ),
+        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
         idx_reg="index",
     )
     right = TableLengthPulse(
         "right",
-        _pulse_cfg(39 / 384, ch=1),
-        lengths=[89 / 384, 64 / 384, 39 / 384],
+        _pulse_cfg(39 / GEN_MHZ, ch=1),
+        lengths=[89 / GEN_MHZ, 64 / GEN_MHZ, 39 / GEN_MHZ],
         idx_reg="index",
     )
 
@@ -759,20 +889,30 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
         prog.emit(right, timeline="right")
         prog.join("left", "right", into="default")
 
-    prog = _program(make_mock_soccfg(2, 0), [left, right], body, initialize)
+    prog = _program(load_soccfg(2, 0), [left, right], body, initialize)
     result = shots(prog)
-    # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
-    assert [waves(s) for s in result] == [[12, 12]] * 6
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [112, 84, 112] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [121, 93, 121] * 2
+    maxima = [
+        7
+        + PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, max(a, b))
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+        for a, b in ((39, 89), (64, 64), (89, 39))
+    ]
+    assert [waves(s) for s in result] == [[7 + PRE, 7 + PRE]] * 6
+    assert [s.body_end_cycle - s.start_cycle for s in result] == maxima * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        end + RELAX for end in maxima
+    ] * 2
 
 
 @pytest.mark.parametrize("constant_second", [False, True])
 def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_second):
-    first = _pulse_cfg(39 / 384).model_copy(
+    first = _pulse_cfg(39 / GEN_MHZ).model_copy(
         update={"post_delay": QickSweep1D("post", 0.0005, 0.0015)}
     )
-    second = _pulse_cfg(39 / 384).model_copy(
+    second = _pulse_cfg(39 / GEN_MHZ).model_copy(
         update={
             "post_delay": 0.0015
             if constant_second
@@ -791,11 +931,24 @@ def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_se
         prog.write_reg("selector", 1)
         prog.emit(pulse)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
-    # Native subcycle post steps truncate to zero in both input branches.
-    assert [waves(s) for s in result] == [[5, 54], [5, 54], [5, 54]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [99, 99, 99] * 2
+    first_posts = native_sweep(prog.soccfg, 0.0005, 0.0015, 3)
+    second_posts = (
+        [Fraction("0.0015") * Fraction(str(TPROC_MHZ))] * 3
+        if constant_second
+        else native_sweep(prog.soccfg, 0.0015, 0.0005, 3)
+    )
+    first_ends = [
+        PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in first_posts
+    ]
+    second_ends = [
+        PRE + ceil(runtime_cycles(prog.soccfg, 39) + post) for post in second_posts
+    ]
+    assert [waves(s) for s in result] == [[PRE, PRE + end] for end in first_ends] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        a + b for a, b in zip(first_ends, second_ends, strict=True)
+    ] * 2
 
 
 class _OverwriteSelected(Macro):
@@ -890,7 +1043,7 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
             self.record_word(length_reg)
             self.record_word("w4")
 
-    prog = Observed(make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
+    prog = Observed(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     words = [[e.value for e in shot.events if e.kind == "data"] for shot in shots(prog)]
     if kind == "table":
         # Observe both the true producer and the patched waveform field consumed
@@ -913,7 +1066,9 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
 @pytest.mark.parametrize("flat", [False, True])
 def test_native_address_playback_keeps_deferred_register_resolution(flat):
     pulse = (
-        _flat_selected("computed") if flat else Pulse("native", _pulse_cfg(39 / 384))
+        _flat_selected("computed")
+        if flat
+        else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
     )
 
     def body(prog):
@@ -921,7 +1076,7 @@ def test_native_address_playback_keeps_deferred_register_resolution(flat):
         prog.pulse_by_reg(0, "late", 0.01, flat_top_pulse=flat)
         prog.add_reg("late")
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body)
+    prog = _program(load_soccfg(1, 0), [pulse], body)
     assert [waves(shot) for shot in shots(prog)] == [[4] * (3 if flat else 1)] * 2
 
 
@@ -992,7 +1147,7 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
             super().append_macro(macro)
 
     try:
-        prog = Observed(make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
+        prog = Observed(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     except ValueError as exc:
         assert corrupt and "unregistered compiler time write at instruction" in str(exc)
         return
@@ -1004,9 +1159,18 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
     # Candidate order and public declared wmem resources supply the expected
     # addresses. The observer never prepares or repairs a segment address.
     assert actual == prog.expected_segments * 2
-    assert [waves(shot) for shot in result] == [[(5 if managed else 4)] * 3] * 4
+    assert [waves(shot) for shot in result] == [
+        [(PRE if managed else int(prog.us2cycles(0.01)))] * 3
+    ] * 4
     if managed:
-        assert [s.body_end_cycle - s.start_cycle for s in result] == [67, 123] * 2
+        assert [s.body_end_cycle - s.start_cycle for s in result] == [
+            PRE
+            + ceil(
+                runtime_cycles(prog.soccfg, n)
+                + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+            )
+            for n in (55, 105)
+        ] * 2
     lengths = []
     for row in actual:
         assert all(address is not None for address in row)
@@ -1020,7 +1184,7 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
 
 
 def _selected_length_with_change(change: str) -> TimelineProgramV2:
-    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
     loader = LoadValue("lengths", [39, 89], idx_reg="index", val_reg="length")
     other = LoadValue(
         "other", [89, 39], idx_reg="index", val_reg="length", use_existed=True
@@ -1072,7 +1236,7 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
 
 
 def _selection_flow_program(body, *, path_count=2):
-    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
     loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
     other = LoadValue(
         "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
@@ -1086,9 +1250,7 @@ def _selection_flow_program(body, *, path_count=2):
         prog.write_reg("index", 0)
         body(prog, loader, other)
 
-    return _program(
-        make_mock_soccfg(1, 0), [template, loader, other], lower, initialize
-    )
+    return _program(load_soccfg(1, 0), [template, loader, other], lower, initialize)
 
 
 def _play_selected_length(prog, relation, values, timeline="default"):
@@ -1180,9 +1342,10 @@ def test_selected_playback_allows_single_iteration_or_fresh_repeat_lookup(
             prog.delay_by_timeline()
 
     result = shots(_selection_flow_program(body))
-    expected = [144 * i + offset for i in range(count) for offset in (0, 44)]
+    ends = [ceil(runtime_cycles(PROFILE, n)) for n in (39, 89)]
+    expected = [sum(ends) * i + offset for i in range(count) for offset in (0, ends[0])]
     assert [waves(shot) for shot in result] == [expected] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [144 * count] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [sum(ends) * count] * 4
 
 
 @pytest.mark.parametrize("declare_case", [False, True])
@@ -1198,7 +1361,9 @@ def test_selected_playback_preserves_deferred_capture_across_empty_branch(declar
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [44] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        ceil(runtime_cycles(PROFILE, 39))
+    ] * 4
 
 
 def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
@@ -1213,11 +1378,13 @@ def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
 
     result = shots(_selection_flow_program(body))
     assert [waves(shot) for shot in result] == [[0]] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [100, 44] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        ceil(runtime_cycles(PROFILE, n)) for n in (89, 39)
+    ] * 2
 
 
 def _selection_program(selection: Module) -> TimelineProgramV2:
-    return _program(make_mock_soccfg(1, 0), [selection], lambda p: p.emit(selection))
+    return _program(load_soccfg(1, 0), [selection], lambda p: p.emit(selection))
 
 
 @pytest.mark.parametrize(
@@ -1241,17 +1408,21 @@ def test_selected_playback_rejects_in_range_writes_without_table_relation(change
 def test_selected_playback_captures_index_before_later_in_range_change(change):
     prog = _selected_length_with_change(change)
     # The first length remains39 despite the author changing index to1.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [49] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
+        PRE
+        + ceil(
+            runtime_cycles(prog.soccfg, 39)
+            + Fraction("0.0005") * Fraction(str(TPROC_MHZ))
+        )
+    ] * 2
 
 
 def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
-    builder = TimelineBuilder(
-        make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
-    )
+    builder = TimelineBuilder(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     builder.add_loop("index", 2)
     choices = [
-        _pulse_cfg(cycles / 384).model_copy(
-            update={"pre_delay": 0, "post_delay": 1 / 430.08}
+        _pulse_cfg(cycles / GEN_MHZ).model_copy(
+            update={"pre_delay": 0, "post_delay": 1 / TPROC_MHZ}
         )
         for cycles in (39, 89)
     ]
@@ -1263,15 +1434,18 @@ def test_repeated_computed_playback_preserves_selected_ends_within_register_budg
         for pulse in pulses:
             builder.emit(pulse)
     builder.emit(pulses[0])
-    result = shots(builder.build())
-    # ceil(39*1.12+1)=45; ceil(89*1.12+1)=101. Each of eleven
-    # emissions must consume its own selected end, including the repeat backedge.
+    prog = builder.build()
+    result = shots(prog)
+    spacings = [ceil(runtime_cycles(prog.soccfg, n) + 1) for n in (39, 89)]
     assert [waves(s) for s in result] == [
-        [45 * i for i in range(11)],
-        [101 * i for i in range(11)],
+        [spacing * i for i in range(11)] for spacing in spacings
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [
+        11 * spacing for spacing in spacings
+    ] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        11 * spacing for spacing in spacings
+    ] * 2
 
 
 def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
@@ -1279,8 +1453,8 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         "first",
         val_reg="a_index",
         pulses=[
-            _pulse_cfg(n / 384).model_copy(
-                update={"pre_delay": 0, "post_delay": -10 / 430.08}
+            _pulse_cfg(n / GEN_MHZ).model_copy(
+                update={"pre_delay": 0, "post_delay": -10 / TPROC_MHZ}
             )
             for n in (39, 89)
         ],
@@ -1289,7 +1463,7 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         "other",
         val_reg="b_index",
         pulses=[
-            _pulse_cfg(n / 384, ch=1).model_copy(
+            _pulse_cfg(n / GEN_MHZ, ch=1).model_copy(
                 update={"pre_delay": 0, "post_delay": 0}
             )
             for n in (20, 40, 60)
@@ -1310,21 +1484,34 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         prog.emit(change_a)
         # The first end and its physical coverage survive another table's
         # capture and a later author-selector change. Pay its negative-post debt.
-        prog.timeline_inc(10 / 430.08, timeline="saved")
+        prog.timeline_inc(10 / TPROC_MHZ, timeline="saved")
         prog.join("saved", into="default")
         prog.emit(first)
-        prog.timeline_inc(10 / 430.08)
+        prog.timeline_inc(10 / TPROC_MHZ)
 
     prog = _program(
-        make_mock_soccfg(2, 0),
+        load_soccfg(2, 0),
         [a_index, b_index, change_a, first, other],
         body,
         lambda p: p.add_loop("index", 2),
     )
     result = shots(prog)
-    assert [waves(s) for s in result] == [[0, 0, 68], [0, 0, 100]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [168, 144] * 2
-    assert [s.end_cycle - s.start_cycle for s in result] == [177, 153] * 2
+    joins = [
+        max(
+            ceil(runtime_cycles(prog.soccfg, a)),
+            ceil(runtime_cycles(prog.soccfg, b, 1)),
+        )
+        for a, b in ((39, 60), (89, 20))
+    ]
+    ends = [
+        join + ceil(runtime_cycles(prog.soccfg, n))
+        for join, n in zip(joins, (89, 39), strict=True)
+    ]
+    assert [waves(s) for s in result] == [[0, 0, join] for join in joins] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == ends * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [
+        end + RELAX for end in ends
+    ] * 2
 
 
 @pytest.mark.parametrize("count", [None, 2])
@@ -1336,6 +1523,4 @@ def test_table_readout_rejects_missing_or_mismatched_public_loop(count):
             prog.add_loop("frequency", count)
 
     with pytest.raises(ValueError, match="(sweep loop|does not match loop)"):
-        _program(
-            make_mock_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize
-        )
+        _program(load_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize)

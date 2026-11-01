@@ -21,10 +21,12 @@ from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.white_noise import WhiteNoiseRawShots
 
+from tests.program._profiles import load_soccfg
+
 
 @pytest.fixture
 def compact_round():
-    env = white_noise(std_adc=0, seed=17)
+    env = white_noise(load_soccfg(), std_adc=0, seed=17, routes=((0, 0),))
     request = AcquireRequest(
         "integrated",
         (1000,),
@@ -424,7 +426,7 @@ def test_equal_content_reuses_validation_across_rounds_and_requests(
 def test_certificate_is_not_shared_between_socs(compact_round, eigen_calls):
     soc, request, record = compact_round
     soc.run_round()
-    other = white_noise(std_adc=0, seed=17)
+    other = white_noise(load_soccfg(), std_adc=0, seed=17, routes=((0, 0),))
     other.soc.binding.execute = lambda _: IntegratedRound(
         record, WhiteNoiseRawShots(0, request, record.raw_identity)
     )

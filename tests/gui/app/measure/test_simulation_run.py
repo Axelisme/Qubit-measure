@@ -28,6 +28,7 @@ from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -71,7 +72,7 @@ NoiseAdapter = Adapter(
 
 @pytest.fixture
 def noise_run(qapp, tmp_path, outcome):
-    env = white_noise(std_adc=0, seed=17)
+    env = white_noise(load_soccfg(), std_adc=0, seed=17, routes=((0, 0),))
     source = env.soc.binding.execute
     entered, release = Event(), Event()
     fail = outcome == "failure_then_retry"

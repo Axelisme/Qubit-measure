@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.program._profiles import load_soccfg
+
 from ._helpers import Fixture, call, mcp_client, open_client
 
 
@@ -16,7 +18,7 @@ def test_soc_tools_observe_gui_connection_without_hardware(
 
     def offline_proxy(ip: str, port: int):
         assert (ip, port) == ("192.0.2.1", 8888)
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         return env.soc, env.soccfg
 
     monkeypatch.setattr(remote, "make_soc_proxy", offline_proxy)

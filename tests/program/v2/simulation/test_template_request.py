@@ -10,6 +10,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, TablePulseRead
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -37,7 +38,9 @@ def receiver():
 
 @pytest.mark.parametrize("dependency", ["sweep", "register", "branch"])
 def test_reps_dependent_timeline_rejected_before_backend(dependency):
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     cfg = drive()
     builder = TimelineBuilder(env.soccfg, reps=2)
     if dependency == "sweep":
@@ -60,7 +63,7 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
 
 
 def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     gen, adc = readout_freq_words(
         env.soccfg, [200, 300], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -83,10 +86,10 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
 @pytest.mark.parametrize("missing", ["generator", "route"])
 def test_soc_rejects_unbound_generator_or_adc_route_before_backend(missing):
     env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=2),
         std_adc=0,
-        n_gens=2,
         routes=((0, 0),) if missing == "generator" else ((0, 0), (1, 0)),
-        n_readouts=2,
+        seed=None,
     )
     if missing == "generator":
         modules = [drive().build("unwired_drive"), receiver().build("readout")]

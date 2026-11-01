@@ -11,12 +11,13 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
 @pytest.fixture
 def environment():
-    env = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, seed=4, routes=((0, 0), (1, 0)))
     yield env
     env.devices.close_all_devices()
 
@@ -61,7 +62,9 @@ def test_new_preparations_share_equal_content_not_program_or_name(environment):
     second = envelope(program(environment, name="renamed"), soc, 1)
     assert second is first
     # The environment, not a global cache, owns the pool.
-    other = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    other = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, seed=4, routes=((0, 0), (1, 0))
+    )
     try:
         independent = envelope(program(other), other.soc, 0)
         assert independent == first
@@ -76,6 +79,9 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     soc = environment.soc
     first = envelope(prog, soc, 0)
     assert envelope(prog, soc, 1) is first
+    old_request = build_compiled_request(
+        prog, "integrated", soc.binding, 1, routes=soc.routes
+    )
     old_times, old_values = first.sample_period_ticks, first.values
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
@@ -88,12 +94,17 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     changed = envelope(prog, soc, 2)
     assert changed is not first
     if difference == "clock":
-        # Doubling the common frequency preserves period ticks, but halves us.
+        # The same samples now occupy half their original physical period.
         changed_request = build_compiled_request(
             prog, "integrated", soc.binding, 2, routes=soc.routes
         )
-        assert changed_request.time_base.ticks_per_us == 86016
-        assert changed.sample_period_ticks == first.sample_period_ticks == 7
+        assert (
+            changed_request.time_base.ticks_per_us % old_request.time_base.ticks_per_us
+            == 0
+        )
+        assert changed_request.time_base.ns(changed.sample_period_ticks) == (
+            old_request.time_base.ns(first.sample_period_ticks) / 2
+        )
         assert changed.values == first.values
     else:
         assert changed != first

@@ -15,6 +15,8 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost
 
+from tests.program._profiles import load_soccfg
+
 from ._engine_ports import START, ManualClock, RecordingBar, RecordingDevices
 
 
@@ -41,7 +43,7 @@ def test_attempt_facts_are_grouped_by_explicit_commits(
     devices = RecordingDevices()
     devices.drivers["flux"] = FakeDevice(address="memory", fast_mode=True)
     plots = w.WorkflowPlots(NonPresentingHost())
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     engine = w.Engine(
         w.EnginePorts(
             plots,

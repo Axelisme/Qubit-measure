@@ -24,6 +24,7 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
+from tests.program._profiles import load_soccfg
 
 from ._helpers import Fixture, call, open_client
 
@@ -460,10 +461,8 @@ def _install_real_mock_soccfg(fx) -> None:
     describe_soc()'s field access and dump_cfg() return real content."""
     import dataclasses
 
-    from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-
     ctx = fx.state.session_env
-    fx.state.session_env = dataclasses.replace(ctx, soccfg=make_mock_soccfg())
+    fx.state.session_env = dataclasses.replace(ctx, soccfg=load_soccfg())
 
 
 def test_soc_info_returns_description_and_cfg(fx):

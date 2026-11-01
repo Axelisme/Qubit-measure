@@ -24,6 +24,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._app_launch import LaunchedMeasureApp, launched_measure_app
 from tests.gui.app.measure._native_save_support import SavingAdapter
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def soc_app(
     registry = Registry()
     registry.register("held", HeldAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         app.controller.session_services.soc_connection.install_soc(env.soc, env.soccfg)
         app.controller.setup_control.new_entry(EntryRequest("synthetic"))
         app.controller.setup_control.new_point(

@@ -16,6 +16,8 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
+from tests.program._profiles import GEN_MAXV, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, tproc_ceil
 from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import (
     envelope_times_us,
@@ -37,7 +39,7 @@ from tests.program.v2.simulation.time_observations import (
 )
 def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(waveform):
     env = white_noise(
-        std_adc=0, seed=4, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1))
+        load_soccfg(n_gens=2, n_readouts=2), std_adc=0, seed=4, routes=((0, 0), (1, 1))
     )
     pulse = PulseCfg(
         ch=1, nqz=1, freq=80, gain=-0.4, phase=37, waveform=waveform
@@ -69,11 +71,13 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     events = request.materialize_point(0).events
     drive = next(event for event in events if event.gen_ch == 1)
     receiver = next(event for event in events if event.gen_ch == 0)
+    origin_cycles = tproc_ceil(env.soccfg, 0.5)
+    receiver_cycles = origin_cycles + tproc_ceil(env.soccfg, 0.1)
     assert time_us(request.time_base, drive.start_ticks) == pytest.approx(
-        0.5, abs=0.003
+        origin_cycles / TPROC_MHZ
     )
     assert time_us(request.time_base, receiver.start_ticks) == pytest.approx(
-        0.6, abs=0.005
+        receiver_cycles / TPROC_MHZ
     )
     drive_end = max(
         time_us(request.time_base, e.start_ticks)
@@ -82,18 +86,22 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
         if e.gen_ch == 1
     )
     assert drive_end - time_us(request.time_base, drive.start_ticks) == pytest.approx(
-        0.25, abs=0.006
+        float(generator_duration(env.soccfg, 0.25, 1)),
+        # Flat-top's split ramps can trim a fabric cycle at each segment boundary.
+        abs=2 / env.soccfg["gens"][1]["f_fabric"]
+        if waveform.style == "flat_top"
+        else 1e-9,
     )
-    assert drive.gain == pytest.approx(-0.4, abs=1 / 32766)
+    assert drive.gain == pytest.approx(-0.4, abs=1 / GEN_MAXV)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)
     assert (
         time_us(request.time_base, drive.phase_reference_ticks)
         == time_us(request.time_base, receiver.phase_reference_ticks)
         == 0
     )
-    origin = math.ceil(0.5 * 430.08) / 430.08
-    offset = math.ceil(0.1 * 430.08) / 430.08
-    trigger = origin + round((offset + 0.02) * 430.08) / 430.08
+    origin = math.ceil(0.5 * TPROC_MHZ) / TPROC_MHZ
+    offset = math.ceil(0.1 * TPROC_MHZ) / TPROC_MHZ
+    trigger = origin + round((offset + 0.02) * TPROC_MHZ) / TPROC_MHZ
     assert times_us(
         request.time_base, request.materialize_point(0).readouts[0].trigger_ticks
     )[0] == pytest.approx(trigger)

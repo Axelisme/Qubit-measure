@@ -9,16 +9,11 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
     round_zcu_gain,
     sweep2array,
 )
-from zcu_tools.program.v2 import (
-    Pulse,
-    PulseCfg,
-    SweepCfg,
-    make_mock_soccfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, PulseCfg, SweepCfg, sweep2param
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -63,7 +58,7 @@ def _compile_sweep_words(
 def test_signed_gain_returns_nearest_coordinate_that_compiles(
     scaler: float, sign: int
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv"] = 30000
     requested = sign * 59.5 / (scaler * 30000)
     target = sign * 59
@@ -90,7 +85,7 @@ def test_signed_gain_returns_nearest_coordinate_that_compiles(
 def test_regular_host_gain_grid_retains_start_and_step_words(
     start, stop, expected
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     sweep = SweepCfg(start=start, stop=stop, expts=4, step=(stop - start) / 3)
     actual = sweep2array(sweep, "gain", {"soccfg": soccfg, "gen_ch": 0})
     words = [_compile_scalar_word(soccfg, float(g)) for g in actual]
@@ -110,7 +105,7 @@ def test_regular_host_gain_grid_retains_start_and_step_words(
 def test_hardware_gain_sweep_compiles_to_host_word_grid(
     start, stop, expected, scaler
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     sweep = SweepCfg(
         start=start / scaler,
         stop=stop / scaler,
@@ -133,7 +128,7 @@ def test_hardware_gain_sweep_compiles_to_host_word_grid(
 def test_fractional_hardware_span_matches_full_scale_host_words(
     reverse, scaler
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv_scale"] = 0.8
     start, stop = (1.0, -1.0) if reverse else (-1.0, 1.0)
     expected = [26212, 0, -26212] if reverse else [-26212, 0, 26212]
@@ -162,7 +157,7 @@ def test_fractional_hardware_span_matches_full_scale_host_words(
 def test_custom_gain_array_preserves_shape_and_compiled_boundary_words(
     maxv, maxv_scale, middle_word, scaler
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0].update(maxv=maxv, maxv_scale=maxv_scale)
     limit_word = soccfg.get_maxv(0)
     requested = np.asarray([[-1.0, -0.3, -1.9 / limit_word], [0.0, 0.3, 1.0]]) / scaler
@@ -187,7 +182,7 @@ def test_custom_gain_array_preserves_shape_and_compiled_boundary_words(
 
 @pytest.mark.parametrize("sign", [1, -1])
 def test_integer_boundary_keeps_original_input_truncation(sign) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv"] = 30000
     boundary = 59 / 30000
     requested = sign * np.asarray([boundary, np.nextafter(boundary, np.inf)])
@@ -203,7 +198,7 @@ def test_integer_boundary_keeps_original_input_truncation(sign) -> None:
 def test_hardware_gain_span_near_zero_preserves_word_grid(
     start_word, stop_word, scaler
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv"] = 30000
     start = (
         np.sign(start_word) * (abs(start_word) + 0.5) / (30000 * scaler)
@@ -229,7 +224,7 @@ def test_hardware_gain_span_near_zero_preserves_word_grid(
 
 
 def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
-    soccfg = make_mock_soccfg(n_gens=3, n_readouts=1)
+    soccfg = load_soccfg(n_gens=3, n_readouts=1)
     gains = sweep2array(
         SweepCfg(start=0.1, stop=0.4, expts=4, step=0.1),
         "gain",
@@ -265,5 +260,7 @@ def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
         )
         words.append(round(compiled_gain * soccfg.get_maxv(1)))
 
-    np.testing.assert_array_equal(words, [3276, 6552, 9828, 13104])
+    # The input is a uniform 0.1..0.4 gain grid. Truncate start and step words.
+    word_step = int(0.1 * soccfg.get_maxv(1))
+    np.testing.assert_array_equal(words, word_step * np.arange(1, 5))
     np.testing.assert_allclose(gains * soccfg.get_maxv(1), words, rtol=0, atol=2e-12)

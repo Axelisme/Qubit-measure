@@ -6,12 +6,13 @@ import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2.ir.base import IRCompileMixin
 from zcu_tools.program.v2.macro.meta import MetaMacro
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture
 def prog() -> IRCompileMixin:
-    return IRCompileMixin(make_mock_soccfg())
+    return IRCompileMixin(load_soccfg())
 
 
 def test_meta_macro_translate_records_metadata(prog: IRCompileMixin):
