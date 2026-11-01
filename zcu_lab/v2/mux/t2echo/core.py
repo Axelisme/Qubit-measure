@@ -327,15 +327,13 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         in fit_i. Invalid sources or fit methods raise.
         """
         # 1. Omit the first requested point before removing missing IQ.
-        if options.fit_method not in ("fringe", "decay"):
-            raise ValueError(f"Unknown fit_method: {options.fit_method}")
         validate_coherence_result(source.result)
         outcomes: list[MuxCoherenceFit | MuxFitFailure] = []
         for row, raw_index in enumerate(source.result.tone_indices):
             trace = prepare_coherence_trace(
                 int(raw_index), source.result.times, source.result.signals[row], skip=1
             )
-            fig, ax = plots.subplots(f"fit_{trace.index}", figsize=(8, 5))
+            fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
             ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"echo tone {trace.index}")
             try:

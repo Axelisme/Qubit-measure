@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Annotated, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -35,7 +37,7 @@ from zcu_lab.v2.mux.twotone_spectrum.core import (
     MuxFreqToneCfg,
     prepare_frequency_scan,
 )
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import check_flux_unit, set_flux
 from zcu_lab.v2.support.mux_sweep_cfg import (
     ToneRangeCfg,
@@ -300,21 +302,10 @@ def run_flux_scan(
         np.nan + 1j * np.nan,
         dtype=np.complex128,
     )
-    viewers = [
-        live_heatmap_with_line(
-            context.plots,
-            f"flux_{i}",
-            f"DC value ({cfg.flux_unit})",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=10,
-            uniform=False,
-        )
-        for i in indices
-    ]
-    # Publish planned coordinates with no measured cells before the first point.
-    for row, viewer in enumerate(viewers):
-        viewer.update(flux_values[row], frequencies[row], np.abs(signals[row]))
+    result = MuxFluxResult(
+        np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
+    )
+    update = _make_flux_update(context.plots, result, cfg.flux_unit)
     for point in range(flux_values.shape[1]):
         if context.scope.stop.is_set():
             break
@@ -339,11 +330,55 @@ def run_flux_scan(
             frequencies=frequencies,
         )
         signals[:, point, :] = acquired
-        for row, viewer in enumerate(viewers):
-            viewer.update(flux_values[row], frequencies[row], np.abs(signals[row]))
-    return MuxFluxResult(
-        np.asarray(indices, dtype=np.int64), flux_values, frequencies, signals
-    )
+        update(signals)
+    return result
+
+
+def _make_flux_update(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Create per-tone magnitude maps and ten scan-history lines.
+
+    Return a plot-thread updater accepting the complete tone-major IQ array.
+    Publish the planned axes before the first acquisition; the caller retains
+    ownership of Plots and its operation lifetime.
+    """
+    flux_values, frequencies = result.flux_values, result.frequencies
+    figures, heatmaps, lines = [], [], []
+    for index in result.tone_indices:
+        fig, _ = plots.subplots(1, 2, num=f"flux_{index}")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        heatmaps.append(live_heatmap(heat_ax, uniform=False))
+        lines.append(live_line(line_ax, num_lines=10))
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+        figures.append(fig)
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        artists = []
+        for row, (heatmap, line) in enumerate(zip(heatmaps, lines, strict=True)):
+            real = np.abs(data[row])
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((10, frequencies.shape[1]), np.nan)
+            for offset in range(min(10, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
+            artists.extend(line.set(frequencies[row], history))
+        return artists
+
+    # Publish planned coordinates with no measured cells before the first point.
+    update(result.signals)
+    for fig in figures:
+        fig.show()
+    return update
 
 
 def _require_finite_spectrum(
@@ -405,7 +440,9 @@ def mux_flux_spec[C: ConfigBase](
     planned axes and NaN gaps after Stop. Loading validates shapes and axes;
     no current library or alias is consulted.
     """
-    tone = VariableAxisSpec("Tone", "", field_name="tone_indices", dtype=np.int64)
+    tone = VariableAxisSpec(
+        label="Tone", unit="", field_name="tone_indices", dtype=np.int64
+    )
     point = VariableAxisSpec.generated_arange("Point", "", dtype=np.int64)
     flux = VariableAxisSpec.generated_arange("Flux point", "", dtype=np.int64)
 
