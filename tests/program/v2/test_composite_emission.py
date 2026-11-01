@@ -1145,7 +1145,9 @@ def test_selected_playback_rejects_relation_missing_on_repeat_skipped_path():
         previous = other.lower_selected(prog)
         _play_selected_length(prog, previous, (89, 39))
         prog.delay_by_timeline()
-        loader.lower_selected(prog)
+        initial = loader.lower_selected(prog)
+        _play_selected_length(prog, initial, (39, 89))
+        prog.delay_by_timeline()
         with prog.repeat("maybe", "path", range_hint=(0, 1)):
             current = other.lower_selected(prog)
             _play_selected_length(prog, current, (89, 39))
