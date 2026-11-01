@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, cast
@@ -278,6 +279,64 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 )
 
 
+def _live_search_plot(
+    plots: Plots, point_indices: NDArray[np.float64],
+) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], int]], None]:
+    """Show the search's four SNR panels and return a snapshot-based update.
+
+    Pass scores, sampled parameter rows (MHz, gain, us), and the current index.
+    Each update changes all four lines and the iteration title in one refresh.
+    """
+    figure, initial_ax = plots.subplots(num="measurement", figsize=(8, 5))
+    initial_ax.remove()
+    figure.suptitle("Readout Auto Optimization")
+    grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
+    axes = []
+    lines = []
+    for xlabel, cell in (
+        ("Iteration", grid[:, 0]),
+        ("Frequency (MHz)", grid[0, 1]),
+        ("Readout Gain (a.u.)", grid[1, 1]),
+        ("Readout Length (us)", grid[2, 1]),
+    ):
+        ax = figure.add_subplot(cell)
+        ax.set(xlabel=xlabel, ylabel="SNR (a.u.)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        lines.append(live_line(ax))
+        ax.lines[0].set_linestyle("None")
+        ax.lines[0].set_marker("o")
+        axes.append(ax)
+
+    figure.show()
+    @plots.on_plot_thread
+    def update(
+        payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
+    ) -> list[Artist]:
+        data, sampled_params, idx = payload
+        snrs = np.abs(data)
+        cur_freq, cur_gain, cur_len = sampled_params[idx, :]
+        title = (
+            f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
+            f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
+        )
+        artists: list[Artist] = [axes[0].set_title(title)]
+        for line, xs in zip(
+            lines,
+            (
+                point_indices,
+                sampled_params[:, 0],
+                sampled_params[:, 1],
+                sampled_params[:, 2],
+            ),
+            strict=True,
+        ):
+            artists.extend(line.set(xs, snrs))
+        return artists
+
+    return update
+
+
 class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[AutoOptResult, AutoOptCfg]] = (
         RO_AUTO_GROUPED_AXES_SPEC
@@ -317,54 +376,8 @@ class AutoOptExp(Experiment[AutoOptResult, AutoOptCfg]):
         point_indices = np.arange(num_points, dtype=np.float64)
 
         # Show search progress and the sampled score along each readout coordinate.
-        figure, initial_ax = context.plots.subplots(num="measurement", figsize=(8, 5))
-        initial_ax.remove()
-        figure.suptitle("Readout Auto Optimization")
-        grid = figure.add_gridspec(3, 2, width_ratios=[1.5, 1])
-        axes = []
-        lines = []
-        for xlabel, cell in (
-            ("Iteration", grid[:, 0]),
-            ("Frequency (MHz)", grid[0, 1]),
-            ("Readout Gain (a.u.)", grid[1, 1]),
-            ("Readout Length (us)", grid[2, 1]),
-        ):
-            ax = figure.add_subplot(cell)
-            ax.set(xlabel=xlabel, ylabel="SNR (a.u.)")
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-            ax.grid(False)
-            lines.append(live_line(ax))
-            ax.lines[0].set_linestyle("None")
-            ax.lines[0].set_marker("o")
-            axes.append(ax)
-
-        figure.show()
+        update = _live_search_plot(context.plots, point_indices)
         current_index = 0
-
-        @context.plots.on_plot_thread
-        def update(
-            payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
-        ) -> list[Artist]:
-            data, sampled_params, idx = payload
-            snrs = np.abs(data)
-            cur_freq, cur_gain, cur_len = sampled_params[idx, :]
-            title = (
-                f"Iteration {idx}, Frequency: {1e-3 * cur_freq:.4g} (GHz), "
-                f"Gain: {cur_gain:.2g} (a.u.), Length: {cur_len:.2g} (us)"
-            )
-            artists: list[Artist] = [axes[0].set_title(title)]
-            for line, xs in zip(
-                lines,
-                (
-                    point_indices,
-                    sampled_params[:, 0],
-                    sampled_params[:, 1],
-                    sampled_params[:, 2],
-                ),
-                strict=True,
-            ):
-                artists.extend(line.set(xs, snrs))
-            return artists
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             update((data, params, current_index))
