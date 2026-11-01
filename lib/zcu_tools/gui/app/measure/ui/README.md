@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -110,6 +110,9 @@ completion, not ledger event times. Unreadable metadata stays visible as a file
 row with its error and a selectable path. Selection does not promise Load success;
 the existing Load owner reports file/format errors after selection.
 
+Predictor… uses Ctrl+P and Results browser… uses Ctrl+R in the measure window.
+Both shortcuts keep working when their buttons move into More ▾. Button tooltips
+and folded menu entries show the shortcuts.
 Results browser… on the toolbar opens an independent top-level Results browser.
 When space is short, the button moves into More ▾. Closing the
 measure window closes this browser. It reads the Controller results query once
