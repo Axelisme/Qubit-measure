@@ -1,5 +1,6 @@
 """FTF outcome histories connect herald reads to continued terminal populations."""
 
+from tests.program._profiles import profile_soccfg
 import json
 from dataclasses import replace
 
@@ -68,7 +69,7 @@ def test_request_rejects_equal_total_reads_with_different_template_event_layout(
     )
     source = FTFSource(
         settings().with_telemetry(enabled=False),
-        DeviceManager(),
+        DeviceManager(), soccfg=profile_soccfg("ftf"),
         readout=readout,
         engine=RejectEvolution(1),
     )
@@ -100,14 +101,14 @@ def test_trigger_emission_columns_survive_event_grouping_with_partial_adc(mode):
     canonical = plan_template(
         numeric,
         snapshot(),
-        replace(base, readouts=(both, partial)),
+        replace(base, readouts=(both, partial)), soccfg=profile_soccfg("ftf"),
         readout=config,
         time_base=TIME_BASE,
     )
     emitted = plan_template(
         numeric,
         snapshot(),
-        replace(base, readouts=(reordered, partial)),
+        replace(base, readouts=(reordered, partial)), soccfg=profile_soccfg("ftf"),
         readout=config,
         time_base=TIME_BASE,
     )
@@ -263,7 +264,7 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
     tmp_path, mode
 ):
     numeric = thermal_mux_settings().with_telemetry(enabled=True, directory=tmp_path)
-    env = ftf(numeric, time_scale=0)
+    env = ftf(numeric, soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
         prog = herald_program(env)
         if mode == "integrated":
@@ -276,7 +277,7 @@ def test_mux_herald_postselection_retains_joint_ground_and_reports_outcomes(
         plan = plan_template(
             numeric,
             captured.snapshot,
-            captured.acquire.templates[0],
+            captured.acquire.templates[0], soccfg=profile_soccfg("ftf"),
             time_base=captured.acquire.time_base,
         )
         labels = []
@@ -310,7 +311,7 @@ def test_herald_expands_joint_count_axis_and_preserves_terminal_only_adc():
     numeric = numeric.model_copy(
         update={"chip": numeric.chip.model_copy(update={"temperature_k": 1.0})}
     )
-    source = FTFSource(numeric, DeviceManager(), readout=readout)
+    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout)
     acquire = replace(request(templates=(template,)), reps=20000)
     try:
         try:
@@ -358,7 +359,7 @@ def test_projection_floor_keeps_zero_weight_histories_or_names_empty_point(floor
             ),
         }
     )
-    source = FTFSource(numeric, DeviceManager(), readout=readout)
+    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout)
     try:
         session = source.open_acquire(request(templates=(template,)))
         if floor:
@@ -389,7 +390,7 @@ def test_unobserved_terminal_still_evolves_and_keeps_joint_final_state(mode):
     numeric = numeric.model_copy(
         update={"chip": numeric.chip.model_copy(update={"temperature_k": 1.0})}
     )
-    source = FTFSource(numeric, DeviceManager(), readout=readout)
+    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout)
     try:
         result = source.open_acquire(request(mode, templates=(base,))).sample_round(
             snapshot(), 0
@@ -410,13 +411,13 @@ def test_unobserved_terminal_still_evolves_and_keeps_joint_final_state(mode):
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_terminal_only_runtime_matches_direct_engine_and_adc_elementwise(mode):
     numeric = settings().with_telemetry(enabled=False)
-    source = FTFSource(numeric, DeviceManager())
+    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"))
     engine = Engine(1)
     try:
         acquire = request(mode)
         facts = source.model_facts(snapshot())
         plan = plan_template(
-            numeric, snapshot(), template(), facts=facts, time_base=TIME_BASE
+            numeric, snapshot(), template(), soccfg=profile_soccfg("ftf"), facts=facts, time_base=TIME_BASE
         )
         evolved = engine.evolve(facts.source, (plan.batch,))
         populations = adc.normalize_populations(
@@ -493,7 +494,7 @@ def test_configured_floor_prunes_and_redistributes_thermal_outcome_weight():
             ),
         }
     )
-    source = FTFSource(numeric, DeviceManager(), readout=readout)
+    source = FTFSource(numeric, DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout)
     try:
         initial = source.model_facts(snapshot()).source.initial_density.diagonal().real
         result = source.open_acquire(
@@ -561,7 +562,7 @@ def test_two_projections_preserve_both_herald_states_in_conditional_statistics()
         }
     )
     source = FTFSource(
-        numeric.model_copy(update={"chip": chip}), DeviceManager(), readout=readout
+        numeric.model_copy(update={"chip": chip}), DeviceManager(), soccfg=profile_soccfg("ftf"), readout=readout
     )
     try:
         result = source.open_acquire(request(templates=(template,))).sample_round(

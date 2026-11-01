@@ -1,5 +1,6 @@
 """Startup preparation is observable and does not consume acquisition identity."""
 
+from tests.program._profiles import profile_soccfg
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Thread
 
@@ -87,7 +88,7 @@ def test_acquire_waits_for_startup_future_before_consuming_sequence():
         assert release.wait(30), "test watchdog: main thread must release warmup"
 
     warmup = ObservedWarmup((("synthetic", prepare),))
-    env = ftf(parse_ftf(ftf_document()), warmup=warmup)
+    env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
     prog = program(env)
     with ThreadPoolExecutor(max_workers=1) as executor:
         try:
@@ -126,7 +127,7 @@ def test_failed_warmup_reports_error_but_allows_acquisition():
         raise ValueError("synthetic compilation failure")
 
     warmup = cls((("broken", broken),))
-    env = ftf(parse_ftf(ftf_document()), warmup=warmup)
+    env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
     try:
         status = env.wait_ready()
         assert status is not None
@@ -153,7 +154,7 @@ def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
         patch.setattr(tqdm, "monitor_interval", 0)
         patch.setattr(Thread, "start", unavailable_thread)
         try:
-            env = ftf(parse_ftf(ftf_document()), warmup=warmup)
+            env = ftf(parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"), warmup=warmup)
         except RuntimeError as error:
             pytest.fail(
                 f"worker startup failure must allow on-demand acquisition: {error}"
@@ -177,8 +178,8 @@ def test_worker_start_failure_is_terminal_and_allows_on_demand(monkeypatch):
 def test_warmup_does_not_change_rng_or_live_bias():
     cls = warmup_type()
     settings = parse_ftf(ftf_document())
-    prepared = ftf(settings, warmup=cls((("synthetic", lambda: None),)))
-    plain = ftf(settings)
+    prepared = ftf(settings, soccfg=profile_soccfg("ftf"), warmup=cls((("synthetic", lambda: None),)))
+    plain = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
         prepared.wait_ready()
         assert prepared.devices.get_info("bias") == plain.devices.get_info("bias")

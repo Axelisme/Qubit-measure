@@ -1,5 +1,6 @@
 """FTF terminal-only sampling parity against explicit pre-projective inputs."""
 
+from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -30,7 +31,7 @@ def test_terminal_only_plan_preserves_raw_statistics_and_decimated_values() -> N
         plan_template(
             settings(),
             snapshot(),
-            replace(base, readouts=(window,)),
+            replace(base, readouts=(window,)), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
         .readouts[0]

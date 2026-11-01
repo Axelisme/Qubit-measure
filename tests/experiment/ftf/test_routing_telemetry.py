@@ -1,5 +1,6 @@
 """One bounded, best-effort routing record per admitted FTF acquisition."""
 
+from tests.program._profiles import profile_soccfg
 import json
 import os
 import warnings
@@ -21,7 +22,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
     directory = tmp_path / "enabled"
     try:
         observed = ftf(
-            settings().with_telemetry(enabled=True, directory=directory),
+            settings().with_telemetry(enabled=True, directory=directory), soccfg=profile_soccfg("ftf"),
             time_scale=0,
         )
     except AttributeError as error:
@@ -30,7 +31,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
         ) from error
     plain_directory = tmp_path / "disabled"
     plain = ftf(
-        settings().with_telemetry(enabled=False, directory=plain_directory),
+        settings().with_telemetry(enabled=False, directory=plain_directory), soccfg=profile_soccfg("ftf"),
         time_scale=0,
     )
     try:

@@ -1,5 +1,6 @@
 """Source-owned noiseless preparations, fresh per-acquire streams and bounded reuse."""
 
+from tests.program._profiles import profile_soccfg
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.sim
 
 
 def test_open_acquire_rejects_unsupported_charge_requirements():
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     ordinary = request()
     try:
         assert source.open_acquire(ordinary).request is ordinary
@@ -89,7 +90,7 @@ def test_preparation_hits_preserve_source_usage_for_later_acquires(
     acquire = request(templates=(replace(base, events=(drive, readout)),))
     histories, routes = [], []
     for clear in (False, True):
-        source = FTFSource(settings(), DeviceManager())
+        source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
         try:
             draw(source, acquire)
             numeric = source.model_facts(snapshot()).source
@@ -155,7 +156,7 @@ def test_cached_small_acquire_reselects_route_after_source_usage_grows(
     )
     routes = []
     for clear in (False, True):
-        source = FTFSource(settings(), DeviceManager())
+        source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
         try:
             draw(source, small)
             assert (
@@ -191,7 +192,7 @@ def test_history_sensitive_hit_reuses_policy_facts_without_prepare_or_put(
             self.puts += 1
             super().put(key, value)
 
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     cache = CountingPreparations()
     source.preparation_cache = cache
     base = delayed_readout_template
@@ -266,7 +267,7 @@ def test_repeated_content_does_not_inflate_source_amortization(
             ),
         )
     )
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         draw(source, acquire)
         numeric = source.model_facts(snapshot()).source
@@ -286,8 +287,8 @@ def test_repeated_content_does_not_inflate_source_amortization(
 
 
 def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
-    source = FTFSource(settings(), DeviceManager())
-    reference = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
+    reference = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         first = expect_statistics(draw(source))
         later = replace(request(), sequence=8)
@@ -331,7 +332,7 @@ def test_equal_content_acquires_skip_adc_preparation_and_keep_streams_exact():
     ],
 )
 def test_changed_preparation_inputs_miss(change, monkeypatch):
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     cleanup = ExitStack()
     try:
         draw(source)
@@ -397,7 +398,7 @@ def test_changed_preparation_inputs_miss(change, monkeypatch):
 
 
 def test_lru_budget_close_and_failed_preparation_release_residents():
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         draw(source)
         assert hasattr(source, "preparation_cache"), "preparations need a byte budget"
@@ -441,7 +442,7 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
             return result
 
     kernels = tuple(ExceedingIdle() if k.name == "t4" else k for k in REGISTRY)
-    source = FTFSource(settings(), DeviceManager(), engine=Engine(1, kernels=kernels))
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=Engine(1, kernels=kernels))
     try:
         with pytest.warns(RuntimeWarning, match="segment accuracy check exceeded"):
             draw(source)
@@ -459,7 +460,7 @@ def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    env = ftf(settings())
+    env = ftf(settings(), soccfg=profile_soccfg("ftf"))
     try:
         prog = compile_modules(
             env.soccfg,

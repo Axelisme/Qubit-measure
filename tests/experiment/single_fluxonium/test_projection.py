@@ -1,5 +1,6 @@
 """Projective reads preserve shot histories through the program/source contract."""
 
+from tests.program._profiles import profile_soccfg
 from collections.abc import Generator
 from dataclasses import replace
 
@@ -43,7 +44,7 @@ def projection_environment() -> Generator[
     tuple[SimulationEnvironment, SingleFluxoniumSource]
 ]:
     config = projection_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(config, env.devices)
     try:
         yield env, source

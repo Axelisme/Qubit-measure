@@ -3,6 +3,7 @@
 The no-fast-flux compatibility pin retires if that batch contract changes.
 """
 
+from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -78,7 +79,7 @@ def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     config = flux_settings()
     facts = FTFModelFacts(config, snapshot(0.4))
     plan = plan_template(
-        config, snapshot(0.4), flux_template(), facts=facts, time_base=TIME_BASE
+        config, snapshot(0.4), flux_template(), soccfg=profile_soccfg("ftf"), facts=facts, time_base=TIME_BASE
     )
     np.testing.assert_allclose(
         facts.joint.dc_flux, [0.3, 0.24, 0.4], atol=1e-16, rtol=0
@@ -96,7 +97,7 @@ def test_three_loop_steps_preserve_snapshot_dc_and_delayed_boundaries() -> None:
     np.testing.assert_array_equal(plan.batch.end_ns, [8.0, 10.0])
     # Fast flux never changes the terminal ADC model's round-DC frequencies.
     dc_plan = plan_template(
-        config, snapshot(0.4), template(), facts=facts, time_base=TIME_BASE
+        config, snapshot(0.4), template(), soccfg=profile_soccfg("ftf"), facts=facts, time_base=TIME_BASE
     )
     np.testing.assert_array_equal(
         plan.readouts[0].batch.model.frequencies_ghz,
@@ -109,7 +110,7 @@ def test_filtered_three_loop_waveform_retains_delays_and_tail_until_readout(
     distortion: bool,
 ) -> None:
     config = flux_settings(tau=0.0 if distortion else 2.0, distortion=distortion)
-    plan = plan_template(config, snapshot(), flux_template(), time_base=TIME_BASE)
+    plan = plan_template(config, snapshot(), flux_template(), soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     waveform = plan.batch.flux_waveform
     assert waveform is not None
     lo, hi = waveform.offsets[:2]
@@ -146,7 +147,7 @@ def test_flux_pulse_envelope_selects_existing_engine_family(
         pulse = replace(pulse, envelopes=(PulseEnvelope(ticks(0.002), (0, 1, 0)),))
     base = template(tones=1 if kind == "microwave" else 0)
     original = replace(base, events=(pulse, *base.events))
-    plan = plan_template(config, snapshot(), original, time_base=TIME_BASE)
+    plan = plan_template(config, snapshot(), original, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     assert (plan.batch.flux_waveform is None) == (kind == "step")
     if kind == "sampled":
         assert plan.batch.segment_boundaries == ((2.0, 4.0, 6.0), (2.0, 4.0, 6.0))
@@ -159,7 +160,7 @@ def test_flux_pulse_envelope_selects_existing_engine_family(
 
 
 def test_public_environment_admits_bound_flux_generator_through_acquire() -> None:
-    env = ftf(flux_settings().with_telemetry(enabled=False), time_scale=0)
+    env = ftf(flux_settings().with_telemetry(enabled=False), soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
         assert len(env.soccfg["gens"]) == 7
         pulse = PulseCfg(
@@ -204,7 +205,7 @@ def test_cavity_boundaries_merge_with_delayed_flux_events() -> None:
         envelopes=(None,),
     )
     original = replace(base, events=(flux_slot(4, 0.02), earlier, *base.events))
-    plan = plan_template(flux_settings(), snapshot(), original, time_base=TIME_BASE)
+    plan = plan_template(flux_settings(), snapshot(), original, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     assert plan.batch.segment_boundaries == ((0.0, 2.0, 6.0), (0.0, 2.0, 6.0))
 
 
@@ -245,18 +246,18 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
                 )
                 for window in shifted.readouts
             ),
-        ),
+        ), soccfg=profile_soccfg("ftf"),
         readout=readout,
         facts=facts,
         time_base=TIME_BASE,
     )
     projection_only = plan_template(
-        config, snapshot(), observed, readout=readout, facts=facts, time_base=TIME_BASE
+        config, snapshot(), observed, soccfg=profile_soccfg("ftf"), readout=readout, facts=facts, time_base=TIME_BASE
     )
     combined = plan_template(
         config,
         snapshot(),
-        replace(observed, events=(flux_slot(4, 0.2), *observed.events)),
+        replace(observed, events=(flux_slot(4, 0.2), *observed.events)), soccfg=profile_soccfg("ftf"),
         readout=readout,
         facts=facts,
         time_base=TIME_BASE,
@@ -316,7 +317,7 @@ def test_projective_and_cavity_boundaries_preserve_filtered_flux_splits() -> Non
 
 
 def test_unbound_flux_configuration_preserves_elementwise_batch_contract() -> None:
-    plan = plan_template(settings(), snapshot(), template(tones=1), time_base=TIME_BASE)
+    plan = plan_template(settings(), snapshot(), template(tones=1), soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     batch = plan.batch
     np.testing.assert_array_equal(batch.points, [0, 1])
     np.testing.assert_array_equal(batch.end_ns, [8.0, 10.0])

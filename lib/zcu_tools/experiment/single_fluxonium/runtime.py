@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from qick import QickConfig
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
@@ -20,7 +21,6 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.device import DeviceManager, FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import SimulationEnvironment
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
@@ -714,6 +714,7 @@ class SingleFluxoniumSource:
 def single_fluxonium(
     configuration: SingleFluxoniumSettings | str | Path,
     *,
+    soccfg: QickConfig,
     private_replay: Path | None = None,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
@@ -721,6 +722,9 @@ def single_fluxonium(
     """Assemble one DC driver and a bound mock SoC, without acquiring or warmup.
 
     configuration is validated settings or a physical YAML path, relative to cwd.
+    soccfg is the required caller-owned QICK compile profile built from independent
+    board YAML. It must include the configured drive/readout channels; this builder
+    does not infer board capabilities or channel counts from physical wiring.
     Startup applies initial once in fixed A/V units. Returned SimulationEnvironment
     owns the manager; caller closes its devices, or transfers each to the GUI.
     Source models/plans remain lazy. Every configured microwave generator and
@@ -771,7 +775,6 @@ def single_fluxonium(
             *((settings.flux_line.gen_ch,) if settings.flux_line is not None else ()),
         )
         adc = settings.readout.adc.ro_ch
-        soccfg = make_mock_soccfg(max(gens) + 1, adc + 1)
         binding = SimulationBinding(
             source.snapshot,
             source.execute,

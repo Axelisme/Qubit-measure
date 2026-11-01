@@ -1,5 +1,6 @@
 """Log-loss drift contracts with supplied times and independent RNG streams."""
 
+from tests.program._profiles import profile_soccfg
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -82,7 +83,7 @@ def request_for(binding: SimulationBinding, sequence: int):
 @contextmanager
 def environment(config, root: Path, clock: SimulationClock, *, archive: bool = False):
     env = single_fluxonium(
-        config,
+        config, soccfg=profile_soccfg("single_fluxonium"),
         clock=clock,
         truth_log=root / "truth.jsonl",
         private_replay=root / "replay" if archive else None,

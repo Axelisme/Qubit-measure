@@ -1,5 +1,6 @@
 """Request-clock interpretation at public physical planning/acquisition seams."""
 
+from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -17,7 +18,7 @@ from ._inputs import settings, template
 
 
 def test_source_plan_and_preparation_reinterpret_ticks_when_clock_changes():
-    env = single_fluxonium(settings())
+    env = single_fluxonium(settings(), soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(settings(), env.devices)
     try:
         snapshot = source.snapshot()
@@ -56,7 +57,7 @@ def test_source_plan_and_preparation_reinterpret_ticks_when_clock_changes():
 
 
 def test_extra_declared_clock_preserves_original_channel_physical_iq_bits():
-    env = single_fluxonium(settings())
+    env = single_fluxonium(settings(), soccfg=profile_soccfg("single_fluxonium"))
     env.soccfg["gens"][1]["f_fabric"] = 512.0
 
     def simulate(extra):

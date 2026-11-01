@@ -1,5 +1,6 @@
 """Physical model reuse at the acquire/engine and numeric-builder boundaries."""
 
+from tests.program._profiles import profile_soccfg
 import weakref
 from collections.abc import Sequence
 from dataclasses import replace
@@ -60,7 +61,7 @@ class ObservedEngine(Engine):
 @pytest.fixture
 def observed_source():
     engine = ObservedEngine()
-    source = FTFSource(settings(), DeviceManager(), engine=engine)
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine)
     # Isolate physical facts; test_prepared_reuse covers the outer preparation cache.
     source.preparation_cache.max_bytes = 0
     try:

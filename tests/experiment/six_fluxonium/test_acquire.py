@@ -1,5 +1,6 @@
 """Six independent physical cavities through the normal compiled acquire seam."""
 
+from tests.program._profiles import profile_soccfg
 from contextlib import contextmanager
 
 import numpy as np
@@ -31,7 +32,7 @@ FREQUENCIES = np.array([6800, 6925, 7050, 7175, 7300, 7425])
 def environment(document=None):
     try:
         env = six_fluxonium(
-            parse_six_fluxonium(six_document() if document is None else document)
+            parse_six_fluxonium(six_document() if document is None else document), soccfg=profile_soccfg("six_fluxonium")
         )
     except (NotImplementedError, ValueError) as error:
         pytest.fail(

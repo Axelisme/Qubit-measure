@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import profile_soccfg
 import importlib
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -105,7 +106,7 @@ def test_builder_binds_control_generators_and_live_dc_with_single_cavity_readout
 ):
     runtime = importlib.import_module("zcu_tools.experiment.single_fluxonium.runtime")
     config = settings()
-    environment = runtime.single_fluxonium(config)
+    environment = runtime.single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     compiled = replace(template(), points=np.array([0, 1], dtype=np.int64))
     request = AcquireRequest(
         "integrated",

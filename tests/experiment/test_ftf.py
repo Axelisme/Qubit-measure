@@ -1,5 +1,6 @@
 """Public FTF composition and acquisition, without GUI truth or lab recipes."""
 
+from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import (
@@ -44,7 +45,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     template = single_point_template(
         PointTimeline((), events, (window,), ticks(2.5), time_base=TIME_BASE)
     )
-    plan = plan_template(settings, snapshot, template, time_base=TIME_BASE)
+    plan = plan_template(settings, snapshot, template, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     np.testing.assert_array_equal(plan.batch.end_ns, [2000.0])
     readout_event = plan.readouts[0].batch.events[0][0]
     pulse = readout_event.pulses[0]
@@ -125,7 +126,7 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
             snapshot,
             single_point_template(
                 PointTimeline((), events, (window,), ticks(0.14), time_base=TIME_BASE)
-            ),
+            ), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
         first, second = plan.batch.tracks
@@ -161,7 +162,7 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
     from zcu_tools.experiment.ftf import ftf
 
     settings = parse_ftf(ftf_document())
-    env = ftf(settings)
+    env = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
         pulse = PulseCfg(
             ch=2,

@@ -4,6 +4,7 @@ Terminal-only numeric pins retire when the versioned ADC/RNG contract changes.
 The reference was captured before projective routing and multi-ADC preparation.
 """
 
+from tests.program._profiles import profile_soccfg
 from collections.abc import Generator
 from dataclasses import replace
 from hashlib import sha256
@@ -91,7 +92,7 @@ def projection_environment() -> Generator[
         qubit["readout"]["adc"]["gain"] = 1e6
         qubit["readout"]["resonator"]["charge_coefficient_ghz"] = 0.03
     settings = parse_six_fluxonium(document)
-    env = six_fluxonium(settings)
+    env = six_fluxonium(settings, soccfg=profile_soccfg("six_fluxonium"))
     source = SixFluxoniumSource(settings, env.devices)
     try:
         yield env, source

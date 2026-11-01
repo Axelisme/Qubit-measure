@@ -7,6 +7,12 @@ from qick import QickConfig
 from zcu_tools.program import build_soccfg
 
 
+def profile_soccfg(name: str) -> QickConfig:
+    """Build a named board from tests/program/profiles/<name>.yaml."""
+    with (Path(__file__).parent / "profiles" / f"{name}.yaml").open() as stream:
+        return build_soccfg(yaml.safe_load(stream))
+
+
 def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> QickConfig:
     """Load the ordinary test YAML; optionally select channel group counts."""
     with (Path(__file__).parent / "profiles" / "ordinary.yaml").open() as stream:

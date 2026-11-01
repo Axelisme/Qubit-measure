@@ -3,6 +3,8 @@
 from importlib.metadata import version
 from pathlib import Path
 
+from qick import QickConfig
+
 from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
@@ -28,10 +30,12 @@ def replay_versions() -> tuple[tuple[str, str], ...]:
     )
 
 
-def replay_round(path: Path) -> IntegratedRound | RoundSignals:
+def replay_round(path: Path, *, soccfg: QickConfig) -> IntegratedRound | RoundSignals:
     """Reload and execute only one saved private FTF round, without live devices.
 
     path is an immutable round JSON path from resources.simulation_replay.
+    soccfg must be the QICK profile used while recording. The caller supplies it;
+    the archive does not contain it and replay does not verify profile equality.
     Resolves full captured settings, controls/envelope samples, sampling identity
     and round snapshot. Checks exact backend/model/RNG/numeric versions plus
     dependencies before recomputing. Numeric records and
@@ -50,7 +54,7 @@ def replay_round(path: Path) -> IntegratedRound | RoundSignals:
         raise ValueError("private replay backend/model/RNG/numeric version mismatch")
     if record.numeric_manifest is not None or acquire.library_path is not None:
         raise ValueError("private replay does not accept numeric record references")
-    source = FTFSource(acquire.settings, DeviceManager())
+    source = FTFSource(acquire.settings, DeviceManager(), soccfg=soccfg)
     try:
         if (
             record.snapshot.version != "ftf-v2"

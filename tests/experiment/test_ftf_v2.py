@@ -1,5 +1,6 @@
 """V2 channel derivation, live DC and charge-drive acquisition seam."""
 
+from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
@@ -28,7 +29,7 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
         settings = parse_ftf(document)
     except ValueError as error:
         pytest.fail(f"v2 sparse channel document must validate: {error}")
-    env = ftf(settings)
+    env = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
         assert len(env.soccfg["gens"]) == 3
         assert len(env.soccfg["readouts"]) == 3

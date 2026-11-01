@@ -1,5 +1,6 @@
 """Author-opted persistent round replay through acquisition and detached inputs."""
 
+from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,7 +27,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
 
     source = FTFSource(
         settings().with_telemetry(enabled=False),
-        DeviceManager(),
+        DeviceManager(), soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     acquire = request(mode)
@@ -64,7 +65,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
             acquire.reps, acquire.avg_level
         ).items():
             np.testing.assert_array_equal(values, expected[channel])
-    replayed = replay_round(archived_round)
+    replayed = replay_round(archived_round, soccfg=profile_soccfg("ftf"))
     if isinstance(replayed, IntegratedRound):
         actual = replayed.raw.materialize(acquire.reps, acquire.avg_level)
     else:
@@ -94,7 +95,7 @@ def test_replay_freezes_drifted_settings_and_identity_without_clock(
     archive = tmp_path / "archive"
     source = FTFSource(
         configuration,
-        DeviceManager(),
+        DeviceManager(), soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0]),
             truth_log=tmp_path / "truth.jsonl",
@@ -131,7 +132,7 @@ def test_replay_freezes_drifted_settings_and_identity_without_clock(
 
     # The clock is an external boundary, not part of the replay calculation.
     monkeypatch.setattr(SimulationClock, "now", unavailable_clock)
-    replayed = replay_round(archived_round)
+    replayed = replay_round(archived_round, soccfg=profile_soccfg("ftf"))
     if not isinstance(replayed, IntegratedRound):
         raise AssertionError("integrated replay must retain raw shots")
     np.testing.assert_array_equal(
@@ -173,7 +174,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
 
     archive = tmp_path / "current"
     env = ftf(
-        parse_ftf(ftf_document()),
+        parse_ftf(ftf_document()), soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=archive),
     )
     try:
@@ -203,7 +204,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     legacy = saved.acquire.model_copy(update={"versions": old_versions})
     path = save_replay(tmp_path / "legacy", legacy, saved.round.snapshot, 0)
     with pytest.raises(ValueError, match="version mismatch"):
-        replay_round(path)
+        replay_round(path, soccfg=profile_soccfg("ftf"))
 
 
 def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) -> None:
@@ -225,7 +226,7 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
 
     source = FTFSource(
         settings(),
-        DeviceManager(),
+        DeviceManager(), soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(private_replay=tmp_path / "archive"),
     )
     try:
@@ -242,7 +243,7 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
     saved = read_replay(paths[0])
     assert saved.round.numeric_manifest is None
     assert saved.acquire.library_path is None
-    actual = expect_statistics(replay_round(paths[0]))
+    actual = expect_statistics(replay_round(paths[0], soccfg=profile_soccfg("ftf")))
     np.testing.assert_array_equal(actual.channels[0].sums, expected.channels[0].sums)
     for name in ("numeric", "rng"):
         incompatible = saved.acquire.model_copy(
@@ -255,4 +256,4 @@ def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) ->
         )
         mismatch = save_replay(tmp_path / name, incompatible, saved.round.snapshot, 2)
         with pytest.raises(ValueError, match="version mismatch"):
-            replay_round(mismatch)
+            replay_round(mismatch, soccfg=profile_soccfg("ftf"))

@@ -1,5 +1,6 @@
 """Independent acquisition-frozen coherence losses through six-source seams."""
 
+from tests.program._profiles import profile_soccfg
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -34,7 +35,7 @@ def drift_configuration():
 
 @contextmanager
 def environment(configuration, *, clock=None, truth_log=None):
-    env = six_fluxonium(configuration, clock=clock, truth_log=truth_log)
+    env = six_fluxonium(configuration, soccfg=profile_soccfg("six_fluxonium"), clock=clock, truth_log=truth_log)
     try:
         yield env
     finally:

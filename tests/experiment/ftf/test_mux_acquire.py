@@ -1,5 +1,6 @@
 """Persisted mux settings drive the real program-to-FTF acquisition path."""
 
+from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
@@ -86,8 +87,8 @@ def raw_shots(prog):
 @pytest.mark.parametrize("mux", [False, True])
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_public_acquisition_resolves_jump_bridges_and_shared_mux_paths(mux, mode):
-    env = ftf(jumping_settings(mux), time_scale=0)
-    repeat = ftf(jumping_settings(mux), time_scale=0)
+    env = ftf(jumping_settings(mux), soccfg=profile_soccfg("ftf"), time_scale=0)
+    repeat = ftf(jumping_settings(mux), soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
         prog = jumping_program(env, mux)
         replay = jumping_program(repeat, mux)
@@ -123,8 +124,8 @@ def test_public_acquisition_resolves_jump_bridges_and_shared_mux_paths(mux, mode
 
 @pytest.mark.parametrize("mux", [False, True])
 def test_deferred_getter_keeps_its_round_and_does_not_advance_mean_stream(mux):
-    env = ftf(jumping_settings(mux), time_scale=0)
-    repeat = ftf(jumping_settings(mux), time_scale=0)
+    env = ftf(jumping_settings(mux), soccfg=profile_soccfg("ftf"), time_scale=0)
+    repeat = ftf(jumping_settings(mux), soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
         held = jumping_program(
             env,
@@ -201,7 +202,13 @@ def test_one_environment_acquires_mux_then_pulse_without_reconfiguration(
             )
         }
     )
-    env = ftf(numeric, time_scale=0)
+    from tests.program._profiles import load_mux_soccfg
+
+    env = ftf(
+        numeric,
+        soccfg=load_mux_soccfg(8, 10, gen_ch=mux_gen, ro_chs=channels),
+        time_scale=0,
+    )
     try:
         mux = MuxReadoutCfg(
             gen_ch=mux_gen,
@@ -247,7 +254,7 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
         settings = parse_ftf(mux_document(channels))
     except ValueError as error:
         pytest.fail(f"mux settings must enable end-to-end FTF acquisition: {error}")
-    env = ftf(settings)
+    env = ftf(settings, soccfg=profile_soccfg("ftf"))
     try:
         module = MuxReadoutCfg(
             gen_ch=1,

@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
+from qick import QickConfig
 from numpy.typing import NDArray
 
 from zcu_tools.core.simulation import (
@@ -26,7 +27,6 @@ from zcu_tools.experiment.single_fluxonium import (
     SingleFluxoniumSource,
 )
 from zcu_tools.experiment.single_fluxonium.drift import CoherenceDrift
-from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
@@ -447,12 +447,16 @@ class SixFluxoniumSource:
 def six_fluxonium(
     configuration: SixFluxoniumSettings | str | Path,
     *,
+    soccfg: QickConfig,
     clock: SimulationClock | None = None,
     truth_log: Path | None = None,
 ) -> SimulationEnvironment:
     """Build seven DC FakeDevices, six independent models and a bound SoC.
 
-    configuration is validated material or a YAML path relative to cwd. Startup
+    configuration is validated material or a YAML path relative to cwd.
+    soccfg is the required caller-owned QICK compile profile built from independent
+    board YAML. It must include the configured drive/readout channels; this builder
+    does not infer board capabilities or channel counts from physical wiring. Startup
     applies each initial current once. No hardware or numerical warmup runs.
     The host owns devices after return and calls close_backend after work drains.
     Mux gen0 binds ADC0..5; pulse gen13 binds ADC6. Microwave gens1..6 bind those
@@ -494,7 +498,6 @@ def six_fluxonium(
         source = SixFluxoniumSource(
             settings, devices, clock=sim_clock, truth_log=truth_log
         )
-        soccfg = make_mux_mock_soccfg(14, 7, gen_ch=0, ro_chs=tuple(range(6)))
         binding = SimulationBinding(
             source.snapshot,
             source.execute,

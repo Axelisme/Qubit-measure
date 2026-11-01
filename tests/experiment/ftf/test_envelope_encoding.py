@@ -1,5 +1,6 @@
 """Exact preparation streams with source-scoped immutable envelope reuse."""
 
+from tests.program._profiles import profile_soccfg
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, fields, replace
@@ -174,8 +175,8 @@ class RecordingEngine(Engine):
 @pytest.mark.sim
 def test_execute_keeps_signals_and_densities_exact_across_fingerprint_reuse(change):
     engine, reference_engine = RecordingEngine(), RecordingEngine()
-    source = FTFSource(settings(), DeviceManager(), engine=engine)
-    reference = FTFSource(settings(), DeviceManager(), engine=reference_engine)
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine)
+    reference = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=reference_engine)
     reference.envelope_encoder.max_bytes = 0
     reference.preparation_cache.max_bytes = 0
     try:
@@ -246,7 +247,7 @@ def test_execute_keeps_signals_and_densities_exact_across_fingerprint_reuse(chan
 
 @pytest.mark.sim
 def test_shared_envelope_encodes_once_and_preserves_exact_stream():
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         assert hasattr(source, "envelope_encoder"), "source must own envelope encoding"
         encoder = source.envelope_encoder
@@ -273,7 +274,7 @@ def test_shared_envelope_encodes_once_and_preserves_exact_stream():
 
 @pytest.mark.sim
 def test_changed_envelope_and_borrowed_arrays_change_key_without_stale_reuse():
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         assert hasattr(source, "envelope_encoder"), "source must own envelope encoding"
         encoder = source.envelope_encoder
@@ -304,9 +305,9 @@ def test_changed_envelope_and_borrowed_arrays_change_key_without_stale_reuse():
 @pytest.mark.parametrize("change", ["snapshot", "settings", "engine"])
 @pytest.mark.sim
 def test_generation_still_invalidates_preparation_and_keeps_output_exact(change):
-    source = FTFSource(settings(), DeviceManager(), engine=RecordingEngine())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=RecordingEngine())
     reference_engine = RecordingEngine()
-    reference = FTFSource(settings(), DeviceManager(), engine=reference_engine)
+    reference = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=reference_engine)
     reference.envelope_encoder.max_bytes = 0
     reference.preparation_cache.max_bytes = 0
     old_engine = source.engine
@@ -355,7 +356,7 @@ def test_generation_still_invalidates_preparation_and_keeps_output_exact(change)
 
 @pytest.mark.sim
 def test_encoder_byte_budget_eviction_disable_and_source_close():
-    source = FTFSource(settings(), DeviceManager())
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"))
     try:
         assert hasattr(source, "envelope_encoder"), "source must own envelope encoding"
         encoder = source.envelope_encoder

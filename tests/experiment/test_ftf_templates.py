@@ -1,5 +1,6 @@
 """Template-to-engine composition and per-acquire FTF round semantics."""
 
+from tests.program._profiles import profile_soccfg
 from collections.abc import Sequence
 from dataclasses import replace
 from threading import Event
@@ -37,7 +38,7 @@ def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
     import zcu_tools.experiment.ftf as ftf
 
     plan = ftf.plan_template(
-        settings(), snapshot(), template(tones=1), time_base=TIME_BASE
+        settings(), snapshot(), template(tones=1), soccfg=profile_soccfg("ftf"), time_base=TIME_BASE
     )
     track = plan.batch.tracks[0]
     np.testing.assert_array_equal(track.start_ns, [0.0, 2.0])
@@ -80,7 +81,7 @@ def test_template_engine_paths_match_strict_secular_reference(
             for r in base.readouts
         ),
     )
-    plan = ftf.plan_template(settings(), snapshot(), tiny, time_base=TIME_BASE)
+    plan = ftf.plan_template(settings(), snapshot(), tiny, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     engine = Engine(1)
     try:
         actual = engine.evolve(plan.source, (plan.batch,), cancel=Event())
@@ -148,7 +149,7 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
     )
     overlap = replace(base, events=(*base.events, extra))
     plans = [
-        ftf.plan_template(settings(), snapshot(), t, time_base=TIME_BASE)
+        ftf.plan_template(settings(), snapshot(), t, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
         for t in (base, overlap)
     ]
     engine = Engine(1)
@@ -165,7 +166,7 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
         ftf.plan_template(
             settings(),
             snapshot(),
-            replace(base, events=(*base.events, base.events[0])),
+            replace(base, events=(*base.events, base.events[0])), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
 
@@ -189,7 +190,7 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
         plan = ftf.plan_template(
             settings(),
             snapshot(),
-            replace(base, events=(terminal, earlier, alternate)),
+            replace(base, events=(terminal, earlier, alternate)), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
     except ValueError as error:
@@ -217,7 +218,7 @@ def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> 
 
     base, config = herald_template()
     plan = ftf.plan_template(
-        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+        settings(), snapshot(), base, soccfg=profile_soccfg("ftf"), readout=config, time_base=TIME_BASE
     )
     assert tuple(item.channel for item in plan.readouts) == (4, 1)
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
@@ -275,7 +276,7 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
     )
     base = replace(base, readouts=(herald_only, replace(herald_only, channel=1)))
     plan = plan_template(
-        settings(), snapshot(), base, readout=config, time_base=TIME_BASE
+        settings(), snapshot(), base, soccfg=profile_soccfg("ftf"), readout=config, time_base=TIME_BASE
     )
     np.testing.assert_array_equal(plan.batch.end_ns, [8, 10])
     for item in plan.readouts:
@@ -301,7 +302,7 @@ def test_readout_rejects_trigger_without_an_incident_pulse_window(
         ftf.plan_template(
             settings(),
             snapshot(),
-            replace(base, readouts=(window,)),
+            replace(base, readouts=(window,)), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
 
@@ -320,7 +321,7 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
         plan = ftf.plan_template(
             settings(),
             snapshot(),
-            replace(base, events=(earlier, terminal)),
+            replace(base, events=(earlier, terminal)), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
     except ValueError as error:
@@ -333,7 +334,7 @@ def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
         ftf.plan_template(
             settings(),
             snapshot(),
-            replace(base, events=(crossing, terminal)),
+            replace(base, events=(crossing, terminal)), soccfg=profile_soccfg("ftf"),
             time_base=TIME_BASE,
         )
 
@@ -369,7 +370,7 @@ def test_round_statistics_reuse_snapshot_and_engine_across_acquires() -> None:
 
     assert callable(FTFSource.open_acquire)
     engine = CountingEngine()
-    source = FTFSource(settings(), DeviceManager(), engine=engine)
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=engine)
     try:
         session = source.open_acquire(request())
         first = expect_statistics(session.sample_round(snapshot(), 0))
@@ -425,7 +426,7 @@ class ResidualEngine(Engine):
 def test_acquire_explicitly_normalizes_in_budget_evolution(populations, normalized):
     from zcu_tools.experiment.ftf import FTFSource
 
-    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=ResidualEngine(populations))
     acquire = replace(request(), reps=1_000_000_000)
     try:
         try:
@@ -446,7 +447,7 @@ def test_acquire_explicitly_normalizes_in_budget_evolution(populations, normaliz
 def test_acquire_rejects_out_of_budget_evolution_and_retains_diagnostics(populations):
     from zcu_tools.experiment.ftf import FTFSource
 
-    source = FTFSource(settings(), DeviceManager(), engine=ResidualEngine(populations))
+    source = FTFSource(settings(), DeviceManager(), soccfg=profile_soccfg("ftf"), engine=ResidualEngine(populations))
     try:
         with pytest.raises(ValueError, match="2 rows") as rejection:
             source.open_acquire(request()).sample_round(snapshot(), 0)
@@ -486,7 +487,7 @@ def test_template_wires_receiver_delay_and_mismatch_without_delaying_evolution()
             ),
         }
     )
-    plan = plan_template(configured, snapshot(), template(), time_base=TIME_BASE)
+    plan = plan_template(configured, snapshot(), template(), soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
     assert (
         getattr(plan.readouts[0].batch.model.receiver, "time_of_flight_ns", None)
         == 400.0
@@ -513,7 +514,7 @@ def test_sampled_readout_template_preserves_linear_envelope_without_field_ode(
     samples = PulseEnvelope(ticks(0.006), (0.1, 0.8 + 0.2j, 1.0 - 0.1j, 0.2))
     shaped = replace(base, events=(replace(base.events[0], envelopes=(samples,)),))
     batch = (
-        plan_template(settings(), snapshot(), shaped, time_base=TIME_BASE)
+        plan_template(settings(), snapshot(), shaped, soccfg=profile_soccfg("ftf"), time_base=TIME_BASE)
         .readouts[0]
         .batch
     )

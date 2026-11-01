@@ -4,6 +4,7 @@ Small retained spaces isolate composition. Production-sized cost is measured by
 an author probe, not by weakening the environment defaults in these tests.
 """
 
+from tests.program._profiles import profile_soccfg
 from dataclasses import replace
 from pathlib import Path
 
@@ -223,7 +224,7 @@ def test_representative_single_points_match_population_oracle(experiment):
                 )
             }
         )
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(config, env.devices)
     try:
         request = request_for(source, experiment)
@@ -267,7 +268,7 @@ def test_representative_single_points_match_population_oracle(experiment):
 
 def test_onetone_mean_matches_causal_scalar_cavity_solution():
     config = physical_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(config, env.devices)
     try:
         request = request_for(source)
@@ -304,7 +305,7 @@ def test_onetone_mean_matches_causal_scalar_cavity_solution():
 def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     from zcu_tools.experiment.single_fluxonium import replay
 
-    env = single_fluxonium(physical_settings())
+    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         source.private_replay = tmp_path / "archive"
@@ -334,7 +335,7 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     if isinstance(result, IntegratedRound):
         for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
             np.testing.assert_array_equal(raw, expected[ch])
-    replayed = replay.replay_round(paths[0])
+    replayed = replay.replay_round(paths[0], soccfg=profile_soccfg("ftf"))
     actual = (
         replayed.raw.materialize(request.reps, request.avg_level)
         if isinstance(replayed, IntegratedRound)
@@ -356,7 +357,7 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
-        replay.replay_round(path)
+        replay.replay_round(path, soccfg=profile_soccfg("ftf"))
 
 
 def named_drive_settings():
@@ -379,7 +380,7 @@ def named_drive_settings():
 
 def test_preflight_routes_overlapping_events_to_their_own_named_source():
     config = named_drive_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(config, env.devices)
     try:
         request = request_for(source, "rabi")
@@ -406,7 +407,7 @@ def test_preflight_routes_overlapping_events_to_their_own_named_source():
 @pytest.mark.parametrize("channel", [3, 6])
 def test_preflight_rejects_unknown_generator_with_event_path(channel):
     config = named_drive_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(config, env.devices)
     try:
         request = request_for(source, "rabi")
@@ -434,7 +435,7 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
                 "real": 0.0,
                 "imag": 0.0,
             }
-        env = single_fluxonium(parse_single_fluxonium(configured))
+        env = single_fluxonium(parse_single_fluxonium(configured), soccfg=profile_soccfg("single_fluxonium"))
         try:
             first = PulseCfg(
                 ch=1,
@@ -488,7 +489,7 @@ def test_overlapping_named_drives_acquire_and_respond_to_each_calibration():
 
 
 def test_program_acquire_raw_decimated_and_live_round_refresh():
-    env = single_fluxonium(physical_settings())
+    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
     try:
         readout = PulseReadoutCfg(
             gen_ch=0,
@@ -569,7 +570,7 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     )
     path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
     try:
-        replay.replay_round(path)
+        replay.replay_round(path, soccfg=profile_soccfg("ftf"))
     except AttributeError:
         pytest.fail(
             f"{target} replay must reject other-backend settings with ValueError before numeric work"
@@ -588,7 +589,7 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
     from zcu_tools.experiment.single_fluxonium import replay_round
 
     config = physical_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(
         config, env.devices, private_replay=tmp_path / "archive"
     )
@@ -614,7 +615,7 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
     finally:
         source.close()
         env.devices.close_all_devices()
-    replayed = expect_integrated(replay_round(archived))
+    replayed = expect_integrated(replay_round(archived, soccfg=profile_soccfg("ftf")))
     np.testing.assert_array_equal(
         replayed.statistics.channels[0].sums, result.statistics.channels[0].sums
     )
@@ -627,7 +628,7 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
 
 
 def test_builder_backend_cleanup_rejects_later_work_but_leaves_drivers_owned():
-    env = single_fluxonium(physical_settings())
+    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
     driver = env.create_device("FakeDevice", physical_settings().dc_bias.source.name)
     try:
         try:
@@ -657,7 +658,7 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
         pytest.fail(
             f"DC-only material must admit an explicitly unbound flux line: {error}"
         )
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     try:
         readout = PulseReadoutCfg(
             gen_ch=0,
@@ -719,7 +720,7 @@ def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
         values["flux_line"]["distortion_terms"] = [{"amplitude": 0.3, "tau_ns": 12.0}]
     elif case == "tail":
         values["flux_line"]["tau_ns"] = 20.0
-    env = single_fluxonium(parse_single_fluxonium(values))
+    env = single_fluxonium(parse_single_fluxonium(values), soccfg=profile_soccfg("single_fluxonium"))
     try:
         microwave = PulseCfg(
             ch=1,
@@ -772,7 +773,7 @@ def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
 
 
 def test_source_rejects_nonterminal_cavity_pulses_before_evolution():
-    env = single_fluxonium(physical_settings())
+    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         request = request_for(source, reps=1)
@@ -802,7 +803,7 @@ class EvolutionObserver(Engine):
 
 def test_new_acquire_rechecks_charge_admission_before_reusing_numeric_preparation():
     config = physical_settings()
-    env = single_fluxonium(config)
+    env = single_fluxonium(config, soccfg=profile_soccfg("single_fluxonium"))
     engine = EvolutionObserver()
     source = SingleFluxoniumSource(
         config, env.devices, runtime=SingleFluxoniumRuntimeOptions(engine=engine)
@@ -842,7 +843,7 @@ def test_new_acquire_rechecks_charge_admission_before_reusing_numeric_preparatio
 
 
 def test_source_rejects_invalidated_session_and_refreshes_mutated_controls():
-    env = single_fluxonium(physical_settings())
+    env = single_fluxonium(physical_settings(), soccfg=profile_soccfg("single_fluxonium"))
     source = SingleFluxoniumSource(physical_settings(), env.devices)
     try:
         request = request_for(source, "rabi", reps=100_000)

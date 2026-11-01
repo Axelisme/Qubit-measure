@@ -4,6 +4,7 @@ These two-state checks validate existing flux wiring, not basis convergence or
 nonadiabatic accuracy for a physical device. No production behavior is added.
 """
 
+from tests.program._profiles import profile_soccfg
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -115,7 +116,7 @@ def evolve_reset(
     plan = plan_template(
         settings,
         snapshot(),
-        reset_template(hold_ns, sudden=sudden),
+        reset_template(hold_ns, sudden=sudden), soccfg=profile_soccfg("ftf"),
         facts=facts,
         time_base=TIME_BASE,
     )
@@ -172,7 +173,7 @@ def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) 
     plan = plan_template(
         settings,
         snapshot(),
-        reset_template(hold_ns, settling_ns=8.0),
+        reset_template(hold_ns, settling_ns=8.0), soccfg=profile_soccfg("ftf"),
         facts=facts,
         time_base=TIME_BASE,
     )

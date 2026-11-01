@@ -6,6 +6,7 @@ from math import prod
 from pathlib import Path
 
 import numpy as np
+from qick import QickConfig
 
 from zcu_tools.core.simulation import (
     AcquireRequest,
@@ -19,7 +20,6 @@ from zcu_tools.core.simulation import (
 from zcu_tools.device import DeviceManager
 from zcu_tools.device.fake import FakeDevice, FakeDeviceInfo
 from zcu_tools.experiment.simulation import EnvironmentWarmup, SimulationEnvironment
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
@@ -375,6 +375,7 @@ class FTFAcquire:
                 snapshot,
                 template,
                 time_base=acquire.time_base,
+                soccfg=owner.soccfg,
                 readout=owner.readout,
                 facts=facts,
             )
@@ -522,6 +523,7 @@ class FTFSource:
         settings: FTFSettings,
         devices: DeviceManager,
         *,
+        soccfg: QickConfig,
         engine: Engine | None = None,
         acquisition: FTFAcquisitionOptions | None = None,
         readout: FTFReadoutConfig | None = None,
@@ -539,6 +541,7 @@ class FTFSource:
                 "private replay requires readout settings to match author configuration"
             )
         self.settings = settings
+        self.soccfg = soccfg
         self.devices = devices
         # The physical source survives session disconnects and registry renames.
         self._source_devices = devices.get_all_devices()
@@ -766,21 +769,22 @@ def _flux_generator_channels(settings: FTFSettings) -> tuple[int, ...]:
 def ftf(
     configuration: FTFSettings | str | Path,
     *,
+    soccfg: QickConfig,
     acquisition: FTFAcquisitionOptions | None = None,
     workers: int = 1,
     warmup: bool | EnvironmentWarmup = False,
     time_scale: float | None = None,
 ) -> SimulationEnvironment:
-    """Build a fixed-profile FTF environment from named values or a YAML path.
+    """Build an FTF environment from physical settings and a caller-owned board.
 
     Startup creates fixed V/A FakeDevices and applies initial values once. The
     returned manager owns cleanup; builder failures close all devices and preserve
-    both original and cleanup errors. The mock profile includes pulse and optional
-    mux readout plus all drive and fast-flux lines. Generator/ADC counts are the
-    maximum configured indices plus one; mux uses its own generator and receiver
-    profile. One environment
-    supports separate pulse and mux acquires without reconfiguration. Channels never
-    accept arbitrary firmware overrides. Host receives no model truth.
+    both original and cleanup errors. soccfg is the required QICK compile profile,
+    built by the caller from independent board YAML. It must include all configured
+    drive/flux channels, pulse readout and optional mux/PFB routes. No channel
+    counts or board settings are inferred from physical wiring. The same soccfg
+    supplies the SoC and numeric PFB carrier selection. One environment supports
+    separate pulse and mux acquires without reconfiguration. Host receives no model truth.
     acquisition.private_replay explicitly enables author-only checked input archives at an
     absolute directory. Replay recomputes with checked numeric and RNG versions;
     no U table or exact density record is consulted. One engine persists across
@@ -841,6 +845,7 @@ def ftf(
         coordinator = FTFSource(
             settings,
             devices,
+            soccfg=soccfg,
             engine=Engine(workers),
             acquisition=replace(options, clock=sim_clock),
             telemetry=telemetry,
@@ -855,15 +860,6 @@ def ftf(
         )
         mux_receivers = () if mux is None else tuple(r.ro_ch for r in mux.receivers)
         receivers = (readout.pulse.ro_ch, *mux_receivers)
-        if mux is not None:
-            soccfg = make_mux_mock_soccfg(
-                max(gens) + 1,
-                max(receivers) + 1,
-                gen_ch=mux.gen_ch,
-                ro_chs=mux_receivers,
-            )
-        else:
-            soccfg = make_mock_soccfg(max(gens) + 1, max(receivers) + 1)
         from .warmup import startup_warmup
 
         preparation = (

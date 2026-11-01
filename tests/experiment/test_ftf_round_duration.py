@@ -1,5 +1,6 @@
 """FTF environment pacing and its opt-out leave public acquisition unchanged."""
 
+from tests.program._profiles import profile_soccfg
 import time
 
 import numpy as np
@@ -33,7 +34,7 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
     # The synthetic settings omit pacing; the builder supplies physical time.
     settings = parse_ftf(ftf_document())
     env = ftf(
-        settings,
+        settings, soccfg=profile_soccfg("ftf"),
         acquisition=FTFAcquisitionOptions(
             clock=SimulationClock(monotonic=lambda: now[0])
         ),
@@ -58,7 +59,7 @@ def test_default_paces_every_round_and_builder_zero_preserves_bitwise_results(
         expected_raw = raw_of(program)
         assert waits == pytest.approx([2.08e-6, 2.08e-6], abs=10e-9)
         unpaced = ftf(
-            settings,
+            settings, soccfg=profile_soccfg("ftf"),
             time_scale=0,
             acquisition=FTFAcquisitionOptions(
                 clock=SimulationClock(monotonic=lambda: now[0])
@@ -89,7 +90,7 @@ def test_yaml_zero_disables_round_wait(monkeypatch: pytest.MonkeyPatch):
     document = ftf_document()
     settings = parse_ftf(document)
     document["numerics"] = {**settings.numerics.model_dump(), "time_scale": 0}
-    env = ftf(parse_ftf(document))
+    env = ftf(parse_ftf(document), soccfg=profile_soccfg("ftf"))
     try:
         program = compile_modules(
             env.soccfg,

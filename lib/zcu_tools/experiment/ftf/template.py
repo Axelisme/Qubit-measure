@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
+from qick import QickConfig
 
 from zcu_tools.core.simulation import (
     EnvironmentSnapshot,
@@ -374,6 +375,7 @@ def plan_template(
     template: TimelineTemplate,
     *,
     time_base: TimeBase,
+    soccfg: QickConfig,
     readout: FTFReadoutConfig | None = None,
     facts: FTFModelFacts | None = None,
 ) -> FTFTemplatePlan:
