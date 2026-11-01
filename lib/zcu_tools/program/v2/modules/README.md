@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，native module declaration、emission 與 cfg-free acquisition
+**Last updated:** 2026-11-01，native module declaration、emission、cfg-free acquisition 與 selected index 生命週期
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -289,10 +289,20 @@ same-channel placement without changing the scheduled end or reference.
 `LoadValue.lower_selected` captures the index at the lookup position and returns
 the declared table relation. Timeline playback checks the actual address/length
 producer against that relation. Later author selector changes do not change the
-already selected playback or its post. Every write to the playback register and
-captured index must belong to that mapping, including Branch cases, backedges
-and resets. An in-range constant or different-table write still fails with the
-register and instruction position. Ordinary scalar and uint32 word consumers
+already selected playback or its post. `ComputedPulse` shares address and capture
+storage across emissions. Each emission consumes both through playback and its
+selected-post finisher before the next lookup. Later joins, repeat guards and
+coverage checks use captured end storage and immutable timing proofs, not the
+reused indices. Other `lower_selected` callers retain loader-owned captures unless
+they explicitly borrow `captured_index` for this same short lifetime.
+Every write to playback/capture storage must belong to a consumed table mapping,
+including Branch cases, backedges and resets. A different mapping may reuse the
+storage only after consumption. Each playback must retain the matching relation
+on every incoming Branch path and Repeat iteration, including skipped loops and
+backedges. Empty cases preserve their entry relation; a body-local lookup replaces
+it before that iteration's consumer. Playback of an overwritten relation fails.
+An in-range constant or different-table write still fails with the register and
+instruction position. Ordinary scalar and uint32 word consumers
 keep their existing contracts.
 
 ## Design Boundaries

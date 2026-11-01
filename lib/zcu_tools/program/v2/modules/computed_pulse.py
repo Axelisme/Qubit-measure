@@ -62,11 +62,15 @@ class ComputedPulse(Module):
         base_idxs = self._declare_candidates(
             prog, declare_pulse=lambda pulse: pulse.declare(prog)
         )
+        # Address words are consumed by this emission before any next module
+        # lookup. Selected ends keep their own ADR-0083 runtime storage.
+        address_register = prog.add_reg("_computed_wmem_index", allow_reuse=True)
         address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
             idx_reg=self.val_reg,
-            val_reg=f"{self.name}_wmem_index",
+            val_reg=address_register,
+            use_existed=True,
         )
         address_loader.declare(prog)
         prog.set_module_state(self, address_loader)
@@ -81,7 +85,11 @@ class ComputedPulse(Module):
         """
         del tag  # ModuleEmission owns the occurrence tag.
         address_loader = prog.get_module_state(self, LoadValue)
-        relation = address_loader.lower_selected(prog)
+        # ModuleEmission finishes the paired selected post before another
+        # ComputedPulse can overwrite this capture. It is not a temp arithmetic
+        # register: lookup scratch and pulse address preparation must not alias it.
+        captured = prog.add_reg("_computed_selected_index", allow_reuse=True)
+        relation = address_loader.lower_selected(prog, captured_index=captured)
         choices = tuple(
             PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules

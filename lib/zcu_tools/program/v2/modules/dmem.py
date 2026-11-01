@@ -142,18 +142,32 @@ class LoadValue(Module):
             ):
                 self._emit_lookup(prog, index)
 
-    def lower_selected(self, prog: TimelineProgramV2) -> TableSelection:
+    def lower_selected(
+        self, prog: TimelineProgramV2, *, captured_index: str | None = None
+    ) -> TableSelection:
         """Load a selected-playback scalar and capture its index at this position.
 
         Declaration must precede this call. The returned immutable relation binds
         actual playback to this table and its exact writers. A loader-owned
         capture survives later author selector changes. Repeated emissions reuse
         registers, with each occurrence loading and capturing before playback.
-        Empty tables fail. Ordinary lower/lower_index keep their scalar contract.
+        captured_index optionally borrows an already declared register, distinct
+        from idx_reg and val_reg. The caller must keep it unchanged through both
+        playback and its selected-post finisher before reusing it. None retains
+        a loader-owned capture for callers that defer playback. Empty tables or
+        aliased captures fail. Ordinary lower/lower_index keep their scalar contract.
         """
         if not self.values:
             raise ValueError(f"{self.name}: selected playback needs a nonempty table")
-        captured = prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
+        if captured_index in (self.idx_reg, self.val_reg):
+            raise ValueError(
+                f"{self.name}: selected capture must not alias lookup registers"
+            )
+        captured = (
+            prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
+            if captured_index is None
+            else captured_index
+        )
         relation = TableSelection(
             prog.get_module_state(self, _LookupDeclaration).table,
             self.val_reg,
@@ -170,7 +184,13 @@ class LoadValue(Module):
         with prog.time_producer(
             self.val_reg,
             CycleBounds(min(self.values), max(self.values)),
-            dependency_ranges={captured: index_limits},
+            # The immediately preceding capture certifies this table's index
+            # range. A shared capture may have other ranges in other emissions;
+            # their whole-program union is not this lookup's index range.
+            dependencies=(captured,),
+            dependency_ranges=(
+                {captured: index_limits} if captured_index is None else None
+            ),
             selection=relation,
         ):
             self._emit_lookup(prog, captured)
