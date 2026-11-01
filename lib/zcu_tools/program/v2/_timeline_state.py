@@ -2,6 +2,7 @@
 
 import warnings
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from qick.asm_v2 import QickParam, WriteReg
 
@@ -11,6 +12,7 @@ from ._timeline_expression import (
     add_time,
     choose_time,
     cycle_axis,
+    difference_limits,
     exact_bounds,
     expression_axes,
     multiply_time,
@@ -41,6 +43,9 @@ from ._timeline_runtime import (
 from .macro.table import TableSelection
 from .macro.write_reg import WriteRegOp
 
+if TYPE_CHECKING:
+    from .timeline import TimelineProgramV2
+
 
 @dataclass(frozen=True)
 class RepeatFrameSnapshot:
@@ -70,6 +75,10 @@ class RepeatFrame:
     written_gens: set[int] = field(default_factory=set)
     written_ros: set[int] = field(default_factory=set)
     pulse_guards: dict[int, _PulseGuard] = field(default_factory=dict)
+    # (timeline, ADC channel, entry-relative start cycles, branch selector/index path).
+    adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = (
+        field(default_factory=list)
+    )
     defined: set[str] = field(default_factory=set)
     initial_external: dict[str, Time] = field(default_factory=dict)
     entry_math: RuntimeMath | None = None
@@ -328,8 +337,10 @@ class LoopTimelineFrame:
     entry is its incoming end; origin adds an opaque iteration-progress identity.
     initial_channels/native retain incoming physical tails and their provenance.
     entry_math initializes shot-local storage before the loop. pinned restores
-    register liveness at exit. starts records managed starts and branch paths
-    for the backedge proof, in relative integer cycles. advance is cumulative
+    register liveness at exit. starts records managed generator starts and branch
+    paths for the backedge proof, in relative integer cycles. adc_starts records
+    (timeline, ADC channel, start cycles, branch selector/index path) for the same
+    proof on independent ADC tails. advance is cumulative
     reference movement in cycles; debits retain its execution-position plans.
     written_channels distinguishes generated tails from untouched outer tails.
     body_math starts empty and retains the prepared RuntimeMath plans emitted
@@ -352,6 +363,9 @@ class LoopTimelineFrame:
     starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
         default_factory=list
     )
+    adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = (
+        field(default_factory=list)
+    )
     advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
@@ -366,10 +380,13 @@ class BranchProvenance:
     sources maps register names to integer tProc-cycle expressions. native maps
     (is_generator, channel_id) to relative integer-cycle tails. Both mappings
     are detached snapshots, so preparing another case cannot mutate this path.
+    unknown_adcs contains channels last triggered with native t=None; those tails
+    cannot prove ordering for a later managed trigger and do not alter closure.
     """
 
     sources: dict[str, TimeExpression]
     native: dict[tuple[bool, int], TimeExpression]
+    unknown_adcs: frozenset[int]
 
 
 @dataclass
@@ -405,6 +422,7 @@ class TimelineBook:
         self.pinned: set[str] = set()
         self.runtime_gens: dict[int, RuntimeEnd] = {}
         self.runtime_ros: dict[int, RuntimeEnd] = {}
+        self.unknown_native_adcs: set[int] = set()
         # Compile-only event tails. Runtime stores and QICK timestamps keep
         # their existing scheduling roles; these expressions never emit code.
         # Keys are (is_generator, channel_id).
@@ -468,6 +486,7 @@ class TimelineBook:
         entry = self.branch_provenance[-1].entry
         self.source_expressions = entry.sources.copy()
         self.native_expressions = entry.native.copy()
+        self.unknown_native_adcs = set(entry.unknown_adcs)
 
     def record_branch_sources(self, prog) -> None:
         """Capture source/channel values after this case's local timeline closure."""
@@ -476,12 +495,17 @@ class TimelineBook:
     def snapshot_branch_provenance(self, prog) -> BranchProvenance:
         """Copy current register sources and all declared native channel tails."""
         return BranchProvenance(
-            self.source_expressions.copy(), self.snapshot_native_expressions(prog)
+            self.source_expressions.copy(),
+            self.snapshot_native_expressions(prog),
+            frozenset(self.unknown_native_adcs),
         )
 
     def finish_branch_sources(self, prog, selector: str) -> None:
         """Select channel tails and register sources defined on every branch path."""
         frame = self.branch_provenance.pop()
+        self.unknown_native_adcs = set().union(
+            *(path.unknown_adcs for path in frame.paths)
+        )
         self.native_expressions = {
             key: select_time(
                 source_expression(prog, selector),
@@ -604,6 +628,93 @@ class TimelineBook:
             (channel, expression, tuple(self.case_path))
         )
 
+    def check_adc(self, prog, timeline: str, channel: int, start: Time) -> None:
+        """Reject a trigger unless its integer start covers the ceiled ADC tail.
+
+        Diagnostics report the worst overlap in tProc cycles, or an unprovable
+        runtime ordering when the input has no sufficient bounds.
+        """
+        if channel in self.unknown_native_adcs:
+            raise ValueError(
+                f"{timeline}: channel {channel} ADC overlap; "
+                "cannot locate previous native trigger (t=None); overlap cycles unknown"
+            )
+        expression = time_expression(prog, start)
+        previous = self.native_expression(prog, channel, generator=False)
+        gap = add_time(expression, scale_time(previous, -1))
+        gap = substitute_time(
+            gap, {frame.progress: TimeVariable() for frame in self.loop_timelines}
+        )
+        lower, _ = difference_limits(gap, TimeVariable())
+        if lower is None or lower < 0:
+            detail = (
+                "cannot prove runtime start >= previous end (overlap cycles unknown)"
+                if lower is None
+                else f"{-lower} cycles; cannot prove start >= previous end"
+            )
+            raise ValueError(f"{timeline}: channel {channel} ADC overlap; {detail}")
+        if self.loop_timelines:
+            self.loop_timelines[-1].adc_starts.append(
+                (timeline, channel, expression, tuple(self.case_path))
+            )
+        for frame in self.repeats:
+            first = substitute_time(
+                expression,
+                {loop.progress: TimeVariable() for loop in self.loop_timelines},
+            )
+            frame.adc_starts.append(
+                (
+                    timeline,
+                    channel,
+                    add_time(first, frame.expression_advance),
+                    tuple(self.case_path),
+                )
+            )
+
+    def check_adc_backedge(
+        self,
+        prog: "TimelineProgramV2",
+        timeline: str,
+        channel: int,
+        gap: TimeExpression,
+        path: tuple[tuple[str, int], ...],
+    ) -> None:
+        """Prove an ADC reentry gap without advancing timelines or emitting delays.
+
+        gap is next-iteration start minus the previous ADC window end in tProc
+        cycles, expressed in the same relative coordinate system with loop
+        progress removed. path lists enclosing (sweep selector, case index)
+        pairs from outermost to innermost; an empty path means unconditional.
+        prog supplies selector point counts and their count expressions.
+        Only the selected path must have a nonnegative gap; zero is safe.
+        Raise ValueError with timeline, ADC channel and overlap cycles if the
+        lower bound is negative, or an unknown-overlap diagnostic if unprovable.
+        """
+        for selector, index in reversed(path):
+            gap = select_time(
+                self.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
+                tuple(
+                    gap if i == index else TimeVariable()
+                    for i in range(prog.loop_dict[selector])
+                ),
+            )
+        lower, _ = difference_limits(gap, TimeVariable())
+        if lower is None or lower < 0:
+            detail = "unknown overlap cycles" if lower is None else f"{-lower} cycles"
+            raise ValueError(
+                f"{timeline}: channel {channel} ADC overlap across repeat backedge; "
+                f"{detail}; cannot prove runtime start >= previous end"
+            )
+
+    def check_reference_adc_backedge(self, prog, frame: RepeatFrame) -> None:
+        """Prove reference-loop reentry against the final relative ADC tails."""
+        for timeline, channel, start, path in frame.adc_starts:
+            gap = add_time(
+                start,
+                scale_time(self.native_expression(prog, channel, generator=False), -1),
+            )
+            self.check_adc_backedge(prog, timeline, channel, gap, path)
+
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
         if self.used is not None or self.reference_guards:
@@ -721,6 +832,8 @@ class TimelineBook:
     def record_native(self, prog, ch: int, end: Time, *, generator: bool) -> None:
         """Capture an actual event end in cycles, without changing native storage."""
         self.native_expressions[generator, ch] = native_event_expression(prog, end)
+        if not generator:
+            self.unknown_native_adcs.discard(ch)
 
     def native_expression(self, prog, ch: int, *, generator: bool) -> TimeExpression:
         """Return the compile-only tail, or the initial native end before any event."""

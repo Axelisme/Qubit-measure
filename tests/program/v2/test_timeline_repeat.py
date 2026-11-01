@@ -903,15 +903,15 @@ def test_repeat_preserves_trigger_cycles_and_adc_window_closure():
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    # 25 ADC ticks = 35 tProc ticks, so trigger end=40 and pulse end=68.
+    # Trigger width closes15; pulse ends43. ADC closes40 before the backedge.
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (5, 1),
         (15, 0),
-        (73, 1),
-        (83, 0),
+        (48, 1),
+        (58, 0),
     ]
-    assert _waves(shot) == [40, 108]
-    assert (shot.body_end_cycle, shot.end_cycle) == (136, 136)
+    assert _waves(shot) == [15, 58]
+    assert (shot.body_end_cycle, shot.end_cycle) == (86, 86)
 
 
 @pytest.mark.parametrize("inner_parent", ["default", "local"])

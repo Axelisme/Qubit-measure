@@ -179,10 +179,6 @@ class ConstructivePhaseHeraldedExp(
             builder.emit(drive_f1, timeline="drive_f1_time")
             builder.emit(drive_f2, timeline="drive_f2_time")
             builder.join("drive_f1_time", "drive_f2_time", into="default")
-            # Advance reference to consume duration-sweep runtime ends here.
-            # Contrast, readout, ADC and shot end then use constant relative
-            # times while their absolute event times remain unchanged.
-            builder.delay_by_timeline()
             builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
             builder.emit(contrast_f1, timeline="contrast_f1_time")
             builder.emit(contrast_f2, timeline="contrast_f2_time")
@@ -264,9 +260,6 @@ class ConstructivePhaseHeraldedExp(
                 builder.emit(drive_f1, timeline="drive_f1_time")
                 builder.emit(drive_f2, timeline="drive_f2_time")
                 builder.join("drive_f1_time", "drive_f2_time", into="default")
-                # Advance reference at the same drive boundary as the hardware path.
-                # Keep downstream relative times constant without moving absolute events.
-                builder.delay_by_timeline()
                 builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
                 builder.emit(contrast_f1, timeline="contrast_f1_time")
                 builder.emit(contrast_f2, timeline="contrast_f2_time")

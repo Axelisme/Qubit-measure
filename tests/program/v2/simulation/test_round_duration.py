@@ -230,7 +230,7 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         binding.end()
 
 
-@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 250e-6)])
+@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 200e-6)])
 def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
     clock: Clock,
     adc_length: float,
@@ -269,7 +269,9 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
             ),
             0,
         )
-        # Allow 10 ns of DAC/ADC rounding per repetition of this nominal sequence.
+        # Generator completion is 3 + 2 + 5 = 10 us, independent of the ADC.
+        # Shot closure waits max(10, adc_length), then relaxes 8 us: 18/20 us.
+        # Ten repetitions give 180/200 us; allow 10 ns rounding per repetition.
         assert clock.waits == pytest.approx([expected], abs=100e-9)
     finally:
         binding.end()

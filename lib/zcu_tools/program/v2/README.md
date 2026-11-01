@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil、storage 重用與靜態 readout observation
+**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -204,9 +204,17 @@ Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join
 Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
 Source 必須存在，into 接受一個新名字或名字 list。未知來源、重名與未宣告使用都報錯。
 帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
+Trigger 的 named end 只含 trigger 寬度，ADC 視窗只更新該 ADC channel 的尾端。
 同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
+後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊也在編譯期報錯。
+前一個 ADC 視窗不論來自原生或 timeline trigger 都算。錯誤列出 timeline、channel 與 overlap cycles。
 Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
 未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
+ADC 重疊檢查同樣只對帶 timeline 的後一個 trigger 生效，純原生 trigger 保留 QICK 的時間與重疊處理。
+原生 scalar／sweep trigger 的尾端證據使用實際量化起點加 ADC 視窗，不改其 timestamp 或 Trigger 展開指令。
+這份證據也用於 shell WAIT／slack。例如 requested 起點為 0.2 cycle、ADC 長 140 cycles 時，實際起點為 0，WAIT 為 140 cycles。
+原生 `t=None` 無法定位 ADC 起點，後一同 ADC 的 timeline trigger 因無法證明不重疊而報錯。
+此未知標記只用於重疊檢查，不捏造 shot closure 的 runtime 結尾。
 
 `with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
 省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：
@@ -295,7 +303,9 @@ Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自
 Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
 Module 本身不是 QICK Macro，不能直接 append。
 Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為起點。
-結尾取實際 waveform／ADC event end 的最大值，加一次 post-delay，整段向上取整一次。
+PulseReadout、TablePulseReadout 與 MuxReadout 的結尾只取 generator waveform end，加一次 post-delay，整段向上取整一次。
+ADC 視窗不 join 回作者 timeline，每個 shot 的收尾仍等待所有 ADC。
+`PulseReadoutCfg.nominal_duration_us()` 回傳 `pre_delay + waveform.length + post_delay`，不含 ADC 時間或時脈取整。
 Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
 Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
 這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
@@ -380,7 +390,9 @@ Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，�
 
 `n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
 Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。
-省略 hint 時使用實際 count，不證明回邊的同 channel overlap。固定次數不接受 hint。
+省略 hint 時使用實際 count，只跳過 generator 回邊的同 channel overlap 證明。
+ADC 回邊仍須證明下一圈的起點不早於前一個視窗結尾，重疊或無法證明時 raise ValueError。
+固定次數或 hint 的 maximum 小於 2 時，兩種回邊檢查都跳過。固定次數不接受 hint。
 每 shot／sweep 點重新初始化循環狀態，局部 counter 不加入 QICK top-level sweep metadata。
 Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
 Producer audit 仍只接受相符的初始化、回邊與重設寫入。

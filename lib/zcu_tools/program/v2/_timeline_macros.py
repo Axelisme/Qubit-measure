@@ -58,6 +58,7 @@ from ._timeline_state import (
     TimelineBook,
 )
 from .macro.delay import DelayRegAuto
+from .macro.readout import ReadoutEmission
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
@@ -196,6 +197,7 @@ class TimelineBoundary(Macro):
             self.book.reference_guards = 0
             self.book.runtime_gens.clear()
             self.book.runtime_ros.clear()
+            self.book.unknown_native_adcs.clear()
             self.book.native_expressions.clear()
             self.book.native_length_sources.clear()
             self.book.pinned.clear()
@@ -569,6 +571,8 @@ class ZeroEntryReferenceExit(Macro):
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
         self._check_pulse_guards(frame)
+        if self.maximum is None or self.maximum >= 2:
+            self.book.check_reference_adc_backedge(prog, frame)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(
@@ -872,10 +876,13 @@ class ModuleEmission(TimedMacro):
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
             self.finishers = []
+            readout = False
             for macro in self.macros:
                 source = (
                     macro.source if isinstance(macro, PreparedTimelineMacro) else macro
                 )
+                if isinstance(source, ReadoutEmission):
+                    readout = True
                 if isinstance(
                     source,
                     (
@@ -887,7 +894,9 @@ class ModuleEmission(TimedMacro):
                 ):
                     start = source.book.end(source.timeline)
                     macro.preprocess(prog)
-                    pending.setdefault(source.timeline, []).append(source.event_end)
+                    # Readout owns generator completion, not its independent ADC trigger.
+                    if not (readout and isinstance(source, TimelinePlacedTrigger)):
+                        pending.setdefault(source.timeline, []).append(source.event_end)
                     source.book.ends[source.timeline] = start
                 else:
                     if isinstance(source, TimelineAdvance):

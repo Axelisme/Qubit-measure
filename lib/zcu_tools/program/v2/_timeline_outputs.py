@@ -1,6 +1,5 @@
 """Place timeline-managed outputs while retaining native QICK consumers."""
 
-from collections.abc import Sequence
 from fractions import Fraction
 from typing import Literal
 
@@ -44,20 +43,12 @@ def _pulse_static_cycles(
 
 
 def _trigger_static_cycles(
-    prog, ros: Sequence[int], start: float | QickParam, width: float | QickParam
+    prog, start: float | QickParam, width: float | QickParam
 ) -> Fraction | None:
     ticks, width_ticks = _static_ticks(prog, start), _static_ticks(prog, width)
     if ticks is None or width_ticks is None:
         return None
-    duration = Fraction(width_ticks)
-    for ch in ros:
-        samples = prog.ro_chs[ch]["length"]
-        clock = prog.soccfg["readouts"][ch]["f_output"]
-        duration = max(
-            duration,
-            Fraction(samples) * Fraction(str(get_fclk(prog))) / Fraction(str(clock)),
-        )
-    return Fraction(ticks) + duration
+    return Fraction(ticks + width_ticks)
 
 
 class TimelineObservedPulse(Pulse):
@@ -275,6 +266,36 @@ class TimelinePlacedConfig(ConfigReadout):
         return self.source.list_time_params()
 
 
+class TimelineObservedTrigger(Trigger):
+    """Retain native Trigger outputs, observing its quantized ADC tail evidence."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+    def __init__(self, book: TimelineBook, source: Trigger):
+        super().__init__(
+            ros=source.ros,
+            tts=source.tts,
+            pins=source.pins,
+            t=source.t,
+            width=source.width,
+            ddr4=source.ddr4,
+            mr=source.mr,
+            tag=source.tag,
+        )
+        self.book = book
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        if self.t_regs["t"] is None:
+            self.book.unknown_native_adcs.update(self.ros)
+            return
+        actual_t = self.get_time_param("t")
+        for ch in self.ros:
+            length = prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
+            self.book.record_native(prog, ch, actual_t + length, generator=False)
+
+
 class TimelinePlacedTrigger(Trigger):
     def __repr__(self) -> str:
         # QICK eagerly formats macros even when debug logging is disabled.
@@ -310,6 +331,8 @@ class TimelinePlacedTrigger(Trigger):
             start = self.book.math.event_time(
                 origin, placement_time(prog, self.relative_t)
             )
+            for ch in self.ros or ():
+                self.book.check_adc(prog, self.timeline, ch, start)
             self.runtime_start = start
             self.t = self.book.math.preprocess_time(start)
             super().preprocess(prog)
@@ -323,24 +346,22 @@ class TimelinePlacedTrigger(Trigger):
                 length = (
                     prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
                 )
-                duration = self.book.math.maximum(duration, length)
                 ro_end = self.book.math.add(scheduled, align_end(prog, length))
                 self.book.runtime_ros[ch] = ro_end
                 self.book.record_native(prog, ch, ro_end, generator=False)
-                end = self.book.math.maximum(end, ro_end)
             offset = placement_time(prog, self.relative_t)
             self.event_end = EventEnd(
                 origin,
-                self.book.math.add(duration, offset)
-                if isinstance(duration, RuntimeEnd)
-                else offset + duration,
+                offset + duration,
                 static_cycles=_trigger_static_cycles(
-                    prog, self.ros, offset, self.get_time_param("width")
+                    prog, offset, self.get_time_param("width")
                 ),
             )
             self.book.set_end(self.timeline, end)
             return
         self.t = origin + placement_time(prog, self.relative_t)
+        for ch in self.ros or ():
+            self.book.check_adc(prog, self.timeline, ch, self.t)
         super().preprocess(prog)
         actual_t = self.get_time_param("t")
         end: Time = actual_t + self.get_time_param("width")
@@ -350,12 +371,11 @@ class TimelinePlacedTrigger(Trigger):
             ro_end = actual_t + length
             self.book.native_timestamp(prog, ro_end, ro_ch=ch)
             self.book.record_native(prog, ch, ro_end, generator=False)
-            end = self.book.math.maximum(end, ro_end)
         self.event_end = EventEnd(
             0.0,
             end,
             static_cycles=_trigger_static_cycles(
-                prog, self.ros, actual_t, self.get_time_param("width")
+                prog, actual_t, self.get_time_param("width")
             ),
         )
         self.book.set_end(

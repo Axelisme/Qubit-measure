@@ -168,7 +168,7 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
 def test_uniform_t1_shell_wait_cancels_shared_readout_origin(mux):
     prog = t1_program(mux)
-    assert shell_wait(prog) == 0
+    assert shell_wait(prog) == (267 if mux else 137)
 
 
 def test_two_sweep_reference_debits_keep_each_axis_correlated():
@@ -185,7 +185,7 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
             self.emit(loader)
             self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.timeline_inc(10 / 430.08)
+            self.timeline_inc(79 / 430.08)
             self.delay(QickSweep1D("advance_axis", 10 / 430.08, 30 / 430.08))
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
@@ -201,9 +201,9 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
 
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
 @pytest.mark.parametrize("delay_kind", ["nonuniform", "static"])
-def test_nonuniform_and_static_t1_keep_zero_shell_wait(mux, delay_kind):
+def test_nonuniform_and_static_t1_keep_constant_adc_shell_wait(mux, delay_kind):
     prog = t1_program(mux, delay_kind=delay_kind)
-    assert shell_wait(prog) == 0
+    assert shell_wait(prog) == (267 if mux else 137)
 
 
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
@@ -234,13 +234,13 @@ def test_coherence_shell_wait_matches_pointwise_scheduling_oracle(mux, sequence)
             )  # Dynamic readout configuration is also a wave port event.
         expected_waves.append(starts)
         adc_end = end + (320 if mux else 190)
-        body_end = end + (330 if mux else 200)
+        body_end = end + 53
         expected_body.append(body_end)
         remaining.append(max(0, adc_end - body_end))
     result = shots(prog)
     assert [waves(s) for s in result] == expected_waves
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected_body
-    # At every point body closure is ten cycles later than the ceiled ADC end.
+    # Generator closure is53 cycles after origin; shell covers the remaining ADC.
     assert shell_wait(prog) == max(remaining)
 
 
@@ -308,13 +308,13 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
     ]
     assert trigger_starts == [124, 124, 152]
     body_ends = [s.body_end_cycle - s.start_cycle for s in result]
-    # The ADC lasts 177.8 cycles. Its ceiled end is ten before body closure.
-    assert body_ends == [312, 312, 340]
+    # The generator plus post closes53 cycles after origin. ADC lasts177.8.
+    assert body_ends == [165, 165, 193]
     remaining = [
         max(0, math.ceil(trigger + 177.8) - body)
         for trigger, body in zip(trigger_starts, body_ends, strict=True)
     ]
-    assert remaining == [0, 0, 0]
+    assert remaining == [137, 137, 137]
     assert shell_wait(prog) == max(remaining)
 
 
@@ -335,6 +335,7 @@ def variable_tail_program(
             self.emit(origin)
             self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+            self.timeline_inc(69 / 430.08)  # Explicitly reach the ADC end before post.
             self.timeline_inc(
                 QickSweep1D(
                     "post_axis", -tail_cycles[0] / 430.08, -tail_cycles[1] / 430.08
@@ -587,6 +588,7 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
                 self.emit(delays)
                 self.timeline_inc(60 / 430.08)
                 self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+                self.timeline_inc(69 / 430.08)  # Preserve a nonoverlapping ADC cadence.
                 self.timeline_inc(-40 / 430.08)
                 self.timeline_inc("delay_cycles")
                 self.delay_by_timeline()
@@ -688,8 +690,8 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             self.emit(right)
             self.timeline_inc("left_cycles")
             self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            # A negative post leaves a real ADC tail beyond the body boundary.
-            self.timeline_inc(-30 / 430.08)
+            # Author advances to40 cycles after origin, leaving a30-cycle ADC tail.
+            self.timeline_inc(39 / 430.08)
             self.timeline_inc("right_cycles", timeline="other")
 
     prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
@@ -833,6 +835,8 @@ class MixedWaitProgram(TimelineProgramV2):
     def read(self, timeline="default"):
         """Schedule one ADC, then leave the requested tail beyond body end."""
         self.trigger(ros=[0], width=1 / 430.08, timeline=timeline)
+        adc_cycles = (self.recipe.adc_samples * 7 + 4) // 5
+        self.timeline_inc((adc_cycles - 1) / 430.08)
         self.timeline_inc(-self.recipe.tail / 430.08)
 
     def emit_controls(self):
@@ -849,12 +853,14 @@ class MixedWaitProgram(TimelineProgramV2):
             self.delay_by_timeline()
             with self.repeat("fixed", recipe.fixed_count):
                 if recipe.read_at == "fixed":
+                    self.timeline_inc(recipe.tail / 430.08)
                     self.read()
                 self.timeline_inc(recipe.loop_delay / 430.08)
                 self.delay_by_timeline()
             self.delay_by_timeline()
             with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
                 if recipe.read_at == "runtime":
+                    self.timeline_inc(recipe.tail / 430.08)
                     self.read()
                 self.timeline_inc(recipe.loop_delay / 430.08)
                 self.delay_by_timeline()
