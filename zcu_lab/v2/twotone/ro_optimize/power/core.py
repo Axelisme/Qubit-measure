@@ -275,7 +275,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         indices = indices[np.argsort(f_sep[indices], kind="stable")]
 
         fig, _ = plots.subplots(3, 3, num="metrics", figsize=(14, 11))
-        for ax, name, label in zip(
+        for ax, name, label, symbol in zip(
             fig.axes,
             (
                 "snr",
@@ -299,14 +299,16 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
                 "Middle pi miss fraction f",
                 "Covariance retention (R1 on)",
             ),
+            ("SNR", "F_sep", "p", "S", "Q", "epsilon up", "epsilon down", "f", "S_cov"),
             strict=True,
         ):
             if name + "_on" in arrays:
                 ax.plot(result.gains, arrays[name + "_on"], "o-", label="R1 on")
                 ax.plot(result.gains, arrays[name + "_off"], "s--", label="R1 off")
             else:
-                ax.plot(result.gains, arrays[name], "o-", label="R1 on calibration")
-            ax.set(xlabel="Gain (a.u.)", ylabel=label + " (dimensionless)")
+                ax.plot(result.gains, arrays[name], "o-", label="R1 on")
+            ax.set_title(label, fontsize=11)
+            ax.set(xlabel="Gain (a.u.)", ylabel=symbol + " (dimensionless)")
             ax.legend()
             ax.grid(True)
         fig.tight_layout()
