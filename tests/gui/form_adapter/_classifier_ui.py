@@ -278,8 +278,13 @@ def exercise_writeback(app: QApplication, output: Path) -> None:
         assert (
             driver.observe(object_name="form.input.classifier.threshold").text == "1.5"
         )
-        driver.click("Done")
-        capture(driver, output, "writeback-07-done")
+        driver.click("Save")
+        capture(driver, output, "writeback-07-saved")
+        assert not driver.dialogs()
+        proposed = driver.observe(object_name="writebackProposed")
+        assert "classifier.mode  — → 'linear'" in proposed.tooltip
+        assert "classifier.angle  — → 0.25" in proposed.tooltip
+        assert "classifier.threshold  — → 1.5" in proposed.tooltip
     finally:
         window.detach()
         window.close()

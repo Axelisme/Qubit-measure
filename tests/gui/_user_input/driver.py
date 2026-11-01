@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QSize, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QKeySequence, QMouseEvent
 from PyQt6.QtWidgets import (
     QAbstractScrollArea,
     QApplication,
@@ -595,7 +595,12 @@ class ComponentDriver:
             if not isinstance(menu, QMenu):
                 raise LookupError("No visible popup menu")
             entries.extend(
-                MenuActionObservation(a.text(), a.isEnabled(), a.objectName())
+                MenuActionObservation(
+                    a.text(),
+                    a.isEnabled(),
+                    a.objectName(),
+                    a.shortcut().toString(QKeySequence.SequenceFormat.NativeText),
+                )
                 for a in menu.actions()
                 if a.isVisible() and not menu.actionGeometry(a).isEmpty()
             )

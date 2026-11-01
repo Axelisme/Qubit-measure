@@ -33,6 +33,7 @@ class MenuActionObservation:
     text: str  # Exact visible caption, including counts and ellipsis.
     enabled: bool  # Effective action availability in the open menu.
     object_name: str  # Stable action identity if supplied by the UI.
+    shortcut: str  # Native shortcut text shown beside the caption; empty if absent.
 
 
 @dataclass(frozen=True)
