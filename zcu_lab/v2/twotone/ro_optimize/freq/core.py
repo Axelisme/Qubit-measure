@@ -85,7 +85,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
     # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",

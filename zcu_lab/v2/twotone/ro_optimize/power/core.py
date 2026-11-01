@@ -86,7 +86,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
     # gains stored as-is on disk -> scale=IDENTITY (default)
     AXES_SPEC: ClassVar[AxesSpec[PowerResult, PowerCfg]] = AxesSpec(
         axes=(AxesSpec.Axis("gains", label="Probe Power", unit="a.u."),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=PowerResult,
         cfg_type=PowerCfg,
         cfg_schema_version="3.0",
