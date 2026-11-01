@@ -425,6 +425,13 @@ def test_mixed_scale_identity_column_remains_exact_and_reports_all_bad_columns(
     assert compare_roundtrip(original, restored, spec=spec) is False
     assert len(caplog.records) == 1
     assert "index=1" in caplog.records[0].message
+    caplog.clear()
+    if index_axis == 0:
+        restored.params[1, :] = 1
+    else:
+        restored.params[:, 1] = 1
+    assert compare_roundtrip(original, restored, spec=spec) is True
+    assert not caplog.records
 
 
 @pytest.mark.parametrize("reverse", [False, True])
