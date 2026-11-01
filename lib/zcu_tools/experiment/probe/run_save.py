@@ -76,6 +76,7 @@ def save_stage(
     and comparison errors propagate unchanged; an already saved file remains.
     """
     native_path = directory / "data.h5"
+    directory.mkdir(parents=True, exist_ok=True)
     native_persistence.save_run(record, native_path, spec=spec, replace=True)
     restored = native_persistence.restore_run(load(native_path), spec=spec)
     return SaveStageResult(
