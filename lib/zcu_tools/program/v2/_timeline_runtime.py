@@ -152,31 +152,41 @@ class DeferredCoverage:
     cycles: int
 
 
+@dataclass(frozen=True)
+class _CycleStorage:
+    """A QICK register name or alias and its signed literal cycle displacement."""
+
+    register: str
+    offset: int = 0
+
+
 @dataclass(frozen=True, init=False)
 class RuntimeEnd:
     """A captured cycle register and its immutable proof expression.
 
-    register names runtime storage; expression describes the integer value
+    register names runtime storage; offset is a literal cycle displacement from
+    that storage, not another register. expression describes the complete value
     independently of later writes. minimum/maximum always derive from expression
     using the common source-range rule, including overflow and max decisions.
     None marks an unavailable endpoint. covers lists ends proven no later than
     this value. deferred records physical boundaries covered after an additional
     nonnegative advance; negative operations and reference debits drop it.
 
-    Constructor endpoints only seed a fresh independent source when expression
-    is omitted. Equal endpoints seed a constant. An explicit expression is
+    storage accepts a QICK register name for a zero-offset operand, or an
+    existing storage/displacement pair. Constructor endpoints only seed a fresh
+    independent source when expression is omitted. Equal endpoints seed a constant. An explicit expression is
     authoritative; copying a value must retain it rather than a register name.
     Final ends must be nonnegative; arithmetic intermediates may be signed32.
     """
 
-    register: str
+    storage: _CycleStorage
     covers: tuple["Time", ...]
     deferred: tuple[DeferredCoverage, ...]
     expression: TimeExpression
 
     def __init__(
         self,
-        register: str,
+        storage: str | _CycleStorage,
         minimum: int | None = None,
         maximum: int | None = None,
         covers: tuple["Time", ...] = (),
@@ -184,16 +194,30 @@ class RuntimeEnd:
         expression: TimeExpression | None = None,
     ) -> None:
         # Endpoints seed a fresh producer only. Existing algebra is authoritative.
+        if isinstance(storage, str):
+            storage = _CycleStorage(storage)
         if expression is None:
             expression = (
                 TimeVariable(minimum)
                 if minimum is not None and minimum == maximum
-                else TimeVariable(terms=((cycle_axis(register, minimum, maximum), 1),))
+                else TimeVariable(
+                    terms=((cycle_axis(storage.register, minimum, maximum), 1),)
+                )
             )
-        object.__setattr__(self, "register", register)
+        object.__setattr__(self, "storage", storage)
         object.__setattr__(self, "covers", covers)
         object.__setattr__(self, "deferred", deferred)
         object.__setattr__(self, "expression", expression)
+
+    @property
+    def register(self) -> str:
+        """Return the name of the underlying runtime register."""
+        return self.storage.register
+
+    @property
+    def offset(self) -> int:
+        """Return the literal cycle displacement from the underlying register."""
+        return self.storage.offset
 
     @property
     def minimum(self) -> int | None:
@@ -516,8 +540,8 @@ def _conversion_weight(ratio: Fraction, clock: float, tproc: float) -> int:
 class EventTime(Macro):
     """Write one runtime event time to the transient s14 output register.
 
-    base names a captured runtime origin in integer tProc cycles. offset is an
-    integer tProc-cycle displacement or a RuntimeEnd holding that displacement.
+    base names a captured runtime origin with its literal cycle displacement.
+    offset is integer tProc cycles or a zero-displacement RuntimeEnd operand.
     expression proves the same base + offset event time in relative tProc
     cycles; it is compile-time provenance, not another runtime calculation.
 
@@ -552,17 +576,24 @@ class EventTime(Macro):
                 WriteRegOp(
                     dst="s_out_time", lhs="s_out_time", op="+", rhs=amount
                 ).translate(prog)
-        elif self.offset == 0:
-            WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
-        else:
+        elif isinstance(self.offset, RuntimeEnd):
+            base = self.base.register
+            if self.base.offset:
+                WriteRegOp(
+                    dst="s_out_time", lhs=base, op="+", rhs=self.base.offset
+                ).translate(prog)
+                base = "s_out_time"
             WriteRegOp(
-                dst="s_out_time",
-                lhs=self.base.register,
-                op="+",
-                rhs=self.offset.register
-                if isinstance(self.offset, RuntimeEnd)
-                else self.offset,
+                dst="s_out_time", lhs=base, op="+", rhs=self.offset.register
             ).translate(prog)
+        else:
+            amount = self.base.offset + self.offset
+            if amount:
+                WriteRegOp(
+                    dst="s_out_time", lhs=self.base.register, op="+", rhs=amount
+                ).translate(prog)
+            else:
+                WriteReg(dst="s_out_time", src=self.base.register).translate(prog)
         book.output_time = self.expression
 
 
@@ -598,14 +629,14 @@ class RuntimeMath(TimedMacro):
                 * get_fclk(self.prog)
             )
         )
-        result = self.op(
+        result = self._operation_result(
             base,
             "+",
             operand,
             limits=self._sum_limits(base, operand),
-            target="s_out_time",
+            storage=_CycleStorage("s_out_time"),
         )
-        self.operations[-1] = EventTime(base, operand, result.expression)
+        self.operations.append(EventTime(base, operand, result.expression))
         return result
 
     def native_end(
@@ -641,7 +672,11 @@ class RuntimeMath(TimedMacro):
         tail = (aggregate - native.value) * get_fclk(self.prog)
         if isinstance(tail, QickParam):
             constant = tail.start
-            spans = {k: round(v * 256) for k, v in tail.spans.items()}
+            spans = {
+                k: amount
+                for k, v in tail.spans.items()
+                if (amount := round(v * 256)) != 0
+            }
         else:
             constant, spans = tail, {}
         # The product is integer. Ceil the fractional bias once, keeping the
@@ -685,6 +720,7 @@ class RuntimeMath(TimedMacro):
 
     def multiply(self, value: RuntimeEnd, factor: int) -> RuntimeEnd:
         """Multiply by a nonnegative integer with checked CSD shifts/adds."""
+        value = self.cycles(value)
         if factor < 0:
             raise ValueError("constant multiplication requires a nonnegative factor")
         if factor == 1:
@@ -1074,7 +1110,7 @@ class RuntimeMath(TimedMacro):
     def _selection_operand(self, value: Time) -> int | str:
         """Resolve a ceiled candidate to literal cycles or its live register."""
         if isinstance(value, RuntimeEnd):
-            return value.register
+            return self.cycles(value).register
         if isinstance(value, QickParam) and value.is_sweep():
             return self.cycles(value).register
         scalar = value.start if isinstance(value, QickParam) else value
@@ -1153,8 +1189,11 @@ class RuntimeMath(TimedMacro):
         )
 
     def cycles(self, value: Time) -> RuntimeEnd:
+        """Resolve a time to a register operand, materializing literal offsets only here."""
         if isinstance(value, RuntimeEnd):
-            return value
+            return self.snapshot(value) if value.offset else value
+        if isinstance(value, QickParam) and not any(value.spans.values()):
+            value = value.start
         key = str(len(self.t_regs))
         rounded = self.convert_time(self.prog, value, key)
         self.prog._time_bounds.time_parameters(self)
@@ -1251,6 +1290,31 @@ class RuntimeMath(TimedMacro):
     def scratch(self, index: int) -> str:
         return self.prog.add_reg(f"_timeline_tmp_{index}", allow_reuse=True)
 
+    def _operation_storage(
+        self,
+        left: RuntimeEnd,
+        operator: str,
+        right: RuntimeEnd | int,
+        target: str | None,
+    ) -> tuple[str, int]:
+        """Lower operand storage, retaining stable register-plus-literal aliases."""
+        if isinstance(right, int) and operator in ("+", "-"):
+            if operator == "+" and target is None and left.register != "s_out_time":
+                return left.register, left.offset + right
+            rhs: int | str = (
+                right + left.offset if operator == "+" else right - left.offset
+            )
+        else:
+            left = self.cycles(left)
+            rhs = (
+                self.cycles(right).register if isinstance(right, RuntimeEnd) else right
+            )
+        register = self.allocate() if target is None else target
+        self.operations.append(
+            WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
+        )
+        return register, 0
+
     def op(
         self,
         left: RuntimeEnd,
@@ -1260,15 +1324,25 @@ class RuntimeMath(TimedMacro):
         limits: tuple[int | None, int | None],
         target: str | None = None,
     ) -> RuntimeEnd:
-        register = self.allocate() if target is None else target
-        self.operations.append(
-            WriteRegOp(
-                dst=register,
-                lhs=left.register,
-                op=operator,
-                rhs=right.register if isinstance(right, RuntimeEnd) else right,
-            )
+        register, offset = self._operation_storage(left, operator, right, target)
+        return self._operation_result(
+            left,
+            operator,
+            right,
+            limits=limits,
+            storage=_CycleStorage(register, offset),
         )
+
+    def _operation_result(
+        self,
+        left: RuntimeEnd,
+        operator: str,
+        right: RuntimeEnd | int,
+        *,
+        limits: tuple[int | None, int | None],
+        storage: _CycleStorage,
+    ) -> RuntimeEnd:
+        """Prove an arithmetic result without emitting or materializing operands."""
         covers: tuple[Time, ...] = ()
         deferred: list[DeferredCoverage] = []
         expression = None
@@ -1298,7 +1372,13 @@ class RuntimeMath(TimedMacro):
                         deferred.append(DeferredCoverage(proof.boundary, remaining))
                     else:
                         covers += (proof.boundary,)
-        result = RuntimeEnd(register, *limits, covers, tuple(deferred), expression)
+        result = RuntimeEnd(
+            storage,
+            *limits,
+            covers,
+            tuple(deferred),
+            expression,
+        )
         if result.minimum is not None and result.maximum is not None:
             self.check(result.minimum, result.maximum)
         return result
@@ -1316,7 +1396,11 @@ class RuntimeMath(TimedMacro):
 
     def snapshot(self, value: RuntimeEnd) -> RuntimeEnd:
         register = self.allocate()
-        self.operations.append(WriteReg(dst=register, src=value.register))
+        self.operations.append(
+            WriteRegOp(dst=register, lhs=value.register, op="+", rhs=value.offset)
+            if value.offset
+            else WriteReg(dst=register, src=value.register)
+        )
         return RuntimeEnd(
             register,
             value.minimum,
@@ -1329,7 +1413,7 @@ class RuntimeMath(TimedMacro):
     def add(self, a: Time, b: Time, *, target: str | None = None) -> RuntimeEnd:
         if isinstance(b, QickParam) and not b.is_sweep():
             b = b.start
-        left = self.cycles(a)
+        left = a if isinstance(a, RuntimeEnd) else self.cycles(a)
         if left.minimum == left.maximum == 0:
             return self.cycles(b)
         if isinstance(b, (float, int)):
@@ -1376,6 +1460,7 @@ class RuntimeMath(TimedMacro):
     def _select(
         self, left: RuntimeEnd, right: RuntimeEnd, *, maximum: bool, target: str | None
     ) -> RuntimeEnd:
+        left, right = self.cycles(left), self.cycles(right)
         if target == right.register:
             left, right = right, left
         lower, upper = difference_limits(
@@ -1491,7 +1576,7 @@ class RuntimeMath(TimedMacro):
             and isinstance(advance, RuntimeEnd)
             and end.register == advance.register
         ):
-            return 0.0
+            return max(0, end.offset - advance.offset) / get_fclk(self.prog)
         if end is advance or (
             isinstance(advance, RuntimeEnd)
             and any(item is end for item in advance.covers)
