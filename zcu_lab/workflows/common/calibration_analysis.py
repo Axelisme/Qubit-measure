@@ -14,17 +14,20 @@ from zcu_tools.analysis.fitting import (
     compute_fit_quality,
     detect_peaks,
     fit_qubit_freq,
+    fit_rabi,
     fitlor,
     lorfunc,
-    fit_rabi,
 )
 from zcu_tools.experiment.workflows import Failed
 
 from zcu_lab.v2.twotone.freq.core import FreqResult
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult
-from zcu_lab.workflows.common.calibration_acquire import qubfreq_signal2real, rabi_signal2real
-from zcu_lab.workflows.common.calibration_tunables import CalibrationTunables
 from zcu_lab.workflows.common.analysis import fit_or_failed, validate_fit_trace
+from zcu_lab.workflows.common.calibration_acquire import (
+    qubfreq_signal2real,
+    rabi_signal2real,
+)
+from zcu_lab.workflows.common.calibration_tunables import CalibrationTunables
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,9 @@ def analyze_qubit_freq(
     if failure is not None:
         return failure
     return fit_or_failed(
-        lambda: _fit_frequency(result, tun, expected_center_mhz, peaks, isolate_peaks)
+        lambda: _fit_frequency(
+            result, tun, expected_center_mhz, peaks, isolate_peaks=isolate_peaks
+        )
     )
 
 
@@ -109,6 +114,7 @@ def _fit_frequency(
     tun: CalibrationTunables,
     expected_center_mhz: float | None,
     peaks: tuple[PeakCandidate, ...] | None,
+    *,
     isolate_peaks: bool,
 ) -> FrequencyFit:
     freqs = result.freqs

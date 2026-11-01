@@ -7,7 +7,9 @@ from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.workflows.common.calibration_acquire import run_len_rabi
 
 
-def measure_planned_rabi(cfg: LenRabiCfg, *, context: RunContext, retry: int) -> LenRabiResult:
+def measure_planned_rabi(
+    cfg: LenRabiCfg, *, context: RunContext, retry: int
+) -> LenRabiResult:
     """Plan cfg.length in us, then measure Length-Rabi on the active QICK clock.
 
     The workflow host supplies an attempt-owned cfg. Update its length before

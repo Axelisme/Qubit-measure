@@ -371,7 +371,10 @@ async def calibrate_len_rabi(
         length=_len_rabi_sweep(settings, guess),
     )
     outcome = await run_core(
-        scope, partial(measure_planned_rabi, retry=settings.rabi_acquire_retry), cfg, name="Rabi"
+        scope,
+        partial(measure_planned_rabi, retry=settings.rabi_acquire_retry),
+        cfg,
+        name="Rabi",
     )
     observe_operation(env.summary, outcome)
     diagnostics = RabiResult(
@@ -634,7 +637,10 @@ async def calibrate_readout(
         ),
     )
     outcome = await run_core(
-        scope, partial(run_freq_gain, retry=settings.ro_acquire_retry), cfg, name="readout"
+        scope,
+        partial(run_freq_gain, retry=settings.ro_acquire_retry),
+        cfg,
+        name="readout",
     )
     observe_operation(env.summary, outcome)
     # Save the landscape and choose its best point meeting the SNR threshold.

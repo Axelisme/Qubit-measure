@@ -19,14 +19,19 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal, snr_checker
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.program.v2 import (
-    Pulse, Readout, Reset, TimelineBuilder, TimelineProgramV2, sweep2param,
+    Pulse,
+    Readout,
+    Reset,
+    TimelineBuilder,
+    TimelineProgramV2,
+    sweep2param,
 )
 from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.twotone.freq.core import FreqCfg, FreqResult
-from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiCfg, AmpRabiResult
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiCfg, LenRabiResult
 from zcu_lab.v2.twotone.ro_optimize.freq_gain.core import FreqGainCfg, FreqGainResult
 
 
@@ -89,9 +94,7 @@ def run_freq(
     )
 
     with Schedule(signals_buffer, scope=context.scope) as sched:
-        builder = TimelineBuilder(
-            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
-        )
+        builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         freq_sweep = cfg.freq
         freq_param = builder.add_sweep("freq", freq_sweep)
 
@@ -159,6 +162,7 @@ def run_len_rabi(
         return _run_len_rabi_fpga(cfg, lengths, context=context, retry=retry)
     return _run_len_rabi_host(cfg, np.unique(lengths), context=context, retry=retry)
 
+
 def _run_len_rabi_fpga(
     cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext, retry: int
 ) -> LenRabiResult:
@@ -200,6 +204,7 @@ def _run_len_rabi_fpga(
             ),
         )
     return LenRabiResult(lengths=lengths, signals=signals.array)
+
 
 def _run_len_rabi_host(
     cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext, retry: int
@@ -299,9 +304,7 @@ def run_amp_rabi(
 
     # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
     with Schedule(signals_buffer, scope=context.scope) as sched:
-        builder = TimelineBuilder(
-            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
-        )
+        builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         gain_sweep = cfg.gain
         gain_param = builder.add_sweep("gain", gain_sweep)
 
@@ -387,9 +390,7 @@ def run_freq_gain(
         cfg.readout.set_param("gain", gain_param)
         tracker = MomentTracker()
 
-        builder = TimelineBuilder(
-            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
-        )
+        builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         builder.add_loop("ge", 2)
         builder.add_sweep("freq", freq_sweep)
         builder.add_sweep("gain", gain_sweep)
@@ -421,4 +422,3 @@ def run_freq_gain(
     signals = signals_buffer.array
 
     return FreqGainResult(freqs, gains, signals)
-
