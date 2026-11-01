@@ -91,8 +91,10 @@ def test_invalid_clock_divider_reports_path(profile, invalid):
 
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
-@pytest.mark.parametrize("channels", [[], [1, 1], [5], [-1], [True]])
+@pytest.mark.parametrize("channels", [[], [1, 1], "outside_profile", [-1], [True]])
 def test_invalid_mux_routes_report_path(profile, channels):
+    if channels == "outside_profile":
+        channels = [sum(group["count"] for group in profile["readouts"])]
     profile["mux"][0]["ro_chs"] = channels
     with pytest.raises(ValueError, match=r"mux\.0\.ro_chs"):
         program.build_soccfg(profile)
