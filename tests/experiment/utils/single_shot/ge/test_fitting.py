@@ -188,6 +188,45 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
             plots.release()
 
 
+@pytest.mark.parametrize("align_t1", [False, True])
+def test_visible_decay_tail_identifies_joint_length_ratio(align_t1):
+    xs = np.linspace(-3.0, 3.0, 10001)
+    quantiles = (np.arange(2000) + 0.5) / 2000
+    ground_pdf = calc_population_pdf(xs, -1.0, 1.0, 0.25, 1.0, 0.0, 0.5, 0.4)
+    excited_pdf = calc_population_pdf(xs, -1.0, 1.0, 0.25, 0.0, 1.0, 0.5, 0.4)
+    ground = np.interp(quantiles, np.cumsum(ground_pdf) / ground_pdf.sum(), xs)
+    excited = np.interp(quantiles, np.cumsum(excited_pdf) / excited_pdf.sum(), xs)
+    quadratures = 0.1 * np.sin(np.arange(2000))
+    signals = np.asarray([ground + 1j * quadratures, excited + 1j * quadratures])
+    plots = Plots(NonPresentingHost())
+    try:
+        fidelity, populations, result = fitting_ge_and_plot(
+            signals,
+            lambda *_: {"theta": 0.0},
+            options=GEFitOptions(
+                numbins=80,
+                init_p0_g=1.0,
+                init_p0_e=0.0,
+                avg_p=0.5,
+                align_t1=align_t1,
+            ),
+            plots=plots,
+        )
+
+        assert result["length_ratio"] == pytest.approx(0.4, abs=0.05)
+        assert 0.7 < fidelity <= 1.0
+        np.testing.assert_allclose(populations, [[1.0, 0.0], [0.0, 1.0]], atol=0.03)
+        assert result["g_center"].real == pytest.approx(-1.0, abs=0.03)
+        assert result["e_center"].real == pytest.approx(1.0, abs=0.03)
+        assert result["s"] == pytest.approx(0.25, abs=0.03)
+        title = " ".join(text.get_text() for text in plots["fit"].texts)
+        assert "Readout length =" in title
+        assert (" / " in title) == (not align_t1)
+    finally:
+        plots.finish(present=False)
+        plots.release()
+
+
 @pytest.mark.parametrize(
     "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
 )
