@@ -1,16 +1,24 @@
 """Headless analysis of caller-constructed records through the public stage."""
 
+from collections.abc import Generator
 from dataclasses import dataclass
 from io import BytesIO
 
 import numpy as np
 import pytest
+from matplotlib import rc_context
 from PIL import Image
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import probe
 from zcu_tools.experiment.base import Experiment
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.plotting.plots import Plots
+
+
+@pytest.fixture(autouse=True)
+def isolated_matplotlib_style() -> Generator[None]:
+    with rc_context():
+        yield
 
 
 @dataclass
