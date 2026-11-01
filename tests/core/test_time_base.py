@@ -8,19 +8,20 @@ from zcu_tools.core import simulation
 
 
 @pytest.mark.parametrize(
-    ("clocks_mhz", "periods"),
+    ("clocks_mhz", "frequency", "periods"),
     [
-        ((430.08, 384.0, 307.2, 6144.0), (100, 112, 140, 7)),
-        ((430.08, 384.0, 76.8, 6144.0), (100, 112, 560, 7)),
+        ((430.08, 384.0, 307.2, 6144.0), Fraction(43008), (100, 112, 140, 7)),
+        ((430.08, 384.0, 76.8, 6144.0), Fraction(43008), (100, 112, 560, 7)),
+        ((430.08, 599.04, 307.2, 38.4), Fraction(419328, 5), (195, 140, 273, 2184)),
     ],
-    ids=["mock", "ftf"],
+    ids=["mock", "ftf", "hardware"],
 )
 def test_board_clocks_share_exact_integer_periods(
-    clocks_mhz: tuple[float, ...], periods: tuple[int, ...]
+    clocks_mhz: tuple[float, ...], frequency: Fraction, periods: tuple[int, ...]
 ) -> None:
     time_base = simulation.TimeBase.from_clocks(clocks_mhz)
 
-    assert time_base.ticks_per_us == Fraction(43008)
+    assert time_base.ticks_per_us == frequency
     assert tuple(time_base.period_ticks(clock) for clock in clocks_mhz) == periods
 
 
