@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 from .core import PhaseCfg
 
@@ -19,13 +19,15 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"waveform.length": 1.0},
             ),
-            "pi2_pulse": Slot(
+            "pi2_pulse": source(
+                ctx,
                 "$qubit.module.x90",
-                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi2_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "length": Range(0.0, 1.0, expts=101),
             "phase": Range(-180.0, 180.0, expts=61),

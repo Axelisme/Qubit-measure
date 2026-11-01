@@ -3,6 +3,8 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
 from .core import TwotoneCfg
 
 
@@ -22,9 +24,10 @@ def make_form(ctx: FormContext) -> Form[TwotoneCfg]:
             "qub_pulse": Template(
                 "qub_probe", bindings={"qubit": "$qubit"}, set={"freq": Hidden(0.0)}
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(0.0, 0.0, expts=1),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301),

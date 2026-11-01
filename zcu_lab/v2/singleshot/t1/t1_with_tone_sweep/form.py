@@ -4,7 +4,7 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core import T1WithToneSweepCfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 
 def _length_sweep(ctx: FormContext) -> Range:
@@ -20,9 +20,10 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
         T1WithToneSweepCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
             "probe_pulse": Template(
                 "res_probe",
@@ -30,9 +31,10 @@ def make_form_gain(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 # Run supplies the outer gain scan; keep waveform baseline.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "delay": _length_sweep(ctx),
             "gain": Range(0.0, 1.0, expts=21),
@@ -52,9 +54,10 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
         T1WithToneSweepCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
             "probe_pulse": Template(
                 "res_probe",
@@ -62,9 +65,10 @@ def make_form_freq(ctx: FormContext) -> Form[T1WithToneSweepCfg]:
                 # Run supplies the outer freq scan; keep waveform baseline.
                 set={"freq": Hidden(0.0)},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "delay": _length_sweep(ctx),
             "freq": Range.around("$resonator.freq", "1.5 * $resonator.kappa", expts=21),

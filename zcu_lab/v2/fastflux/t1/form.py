@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 from .core import T1Cfg
 
@@ -15,9 +15,10 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
         T1Cfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
             "flux_pulse": Template(
                 "flux_pulse",
@@ -25,9 +26,10 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                 # Run supplies gain; length remains a waveform-shape baseline.
                 set={"gain": Hidden(0.0), "waveform.length": 0.1},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(0.0, 0.0, expts=1),
             "length": Range(0.1, relax_delay, expts=101),

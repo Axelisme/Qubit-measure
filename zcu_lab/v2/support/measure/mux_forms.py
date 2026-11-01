@@ -19,7 +19,7 @@ from zcu_tools.resources.entry import RoleResolutionError
 
 from zcu_lab.components.mux import MuxGroupSchema
 
-from .ctx_helpers import t1_initial_time
+from .ctx_helpers import source, t1_initial_time
 from .mux_bindings import require_mux_group, require_mux_qubits
 from .seed_metadata import seed_metadata
 
@@ -86,7 +86,7 @@ def mux_readout_initial(
 ) -> Slot | Template:
     """Choose the readout source from ctx's fixed Open/Reset group capture.
 
-    With wait_for_ringup=False, return a Slot with a blank Template fallback.
+    With wait_for_ringup=False, select a captured Slot or a blank Template.
     The Template owns its seed metadata, adopted only when the slot is missing.
     With a readout slot, keep a library reference without reading fallback sources,
     preserving all stored tones and scalar settings. Without a slot, seed the
@@ -157,7 +157,7 @@ def mux_readout_initial(
     template = replace(template, seed_metadata=mux_readout_seed_metadata(template))
     if wait_for_ringup:
         return template
-    return Slot("$mux.module.readout", fallback=template)
+    return source(ctx, "$mux.module.readout", template)
 
 
 def mux_readout_seed_metadata(

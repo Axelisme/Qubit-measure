@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.seed_metadata import pulse_readout_seed_metadata
 
 from .core import QutritPopulationCfg
@@ -28,15 +28,17 @@ def make_form(ctx: FormContext) -> Form[QutritPopulationCfg]:
             "initial_delay",
         ),
         tree={
-            "pi01": Slot(
+            "pi01": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
             "pi03": Template("pi_pulse", bindings={"qubit": "$qubit"}),
             "pi32": Template("pi_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),
