@@ -365,6 +365,67 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
     ] == [[length + 54, length + 64]] * 2
 
 
+@pytest.mark.parametrize("kind", ["two_pulse", "bath"])
+@pytest.mark.parametrize(
+    "operation",
+    ["delay", "delay_auto", "delay_by_timeline", "runtime_sync", "register", "repeat"],
+)
+def test_reset_rejects_reference_advancing_pulse_lowering_at_build(kind, operation):
+    class AdvancingPulse(Pulse):
+        def lower(
+            self, prog: TimelineProgramV2, *, timeline: str | None, tag: str | None
+        ) -> None:
+            if operation == "delay":
+                prog.delay(0.1)
+            elif operation == "delay_auto":
+                prog.delay_auto(0.1)
+            elif operation == "delay_by_timeline":
+                prog.timeline_inc(0.1, timeline=timeline)
+                prog.delay_by_timeline(timeline=timeline)
+            elif operation == "runtime_sync":
+                prog.write_reg("duration", 10)
+                prog.timeline_inc("duration", timeline=timeline)
+                prog.delay_by_timeline(timeline=timeline)
+            elif operation == "register":
+                prog.write_reg("duration", 10)
+                prog.delay_reg_auto("duration")
+            elif operation == "repeat":
+                prog.delay_by_timeline(timeline=timeline)
+                with prog.repeat("inner", 2, timeline=timeline):
+                    prog.timeline_inc(0.1, timeline=timeline)
+                    prog.delay_by_timeline(timeline=timeline)
+            else:
+                raise ValueError(f"unknown reference operation: {operation}")
+
+    def cfg(ch):
+        return PulseCfg(
+            ch=ch,
+            nqz=1,
+            freq=1000,
+            gain=0.5,
+            waveform=ConstWaveformCfg(length=0.1),
+        )
+
+    first, second = cfg(0), cfg(1)
+    child = AdvancingPulse("advancing", first)
+    if kind == "two_pulse":
+        reset = TwoPulseResetCfg(pulse1_cfg=first, pulse2_cfg=second).build("reset")
+        reset.reset_pulse1 = child
+    else:
+        reset = BathResetCfg(
+            cavity_tone_cfg=first, qubit_tone_cfg=second, pi2_cfg=first
+        ).build("reset")
+        reset.res_pulse = child
+
+    def initialize(prog):
+        prog.add_reg("duration")
+
+    with pytest.raises(
+        ValueError, match="cannot advance reference; use timeline_inc instead"
+    ):
+        _program([reset], initialize=initialize)
+
+
 class _PrepareRegisters(Macro):
     """Public QICK register declarations for existing consumers."""
 
