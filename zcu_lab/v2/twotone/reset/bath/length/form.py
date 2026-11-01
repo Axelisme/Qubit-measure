@@ -22,7 +22,10 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
                     "cavity_tone_cfg.gain": Expr("$qubit.ext.reset_bath_gain"),
                 },
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "length": Range(0.05, 15.0, expts=201),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

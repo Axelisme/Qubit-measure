@@ -26,7 +26,10 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                     ),
                 },
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "freq": Range(
                 "$resonator.freq - 1.2 * $qubit.ext.rabi_freq",
                 "$resonator.freq - 0.8 * $qubit.ext.rabi_freq",

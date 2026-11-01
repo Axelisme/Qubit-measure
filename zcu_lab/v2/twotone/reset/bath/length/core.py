@@ -72,7 +72,12 @@ class LengthCfg(ConfigBase):
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis(values=(0.0, 90.0, 180.0, 270.0), label="Pi2 Phase", unit="deg", dtype=np.float64),
+            AxesSpec.Axis(
+                values=(0.0, 90.0, 180.0, 270.0),
+                label="Pi2 Phase",
+                unit="deg",
+                dtype=np.float64,
+            ),
             AxesSpec.Axis(
                 "lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64
             ),

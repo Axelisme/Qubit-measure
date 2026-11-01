@@ -100,7 +100,12 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
             AxesSpec.Axis(
                 "gains", label="Cavity drive Gain", unit="a.u.", dtype=np.float64
             ),
-            AxesSpec.Axis(values=(0.0, 90.0, 180.0, 270.0), label="Pi2 Phase", unit="deg", dtype=np.float64),
+            AxesSpec.Axis(
+                values=(0.0, 90.0, 180.0, 270.0),
+                label="Pi2 Phase",
+                unit="deg",
+                dtype=np.float64,
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=FreqGainResult,
