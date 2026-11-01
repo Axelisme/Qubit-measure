@@ -216,7 +216,9 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
 
     A Run core returning normally delivers finished even after a stop request;
     stop_requested in its result snapshot records the accepted request instead.
-    Other operation owners retain their own terminal policies.
+    Other operation owners retain their own terminal policies. A completed
+    failed wire reply must contain an error object with a non-empty message;
+    malformed failures raise ValueError before returning any outcome data.
     """
     op = _operation_id(arguments)
     timeout = wait_timeout(arguments)
@@ -230,6 +232,11 @@ def wait(ctx: MeasureToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     )
     result: dict[str, Any] = {"elapsed_s": max(0.0, time.monotonic() - start)}
     if reply["reason"] == "completed":
+        if reply["status"] == "failed":
+            error = reply.get("error")
+            message = error.get("message") if isinstance(error, dict) else None
+            if not isinstance(message, str) or not message:
+                raise ValueError("failed operation requires a non-empty error message")
         result["status"] = reply["status"]
         if "error" in reply:
             result["error"] = reply["error"]

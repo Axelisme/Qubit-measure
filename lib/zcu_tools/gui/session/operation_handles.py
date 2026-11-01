@@ -69,11 +69,17 @@ class OperationOutcome:
     status is pending, finished, failed or cancelled. error is an optional
     failure message; from_exception sets it to repr(error), including the
     exception type when its message is empty. Other callers supply their own
-    reason string. None means no message was supplied.
+    reason string. Failed outcomes require a non-empty error message and raise
+    ValueError otherwise. None is allowed for other statuses.
     """
 
     status: OperationStatus
     error: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject a failed outcome without a non-empty diagnostic string."""
+        if self.status == "failed" and not self.error:
+            raise ValueError("failed operation requires a non-empty error message")
 
     @classmethod
     def from_exception(cls, error: BaseException) -> OperationOutcome:

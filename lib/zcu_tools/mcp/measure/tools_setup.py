@@ -367,7 +367,7 @@ def _wait_setup(ctx: MeasureToolContext, result: SetupResult, timeout: float) ->
         error: SetupError = {
             "code": native_error.get("code"),
             "reason": native_error.get("reason"),
-            "message": native_error.get("message", "operation failed"),
+            "message": native_error["message"],
             "request_rejected": native_error.get("request_rejected", False),
         }
         result["error"] = error

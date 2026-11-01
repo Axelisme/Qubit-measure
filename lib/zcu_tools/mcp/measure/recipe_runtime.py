@@ -10,9 +10,9 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from threading import RLock
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, model_validator
 
 from zcu_tools.experiment import ScriptCancelled
 from zcu_tools.experiment.scope import Scope, parse_cancel_scope
@@ -159,11 +159,21 @@ class _Completion(BaseModel):
     status: Literal["finished", "cancelled", "failed"] | None = None
     error: str | _OperationError | None = None
 
+    @model_validator(mode="after")
+    def require_failure_message(self) -> Self:
+        """Reject failed wire replies that omit a non-empty diagnostic."""
+        if self.status == "failed" and not self.error_message:
+            raise ValueError("failed operation requires a non-empty error message")
+        return self
+
     @property
     def error_message(self) -> str:
+        """Return the native error text; raise ValueError when none was supplied."""
         if isinstance(self.error, _OperationError):
             return self.error.message
-        return self.error or "Operation failed"
+        if self.error is None:
+            raise ValueError("failed operation requires a non-empty error message")
+        return self.error
 
 
 class _Candidate(BaseModel):
