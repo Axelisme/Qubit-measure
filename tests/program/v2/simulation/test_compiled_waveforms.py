@@ -267,11 +267,13 @@ def test_reps_varying_envelope_selection_fails_before_request():
 
 
 def test_wave_register_readback_and_wmem_field_widths_are_distinct():
+    length_word = 65574
+
     def body(p):
         p.read_wmem(p.pulses["p"].get_wavenames()[0])
         p.write_reg("w_env", 16777223)
         p.write_reg("w_conf", 65545)
-        p.write_reg("w_length", 65574)
+        p.write_reg("w_length", length_word)
         for time, field in ((0, "w_env"), (50, "w_conf")):
             p.write_reg("w_gain", field)
             p.asm_inst(
@@ -293,4 +295,6 @@ def test_wave_register_readback_and_wmem_field_widths_are_distinct():
     )
     assert [
         time_us(observed.time_base, e.duration_ticks) for e in events
-    ] == pytest.approx([float(generator_duration(env.soccfg, 0.1))] * 4)
+    ] == pytest.approx([
+        env.soccfg.cycles2us(length_word & 0xFFFF, gen_ch=0)
+    ] * 4)
