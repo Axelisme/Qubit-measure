@@ -195,4 +195,3 @@ mux:
     pfb_ch_offset: 32
     pfb_dds_on_output: true
     has_outsel: false
-    b_phase: 32
