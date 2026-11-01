@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Run simultaneous mux GE readout from the GUI or MCP and read its results.
 
-**Last updated:** 2026-10-22
+**Last updated:** 2026-11-01
 
 After changing the parameter source, use Reset to recapture initial values. Refresh only updates sources and choices while preserving authored inputs; Reset can overwrite unsaved inputs.
 
@@ -80,6 +80,10 @@ predominant state after reset/init and before probe. It maps analysis rows to g/
 while preserving the stored data order.
 Options include PCA/center fitting, angle in degrees, log histogram, T1 alignment
 and a dimensionless length ratio.
+The length ratio (readout length / T1) is inferred from the decay tail between the two clusters.
+With Length Ratio left empty, two tight clusters without a visible tail make Analyze return `length_ratio: null` and title the IQ plot `GE IQ (length ratio: not identifiable)`.
+This reporting decision does not change centers, fidelity or Post.
+If you set Length Ratio manually, Analyze returns the supplied value.
 Incomplete pairs and numerical fitting/classification failures retain a reason;
 other tones continue. Plotting errors report the diagnostic failure.
 

@@ -16,6 +16,7 @@
 
 ## 其他格式變更
 
+- 2026-11-01，[Readout power QND](2026-11-01-readout-power-qnd.md)。新 tag 與 grouped paired-IQ sums 取代 SNR-only power，舊 tag 明確拒讀，無法由 SNR 重建 QND moments。
 - 2026-11-01，[Readout optimization SNR dtype](2026-11-01-readout-optimization-snr-dtype.md)。Frequency／power 優化明寫 float64；舊檔的零虛部 complex SNR 照常讀回，不重寫檔案。
 
 - 2026-11-01，[MIST drive-frequency native 軸順序](2026-11-01-mist-drive-frequency-axes.md)。新檔維度為 frequency／gain；舊方陣檔的磁碟 gain 軸在前，Load 明確拒絕。目前無轉換工具，原檔不改不刪。

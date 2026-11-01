@@ -158,9 +158,15 @@ def analyze_ge(
                 g_center=fit["g_center"],
                 e_center=fit["e_center"],
                 init_pops=init_pops,
+                length_ratio=fit["length_ratio"],
                 fit_quality=fit["fit_quality"],
             )
             primary.validate_calibration()
+            axes.set_title(
+                "GE IQ (length ratio: not identifiable)"
+                if primary.length_ratio is None
+                else f"GE IQ (length ratio = {primary.length_ratio:.2f})"
+            )
             outcomes.append(MuxGEAnalysis(index, primary))
         except (GENumericalError, AnalysisFailed) as exc:
             _failure_plot(plots, name, str(exc))
