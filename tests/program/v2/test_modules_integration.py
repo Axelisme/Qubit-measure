@@ -12,7 +12,7 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
-from zcu_tools.program.v2 import SweepCfg, TimelineProgramV2, sweep2param
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, TimelineProgramV2, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -231,6 +231,37 @@ class TestPulseIntegration:
 
 
 class TestReadoutIntegration:
+    @pytest.mark.parametrize("runtime", [False, True])
+    def test_same_named_readouts_keep_program_owned_templates(self, runtime):
+        cfg = _readout_cfg()
+        options = (
+            {"gain_val": "gain_word", "ro_freq_val": "ro_freq_word"}
+            if runtime else {}
+        )
+        first = PulseReadout("r1", cfg, **options)
+        second = PulseReadout("r1", cfg, gain=0.0, **options)
+
+        def build(modules):
+            builder = TimelineBuilder(make_mock_soccfg())
+            builder.add_loop("choice", 2)
+            if runtime:
+                for name in ("gain_word", "ro_freq_word"):
+                    builder.emit(LoadWord(name, [0, 0], idx_reg="choice", val_reg=name))
+            with builder.branch(by="choice", align_timeline=True) as cases:
+                for index, module in enumerate(modules):
+                    with cases.case(index):
+                        builder.emit(module)
+            return builder.build()
+
+        prog = build([first, second])
+        names = (first.adc_name(prog), second.adc_name(prog))
+        assert names[0] != names[1]
+        assert all(name in prog.pulses for name in names)
+        other = build([second, first])
+        assert first.adc_name(other) != second.adc_name(other)
+        assert (first.adc_name(prog), second.adc_name(prog)) == names
+        assert prog.binprog is not None
+
     def test_pulse_readout_compiles(self):
         cfg = _readout_cfg()
         prog = _make_prog(modules=[PulseReadout("ro", cfg)])
