@@ -33,7 +33,7 @@ pytestmark = pytest.mark.sim
 
 
 def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     plan = ftf.plan_template(
         settings(),
@@ -65,7 +65,7 @@ def test_template_units_common_phase_flat_readout_and_dc_model() -> None:
 def test_template_engine_paths_match_strict_secular_reference(
     tones: int, path: str
 ) -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base = template(tones=tones)
     # Keep the 2 ns drive support required by FTF's quantization, but shorten
@@ -141,7 +141,7 @@ def test_template_engine_paths_match_strict_secular_reference(
 def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_pulses() -> (
     None
 ):
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base = template()
     # Charge controls beginning after readout must have no effect.
@@ -179,7 +179,7 @@ def test_readout_ignores_controls_after_start_and_rejects_multiple_terminal_puls
 
 
 def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base = template()
     terminal = base.events[-1]
@@ -222,7 +222,7 @@ def test_cavity_drives_are_classified_per_point_with_calibrated_envelopes() -> N
 
 
 def test_herald_plan_aligns_two_events_when_one_adc_only_observes_terminal() -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base, config = herald_template()
     plan = ftf.plan_template(
@@ -310,7 +310,7 @@ def test_herald_only_observations_keep_an_unobserved_terminal_event() -> None:
 def test_readout_rejects_trigger_without_an_incident_pulse_window(
     trigger_ticks,
 ) -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base = template()
     window = replace(
@@ -327,7 +327,7 @@ def test_readout_rejects_trigger_without_an_incident_pulse_window(
 
 
 def test_cavity_drive_must_not_cross_terminal_start_but_may_end_there() -> None:
-    import zcu_tools.experiment.ftf as ftf
+    from zcu_tools.simulators.ftf import environment as ftf
 
     base = template()
     terminal = base.events[-1]

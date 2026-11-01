@@ -109,7 +109,7 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
     from zcu_tools.program import build_soccfg
 
     with (
-        Path(__file__).parents[2] / "program" / "profiles" / "ftf.yaml"
+        Path(__file__).parents[3] / "program" / "profiles" / "ftf.yaml"
     ).open() as stream:
         profile = yaml.safe_load(stream)
     original = build_soccfg(profile)

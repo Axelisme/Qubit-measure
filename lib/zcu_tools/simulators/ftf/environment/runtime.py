@@ -763,7 +763,7 @@ def _routing_telemetry(settings: FTFSettings) -> RoutingTelemetry | None:
         return None
     directory = policy.directory
     if directory is None:
-        directory = Path(__file__).resolve().parents[4] / ".sim_telemetry"
+        directory = Path(__file__).resolve().parents[5] / ".sim_telemetry"
     return RoutingTelemetry(directory.absolute())
 
 
