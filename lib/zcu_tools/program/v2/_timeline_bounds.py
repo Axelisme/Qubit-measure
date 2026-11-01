@@ -344,6 +344,13 @@ class ProducerBounds:
                 f"{name}: invalid selected playback selection write at instruction {address}"
             )
 
+    def _audit_selection_consumer(self, origin: Macro | None, address: int) -> None:
+        """Reject a playback that reads a relation overwritten before its use."""
+        if name := self.stale_selection_consumers.get(id(origin)):
+            raise ValueError(
+                f"{name}: overwritten selected playback selection at instruction {address}"
+            )
+
     def audit(self, prog) -> None:
         """Audit every translated write, including unreachable alternate paths.
 
@@ -367,10 +374,7 @@ class ProducerBounds:
             inst = BaseInst.from_dict(raw)
             address = raw["P_ADDR"]
             origin = self.origins.get(address)
-            if name := self.stale_selection_consumers.get(id(origin)):
-                raise ValueError(
-                    f"{name}: overwritten selected playback selection at instruction {address}"
-                )
+            self._audit_selection_consumer(origin, address)
             for physical in inst.reg_write & watched.keys():
                 name = watched[physical]
                 if physical in self.generated:
