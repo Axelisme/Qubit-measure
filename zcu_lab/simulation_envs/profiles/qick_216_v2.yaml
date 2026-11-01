@@ -1,22 +1,13 @@
 # Source: bitfiles/qick_216_v2.hwh, interpreted with QICK 0.2.436 driver rules.
-# This compile-only profile uses the current build_soccfg schema, not a full
-# hardware topology. These five departures from the HWH remain:
-# (a) Dyn readouts use consecutive control ports 16 and 17, rather than sharing
-#     port 12 with mixmux8 through tmux_ch 0/1/2. tmux_ch remains null.
-# (b) Readout triggers use dport instead of hardware tport 10..19, bit 0.
-#     Dyn readouts use dport 0; PFB uses placeholder dport 1 so its bits 0..7
-#     do not collide with the dyn readouts' bits 0 and 1.
-# (c) DAC/ADC names are consecutive, not hardware DACs 20..23, 00..13, 30..33
-#     and ADCs 20, 21, 22. Each PFB output has its own ADC name, rather than
-#     all eight outputs sharing hardware ADC 21.
-# (d) PFB readback tproc_ch values are consecutive; hardware readouts 8 and 9
-#     instead have tproc_ch -1.
-# (e) Dyn readout b_phase (32 in hardware) remains null.
+# Generator/readout types and clock formulas follow the HWH. Channel counts,
+# indices and wiring serve the simulation environments, not a hardware inventory.
+# Generators 0..6 are v6: pulse readout on 0 and six charge drives on 1..6.
+# Generator 7 is mixmux8; its wave port is shared with both dyn readouts,
+# selected by tmux_ch 0/1/2. PFB outputs share one ADC and use tport triggers.
 # Generator samps_per_clk, maxlen, complex_env and maxv_scale retain the
 # compile placeholders for mixmux8. RF clock groups and tProc pins remain
 # untraced placeholders.
-# PFB decimation remains provisional here: HWH C_ADC_Decimation_Mode21=2;
-# not verified on the board. Derived PFB rates remain provisional too.
+# PFB decimation 2 is user-confirmed (HWH C_ADC_Decimation_Mode21=2).
 board: ZCU216
 sw_version: 0.2.436
 fw_timestamp: 'Tue Sep 10 16:13:40 2024'
@@ -97,70 +88,19 @@ generators:
     dac: '03'
     tproc_ch: 3
     tmux_ch: null
-  - &generators3
-    type: axis_sg_int4_v2
-    fs_mult: 56
-    fs_div: 2
-    interpolation: 4
-    fabric_div: 16
-    rf_fabric_div: 16
-    samps_per_clk: 1
-    b_dds: 32
-    b_phase: 32
-    maxlen: 16384
-    complex_env: true
-    has_dds: true
-    has_mixer: true
-    maxv: 32766
-    maxv_scale: 0.9
+  - <<: *generators1
     dac: '04'
     tproc_ch: 4
     tmux_ch: null
-  - &generators4
-    type: axis_sg_int4_v2
-    fs_mult: 56
-    fs_div: 2
-    interpolation: 4
-    fabric_div: 16
-    rf_fabric_div: 16
-    samps_per_clk: 1
-    b_dds: 32
-    b_phase: 32
-    maxlen: 8192
-    complex_env: true
-    has_dds: true
-    has_mixer: true
-    maxv: 32766
-    maxv_scale: 0.9
+  - <<: *generators1
     dac: '05'
     tproc_ch: 5
     tmux_ch: null
-  - <<: *generators3
+  - <<: *generators1
     dac: '06'
     tproc_ch: 6
     tmux_ch: null
-  - <<: *generators4
-    dac: '07'
-    tproc_ch: 7
-    tmux_ch: null
-  - <<: *generators4
-    dac: 08
-    tproc_ch: 8
-    tmux_ch: null
-  - <<: *generators4
-    dac: 09
-    tproc_ch: 9
-    tmux_ch: null
-  - <<: *generators4
-    dac: '10'
-    tproc_ch: 10
-    tmux_ch: null
-  - <<: *generators4
-    dac: '11'
-    tproc_ch: 11
-    tmux_ch: null
-  - &generators5
-    type: axis_sg_mixmux8_v1
+  - type: axis_sg_mixmux8_v1
     fs_mult: 56
     fs_div: 2
     interpolation: 4
@@ -176,20 +116,8 @@ generators:
     maxv: 32766
     maxv_scale: 0.9
     dac: '12'
-    tproc_ch: 12
-    tmux_ch: null
-  - <<: *generators4
-    dac: '13'
-    tproc_ch: 13
-    tmux_ch: null
-  - <<: *generators4
-    dac: '14'
-    tproc_ch: 14
-    tmux_ch: null
-  - <<: *generators4
-    dac: '15'
-    tproc_ch: 15
-    tmux_ch: null
+    tproc_ch: 7
+    tmux_ch: 0
 readouts:
   - &readouts0
     type: axis_dyn_readout_v1
@@ -208,23 +136,23 @@ readouts:
     has_outsel: true
     iq_offset: 0.0
     coupling: AC
-    adc: '00'
-    tproc_ctrl: 16
-    tmux_ch: null
-    trigger_type: dport
-    trigger_port: 0
+    adc: '20'
+    tproc_ctrl: 7
+    tmux_ch: 1
+    trigger_type: tport
+    trigger_port: 10
     trigger_bit: 0
     tproc_ch: 0
-    b_phase: null
+    b_phase: 32
   - <<: *readouts0
-    adc: '01'
-    tproc_ctrl: 17
-    tmux_ch: null
-    trigger_type: dport
-    trigger_port: 0
-    trigger_bit: 1
+    adc: '22'
+    tproc_ctrl: 7
+    tmux_ch: 2
+    trigger_type: tport
+    trigger_port: 11
+    trigger_bit: 0
     tproc_ch: 1
-    b_phase: null
+    b_phase: 32
   - &readouts1
     type: axis_pfb_readout_v4
     ro_type: axis_pfb_readout_v4
@@ -242,76 +170,76 @@ readouts:
     has_outsel: false
     iq_offset: -0.5
     coupling: AC
-    adc: '02'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
+    trigger_type: tport
+    trigger_port: 12
     trigger_bit: 0
     tproc_ch: 2
     b_phase: 32
   - <<: *readouts1
-    adc: '03'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 1
+    trigger_type: tport
+    trigger_port: 13
+    trigger_bit: 0
     tproc_ch: 3
     b_phase: 32
   - <<: *readouts1
-    adc: '04'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 2
+    trigger_type: tport
+    trigger_port: 14
+    trigger_bit: 0
     tproc_ch: 4
     b_phase: 32
   - <<: *readouts1
-    adc: '05'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 3
+    trigger_type: tport
+    trigger_port: 15
+    trigger_bit: 0
     tproc_ch: 5
     b_phase: 32
   - <<: *readouts1
-    adc: '06'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 4
+    trigger_type: tport
+    trigger_port: 16
+    trigger_bit: 0
     tproc_ch: 6
     b_phase: 32
   - <<: *readouts1
-    adc: '07'
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 5
+    trigger_type: tport
+    trigger_port: 17
+    trigger_bit: 0
     tproc_ch: 7
     b_phase: 32
   - <<: *readouts1
-    adc: 08
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 6
-    tproc_ch: 8
+    trigger_type: tport
+    trigger_port: 18
+    trigger_bit: 0
+    tproc_ch: -1
     b_phase: 32
   - <<: *readouts1
-    adc: 09
+    adc: '21'
     tproc_ctrl: null
     tmux_ch: null
-    trigger_type: dport
-    trigger_port: 1
-    trigger_bit: 7
-    tproc_ch: 9
+    trigger_type: tport
+    trigger_port: 19
+    trigger_bit: 0
+    tproc_ch: -1
     b_phase: 32
 rf:
   # HWH C_DAC_VOP_Mode=0 and C_DAC_Output_Current=0 select 20 mA.
@@ -319,7 +247,7 @@ rf:
   # Placeholder: HWH clock nets have not been traced.
   clk_groups: []
 mux:
-  - gen_ch: 12
+  - gen_ch: 7
     ro_chs: [2, 3, 4, 5, 6, 7, 8, 9]
     generator:
       type: axis_sg_mixmux8_v1
