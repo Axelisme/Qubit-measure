@@ -1065,39 +1065,47 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
     return _selection_program(Selection())
 
 
-@pytest.mark.parametrize("other_case", [0, 1])
-@pytest.mark.parametrize("empty_case", [False, True])
-def test_selected_playback_rejects_consumed_alternative_after_branch_join(
-    other_case, empty_case
-):
+def _selection_flow_program(body, *, path_count=2):
     template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
     loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
     other = LoadValue(
         "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
     )
 
-    def playback(prog, relation, values, timeline):
-        prog.pulse_from_length_reg(
-            0,
-            "template",
-            length_reg="length",
-            flat_top=False,
-            timeline=timeline,
-            selection=SelectedPlayback(
-                relation.selector,
-                "length",
-                tuple(PlaybackChoice("template", length_cycles=n) for n in values),
-                relation,
-            ),
-        )
-        prog.timeline_inc(0, timeline=timeline)
-
     def initialize(prog):
-        prog.add_loop("path", 2)
+        prog.add_loop("path", path_count)
         prog.add_reg("index")
 
-    def body(prog):
+    def lower(prog):
         prog.write_reg("index", 0)
+        body(prog, loader, other)
+
+    return _program(make_mock_soccfg(1, 0), [template, loader, other], lower, initialize)
+
+
+def _play_selected_length(prog, relation, values, timeline="default"):
+    prog.pulse_from_length_reg(
+        0,
+        "template",
+        length_reg="length",
+        flat_top=False,
+        timeline=timeline,
+        selection=SelectedPlayback(
+            relation.selector,
+            "length",
+            tuple(PlaybackChoice("template", length_cycles=n) for n in values),
+            relation,
+        ),
+    )
+    prog.timeline_inc(0, timeline=timeline)
+
+
+@pytest.mark.parametrize("other_case", [0, 1])
+@pytest.mark.parametrize("empty_case", [False, True])
+def test_selected_playback_rejects_consumed_alternative_after_branch_join(
+    other_case, empty_case
+):
+    def body(prog, loader, other):
         initial = loader.lower_selected(prog)
         with prog.branch(by="path", align_timeline=True) as branch:
             for index in range(2):
@@ -1107,13 +1115,45 @@ def test_selected_playback_rejects_consumed_alternative_after_branch_join(
                     current = other if index == other_case else loader
                     relation = current.lower_selected(prog)
                     values = (89, 39) if index == other_case else (39, 89)
-                    playback(prog, relation, values, timeline)
+                    _play_selected_length(prog, relation, values, timeline)
         # Both tables have valid writers/consumers, but path=other_case leaves
         # length=89 while initial's independent capture still selects A's 39.
-        playback(prog, initial, (39, 89), "default")
+        _play_selected_length(prog, initial, (39, 89))
 
     with pytest.raises(ValueError, match="length: .*selected playback selection"):
-        _program(make_mock_soccfg(1, 0), [template, loader, other], body, initialize)
+        _selection_flow_program(body)
+
+
+@pytest.mark.parametrize("count", [2, "path"])
+def test_selected_playback_rejects_consumed_overwrite_on_repeat_backedge(count):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.repeat("again", count):
+            # The first iteration is valid; B reaches this consumer only via
+            # the second iteration's backedge, not linear preprocess order.
+            _play_selected_length(prog, initial, (39, 89))
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _selection_flow_program(body, path_count=3)
+
+
+def test_selected_playback_rejects_relation_missing_on_repeat_skipped_path():
+    def body(prog, loader, other):
+        previous = other.lower_selected(prog)
+        _play_selected_length(prog, previous, (89, 39))
+        prog.delay_by_timeline()
+        loader.lower_selected(prog)
+        with prog.repeat("maybe", "path", range_hint=(0, 1)):
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+        _play_selected_length(prog, previous, (89, 39))
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _selection_flow_program(body)
 
 
 def _selection_program(selection: Module) -> TimelineProgramV2:
