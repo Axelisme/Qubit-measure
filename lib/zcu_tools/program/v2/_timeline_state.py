@@ -71,6 +71,9 @@ class RepeatFrame:
     written_gens: set[int] = field(default_factory=set)
     written_ros: set[int] = field(default_factory=set)
     pulse_guards: dict[int, _PulseGuard] = field(default_factory=dict)
+    adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
+        default_factory=list
+    )
     defined: set[str] = field(default_factory=set)
     initial_external: dict[str, Time] = field(default_factory=dict)
     entry_math: RuntimeMath | None = None
@@ -632,6 +635,32 @@ class TimelineBook:
             self.loop_timelines[-1].adc_starts.append(
                 (timeline, channel, expression, tuple(self.case_path))
             )
+        for frame in self.repeats:
+            first = substitute_time(
+                expression, {loop.progress: TimeVariable() for loop in self.loop_timelines}
+            )
+            frame.adc_starts.append(
+                (timeline, channel, add_time(first, frame.expression_advance), tuple(self.case_path))
+            )
+
+    def check_reference_adc_backedge(self, prog, frame: RepeatFrame) -> None:
+        """Prove reference-loop reentry against the final relative ADC tails."""
+        for timeline, channel, start, path in frame.adc_starts:
+            gap = add_time(
+                start, scale_time(self.native_expression(prog, channel, generator=False), -1)
+            )
+            for selector, index in reversed(path):
+                gap = select_time(
+                    self.repeat_count(prog, selector, 0, prog.loop_dict[selector] - 1),
+                    tuple(gap if i == index else TimeVariable() for i in range(prog.loop_dict[selector])),
+                )
+            lower, _ = difference_limits(gap, TimeVariable())
+            if lower is None or lower < 0:
+                detail = "unknown overlap cycles" if lower is None else f"{-lower} cycles"
+                raise ValueError(
+                    f"{timeline}: channel {channel} ADC overlap across repeat backedge; "
+                    f"{detail}; cannot prove runtime start >= previous end"
+                )
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""

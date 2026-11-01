@@ -570,6 +570,8 @@ class ZeroEntryReferenceExit(Macro):
         if self.count == 0:
             prog._time_bounds.defined.intersection_update(frame.defined)
         self._check_pulse_guards(frame)
+        if self.maximum is None or self.maximum >= 2:
+            self.book.check_reference_adc_backedge(prog, frame)
         variable = self.variable or frame.variable
         if variable and _bounds(frame.advance)[0] < -1e-12:
             raise ValueError(

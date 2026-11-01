@@ -301,7 +301,7 @@ class TimelinePlacedTrigger(Trigger):
             start = self.book.math.event_time(
                 origin, placement_time(prog, self.relative_t)
             )
-            for ch in self.ros:
+            for ch in self.ros or ():
                 self.book.check_adc(prog, self.timeline, ch, start)
             self.runtime_start = start
             self.t = self.book.math.preprocess_time(start)
@@ -332,7 +332,7 @@ class TimelinePlacedTrigger(Trigger):
             self.book.set_end(self.timeline, end)
             return
         self.t = origin + placement_time(prog, self.relative_t)
-        for ch in self.ros:
+        for ch in self.ros or ():
             self.book.check_adc(prog, self.timeline, ch, self.t)
         super().preprocess(prog)
         actual_t = self.get_time_param("t")
