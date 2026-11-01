@@ -56,6 +56,28 @@ def test_module_date_can_include_a_topic_and_live_after_header() -> None:
     assert check_sources({"lib/example/README.md": source}) == ()
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/adr/0001-example.md",
+        "docs/adr/draft/example.md",
+        "docs/adr/retired/example.md",
+        "docs/discussions/2026-01-01-example.md",
+        "docs/discussions/history/example.md",
+    ],
+)
+def test_snapshots_are_exempt(path: str) -> None:
+    assert check_sources({path: "# Historical snapshot\n"}) == ()
+
+
+@pytest.mark.parametrize("path", ["docs/adr/README.md", "docs/discussions/INDEX.md"])
+def test_snapshot_indexes_still_require_readers(path: str) -> None:
+    assert check_sources({path: "# Index\n"}) == (
+        Violation(path, "missing reader declaration in first 8 body lines"),
+    )
+    assert check_sources({path: "**Readers:** agent. Locate snapshots.\n"}) == ()
+
+
 def test_non_module_readme_does_not_require_date() -> None:
     source = "**Readers:** agent. Read this guide.\n"
     assert check_sources({"tools/README.md": source, "README.md": source}) == ()
