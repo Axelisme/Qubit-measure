@@ -1,6 +1,7 @@
 """Measure Hahn-echo coherence from current-point pulses and independent timing."""
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -27,6 +28,7 @@ from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate
 from zcu_lab.workflows.common.lifetime_models import LifetimeModelRecord
+from zcu_lab.workflows.common.lifetime_acquire import run_t2echo
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 
@@ -81,7 +83,6 @@ def _cfg(
     return T2EchoCfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=relax_delay(settings, guess.t1_us),
         detune=settings.detune_ratio / sweep.step,
@@ -164,7 +165,7 @@ async def measure_echo(
     acquisition = await acquire_saved(
         scope,
         env,
-        T2EchoExp().run,
+        partial(run_t2echo, retry=settings.acquire_retry),
         cfg,
         name="Echo",
         output=NativeOutput(filename="t2echo.h5", spec=T2EchoExp.AXES_SPEC),

@@ -12,16 +12,15 @@ from zcu_tools.analysis.fitting import (
 )
 from zcu_tools.experiment.workflows import Failed
 
-from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult, t2echo_signal2real
-from zcu_lab.v2.twotone.time_domain.t2ramsey.core import (
-    T2RamseyResult,
-    t2ramsey_signal2real,
-)
+from zcu_lab.v2.twotone.time_domain.t2echo.core import T2EchoResult
+from zcu_lab.v2.twotone.time_domain.t2ramsey.core import T2RamseyResult
+from zcu_lab.workflows.coherence_fluxdep.acquire import t2ramsey_signal2real
 from zcu_lab.workflows.common.analysis import (
     DecayFit,
     fit_or_failed,
     validate_fit_trace,
 )
+from zcu_lab.workflows.common.lifetime_acquire import t2echo_signal2real
 
 
 @dataclass(frozen=True)

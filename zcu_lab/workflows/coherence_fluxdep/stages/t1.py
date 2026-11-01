@@ -2,6 +2,7 @@
 
 import math
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -32,6 +33,7 @@ from zcu_lab.workflows.common.lifetime_models import (
     LifetimeModelRecord,
     draw_lifetime_comparison,
 )
+from zcu_lab.workflows.common.lifetime_acquire import run_t1
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 
@@ -97,7 +99,6 @@ def _cfg(
     cfg = T1Cfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=relax,
         sampling=settings.sampling,
@@ -205,7 +206,7 @@ async def measure_t1(
     acquisition = await acquire_saved(
         scope,
         env,
-        T1Exp().run,
+        partial(run_t1, retry=settings.acquire_retry),
         cfg,
         name="T1",
         output=NativeOutput(filename="t1.h5", spec=T1Exp.AXES_SPEC),
