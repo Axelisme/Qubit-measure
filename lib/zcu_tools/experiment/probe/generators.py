@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc, lorfunc
+from zcu_tools.analysis.fitting.anticross import get_predict_ys
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 
 from .shot_generators import GaussianCloudParameters as GaussianCloudParameters
@@ -76,6 +77,23 @@ class ResonatorParameters:
     electrical_delay: float
     amplitude_slope: float
     phase_curvature: float
+
+
+@dataclass(frozen=True)
+class ConicParameters:
+    """Coefficients of a*x² + b*x + c*y² + d*y + e*x*y + f = 0.
+
+    x/y use the supplied coordinate/frequency units. c must be nonzero and
+    discriminants must be nonnegative on the requested x grid. Overall scale
+    is unidentifiable; fitted physics, not individual coefficients, is truth.
+    """
+
+    a: float
+    b: float
+    c: float
+    d: float
+    e: float
+    f: float
 
 
 def _coordinates(xs: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -218,3 +236,25 @@ def generate_qubit_frequency(
     if truth.slope != 0:
         raise ValueError("qubit frequency Lorentzian requires zero slope")
     return generate_lorentzian(freqs, truth, noise_std, seed)
+
+
+def generate_anticrossing(
+    xs: NDArray[np.float64], truth: ConicParameters, noise_std: float, seed: int
+) -> NDArray[np.float64]:
+    """Return float64 branches shaped (2, len(xs)), upper then lower noiseless.
+
+    xs is a finite 1D coordinate array. truth gives the implicit conic in
+    coordinate/frequency units. Reuse fitting.anticross.get_predict_ys; c=0 or
+    nonreal/nonfinite branches raise ValueError. noise_std is independent
+    additive Gaussian frequency noise on each branch, so noisy points may
+    cross. seed initializes a local RNG. Inputs are unchanged.
+    """
+    _coordinates(xs)
+    if truth.c == 0:
+        raise ValueError("conic c must be nonzero")
+    branches = np.stack(get_predict_ys(
+        xs, truth.a, truth.b, truth.c, truth.d, truth.e, truth.f
+    ))
+    if not np.all(np.isfinite(branches)):
+        raise ValueError("conic must have finite real branches on xs")
+    return branches + _noise(branches.shape, noise_std, seed)
