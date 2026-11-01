@@ -35,11 +35,11 @@ def field_product_integral(
     initial = np.concatenate((fields, np.tile(incidents, (n, 1))), axis=1)
     products = np.empty((n, c, n, c), dtype=np.complex128)
     identity = np.eye(d)
+    left_blocks = [np.kron(block, identity) for block in blocks]
+    right_blocks = [np.kron(identity, block.conj()) for block in blocks]
     for s in range(n):
         for u in range(s, n):
-            generator = np.kron(blocks[s], identity) + np.kron(
-                identity, blocks[u].conj()
-            )
+            generator = left_blocks[s] + right_blocks[u]
             # phi1(K*T)*T*z0 via exp([[K,z0],[0,0]]*T). The extra zero
             # eigenvalue also covers resonant, dark and defective line blocks.
             augmented = np.zeros((d * d + 1, d * d + 1), dtype=np.complex128)
