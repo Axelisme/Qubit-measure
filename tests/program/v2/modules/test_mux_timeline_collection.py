@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from zcu_tools.program.v2 import TimelineBuilder
+from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
@@ -33,16 +33,20 @@ def test_averaged_collection_preserves_read_axes_tones_and_nan_after_module_reus
 @pytest.mark.parametrize("emitted", [False, True])
 def test_collection_requires_identity_emitted_in_nested_control(emitted, monkeypatch):
     module = native_mux().build("mux")
-    builder = TimelineBuilder(mux_soccfg())
-    builder.add_loop("choice", 2)
-    builder.declare(module)
-    with builder.branch(by="choice", align_timeline=True) as cases:
-        with cases.case(0):
-            pass
-        with cases.case(1), builder.repeat("reads", 2):
-            if emitted:
-                builder.emit(module)
-    prog = builder.build()
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("choice", 2)
+            self.declare(module)
+
+        def _body(self, cfg):
+            with self.branch(by="choice", align_timeline=True) as cases:
+                with cases.case(0):
+                    pass
+                with cases.case(1), self.repeat("reads", 2):
+                    if emitted:
+                        self.emit(module)
+
+    prog = Program(mux_soccfg())
     acquired = [np.array([[[2.0, 3.0], [5.0, 7.0]]])] * 2
     raw = [
         np.full((1, 2, 1, 2), 11 * channel["length"], dtype=np.int64)
