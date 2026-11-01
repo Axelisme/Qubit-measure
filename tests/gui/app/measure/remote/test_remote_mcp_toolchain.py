@@ -274,7 +274,7 @@ def test_gui_cancel_run_survives_eventless_remote_wait(
                 "status": "failed",
                 "error": {
                     "reason": "failed",
-                    "message": "stopped before any acquisition",
+                    "message": "InterruptedError('stopped before any acquisition')",
                 },
             }
         snapshot = call(sock, "tab.snapshot", {"tab_id": tab_id})["result"]["tabs"][0]
