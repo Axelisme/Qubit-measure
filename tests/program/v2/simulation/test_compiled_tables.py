@@ -260,7 +260,6 @@ def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
         ).build("reset")
         expected = [(1, 0), (2, 0), (1, cavity_end)]
         readout_start = max(qubit_end, cavity_end + pi2_end)
-        readout_start = max(cavity_end, qubit_end)
     prog, env = module_program([reset, receiver().build("readout")])
     observed = request(prog, env)
     events = observed.materialize_point(0).events

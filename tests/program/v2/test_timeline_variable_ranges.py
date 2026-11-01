@@ -1,5 +1,7 @@
 """Correlated timeline bounds through public compile and linked timing."""
 
+from math import ceil
+
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import Macro, QickSweep1D
@@ -7,6 +9,7 @@ from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from tests.program._profiles import TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import native_sweep, runtime_cycles
 
 from .timing_support import shots, waves
 
@@ -50,14 +53,16 @@ def test_complementary_tproc_pulses_leave_a_literal_constant_end():
             self.pulse(0, "after", timeline="default", tag="after")
 
     prog = Program(QickConfig(cfg), reps=2, initial_delay=0, relax_delay=0)
-    # Native QICK steps are +/-430 ticks. Rounded starts sum to 4301.
+    forward = native_sweep(prog.soccfg, 1, 9, 9, gen_ch=0)
+    backward = native_sweep(prog.soccfg, 9, 1, 9, gen_ch=0)
+    constant_end = forward[0] + backward[0]
     assert [waves(s) for s in shots(prog)] == [
-        [0, 430 + 430 * i, 4301] for _ in range(2) for i in range(9)
+        [0, a, a + b] for _ in range(2) for a, b in zip(forward, backward, strict=True)
     ]
-    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(4301)
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(constant_end)
     assert not any(name.startswith("_timeline_end_") for name in prog.reg_dict)
     assert any(
-        inst.get("CMD") == "WPORT_WR" and inst.get("TIME") == "@4301"
+        inst.get("CMD") == "WPORT_WR" and inst.get("TIME") == f"@{constant_end}"
         for inst in prog.prog_list
     )
 
@@ -79,18 +84,12 @@ def test_complementary_fabric_pulses_keep_pointwise_ceil_differences():
             self.pulse(0, "after", timeline="default", tag="after")
 
     prog = Program(load_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
-    # At 384 MHz the k=8 upper conversion is 287/256. Separate ceils
-    # of complementary lengths alternate between 4306 and 4305, not one end.
+    # Each complementary operation ceils separately; the sum need not be constant.
+    forward = native_sweep(prog.soccfg, 1, 9, 9, gen_ch=0)
+    backward = native_sweep(prog.soccfg, 9, 1, 9, gen_ch=0)
     expected = [
-        [0, 431, 4306],
-        [0, 861, 4305],
-        [0, 1292, 4306],
-        [0, 1722, 4305],
-        [0, 2153, 4306],
-        [0, 2583, 4305],
-        [0, 3014, 4306],
-        [0, 3444, 4305],
-        [0, 3875, 4306],
+        [0, ceil(runtime_cycles(prog.soccfg, a)), ceil(runtime_cycles(prog.soccfg, a)) + ceil(runtime_cycles(prog.soccfg, b))]
+        for a, b in zip(forward, backward, strict=True)
     ]
     assert [waves(s) for s in shots(prog)] == expected * 2
     with pytest.raises(RuntimeError, match="non-affine"):
@@ -333,13 +332,5 @@ def test_two_loop_fabric_conversion_keeps_linear_part_for_dominance():
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert not any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        80,
-        86,
-        92,
-        86,
-        92,
-        98,
-        92,
-        98,
-        104,
+        80 + 6 * i + 6 * j for i in range(3) for j in range(3)
     ]

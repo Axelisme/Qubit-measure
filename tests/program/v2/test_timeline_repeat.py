@@ -1005,7 +1005,7 @@ def test_unhinted_register_repeat_preserves_actual_external_end(actual):
         prog.pulse(1, "p1", timeline="default")
 
     result = _shots(_program(body, initialize, reps=2))
-    expected = [100] if actual == 0 else [0, 15, 30, 100]
+    expected = [i * (SHORT_END + 9) for i in range(actual)] + [100]
     assert [_waves(s) for s in result] == [expected] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [100 + PULSE_END] * 2
 
@@ -1031,8 +1031,10 @@ def test_register_repeat_wait_consumers_use_actual_remaining_end(consumer):
             prog.pulse(1, "p1", timeline="external")
 
     shots = _shots(_program(body, _register_initialize, reps=2))
-    # Actual reference is 3*15=45; the runtime remainder is 55.
-    expected = [0, 15, 30] if consumer == "body" else [0, 15, 30, 100]
+    # Each iteration advances by the quantized short playback plus nine cycles.
+    expected = [i * (SHORT_END + 9) for i in range(3)]
+    if consumer != "body":
+        expected += [100]
     end = 100 if consumer == "body" else 100 + PULSE_END
     assert [_waves(s) for s in shots] == [expected] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [end] * 2
@@ -1191,7 +1193,7 @@ def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
         prog.pulse(0, "p0", timeline="default")
 
     (shot,) = _shots(_program(body, initialize))
-    expected = [0] if actual == 0 else [0, 15, 30, 45]
+    expected = [i * (SHORT_END + 9) for i in range(actual + 1)]
     assert _waves(shot) == expected
     assert (shot.body_end_cycle, shot.end_cycle) == (100, 100)
 
@@ -1345,7 +1347,10 @@ def test_register_count_updates_and_resets_across_scan_and_shots():
 
     prog = _program(body, initialize, reps=2)
     shots = _shots(prog)
-    assert [_waves(s) for s in shots] == [[0, 100], [0, 15, 100], [0, 15, 30, 100]] * 2
+    assert [_waves(s) for s in shots] == [
+        [i * (SHORT_END + 9) for i in range(count)] + [100]
+        for count in (1, 2, 3)
+    ] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
     assert [s.end_cycle - s.start_cycle for s in shots] == [100 + PULSE_END] * 6
     prog.compile()

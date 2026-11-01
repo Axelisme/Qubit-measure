@@ -6,6 +6,11 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, readout_duration, tproc_ceil
+
+PROFILE = load_soccfg(2, 1)
+PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
+ADC_TOUCH = tproc_ceil(PROFILE, readout_duration(PROFILE, 100 / RO_MHZ))
 
 from .timing_support import shots as _shots
 
@@ -45,11 +50,15 @@ def _shot(prog):
 
 
 @pytest.mark.parametrize(
-    "gens,ros,advance", [(True, False, 43), (False, True, 172), (True, True, 172)]
+    "gens,ros", [(True, False), (False, True), (True, True)]
 )
 def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
-    gens, ros, advance
+    gens, ros
 ):
+    advance = max(
+        round(generator_duration(PROFILE, 0.1) * TPROC_MHZ) if gens else 0,
+        round(readout_duration(PROFILE, 0.4) * TPROC_MHZ) if ros else 0,
+    )
     def body(prog):
         prog.fork("default", into="other")
         prog.timeline_inc(200 / TPROC_MHZ)
@@ -94,19 +103,20 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
         prog.pulse(0, "pulse", timeline=timeline)
 
     shot = _shot(_program(body, initialize))
-    # Instant config: E10+t0 ->10; E10+t5 ->15. The .1-us waveform
-    # then adds ceil(38/384*430.08)=43. Other ADC timestamps affect only shell.
+    # Config is instantaneous. The physical waveform advances only the body;
+    # the separately triggered ADC controls the shell.
     assert [e.cycle for e in shot.events if e.kind == "wave"] == [10 + offset] * 2
-    assert shot.body_end_cycle == 53 + offset
+    assert shot.body_end_cycle == 10 + offset + PULSE_END
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
-        (430, 1),
-        (440, 0),
+        (int(PROFILE.us2cycles(1)), 1),
+        (int(PROFILE.us2cycles(1)) + 10, 0),
     ]
-    assert shot.end_cycle == 602
+    assert shot.end_cycle == round((1 + readout_duration(PROFILE, 0.4)) * TPROC_MHZ)
 
 
-@pytest.mark.parametrize("delay, expected", [(20, 43), (60, 60)])
-def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
+@pytest.mark.parametrize("delay", [20, 60])
+def test_timeline_pulse_auto_chooses_later_channel_or_end(delay):
+    expected = max(delay, PULSE_END)
     def body(prog):
         prog.pulse(0, "pulse")
         prog.timeline_inc(delay / TPROC_MHZ)
@@ -124,17 +134,17 @@ def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
         prog.pulse(0, "pulse", timeline="default")
 
     prog = _program(body)
-    # Native ADC window is123/307.2 us =172.2 tProc cycles.
-    # The named end is20 (trigger width only); native ADC wait still rounds to182.
-    assert prog.get_time_param("wait", "t") * TPROC_MHZ == pytest.approx(182)
+    # Named end includes the native ten-cycle width, not the ADC window.
+    adc_wait = 10 + round(readout_duration(PROFILE, 0.4) * TPROC_MHZ)
+    assert prog.get_time_param("wait", "t") * TPROC_MHZ == pytest.approx(adc_wait)
     shot = _shot(prog)
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (10, 1),
         (20, 0),
     ]
     assert [e.cycle for e in shot.events if e.kind == "wave"] == [20]
-    assert shot.body_end_cycle == 63
-    assert shot.end_cycle == 182
+    assert shot.body_end_cycle == 20 + PULSE_END
+    assert shot.end_cycle == adc_wait
 
 
 def test_fractional_event_start_and_trigger_width_ceil_once():
@@ -199,11 +209,11 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
         assert prog.get_time_param("event", "width") * TPROC_MHZ == pytest.approx(
             rounded, rel=0, abs=1e-8
         )
-    # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
+    # Only a pulse contributes physical playback to this timeline end.
     end = (
         start
         + {
-            "pulse": 43,
+            "pulse": PULSE_END,
             "config": 0,
             "trigger": rounded,
             "delay": 0,
@@ -338,9 +348,9 @@ def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
         )
         prog.trigger([0], t=start, width=10 / TPROC_MHZ)
         next_start = (
-            QickSweep1D("scan", 140 / TPROC_MHZ, 141 / TPROC_MHZ)
+            QickSweep1D("scan", ADC_TOUCH / TPROC_MHZ, (ADC_TOUCH + 1) / TPROC_MHZ)
             if swept
-            else 140 / TPROC_MHZ
+            else ADC_TOUCH / TPROC_MHZ
         )
         prog.timeline_inc(next_start)
         prog.trigger([0], timeline="default")
@@ -353,7 +363,7 @@ def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
             if e.kind == "data" and e.value
         ]
         for shot in _shots(prog)
-    ] == ([[0, 140], [1, 141]] if swept else [[0, 140]] * 2)
+    ] == ([[0, ADC_TOUCH], [1, ADC_TOUCH + 1]] if swept else [[0, ADC_TOUCH]] * 2)
 
 
 def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
@@ -383,7 +393,7 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
         i for i in reference.prog_list if i["CMD"] == "DPORT_WR"
     ]
     (wait,) = [i for i in prog.prog_list if i["CMD"] == "WAIT"]
-    assert wait["TIME"] == "@140"
+    assert wait["TIME"] == f"@{ADC_TOUCH}"
 
 
 @pytest.mark.parametrize("control", ["flat", "branch", "repeat"])
@@ -422,14 +432,14 @@ def test_known_native_adc_window_replaces_unlocatable_predecessor():
         prog.write_reg("s_out_time", 0)
         prog.trigger([0], t=None)
         prog.trigger([0], t=0)
-        prog.timeline_inc(140 / TPROC_MHZ)
+        prog.timeline_inc(ADC_TOUCH / TPROC_MHZ)
         prog.trigger([0], timeline="default")
 
     prog = _program(body, initialize)
     assert [e.cycle for e in _shot(prog).events if e.kind == "data" and e.value] == [
         0,
         0,
-        140,
+        ADC_TOUCH,
     ]
 
 
@@ -453,7 +463,7 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
 
     def one_read(prog):
         prog.trigger([0], timeline="default")
-        prog.timeline_inc(130 / TPROC_MHZ)
+        prog.timeline_inc((ADC_TOUCH - 10) / TPROC_MHZ)
 
     def body(prog):
         if placement in {"repeat", "repeat_sync"}:
@@ -471,7 +481,7 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
 
     prog = _program(body, initialize)
     result = _shots(prog)
-    expected = {"static": [0, 140], "sweep": [0, 180], "runtime": [0, 141]}
+    expected = {"static": [0, ADC_TOUCH], "sweep": [0, ADC_TOUCH + 40], "runtime": [0, ADC_TOUCH + 1]}
     starts = [
         [
             e.cycle - shot.start_cycle
@@ -480,11 +490,11 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
         ]
         for shot in result
     ]
-    assert starts == [[0, 140], expected.get(placement, [0, 140])]
+    assert starts == [[0, ADC_TOUCH], expected.get(placement, [0, ADC_TOUCH])]
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
     assert all(
-        shot.body_end_cycle - shot.start_cycle + wait_cycles >= times[-1] + 140
+        shot.body_end_cycle - shot.start_cycle + wait_cycles >= times[-1] + ADC_TOUCH
         for shot, times in zip(result, starts, strict=True)
     )
 
@@ -568,9 +578,10 @@ def test_crossing_swept_auto_maximum_places_at_each_points_later_end():
             if event.kind == "wave"
         ]
         for shot in result
-    ] == [[0, 100], [100, 143]]
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [143, 186]
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [143, 186]
+    ] == [[0, 100], [100, 100 + PULSE_END]]
+    expected_ends = [100 + PULSE_END, 100 + 2 * PULSE_END]
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == expected_ends
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == expected_ends
 
 
 def test_crossing_body_maximum_closes_at_each_points_latest_end():
