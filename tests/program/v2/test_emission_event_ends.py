@@ -577,8 +577,8 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
 
 
 @pytest.mark.parametrize("swept_post", [False, True])
-@pytest.mark.parametrize("length, end", [(0.051, 49), (0.201, 92)])
-def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_post):
+@pytest.mark.parametrize("length, end", [(0.051, 28), (0.201, 92)])
+def test_readout_post_follows_generator_without_waiting_for_adc(length, end, swept_post):
     readout = PulseReadout(
         "read",
         PulseReadoutCfg(
@@ -609,8 +609,8 @@ def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_po
     )
     result = shots(prog)
     ends = [end, end + 2, end + 4] if swept_post else [end]
-    # Start5 plus ADC43.4 or generator86.24 dominates. Scalar post .21504
-    # or native swept post0 gives final ceil49/92, with swept steps2.
+    # Generator starts5 and lasts22.4/86.24 cycles. Add scalar post.21504
+    # or native swept post0 once: ceil28/92, with swept steps2.
     assert [waves(shot) for shot in result] == [
         [0, 5, point_end] for point_end in ends
     ] * 2
