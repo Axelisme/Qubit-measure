@@ -112,7 +112,7 @@ def test_inline_body_failure_settles_and_propagates_original(
         raise failure
     assert caught.value is failure
     assert handles.known_outcome(lease.token) == OperationOutcome(
-        "failed", str(failure)
+        "failed", repr(failure)
     )
     assert handles.live_count() == 0
     assert gate.release_calls == [lease.token]
@@ -177,7 +177,7 @@ def test_explicit_lease_startup_failure_unwinds_opened_resources(
         runner.open_lease(spec)
     assert caught.value is failure
     token = opened[0]
-    assert handles.known_outcome(token) == OperationOutcome("failed", str(failure))
+    assert handles.known_outcome(token) == OperationOutcome("failed", repr(failure))
     assert handles.live_count() == 0
     assert progress.discard_calls == gate.release_calls == [token]
     assert bus.current_origin == EventOrigin(kind="user")

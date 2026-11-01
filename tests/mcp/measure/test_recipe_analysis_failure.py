@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
 from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
@@ -54,7 +53,10 @@ def test_unhandled_analysis_failure_ends_recipe(
         assert observed == []
         assert snapshot.error is not None
         if expected is None:
-            assert "failed operation requires a non-empty error message" in snapshot.error.message
+            assert (
+                "failed operation requires a non-empty error message"
+                in snapshot.error.message
+            )
         else:
             assert snapshot.error.message == expected
     finally:

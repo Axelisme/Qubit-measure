@@ -44,11 +44,11 @@ class Report(BaseModel):
 @pytest.mark.parametrize("stage", ["run", "analyze"])
 @pytest.mark.parametrize("boundary", ["wire", "recipe"])
 @pytest.mark.parametrize(
-    ("error", "expected"),
+    ("error_type", "message", "expected"),
     [
-        (ValueError(), "ValueError()"),
-        (ValueError("no result"), "ValueError('no result')"),
-        (AnalysisFailed("no result"), "AnalysisFailed('no result')"),
+        (ValueError, "", "ValueError()"),
+        (ValueError, "no result", "ValueError('no result')"),
+        (AnalysisFailed, "no result", "AnalysisFailed('no result')"),
     ],
 )
 def test_operation_errors_reach_wire_and_recipe_author(
@@ -57,14 +57,17 @@ def test_operation_errors_reach_wire_and_recipe_author(
     request: pytest.FixtureRequest,
     stage: str,
     boundary: str,
-    error: Exception,
+    error_type: type[Exception],
+    message: str,
     expected: str,
 ) -> None:
     """Run and Analyze expose the exception representation without classifying it."""
+    error = error_type(message) if message else error_type()
 
     def run(
         cfg: SampleCfg, *, context: RunContext
     ) -> RunRecord[SampleCfg, SampleResult]:
+        """Acquire a synthetic record or raise the selected Run failure."""
         if stage == "run":
             raise error
         return SampleAdapter.run(cfg, context=context)
@@ -74,6 +77,7 @@ def test_operation_errors_reach_wire_and_recipe_author(
         *,
         plots: Plots,
     ) -> SampleAnalysis:
+        """Raise the selected failure for any analysis request and plot host."""
         raise error
 
     fx.registry.register(
@@ -86,33 +90,31 @@ def test_operation_errors_reach_wire_and_recipe_author(
             analysis=Analysis(fn=analyze, options=lambda source, env: SampleParams()),
         ),
     )
-    with open_client(fx.service.port) as sock:
-        opened = rpc_call(
-            sock, "tab.new", {"adapter_name": "synthetic/failing-analysis"}
-        )
-        tab_id = opened["result"]["tab_id"]
-        started = rpc_call(sock, "tab.run_start", {"tab_id": tab_id})
-        terminal = rpc_call(
-            sock,
-            "operation.await",
-            {"operation_id": started["result"]["operation_id"], "timeout": 5},
-        )
-        if stage == "analyze":
-            assert terminal["result"]["status"] == "finished", terminal
-            started = rpc_call(sock, "tab.analyze", {"tab_id": tab_id})
+    if boundary == "wire":
+        with open_client(fx.service.port) as sock:
+            opened = rpc_call(
+                sock, "tab.new", {"adapter_name": "synthetic/failing-analysis"}
+            )
+            tab_id = opened["result"]["tab_id"]
+            started = rpc_call(sock, "tab.run_start", {"tab_id": tab_id})
             terminal = rpc_call(
                 sock,
                 "operation.await",
                 {"operation_id": started["result"]["operation_id"], "timeout": 5},
             )
-        if boundary == "wire":
+            if stage == "analyze":
+                assert terminal["result"]["status"] == "finished", terminal
+                started = rpc_call(sock, "tab.analyze", {"tab_id": tab_id})
+                terminal = rpc_call(
+                    sock,
+                    "operation.await",
+                    {"operation_id": started["result"]["operation_id"], "timeout": 5},
+                )
             assert terminal["result"] == {
                 "reason": "completed",
                 "status": "failed",
                 "error": {"reason": "failed", "message": expected},
             }
-        rpc_call(sock, "control.release")
-    if boundary == "wire":
         return
 
     observed: list[str] = []

@@ -303,7 +303,8 @@ def test_failed_publication_releases_admission(search_case):
     token = ctrl.search.start()
     bg.deliver(short)
     assert ctrl.search.outcome(token) == OperationOutcome(
-        "failed", "captured coordinates must match kernel attribution shape"
+        "failed",
+        "ValueError('captured coordinates must match kernel attribution shape')",
     )
     assert ctrl.search.current.status == "failed"
     assert ctrl.search.active_token is None

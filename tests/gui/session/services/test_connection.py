@@ -506,6 +506,9 @@ def test_start_connect_remote_failure_emits_failed(qapp, monkeypatch, real_bg):
 
     assert errors
     assert "nope" in errors[0]
+    outcome = handles.poll(token)
+    assert outcome is not None
+    assert outcome.error == "ConnectionRefusedError('nope')"
 
 
 # ---------------------------------------------------------------------------

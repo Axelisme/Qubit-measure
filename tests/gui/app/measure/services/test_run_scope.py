@@ -41,7 +41,7 @@ def test_selector_stop_keeps_core_return_or_failure(selector: str, fails: bool) 
     outcome = handles.poll(token)
     assert outcome is not None
     assert outcome.status == ("failed" if fails else "finished")
-    assert outcome.error == ("selector core error" if fails else None)
+    assert outcome.error == ("RuntimeError('selector core error')" if fails else None)
     pane = state.get_tab(tab_id).run
     assert pane.result is (None if fails else record)
     assert pane.stop_requested

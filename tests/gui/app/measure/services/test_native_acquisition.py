@@ -387,7 +387,7 @@ def test_native_run_ledger_failure_is_visible_and_retains_result_for_save(
     assert str(blocked) in terminal.error_message
     outcome = session.handles.known_outcome(token)
     assert outcome is not None and outcome.status == "failed"
-    assert outcome.error == terminal.error_message
+    assert outcome.error == "IsADirectoryError(21, 'Is a directory')"
     tab = session.state.get_tab("tab")
     assert require_record(tab.run) is not None
     metadata = RunMetadataContent(require_record(tab.run).metadata)
