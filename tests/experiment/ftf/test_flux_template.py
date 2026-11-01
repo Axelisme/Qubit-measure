@@ -162,7 +162,6 @@ def test_flux_pulse_envelope_selects_existing_engine_family(
 def test_public_environment_admits_bound_flux_generator_through_acquire() -> None:
     env = ftf(flux_settings().with_telemetry(enabled=False), soccfg=profile_soccfg("ftf"), time_scale=0)
     try:
-        assert len(env.soccfg["gens"]) == 7
         pulse = PulseCfg(
             ch=6,
             nqz=1,

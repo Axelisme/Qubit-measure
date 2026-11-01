@@ -1,6 +1,6 @@
 """Common-origin FTF carriers retain their IQ phase across readout delays."""
 
-from tests.program._profiles import profile_soccfg
+from tests.program._profiles import load_mux_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -75,7 +75,7 @@ def isolated_carrier_plan(
     return plan_template(
         settings(),
         snapshot(),
-        replace(base, events=pulses, readouts=windows), soccfg=profile_soccfg("ftf"),
+        replace(base, events=pulses, readouts=windows), soccfg=load_mux_soccfg(3, 3, gen_ch=1, ro_chs=(1, 2)),
         readout=config,
         time_base=TIME_BASE,
     )

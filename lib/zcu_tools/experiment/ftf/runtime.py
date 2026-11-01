@@ -467,6 +467,9 @@ class FTFAcquire:
 class FTFSource:
     """Environment coordinator with one persistent Engine and one current acquire.
 
+    soccfg is the required acquisition board profile, supplied by the caller.
+    Its actual PFB clocks select mux carriers. Keep it unchanged for this source's
+    lifetime; construct a new source when changing board capabilities.
     settings is a validated immutable FTF resource; devices supplies startup DC
     identities whose live values are read by snapshot, even after session
     disconnects or registry renames. engine optionally supplies a configured numerical

@@ -1,6 +1,6 @@
 """V2 channel derivation, live DC and charge-drive acquisition seam."""
 
-from tests.program._profiles import profile_soccfg
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
@@ -16,7 +16,7 @@ from tests.resources._ftf_data import ftf_document
 pytestmark = pytest.mark.sim
 
 
-def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
+def test_v2_uses_supplied_sparse_board_and_acquires_with_live_dc() -> None:
     document = ftf_document()
     numerics = document["numerics"]
     assert isinstance(numerics, dict)
@@ -29,10 +29,10 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
         settings = parse_ftf(document)
     except ValueError as error:
         pytest.fail(f"v2 sparse channel document must validate: {error}")
-    env = ftf(settings, soccfg=profile_soccfg("ftf"))
+    board = load_soccfg(3, 3)
+    env = ftf(settings, soccfg=board)
     try:
-        assert len(env.soccfg["gens"]) == 3
-        assert len(env.soccfg["readouts"]) == 3
+        assert env.soccfg is board
         driver = env.devices.get_device("bias")
         if not isinstance(driver, FakeDevice):
             raise AssertionError("FTF DC source must be a fixed-unit memory device")
