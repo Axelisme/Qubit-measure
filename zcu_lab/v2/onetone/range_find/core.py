@@ -103,10 +103,10 @@ class RangeFindOptions:
         return names
 
     def to_dip_options(self) -> DipFinderOptions:
-        """Validate names and return pure numerical controls for this selection.
+        """Return numerical dip controls, using the name count as max_dips.
 
-        The name count limits selected dips; empty names discover all candidates.
-        Invalid names or controls raise ValueError.
+        Empty names leave max_dips unlimited. Names are validated when the
+        Options object is constructed, not by this conversion.
         """
         return DipFinderOptions(
             smoothing_sigma=self.smoothing_sigma,
