@@ -7,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from scipy.special import erfc
 from typing_extensions import (
@@ -210,6 +211,8 @@ class GEFitOptions:
     ratio, preparation populations and average population; None fits each value.
     logscale defaults to linear PDF axes. align_t1 defaults to sharing the joint
     readout/T1 ratio in the two population refinements.
+    length_ratio_max_relative_error is a dimensionless, finite, positive
+    threshold; nonpositive or nonfinite values raise ValidationError at construction.
     """
 
     numbins: int | str = "auto"
@@ -219,6 +222,9 @@ class GEFitOptions:
     avg_p: float | None = None
     logscale: bool = False
     align_t1: bool = True
+    length_ratio_max_relative_error: float = Field(
+        default=1.0, gt=0.0, allow_inf_nan=False
+    )
 
 
 def fitting_ge_and_plot(
