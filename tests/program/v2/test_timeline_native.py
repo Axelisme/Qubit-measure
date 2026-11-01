@@ -254,9 +254,9 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
         prog.declare_readout(0, length=100 / 307.2)
         prog.add_loop("scan", 2)
 
-    def trigger(prog):
-        prog.trigger([0], timeline="default")
-        prog.timeline_inc(90 / 430.08)
+    def trigger(prog, timeline="default"):
+        prog.trigger([0], timeline=timeline)
+        prog.timeline_inc(90 / 430.08, timeline=timeline)
 
     def body(prog):
         if control == "repeat":
@@ -269,13 +269,13 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
         elif control == "branch_then_trigger":
             with prog.branch(by="scan", align_timeline=False) as cases:
                 with cases.case(0):
-                    trigger(prog)
+                    trigger(prog, None)
             prog.trigger([0], timeline="default")
         else:
             trigger(prog)
             with prog.branch(by="scan", align_timeline=False) as cases:
                 with cases.case(0):
-                    prog.trigger([0], timeline="default")
+                    prog.trigger([0])
 
     with pytest.raises(ValueError, match=r"channel 0.*ADC overlap.*40 cycles"):
         _program(body, initialize)
@@ -286,6 +286,7 @@ def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
     def body(prog):
         prog.trigger([0], timeline=previous)
         prog.trigger([0], t=0, tag="raw")
+        prog.write_reg("s_out_time", 20)
         prog.trigger([0], t=None)
 
     prog = _program(body)
