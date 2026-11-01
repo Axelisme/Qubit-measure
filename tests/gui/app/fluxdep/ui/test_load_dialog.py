@@ -41,13 +41,16 @@ def preview_dialog(qapp, spectrum_hdf5, monkeypatch):
             qapp.processEvents()
 
 
+@pytest.mark.parametrize("final_transposed", [False, True])
 def test_preview_axis_labels_follow_transpose_and_restore(
-    preview_dialog, qapp, tmp_path: Path
+    preview_dialog, qapp, tmp_path: Path, final_transposed: bool
 ):
     dialog, filename = preview_dialog
     dialog.show()
     qapp.processEvents()
     driver = ComponentDriver(dialog)
+    driver.resize_window(1100, 700)
+    driver.screenshot(tmp_path / "initial.png")
     driver.choose_file("Browse…", filename, evidence=tmp_path / "chooser.png")
     driver.screenshot(tmp_path / "original.png")
     original = driver.plots().axes[0]
@@ -55,7 +58,9 @@ def test_preview_axis_labels_follow_transpose_and_restore(
     assert original.xlim == pytest.approx((-5.0, 5.0))
     assert original.ylim == pytest.approx((5e9, 6e9))
 
-    driver.choose_option("X=Flux, Y=Frequency", value="X=Frequency, Y=Flux")
+    assert driver.observe("Axis: X=Flux, Y=Frequency").checked is False
+    driver.click("Axis: X=Flux, Y=Frequency")
+    assert driver.observe("Axis: X=Frequency, Y=Flux").checked is True
     driver.screenshot(tmp_path / "transposed.png")
     transposed = driver.plots().axes[0]
     assert (transposed.xlabel, transposed.ylabel) == (
@@ -65,7 +70,8 @@ def test_preview_axis_labels_follow_transpose_and_restore(
     assert transposed.xlim == pytest.approx(original.ylim)
     assert transposed.ylim == pytest.approx(original.xlim)
 
-    driver.choose_option("X=Frequency, Y=Flux", value="X=Flux, Y=Frequency")
+    driver.click("Axis: X=Frequency, Y=Flux")
+    assert driver.observe("Axis: X=Flux, Y=Frequency").checked is False
     driver.screenshot(tmp_path / "restored.png")
     restored = driver.plots().axes[0]
     # Restore the displayed content, not tight_layout's floating-point pixel bounds.
@@ -74,6 +80,16 @@ def test_preview_axis_labels_follow_transpose_and_restore(
     assert restored.annotations == original.annotations
     assert restored.xlim == pytest.approx(original.xlim)
     assert restored.ylim == pytest.approx(original.ylim)
+
+    if final_transposed:
+        driver.click("Axis: X=Flux, Y=Frequency")
+        driver.screenshot(tmp_path / "final-transposed.png")
+    driver.click("OK")
+    # The accepted dialog has no visible pixels to capture.
+    assert not driver.visible().widgets
+    request = dialog.result_request()
+    assert request is not None
+    assert request.transpose_axes is final_transposed
 
 
 @pytest.fixture
@@ -155,9 +171,7 @@ def test_result_request_reflects_choices(dialog, qapp, spectrum_hdf5, monkeypatc
         )
     dialog.show()
     qapp.processEvents()
-    ComponentDriver(dialog).choose_option(
-        "X=Flux, Y=Frequency", value="X=Frequency, Y=Flux"
-    )
+    ComponentDriver(dialog).click("Axis: X=Flux, Y=Frequency")
 
     req = dialog.result_request()
     assert req is not None
