@@ -1123,8 +1123,8 @@ class TimeProducer(Macro):
             macro.preprocess(prog)
         prog._time_bounds.defined.add(self.register)
         if self.selection is not None:
-            prog._time_bounds.selection_at_position[self.register] = SelectionProvenance(
-                self.selection
+            prog._time_bounds.selection_at_position[self.register] = (
+                SelectionProvenance(self.selection)
             )
         prog._timeline_book.observe_selection(prog, self.register, self.selection)
 

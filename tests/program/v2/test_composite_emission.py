@@ -1080,7 +1080,9 @@ def _selection_flow_program(body, *, path_count=2):
         prog.write_reg("index", 0)
         body(prog, loader, other)
 
-    return _program(make_mock_soccfg(1, 0), [template, loader, other], lower, initialize)
+    return _program(
+        make_mock_soccfg(1, 0), [template, loader, other], lower, initialize
+    )
 
 
 def _play_selected_length(prog, relation, values, timeline="default"):
