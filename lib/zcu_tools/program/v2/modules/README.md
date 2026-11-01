@@ -198,7 +198,7 @@ only generator playback plus `post_delay`, with clock rounding. ADC windows stay
 on their channels; shot closure waits for all ADCs.
 Program declaration allocates unique names for each module-derived ADC and runtime
 pulse template. Same-named readouts can therefore coexist without sharing mutable
-configuration templates. `readout.adc_name(prog)` returns that program\'s ADC
+configuration templates. `readout.adc_name(prog)` returns that program's ADC
 config name after declaration, like `pulse.pulse_name(prog)` for a generator pulse.
 The first template uses its base name; later allocations append a numeric suffix.
 `TablePulseReadout` uses the same accessor for its ADC word updates. Ordinary

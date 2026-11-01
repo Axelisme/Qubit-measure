@@ -351,7 +351,7 @@ class PulseReadout(AbsReadout):
         self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
 
     def adc_name(self, prog: TimelineProgramV2) -> str:
-        """Return this readout\'s registered ADC template name on prog.
+        """Return this readout's registered ADC template name on prog.
 
         prog must have declared this module successfully. The program assigns
         unique names even for same-named readouts; use this accessor for native
