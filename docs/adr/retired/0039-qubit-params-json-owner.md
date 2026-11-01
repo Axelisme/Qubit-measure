@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [QubitParams](../../../lib/zcu_tools/resources/qubit_params.md)。以下保留歷史正文。
+> 2026-09-27。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [QubitParams](../../../lib/zcu_tools/resources/qubit_params.md)。以下保留歷史正文。
 
 # 0039 — QubitParams owns params.json typed handoff
 

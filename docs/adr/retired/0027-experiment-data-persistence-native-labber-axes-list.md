@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [datafile](../../../lib/zcu_tools/datafile/README.md) 與 [experiment](../../../lib/zcu_tools/experiment/README.md)。以下保留歷史正文。
+> 2026-09-27。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [datafile](../../../lib/zcu_tools/datafile/README.md) 與 [experiment](../../../lib/zcu_tools/experiment/README.md)。以下保留歷史正文。
 
 # 0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset
 

@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-29）。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
+> 2026-09-29。跨模組設計由 [ADR-0068](../0068-remote-transport.md) 接替；局部契約見 [measure remote README](../../../lib/zcu_tools/gui/app/measure/remote/README.md) 與 [measure MCP README](../../../lib/zcu_tools/mcp/measure/README.md)。以下保留歷史正文。
 
 # 0060 — measure-gui 的 agent 介面——共用 GUI 狀態的第二個 view
 

@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。現行局部契約見 [`analysis/fluxdep/README.md`](../../../lib/zcu_tools/analysis/fluxdep/README.md)；以下保留歷史正文。
+> 2026-09-27。現行局部契約見 [`analysis/fluxdep/README.md`](../../../lib/zcu_tools/analysis/fluxdep/README.md)；以下保留歷史正文。
 
 # 0028 — Flux-Dependence Analysis kernel lives outside notebook and GUI adapters
 

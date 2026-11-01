@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [`gui/session` README](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
+> 2026-09-27。接替文件：[ADR-0067](../0067-gui-application.md) 及 [`gui/session` README](../../../lib/zcu_tools/gui/session/README.md)。以下保留歷史正文。
 
 # 0020 — session-core 共用層：measure + autofluxdep 共享量測 session（gui/session/）
 

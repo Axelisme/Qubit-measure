@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md) 及 [adapter README](../../../zcu_lab/v2/gui-contracts.md)。以下保留歷史正文。
+> 2026-09-27。接替文件：[ADR-0067](../0067-gui-application.md) 及 [adapter README](../../../zcu_lab/v2/gui-contracts.md)。以下保留歷史正文。
 
 # 0036 — Adapter capability contract — explicit `AdapterCapabilities`, validated at import
 

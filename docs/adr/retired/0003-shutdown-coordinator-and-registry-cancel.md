@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替。以下保留歷史正文。
+> 2026-09-27。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替。以下保留歷史正文。
 
 # 0003 — 統一 async-task cancel（Registry 持 stop_event）+ Qt-free ShutdownCoordinator 輪詢關閉
 

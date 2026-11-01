@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。現行局部契約見 [`resources/waveform_assets.md`](../../../lib/zcu_tools/resources/waveform_assets.md)；以下保留歷史正文。
+> 2026-09-27。現行局部契約見 [`resources/waveform_assets.md`](../../../lib/zcu_tools/resources/waveform_assets.md)；以下保留歷史正文。
 
 # 0034 — ArbWaveformDatabase owns shared arbitrary waveform asset operations
 

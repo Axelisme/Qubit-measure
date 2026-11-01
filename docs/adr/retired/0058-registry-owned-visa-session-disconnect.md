@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替；registry 局部契約見 [`device/README.md`](../../../lib/zcu_tools/device/README.md)。以下保留歷史正文。
+> 2026-09-27。跨模組設計由 [ADR-0066](../0066-operation-lifecycle.md) 接替；registry 局部契約見 [`device/README.md`](../../../lib/zcu_tools/device/README.md)。以下保留歷史正文。
 
 # 0058 — registry-owned VISA session disconnect lifecycle
 

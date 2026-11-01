@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。現行局部契約見 [`analysis/fitting/README.md`](../../../lib/zcu_tools/analysis/fitting/README.md) 與 [measure authoring](../../../zcu_lab/v2/measure-authoring.md)；以下保留歷史正文。
+> 2026-09-27。現行局部契約見 [`analysis/fitting/README.md`](../../../lib/zcu_tools/analysis/fitting/README.md) 與 [measure authoring](../../../zcu_lab/v2/measure-authoring.md)；以下保留歷史正文。
 
 # 0054 — Resonance fitting 使用 multiplicative amplitude background
 

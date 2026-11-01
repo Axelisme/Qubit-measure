@@ -2,7 +2,7 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
+> 2026-09-27。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
 
 # 0004 — Service 互依的「三問規則」—— 取代分層表，治「service 互呼卡循環」
 
