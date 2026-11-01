@@ -119,7 +119,9 @@ def test_resonator_rejects_nonfinite_or_nonpositive_frequency_and_quality(
     )
     truth = replace(truth, **{field: invalid})
     with pytest.raises(ValueError, match=field):
-        generators.generate_resonator(np.array([5990.0, 6000.0, 6010.0]), truth, 0.0, 17)
+        generators.generate_resonator(
+            np.array([5990.0, 6000.0, 6010.0]), truth, 0.0, 17
+        )
 
 
 def test_qubit_frequency_recovers_dip_center_and_linewidth():
