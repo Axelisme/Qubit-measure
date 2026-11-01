@@ -154,3 +154,50 @@ def test_sample_iq_shots_adds_independent_gaussian_quadrature_width():
         assert np.mean(np.abs(component) > 0.6) == pytest.approx(0.0455, abs=0.004)
         assert abs(np.corrcoef(component[0], component[1])[0, 1]) < 0.02
     assert abs(np.corrcoef(noise.real.ravel(), noise.imag.ravel())[0, 1]) < 0.02
+
+
+@pytest.mark.parametrize(
+    "populations, g_center, e_center, width, shots, message",
+    [
+        (np.array(0.5), -1j, 1j, 0.2, 3, "population"),
+        (np.array([[0.5]]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([np.nan]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([np.inf]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([-np.inf]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([-0.01]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([1.01]), -1j, 1j, 0.2, 3, "population"),
+        (np.array([0.5]), -1j, 1j, -0.1, 3, "width"),
+        (np.array([0.5]), -1j, 1j, np.nan, 3, "width"),
+        (np.array([0.5]), -1j, 1j, np.inf, 3, "width"),
+        (np.array([0.5]), -1j, 1j, -np.inf, 3, "width"),
+        (np.array([0.5]), -1j, 1j, 0.2, -1, "shots"),
+        (np.array([0.5]), -1j, 1j, 0.2, True, "shots"),
+        (np.array([0.5]), -1j, 1j, 0.2, False, "shots"),
+        (np.array([0.5]), -1j, 1j, 0.2, 1.5, "shots"),
+        (np.array([0.5]), complex(np.nan, 0), 1j, 0.2, 3, "center"),
+        (np.array([0.5]), complex(0, np.inf), 1j, 0.2, 3, "center"),
+        (np.array([0.5]), -1j, complex(np.inf, 0), 0.2, 3, "center"),
+        (np.array([0.5]), -1j, complex(0, np.nan), 0.2, 3, "center"),
+    ],
+)
+def test_sample_iq_shots_rejects_declared_invalid_inputs(
+    populations, g_center, e_center, width, shots, message
+):
+    with pytest.raises(ValueError, match=message):
+        generators.sample_iq_shots(
+            populations, g_center=g_center, e_center=e_center,
+            width=width, shots=shots, seed=17,
+        )
+
+
+@pytest.mark.parametrize(
+    "populations, shots, shape",
+    [(np.array([]), 3, (0, 3)), (np.array([0.0, 1.0]), 0, (2, 0)),
+     (np.array([]), 0, (0, 0))],
+)
+def test_sample_iq_shots_allows_empty_population_and_zero_shots(populations, shots, shape):
+    samples = generators.sample_iq_shots(
+        populations, g_center=-1j, e_center=1j, width=0.0, shots=shots, seed=17
+    )
+    assert samples.shape == shape
+    assert samples.dtype == np.complex128
