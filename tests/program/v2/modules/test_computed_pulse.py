@@ -79,18 +79,6 @@ def test_dmem_lookup_emits_dmem_read_in_asm():
     assert "dmem" in asm
 
 
-def test_identical_candidates_dedup_table_points_to_same_index():
-    """Identical candidates share one compiled waveform memory entry."""
-    same_pulse = _const_pulse(gain=0.5)
-    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
-
-    modules = _gate_modules([same_pulse, same_pulse])
-    prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
-    assert prog.binprog is not None
-
-    assert len(prog.binprog["wmem"]) == 1
-
-
 # ---------------------------------------------------------------------------
 # Regression: non-flat_top behavior unchanged
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile import load, load_labber_data

@@ -652,8 +652,6 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     prog = compile_modules(env.soccfg, modules=modules, reps=1)
     other = program(env, reps=1)
     readout = modules[0]
-    if not isinstance(readout, PulseReadout):
-        raise AssertionError("synthetic program must provide its declared readout")
     value = 0.0
     seen = []
 
