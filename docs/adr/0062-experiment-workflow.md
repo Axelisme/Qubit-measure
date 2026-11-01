@@ -39,9 +39,9 @@ Completed.value 是 callable 的原始值，Completed.facts 是 OperationFacts�
 Completed 不帶 stop_requested。`facts.stopped` 只記 operation 自己的停止位元，不推斷子孫取消或結果完整度。不再寫 partial／failed operation outcome 或 ExperimentFailed journal，也不保留這些舊值的讀取相容。RunMetadata.completion 的既有存檔值不改。2026-10-31，使用者對 Stop 後錯誤仍 failed、舊 workflow 值不保留，以及 metadata 值不改的三題答覆為「Ba Cb , 因為還沒用過 Da」。
 
 使用者於 2026-10-26 裁決：「是作者的自由，框架只提供工具。」及「我想把AcquisitionFacts機制刪除或取代」。
-框架不要求 run 使用 ProgramBuilder，也不收集僅覆蓋該路徑的 acquisition facts。
-ProgramBuilder 每次 acquire retry 寫一行 warning，包含原因與下一次 attempt number。
-Data-driven early stop 寫一行 info，包含 stop value 與完成 rounds。
+框架不要求 run 使用 Schedule，也不收集僅覆蓋該路徑的 acquisition facts。
+Schedule 的 AcquisitionRunner 每次 acquire retry 寫一行 warning，包含原因與下一次 attempt number。
+AcquisitionRunner 在 data-driven early stop 時寫一行 info，包含 stop value 與完成 rounds。
 Operation、native RunMetadata 與 RPC 不攜帶這些 program observations，workflow 摘要也不聚合其計數。
 舊文件與 journal 的 `acquisitions` key 在載入時忽略，不轉換或寫回；缺少此 key 不影響載入。
 
@@ -101,7 +101,7 @@ Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flu
 
 使用者在 2026-10-12 裁定：「我以為一直都是框架一開始就給這個iter的儲存路徑，workflow內部自己決定在哪裡存什麼」與「你沒辦法阻止workflow 內部亂搞，也不該試圖保證不亂搞，這些機制都是過度工程」。本裁定將量測與保存分開，不維持舊暫存路徑及檔案發布介面。
 
-`env.new_commit_dir()` 每次配置並建立新的 absolute `data_root/commits/<六位配置序號>/`。`env.commit_dirs()` 是惰性無限 generator，可用 `zip(plan.fluxes, env.commit_dirs())`，有限序列放前面。作者用 `await env.commit(record, d)` 提交到已配置的 d，省略 d 時自配。同 d 二次 commit raise。配置序號與 commit 序號分開，信封同時記錄，reader 按 commit 序號排序。配置目錄不換 iteration token，成功 commit 才換；未提交目錄與作者檔案保留，但沒有 record.json。
+`scope.dir` 第一次使用時建立並回傳該 scope 的目錄：root 是 data_root，iteration 是 `iteration-<六位序號>/`，作者 child 用 `<label>-<六位序號>`，內建 child 用 `<kind>-<六位序號>`。`env.iterations()` 逐趟產生新的 iteration scope，可用 `zip(plan.fluxes, env.iterations())`，有限序列放前面。作者用同步的 `scope.commit(record)` 把一個 BaseModel 快照寫入該 scope 的 record.json，不傳目錄。同一 scope 二次 commit raise ValueError。目錄序號與 commit 序號分開，信封同時記錄目錄與 commit 序號，reader 按 commit 序號排序。Iteration 序號在 scope 建立時決定，commit 不改它；未提交 scope 已建立的目錄與作者檔案保留，但沒有 record.json。
 
 Scope.call 只執行一般 callable，run_core helper 才負責 cfg deepcopy、device capture 與 core 介面轉接。兩者都不解讀 callable 內部的序列。`Completed` 只表示 operation 返回，不代表 Result 完整或已保存。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。
 
