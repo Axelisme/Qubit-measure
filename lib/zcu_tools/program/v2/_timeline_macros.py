@@ -58,6 +58,7 @@ from ._timeline_state import (
     TimelineBook,
 )
 from .macro.delay import DelayRegAuto
+from .macro.readout import ReadoutEmission
 from .macro.structure import MarkedCloseLoop, MarkedOpenLoop
 from .macro.table import TableSelection
 from .modules.base import Module
@@ -872,6 +873,7 @@ class ModuleEmission(TimedMacro):
         try:
             pending: dict[str, list[EventEnd | SelectedEventEnd]] = {}
             self.finishers = []
+            readout = any(isinstance(macro, ReadoutEmission) for macro in self.macros)
             for macro in self.macros:
                 source = (
                     macro.source if isinstance(macro, PreparedTimelineMacro) else macro
@@ -887,7 +889,9 @@ class ModuleEmission(TimedMacro):
                 ):
                     start = source.book.end(source.timeline)
                     macro.preprocess(prog)
-                    pending.setdefault(source.timeline, []).append(source.event_end)
+                    # Readout owns generator completion, not its independent ADC trigger.
+                    if not (readout and isinstance(source, TimelinePlacedTrigger)):
+                        pending.setdefault(source.timeline, []).append(source.event_end)
                     source.book.ends[source.timeline] = start
                 else:
                     if isinstance(source, TimelineAdvance):
