@@ -139,7 +139,10 @@ def _secondary(
     times: NDArray[np.float64], observed: NDArray[np.float64], primary: LifetimeCurve
 ) -> LifetimeCurve:
     if primary.model == "exponential":
-        t, err, tb, errb, fitted, (params, covariance) = fit_dual_decay(times, observed)
+        fit = fit_dual_decay(times, observed)
+        t, err = fit.decay_time1, fit.decay_time1_err
+        tb, errb = fit.decay_time2, fit.decay_time2_err
+        fitted, params, covariance = fit.curve, fit.params, fit.cov
         names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         model, values, errors, free = "dual", (t, tb), (err, errb), 5
         fixed = ()
@@ -265,9 +268,12 @@ def show_lifetime_comparison(
     samples in us/projected units. Does not save PNG or modify accepted trends.
     """
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
 
-    def draw(figure: Figure) -> None:
+    figure = plots[name]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         ax = figure.axes[0]
         ax.clear()
         ax.plot(times, observed, ".", label="observed")
@@ -275,7 +281,10 @@ def show_lifetime_comparison(
         ax.set(xlabel="Delay (us)", ylabel="Projected signal")
         ax.legend()
 
-    plots.draw(name, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
 
 
 def draw_lifetime_comparison(

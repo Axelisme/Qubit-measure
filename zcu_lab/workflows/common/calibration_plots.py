@@ -116,10 +116,13 @@ def draw_frequency(
     """
     name = "calibration/qubit_freq"
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
     current = rows[-1]
 
-    def draw(figure: Figure) -> None:
+    figure = plots[name]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         figure.set_layout_engine("constrained")
         grid = figure.add_gridspec(2, 2)
@@ -146,7 +149,10 @@ def draw_frequency(
         )
         trace.legend()
 
-    plots.draw(name, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
     plots.save(name, directory / "qubit-freq.png", figsize=(12.8, 9.6))
 
 
@@ -166,10 +172,13 @@ def draw_rabi(
     xlabel = "Pulse length (us)" if coordinate == "length" else "Pulse gain"
     filename = "len-rabi.png" if coordinate == "length" else "amp-rabi.png"
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
     current = rows[-1]
 
-    def draw(figure: Figure) -> None:
+    figure = plots[name]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         figure.set_layout_engine("constrained")
         heatmap, trace = figure.subplots(1, 2)
@@ -197,7 +206,10 @@ def draw_rabi(
         )
         trace.legend()
 
-    plots.draw(name, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
     plots.save(name, directory / filename, figsize=(12.8, 4.8))
 
 
@@ -219,9 +231,12 @@ def draw_readout(
     """
     name = "calibration/readout"
     if name not in plots:
-        plots.subplots(name)
+        plots.subplots(num=name)
 
-    def draw(figure: Figure) -> None:
+    figure = plots[name]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         figure.set_layout_engine("constrained")
         axis = figure.subplots()
@@ -246,5 +261,8 @@ def draw_readout(
             title=f"Readout SNR\nFlux = {flux:.6g} {unit}",
         )
 
-    plots.draw(name, draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()
     plots.save(name, directory / "readout.png")
