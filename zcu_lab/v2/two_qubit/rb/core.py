@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import compute_fit_quality
@@ -166,7 +166,7 @@ class RBResult:
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
-    
+
     rounds: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -174,7 +174,12 @@ class RBResult:
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
     """Restore counts; old per-shot IQ files fail because sums is missing."""
     sums = data.variable("sums")
-    return RBResult(depths=sums.axes[5].astype(np.int64), seeds=sums.axes[4].astype(np.int64), rounds=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64))
+    return RBResult(
+        depths=sums.axes[5].astype(np.int64),
+        seeds=sums.axes[4].astype(np.int64),
+        rounds=sums.axes[2].astype(np.int64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class RBExp(Experiment[RBResult, RBCfg]):
@@ -188,11 +193,20 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 axes=(
                     VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
-                    VariableAxisSpec(label="Round", unit="", field_name="rounds", dtype=np.int64),
-                    VariableAxisSpec(label="Arm", unit="", values=(0, 1), dtype=np.int64),
-                    VariableAxisSpec(label="Seed", unit="", field_name="seeds", dtype=np.int64),
                     VariableAxisSpec(
-                        label="Clifford depth", unit="", field_name="depths", dtype=np.int64
+                        label="Round", unit="", field_name="rounds", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        label="Arm", unit="", values=(0, 1), dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        label="Seed", unit="", field_name="seeds", dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        label="Clifford depth",
+                        unit="",
+                        field_name="depths",
+                        dtype=np.int64,
                     ),
                 ),
                 z=VariableZSpec(
@@ -317,7 +331,12 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        return RBResult(np.array(config.depths, dtype=np.int64), np.array(config.seeds, dtype=np.int64), np.arange(config.rounds, dtype=np.int64), buffer.array)
+        return RBResult(
+            np.array(config.depths, dtype=np.int64),
+            np.array(config.seeds, dtype=np.int64),
+            np.arange(config.rounds, dtype=np.int64),
+            buffer.array,
+        )
 
     def analyze(
         self,

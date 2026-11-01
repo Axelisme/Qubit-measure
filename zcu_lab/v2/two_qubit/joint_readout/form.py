@@ -27,9 +27,7 @@ def joint_readout_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
     Core validation requires its tone count to match the captured full group.
     """
     roles = captured_roles(ctx)
-    readout = (
-        Slot("$mux.module.readout", fallback=Template("readout/mux:blank"))
-    )
+    readout = Slot("$mux.module.readout", fallback=Template("readout/mux:blank"))
     return Form(
         cfg_type,
         field_order=(

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -108,8 +108,6 @@ class JointReadoutHeraldedResult:
     The RunContext still reports cancellation or acquisition failure.
     """
 
-    
-    
     sums: NDArray[np.float64]
 
 
@@ -206,7 +204,10 @@ class JointReadoutHeraldedExp(
 
         validate_classifiers(config.readout, config.roles)
         fig, ax = context.plots.subplots(num="measurement")
-        ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g) | herald (g,g)")
+        ax.set(
+            xlabel="Nominal preparation (gg, ge, eg, ee)",
+            ylabel="Terminal P(g,g) | herald (g,g)",
+        )
         viewer = live_line(ax)
         fig.show()
 
@@ -286,12 +287,8 @@ class JointReadoutHeraldedExp(
         """
         del options
         result = source.result
-        if (
-            result.sums.shape != (2, 2, 3, 3, 3, 3)
-        ):
-            raise ValueError(
-                "Heralded joint readout requires sums (2,2,3,3,3,3)"
-            )
+        if result.sums.shape != (2, 2, 3, 3, 3, 3):
+            raise ValueError("Heralded joint readout requires sums (2,2,3,3,3,3)")
 
         # Herald ee starts with both qubits excited. The same I/Xπ preparation
         # reaches the complementary state, so align nominal ee/eg/ge/gg to gg/ge/eg/ee.

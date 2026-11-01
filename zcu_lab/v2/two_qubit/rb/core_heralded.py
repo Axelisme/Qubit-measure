@@ -5,8 +5,8 @@ from typing import ClassVar
 
 import numpy as np
 from matplotlib.axes import Axes
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.experiment import (
@@ -68,7 +68,7 @@ class RBHeraldedResult:
 
     depths: NDArray[np.int64]
     seeds: NDArray[np.int64]
-    
+
     rounds: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -104,7 +104,12 @@ class RBHeraldedAnalysis:
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
     """Restore all 81 class counts; old per-shot IQ files fail without sums."""
     sums = data.variable("sums")
-    return RBHeraldedResult(depths=sums.axes[7].astype(np.int64), seeds=sums.axes[6].astype(np.int64), rounds=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64))
+    return RBHeraldedResult(
+        depths=sums.axes[7].astype(np.int64),
+        seeds=sums.axes[6].astype(np.int64),
+        rounds=sums.axes[4].astype(np.int64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
@@ -124,12 +129,17 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                         VariableAxisSpec(
                             label="Round", unit="", field_name="rounds", dtype=np.int64
                         ),
-                        VariableAxisSpec(label="Arm", unit="", values=(0, 1), dtype=np.int64),
+                        VariableAxisSpec(
+                            label="Arm", unit="", values=(0, 1), dtype=np.int64
+                        ),
                         VariableAxisSpec(
                             label="Seed", unit="", field_name="seeds", dtype=np.int64
                         ),
                         VariableAxisSpec(
-                            label="Clifford depth", unit="", field_name="depths", dtype=np.int64
+                            label="Clifford depth",
+                            unit="",
+                            field_name="depths",
+                            dtype=np.int64,
                         ),
                     ),
                     z=VariableZSpec(
@@ -262,7 +272,12 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                 options=RunOptions(),
                             )
         buffer.trigger_update(flush=True)
-        return RBHeraldedResult(np.array(config.depths, dtype=np.int64), np.array(config.seeds, dtype=np.int64), np.arange(config.rounds, dtype=np.int64), buffer.array)
+        return RBHeraldedResult(
+            np.array(config.depths, dtype=np.int64),
+            np.array(config.seeds, dtype=np.int64),
+            np.arange(config.rounds, dtype=np.int64),
+            buffer.array,
+        )
 
     def analyze(
         self,

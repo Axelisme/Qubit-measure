@@ -5,8 +5,8 @@ from itertools import product
 from typing import ClassVar
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -54,8 +54,6 @@ class LocalZHeraldedResult:
     Unmeasured points remain NaN; completed rounds survive cancellation.
     """
 
-    
-    
     gate_counts: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -65,7 +63,9 @@ def restore_result(
 ) -> LocalZHeraldedResult:
     """Restore 81-class sums; reject legacy raw-IQ files without sums."""
     sums = data.variable("sums")
-    return LocalZHeraldedResult(gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64))
+    return LocalZHeraldedResult(
+        gate_counts=sums.axes[4].astype(np.int64), sums=sums.z.astype(np.float64)
+    )
 
 
 @dataclass(frozen=True)
@@ -110,7 +110,10 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            label="Target F1 or F2", unit="", values=(0, 1), dtype=np.int64
+                            label="Target F1 or F2",
+                            unit="",
+                            values=(0, 1),
+                            dtype=np.int64,
                         ),
                     ),
                     z=VariableZSpec(
@@ -227,7 +230,10 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        return LocalZHeraldedResult(np.array(config.gate_counts, dtype=np.int64), np.moveaxis(buffer.array, 0, 2))
+        return LocalZHeraldedResult(
+            np.array(config.gate_counts, dtype=np.int64),
+            np.moveaxis(buffer.array, 0, 2),
+        )
 
     def analyze(
         self,
@@ -241,9 +247,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        for actual, expected in (
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
+        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
             if not np.array_equal(actual, expected):
                 raise ValueError("LocalZ count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3, 3, 3):

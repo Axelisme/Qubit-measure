@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -54,7 +54,7 @@ class IdleZZHeraldedResult:
     """
 
     dc_values: NDArray[np.float64]
-    
+
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -80,7 +80,11 @@ class IdleZZHeraldedAnalysis:
 def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedResult:
     """Restore 81-class sums; old raw-IQ files missing sums raise ValueError."""
     sums = data.variable("sums")
-    return IdleZZHeraldedResult(sums.axes[6].astype(np.float64), sums.axes[4].astype(np.float64), sums.z.astype(np.float64))
+    return IdleZZHeraldedResult(
+        sums.axes[6].astype(np.float64),
+        sums.axes[4].astype(np.float64),
+        sums.z.astype(np.float64),
+    )
 
 
 class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
@@ -96,7 +100,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                         VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                         VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
                         VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
-                        VariableAxisSpec(label="Delay", unit="s", field_name="delays", scale=1e-6),
+                        VariableAxisSpec(
+                            label="Delay", unit="s", field_name="delays", scale=1e-6
+                        ),
                         VariableAxisSpec(
                             label="Spectator state (0=I, 1=Xπ)",
                             unit="",
@@ -150,7 +156,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             gg = sigma(terminal_counts(sums, ("g", "g")), config.target)
             ee = -sigma(terminal_counts(sums, ("e", "e")), config.target)[:, ::-1]
-            return viewer.set(delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays)))
+            return viewer.set(
+                delays, np.stack((gg, ee), axis=1).reshape(-1, len(delays))
+            )
 
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3, 3, 3),
@@ -327,7 +335,9 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         ]
         for dc_index, dc_value in enumerate(dc_values):
             for state in range(2):
-                fig, ax = plots.subplots(num=f"herald_{dc_index}_{state}", figsize=(9, 5))
+                fig, ax = plots.subplots(
+                    num=f"herald_{dc_index}_{state}", figsize=(9, 5)
+                )
                 for outcome, label in enumerate(labels):
                     ax.plot(
                         result.delays,

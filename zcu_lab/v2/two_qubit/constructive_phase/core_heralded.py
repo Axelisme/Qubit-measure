@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -86,7 +86,10 @@ class ConstructivePhaseHeraldedExp(
                     VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                     VariableAxisSpec(
-                        label="Drive duration", unit="s", field_name="durations", scale=1e-6
+                        label="Drive duration",
+                        unit="s",
+                        field_name="durations",
+                        scale=1e-6,
                     ),
                     VariableAxisSpec(
                         label="F2 relative to F1 phase",
@@ -326,7 +329,9 @@ class ConstructivePhaseHeraldedExp(
             totals,
             herald_probabilities(result.sums),
         )
-        fig, ax = plots.subplots(num="interference", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(
+            num="interference", figsize=(9, 6), layout="constrained"
+        )
         image = ax.pcolormesh(
             result.durations,
             result.coordinates,

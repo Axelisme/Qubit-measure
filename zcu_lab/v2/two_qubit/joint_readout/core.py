@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -112,8 +112,6 @@ class JointReadoutResult:
     requests and reason text, not errors or data completeness.
     """
 
-    
-    
     sums: NDArray[np.float64]
 
 
@@ -258,12 +256,8 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options
         result = source.result
-        if (
-            result.sums.shape != (2, 2, 3, 3)
-        ):
-            raise ValueError(
-                "Joint readout requires sums (2,2,3,3)"
-            )
+        if result.sums.shape != (2, 2, 3, 3):
+            raise ValueError("Joint readout requires sums (2,2,3,3)")
         answer = JointReadoutAnalysis(
             counts=result.sums.reshape(4, 9),
             matrix=joint_probabilities(result.sums).reshape(4, 9),

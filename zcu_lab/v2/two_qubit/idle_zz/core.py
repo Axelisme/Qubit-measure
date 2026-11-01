@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
@@ -189,7 +189,7 @@ class IdleZZResult:
     """
 
     dc_values: NDArray[np.float64]
-    
+
     delays: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -197,7 +197,11 @@ class IdleZZResult:
 def restore_result(data: GroupedLoadData[IdleZZCfg]) -> IdleZZResult:
     """Restore summed counts; old raw-IQ files missing sums raise ValueError."""
     sums = data.variable("sums")
-    return IdleZZResult(sums.axes[4].astype(np.float64), sums.axes[2].astype(np.float64), sums.z.astype(np.float64))
+    return IdleZZResult(
+        sums.axes[4].astype(np.float64),
+        sums.axes[2].astype(np.float64),
+        sums.z.astype(np.float64),
+    )
 
 
 class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
@@ -210,7 +214,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 axes=(
                     VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
-                    VariableAxisSpec(label="Delay", unit="s", field_name="delays", scale=1e-6),
+                    VariableAxisSpec(
+                        label="Delay", unit="s", field_name="delays", scale=1e-6
+                    ),
                     VariableAxisSpec(
                         label="Spectator state (0=I, 1=Xπ)",
                         unit="",
@@ -256,7 +262,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
-            return viewer.set(delays, sigma(sums, config.target).reshape(-1, len(delays)))
+            return viewer.set(
+                delays, sigma(sums, config.target).reshape(-1, len(delays))
+            )
 
         buffer = SignalBuffer(
             (len(dc_values), 2, len(delays), 3, 3),

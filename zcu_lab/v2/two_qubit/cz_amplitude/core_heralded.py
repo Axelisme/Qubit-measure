@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -93,7 +93,9 @@ class CZAmplitudeHeraldedExp(
                     VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
-                    VariableAxisSpec(label="Common gain scale", unit="", field_name="scales"),
+                    VariableAxisSpec(
+                        label="Common gain scale", unit="", field_name="scales"
+                    ),
                 ),
                 z=VariableZSpec(
                     field_name="sums",
@@ -208,7 +210,9 @@ class CZAmplitudeHeraldedExp(
             acquired_shots=result.sums.sum(axis=(-4, -3, -2, -1)),
             expected_shots=cfg.reps * cfg.rounds,
         )
-        _, ax = plots.subplots(num="joint_return", figsize=(10, 5), layout="constrained")
+        _, ax = plots.subplots(
+            num="joint_return", figsize=(10, 5), layout="constrained"
+        )
         for index, label in enumerate(OUTCOME_LABELS):
             ax.plot(
                 result.scales,

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
 from zcu_tools.experiment import (
@@ -96,7 +96,10 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
                     VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        label="Drive duration", unit="s", field_name="durations", scale=1e-6
+                        label="Drive duration",
+                        unit="s",
+                        field_name="durations",
+                        scale=1e-6,
                     ),
                     VariableAxisSpec(
                         label="F2 relative to F1 phase",
@@ -328,7 +331,9 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
             totals,
             None,
         )
-        fig, ax = plots.subplots(num="interference", figsize=(9, 6), layout="constrained")
+        fig, ax = plots.subplots(
+            num="interference", figsize=(9, 6), layout="constrained"
+        )
         image = ax.pcolormesh(
             result.durations,
             result.coordinates,

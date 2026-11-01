@@ -5,8 +5,8 @@ from itertools import product
 from typing import ClassVar
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -63,8 +63,6 @@ class ConditionalPhaseHeraldedResult:
     Unmeasured points remain NaN; completed rounds survive cancellation.
     """
 
-    
-    
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
@@ -75,7 +73,11 @@ def restore_result(
 ) -> ConditionalPhaseHeraldedResult:
     """Restore 81-class sums; reject legacy raw-IQ files without sums."""
     sums = data.variable("sums")
-    return ConditionalPhaseHeraldedResult(gate_counts=sums.axes[5].astype(np.int64), frequencies=sums.axes[4].astype(np.float64), sums=sums.z.astype(np.float64))
+    return ConditionalPhaseHeraldedResult(
+        gate_counts=sums.axes[5].astype(np.int64),
+        frequencies=sums.axes[4].astype(np.float64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,10 @@ class ConditionalPhaseHeraldedExp(
                         scale=1e6,
                     ),
                     VariableAxisSpec(
-                        label="CZ gate count", unit="", field_name="gate_counts", dtype=np.int64
+                        label="CZ gate count",
+                        unit="",
+                        field_name="gate_counts",
+                        dtype=np.int64,
                     ),
                     VariableAxisSpec(
                         label="Projection X or Y",
@@ -244,7 +249,11 @@ class ConditionalPhaseHeraldedExp(
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        return ConditionalPhaseHeraldedResult(np.array(config.gate_counts, dtype=np.int64), frequencies, np.moveaxis(buffer.array, 0, 2))
+        return ConditionalPhaseHeraldedResult(
+            np.array(config.gate_counts, dtype=np.int64),
+            frequencies,
+            np.moveaxis(buffer.array, 0, 2),
+        )
 
     def analyze(
         self,
@@ -263,9 +272,7 @@ class ConditionalPhaseHeraldedExp(
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        for actual, expected in (
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
+        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
             if not np.array_equal(actual, expected):
                 raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (

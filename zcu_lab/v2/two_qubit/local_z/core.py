@@ -7,8 +7,8 @@ from itertools import pairwise
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -138,8 +138,6 @@ class LocalZResult:
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
-    
-    
     gate_counts: NDArray[np.int64]
     sums: NDArray[np.float64]
 
@@ -147,7 +145,9 @@ class LocalZResult:
 def restore_result(data: GroupedLoadData[LocalZCfg]) -> LocalZResult:
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
-    return LocalZResult(gate_counts=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64))
+    return LocalZResult(
+        gate_counts=sums.axes[2].astype(np.int64), sums=sums.z.astype(np.float64)
+    )
 
 
 class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
@@ -161,7 +161,10 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
                     VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                     VariableAxisSpec(
-                        label="CZ gate count", unit="", field_name="gate_counts", dtype=np.int64
+                        label="CZ gate count",
+                        unit="",
+                        field_name="gate_counts",
+                        dtype=np.int64,
                     ),
                     VariableAxisSpec(
                         label="Projection X or Y",
@@ -282,7 +285,10 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        return LocalZResult(np.array(config.gate_counts, dtype=np.int64), np.moveaxis(buffer.array, 0, 2))
+        return LocalZResult(
+            np.array(config.gate_counts, dtype=np.int64),
+            np.moveaxis(buffer.array, 0, 2),
+        )
 
     def analyze(
         self,
@@ -296,9 +302,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Phase analysis requires saved source cfg")
-        for actual, expected in (
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
+        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
             if not np.array_equal(actual, expected):
                 raise ValueError("LocalZ count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), 3, 3):

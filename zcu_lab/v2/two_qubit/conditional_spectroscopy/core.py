@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
@@ -138,8 +138,7 @@ class SpectroscopyResult:
     """
 
     dc_values: NDArray[np.float64]
-    
-    
+
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
 
@@ -147,7 +146,9 @@ class SpectroscopyResult:
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:
     """Restore summed counts; old per-shot IQ files lack sums and are rejected."""
     sums = data.variable("sums")
-    return SpectroscopyResult(dc_values=sums.axes[5], frequencies=sums.axes[2], sums=sums.z.astype(np.float64))
+    return SpectroscopyResult(
+        dc_values=sums.axes[5], frequencies=sums.axes[2], sums=sums.z.astype(np.float64)
+    )
 
 
 class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
@@ -162,7 +163,10 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
                         VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                         VariableAxisSpec(
-                            label="Probe frequency", unit="Hz", field_name="frequencies", scale=1e6
+                            label="Probe frequency",
+                            unit="Hz",
+                            field_name="frequencies",
+                            scale=1e6,
                         ),
                         VariableAxisSpec(
                             label="Prepared F2", unit="", values=(0, 1), dtype=np.int64
@@ -212,8 +216,14 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         for d, dc in enumerate(dc_values):
             for f1 in range(2):
                 for f2 in range(2):
-                    fig, ax = context.plots.subplots(num=f"measurement_dc_{d}_prep_{f1}_{f2}")
-                    ax.set(xlabel="Common probe frequency (MHz)", ylabel="P_e (F1 line 1, F2 line 2)", title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}")
+                    fig, ax = context.plots.subplots(
+                        num=f"measurement_dc_{d}_prep_{f1}_{f2}"
+                    )
+                    ax.set(
+                        xlabel="Common probe frequency (MHz)",
+                        ylabel="P_e (F1 line 1, F2 line 2)",
+                        title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
+                    )
                     viewers[d, f1, f2] = live_line(ax, num_lines=2)
                     fig.show()
 
@@ -223,9 +233,11 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             f2_pe = marginal_probabilities(sums, "f2")[..., 1]
             artists: list[Line2D] = []
             for (d, f1, f2), viewer in viewers.items():
-                artists.extend(viewer.set(
-                    frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
-                ))
+                artists.extend(
+                    viewer.set(
+                        frequencies, np.stack((f1_pe[d, f1, f2], f2_pe[d, f1, f2]))
+                    )
+                )
             return tuple(artists)
 
         buffer = SignalBuffer(

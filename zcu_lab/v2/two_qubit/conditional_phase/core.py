@@ -7,8 +7,8 @@ from itertools import product
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.lines import Line2D
+from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
@@ -178,8 +178,6 @@ class ConditionalPhaseResult:
     Rounds add without averaging. Unmeasured points remain NaN.
     """
 
-    
-    
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
@@ -190,7 +188,11 @@ def restore_result(
 ) -> ConditionalPhaseResult:
     """Restore classified sums; old per-shot IQ files without sums are rejected."""
     sums = data.variable("sums")
-    return ConditionalPhaseResult(gate_counts=sums.axes[3].astype(np.int64), frequencies=sums.axes[2].astype(np.float64), sums=sums.z.astype(np.float64))
+    return ConditionalPhaseResult(
+        gate_counts=sums.axes[3].astype(np.int64),
+        frequencies=sums.axes[2].astype(np.float64),
+        sums=sums.z.astype(np.float64),
+    )
 
 
 class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg]):
@@ -213,7 +215,10 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                         scale=1e6,
                     ),
                     VariableAxisSpec(
-                        label="CZ gate count", unit="", field_name="gate_counts", dtype=np.int64
+                        label="CZ gate count",
+                        unit="",
+                        field_name="gate_counts",
+                        dtype=np.int64,
                     ),
                     VariableAxisSpec(
                         label="Projection X or Y",
@@ -332,7 +337,11 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        return ConditionalPhaseResult(np.array(config.gate_counts, dtype=np.int64), frequencies, np.moveaxis(buffer.array, 0, 2))
+        return ConditionalPhaseResult(
+            np.array(config.gate_counts, dtype=np.int64),
+            frequencies,
+            np.moveaxis(buffer.array, 0, 2),
+        )
 
     def analyze(
         self,
@@ -351,9 +360,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        for actual, expected in (
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
+        for actual, expected in ((data.gate_counts, np.array(cfg.gate_counts)),):
             if not np.array_equal(actual, expected):
                 raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (2, 2, len(cfg.gate_counts), len(frequencies), 3, 3):
