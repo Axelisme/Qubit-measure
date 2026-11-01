@@ -128,6 +128,6 @@ def test_save_propagates_original_native_restore_error(
         raise error
 
     monkeypatch.setattr(native_persistence, "restore_run", failing_restore)
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError, match="native restore failed") as caught:
         probe.save_stage(record, spec, tmp_path)
     assert caught.value is error
