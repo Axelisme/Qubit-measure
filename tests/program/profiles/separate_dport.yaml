@@ -1,0 +1,73 @@
+board: ZCU216
+sw_version: 0.2.436
+fw_timestamp: '2025-01-01'
+refclk_freq: 200
+extra_description: []
+tprocs:
+  - type: qick_processor
+    revision: 27
+    f_time: 400
+    f_core: 400
+    pmem_size: 4096
+    wmem_size: 8192
+    dmem_size: 2048
+    dreg_qty: 16
+    output_pins: []
+    start_pin: none
+    stop_pin: none
+generators:
+  - type: axis_signal_gen_v6
+    fs_mult: 40
+    fs_div: 1
+    interpolation: 1
+    fabric_div: 32
+    rf_fabric_div: 16
+    samps_per_clk: 16
+    b_dds: 32
+    b_phase: 32
+    maxlen: 65536
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 32766
+    maxv_scale: 1.0
+    dac: '10'
+    tproc_ch: 5
+    tmux_ch: null
+readouts:
+  - &readout
+    type: axis_dyn_readout_v1
+    ro_type: axis_dyn_readout_v1
+    fs_mult: 8
+    fs_div: 1
+    decimation: 2
+    samps_per_clk: 8
+    b_dds: 32
+    buf_maxlen: 8192
+    avg_maxlen: 8192
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: v2
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: true
+    iq_offset: 0.0
+    coupling: AC
+    adc: '20'
+    tproc_ctrl: 6
+    tmux_ch: null
+    trigger_type: dport
+    trigger_port: 3
+    trigger_bit: 0
+    tproc_ch: 0
+    b_phase: 32
+  - <<: *readout
+    adc: '21'
+    tproc_ctrl: 7
+    tmux_ch: null
+    trigger_port: 3
+    trigger_bit: 1
+    tproc_ch: 1
+rf:
+  dac_power: VOP
+  clk_groups: []
+mux: []
