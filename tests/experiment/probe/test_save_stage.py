@@ -1,13 +1,13 @@
 """Save-stage contracts from independently constructed typed records."""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.experiment import probe
+from zcu_tools.experiment import AxesSpec, probe
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 
@@ -43,7 +43,14 @@ def test_save_reports_a_differing_result_field_through_public_comparison(tmp_pat
     class AuxiliaryResult(SavingResult):
         auxiliary: NDArray[np.float64] = field(default_factory=lambda: np.array([0.0]))
 
-    spec = replace(SavingCore.AXES_SPEC, result_type=AuxiliaryResult)
+    original = SavingCore.AXES_SPEC
+    spec = AxesSpec(
+        axes=original.axes,
+        z=original.z,
+        result_type=AuxiliaryResult,
+        cfg_type=SavingCfg,
+        tag=original.tag,
+    )
     record = RunRecord(
         SavingCfg(),
         AuxiliaryResult(np.array([1.0]), np.array([2 + 3j]), np.array([7.0])),
@@ -60,9 +67,16 @@ def test_save_reports_a_differing_result_field_through_public_comparison(tmp_pat
 
 def test_save_preserves_native_cfg_diagnostic(tmp_path: Path):
     class PositiveCfg(SavingCfg):
-        gain: float = Field(gt=0)
+        gain: float = Field(default=1.0, gt=0)
 
-    spec = replace(SavingCore.AXES_SPEC, cfg_type=PositiveCfg)
+    original = SavingCore.AXES_SPEC
+    spec = AxesSpec(
+        axes=original.axes,
+        z=original.z,
+        result_type=SavingResult,
+        cfg_type=PositiveCfg,
+        tag=original.tag,
+    )
     record = RunRecord(
         PositiveCfg.model_construct(gain=-1.0),
         SavingResult(np.array([1.0]), np.array([2 + 3j])),
