@@ -27,3 +27,22 @@ def test_invalid_readers_are_rejected(readers: str) -> None:
 )
 def test_valid_reader_combinations_pass(declaration: str) -> None:
     assert check_sources({"guide.md": "# Guide\n\n" + declaration}) == ()
+
+
+@pytest.mark.parametrize("prefix", ["", "---\n" + "metadata: value\n" * 12 + "---\n"])
+@pytest.mark.parametrize("body_line", [8, 9])
+def test_header_window_counts_only_body_lines(prefix: str, body_line: int) -> None:
+    source = prefix + "\n" * (body_line - 1) + "**Readers:** agent. Read this guide.\n"
+    expected = (
+        ()
+        if body_line == 8
+        else (Violation("guide.md", "missing reader declaration in first 8 body lines"),)
+    )
+    assert check_sources({"guide.md": source}) == expected
+
+
+def test_front_matter_declaration_does_not_count_as_body() -> None:
+    source = "---\n**Readers:** agent. Metadata only.\n---\n# Guide\n"
+    assert check_sources({"guide.md": source}) == (
+        Violation("guide.md", "missing reader declaration in first 8 body lines"),
+    )
