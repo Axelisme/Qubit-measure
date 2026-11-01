@@ -282,7 +282,7 @@ def exercise_writeback(app: QApplication, output: Path) -> None:
         capture(driver, output, "writeback-07-saved")
         assert not driver.dialogs()
         proposed = driver.observe(object_name="writebackProposed")
-        assert "classifier.type  — → 'linear'" in proposed.tooltip
+        assert "classifier.mode  — → 'linear'" in proposed.tooltip
         assert "classifier.angle  — → 0.25" in proposed.tooltip
         assert "classifier.threshold  — → 1.5" in proposed.tooltip
     finally:
