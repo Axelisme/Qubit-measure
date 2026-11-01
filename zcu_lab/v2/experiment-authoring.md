@@ -874,13 +874,14 @@ Branch／runtime Repeat 後可直接在外部 timeline 放事件，從實際 rem
 
 Schedule 與 scan step 都提供以下入口，接受 builder 產生或手寫的 program：
 
-| 入口 | 預設寫入 slot 的資料 |
+| 入口 | 寫入或回傳的資料 |
 | --- | --- |
 | `run_acquire(prog, soc, ...)` | 第一個 ADC 的第一次 read，IQ 轉 complex |
 | `run_acquire_summed(prog, soc, processor=..., ...)` | 累積總和，不除 reps 或 rounds |
 | `run_acquire_decimated(prog, soc, ...)` | 第一個 ADC 的 complex trace，保留 repetitions 與 samples 軸 |
+| `run_acquire_shots(prog, soc, ...)` | 回傳 `program.get_raw()` 的逐 shot int64 buffers，不寫 slot；外部取消時回傳 `None` |
 
-`run` 把轉換後的資料寫進目前 Schedule 或 step 的 slot，並觸發 buffer 的 live update。
+前三個入口把轉換後的資料寫進目前 Schedule 或 step 的 slot，並觸發 buffer 的 live update。
 Scan step 使用自身 path 選 slot，所以在 host loop 中呼叫 `step.run_acquire(...)`。
 每次 completed round 都先轉換與寫入，再檢查 `RunOptions.stop_condition`。
 Callback 不收參數，可讀 slot，回傳 True 或 `StopDecision(met=True)` 就停止目前 acquire。
@@ -888,13 +889,24 @@ Data stop 保留已完成 rounds，Schedule 仍是 completed，不會取消後�
 外部 stop 則透過 Schedule scope 傳入 acquire，保留已完成資料，其餘 slot 維持 NaN。
 一般 acquisition 失敗在 retry 耗盡後原樣傳出，KeyboardInterrupt 直接傳出。Buffer 可能仍有資料，作者自行決定是否攔截並回傳。
 `RunOptions(on_stop=callback)` 在本次 acquire 因外部停止而正常返回時通知作者，純 data stop 不通知。
-Callback 不收參數，在 acquire scope 與 progress 清理後、ndarray 返回前同步呼叫一次；callback 例外原樣傳出且不 retry。
+Callback 不收參數，在 acquire scope 與 progress 清理後、結果返回前同步呼叫一次；callback 例外原樣傳出且不 retry。
 
-`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 同樣使用這個預算，並先還原取數前的 slot。
+`RunOptions.retry` 是額外嘗試次數，預設 0。Shot overrun 同樣使用這個預算，三個 slot 入口會先還原取數前的 slot。
 外部 stop 與 interruption 不重試。Converter 或 live update 的例外直接傳播，不走 acquisition retry。
 `progress` 控制 native 取數進度，`converter` 同時處理各輪累積值與最終值。
-`rounds` 等 QICK 原生參數直接傳給 run 方法，`rounds` 必須為正整數，不接受 bool。
+`rounds` 等 QICK 原生參數直接傳給 run 方法。三個 slot 入口的 `rounds` 必須為正整數，不接受 bool。
 不要把 `rounds` 放進 `RunOptions`。
+
+`run_acquire_shots` 需要已進入 context 的 Schedule，但不需要預建 buffer，也不做轉換或 live update。
+它只取一輪，`rounds` 省略或設為整數 1，其他值會拋出 `ValueError`。
+需要多輪 raw shots 時，由作者在 host loop 重複呼叫。
+它接受 `RunOptions(retry=..., progress=..., on_stop=...)`。
+`converter` 或 `stop_condition` 非 `None` 時，入口會拋出 `ValueError`。
+成功取數後，`program.get_raw()` 若回傳 `None`，入口會拋出 `RuntimeError`。
+外部取消時入口回傳 `None`，不讀 raw buffer。
+只取消 `"acquire"` 子 scope 不改父 Schedule outcome，下一次 acquire 可繼續。
+只有父 Schedule 的 stop token 已設時，Schedule outcome 才記為 `stopped`。
+Producer 失敗沿用上述 retry 預算，不做 slot 還原。Raw-buffer 讀取失敗不 retry。
 
 Summed 範例先 build 再解析 read label。以下是上方 builder 範例的替代取數段，
 使用同一個 `prog`，但 slot 改為 float64 的 count、sum I、sum Q 三欄。
@@ -934,8 +946,15 @@ with Schedule(trace_buffer, scope=context.scope) as sched:
 ```
 
 Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數並回傳。
-它們不寫 Schedule slot，不管理 live update、retry 或 Schedule stop_condition。
-直接呼叫時，caller 自己傳入 cancel flag 並處理結果。
+它們不寫 Schedule slot，不管理 live update 或 Schedule stop_condition。
+直接呼叫 `program.acquire*` 時，作者自行負責以下事項：
+
+- 傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，讓 program 收到 Schedule 的停止請求。
+- 接住 `StoppedPartialAcquireError` 並決定是否呼叫 `sched.set_stop()` 或 `step.set_stop()`，以及如何處理未完成的資料。
+- 直接呼叫不建立 `"acquire"` 子 scope，所以 `scope.cancel("acquire")` 停不到這次取數。
+- 直接呼叫不會自動 retry，需要重試時由作者撰寫重試流程。
+
+直接取數仍是作者的自由。Runner 入口是代管 scope、取消轉譯與 retry 的慣例工具，不限制 core 的取數方式。
 
 ## v2 cfg 組合慣例
 
@@ -1017,7 +1036,9 @@ Schedule 的 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` �
 Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 retry、不轉 outcome；converter 與 update 錯誤也直接傳出。Schedule 的作者 outcome 保留 completed、stopped 或 failed，但不代表資料可用性。GUI 與 Notebook 只依 core 回傳或拋錯發布結果，不解析 buffer 或 outcome。
 
 - `RunOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(signals_buffer[step], threshold, signal2real_fn))`。Runner 寫入 completed round 後才檢查 condition，命中時只停止目前 acquire。
-- 直接呼叫 program 的 raw-shot acquire 時，明傳 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
+- 需要逐 shot raw buffers 時，使用 `sched.run_acquire_shots(...)` 或 `step.run_acquire_shots(...)`，外部取消會回傳 `None`。
+  只取消 acquire 不改父 Schedule outcome，父 stop token 已設才記 `stopped`。
+  若選擇直接呼叫 `program.acquire(...)`，依[直接取數的作者責任](#用-run_acquire-寫入與停止)傳入 cancel flag、處理 `StoppedPartialAcquireError`，並自行管理 scope 與 retry。
 
 ---
 
@@ -1026,7 +1047,10 @@ Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 ret
 1. 定義 `XxxCfg(ConfigBase)`，頂層欄位與 module 型別依[寫法慣例](#cfg-名稱順序與取數欄位)宣告。平鋪、版本與 Advanced group 見[v2 cfg 組合慣例](#v2-cfg-組合慣例)。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
-4. Schedule 的 `run_acquire*` 自動注入 acquire-local `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(...))`。
+4. Schedule 與 step 的 `run_acquire`、`run_acquire_summed`、`run_acquire_decimated`、`run_acquire_shots` 自動注入 acquire-local `cancel_flag`。
+   `run_acquire_shots` 不寫 slot，外部取消時回傳 `None`。只有父 Schedule 的 stop token 已設才記 `stopped`。
+   直接呼叫 `program.acquire*` 時，依[作者責任清單](#用-run_acquire-寫入與停止)傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，自行處理取消轉譯、scope 與 retry。
+   SNR early stop 使用三個 slot 入口的 `RunOptions(stop_condition=snr_checker(...))`，不適用於 raw-shot 入口。
 5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `TimelineBuilder.add_sweep(...)` 或 `add_loop(...)`。Host soft sweep 若需重用每點 program，在 `run()` 裡維護 dict；cache miss 時建立新的 builder 並 build，每次量測時呼叫 `step.run_acquire(program, context.soc, ...)`。
 
