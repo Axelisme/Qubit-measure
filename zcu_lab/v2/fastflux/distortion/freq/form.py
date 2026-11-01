@@ -3,9 +3,8 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import source
-
 from zcu_lab.v2.fastflux.distortion.freq.core import FreqCfg
+from zcu_lab.v2.support.measure.ctx_helpers import source
 
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
