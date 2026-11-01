@@ -45,8 +45,9 @@ class PulseReadoutCfg(AbsReadoutCfg):
     gen_ch/ro_ch select generator/ADC channels; nqz is Nyquist zone 1 or 2.
     freq/mixer_freq are MHz, gain is normalized, phase is degrees. waveform is
     an expanded native envelope (arb holds its absolute asset path). pre_delay
-    and post_delay bracket generator playback in us; ro_length is the ADC window
-    and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
+    and post_delay are in us. pre_delay offsets generator playback; post_delay
+    follows the later of generator and ADC completion. ro_length is the ADC
+    window and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
     QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
     offset-free normalized ADC calibration (including radians for linear angle);
     None means no calibration is available. The module does not apply it.
@@ -76,18 +77,16 @@ class PulseReadoutCfg(AbsReadoutCfg):
 
         Timing fields and waveform length must be finite nonnegative scalar us.
         Return the later of ADC trigger + window and generator pre-delay +
-        waveform length + post-delay. No program, initialization or hardware is
-        needed, and this cfg is unchanged. This is nominal timing, not the
-        clock-rounded blocking duration returned by PulseReadout.total_length.
+        waveform length, then add post-delay once. No program or hardware is
+        needed, and this cfg is unchanged. This nominal estimate does not
+        quantize either event or the final duration to hardware clocks.
         Non-scalar timing raises TypeError during float conversion; waveform
         length lookup errors (for example an unreadable arb asset) propagate.
         """
         return max(
             float(self.trig_offset) + float(self.ro_length),
-            float(self.pre_delay)
-            + float(self.waveform.length)
-            + float(self.post_delay),
-        )
+            float(self.pre_delay) + float(self.waveform.length),
+        ) + float(self.post_delay)
 
     def to_pulse_cfg(self) -> PulseCfg:
         """Return a fresh outer PulseCfg containing only generator settings.
