@@ -415,7 +415,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 **為什麼不用 `axis_sg_int4_v1`？**  
 這個 gen 是 `HAS_MIXER=True`，`declare_gen()` 會強制要求 `mixer_freq`，  
-但 `Pulse.declare()` 只在 `cfg.mixer_freq is not None` 時才傳 `mixer_freq`，  
+但 `Pulse.declare()` 只在 `cfg.mixer_freq is not None` 時才傳 `mixer_freq`，
 導致 `RuntimeError: generator N has a digital mixer, but no mixer_freq was defined`。
 
 **哪些欄位必須手動補齊？**  
@@ -427,7 +427,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Level 2 — `MagicMock` (`tests/program/v2/modules/conftest.py`)
 
-用於 `modules/` 下的**純單元測試**，只測試 cfg parsing、constructor overrides 與 declaration calls，  
+用於 `modules/` 下的**純單元測試**，只測試 cfg parsing、constructor overrides 與 declaration calls，
 不觸發真實 QICK 編譯。`mock_prog.soccfg` 是一個最小 dict，不需完整硬體欄位。
 
 ### IR 結構測試（`tests/program/v2/ir/`）

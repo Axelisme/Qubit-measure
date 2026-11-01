@@ -208,9 +208,8 @@ def test_branch_dispatch_and_repeat_preserve_selected_sources():
         with p.branch(by="scan", align_timeline=True) as cases:
             with cases.case(0):
                 p.emit(first)
-            with cases.case(1):
-                with p.repeat("inner", 2):
-                    p.emit(second)
+            with cases.case(1), p.repeat("inner", 2):
+                p.emit(second)
         p.emit(readout)
 
     prog, env = module_program(

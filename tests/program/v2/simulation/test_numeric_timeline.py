@@ -192,8 +192,7 @@ def test_undefined_register_in_unselected_branch_fails_before_signals():
     builder.emit(readout())
     builder.delay_by_timeline()
     with pytest.raises(ValueError, match=r"(?:undefined|bounds|producer|initialized)"):
-        uninitialized = builder.build()
-        uninitialized.acquire(env.soc, progress=False)
+        builder.build().acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 

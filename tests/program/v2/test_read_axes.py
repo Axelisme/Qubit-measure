@@ -239,9 +239,11 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
         with builder.repeat("repeat_scope", 2):
             builder.emit(other)
     else:
-        with builder.branch(by="choice", align_timeline=True) as cases:
-            with cases.case(0):
-                builder.emit(other)
+        with (
+            builder.branch(by="choice", align_timeline=True) as cases,
+            cases.case(0),
+        ):
+            builder.emit(other)
     builder.emit(selected)
     prog = builder.build()
     process = v2.shot_sums(prog, [v2.IQ("readout")])

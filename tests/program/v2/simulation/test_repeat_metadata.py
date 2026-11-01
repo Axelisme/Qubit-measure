@@ -108,16 +108,18 @@ def repeated_program(env, case):
     builder = TimelineBuilder(env.soccfg, reps=2)
     builder.add_loop("axis", 3)
     builder.emit(LoadValue("counts", [0, 2, 1], "axis", "count"))
-    with builder.repeat("outer", "count", range_hint=(0, 2)):
-        with builder.repeat("inner", 2):
-            for module in body:
-                if module is pulse and case == "branch":
-                    with builder.branch(by="axis", align_timeline=True) as cases:
-                        for index, label in enumerate(["drive", "other", "third"]):
-                            with cases.case(index):
-                                builder.emit(cfg.build(label))
-                else:
-                    builder.emit(module)
+    with (
+        builder.repeat("outer", "count", range_hint=(0, 2)),
+        builder.repeat("inner", 2),
+    ):
+        for module in body:
+            if module is pulse and case == "branch":
+                with builder.branch(by="axis", align_timeline=True) as cases:
+                    for index, label in enumerate(["drive", "other", "third"]):
+                        with cases.case(index):
+                            builder.emit(cfg.build(label))
+            else:
+                builder.emit(module)
     builder.emit(readout.build("readout"))
     builder.delay_by_timeline()
     return builder.build()

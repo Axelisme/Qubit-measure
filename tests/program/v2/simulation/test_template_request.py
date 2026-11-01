@@ -55,8 +55,7 @@ def test_reps_dependent_timeline_rejected_before_backend(dependency):
     builder.emit(receiver().build("readout"))
     builder.delay_by_timeline()
     with pytest.raises(ValueError, match=r"(?:reps|cross-shot|measurement)"):
-        prog = builder.build()
-        prog.acquire(env.soc, progress=False)
+        builder.build().acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
