@@ -158,7 +158,7 @@ def _readouts(
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
     readouts: list[dict[str, object]] = []
     adcs: dict[str, dict[str, object]] = {}
-    for channel in profile.readouts:
+    for index, channel in enumerate(profile.readouts):
         fs = channel.sample_rate(profile.refclk_freq)
         f_output = fs / (channel.decimation * channel.samps_per_clk)
         cfg = channel.model_dump(
@@ -171,7 +171,7 @@ def _readouts(
             fdds_div=channel.fs_div * channel.decimation,
         )
         readouts.append(cfg)
-        adcs[channel.adc] = {
+        adc = {
             "fs": fs,
             "fs_mult": channel.fs_mult,
             "fs_div": channel.fs_div,
@@ -179,6 +179,11 @@ def _readouts(
             "f_fabric": f_output,
             "coupling": channel.coupling,
         }
+        if channel.adc in adcs and adcs[channel.adc] != adc:
+            raise ValueError(
+                f"readouts.{index}.adc: shared ADC requires identical RF settings"
+            )
+        adcs[channel.adc] = adc
     return readouts, adcs
 
 
