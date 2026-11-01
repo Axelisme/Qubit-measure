@@ -154,7 +154,7 @@ def _compare_field(
         return False
     covered = np.zeros(before.shape, dtype=bool)
     equal = True
-    for scale, index, index_axis in comparisons:
+    for scale, index, index_axis in comparisons or [(1.0, None, -1)]:
         selection: list[slice | int] = [slice(None)] * before.ndim
         if index is not None:
             selection[index_axis] = index
