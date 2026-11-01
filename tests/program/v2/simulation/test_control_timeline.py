@@ -352,7 +352,7 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
         timelines = [request.materialize_point(point) for point in range(3)]
         # Each native point covers the actual waveform plus pre/post once.
         lengths = native_sweep(env.soccfg, 0.05, 0.15, 3, gen_ch=1)
-        starts = [ceil(runtime_cycles(env.soccfg, n, 1) + Fraction('0.03') * Fraction(str(TPROC_MHZ))) + tproc_ceil(env.soccfg, 0.01) for n in lengths]
+        starts = [2 * tproc_ceil(env.soccfg, 0.01) + ceil(runtime_cycles(env.soccfg, n, 1) + Fraction('0.02') * Fraction(str(TPROC_MHZ))) for n in lengths]
         triggers = [start - tproc_ceil(env.soccfg, 0.01) + int(env.soccfg.us2cycles(0.03)) for start in starts]
         readout_end = tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.2) + Fraction('0.02'))
         adc_end = tproc_ceil(env.soccfg, readout_duration(env.soccfg, 0.1))

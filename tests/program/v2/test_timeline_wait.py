@@ -4,6 +4,7 @@ import math
 import random
 import warnings
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Literal
 
 import pytest
@@ -29,7 +30,12 @@ from tests.program._profiles import (
     load_soccfg,
 )
 
+from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, runtime_cycles, tproc_ceil
+
 from .timing_support import shots, waves
+
+PROFILE = load_soccfg()
+ADC50 = tproc_ceil(PROFILE, readout_duration(PROFILE, 50 / RO_MHZ))
 
 
 def t1_program(
@@ -131,10 +137,9 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     (shot,) = shots(prog)
     assert shot.body_end_cycle - shot.start_cycle == 42
-    # Independent ADC-clock oracle: 51 samples end at 71.4 tProc cycles.
-    physical_tail = 51 / RO_MHZ * TPROC_MHZ - 42
+    physical_tail = readout_duration(prog.soccfg, 51 / RO_MHZ) * Fraction(str(TPROC_MHZ)) - 42
     assert shell_wait(prog) >= physical_tail
-    assert shell_wait(prog) == math.ceil(physical_tail) == 30
+    assert shell_wait(prog) == math.ceil(physical_tail)
 
 
 @pytest.mark.parametrize("relax_cycles", [9, 10])
@@ -168,11 +173,10 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
         result = shots(prog)
         body = [shot.body_end_cycle - shot.start_cycle for shot in result]
         assert body == [10, 20]
-        # Independent ADC length: 50 samples at 307.2 MHz = 70 tProc cycles.
-        tails = [50 / RO_MHZ * TPROC_MHZ - end for end in body]
-        assert tails == pytest.approx([60, 50])
+        tails = [ADC50 - end for end in body]
+        assert tails == pytest.approx([ADC50 - 10, ADC50 - 20])
         messages = [str(warning.message) for warning in caught]
-        assert shell_wait(prog) == math.ceil(max(tails)) == 60, messages
+        assert shell_wait(prog) == math.ceil(max(tails)), messages
         assert len(messages) == 1
         assert "duration" in messages[0] and "slack=10 cycles" in messages[0]
         assert "upper bound" not in messages[0]
@@ -181,7 +185,10 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
 def test_uniform_t1_shell_wait_cancels_shared_readout_origin(mux):
     prog = t1_program(mux)
-    assert shell_wait(prog) == (267 if mux else 137)
+    adc_length = 55 / prog.soccfg['readouts'][0]['f_output'] if mux else 127 / RO_MHZ
+    adc_end = 12 + tproc_ceil(prog.soccfg, readout_duration(prog.soccfg, adc_length))
+    gen_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.1) + Fraction(10) / Fraction(str(TPROC_MHZ)))
+    assert shell_wait(prog) == adc_end - gen_end
 
 
 def test_two_sweep_reference_debits_keep_each_axis_correlated():
@@ -216,7 +223,10 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
 @pytest.mark.parametrize("delay_kind", ["nonuniform", "static"])
 def test_nonuniform_and_static_t1_keep_constant_adc_shell_wait(mux, delay_kind):
     prog = t1_program(mux, delay_kind=delay_kind)
-    assert shell_wait(prog) == (267 if mux else 137)
+    adc_length = 55 / prog.soccfg['readouts'][0]['f_output'] if mux else 127 / RO_MHZ
+    adc_end = 12 + tproc_ceil(prog.soccfg, readout_duration(prog.soccfg, adc_length))
+    gen_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.1) + Fraction(10) / Fraction(str(TPROC_MHZ)))
+    assert shell_wait(prog) == adc_end - gen_end
 
 
 @pytest.mark.parametrize("mux", [False, True], ids=["single", "mux"])
@@ -227,33 +237,38 @@ def test_coherence_shell_wait_matches_pointwise_scheduling_oracle(mux, sequence)
     expected_body = []
     remaining = []
     # Author delay sweeps use native start round and truncated step.
-    gaps = (22, 882, 1742) if sequence == "echo" else (43, 1763, 3483)
+    divisor = 2 if sequence == 'echo' else 1
+    gaps = native_sweep(prog.soccfg, 43 / (divisor * TPROC_MHZ), 3484 / (divisor * TPROC_MHZ), 3)
+    drive_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 25 / GEN_MHZ, 1))
+    read_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.1) + Fraction(10) / Fraction(str(TPROC_MHZ)))
+    adc_length = 55 / prog.soccfg['readouts'][0]['f_output'] if mux else 127 / RO_MHZ
+    adc_duration = tproc_ceil(prog.soccfg, readout_duration(prog.soccfg, adc_length))
     for gap in gaps:
         starts = [0]
-        end = 28
+        end = drive_end
         if sequence == "echo":
             end += gap
             starts.append(end)
-            end += 28
+            end += drive_end
             end += gap
         else:
             end = math.ceil(end + gap)
         starts.append(end)
-        end += 28
+        end += drive_end
         starts.append(end)  # Readout starts at the last drive end.
         if not mux:
             starts.append(
                 end
             )  # Dynamic readout configuration is also a wave port event.
         expected_waves.append(starts)
-        adc_end = end + (320 if mux else 190)
-        body_end = end + 53
+        adc_end = end + 12 + adc_duration
+        body_end = end + read_end
         expected_body.append(body_end)
         remaining.append(max(0, adc_end - body_end))
     result = shots(prog)
     assert [waves(s) for s in result] == expected_waves
     assert [s.body_end_cycle - s.start_cycle for s in result] == expected_body
-    # Generator closure is53 cycles after origin; shell covers the remaining ADC.
+    # The shell covers only the ADC remainder beyond generator-plus-post closure.
     assert shell_wait(prog) == max(remaining)
 
 
@@ -305,29 +320,26 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
 
     prog = Program(load_soccfg(3, 1), initial_delay=0, relax_delay=1)
     result = shots(prog)
-    # A lasts 112 tProc cycles; B lasts 56. All three points overlap A.
-    # max(112, t + 56) is 112, 112, 140: left side, corner, right side.
-    # Readout emits a pulse and config at that maximum, then triggers at +12.
-    assert [waves(s) for s in result] == [
-        [0, 28, 112, 112],
-        [0, 56, 112, 112],
-        [0, 84, 140, 140],
-    ]
+    a_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 100 / GEN_MHZ))
+    b_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 50 / GEN_MHZ, 1))
+    origins = [max(a_end, start + b_end) for start in (28, 56, 84)]
+    assert [waves(s) for s in result] == [[0, start, origin, origin] for start, origin in zip((28, 56, 84), origins, strict=True)]
     trigger_starts = [
         e.cycle - s.start_cycle
         for s in result
         for e in s.events
         if e.kind == "data" and e.value
     ]
-    assert trigger_starts == [124, 124, 152]
+    assert trigger_starts == [origin + 12 for origin in origins]
     body_ends = [s.body_end_cycle - s.start_cycle for s in result]
-    # The generator plus post closes53 cycles after origin. ADC lasts177.8.
-    assert body_ends == [165, 165, 193]
+    read_end = tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 0.1, 2) + Fraction(10) / Fraction(str(TPROC_MHZ)))
+    adc_duration = readout_duration(prog.soccfg, 127 / RO_MHZ) * Fraction(str(TPROC_MHZ))
+    assert body_ends == [origin + read_end for origin in origins]
     remaining = [
-        max(0, math.ceil(trigger + 177.8) - body)
+        max(0, math.ceil(trigger + adc_duration) - body)
         for trigger, body in zip(trigger_starts, body_ends, strict=True)
     ]
-    assert remaining == [137, 137, 137]
+    assert remaining == [12 + math.ceil(adc_duration) - read_end] * 3
     assert shell_wait(prog) == max(remaining)
 
 
@@ -349,7 +361,7 @@ def variable_tail_program(
             self.timeline_inc("origin_cycles")
             self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
             self.timeline_inc(
-                69 / TPROC_MHZ
+                (ADC50 - 1) / TPROC_MHZ
             )  # Explicitly reach the ADC end before post.
             self.timeline_inc(
                 QickSweep1D(
@@ -369,17 +381,9 @@ def test_variable_shell_wait_warns_with_only_uncancelled_axis_and_cycle_slack():
         prog = variable_tail_program()
     assert all("origin" not in str(item.message) for item in caught)
     assert shell_wait(prog) == 30
-    # ADC end is origin + 70, while the negative post closes the body earlier.
+    # The negative authored post leaves exactly the chosen tail after ADC end.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        100,
-        90,
-        80,
-        120,
-        110,
-        100,
-        110,
-        100,
-        90,
+        origin + ADC50 - tail for origin in (40, 60, 50) for tail in (10, 20, 30)
     ]
 
 
@@ -445,7 +449,7 @@ def test_shared_axis_lookup_maximum_warns_with_exact_discrete_slack():
         UserWarning, match=r"WAIT.*left_cycles.*right_cycles.*slack=50 cycles"
     ):
         prog = opposing_tail_program((0, 50, 100))
-    assert shell_wait(prog) == 170
+    assert shell_wait(prog) == 100 + ADC50
     result = shots(prog)
     assert [s.body_end_cycle - s.start_cycle for s in result] == [0, 0, 0]
 
@@ -453,7 +457,7 @@ def test_shared_axis_lookup_maximum_warns_with_exact_discrete_slack():
 @pytest.mark.filterwarnings("error")
 def test_shared_axis_lookup_maximum_is_constant_on_two_legal_points():
     prog = opposing_tail_program((0, 100), relax_cycles=0)
-    assert shell_wait(prog) == 170
+    assert shell_wait(prog) == 100 + ADC50
 
 
 def test_unknown_wait_warns_with_slack_bound_without_rejecting_above_relax():
@@ -462,7 +466,7 @@ def test_unknown_wait_warns_with_slack_bound_without_rejecting_above_relax():
         match=r"WAIT.*feedback_cycles.*slack=31 cycles.*upper bound.*not actual",
     ):
         prog = opposing_tail_program((0, 100), relax_cycles=0, feedback=True)
-    assert shell_wait(prog) == 170
+    assert shell_wait(prog) == 100 + ADC50
 
 
 def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
@@ -482,8 +486,8 @@ def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
 
     with pytest.warns(UserWarning, match=r"WAIT.*axis.*slack=50 cycles"):
         prog = Program(load_soccfg(0, 2), initial_delay=0, relax_delay=100 / TPROC_MHZ)
-    assert shell_wait(prog) == 170
-    assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [270, 220, 270]
+    assert shell_wait(prog) == 100 + ADC50
+    assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [max(a, b) + ADC50 + 100 for a, b in ((0, 100), (50, 50), (100, 0))]
 
 
 def test_table_derived_repeat_count_keeps_exact_wait_slack():
@@ -513,7 +517,7 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
     ) as caught:
         prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / TPROC_MHZ)
     assert all("not actual" not in str(w.message) for w in caught)
-    assert shell_wait(prog) == 100
+    assert shell_wait(prog) == 40 + ADC50 - 10
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 30, 20]
 
 
@@ -553,10 +557,9 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
         assert all("upper bound" not in str(item.message) for item in caught)
         body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
         assert body == [10, 20]
-        # The ADC ends at 70: skipping the write leaves a 60-cycle tail.
-        tails = [70 - end for end in body]
-        assert tails == [60, 50]
-        assert shell_wait(prog) == max(tails) == 60
+        tails = [ADC50 - end for end in body]
+        assert tails == [ADC50 - 10, ADC50 - 20]
+        assert shell_wait(prog) == max(tails)
 
 
 @pytest.mark.filterwarnings("error")
@@ -582,7 +585,7 @@ def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection
                 self.timeline_inc("delay_cycles")
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
-    assert shell_wait(prog) == (20 if reuse_after else 40)
+    assert shell_wait(prog) == ADC50 - (50 if reuse_after else 30)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         50 if reuse_after else 30
     ]
@@ -604,7 +607,7 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
                 self.timeline_inc(60 / TPROC_MHZ)
                 self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
                 self.timeline_inc(
-                    69 / TPROC_MHZ
+                    (ADC50 - 1) / TPROC_MHZ
                 )  # Preserve a nonoverlapping ADC cadence.
                 self.timeline_inc(-40 / TPROC_MHZ)
                 self.timeline_inc("delay_cycles")
@@ -612,7 +615,7 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == 20
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [210]
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [2 * (60 + ADC50 - 40) + 10 + 20]
 
 
 @pytest.mark.parametrize("branch", [False, True])
@@ -642,7 +645,7 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
         prog = Program(
             load_soccfg(0, 1), initial_delay=0, relax_delay=slack / TPROC_MHZ
         )
-    assert shell_wait(prog) == 30
+    assert shell_wait(prog) == 60 + ADC50 - 100
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         100,
         115 if branch else 110,
@@ -678,13 +681,15 @@ def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
             self.emit(selector)
             self.emit(playback)
 
-    # Native waveform rounding gives aggregate ends 71 and 140 cycles.
-    with pytest.raises(ValueError, match=r"selected.*slack=69 cycles.*relax=68 cycles"):
-        Program(load_soccfg(1, 1), initial_delay=0, relax_delay=68 / TPROC_MHZ)
-    with pytest.warns(UserWarning, match=r"selected.*slack=69 cycles"):
-        prog = Program(load_soccfg(1, 1), initial_delay=0, relax_delay=69 / TPROC_MHZ)
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [71, 140]
-    assert shell_wait(prog) == 139
+    profile = load_soccfg(1, 1)
+    ends = [math.ceil(runtime_cycles(profile, int(profile.us2cycles(n / RO_MHZ, gen_ch=0)))) for n in (50, 100)]
+    slack = max(ends) - min(ends)
+    with pytest.raises(ValueError, match=rf"selected.*slack={slack} cycles.*relax={slack - 1} cycles"):
+        Program(profile, initial_delay=0, relax_delay=(slack - 1) / TPROC_MHZ)
+    with pytest.warns(UserWarning, match=rf"selected.*slack={slack} cycles"):
+        prog = Program(profile, initial_delay=0, relax_delay=slack / TPROC_MHZ)
+    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == ends
+    assert shell_wait(prog) == tproc_ceil(profile, readout_duration(profile, 150 / RO_MHZ)) - min(ends)
 
 
 def test_crossing_body_maximum_retains_positive_adc_remainder():
@@ -718,9 +723,9 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
         for other in others:
             body = max(origin + 40, other)
             expected_body.append(body)
-            remaining.append(max(0, origin + 70 - body))
+            remaining.append(max(0, origin + ADC50 - body))
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == expected_body
-    assert shell_wait(prog) == max(remaining) == 30
+    assert shell_wait(prog) == max(remaining)
 
 
 @pytest.mark.filterwarnings("error")
@@ -742,7 +747,7 @@ def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
             self.join("right", "extra", into="default")
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
-    assert shell_wait(prog) == 30
+    assert shell_wait(prog) == ADC50 - 40
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [40] * 4
 
 
@@ -852,7 +857,7 @@ class MixedWaitProgram(TimelineProgramV2):
     def read(self, timeline="default"):
         """Schedule one ADC, then leave the requested tail beyond body end."""
         self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline=timeline)
-        adc_cycles = (self.recipe.adc_samples * 7 + 4) // 5
+        adc_cycles = tproc_ceil(self.soccfg, readout_duration(self.soccfg, self.recipe.adc_samples / RO_MHZ))
         self.timeline_inc((adc_cycles - 1) / TPROC_MHZ)
         self.timeline_inc(-self.recipe.tail / TPROC_MHZ)
 
@@ -910,9 +915,8 @@ WAIT_RECIPE_SEED = 0x5EED
     ids=lambda recipe: f"seed={WAIT_RECIPE_SEED}-{recipe!r}",
 )
 def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe):
-    # The public analyzer executes linked instructions. It supplies event starts
-    # and reference only, so lengths come independently from mock clock specs:
-    # 430.08/307.2 = 7/5 ADC cycles; 430.08/384 = 28/25 DAC cycles.
+    # Linked events supply start/reference, not durations. Physical lengths come
+    # independently from caller YAML and public native clock conversion.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         prog = MixedWaitProgram(recipe)
@@ -922,7 +926,7 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
     for shot in result:
         triggers = [e.cycle for e in shot.events if e.kind == "data" and e.value]
         adc_end = max(
-            (start + (recipe.adc_samples * 7 + 4) // 5 for start in triggers),
+            (start + tproc_ceil(prog.soccfg, readout_duration(prog.soccfg, recipe.adc_samples / RO_MHZ)) for start in triggers),
             default=shot.start_cycle,
         )
         remainders.append(max(0, adc_end - shot.body_end_cycle))
@@ -930,7 +934,7 @@ def test_mixed_schedules_shell_wait_matches_every_legal_point(recipe: WaitRecipe
         # known lengths, not waveform objects or compiler timestamp estimates.
         for start, samples in zip(waves(shot), recipe.pulse_samples, strict=True):
             assert (
-                shot.start_cycle + start + (samples * 28 + 24) // 25
+                shot.start_cycle + start + tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, samples / GEN_MHZ))
                 <= shot.body_end_cycle
             ), (shot.loop_indices, recipe)
     upper, lower = max(remainders), min(remainders)
@@ -1020,12 +1024,11 @@ def test_fractional_length_shell_wait_uses_exact_nonaffine_point_tails(
     tails = []
     for index, shot in enumerate(result):
         (start,) = waves(shot)
-        # ceil((samples + index) * 287/256 + post_tenths/10), once, not
-        # separate waveform/post ceils. ADC duration is 100 * 7/5 = 140.
-        duration = ((samples + index) * 2870 + post_tenths * 256 + 2559) // 2560
+        # One aggregate ceil, not separate waveform/post ceils.
+        duration = math.ceil(runtime_cycles(prog.soccfg, samples + index) + Fraction(post_tenths, 10))
         assert shot.body_end_cycle == shot.start_cycle + start + duration
         (trigger,) = [e.cycle for e in shot.events if e.kind == "data" and e.value]
-        tails.append(max(0, trigger + 140 - shot.body_end_cycle))
+        tails.append(max(0, trigger + tproc_ceil(prog.soccfg, readout_duration(prog.soccfg, 100 / RO_MHZ)) - shot.body_end_cycle))
     upper, lower = max(tails), min(tails)
     diagnostic = (WAIT_RECIPE_SEED + 1, samples, post_tenths, tails)
     assert shell_wait(prog) >= upper, diagnostic

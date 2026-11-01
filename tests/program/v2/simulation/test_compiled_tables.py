@@ -408,7 +408,8 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         data_registers=32,
     )
     result = request(prog, env)
-    maxima = [max(ceil(runtime_cycles(prog.soccfg, left_n, 1)), ceil(runtime_cycles(prog.soccfg, right_n, 2))) for left_n, right_n in ((25, 75), (50, 50), (75, 25))]
+    # These table lengths are integer-affine on the tProc grid, so remain exact.
+    maxima = [max(tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, left_n / GEN_MHZ, 1)), tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, right_n / GEN_MHZ, 2))) for left_n, right_n in ((25, 75), (50, 50), (75, 25))]
     for index, (origin_cycle, maximum) in enumerate(zip((7, 20, 10), maxima, strict=True)):
         point = result.materialize_point(index)
         assert [e.source for e in point.events] == ["left", "right"] * 2 + ["readout"]
