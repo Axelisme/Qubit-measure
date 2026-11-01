@@ -1,6 +1,6 @@
 # Six-fluxonium material
 
-**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
+**Last updated:** 2026-11-01
 
 **Readers:** framework-dev, lab-author, agent. Load six circuit materials with local currents and one shared coil.
 
@@ -24,7 +24,7 @@ fail validation. Negative periods reverse flux direction. The single-fluxonium
 schema is unchanged. Old six-system documents have no fallback conversion.
 The type contracts and units live in `schema.py`.
 
-Top-level `numerics.routing_cache_bytes` sets a 4 MiB routing-facts allowance
+Required top-level `numerics.routing_cache_bytes` sets the routing-facts allowance
 across the environment. Each source receives one sixth, rounded down.
 Zero disables routing retention. The value must be a strict nonnegative integer.
 The allowance excludes models, complete preparations, scratch and process RSS.
@@ -38,8 +38,17 @@ targets before creating resources. Format and version remain unchanged.
 The acquisition owner derives independent Q1..Q6 streams from the Q1 root seed
 and freezes all losses once per acquisition on the shared simulation clock.
 
-The channel map is fixed. `mux_gen_ch` is 0, `pulse_gen_ch` is 13 and
-`pulse_ro_ch` is 6. Q1..Q6 use microwave generators 1..6 and mux ADCs0..5.
-There are no fast-flux fields. Unknown sections, missing or
-additional qubits, colliding source names and incorrect routes fail validation.
+YAML owns all board channel IDs. `mux_gen_ch` and `pulse_gen_ch` must differ.
+Each qubit supplies its unique `drive_line.gen_ch` and unique `readout.adc.ro_ch`.
+All nested `readout.drive.gen_ch` values select the shared mux generator.
+Microwave generators cannot overlap either readout generator. `pulse_ro_ch`
+cannot overlap any mux receiver. The environment checks these channels against
+the caller's `soccfg`. Six qubit roles and seven named DC sources remain fixed.
+There are no fast-flux fields. Unknown sections, missing or additional qubits
+and colliding source names fail validation.
+
+Top-level `numerics.slow_envelope_segments_per_period` and all nested single-model
+numeric inputs are required. The example keeps 20 subdivisions and a 4 MiB
+routing allowance. Required nullable seed, bath occupation and receiver-background
+shape inputs follow the single-model contract.
 `settings.qubits.ordered()` returns Q1..Q6 independently of YAML mapping order.

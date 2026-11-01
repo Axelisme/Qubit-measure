@@ -141,7 +141,7 @@ readout:
       kappa_external_mhz: 1.0 # kappa_external/(2*pi), MHz
       kappa_internal_mhz: 0.1
       mismatch_phase_rad: 0.2 # Scattered field relative to direct transmission.
-      thermal_occupation: 0.0 # Omit for Bose(common temperature, bare frequency).
+      thermal_occupation: 0.0 # Use null for Bose(common temperature, bare frequency).
     r2:
       frequency_ghz: 7.08
       charge_coefficients_ghz: { f1: 0.0, coupler: 0.005, f2: 0.03 }

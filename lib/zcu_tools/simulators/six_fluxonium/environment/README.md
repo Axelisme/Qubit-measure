@@ -32,7 +32,7 @@ noiseless ADC inputs after later acquisitions and backend close.
 ## Cache budgets
 
 Top-level `numerics.routing_cache_bytes` sets the environment-wide routing-facts
-allowance, default 4 MiB. Each Engine receives one sixth, rounded down, with at
+allowance, required in YAML. The example uses 4 MiB. Each Engine receives one sixth, rounded down, with at
 most five bytes unused. Zero disables routing retention. The value is a
 nonnegative integer without a fixed upper bound. Routing reuse also requires
 the same source instance.
@@ -45,8 +45,9 @@ the routing cap. It is not a process RSS limit.
 
 ## Routing and acquisition
 
-Mux generator 0 binds ADC0..5. Microwave generators 1..6 control Q1..Q6.
-Pulse generator 13 binds ADC6 for single-tone sweeps. Generators 7..12 are unbound.
+The YAML mux generator binds the six configured mux ADCs. Each qubit's
+microwave generator controls only that qubit. The YAML pulse generator binds
+its separate pulse ADC for single-tone sweeps. All other channels stay unbound.
 At every point, each incident tone selects the nearest bare cavity by frequency.
 Each ADC demodulation frequency selects the observed cavity. Distances tied within
 1e-9 MHz raise `ValueError`; the tolerance covers floating subtraction only.
@@ -83,11 +84,11 @@ This does not add MIST or data-dependent feedback for active reset. Trigger
 pairing and nonterminal sample-window rejection follow the shared
 [readout planner](../../../experiment/README.md#explicit-simulation-environments).
 Each qubit's `numerics.projection_prune_floor` controls its own global history
-pruning. It accepts finite `0 <= floor < 1` and defaults to `1e-9`.
+pruning. It requires a finite `0 <= floor < 1`; the example supplies `1e-9`.
 Zero retains every history, including zero-weight histories. A positive floor
 discards lower weights and renormalizes survivors. Empty survivors raise
 `ValueError` naming the point and floor.
-Pulse ADC6 uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
+The pulse ADC uses Q1's receiver gain, offset, phase, time of flight and noise PSD.
 Its physical cavity and incident-field calibration follow the frequency route.
 Q1's seed selects the environment root stream. The largest per-qubit
 `numerics.time_scale` multiplies the round's physical duration, computed from reps

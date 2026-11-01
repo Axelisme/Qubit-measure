@@ -54,18 +54,18 @@ Receiver gain maps sqrt(photons/ns) to ADC sample units.
 Offset is an I/Q pair. Noise PSD is a two-sided 2-by-2 I/Q covariance in
 ADC units squared times ns. Time of flight uses ns. Receiver phase uses degrees;
 resonator mismatch phase uses radians.
-The optional receiver `background` object multiplies each carrier's microwave
+The required receiver `background` object multiplies each carrier's microwave
 I+iQ line response before receiver gain and phase. It uses the absolute incident
-frequency, not the ADC demodulation frequency. Omission or an empty object gives
-a flat unity background. Null is invalid.
+frequency, not the ADC demodulation frequency. Supply period and pivot even
+for zero depth and slope, which give unity. Null is invalid.
 
 | Field under `background` | Meaning and unit | Constraint and omitted value |
 | --- | --- | --- |
 | `ripple_depth` | Reflected standing-wave amplitude, dimensionless | Finite, 0 ≤ depth < 1; default 0 |
-| `ripple_period_mhz` | Standing-wave period, MHz | Finite and positive; default 1000 |
+| `ripple_period_mhz` | Standing-wave period, MHz | Required, finite and positive |
 | `ripple_phase_deg` | Standing-wave phase, degrees | Finite signed value; default 0 |
 | `slope_db_per_ghz` | Amplitude slope, dB/GHz | Finite signed value; default 0 |
-| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Finite signed value; default 0 |
+| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Required finite signed value |
 
 The complex ripple changes amplitude and phase. The full background need not be
 unity at the pivot. It stays fixed across rounds and does not change noise,
@@ -90,7 +90,10 @@ before readout and their backaction are not implemented. A sequence requiring
 such a pulse must not be interpreted as a supported measurement.
 
 Solver tolerances control numerical integration, not basis convergence.
-Seed selects the root RNG identity. Acquire sequence and software round select
+Seed is required and selects the root RNG identity; explicit null chooses once
+at startup. Thermal occupation is required; null uses Bose equilibrium.
+YAML also requires `numerics.slow_envelope_segments_per_period` and
+`numerics.projection_prune_floor`. Acquire sequence and software round select
 independent streams; raw shots use a stream separate from direct means.
 `time_scale` multiplies physical round time: reps times the sum of each point's
 timeline duration and relax delay. The default is 1.0; 0.1 is ten times faster,

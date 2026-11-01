@@ -10,6 +10,11 @@
 
 使用者填表與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。欄位型別與省略語意的程式契約在 [schema.py](schema.py)。[環境 README](../../../../../zcu_lab/simulation_envs/FTF/README.md) 提供工作副本與 GUI／Notebook 入口。
 
+`numerics.seed` 與各 resonator 的 `thermal_occupation` 必填，可明填 `null`。
+前者在 startup 選一次 seed，後者按共通溫度計算 Bose occupation。
+每個 receiver 的 `background` 必填，其中 `ripple_period_mhz` 與 `pivot_ghz` 也必填。
+零 depth 與 slope 仍關閉背景效果，其他關閉／恆等預設不變。
+
 文件使用 `format: zcu.ftf`、整數 `version: 2`。`chip` 描述物理值，`dc_bias` 合併具名電源與校準，`drive_lines` 綁定 charge 或小訊號 flux drive lines，`flux_lines` 宣告各迴路的 fast-flux 校準與濾波，`readout` 分開 drive、物理 resonators 與 ADC，`numerics` 集中截斷與 solver。接線與校準的迴路 map 必填 `f1`、`coupler`、`f2`，key 指受作用的迴路，不是額外線路。`drift` 與 `flux_lines` 的迴路則為選填。
 
 省略 `drift` 或設為 `null` 會關閉跨 acquisition 漂移。
@@ -36,7 +41,7 @@ Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘�
 
 `numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
-`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，省略為 `1e-9`。Runtime 在每次 projective read 後剪除低於此值的全域 outcome 權重，將權重按比例歸到其餘 outcomes。設為 0 保留零權重 outcomes。若某 point 剪空，runtime 會報錯並指名 point 與 floor。Telemetry 記錄保留數與剪除機率。
+`numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填，範本明填 `1e-9`。Runtime 在每次 projective read 後剪除低於此值的全域 outcome 權重，將權重按比例歸到其餘 outcomes。設為 0 保留零權重 outcomes。若某 point 剪空，runtime 會報錯並指名 point 與 floor。Telemetry 記錄保留數與剪除機率。
 
 `numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
 

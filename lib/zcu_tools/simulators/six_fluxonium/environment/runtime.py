@@ -464,10 +464,11 @@ def six_fluxonium(
     does not infer board capabilities or channel counts from physical wiring. Startup
     applies each initial current once. No hardware or numerical warmup runs.
     The host owns devices after return and calls close_backend after work drains.
-    Mux gen0 binds ADC0..5; pulse gen13 binds ADC6. Microwave gens1..6 bind those
-    ADCs for transport admission; numeric routing keeps each control on its own
-    circuit. Holes7..12 are unbound. Q1 seed selects the root RNG; pacing uses the
-    maximum per-qubit floor. Pulse ADC6 uses Q1 receiver calibration.
+    YAML supplies the shared mux generator, six mux ADCs and separate pulse route.
+    Each qubit's microwave generator binds those ADCs for transport admission;
+    numeric routing keeps each control on its own circuit. Other IDs are unbound.
+    Q1 seed selects the root RNG; pacing uses the maximum per-qubit time scale.
+    The pulse ADC uses Q1 receiver calibration.
     clock optionally injects monotonic physical seconds; None creates one shared
     environment clock. Only the outer binding completes physical rounds.
     truth_log selects private JSONL output for enabled drift, defaulting to

@@ -17,6 +17,11 @@ environment = ftf(settings, soccfg=soccfg)
 ```
 
 The caller supplies `model_path` and a `QickConfig` built from independent board YAML.
+Model YAML explicitly supplies RNG seeds, bath occupations, pruning thresholds and
+existing numerical controls. A null root seed chooses once at startup; a null
+bath occupation uses the circuit temperature. Every receiver supplies background
+period and pivot, even when zero depth and slope disable the effect.
+Off/identity defaults remain optional. Missing required fields report dotted paths.
 After acquisitions drain, the host closes the backend and then its devices.
 The builders retain the framework's `SimulationEnvironment` and public acquisition contracts.
 
@@ -50,7 +55,9 @@ content integrity, atomic file I/O and acquire/round reference resolution.
 It retains detached waveform samples and settings, not measured I/Q.
 Template arrays preserve dtype, shape and flat values, with typed float64, int64
 and bool reconstruction. Acquire and round files use version 2 and reject version 1.
-Request clocks retain positive integer num/den fields in MHz.
+Replay requests require explicit `reps` and `relax_delay_ticks`; complete version 2
+archives already contain both fields. Request clocks retain positive integer
+num/den fields in MHz.
 All time arrays retain int64 ticks, including ADC and envelope periods.
 Numeric manifests remain opaque and are verified by their numeric owner.
 Replay does not change normal waveform assets or data.h5 policies.

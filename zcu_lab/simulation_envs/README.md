@@ -10,7 +10,11 @@
 三個物理模型的 builder 位於 `zcu_tools.simulators.<model>.environment`，
 YAML loader 位於對應的 `config` package。框架不 import 這些模型。
 每份 startup 讀取同目錄的 `profile.yaml`，再用 `program.build_soccfg` 建立板子。
-板子設定獨立於物理模型 YAML。修改 profile 後須重建環境。FTF 使用四個 generator
+板子設定獨立於物理模型 YAML。修改 profile 後須重建環境。
+模型 YAML 必填 seed、thermal occupation、pruning floor 及既有 numerical controls。
+Seed 與 occupation 可以明填 `null`，分別表示 startup 選一次與使用 Bose equilibrium。
+每個 receiver 都必填 background period 與 pivot，零 depth／slope 仍關閉效果。
+Six 的接線也由模型 YAML 明填，channel 必須存在於 caller 的 board profile。FTF 使用四個 generator
 和三個 ADC，其中 gen1 配 mux ADC1、2。single_fluxonium 和 integer_fluxonium
 各用三個 generator 和一個 ADC。six_fluxonium 用十四個 generator 和七個 ADC，
 其中 gen0 配 mux ADC0..5。

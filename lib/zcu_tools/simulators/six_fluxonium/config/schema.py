@@ -96,10 +96,10 @@ class SixFluxoniumQubit(Values):
 
 
 class SixQubits(Values):
-    """Q1..Q6: complete independent materials in physical cavity/channel order.
+    """Q1..Q6: complete independent materials in physical cavity order.
 
     Additional and missing members are rejected. Input mapping order has no
-    effect on the physical association between circuit and channel.
+    effect on each circuit's configured channel association.
     """
 
     Q1: SixFluxoniumQubit
@@ -110,7 +110,7 @@ class SixQubits(Values):
     Q6: SixFluxoniumQubit
 
     def ordered(self) -> tuple[SixFluxoniumQubit, ...]:
-        """Return Q1..Q6 in channel order, independent of input mapping order."""
+        """Return Q1..Q6 in physical order, independent of input mapping order."""
         return (self.Q1, self.Q2, self.Q3, self.Q4, self.Q5, self.Q6)
 
 
@@ -136,10 +136,13 @@ class SixFluxoniumSettings(Values):
     """Immutable six-independent-fluxonium v1 physical/configuration snapshot.
 
     format: zcu.six-fluxonium; version: strict integer 1. qubits: Q1..Q6 material.
-    dc_source: shared coil_bias driver in A. mux_gen_ch: integer 0. pulse_gen_ch: integer
-    13; pulse_ro_ch: integer 6, dedicated to single-tone frequency sweeps.
-    Q_i requires microwave gen i, mux readout gen 0 and mux ADC i-1. Microwave
-    source names differ from all seven DC names. Q_i's local source is Q{i}_bias.
+    dc_source: shared coil_bias driver in A. mux_gen_ch/pulse_gen_ch: distinct
+    nonnegative generator IDs. pulse_ro_ch: dedicated nonnegative pulse ADC ID.
+    Each qubit's drive_line.gen_ch is unique and disjoint from both readout
+    generators. Each readout.drive.gen_ch equals mux_gen_ch; readout.adc.ro_ch
+    is unique and differs from pulse_ro_ch. The environment checks IDs against
+    the caller's board. Microwave source names differ from all seven DC names.
+    Q_i's local source is Q{i}_bias.
     Tones/pulse frequencies select the nearest bare cavity at each point;
     equal-distance routing fails at acquisition. No joint Hilbert space is used.
     Q1's seed selects the environment root stream. The maximum of the six

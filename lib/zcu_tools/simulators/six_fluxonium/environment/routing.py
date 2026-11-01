@@ -28,7 +28,7 @@ class RoutedGroup:
     cavity: Q1..Q6 zero-based index. points: original flattened point indices.
     channels: ADCs observing this cavity in the pattern. templates: compact
     point-indexed controls and all readout windows for those ADCs. gen_ch: the
-    common incident readout generator (mux 0 or pulse 13).
+    common incident readout generator selected by YAML.
     """
 
     cavity: int

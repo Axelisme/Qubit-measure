@@ -23,6 +23,8 @@ def test_preparation_uses_fixed_background_seed_independent_of_noise(noise_seed)
     values = settings().model_dump()
     values["numerics"]["seed"] = noise_seed
     values["readout"]["adc"]["background"] = {
+        "ripple_period_mhz": 1000.0,
+        "pivot_ghz": 0.0,
         "extra_ripples": [{"depth": 0.2, "period_mhz": 2000.0, "phase_deg": 90.0}],
         "roughness": {"amplitude": 0.02, "correlation_mhz": 50.0, "seed": 82},
         "band_edges": {"low": {"corner_ghz": 7.5, "rolloff_db_per_ghz": 20.0}},
