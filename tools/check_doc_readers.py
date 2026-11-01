@@ -5,9 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Final
 
 _ALLOWED_READERS: Final = frozenset({"operator", "lab-author", "framework-dev", "agent"})
+_LAST_UPDATED: Final = re.compile(
+    r"^\*\*Last updated:\*\* \d{4}-\d{2}-\d{2}\b", re.MULTILINE
+)
 _DECLARATION: Final = re.compile(r"^\*\*(?:讀者：|Readers:)\*\*[ \t]*(.*)", re.MULTILINE)
 
 
@@ -29,6 +33,15 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
         lines = source.splitlines()
         if lines and lines[0] == "---":
             lines = lines[lines.index("---", 1) + 1 :]
+        document = PurePosixPath(path)
+        if (
+            document.parts[0] in {"lib", "tests"}
+            and document.name == "README.md"
+            and _LAST_UPDATED.search("\n".join(lines)) is None
+        ):
+            found.append(
+                Violation(path, "missing or malformed **Last updated:** YYYY-MM-DD")
+            )
         header = "\n".join(lines[:8])
         declaration = _DECLARATION.search(header)
         if declaration is None:
