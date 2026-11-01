@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from statistics import fmean, pstdev
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from zcu_tools.experiment.operations import Completed, OperationFacts
 
 from zcu_lab.workflows.common.calibration_results import StageStatus
@@ -128,20 +128,8 @@ class SummaryPoint(BaseModel):
     qubits: tuple[QubitLifetimes, ...] = ()
 
 
-_OPERATION_STAGES: dict[str, StageName] = {
-    "frequency": "frequency",
-    "Rabi": "Rabi",
-    "AmpRabi": "amp Rabi",
-    "readout": "readout",
-    "singleshot GE": "singleshot",
-    "T1": "T1",
-    "Ramsey": "Ramsey",
-    "Echo": "Echo",
-    "Mux T1": "T1",
-    "Mux Echo": "Echo",
-    "MIST excited": "MIST",
-    "MIST ground": "MIST",
-}
+# Operation labels are the canonical stage names; any other label is a caller bug.
+_STAGE_NAME = TypeAdapter[StageName](StageName)
 
 
 def _stage_totals(points: Iterable[SummaryPoint]) -> dict[StageName, StageSummary]:
@@ -173,11 +161,10 @@ def _add_durations(
 ) -> None:
     per_point: dict[tuple[int, StageName], float] = defaultdict(float)
     for facts in operations:
-        stage = _OPERATION_STAGES.get(facts.name or "")
-        if stage is not None:
-            per_point[facts.iteration, stage] += (
-                facts.finished_at - facts.started_at
-            ).total_seconds()
+        stage = _STAGE_NAME.validate_python(facts.name)
+        per_point[facts.iteration, stage] += (
+            facts.finished_at - facts.started_at
+        ).total_seconds()
     durations: dict[StageName, list[float]] = defaultdict(list)
     for (_, stage), seconds in per_point.items():
         durations[stage].append(seconds)
@@ -216,6 +203,7 @@ class SummaryAccumulator:
     planned_points is the fixed plan size; flux_unit is None for a mux run.
     Append one SummaryPoint after each commit. Helpers call observe immediately
     after an operation returns; raised operations contribute no delivered timing.
+    Every observed operation must carry a canonical StageName as its name.
     finish returns mechanical totals without changing scientific acceptance.
     """
 
@@ -229,7 +217,11 @@ class SummaryAccumulator:
         self.operations.append(outcome.facts)
 
     def finish(self) -> RunSummary:
-        """Return point totals, stage durations and population statistics."""
+        """Return point totals, stage durations and population statistics.
+
+        An observed operation whose name is not a StageName raises
+        pydantic.ValidationError naming the label and the canonical set.
+        """
         stages = _stage_totals(self.points)
         _add_durations(stages, self.operations)
         fluxes = [point.flux for point in self.points if point.flux is not None]

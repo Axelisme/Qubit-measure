@@ -225,7 +225,7 @@ async def measure_mux_t1(
         participants=list(pulses.participants),
         delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await run_core(scope, MuxT1Exp().run, cfg, name="Mux T1")
+    record = await run_core(scope, MuxT1Exp().run, cfg, name="T1")
     observe_operation(env.summary, record)
     save_native(
         record,
@@ -336,7 +336,7 @@ async def measure_mux_echo(
         participants=list(pulses.participants),
         delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await run_core(scope, MuxT2EchoExp().run, cfg, name="Mux Echo")
+    record = await run_core(scope, MuxT2EchoExp().run, cfg, name="Echo")
     observe_operation(env.summary, record)
     save_native(
         record,
