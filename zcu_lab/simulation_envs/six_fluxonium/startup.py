@@ -14,6 +14,9 @@ from zcu_tools.resources.entry import DestinationExistsError, load_entry_templat
 from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
 
 
+PROFILE_PATH = Path(__file__).resolve().parent.parent / "profiles" / "qick_216_v2.yaml"
+
+
 def startup(ctx: StartupContext) -> None:
     """Open six-fluxonium-demo/initial and install mock SoC and seven DC drivers.
 
@@ -26,7 +29,8 @@ def startup(ctx: StartupContext) -> None:
     evolves each qubit independently on demand. Q1_bias..Q6_bias each affect only their own qubit. The shared
     coil_bias affects all six. Both contributions use per-qubit offsets and
     periods in A. No fast-flux line is installed. Single-tone scans use pulse
-    gen13/ADC6; mux uses gen0/ADC0..5.
+    gen0/ADC0; mux uses gen7/ADC2..7. Q1..Q6 charge drives use gen1..6.
+    All seven non-mux generators are v6; drives need no mixer frequency.
 
     Successfully registered drivers become GUI-owned. The on-close callback
     closes the backend after acquire drain, then drops borrowed driver references
@@ -59,9 +63,7 @@ def startup(ctx: StartupContext) -> None:
         _seed_entry(ctx)
 
     ctx.progress("Building offline six-fluxonium resources")
-    soccfg = build_soccfg(
-        yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text())
-    )
+    soccfg = build_soccfg(yaml.safe_load(PROFILE_PATH.read_text()))
     environment = six_fluxonium(settings_path, soccfg=soccfg)
     transferred: set[str] = set()
 
