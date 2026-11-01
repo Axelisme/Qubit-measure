@@ -227,6 +227,27 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     assert prog.compile_datamem() is None
 
 
+@pytest.mark.parametrize("placement", ["static", "sweep", "runtime"])
+def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        prog.fork("default", into="next_read")
+        prog.trigger([0], timeline="default")
+        if placement == "sweep":
+            prog.timeline_inc(QickSweep1D("scan", 100 / 430.08, 180 / 430.08), timeline="next_read")
+        else:
+            prog.timeline_inc(100 / 430.08, timeline="next_read")
+            if placement == "runtime":
+                prog.timeline_inc("scan", timeline="next_read")
+        prog.trigger([0], timeline="next_read")
+
+    with pytest.raises(ValueError, match=r"next_read.*channel 0.*ADC overlap.*40 cycles"):
+        _program(body, initialize)
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):
