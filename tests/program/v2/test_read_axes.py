@@ -241,7 +241,7 @@ def test_declared_reads_must_match_actual_triggers():
 @pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("control", ["Repeat", "Branch"])
 @pytest.mark.parametrize("inside", [False, True])
-def test_any_control_flow_trigger_on_selected_adc_is_rejected(
+def test_repeated_or_unbalanced_triggers_on_selected_adc_are_rejected(
     timeline, control, inside
 ):
     ro = readout()
@@ -278,7 +278,11 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
 
     prog = Program(v2.make_mock_soccfg())
     label = "selected"
-    with pytest.raises(ValueError, match=rf"ADC 0.*{control}"):
+    message = (
+        r"Branch cases choice\[1\].*(ADC 0.*emitted|label 'selected')"
+        if control == "Branch" else r"ADC 0.*Repeat"
+    )
+    with pytest.raises(ValueError, match=message):
         v2.shot_sums(prog, [v2.IQ(label)])
 
 
@@ -312,7 +316,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
 
 
 @pytest.mark.parametrize("inner", ["Repeat", "Branch"])
-def test_nested_control_rejects_trigger_with_innermost_scope(inner):
+def test_nested_branch_and_repeat_still_reject_repeated_adc_trigger(inner):
     ro = readout()
     builder = v2.TimelineBuilder(v2.make_mock_soccfg())
     builder.add_loop("choice", 2)
@@ -337,7 +341,8 @@ def test_nested_control_rejects_trigger_with_innermost_scope(inner):
             # Clear each iteration before reentering the conditional read.
             builder.delay_by_timeline()
     prog = builder.build()
-    with pytest.raises(ValueError, match=rf"ADC 0.*{inner}"):
+    prog.set_reads_per_shot(1)
+    with pytest.raises(ValueError, match=r"Branch.*choice\[1\].*ADC 0.*Repeat"):
         v2.shot_sums(prog, [v2.IQ("selected")])
 
 
