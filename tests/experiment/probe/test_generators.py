@@ -132,3 +132,25 @@ def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
     assert_array_equal(state[1], after[1])
     assert state[2:] == after[2:]
     assert_array_equal(populations, [0.0, 1.0, 0.2, 0.8, 0.5])
+
+
+def test_sample_iq_shots_adds_independent_gaussian_quadrature_width():
+    populations = np.array([0.0, 1.0, 0.25, 0.75])
+    samples = generators.sample_iq_shots(
+        populations, g_center=-3.0 + 2j, e_center=3.0 - 2j,
+        width=0.3, shots=30000, seed=17,
+    )
+    repeated = generators.sample_iq_shots(
+        populations, g_center=-3.0 + 2j, e_center=3.0 - 2j,
+        width=0.3, shots=30000, seed=17,
+    )
+    assert_array_equal(samples, repeated)
+    excited = samples.real > 0
+    assert_allclose(excited.mean(axis=1), populations, atol=0.007)
+    noise = samples - np.where(excited, 3.0 - 2j, -3.0 + 2j)
+    for component in (noise.real, noise.imag):
+        assert_allclose(component.mean(axis=1), 0.0, atol=0.006)
+        assert_allclose(component.std(axis=1), 0.3, atol=0.006)
+        assert np.mean(np.abs(component) > 0.6) == pytest.approx(0.0455, abs=0.004)
+        assert abs(np.corrcoef(component[0], component[1])[0, 1]) < 0.02
+    assert abs(np.corrcoef(noise.real.ravel(), noise.imag.ravel())[0, 1]) < 0.02
