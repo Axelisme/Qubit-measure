@@ -205,10 +205,26 @@ class Pulse(Module):
 class TableLengthPulse(Module):
     """Sweep const/flat-top pulse length from dmem with one wmem template.
 
-    The hardware loop counter selects generator-length and tProcessor-duration
-    tables. Every entry must be strictly positive and satisfy the generator's
-    three-cycle minimum. Readout alignment uses the
-    runtime duration table, so shorter pulses are not padded to the longest point.
+    name identifies this module and its generated resources. cfg is a PulseCfg
+    template with a const or flat_top waveform; it is copied, not mutated.
+    cfg supplies the generator channel, frequency (MHz), phase (degrees),
+    normalized gain and pre/post delays (us). lengths is a nonempty iterable
+    of finite, strictly positive waveform lengths in us, replacing the template
+    length at each selected point. For flat_top, each length includes the fixed
+    ramps. idx_reg names a caller-owned zero-based integer selector register;
+    initialize it with certified producers in 0..len(lengths)-1 before playback.
+
+    Declare before emit. Declaration stores one waveform template and a
+    generator-length lookup. Playback uses the selected actual waveform end,
+    including flat-top ramps. The timeline owner adds pre/post once and ceils
+    the aggregate once; fork/join takes the pointwise maximum of branch ends,
+    without padding every point to the longest length or storing duration tables.
+
+    Construction raises ValueError for empty, nonfinite or nonpositive lengths,
+    and NotImplementedError for other waveform styles. Declaration raises
+    ValueError when a selected length violates the generator's 3..65535-cycle
+    range or flat-top ramp constraints. Compilation rejects uncertified or
+    out-of-range selector producers and overlapping same-channel playback.
     """
 
     def __init__(
@@ -241,8 +257,8 @@ class TableLengthPulse(Module):
         """Declare one template and the actual generator-length table, not durations.
 
         The caller owns idx_reg. Entries must satisfy generator minimum/maximum
-        lengths and flat-top ramp constraints. No legacy duration table is built;
-        native playback timing is resolved from the selected actual waveform.
+        lengths and flat-top ramp constraints. Playback timing is resolved from
+        the selected actual waveform, without a duration table.
         """
         wave_cycles = [
             self._wave_length_cycles(prog, length) for length in self.lengths

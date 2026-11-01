@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，timeline ceil、compilation options、runtime 結尾的字面值偏移與 storage 重用
+**Last updated:** 2026-11-01，timeline ceil、storage 重用與靜態 readout observation
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -147,6 +147,10 @@ The cfg-based APIs delegate to these same word decoders.
   `shot_sums(prog, axes)` 在 compile 後以讀出 label 解析 `Classify` 與 `IQ` 軸。
   讀出以 emit tag 或未標記 module 名稱識別。
   外積總和與取消契約見 [program](../README.md#summed-acquisition)。
+- `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，
+  為 Mux collection 與 shot sums 提供 readout provenance、Trigger 順序及控制 scope。
+  它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
+  Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## 原生寫法與具名 timeline
