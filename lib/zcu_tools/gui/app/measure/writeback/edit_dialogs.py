@@ -43,7 +43,7 @@ class WritebackEditDialogs:
     """Own transient writeback editors for one pane without owning its draft.
 
     The parent owns Qt lifetime; ctrl admits all writes for tab_id and pane.
-    Module dialogs are reused until finished and detach from the shared form on close.
+    Module dialogs are reused until finished and discard their local copy on cancel.
     """
 
     def __init__(

@@ -1,6 +1,6 @@
 # `gui.app.measure.writeback`
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。寫回提案、review widget 與逐項 Apply 契約。
 
@@ -39,9 +39,13 @@ The ledger owns a LifetimeScope and retires all open scalar/module editors when
 its host calls `detach()`. ExpTabWidget registers that cleanup for Analysis and
 Post-Analysis. Each dialog closes its own scope before completion. Module-form
 subscriptions and editor callbacks are removed before the tab's Qt children are
-deleted. Owner retirement discards pending input and does not commit Apply-as.
-Normal Done retains its existing name-commit policy. No destroyed closure owns
-form cleanup.
+deleted. Module editing uses a detached input copy. Cancel, Esc, window close
+and owner retirement reject the copy without changing the shared draft or Apply-as.
+Save installs the copy through controller admission, then commits a changed Apply-as
+name. Only successful Save closes the dialog; refusals stay inline for correction.
+Invalid input disables Save. The ledger updates from the shared draft when the
+dialog finishes, not while the copy is being edited. Apply Selected remains the
+library write boundary. No destroyed closure owns form cleanup.
 
 ## Initial selection and notes
 
