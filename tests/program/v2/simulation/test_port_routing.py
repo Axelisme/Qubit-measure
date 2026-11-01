@@ -8,9 +8,9 @@ from qick import QickConfig
 from zcu_tools.core.simulation import AcquireRequest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
-from zcu_tools.program.v2.ir.instructions import NopInst, RegWriteInst
+from zcu_tools.program.v2.ir.instructions import RegWriteInst
 from zcu_tools.program.v2.ir.io_instructions import TrigInst
-from zcu_tools.program.v2.ir.operands import TimeOffset
+from zcu_tools.program.v2.ir.operands import Immediate, Register, SrcKeyword
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program._profiles import profile_soccfg
@@ -93,25 +93,21 @@ def test_explicit_trig_time_does_not_read_cross_shot_s14():
     soccfg = profile_soccfg("tmux_tport")
 
     def explicit_times(stream: CompiledStream) -> CompiledStream:
-        time = 0
         records = []
-        last_write = max(
-            index
-            for index, record in enumerate(stream.records)
-            if isinstance(record.instruction, RegWriteInst)
-            and record.instruction.dst.canonical_name == "s14"
-        )
-        for index, record in enumerate(stream.records):
-            inst = record.instruction
-            if isinstance(inst, RegWriteInst) and inst.dst.canonical_name == "s14":
-                if inst.lit is None:
-                    raise ValueError("test input requires literal trigger timestamps")
-                time = inst.lit.value
-                if index != last_write:
-                    inst = NopInst()
-            if isinstance(inst, TrigInst):
-                inst = replace(inst, time=TimeOffset(time))
-            records.append(CompiledRecord(inst, record.p_addr))
+        for record in stream.records:
+            records.append(record)
+            if isinstance(record.instruction, TrigInst):
+                assert record.instruction.time is not None
+                records.append(
+                    CompiledRecord(
+                        RegWriteInst(
+                            dst=Register("s14"),
+                            src=SrcKeyword.IMM,
+                            lit=Immediate(999),
+                        ),
+                        record.p_addr,
+                    )
+                )
         return CompiledStream(tuple(records))
 
     native = build_port_request(soccfg).materialize_point(0)
