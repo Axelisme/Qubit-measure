@@ -280,7 +280,8 @@ RO_AUTO_GROUPED_AXES_SPEC = GroupedAxesSpec(
 
 
 def _live_search_plot(
-    plots: Plots, point_indices: NDArray[np.float64],
+    plots: Plots,
+    point_indices: NDArray[np.float64],
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], int]], None]:
     """Show the search's four SNR panels and return a snapshot-based update.
 
@@ -309,6 +310,7 @@ def _live_search_plot(
         axes.append(ax)
 
     figure.show()
+
     @plots.on_plot_thread
     def update(
         payload: tuple[NDArray[np.float64], NDArray[np.float64], int],
