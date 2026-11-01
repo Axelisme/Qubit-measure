@@ -10,7 +10,6 @@ from .core import TwotoneCfg
 
 def make_form(ctx: FormContext) -> Form[TwotoneCfg]:
     """Capture pulse sources and start with a one-point zero-gain sweep."""
-    del ctx  # Slot fallback resolution uses the Form environment.
     return Form(
         TwotoneCfg,
         tree={

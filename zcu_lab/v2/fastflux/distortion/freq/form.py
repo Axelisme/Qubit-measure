@@ -9,7 +9,6 @@ from zcu_lab.v2.support.measure.ctx_helpers import source
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Choose pulse sources from the fixed Open/Reset capture."""
-    del ctx  # Slot fallback resolution uses the Form environment.
     return Form(
         FreqCfg,
         tree={
