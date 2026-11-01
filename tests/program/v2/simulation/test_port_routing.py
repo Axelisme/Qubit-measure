@@ -136,9 +136,7 @@ def test_unregistered_wave_tmux_reports_port_and_encoded_channel():
     soccfg["gens"][0]["tmux_ch"] = encoded_tmux + 1
     env = white_noise(soccfg, std_adc=0, seed=None, routes=((0, 0), (0, 1)))
     try:
-        with pytest.raises(
-            ValueError, match=rf"port {port}, tmux_ch={encoded_tmux}"
-        ):
+        with pytest.raises(ValueError, match=rf"port {port}, tmux_ch={encoded_tmux}"):
             request(prog, env)
     finally:
         env.devices.close_all_devices()

@@ -99,7 +99,9 @@ class Outputs:
         for ch in prog.ro_chs:
             ctrl = prog.soccfg["readouts"][ch].get("tproc_ctrl")
             if ctrl is not None:
-                self._port(int(ctrl), prog.soccfg["readouts"][ch].get("tmux_ch"), "ro", ch)
+                self._port(
+                    int(ctrl), prog.soccfg["readouts"][ch].get("tmux_ch"), "ro", ch
+                )
         self.iterations: tuple[tuple[str, int], ...] = ()
         self.loop_positions: dict[str, int] = {}
         self.events: dict[tuple[int, int, tuple[tuple[str, int], ...]], EventSlot] = {}
