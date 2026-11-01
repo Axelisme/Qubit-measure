@@ -1,6 +1,5 @@
 """Shell WAIT bounds through public timeline compilation and point scheduling."""
 
-from tests.program._profiles import load_mux_soccfg, load_soccfg
 import math
 import random
 import warnings
@@ -11,7 +10,6 @@ import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program.v2 import SweepCfg
-
 from zcu_tools.program.v2.modules import (
     ComputedPulse,
     DelayAuto,
@@ -22,6 +20,8 @@ from zcu_tools.program.v2.modules import (
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
+
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 
 from .timing_support import shots, waves
 
@@ -150,9 +150,7 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
     else:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            prog = Program(
-                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
-            )
+            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08)
         result = shots(prog)
         body = [shot.body_end_cycle - shot.start_cycle for shot in result]
         assert body == [10, 20]
@@ -465,9 +463,7 @@ def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
             )
 
     with pytest.warns(UserWarning, match=r"WAIT.*axis.*slack=50 cycles"):
-        prog = Program(
-            load_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08
-        )
+        prog = Program(load_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08)
     assert shell_wait(prog) == 170
     assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [270, 220, 270]
 
@@ -533,9 +529,7 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
         with pytest.warns(
             UserWarning, match=r"WAIT.*count_cycles.*slack=10 cycles"
         ) as caught:
-            prog = Program(
-                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
-            )
+            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08)
         assert all("upper bound" not in str(item.message) for item in caught)
         body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
         assert body == [10, 20]
@@ -623,9 +617,7 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
 
     slack = 15 if branch else 10
     with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
-        prog = Program(
-            load_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08
-        )
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08)
     assert shell_wait(prog) == 30
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         100,

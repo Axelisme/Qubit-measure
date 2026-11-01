@@ -1,6 +1,5 @@
 """Measure composition owns dynamically registered drivers after work drains."""
 
-from tests.program._profiles import load_soccfg
 import sys
 
 import pytest
@@ -9,8 +8,8 @@ from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.session.state import DeviceStatus
 
-
 from tests._lab import synthetic_lab
+from tests.program._profiles import load_soccfg
 
 
 class ClosingDriver(FakeDevice):

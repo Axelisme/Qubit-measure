@@ -1,6 +1,5 @@
 """Analyze terminal feedback through real owners and visible component input."""
 
-from tests.program._profiles import load_soccfg
 import os
 from pathlib import Path
 
@@ -22,7 +21,6 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
-
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import (
@@ -32,6 +30,7 @@ from tests.gui.app.measure._synthetic import (
     SampleParams,
     SampleResult,
 )
+from tests.program._profiles import load_soccfg
 
 
 @pytest.mark.parametrize("error_type", [AnalysisFailed, ValueError, None])

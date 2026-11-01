@@ -8,7 +8,6 @@ async signal tests (offline remote success / failure) where the bg submit matter
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
@@ -35,6 +34,7 @@ from zcu_tools.gui.session.services.progress import ProgressService
 from tests.gui._completion_helpers import on_connection_failed
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._qt_waits import qt_until
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture

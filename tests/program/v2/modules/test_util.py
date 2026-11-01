@@ -1,13 +1,13 @@
-from tests.program._profiles import load_soccfg
 import math
 
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
-
 from zcu_tools.program.v2.modules.util import (
     get_fclk,
     round_timestamp,
 )
+
+from tests.program._profiles import load_soccfg
 
 
 def test_get_fclk():

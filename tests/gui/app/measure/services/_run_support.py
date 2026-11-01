@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
@@ -36,10 +35,10 @@ from zcu_tools.gui.session.ports import BackgroundError
 from zcu_tools.gui.session.services.progress import ProgressService
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui.app.measure._cfg_fakes import parameter_capture
 from tests.gui.app.measure._form_fakes import make_form
+from tests.program._profiles import load_soccfg
 
 
 def make_state(

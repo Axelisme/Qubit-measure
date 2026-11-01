@@ -1,13 +1,12 @@
 """Deterministic transport for the unbound, ordinary QICK acquisition pipeline."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 from qick import QickConfig
 from zcu_tools.program.v2 import TimelineProgramV2
-
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 

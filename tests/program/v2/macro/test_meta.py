@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2.ir.base import IRCompileMixin
 from zcu_tools.program.v2.macro.meta import MetaMacro
 
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture

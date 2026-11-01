@@ -1,12 +1,12 @@
 """Correlated timeline bounds through public compile and linked timing."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import Macro, QickSweep1D
-
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 from .timing_support import shots, waves
 

@@ -1,6 +1,5 @@
 """Native Ask through the registered headless facet and retained operation owner."""
 
-from tests.program._profiles import load_soccfg
 from contextlib import contextmanager
 from threading import Event, get_ident
 
@@ -20,6 +19,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui.app.measure._workflow_ask import AskAuthor, Decision, OtherAnswer
+from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
 

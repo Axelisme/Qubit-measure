@@ -1,6 +1,5 @@
 """Runtime timeline ends observed through linked compiler timing."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 
 import pytest
@@ -14,9 +13,10 @@ from qick.asm_v2 import (
     WriteReg,
 )
 from zcu_tools.program.v2 import ir
-
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 from .timing_support import recompile, shots, waves
 

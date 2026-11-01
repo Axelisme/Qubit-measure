@@ -1,6 +1,5 @@
 """Composite declarations and runtime playback at the public compiler seam."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -11,7 +10,6 @@ from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
-
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -28,6 +26,7 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -387,9 +386,7 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
             prog.emit(pulse, timeline="other")
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(
-            load_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2)
-        )
+        _program(load_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2))
 
 
 def _negative_selected(kind: str, cycles: tuple[int, int] = (39, 64)) -> Module:
@@ -639,9 +636,7 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         prog.emit(following, timeline=target)
 
     def build():
-        return _program(
-            load_soccfg(2, 0), [*selected, following], body, initialize
-        )
+        return _program(load_soccfg(2, 0), [*selected, following], body, initialize)
 
     if post + advance < 0:
         with pytest.raises(ValueError, match="pulse overlap"):
@@ -1087,9 +1082,7 @@ def _selection_flow_program(body, *, path_count=2):
         prog.write_reg("index", 0)
         body(prog, loader, other)
 
-    return _program(
-        load_soccfg(1, 0), [template, loader, other], lower, initialize
-    )
+    return _program(load_soccfg(1, 0), [template, loader, other], lower, initialize)
 
 
 def _play_selected_length(prog, relation, values, timeline="default"):
@@ -1246,9 +1239,7 @@ def test_selected_playback_captures_index_before_later_in_range_change(change):
 
 
 def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
-    builder = TimelineBuilder(
-        load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
-    )
+    builder = TimelineBuilder(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     builder.add_loop("index", 2)
     choices = [
         _pulse_cfg(cycles / 384).model_copy(
@@ -1337,6 +1328,4 @@ def test_table_readout_rejects_missing_or_mismatched_public_loop(count):
             prog.add_loop("frequency", count)
 
     with pytest.raises(ValueError, match="(sweep loop|does not match loop)"):
-        _program(
-            load_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize
-        )
+        _program(load_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize)

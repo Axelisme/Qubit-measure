@@ -1,13 +1,12 @@
 """B1 scheduling through the public compiler and linked timing analysis."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 
 import pytest
 from qick.asm_v2 import QickSweep1D
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 

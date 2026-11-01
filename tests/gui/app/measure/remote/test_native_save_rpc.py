@@ -1,6 +1,5 @@
 """Native Save RPC reports through the real connection-owned dispatcher."""
 
-from tests.program._profiles import load_soccfg
 import socket
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -43,6 +42,7 @@ from tests.gui.app.measure._native_save_support import (
     native_save_session,
 )
 from tests.gui.app.measure._record_support import require_metadata, require_record
+from tests.program._profiles import load_soccfg
 
 from ._helpers import call, open_client, reset_inbox
 

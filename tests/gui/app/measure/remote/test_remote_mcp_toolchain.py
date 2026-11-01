@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -25,6 +24,7 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleParams
+from tests.program._profiles import load_soccfg
 
 from ._helpers import Fixture, call, open_client
 
@@ -460,8 +460,6 @@ def _install_real_mock_soccfg(fx) -> None:
     """Swap the fixture's MagicMock soccfg for a real QICK mock soccfg so
     describe_soc()'s field access and dump_cfg() return real content."""
     import dataclasses
-
-    
 
     ctx = fx.state.session_env
     fx.state.session_env = dataclasses.replace(ctx, soccfg=load_soccfg())

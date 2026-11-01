@@ -1,6 +1,5 @@
 """Writeback Edit dialogs: scalar parameter values and module item Forms."""
 
-from tests.program._profiles import load_soccfg
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -56,6 +55,7 @@ from tests.gui.app.measure._synthetic import (
 )
 from tests.gui.widgets.form._field_errors import field_error
 from tests.gui.widgets.form._text_input import commit_text_on_focus_loss as commit_text
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import register_fakes, registry_state, restore_registry
 
 

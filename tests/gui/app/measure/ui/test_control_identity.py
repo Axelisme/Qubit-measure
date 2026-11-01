@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import socket
 from collections.abc import Callable, Iterator
 from copy import deepcopy
@@ -62,7 +61,6 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
-
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
@@ -76,6 +74,7 @@ from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure._reload_fakes import Loader, OldAdapter
 from tests.gui.app.measure.remote._helpers import recv_response, send
 from tests.gui.app.measure.ui._qt_interactions import modal_action
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 pytestmark = [pytest.mark.requires_loopback, pytest.mark.uses_wall_clock]

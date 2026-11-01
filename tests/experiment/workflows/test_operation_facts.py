@@ -1,6 +1,5 @@
 """Framework operation-attempt evidence grouped by explicit authored commits."""
 
-from tests.program._profiles import load_soccfg
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -15,6 +14,8 @@ from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import saved_run
 from zcu_tools.plotting.plots import NonPresentingHost
+
+from tests.program._profiles import load_soccfg
 
 from ._engine_ports import START, ManualClock, RecordingBar, RecordingDevices
 

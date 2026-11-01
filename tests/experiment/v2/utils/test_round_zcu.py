@@ -1,4 +1,3 @@
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick import QickConfig
@@ -15,6 +14,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
 from zcu_tools.program.v2 import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 

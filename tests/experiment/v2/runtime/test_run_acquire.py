@@ -1,6 +1,5 @@
 """Schedule-owned acquisition, independently of program construction."""
 
-from tests.program._profiles import load_soccfg
 import re
 from collections.abc import Callable, Iterator
 from contextlib import nullcontext
@@ -32,6 +31,7 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 

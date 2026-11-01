@@ -1,12 +1,12 @@
 """Time-input proofs belong to each lookup's structured execution position."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick.asm_v2 import Macro, WriteReg
 from zcu_tools.program.v2 import ir
-
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 class UnregisteredIndexWrite(Macro):

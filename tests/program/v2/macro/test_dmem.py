@@ -1,14 +1,13 @@
 """Native row-major table indices observed at public compiled consumers."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Mapping, Sequence
 
 import pytest
 from qick.asm_v2 import AsmInst, Macro, WriteReg
 from zcu_tools.program.v2.macro.dmem import DmemLookup, sweep_table_index
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import recompile, shots
 
 

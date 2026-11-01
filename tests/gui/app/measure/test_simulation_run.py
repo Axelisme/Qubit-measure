@@ -1,6 +1,5 @@
 """A registered synthetic experiment acquires, stops, fails and saves via RPC."""
 
-from tests.program._profiles import load_soccfg
 import sys
 from threading import Event
 
@@ -29,6 +28,7 @@ from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 

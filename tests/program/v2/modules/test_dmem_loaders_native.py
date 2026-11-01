@@ -1,13 +1,13 @@
 """Native table declarations and register consumers through linked compilation."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import pytest
 from zcu_tools.program.v2 import ir
-
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def compile_lookup(

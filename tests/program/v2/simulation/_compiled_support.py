@@ -1,11 +1,12 @@
 """Public native compile/request fixture builders for compiled frontend tests."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 from qick import QickConfig
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def program(
@@ -23,7 +24,12 @@ def program(
     cleanup=None,
     stream_transform=None,
 ):
-    env = white_noise(load_soccfg(n_gens=2, n_readouts=n_readouts), std_adc=0, routes=routes, seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=n_readouts),
+        std_adc=0,
+        routes=routes,
+        seed=None,
+    )
 
     class Program(TimelineProgramV2):
         @property

@@ -1,6 +1,5 @@
 """Retained async workflow execution through the registered headless owner."""
 
-from tests.program._profiles import load_soccfg
 import json
 from threading import Thread
 
@@ -14,6 +13,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._workflow_ask import AskAuthor
+from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
 

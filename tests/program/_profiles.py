@@ -7,9 +7,7 @@ from qick import QickConfig
 from zcu_tools.program import build_soccfg
 
 
-def load_soccfg(
-    n_gens: int | None = None, n_readouts: int | None = None
-) -> QickConfig:
+def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> QickConfig:
     """Load the ordinary test YAML; optionally select channel group counts."""
     with (Path(__file__).parent / "profiles" / "ordinary.yaml").open() as stream:
         profile = yaml.safe_load(stream)

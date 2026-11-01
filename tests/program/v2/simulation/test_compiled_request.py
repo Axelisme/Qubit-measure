@@ -1,6 +1,5 @@
 """Compiled request outputs from public native and Module compile seams."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import (
@@ -323,7 +323,12 @@ def test_native_ordinals_ignore_module_pulses_in_mixed_compiled_body():
 
 def test_compiled_mux_output_keeps_tone_and_declared_adc_order():
     prog = compile_modules(mux_soccfg(), modules=[native_mux().build("mux")], reps=2)
-    env = white_noise(load_soccfg(n_gens=2, n_readouts=9), std_adc=0, routes=((0, 4), (0, 1)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=9),
+        std_adc=0,
+        routes=((0, 4), (0, 1)),
+        seed=None,
+    )
     result = request(prog, env)
     point = result.materialize_point(0)
     assert [e.frequency_mhz for e in point.events] == pytest.approx(
@@ -358,7 +363,12 @@ def test_static_mux_readout_retains_absolute_frequencies_without_any_pulse():
             self.trigger([4, 1], t=0)
 
     prog = Program(mux_soccfg(), reps=1, initial_delay=0, relax_delay=0)
-    env = white_noise(load_soccfg(n_gens=2, n_readouts=9), std_adc=0, routes=((0, 4), (0, 1)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=9),
+        std_adc=0,
+        routes=((0, 4), (0, 1)),
+        seed=None,
+    )
     point = request(prog, env).materialize_point(0)
     assert point.events == ()
     assert [r.frequency_mhz[0] for r in point.readouts] == pytest.approx(
@@ -699,7 +709,12 @@ def test_declared_zero_read_adc_fails_before_request_with_channel_reason():
 
 
 def test_ordinary_adc_triggers_are_distinct_output_effects():
-    env = white_noise(load_soccfg(n_gens=1, n_readouts=2), std_adc=0, routes=((0, 0), (0, 1)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=1, n_readouts=2),
+        std_adc=0,
+        routes=((0, 0), (0, 1)),
+        seed=None,
+    )
 
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):

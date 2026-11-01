@@ -5,7 +5,6 @@ The handwritten parity oracle remains until TimelineProgramV2 author hooks are
 retired; changes to the common compiler must preserve parity, not old ASM bytes.
 """
 
-from tests.program._profiles import load_mux_soccfg, load_soccfg
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -15,7 +14,6 @@ from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
-
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
     PulseReadout,
@@ -27,6 +25,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -36,9 +35,7 @@ from tests.program.v2.timing_support import recompile, shots, waves
 def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
     hint, tail_sync
 ):
-    builder = v2.TimelineBuilder(
-        load_soccfg(), reps=2, initial_delay=0, relax_delay=0
-    )
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
     builder.add_loop("depth", 2)
     builder.emit(v2.LoadValue("load_count", [0, 2], "depth", "count"))
     builder.delay_by_timeline()

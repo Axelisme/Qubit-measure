@@ -1,6 +1,5 @@
 """Synthetic registered workflow host shared by component-driver scenarios."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -28,6 +27,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 
 
 def toggle_tab_family(driver: ComponentDriver) -> None:

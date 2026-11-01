@@ -1,12 +1,12 @@
 """Shared dmem allocation and route ownership through concrete program APIs."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import numpy as np
 import pytest
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _program(

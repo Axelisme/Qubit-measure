@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import json
 import os
 import sys
@@ -27,7 +26,6 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
-
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests._lab import synthetic_lab
@@ -35,6 +33,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 

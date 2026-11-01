@@ -1,6 +1,6 @@
-from tests.program._profiles import load_soccfg
 from zcu_tools.program.v2.ir.base import IRCompileMixin
 
+from tests.program._profiles import load_soccfg
 
 
 # A minimal concrete subclass to instantiate the mixin

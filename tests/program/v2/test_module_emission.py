@@ -1,11 +1,9 @@
 """Module emissions are measured at the public compiler/analysis seam."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSweep1D, WriteReg
-
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
@@ -17,6 +15,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 

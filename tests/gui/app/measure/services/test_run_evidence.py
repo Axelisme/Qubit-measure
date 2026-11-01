@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,6 +49,7 @@ from tests.gui.app.measure._native_save_support import (
 from tests.gui.app.measure._record_support import require_record
 from tests.gui.app.measure._synthetic import SampleResult
 from tests.gui.app.measure.services._snapshot_adapter import SnapshotAdapter
+from tests.program._profiles import load_soccfg
 
 from ._run_support import (
     make_inputs,

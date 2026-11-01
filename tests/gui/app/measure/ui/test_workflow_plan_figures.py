@@ -1,6 +1,5 @@
 """Plan editing and figure availability through registered synthetic workflows."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -40,6 +39,7 @@ from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
 from tests.gui.app.measure._workflow_window import toggle_tab_family
+from tests.program._profiles import load_soccfg
 
 
 class Plan(FormModel):

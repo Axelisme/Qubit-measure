@@ -1,15 +1,14 @@
 """Repeat boundaries through native compilation and linked timing analysis."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 from contextlib import nullcontext
 
 import pytest
 from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.macro.wmem import PulseFromRegs
-
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
 

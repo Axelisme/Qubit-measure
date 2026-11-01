@@ -1,6 +1,5 @@
 """Production Controller Run, portable Save/Load and recorded analysis context."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Generator
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -33,7 +32,6 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.gui.session.parameters import ParameterContext
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-
 from zcu_tools.resources.entry import AcquiredPayload, ComponentSchema, ResultEntry
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -44,6 +42,7 @@ from tests.gui.app.measure._record_support import (
     require_record,
     require_target,
 )
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.view_support import registered_model
 
 pytestmark = pytest.mark.uses_wall_clock

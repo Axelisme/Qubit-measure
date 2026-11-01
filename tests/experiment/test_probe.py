@@ -1,6 +1,5 @@
 """Offline probe contracts through public orchestration and in-process entry."""
 
-from tests.program._profiles import load_soccfg
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -31,6 +30,7 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture(autouse=True)

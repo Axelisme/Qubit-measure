@@ -1,6 +1,5 @@
 """QICK callable metadata and argument semantics at public simulation acquire."""
 
-from tests.program._profiles import load_soccfg
 import gc
 import inspect
 import weakref
@@ -15,6 +14,7 @@ from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
@@ -29,7 +28,6 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
-
 from zcu_tools.resources.entry import ComponentSchema
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -41,6 +39,7 @@ from tests.gui.app.measure._native_save_support import (
     PaneSummary,
     SavingAdapter,
 )
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import registry_state
 from tests.resources.entry.view_support import registered_model
 

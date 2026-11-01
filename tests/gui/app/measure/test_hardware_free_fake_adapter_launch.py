@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Sequence
 from unittest.mock import MagicMock
 
@@ -31,7 +30,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-
 from zcu_tools.resources.entry.registry import component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -45,6 +43,7 @@ from tests.gui.app.measure._synthetic import (
     SampleRun,
 )
 from tests.gui.app.measure._templates import TEMPLATES
+from tests.program._profiles import load_soccfg
 
 
 def LedgerAdapter_run(

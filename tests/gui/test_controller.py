@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import dataclasses
 import threading
 from collections.abc import Iterator
@@ -57,7 +56,6 @@ from zcu_tools.gui.session.ports import (
 )
 from zcu_tools.plotting.plots import Plots
 
-
 from tests.gui._controller_adapter import (
     InteractiveAdapter,
     RecordingAdapter,
@@ -66,6 +64,7 @@ from tests.gui._controller_adapter import (
 )
 from tests.gui._qt_waits import qt_until as _wait_for
 from tests.gui.app.measure._load_support import historical_metadata, write_native_file
+from tests.program._profiles import load_soccfg
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

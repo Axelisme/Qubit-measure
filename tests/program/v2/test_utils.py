@@ -1,9 +1,7 @@
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
 from zcu_tools.program.v2 import utils
-
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.sweep import SweepCfg
@@ -14,6 +12,8 @@ from zcu_tools.program.v2.utils import (
     readout_freq_words,
     sweep2param,
 )
+
+from tests.program._profiles import load_soccfg
 
 
 def test_sweep2param():

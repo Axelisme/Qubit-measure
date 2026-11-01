@@ -7,7 +7,6 @@ integrates with the actual QICK ASM backend without hardware.
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from typing import Literal
 
 import numpy as np
@@ -15,7 +14,6 @@ import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
 from zcu_tools.program.v2 import SweepCfg, TimelineProgramV2, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
-
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -36,6 +34,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------

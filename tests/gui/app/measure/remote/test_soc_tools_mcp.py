@@ -1,9 +1,10 @@
 """Offline SoC state is the same through GUI socket and public MCP tools."""
 
-from tests.program._profiles import load_soccfg
 from pathlib import Path
 
 import pytest
+
+from tests.program._profiles import load_soccfg
 
 from ._helpers import Fixture, call, mcp_client, open_client
 

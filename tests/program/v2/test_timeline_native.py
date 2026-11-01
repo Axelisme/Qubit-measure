@@ -1,11 +1,11 @@
 """Native QICK operations retain reference/channel selection around B1 ends."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 from .timing_support import shots as _shots
 

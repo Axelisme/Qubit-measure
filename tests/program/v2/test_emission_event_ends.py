@@ -1,6 +1,5 @@
 """Actual waveform/ADC ends govern module emission at the public compiler seam."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 from fractions import Fraction
 from functools import lru_cache
@@ -9,7 +8,6 @@ from math import ceil
 import numpy as np
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
-
 from zcu_tools.program.v2.modules import (
     ComputedPulse,
     LoadValue,
@@ -27,6 +25,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots, waves
 
 

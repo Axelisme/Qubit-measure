@@ -1,6 +1,5 @@
 """Run → Stop → core return/failure through visible measure controls."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -21,10 +20,10 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.types import SessionEnv
 
-
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter, SampleCfg, SampleResult
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture(params=["return", "error", "interrupt"])

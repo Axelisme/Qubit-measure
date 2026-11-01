@@ -9,7 +9,6 @@ handlers a chance to execute.
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -27,7 +26,6 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
-
 from zcu_tools.resources.entry.registry import component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -35,6 +33,7 @@ from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 
 from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs

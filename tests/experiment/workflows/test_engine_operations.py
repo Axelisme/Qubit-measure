@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event, Thread, Timer
@@ -18,6 +17,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.plotting.plots import NonPresentingHost
+
+from tests.program._profiles import load_soccfg
 
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
 

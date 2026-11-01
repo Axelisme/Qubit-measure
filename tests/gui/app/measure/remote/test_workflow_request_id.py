@@ -1,6 +1,5 @@
 """MCP answers retain the exact question identity through the live RPC owner."""
 
-from tests.program._profiles import load_soccfg
 import json
 
 import pytest
@@ -19,6 +18,7 @@ from zcu_tools.resources.entry import ResultEntry
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._workflow_ask import AskAuthor
 from tests.mcp.measure._support import make_client
+from tests.program._profiles import load_soccfg
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 

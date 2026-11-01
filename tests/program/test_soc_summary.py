@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick import QickConfig
 from qick.qick_asm import get_version
 from zcu_tools.program import describe_soc
 
+from tests.program._profiles import load_soccfg
 
 
 def test_describe_soc_sections_and_counts() -> None:

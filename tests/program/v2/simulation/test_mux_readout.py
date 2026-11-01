@@ -1,11 +1,11 @@
 """Mux frontend emits all coherent carriers and preserves explicit ADC order."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -22,7 +22,12 @@ def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
         builder.emit(mux)
     builder.delay_by_timeline()
     prog = builder.build()
-    env = white_noise(load_soccfg(n_gens=2, n_readouts=9), std_adc=0, routes=((0, 4), (0, 1)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=9),
+        std_adc=0,
+        routes=((0, 4), (0, 1)),
+        seed=None,
+    )
     try:
         try:
             prog.acquire(env.soc, progress=False)
@@ -70,7 +75,12 @@ def test_fixed_mux_compile_profile_runs_real_mux_with_every_adc(channels):
         modules=[native_mux(channels).build("mux")],
         reps=3,
     )
-    env = white_noise(load_soccfg(n_gens=3, n_readouts=5), routes=tuple((0, ch) for ch in channels), std_adc=1.0, seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=3, n_readouts=5),
+        routes=tuple((0, ch) for ch in channels),
+        std_adc=1.0,
+        seed=None,
+    )
     try:
         prog.acquire_decimated(env.soc, progress=False)
         raw = prog.get_raw()

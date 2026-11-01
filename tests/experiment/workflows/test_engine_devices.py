@@ -1,6 +1,5 @@
 """Device capture, core RunContext and explicit setup through async Engine."""
 
-from tests.program._profiles import load_soccfg
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -14,6 +13,8 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Engine, EnginePorts, Live, WorkflowEnv
+
+from tests.program._profiles import load_soccfg
 
 from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed
 

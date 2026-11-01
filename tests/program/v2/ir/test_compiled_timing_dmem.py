@@ -1,6 +1,5 @@
 """Known data-memory timing/control through real native compilation."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
@@ -10,8 +9,9 @@ import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.macro.loop import CloseInnerLoop, OpenInnerLoop
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 class DispatchProgram(TimelineProgramV2):

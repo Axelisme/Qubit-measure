@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
@@ -21,8 +20,9 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
     WaitInst,
 )
-
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:

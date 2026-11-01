@@ -1,4 +1,3 @@
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.experiment.utils.sweep import make_sweep
@@ -7,6 +6,7 @@ from zcu_tools.experiment.v2.utils.time_sweep import plan_time_sweep
 from zcu_tools.program.v2 import Pulse, PulseCfg, sweep2param
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -66,9 +66,7 @@ def test_unusable_time_plan_reports_clock_and_available_points(cycles, points) -
 @pytest.mark.parametrize("scaler", [0.0, np.nan, np.inf])
 def test_time_plan_rejects_invalid_scaler(scaler: float) -> None:
     with pytest.raises(ValueError, match="scaler"):
-        plan_time_sweep(
-            make_sweep(0.05, 0.56, expts=101), load_soccfg(), scaler=scaler
-        )
+        plan_time_sweep(make_sweep(0.05, 0.56, expts=101), load_soccfg(), scaler=scaler)
 
 
 def test_scaled_readout_clock_plan_matches_preview() -> None:

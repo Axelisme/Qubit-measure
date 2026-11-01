@@ -4,7 +4,6 @@ Remove the scalar diagnostic reset parameter when the Module-tree interpreter
 is deleted. Keep the acquisition case on the public acquisition route.
 """
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
@@ -27,6 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -51,7 +51,9 @@ def receiver():
 
 
 def acquire(modules, *, sweep=None, reps=1):
-    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     prog = compile_modules(
         env.soccfg,
         modules=modules,
@@ -66,7 +68,9 @@ def acquire(modules, *, sweep=None, reps=1):
 
 
 def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
-    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     builder = TimelineBuilder(env.soccfg)
     builder.add_loop("shot", 2)
     builder.emit(LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles"))
@@ -137,7 +141,9 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         GaussWaveformCfg,
     )
 
-    env = white_noise(load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
+    )
     first = drive()
     first.pre_delay = 0.02
     first.post_delay = 0.03
@@ -291,7 +297,9 @@ def test_reset_wrappers_expand_only_actual_parallel_pulses():
 
 
 def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
-    env = white_noise(load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
+    )
     pulses = [
         PulseCfg(
             ch=ch,
@@ -352,7 +360,9 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
 
 
 def test_reps_counter_lookup_rejected_before_backend():
-    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None)
+    env = white_noise(
+        load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None
+    )
     builder = TimelineBuilder(env.soccfg)
     builder.emit(LoadValue("writer", [0], "reps", "selection"))
     builder.emit(

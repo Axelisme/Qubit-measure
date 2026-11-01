@@ -1,6 +1,5 @@
 """Workflow RPC uses the shared headless facet, not the selected GUI pane."""
 
-from tests.program._profiles import load_soccfg
 import base64
 
 import pytest
@@ -32,6 +31,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._workflow_ask import AskAuthor, Decision
 from tests.mcp.measure._support import make_client
+from tests.program._profiles import load_soccfg
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 

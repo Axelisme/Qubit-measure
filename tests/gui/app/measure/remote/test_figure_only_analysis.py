@@ -1,6 +1,5 @@
 """Figures-only adapters retain completed analysis without numeric payloads."""
 
-from tests.program._profiles import load_soccfg
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -20,10 +19,10 @@ from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
-
 from tests.experiment._saving_support import SavingCfg, SavingCore
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import native_save_session
+from tests.program._profiles import load_soccfg
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -13,6 +12,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.ports import ProgressEvent
 
 from tests.gui._lifecycle_waits import manual_until
+from tests.program._profiles import load_soccfg
 
 
 class OwnerProgressTransport:

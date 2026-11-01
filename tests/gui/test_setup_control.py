@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,11 +31,11 @@ from zcu_tools.gui.session.services.project_settings import (
 from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle
-
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
 from tests.gui.app.measure.remote._helpers import Fixture
+from tests.program._profiles import load_soccfg
 
 
 class RecordingSettings(ProjectSettingsService):

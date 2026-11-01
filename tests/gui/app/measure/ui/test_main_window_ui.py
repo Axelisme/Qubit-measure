@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -56,6 +55,7 @@ from tests.gui.app.measure.ui._main_window_fakes import (
     make_tab_snapshot,
     mock_ctrl,
 )
+from tests.program._profiles import load_soccfg
 
 
 def test_main_window_role_failure_is_presented_without_registering_tab(

@@ -1,10 +1,8 @@
 """Table and reset effects read from public compiled programs, not Module trees."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
-
 from zcu_tools.program.v2.modules import Delay, LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
@@ -21,6 +19,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 from tests.program.v2.simulation.time_observations import time_us, times_us
 

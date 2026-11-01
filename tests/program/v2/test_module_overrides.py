@@ -1,6 +1,5 @@
 """Constructor overrides preserve cfg routing at the public compile boundary."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Sequence
 from typing import Literal
 
@@ -8,7 +7,6 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
-
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -30,6 +28,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.utils import is_qick_param
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2._mux_support import native_mux
 
 ProgramKind = Literal["native", "builder"]

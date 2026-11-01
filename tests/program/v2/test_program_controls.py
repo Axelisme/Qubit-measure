@@ -1,13 +1,12 @@
 """Explicit program repetition and timing controls at the compiled public seam."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import time_us
 

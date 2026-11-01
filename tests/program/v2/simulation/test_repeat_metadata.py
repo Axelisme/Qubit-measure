@@ -1,6 +1,5 @@
 """Repeated compiled requests preserve numeric controls and detached envelopes."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
@@ -18,12 +17,15 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation.time_observations import time_us
 
 
 @pytest.fixture
 def environment():
-    env = white_noise(load_soccfg(n_gens=2, n_readouts=2), std_adc=0, seed=4, routes=((0, 0), (1, 1)))
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=2), std_adc=0, seed=4, routes=((0, 0), (1, 1))
+    )
     yield env
     env.devices.close_all_devices()
 

@@ -7,7 +7,6 @@ reception) lives next to the tests that need it.
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import json
 import logging
 import socket
@@ -52,13 +51,13 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._form_fakes import form_sources
 from tests.gui.app.measure._synthetic import SampleAdapter, register_all
+from tests.program._profiles import load_soccfg
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +188,7 @@ class Fixture:
                 PointCreateRequest(active_label or "ctx001", "", CommandOrigin("gui"))
             )
             self.state.set_context(
-                replace(
-                    self.state.session_env, soc=MagicMock(), soccfg=load_soccfg()
-                )
+                replace(self.state.session_env, soc=MagicMock(), soccfg=load_soccfg())
             )
         if opts is None:
             opts = ControlOptions(port=0)

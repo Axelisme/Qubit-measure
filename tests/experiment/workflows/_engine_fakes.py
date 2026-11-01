@@ -1,6 +1,5 @@
 """Deterministic ports and worker lifetime for public async Engine tests."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -30,6 +29,8 @@ from zcu_tools.experiment.workflows import (
     workflow,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, PlotHost
+
+from tests.program._profiles import load_soccfg
 
 from ._engine_ports import START as START
 from ._engine_ports import ManualClock, RecordingBar
@@ -116,7 +117,11 @@ class Rig:
     def __post_init__(self) -> None:
         self.plots = WorkflowPlots(self.plot_host)
         self.paths = RunPaths(self.root / "metadata", self.root / "data")
-        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),)) if self.native else None
+        board = (
+            white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
+            if self.native
+            else None
+        )
         self.engine = Engine(
             EnginePorts(
                 self.plots,

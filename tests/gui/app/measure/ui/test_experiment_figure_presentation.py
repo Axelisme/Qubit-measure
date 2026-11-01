@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path
@@ -44,6 +43,7 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
+from tests.program._profiles import load_soccfg
 
 
 class StaticInteractive(InteractiveFrontend):

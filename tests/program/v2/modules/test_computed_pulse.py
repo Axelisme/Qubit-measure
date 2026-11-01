@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 import pytest
-
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -15,6 +13,7 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 GEN_CH = 0

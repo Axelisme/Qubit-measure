@@ -1,6 +1,5 @@
 """SoC and Setup toolbar entry points share the host's run edit lock."""
 
-from tests.program._profiles import load_soccfg
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,6 +24,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._app_launch import LaunchedMeasureApp, launched_measure_app
 from tests.gui.app.measure._native_save_support import SavingAdapter
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture

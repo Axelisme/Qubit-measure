@@ -1,6 +1,5 @@
 """Host gain coordinates retain their intended words through QICK compilation."""
 
-from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick import QickConfig
@@ -14,6 +13,7 @@ from zcu_tools.program.v2 import Pulse, PulseCfg, SweepCfg, sweep2param
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 

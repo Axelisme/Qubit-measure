@@ -1,12 +1,13 @@
 """Synthetic mixmux/PFB wiring and a deterministic, non-physical transport."""
 
-from tests.program._profiles import load_mux_soccfg
 import numpy as np
 import pytest
+from qick import QickConfig
 from zcu_tools.cfg_model import MuxReadoutCfg, MuxReadoutTone
 from zcu_tools.program.v2 import TimelineProgramV2
-
 from zcu_tools.program.v2.modules import ModuleCfgFactory, readout
+
+from tests.program._profiles import load_mux_soccfg
 
 
 def core_mux(channels=(4, 1), **updates):

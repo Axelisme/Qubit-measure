@@ -1,6 +1,5 @@
 """Borrowed compact statistics are validated by content and always detached."""
 
-from tests.program._profiles import load_soccfg
 import re
 from copy import deepcopy
 from dataclasses import replace
@@ -21,6 +20,8 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.simulation.signals import StatisticsCopier
 from zcu_tools.simulate.white_noise import WhiteNoiseRawShots
+
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture

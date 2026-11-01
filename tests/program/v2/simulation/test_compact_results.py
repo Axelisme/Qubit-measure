@@ -1,6 +1,5 @@
 """Compact rounds preserve QICK layouts and defer shot creation until needed."""
 
-from tests.program._profiles import load_soccfg
 from dataclasses import replace
 
 import numpy as np
@@ -18,6 +17,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 
 from tests.program._acquisition_soc import AcquisitionSoc
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
@@ -86,7 +86,12 @@ def statistics(request: RoundRequest) -> IntegratedRound:
 
 
 def test_summed_materializes_retained_shots_matching_hardware(monkeypatch):
-    env = white_noise(load_soccfg(n_readouts=2), std_adc=0, seed=19, routes=tuple((ch, ch) for ch in range(2)))
+    env = white_noise(
+        load_soccfg(n_readouts=2),
+        std_adc=0,
+        seed=19,
+        routes=tuple((ch, ch) for ch in range(2)),
+    )
     prog = make_program(env)
     hardware = make_program(env)
     soc = AcquisitionSoc(env.soccfg.get_cfg())
@@ -160,7 +165,12 @@ def test_summed_materializes_retained_shots_matching_hardware(monkeypatch):
 
 
 def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
-    env = white_noise(load_soccfg(n_readouts=2), std_adc=0, seed=19, routes=tuple((ch, ch) for ch in range(2)))
+    env = white_noise(
+        load_soccfg(n_readouts=2),
+        std_adc=0,
+        seed=19,
+        routes=tuple((ch, ch) for ch in range(2)),
+    )
     prog = make_program(env)
     records = []
     hooks = []
@@ -218,7 +228,12 @@ def test_averaged_statistics_preserve_layout_offsets_hooks_and_deferred_raw():
 
 @pytest.mark.parametrize("processing", ["threshold", "tracker"])
 def test_shot_processing_uses_materialized_statistics(processing):
-    env = white_noise(load_soccfg(n_readouts=2), std_adc=0, seed=29, routes=tuple((ch, ch) for ch in range(2)))
+    env = white_noise(
+        load_soccfg(n_readouts=2),
+        std_adc=0,
+        seed=29,
+        routes=tuple((ch, ch) for ch in range(2)),
+    )
     prog = make_program(
         env,
     )
@@ -270,7 +285,12 @@ def test_shot_processing_uses_materialized_statistics(processing):
     ],
 )
 def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
-    env = white_noise(load_soccfg(n_readouts=2), std_adc=0, seed=None, routes=tuple((ch, ch) for ch in range(2)))
+    env = white_noise(
+        load_soccfg(n_readouts=2),
+        std_adc=0,
+        seed=None,
+        routes=tuple((ch, ch) for ch in range(2)),
+    )
     prog = make_program(
         env,
     )
@@ -333,7 +353,12 @@ def test_invalid_statistics_raise_at_acquire_without_materializing(invalid):
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_binding_rejects_result_type_mismatch(mode, monkeypatch):
-    env = white_noise(load_soccfg(n_readouts=2), std_adc=0, seed=None, routes=tuple((ch, ch) for ch in range(2)))
+    env = white_noise(
+        load_soccfg(n_readouts=2),
+        std_adc=0,
+        seed=None,
+        routes=tuple((ch, ch) for ch in range(2)),
+    )
     prog = make_program(
         env,
     )

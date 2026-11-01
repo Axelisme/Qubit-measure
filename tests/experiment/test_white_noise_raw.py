@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -18,6 +17,7 @@ from zcu_tools.core.simulation import (
 from zcu_tools.experiment.simulation import white_noise
 
 from tests.core._simulation import TIME_BASE, tick_tuple
+from tests.program._profiles import load_soccfg
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.simulation import IntegratedRound

@@ -1,13 +1,12 @@
 """Trusted environment authors can use ordinary Python dataclasses."""
 
-from tests.program._profiles import load_soccfg
 from dataclasses import replace
 
 import pytest
 from zcu_tools.experiment.simulation import load_environment, white_noise
 
-
 from tests.core._simulation import TIME_BASE, tick_tuple
+from tests.program._profiles import load_soccfg
 
 
 def test_environment_builder_can_resolve_its_own_postponed_annotations(tmp_path):
@@ -48,7 +47,9 @@ def test_white_noise_all_routes_acquires_on_any_generator_and_adc(gen_ch, ro_ch)
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    env = white_noise(load_soccfg(n_gens=3, n_readouts=2), std_adc=0, seed=17, routes="all")
+    env = white_noise(
+        load_soccfg(n_gens=3, n_readouts=2), std_adc=0, seed=17, routes="all"
+    )
     try:
         builder = TimelineBuilder(env.soccfg, reps=2)
         builder.emit(

@@ -1,14 +1,14 @@
 """Timeline compilation preserves source ownership before IR optimization."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from qick.qick_asm import AbsQickProgram
 from zcu_tools.program.v2.ir.instructions import MetaInst, WaitInst
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
-
 from zcu_tools.program.v2.modules import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _invalidate_binary(prog: AbsQickProgram) -> None:

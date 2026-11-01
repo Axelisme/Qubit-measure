@@ -1,6 +1,5 @@
 """Form-local cfg diagnostics through real measure owners and visible inputs."""
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -21,11 +20,11 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.types import SessionEnv
 
-
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
 from tests.gui.widgets.form._text_input import commit_text
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture

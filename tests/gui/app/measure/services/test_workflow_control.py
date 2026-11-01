@@ -1,6 +1,5 @@
 """Headless workflow hosting through synthetic registrations and shared session."""
 
-from tests.program._profiles import load_soccfg
 import pytest
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.experiment.workflows import (
@@ -18,6 +17,8 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.ports import OperationConflictError
 from zcu_tools.resources.entry import ResultEntry
+
+from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
 

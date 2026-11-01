@@ -7,15 +7,14 @@ _initialize / _body / compile pipeline.
 
 from __future__ import annotations
 
-from tests.program._profiles import load_soccfg
 from collections.abc import Mapping
 
 import pytest
 from zcu_tools.program.v2 import TimelineProgramV2
-
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
