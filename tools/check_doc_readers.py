@@ -26,7 +26,10 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """
     found: list[Violation] = []
     for path, source in sorted(sources.items()):
-        header = "\n".join(source.splitlines()[:8])
+        lines = source.splitlines()
+        if lines and lines[0] == "---":
+            lines = lines[lines.index("---", 1) + 1 :]
+        header = "\n".join(lines[:8])
         declaration = _DECLARATION.search(header)
         if declaration is None:
             found.append(
