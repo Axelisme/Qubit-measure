@@ -300,6 +300,7 @@ class Readout:
 class _ReadoutDeclaration:
     """Optional register-driven generator template and ADC configuration name."""
 
+    adc_name: str
     runtime_pulse: Pulse | None
     runtime_ro_name: str | None
 
@@ -344,10 +345,15 @@ class PulseReadout(AbsReadout):
         pulse_cfg = self.cfg.to_pulse_cfg()
         self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
 
-    @property
-    def adc_name(self) -> str:
-        """Registered ADC template name, also used for table-backed word updates."""
-        return f"{self.name}_adc"
+    def adc_name(self, prog: TimelineProgramV2) -> str:
+        """Return this readout\'s registered ADC template name on prog.
+
+        prog must have declared this module successfully. The program assigns
+        unique names even for same-named readouts; use this accessor for native
+        config playback and table-backed updates. Undeclared modules raise
+        ValueError. No program, module or hardware state is changed.
+        """
+        return prog.get_module_state(self, _ReadoutDeclaration).adc_name
 
     def _declare_resources(
         self,
@@ -357,31 +363,33 @@ class PulseReadout(AbsReadout):
     ) -> _ReadoutDeclaration:
         declare_pulse(self.pulse)
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
+        adc_name = prog.allocate_template_name(f"{self.name}_adc")
         prog.add_readoutconfig(
             ch=self.cfg.ro_ch,
-            name=self.adc_name,
+            name=adc_name,
             freq=self.cfg.freq,
             gen_ch=self.cfg.gen_ch,
         )
         runtime_pulse = None
         runtime_ro_name = None
         if self._uses_runtime_pulse:
+            pulse_name = prog.allocate_template_name(f"{self.name}_runtime_pulse")
             runtime_pulse = Pulse(
-                name=f"{self.name}_runtime_pulse",
+                name=pulse_name,
                 cfg=self.pulse.cfg,
                 ro_ch=self.cfg.ro_ch,
-                pulse_id=f"{self.name}_runtime_pulse",
+                pulse_id=pulse_name,
             )
             declare_pulse(runtime_pulse)
         if self.ro_freq_val is not None:
-            runtime_ro_name = f"{self.name}_adc_runtime"
+            runtime_ro_name = prog.allocate_template_name(f"{self.name}_adc_runtime")
             prog.add_readoutconfig(
                 ch=self.cfg.ro_ch,
                 name=runtime_ro_name,
                 freq=self.cfg.freq,
                 gen_ch=self.cfg.gen_ch,
             )
-        return _ReadoutDeclaration(runtime_pulse, runtime_ro_name)
+        return _ReadoutDeclaration(adc_name, runtime_pulse, runtime_ro_name)
 
     @property
     def _uses_runtime_pulse(self) -> bool:
@@ -408,7 +416,7 @@ class PulseReadout(AbsReadout):
         prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch, tag))
         if self.ro_freq_val is None:
             prog.send_readoutconfig(
-                self.cfg.ro_ch, self.adc_name, t=0, tag=tag, timeline=timeline
+                self.cfg.ro_ch, self.adc_name(prog), t=0, tag=tag, timeline=timeline
             )
         else:
             runtime_ro_name = state.runtime_ro_name
@@ -558,7 +566,7 @@ class TablePulseReadout(AbsReadout):
                 dmem_offset=self._freq_loader.dmem_offset(prog),
             ),
             PatchWmemFromDmem(
-                name=self._readout.adc_name,
+                name=self._readout.adc_name(prog),
                 idx_reg=self.idx_reg,
                 addr_reg=self._addr_reg,
                 val_reg=self._ro_freq_loader.val_reg,
