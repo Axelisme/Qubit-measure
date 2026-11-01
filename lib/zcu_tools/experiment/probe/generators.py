@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc, lorfunc
 from zcu_tools.analysis.fitting.anticross import get_predict_ys
+from zcu_tools.analysis.fitting.multi_decay import TransitionRates, model_func
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 
 from .shot_generators import GaussianCloudParameters as GaussianCloudParameters
@@ -94,6 +95,21 @@ class ConicParameters:
     d: float
     e: float
     f: float
+
+
+@dataclass(frozen=True)
+class MultiDecayParameters:
+    """Three-state Markov truth at elapsed time zero.
+
+    rates holds nonnegative ge/eg/eo/oe/go/og transition rates; each two-letter
+    name means source to destination, in inverse time units. initial_g and
+    initial_e are populations in [0,1] whose sum is at most one. The remaining
+    population is state o. No readout/confusion matrix is applied.
+    """
+
+    rates: TransitionRates
+    initial_g: float
+    initial_e: float
 
 
 def _coordinates(xs: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -258,3 +274,29 @@ def generate_anticrossing(
     if not np.all(np.isfinite(branches)):
         raise ValueError("conic must have finite real branches on xs")
     return branches + _noise(branches.shape, noise_std, seed)
+
+
+def generate_multi_decay(
+    times: NDArray[np.float64], truth: MultiDecayParameters, noise_std: float, seed: int
+) -> NDArray[np.float64]:
+    """Return (len(times), 3) float64 g/e/o populations from model_func.
+
+    times contains finite nonnegative elapsed times since preparation, not
+    absolute timestamps. truth gives six rates in inverse time units and
+    initial g/e populations; o is their complement. noise_std is independent
+    additive Gaussian population measurement noise; no clipping or
+    renormalization is applied, so noisy rows need not sum to one. seed
+    initializes a local RNG. Invalid coordinates, rates, populations or noise
+    raise ValueError. Inputs are unchanged.
+    """
+    _coordinates(times)
+    rates = truth.rates.as_array()
+    if np.any(times < 0) or not np.all(np.isfinite(rates)) or np.any(rates < 0):
+        raise ValueError("times and rates must be finite and nonnegative")
+    if not (0 <= truth.initial_g <= 1 and 0 <= truth.initial_e <= 1
+            and truth.initial_g + truth.initial_e <= 1):
+        raise ValueError("initial populations must lie in the probability simplex")
+    populations = model_func(
+        times, *truth.rates.as_tuple(), truth.initial_g, truth.initial_e
+    )
+    return populations + _noise(populations.shape, noise_std, seed)
