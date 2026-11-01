@@ -289,16 +289,26 @@ class AcquisitionRunner:
         and on_stop; data stop must be disabled by the caller. Return True on
         completion, False on cooperative external stop. A stopped Schedule
         records its outcome. Producer errors retry then propagate unchanged;
-        KeyboardInterrupt never retries. on_stop runs once after scope release
-        and progress cleanup. Requires an active owner and nonnegative retry.
+        progress callback errors propagate unchanged without retry or marking
+        acquisition failed. KeyboardInterrupt never retries. on_stop runs once
+        after scope release and progress cleanup. Requires an active owner and
+        nonnegative retry.
         """
 
         def attempt(observation: _AcquireProgress) -> object:
+            def update_hook(
+                ir: int, _raw: object, _cancel_flag: CancelFlagProtocol
+            ) -> None:
+                try:
+                    observation.pbar.set_progress(ir)
+                except Exception as exc:
+                    raise _CallbackError(exc) from exc
+
             return self._acquire_once(
                 acquire=acquire,
                 options=options,
                 acquire_kwargs=dict(acquire_kwargs, rounds=1),
-                round_hook=lambda ir, raw, flag: observation.pbar.set_progress(ir),
+                round_hook=update_hook,
             )
 
         return self._run_attempts(

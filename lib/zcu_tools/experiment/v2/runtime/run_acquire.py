@@ -236,7 +236,10 @@ class RunAcquisitionMixin(ABC):
         ValueError rejects negative retry, converter or stop_condition policies,
         and rounds other than the single positive integer 1. RuntimeError means
         program.get_raw() provided no raw shot buffer after successful acquire.
-        Neither raw-buffer access failures nor on_stop failures are retried.
+        Progress callback errors propagate unchanged without retry or marking
+        acquisition failed, after acquire scope release and progress cleanup;
+        they do not call on_stop. Neither raw-buffer access failures nor on_stop
+        failures are retried.
         """
         selected, rounds, acquire_options = _adapt_run_options(options, qick_options)
         if selected.converter is not None or selected.stop_condition is not None:

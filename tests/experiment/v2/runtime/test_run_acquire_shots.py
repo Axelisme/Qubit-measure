@@ -177,6 +177,48 @@ def test_pre_stopped_schedule_observes_once_without_acquiring(
     assert sched.outcome.status == "stopped"
 
 
+@pytest.mark.parametrize("use_step", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, AcquisitionContractError])
+def test_progress_callback_failure_propagates_without_retry_or_failed_outcome(
+    use_step: bool,
+    error_type: type[Exception],
+    active_run: ShotRun,
+) -> None:
+    root, sched, producer = active_run
+    cause = error_type("progress observer failed")
+    observed: list[bool] = []
+
+    class FailingProgressBar(RecordingProgressBar):
+        """Fail at the external progress observer boundary."""
+
+        def set_progress(self, value: int | float) -> None:
+            raise cause
+
+    bar = FailingProgressBar()
+    owners = (
+        (step for _, step in sched.scan("point", [0])) if use_step else iter([sched])
+    )
+    for owner in owners:
+        with (
+            use_pbar_factory(lambda *args, **kwargs: bar),
+            pytest.raises(error_type) as caught,
+        ):
+            owner.run_acquire_shots(
+                producer,
+                object(),
+                options=RunOptions(retry=2, on_stop=lambda: observed.append(True)),
+            )
+        assert caught.value is cause
+    assert producer.calls == 1
+    assert producer.raw_reads == 0
+    assert bar.closed
+    assert not root.cancel("acquire").cancelled
+    assert root.active_path == sched.scope.path
+    assert observed == []
+    assert sched.outcome.status == "completed"
+    assert not sched.is_stop()
+
+
 @pytest.mark.parametrize("retry", [0, 1])
 @pytest.mark.parametrize("overrun", [False, True])
 def test_producer_errors_use_explicit_retry_budget(
