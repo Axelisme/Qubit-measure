@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -25,6 +27,8 @@ from zcu_tools.gui.app.measure.flux_pick_plugin import (
 )
 from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerScheduler
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+from tests.gui._user_input import ComponentDriver
 
 
 class _DeferredEnv:
@@ -382,10 +386,16 @@ def test_auto_align_submission_failure_keeps_editing_and_logs_traceback(
         qapp.processEvents()
 
 
-def test_terminal_buttons_remain_at_bottom_of_side_panel(qapp):
+def test_terminal_buttons_remain_at_bottom_of_side_panel(qapp, tmp_path: Path):
     widget, _plugin, _session, _env, _done, _cancel, _canvas = _frontend(qapp)
-    widget.resize(1100, 700)
-    qapp.processEvents()
+    ui = ComponentDriver(widget)
+    evidence = Path(os.environ.get("FLUX_PICK_EVIDENCE", str(tmp_path)))
+    for width, height in ((1100, 700), (1600, 950)):
+        ui.resize_window(width, height)
+        ui.screenshot(evidence / f"flux-pick-{width}x{height}.png")
+        assert ui.observe("Done").visible
+        assert ui.observe("Cancel").visible
+    ui.resize_window(1100, 700)
     done = _button(widget, "Done")
     cancel = _button(widget, "Cancel")
     info = next(

@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -85,7 +86,8 @@ class FluxPickFrontend[R: FluxPickResult](InteractiveFrontend):
 
         controls = QWidget(self)
         buttons = QVBoxLayout(controls)
-        controls.setFixedWidth(200)
+        controls.setMinimumWidth(200)
+        controls.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         hint = QLabel(
             "Left-click near a line to select it. Move to preview, then click "
             "to place it. Press Esc to cancel the preview."
