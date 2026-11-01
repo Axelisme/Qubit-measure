@@ -1,11 +1,9 @@
 """Analyze caller records without running acquisition or persistence."""
 
 from dataclasses import dataclass
-from io import BytesIO
 from typing import Any, TypeVar
-from urllib.parse import quote
 
-from matplotlib import rc_context, style
+from matplotlib import style
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting import DEFAULT_STYLE
@@ -13,6 +11,7 @@ from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from ..base import Experiment
 from ..records import RunRecord
+from ._png import encode_pngs
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
@@ -50,12 +49,7 @@ def analysis_stage(
     try:
         analysis = experiment.analyze(record, options, plots=plots)
         plots.finish()
-        pngs: dict[str, bytes] = {}
-        for name in plots:
-            buffer = BytesIO()
-            with rc_context({"savefig.bbox": None}):
-                plots[name].savefig(buffer, format="png", dpi=100)
-            pngs[f"analysis-{quote(name, safe='')}.png"] = buffer.getvalue()
+        pngs = encode_pngs(plots.items(), prefix="analysis-")
         return AnalysisStageResult(analysis, pngs)
     finally:
         plots.finish(present=False)

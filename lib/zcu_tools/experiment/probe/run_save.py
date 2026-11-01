@@ -1,14 +1,12 @@
 """Independent acquisition and native persistence stages for offline callers."""
 
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from time import perf_counter
 from typing import Generic, TypeVar
-from urllib.parse import quote
 
 import numpy as np
-from matplotlib import rc_context, style
+from matplotlib import style
 
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import load
@@ -22,6 +20,7 @@ from ..records import RunRecord
 from ..simulation import SimulationEnvironment
 from ._acquisition import acquire_record
 from ._comparison import compare_roundtrip
+from ._png import encode_pngs
 
 _Cfg = TypeVar("_Cfg", bound=ConfigBase)
 _Result = TypeVar("_Result")
@@ -139,13 +138,10 @@ def run_stage(
             record, spec=experiment.AXES_SPEC, comment=""
         )
         plots.finish()
-        pngs: dict[str, bytes] = {}
-        for name, figure in plots.items():
+        for figure in plots.values():
             if figure.get_layout_engine() is None:
                 figure.set_layout_engine("tight")
-            with BytesIO() as buffer, rc_context({"savefig.bbox": None}):
-                figure.savefig(buffer, format="png", dpi=100)
-                pngs[f"live-{quote(name, safe='')}.png"] = buffer.getvalue()
+        pngs = encode_pngs(plots.items(), prefix="live-")
         return RunStageResult(record, perf_counter() - started, pngs)
     finally:
         plots.finish(present=False)

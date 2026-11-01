@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.experiment import AxesSpec, probe
+from zcu_tools.experiment import AxesSpec, native_persistence, probe
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 
@@ -111,3 +111,23 @@ def test_save_propagates_native_io_failure(tmp_path: Path):
     (tmp_path / "data.h5").mkdir()
     with pytest.raises(IsADirectoryError):
         probe.save_stage(record, spec, tmp_path)
+
+
+def test_save_propagates_original_native_restore_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = SavingCore.AXES_SPEC
+    record = RunRecord(
+        SavingCfg(),
+        SavingResult(np.array([1.0]), np.array([2 + 3j])),
+        native_metadata(spec.tag).model_dump(mode="json"),
+    )
+    error = ValueError("native restore failed")
+
+    def failing_restore(_stored, *, spec):
+        raise error
+
+    monkeypatch.setattr(native_persistence, "restore_run", failing_restore)
+    with pytest.raises(ValueError) as caught:
+        probe.save_stage(record, spec, tmp_path)
+    assert caught.value is error
