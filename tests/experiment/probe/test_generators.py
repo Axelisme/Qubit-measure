@@ -56,3 +56,48 @@ def test_synthesize_adds_independent_gaussian_noise_with_local_seed(complex_outp
     assert_array_equal(state[1], after[1])
     assert state[2:] == after[2:]
     assert_allclose(values, 2.0 + 3.0j if complex_output else 2.0, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "xs, noise_std, message",
+    [
+        (np.array([]), 0.0, "xs"),
+        (np.empty((2, 0)), 0.0, "xs"),
+        (np.array([np.nan]), 0.0, "xs"),
+        (np.array([np.inf]), 0.0, "xs"),
+        (np.array([-np.inf]), 0.0, "xs"),
+        (np.array([1.0]), -0.1, "noise_std"),
+        (np.array([1.0]), np.nan, "noise_std"),
+        (np.array([1.0]), np.inf, "noise_std"),
+        (np.array([1.0]), -np.inf, "noise_std"),
+    ],
+)
+def test_synthesize_rejects_only_declared_invalid_inputs_before_model(
+    xs, noise_std, message
+):
+    def model(coordinates: NDArray[np.float64]):
+        pytest.fail("invalid input reached model")
+
+    with pytest.raises(ValueError, match=message):
+        generators.synthesize(model, xs, [], noise_std=noise_std, seed=17)
+
+
+def test_synthesize_leaves_parameters_output_and_exceptions_to_model():
+    xs = np.array(1.0)
+    values = np.array([np.nan, np.inf, -np.inf])
+
+    def model(coordinates: NDArray[np.float64], value: float):
+        assert np.isnan(value)
+        return values
+
+    assert_array_equal(
+        generators.synthesize(model, xs, [np.nan], noise_std=0.0, seed=17), values
+    )
+    failure = RuntimeError("native model failure")
+
+    def broken_model(coordinates: NDArray[np.float64], value: float):
+        raise failure
+
+    with pytest.raises(RuntimeError) as caught:
+        generators.synthesize(broken_model, xs, [-1.0], noise_std=0.0, seed=17)
+    assert caught.value is failure
