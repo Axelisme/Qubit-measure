@@ -364,7 +364,7 @@ def _mux_channel_contents(
     return replace(content, events=tuple(selected))
 
 
-def plan_template(
+def plan_template(  # noqa: PLR0913  # tolerated: seven independent inputs with distinct owners (settings, snapshot/devices, template, time base, readout calibration, model facts, board profile); pairing any two would add a class with one caller
     settings: FTFSettings,
     snapshot: EnvironmentSnapshot,
     template: TimelineTemplate,

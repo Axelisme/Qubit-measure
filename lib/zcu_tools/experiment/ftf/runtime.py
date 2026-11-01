@@ -521,7 +521,7 @@ class FTFSource:
     Calls are synchronous, serialized by SimulationBinding, not thread-safe.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # tolerated: seven independent inputs with distinct owners (settings, snapshot/devices, template, time base, readout calibration, model facts, board profile); pairing any two would add a class with one caller
         self,
         settings: FTFSettings,
         devices: DeviceManager,
