@@ -212,7 +212,7 @@ def test_builder_forwards_author_register_time_hint(mock_soccfg):
     assert [waves(s) for s in shots(builder.build())] == [[10], [20], [30]]
 
 
-def _readout(name="read", *, gain: float | QickParam = 0.5):
+def _readout(name="read", *, gain: float | QickParam = 0.5, post_delay: float = 0.05):
     return PulseReadout(
         name,
         PulseReadoutCfg(
@@ -223,7 +223,7 @@ def _readout(name="read", *, gain: float | QickParam = 0.5):
             gain=gain,
             waveform=ConstWaveformCfg(length=0.1),
             ro_length=0.2,
-            post_delay=0.05,
+            post_delay=post_delay,
         ),
     )
 
@@ -581,7 +581,7 @@ def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
     mock_soccfg,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.emit(readout, tag="before")
     builder.delay_by_timeline()
     with builder.repeat("outer", 2):
@@ -663,7 +663,7 @@ def test_builder_branch_timeline_delays_inside_repeat_match_native(mock_soccfg):
 
 def test_builder_fork_emit_join_matches_native_and_captures_target_names(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout, pulse = _readout(), _pulse("drive")
+    readout, pulse = _readout(post_delay=0.1), _pulse("drive")
     targets = ["read", "drive"]
     builder.fork("default", into=targets)
     targets.clear()
@@ -1001,6 +1001,7 @@ def test_mux_objects_share_resources_despite_different_emission_timing():
     )
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
     builder.emit(first)
+    builder.timeline_inc(0.1)  # Author spacing keeps the shared ADC windows disjoint.
     builder.emit(second)
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
@@ -1010,8 +1011,8 @@ def test_mux_objects_share_resources_despite_different_emission_timing():
 
 def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    builder.emit(_readout("first"))
-    builder.emit(_readout("second"))
+    builder.emit(_readout("first", post_delay=0.1))
+    builder.emit(_readout("second", post_delay=0.1))
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
     assert prog.ro_chs[0]["length"] == 61

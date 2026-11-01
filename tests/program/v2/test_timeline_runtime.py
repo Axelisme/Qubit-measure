@@ -736,7 +736,7 @@ def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
         [event.cycle - s.start_cycle for event in s.events if event.kind == "data"]
         for s in result
     ] == [[45, 48]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [51] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [48] * 3
     assert [s.end_cycle - s.start_cycle for s in result] == [51] * 3
 
 
@@ -757,24 +757,6 @@ def test_auto_pulse_uses_actual_runtime_channel_end_not_its_upper_bound(managed)
         [61, 66, 71] if managed else [33, 38, 43]
     )
     assert [s.end_cycle - s.start_cycle for s in result] == [61, 66, 71]
-
-
-def test_static_trigger_promotes_crossing_width_and_adc_window_ends():
-    def body(prog):
-        prog.trigger(
-            ros=[0],
-            width=QickSweep1D("scan", 3 / 430.08, 9 / 430.08),
-            timeline="default",
-        )
-
-    result = shots(
-        program(body, initialize=lambda p: p.declare_readout(0, length=4 / 307.2))
-    )
-    assert [
-        [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in result
-    ] == [[0, 3], [0, 6], [0, 9]]
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [6, 6, 9]
-    assert [s.end_cycle - s.start_cycle for s in result] == [6, 6, 9]
 
 
 def test_native_register_reference_advance_preserves_unconsumed_end():

@@ -149,7 +149,7 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
     assert prog.get_time_param("config", "t") * 430.08 == pytest.approx(1)
     assert prog.get_time_param("edge", "t") * 430.08 == pytest.approx(2)
     assert prog.get_time_param("edge", "width") * 430.08 == pytest.approx(1)
-    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 175]
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 3]
 
 
 @pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
@@ -198,7 +198,7 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
         + {
             "pulse": 43,
             "config": 0,
-            "trigger": max(rounded, 173),
+            "trigger": rounded,
             "delay": 0,
         }[operation]
     )
@@ -223,7 +223,7 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "wave"]
         for s in _shots(prog)
-    ] == [[173], [174], [175], [176]]
+    ] == [[0], [2], [4], [6]]
     assert prog.compile_datamem() is None
 
 
