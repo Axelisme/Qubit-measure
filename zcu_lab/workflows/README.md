@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查找各量測 workflow 的科學流程、表單與註冊入口。
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-01，workflow 自行取數與 retry 來源
 
 - `coherence_fluxdep/`：逐個 flux 點校準，可選擇保存 singleshot GE 原始資料，再量測 T1、Ramsey 與 Hahn echo。
 - `mist_fluxdep/`：逐個 flux 點校準並掃描 MIST disturbance gain。
@@ -67,19 +67,41 @@ Plan 是 frozen、extra-forbid 的 Pydantic model。Tunables 是 extra-forbid mo
 每次 `tun.current` 取得目前已接受的完整 model。需要子 model 時直接讀
 `tun.current.t1` 或 `tun.current.cal`，再傳給該段 helper。
 
-直接轉送 operation 的薄 helper 可以接同一個 Scope 與 typed cfg。量測＋分析的 stage 接 pulses、settings 與 guess，不收完整 experiment cfg：
+Workflow 自己寫同步 `run_<exp>(cfg, *, context: RunContext, retry: int) -> Result`，
+在函式內組 program 並呼叫 Schedule／step 的取數入口。Cfg 是位置參數，context 與 retry 是 keyword-only。
+Helper 把 retry 原樣傳給 `RunOptions(retry=retry)`。Stage 從本次接受的 workflow settings 取 retry，
+以 `functools.partial` 綁定後交給 `run_core` 或 `acquire_saved`：
 
 ```python
-from zcu_tools.experiment.run_core import run_core
+from functools import partial
 
-async def run_t1(scope: Scope, cfg: T1Cfg):
-    return await run_core(scope, T1Exp().run, cfg, name="T1")
+from zcu_tools.experiment.run_core import run_core
+from zcu_tools.experiment.scope import Scope
+from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
+from zcu_lab.workflows.common.lifetime_acquire import run_t1
+
+
+async def acquire_t1(scope: Scope, cfg: T1Cfg, settings: T1Tunables):
+    return await run_core(
+        scope, partial(run_t1, retry=settings.acquire_retry), cfg, name="T1"
+    )
 ```
 
-需要不同序列時，寫同步 `def acquire(cfg, *, context: RunContext) -> Result`，
-再用 `await run_core(iteration, acquire, cfg, name="frequency")` 呼叫。
-Cfg 是位置參數，context 是 keyword-only。不要複製 core 的 pulse 序列。
+`common/calibration_acquire.py` 放 frequency、LenRabi、AmpRabi 與 readout 取數，
+`common/lifetime_acquire.py` 放共用 T1 與 Echo 取數。
+Coherence 的 Ramsey／GE、MIST 與 mux lifetime 取數各放在該 workflow 的 `acquire.py`。
+`run_ge(cfg, *, context)` 不收 retry，維持 0，因為 singleshot settings 沒有 retry 欄位。
+校準的 frequency、Rabi、readout 分別取 `qf_acquire_retry`、`rabi_acquire_retry`、`ro_acquire_retry`。
+Lifetime 與 MIST 取該 stage settings 的 `acquire_retry`，不從 core cfg 讀取。
+
+Workflow 沿用 core 的 Cfg／Result 型別，保存時傳入 `<Exp>.AXES_SPEC`，不實例化 Exp 或呼叫它的 run／analyze。
+Native cfg 不含 workflow retry；retry 留在 workflow tunables 的 accepted input。
+修改 pulse 序列、取數分支、retry 或分析步驟時，改 workflow 的 helper，不改 core 實驗。
+分析直接呼叫 `zcu_tools.analysis` 的 fit 工具，`*_signal2real` 放在 workflow 的取數模組。
+量測與分析的 stage 接 pulses、settings 與 guess，在 stage 內組 cfg。
 需要 workflow 圖的 helper 明收 `plots: Plots`。Identity 與 live device cfg 從 scope 取得。
+自行組 T1 program 與保存的範例見[教學](../tutorial/05-workflow.md#用-scope-執行-workflow-取數)。
 
 `env` 是 workflow 根。`with env.scope("calibration") as scope` 建作者 child。
 逐點量測用 `zip(plan.fluxes, env.iterations())`，變數命名為 `iteration`。
@@ -112,7 +134,7 @@ Early-stop SNR 留空（None）即關閉。Spectroscopy 預設 50，LenRabi／Am
 Builder 在 SNR 提前停止時以 info 記錄 stop value 與完成 rounds，mux 的值是 active tones 的最小 SNR。非有限值記 None。
 每次 acquire retry 以 warning 記錄原因與下一次 attempt number。舊檔的 `acquisitions` key 在載入時忽略，不轉換或寫回。
 
-`Completed.value` 是 core 的 RunRecord。`Completed.facts` 是同時寫入 journal 與信封的 operation 事實。
+`Completed.value` 是 workflow 取數的 RunRecord。`Completed.facts` 是同時寫入 journal 與信封的 operation 事實。
 Iteration 序號取自 iteration 物件，不取成功 commit 數，跳過未提交點也不重用序號。
 Saver 收 Completed、歷史 snapshot 與 scope.identity，不重新捕捉 evidence。
 每次 run attempt 建獨立 operation Plots，workflow 趨勢圖留在 env.plots。
@@ -137,7 +159,9 @@ Frequency widening 以最後一次完整 attempt 取代該點的一列。Heatmap
 
 Coherence 的 `measure_singleshot` 預設關閉。打開後，GE 在 readout 校準之後、lifetimes 之前執行。
 GE 要求本點 Rabi 已接受。主迴圈判斷資格與最小間距，呼叫 `stages.ge.measure_ge` 後填 `singleshot`；每個已保存 Completed（含 partial）更新最後 GE flux。`singleshot` 子表單控制 flux 最小間距與每種 preparation 的 shots。
-預設是暫定模擬值：間距 0、shots 100000。GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖；core 的 operation 即時圖照常。
+預設是暫定模擬值：間距 0、shots 100000。
+GE 只保存 `singleshot-ge.h5`，不擬合、不新增 workflow 圖。
+`coherence_fluxdep.acquire.run_ge` 的 operation 即時圖顯示 probe-off/on IQ clouds。
 
 Coherence 與 MIST 的 frequency stage 預設使用 two-step 掃描，粗掃寬度 `coarse_span_mhz` 預設 100 MHz，widening 時乘上 `qf_widen` 的倍率。細掃寬度預設 30 MHz，可用 `fine_span_mhz` 覆寫。
 Frequency stage 使用獨立 `probe_pulse`，保留它的 waveform 與長度，頻率由 tracker 的掃描設定。
@@ -168,7 +192,7 @@ MIST 的 gain-<mode>.png 使用 Result 的實際 gains/signals；map-<mode>.png 
 這些保存不讀 operation 圖、不改 native raw／export 格式，也不更動科學序列。Overnight 的趨勢圖維持原樣，新增的 model comparison 圖不自動保存。
 
 每個 operation 只呼叫一次。框架不丟棄合作停止的回傳值，也不自動重跑。
-子層取消後，core 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.facts.stopped。
+子層取消後，取數 helper 回傳就交付 Completed。作者先保存 raw，再檢查 Completed.facts.stopped。
 facts.stopped 只表示 operation 自己的 stop bit，不表示框架判定資料不完整。只取消子孫時仍為 false。
 這些 workflow 由作者把 facts.stopped 為 true 的回傳資料分類為 partial，存檔明填 completion=stopped，不進擬合或接受，保留拒絕原因，也不更新 accepted history。
 根 Stop 則在下一個 async operation 或 Ask raise ScriptCancelled。進行中工作先 drain 並留 facts。
@@ -201,7 +225,7 @@ Data root 的 point `record.json` 與 metadata root 的 run 摘要是不同檔�
 
 ## Async await guardrail
 
-作者可寫 `await iteration.call(...)`、`await run_core(iteration, core.run, cfg)` 或 `await helper(scope, cfg)`。
+作者可寫 `await iteration.call(...)`、`await run_core(iteration, acquire, cfg)` 或 `await helper(scope, cfg)`。
 Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def。Lib 唯一例外是 `zcu_tools.experiment.run_core.run_core`，直接 import alias 也以完整路徑核對。
 所有 lab async def 統一只 await env／scope／iteration／tab／session 的呼叫、lib run_core 或 lab 內定義的 helper，helper 可再呼叫 helper。
 Quality gate 全掃 async def 本文，不依 decorator 或可達性選集。
