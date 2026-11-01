@@ -182,6 +182,7 @@ Ceil 以 `math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` 吸收接�
 
 編譯期以軸 ID 對齊時間分量，已知軸保存一維值，未知軸保存範圍與係數，常數使用大小 1 的固定軸。
 加減先合併同軸分量並消去零項。已知軸上逐點全等的分量移到常數軸，結尾因此為常數時不配置 end register。
+編譯期已知的跨格點換算 bias 以字面值進入運算；span 為 0 的換算參數不配 sweep register。只差編譯期常數的 runtime 結尾沿用既有 register，以字面值位移表示，consumer 需要獨立 register operand 時才物化。2026-11-01 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的代理授權，為無同步 chevron 與遷移後 RB／IRB 的 16 data register 容量定下這兩條。
 同一已知軸的非線性運算逐點算；跨軸 ceil／定點換算保留原式，另加有界誤差軸，不建多維網格。
 跨軸 max／min 以線性部分加有理係數的 Abs 項表示，允許負係數及巢狀 Abs。
 取界依共用軸分連通塊，塊內分支定界。每塊超過 20 個未定號 Abs 項才退回區間界，退回不改 runtime 真值。
@@ -411,5 +412,5 @@ IR analysis 是編譯結果分析，不是物理模擬 frontend，不產生模�
 
 作者必須明確同步 timeline 與原生 reference，不能以未同步的原生 pulse 代替序列發射。
 Runtime timeline 承接無法靜態精確表示的時間。已知來源保留 bounds、provenance 與可證明重疊的拒絕，無 hint 作者時間的未知段由作者負責合法性。
-Data register 上限仍為 16，不保證任意序列都能編譯。不加同步的 chevron 容量優化另案處理，實驗仍保留 drive Join 後的明確同步。
+Data register 上限仍為 16，不保證任意序列都能編譯。實驗仍保留 drive Join 後的明確同步。
 原生寫法與公開 API 範例由 [program README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline) 維護，module 宣告與 owner 邊界見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)。
