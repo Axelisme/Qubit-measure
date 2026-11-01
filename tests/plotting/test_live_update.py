@@ -270,9 +270,3 @@ def test_decorators_share_axes_for_repeated_and_one_off_updates(
     assert axes.get_title() == "One-off"
     assert host.refreshed == [(figure, False), (figure, False)]
     assert host.presented == [figure]
-
-
-
-
-
-

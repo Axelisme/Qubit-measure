@@ -106,7 +106,9 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                     variable="sums",
                     axes=(
                         VariableAxisSpec.generated_arange(label="components", unit=""),
-                        VariableAxisSpec.generated_arange(label="herald_states", unit=""),
+                        VariableAxisSpec.generated_arange(
+                            label="herald_states", unit=""
+                        ),
                         VariableAxisSpec(
                             label="Time", unit="s", field_name="times", scale=1e-6
                         ),

@@ -125,6 +125,7 @@ def test_probe_exports_current_figure_sizes(
     class SizedExperiment(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
             result = super().run(config, context=context)
+
             @context.plots.on_plot_thread
             def resize(size: tuple[float, float]):
                 figure = context.plots["signal/trace"]
@@ -189,9 +190,16 @@ def test_probe_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
                 VariableSpec(
                     "response",
                     axes=(
-                        VariableAxisSpec(label="coordinate", unit="s", field_name="frequency", scale=1e-6),
+                        VariableAxisSpec(
+                            label="coordinate",
+                            unit="s",
+                            field_name="frequency",
+                            scale=1e-6,
+                        ),
                     ),
-                    z=VariableZSpec("signal", label="signal", unit="V", dtype=np.complex128),
+                    z=VariableZSpec(
+                        "signal", label="signal", unit="V", dtype=np.complex128
+                    ),
                 ),
             ),
             result_type=SavingResult,
@@ -271,7 +279,14 @@ def grouped_comparison_spec() -> GroupedAxesSpec[_ComparisonResult, SavingCfg]:
         variables=(
             VariableSpec(
                 "response",
-                axes=(VariableAxisSpec(label="coordinate", unit="s", field_name="coordinate", scale=1e-6),),
+                axes=(
+                    VariableAxisSpec(
+                        label="coordinate",
+                        unit="s",
+                        field_name="coordinate",
+                        scale=1e-6,
+                    ),
+                ),
                 z=VariableZSpec("signal", label="signal", unit="V", scale=1e-3),
             ),
             VariableSpec(
@@ -324,7 +339,11 @@ def mixed_scale_spec() -> GroupedAxesSpec[_ColumnResult, SavingCfg]:
                 f"column_{column}",
                 axes=(VariableAxisSpec(label="sample", unit="", values=(0, 1)),),
                 z=VariableZSpec(
-                    "params", label=f"parameter_{column}", unit="", scale=scale, index=column
+                    "params",
+                    label=f"parameter_{column}",
+                    unit="",
+                    scale=scale,
+                    index=column,
                 ),
             )
             for column, scale in enumerate((1e-6, 1.0, 1e6))

@@ -240,10 +240,6 @@ def test_live_name_conflict_does_not_present_another_figure() -> None:
     plots.finish()
 
 
-
-
-
-
 def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
     host = RecordingHost()
     parent = Plots(host)

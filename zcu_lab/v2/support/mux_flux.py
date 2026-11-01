@@ -444,7 +444,9 @@ def mux_flux_spec[C: ConfigBase](
         label="Tone", unit="", field_name="tone_indices", dtype=np.int64
     )
     point = VariableAxisSpec.generated_arange(label="Point", unit="", dtype=np.int64)
-    flux = VariableAxisSpec.generated_arange(label="Flux point", unit="", dtype=np.int64)
+    flux = VariableAxisSpec.generated_arange(
+        label="Flux point", unit="", dtype=np.int64
+    )
 
     def build(data: GroupedLoadData[C]) -> MuxFluxResult:
         values = data.variable("flux_values")

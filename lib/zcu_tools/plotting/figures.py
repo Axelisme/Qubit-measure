@@ -122,6 +122,7 @@ class FigureCollection(Mapping[str, Figure]):
         raise ValueError. Adding figures after seal raises RuntimeError.
         Return a Figure and Matplotlib's scalar, 1-D or 2-D axes shape.
         """
+
         def create(
             nrows: int = 1, ncols: int = 1, **kwargs: Any
         ) -> tuple[Figure, Axes | NDArray[np.object_]]:

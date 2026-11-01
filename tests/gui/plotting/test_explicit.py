@@ -419,10 +419,6 @@ def test_clearing_container_preserves_caller_replaced_canvas(qapp, hosts) -> Non
     plots.release()
 
 
-
-
-
-
 def test_qt_diagnostic_finish_does_not_attach_regular_figure(hosts) -> None:
     stacks, _containers, adapters = hosts
     plots = Plots(adapters[0])

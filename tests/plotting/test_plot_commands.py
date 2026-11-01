@@ -35,12 +35,6 @@ class OwnerHost(NonPresentingHost):
         self.refreshed.append(figure)
 
 
-
-
-
-
-
-
 @pytest.mark.parametrize("finished", [False, True])
 def test_save_uses_owner_without_refresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, finished: bool

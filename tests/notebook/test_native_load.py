@@ -80,12 +80,22 @@ class GroupedCore(NativeCore):
         variables=(
             VariableSpec(
                 "signal",
-                (VariableAxisSpec(label="Frequency", unit="Hz", field_name="frequency", scale=1e6),),
-                VariableZSpec("signal", label="Signal", unit="V", scale=1e-3, dtype=np.complex128),
+                (
+                    VariableAxisSpec(
+                        label="Frequency", unit="Hz", field_name="frequency", scale=1e6
+                    ),
+                ),
+                VariableZSpec(
+                    "signal", label="Signal", unit="V", scale=1e-3, dtype=np.complex128
+                ),
             ),
             VariableSpec(
                 "decay",
-                (VariableAxisSpec(label="Delay", unit="s", field_name="delay", scale=1e-6),),
+                (
+                    VariableAxisSpec(
+                        label="Delay", unit="s", field_name="delay", scale=1e-6
+                    ),
+                ),
                 VariableZSpec("decay", label="Decay", unit="", dtype=np.float64),
             ),
         ),
