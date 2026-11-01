@@ -1,9 +1,10 @@
 """Table and reset effects read from public compiled programs, not Module trees."""
 
+from tests.program._profiles import load_soccfg
 import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import Delay, LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
@@ -48,7 +49,7 @@ def receiver():
 
 
 def module_program(modules, *, sweep=(), reps=2, body=None, data_registers=16):
-    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0),))
+    env = white_noise(load_soccfg(n_gens=3), std_adc=0, routes=((0, 0),), seed=None)
     env.soccfg["tprocs"][0]["dreg_qty"] = data_registers
     builder = TimelineBuilder(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1)
     for name, count in sweep:
@@ -138,7 +139,7 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length()
 
 def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
     gen, adc = readout_freq_words(
-        make_mock_soccfg(), [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+        load_soccfg(), [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
     modules = [
         LoadWord("frequency", gen, "scan", "freq_word"),
@@ -164,7 +165,7 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
 
 def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps():
     gen, adc = readout_freq_words(
-        make_mock_soccfg(), [100, 250, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+        load_soccfg(), [100, 250, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
     table = TablePulseReadout(
         "readout", receiver(), idx_reg="scan", freq_words=gen, ro_freq_words=adc

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import socket
 from collections.abc import Callable, Iterator
 from copy import deepcopy
@@ -61,7 +62,7 @@ from zcu_tools.gui.session.ui.device_dialog import DeviceDialog
 from zcu_tools.gui.session.ui.inspect_dialog import InspectDialog
 from zcu_tools.gui.session.ui.setup_dialog import SetupDialog
 from zcu_tools.gui.widgets.form import FormEditor
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.resources.entry import component_registry
 from zcu_tools.resources.waveform_assets import FormulaRecipe
 
@@ -188,7 +189,7 @@ def control_ui(
         devices = DeviceManager()
         devices.register_device("bias", FakeDevice(fast_mode=False))
     ctrl = Controller(
-        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=load_soccfg())),
         registry,
         None,
         BaseEventBus(),

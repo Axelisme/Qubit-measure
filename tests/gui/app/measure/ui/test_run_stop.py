@@ -1,5 +1,6 @@
 """Run → Stop → core return/failure through visible measure controls."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.program.v2 import make_mock_soccfg
+
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -54,7 +55,7 @@ def stop_window(
             analysis=SampleAdapter.analysis,
         ),
     )
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=soccfg, soccfg=soccfg)),
         registry,

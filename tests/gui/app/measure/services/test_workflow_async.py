@@ -1,5 +1,6 @@
 """Retained async workflow execution through the registered headless owner."""
 
+from tests.program._profiles import load_soccfg
 import json
 from threading import Thread
 
@@ -30,7 +31,7 @@ def retained_ask(qapp, tmp_path):
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
     harness.services.context.use_point(PointUseRequest("source"))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     author = AskAuthor()
     control = WorkflowControlFacet(harness.state, harness.services)

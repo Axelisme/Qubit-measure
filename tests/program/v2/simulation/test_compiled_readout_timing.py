@@ -1,5 +1,6 @@
 """Runtime readout timing through public native compile/request seams."""
 
+from tests.program._profiles import load_soccfg
 from dataclasses import replace
 
 import pytest
@@ -270,7 +271,7 @@ def test_pending_config_fifo_carries_into_later_rep_window():
 
 @pytest.mark.parametrize("second_gen", [0, 1])
 def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_gen):
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=1, routes=((0, 0), (1, 0)))
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=1), std_adc=0, routes=((0, 0), (1, 0)), seed=None)
     try:
         cfg = PulseReadoutCfg(
             gen_ch=0,

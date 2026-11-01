@@ -1,10 +1,11 @@
 """Trusted environment authors can use ordinary Python dataclasses."""
 
+from tests.program._profiles import load_soccfg
 from dataclasses import replace
 
 import pytest
 from zcu_tools.experiment.simulation import load_environment, white_noise
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 from tests.core._simulation import TIME_BASE, tick_tuple
 
@@ -15,11 +16,13 @@ def test_environment_builder_can_resolve_its_own_postponed_annotations(tmp_path)
         "from __future__ import annotations\n"
         "from dataclasses import dataclass, replace\n"
         "from zcu_tools.experiment.simulation import white_noise\n"
+        "from tests.program._profiles import load_soccfg\n"
         "@dataclass\n"
         "class Settings:\n"
         "    label: str = 'authored environment'\n"
         "def build_environment():\n"
-        "    return replace(white_noise(), description=Settings().label)\n"
+        "    return replace(white_noise(load_soccfg(), std_adc=1.0, seed=None, "
+        "routes=((0, 0),)), description=Settings().label)\n"
     )
     environment = load_environment(path)
     try:
@@ -29,10 +32,10 @@ def test_environment_builder_can_resolve_its_own_postponed_annotations(tmp_path)
 
 
 def test_environment_bundle_rejects_a_different_compile_profile():
-    environment = white_noise()
+    environment = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     try:
         with pytest.raises(ValueError, match="matching|match"):
-            replace(environment, soccfg=make_mock_soccfg(n_gens=3))
+            replace(environment, soccfg=load_soccfg(n_gens=3))
     finally:
         environment.devices.close_all_devices()
 
@@ -45,7 +48,7 @@ def test_white_noise_all_routes_acquires_on_any_generator_and_adc(gen_ch, ro_ch)
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    env = white_noise(std_adc=0, seed=17, n_gens=3, n_readouts=2, routes="all")
+    env = white_noise(load_soccfg(n_gens=3, n_readouts=2), std_adc=0, seed=17, routes="all")
     try:
         builder = TimelineBuilder(env.soccfg, reps=2)
         builder.emit(
@@ -76,7 +79,7 @@ def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals()
     )
     from zcu_tools.program.v2.simulation import IntegratedRound
 
-    env = white_noise(std_adc=3, seed=17)
+    env = white_noise(load_soccfg(), std_adc=3, seed=17, routes=((0, 0),))
     try:
         request = AcquireRequest(
             mode="integrated",

@@ -1,5 +1,6 @@
 """A history tab exposes factory failure and retries through the normal Reset."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -14,7 +15,7 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2 import make_mock_soccfg
+
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
@@ -36,7 +37,7 @@ def history_ui(
         ctrl.setup_control.new_entry(EntryRequest("current"))
         ctrl.setup_control.new_point(PointCreateRequest("p", "", CommandOrigin("gui")))
         ctrl.session_services.soc_connection.install_soc(
-            MagicMock(), make_mock_soccfg()
+            MagicMock(), load_soccfg()
         )
         ctrl.context_control.add_component("Q1", "history/source", {})
         ctrl.context_control.apply_alias_rows((AliasRow("history", "Q1"),))

@@ -1,5 +1,6 @@
 """Simulation validates compiled uploads without serializing unused transport data."""
 
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
@@ -17,7 +18,7 @@ class ObservedData(np.ndarray):
 
 
 def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
-    env = white_noise(std_adc=0, seed=1)
+    env = white_noise(load_soccfg(), std_adc=0, seed=1, routes=((0, 0),))
     try:
         program = compile_modules(
             env.soccfg,
@@ -53,7 +54,7 @@ def test_integrated_upload_skips_lists_and_still_rejects_invalid_dtype():
 
 
 def test_integrated_weight_upload_validates_without_serializing():
-    env = white_noise(std_adc=0, seed=1)
+    env = white_noise(load_soccfg(), std_adc=0, seed=1, routes=((0, 0),))
     try:
         program = compile_modules(
             env.soccfg,

@@ -1,5 +1,6 @@
 """Measure composition owns dynamically registered drivers after work drains."""
 
+from tests.program._profiles import load_soccfg
 import sys
 
 import pytest
@@ -7,7 +8,7 @@ from zcu_tools.device import FakeDevice, FakeDeviceInfo
 from zcu_tools.gui.app.measure.app import MeasureGuiBehavior
 from zcu_tools.gui.app.measure.controller import Controller
 from zcu_tools.gui.session.state import DeviceStatus
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 from tests._lab import synthetic_lab
 
@@ -49,7 +50,7 @@ def test_behavior_closes_runtime_registered_drivers_after_drain(assembled_app):
     behavior, assembly = assembled_app
     ctrl = controller_of(assembly.controller)
     driver = ClosingDriver(fast_mode=True)
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.register_device("runtime", driver)
     assert ctrl.device_control.get_device_info("runtime") == driver.get_info()
@@ -76,7 +77,7 @@ def test_close_hardware_isolates_driver_failure_and_still_uninstalls_soc(
     bad = ClosingDriver(fast_mode=True)
     good = ClosingDriver(fast_mode=True)
     bad.fail_close = True
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.register_device("bad", bad)
     ctrl.register_device("good", good)

@@ -1,5 +1,6 @@
 """Production form ownership without tab widgets or live hardware."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Generator
 from dataclasses import replace
 from pathlib import Path
@@ -43,7 +44,7 @@ from zcu_tools.gui.session.events import GateChangedPayload
 from zcu_tools.gui.session.state import DeviceState, DeviceStatus
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.resources.entry import ComponentSchema, component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -299,7 +300,7 @@ def global_sources(
     before = component_registry.kinds()
     component_registry.register("cfg/drive", SourceDrive)
     state = State(
-        SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())
+        SessionEnv(parameters=None, soc=MagicMock(), soccfg=load_soccfg())
     )
     registry = Registry()
     registry.register("global-source", GlobalSourceAdapter)

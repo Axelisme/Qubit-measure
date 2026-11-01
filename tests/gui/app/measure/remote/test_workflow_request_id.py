@@ -1,5 +1,6 @@
 """MCP answers retain the exact question identity through the live RPC owner."""
 
+from tests.program._profiles import load_soccfg
 import json
 
 import pytest
@@ -41,7 +42,7 @@ def answering_client(qapp, tmp_path):
     entry.new_point("source", description="synthetic")
     controller.session_services.context.install_entry(entry)
     controller.session_services.context.use_point(PointUseRequest("source"))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     control = controller.workflow_control()
     control.configure((AskAuthor().attachment(),))

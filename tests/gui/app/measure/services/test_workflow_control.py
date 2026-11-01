@@ -1,5 +1,6 @@
 """Headless workflow hosting through synthetic registrations and shared session."""
 
+from tests.program._profiles import load_soccfg
 import pytest
 from pydantic import BaseModel, ConfigDict
 from zcu_tools.experiment.workflows import (
@@ -51,7 +52,7 @@ def make_control(tmp_path):
 
     from zcu_tools.experiment.simulation import white_noise
 
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     control = facet_type(harness.state, harness.services)
 

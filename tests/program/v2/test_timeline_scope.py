@@ -1,12 +1,13 @@
 """Timed native entry points select lexical scope through both author frontends."""
 
+from tests.program._profiles import load_soccfg
 from contextlib import nullcontext
 from typing import TypedDict
 
 import pytest
 from zcu_tools.program import v2
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 from tests.program.v2.timing_support import shots, waves
 
@@ -109,7 +110,7 @@ def _compile_operation(frontend: str, operation: str, context: str):
         prog.delay_by_timeline(timeline=selected)
         prog.pulse(0, "p", t=0)
 
-    soccfg = make_mock_soccfg(1, 1)
+    soccfg = load_soccfg(1, 1)
     if frontend == "builder":
         builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
         body(builder)

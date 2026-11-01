@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -233,7 +234,7 @@ def blocked_writeback_window(
         PointCreateRequest("working", "", CommandOrigin("gui"))
     )
     ctrl.context_control.set_parameter(target, "general.ext.blocked", 3)
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     tab_id = ctrl.tab_control.new_tab("blocked-writeback")
     window = MainWindow(ctrl, templates=lambda: {})

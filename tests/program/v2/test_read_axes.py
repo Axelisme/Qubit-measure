@@ -6,6 +6,7 @@ from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearCla
 from zcu_tools.program import v2
 from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
@@ -46,7 +47,7 @@ def test_classified_and_mixed_axes_preserve_class_rules_and_axis_order(
     classifier, counts
 ):
     ro = readout(classifier=classifier)
-    prog = compile_modules(v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(load_soccfg(), [ro])
     iq = {
         0: np.array([[-1, 0], [0, 0], [1, 0], [3, 0]], dtype=np.float64).reshape(
             1, 4, 1, 2
@@ -100,7 +101,7 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     classifier, values, expected
 ):
     ro = readout(classifier=classifier)
-    prog = compile_modules(v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(load_soccfg(), [ro])
     process = v2.shot_sums(prog, [v2.Classify("readout")])
     if isinstance(ro.cfg.classifier, CircleClassifier):
         ro.cfg.classifier.g_center = 99j
@@ -120,7 +121,7 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
 @pytest.mark.parametrize("timeline", [True])
 @pytest.mark.parametrize("mux", [False, True])
 def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
-    cfg = mux_soccfg() if mux else v2.make_mock_soccfg()
+    cfg = mux_soccfg() if mux else load_soccfg()
     ro = native_mux((4, 1)).build("readout") if mux else readout()
 
     class Program(v2.TimelineProgramV2):
@@ -159,9 +160,9 @@ def test_labels_resolve_adc_trigger_order_and_repeated_emissions(timeline, mux):
 @pytest.mark.parametrize("timeline", [True])
 def test_empty_axes_fail_when_constructing_processor(timeline):
     prog = (
-        v2.TimelineProgramV2(v2.make_mock_soccfg())
+        v2.TimelineProgramV2(load_soccfg())
         if timeline
-        else compile_modules(v2.make_mock_soccfg(), [readout()])
+        else compile_modules(load_soccfg(), [readout()])
     )
     with pytest.raises(ValueError, match="axes must contain at least one read"):
         v2.shot_sums(prog, [])
@@ -169,7 +170,7 @@ def test_empty_axes_fail_when_constructing_processor(timeline):
 
 @pytest.mark.parametrize("reads", [0, 2])
 def test_processor_rejects_adc_read_count_mismatch(reads):
-    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(load_soccfg(), [readout()])
     process = v2.shot_sums(prog, [v2.IQ("readout")])
     with pytest.raises(ValueError, match=rf"ADC 0.*expected.*1.*actual.*{reads}"):
         process({0: np.zeros((1, 2, reads, 2), dtype=np.float64)})
@@ -180,13 +181,13 @@ def test_processor_rejects_adc_read_count_mismatch(reads):
 )
 def test_tone_must_match_readout_type(mux, tone):
     ro = native_mux((4, 1)).build("readout") if mux else readout()
-    prog = compile_modules(mux_soccfg() if mux else v2.make_mock_soccfg(), [ro])
+    prog = compile_modules(mux_soccfg() if mux else load_soccfg(), [ro])
     with pytest.raises(ValueError, match="tone"):
         v2.shot_sums(prog, [v2.IQ("readout", tone=tone)])
 
 
 def test_declared_reads_must_match_actual_triggers():
-    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(load_soccfg(), [readout()])
     prog.set_reads_per_shot(2)
     with pytest.raises(ValueError, match="ADC 0.*2.*1"):
         v2.shot_sums(prog, [v2.IQ("readout")])
@@ -230,7 +231,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
                     with branch.case(1):
                         pass
 
-    prog = Program(v2.make_mock_soccfg())
+    prog = Program(load_soccfg())
     label = "selected"
     with pytest.raises(ValueError, match=rf"ADC 0.*{control}"):
         v2.shot_sums(prog, [v2.IQ(label)])
@@ -240,7 +241,7 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
 def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
     selected = readout()
     other = readout("other", ch=1)
-    builder = v2.TimelineBuilder(v2.make_mock_soccfg(n_readouts=2))
+    builder = v2.TimelineBuilder(load_soccfg(n_readouts=2))
     builder.add_loop("choice", 2)
     if control == "Repeat":
         with builder.repeat("repeat_scope", 2):
@@ -268,7 +269,7 @@ def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
 @pytest.mark.parametrize("inner", ["Repeat", "Branch"])
 def test_nested_control_rejects_trigger_with_innermost_scope(inner):
     ro = readout()
-    builder = v2.TimelineBuilder(v2.make_mock_soccfg())
+    builder = v2.TimelineBuilder(load_soccfg())
     builder.add_loop("choice", 2)
     builder.emit(ro, tag="selected")
     # Separate the selected 1-us window from nested reads on the same ADC.
@@ -328,7 +329,7 @@ def test_missing_and_ambiguous_labels_list_available_labels(timeline, collision)
             self.timeline_inc(1.0)
             self.emit(ro)
 
-    prog = Program(v2.make_mock_soccfg())
+    prog = Program(load_soccfg())
     label = "readout" if collision else "missing"
     with pytest.raises(ValueError, match=rf"{label}.*available labels.*readout"):
         v2.shot_sums(prog, [v2.IQ(label)])
@@ -352,14 +353,14 @@ def test_explicit_tags_keep_qick_compile_time_uniqueness(native_conflict):
     with pytest.raises(
         RuntimeError, match="two instructions have the same tag duplicate"
     ):
-        Program(v2.make_mock_soccfg())
+        Program(load_soccfg())
 
 
 @pytest.mark.parametrize(
     "classifier", [None, CircleClassifier(g_center=0j, e_center=2 + 0j)]
 )
 def test_missing_or_incomplete_classification_fails_at_construction(classifier):
-    prog = compile_modules(v2.make_mock_soccfg(), [readout(classifier=classifier)])
+    prog = compile_modules(load_soccfg(), [readout(classifier=classifier)])
     with pytest.raises(ValueError, match="classifier missing|GE Post"):
         v2.shot_sums(prog, [v2.Classify("readout")])
 
@@ -379,7 +380,7 @@ def test_parallel_readout_emissions_keep_labels_without_changing_admission():
             self.emit(second, timeline="second")
             self.join("default", "second", into="default")
 
-    prog = Program(v2.make_mock_soccfg(n_gens=2, n_readouts=2))
+    prog = Program(load_soccfg(n_gens=2, n_readouts=2))
     process = v2.shot_sums(prog, [v2.IQ("first"), v2.IQ("second")])
     iq = {ch: np.full((1, 2, 1, 2), ch + 1.0) for ch in (0, 1)}
     np.testing.assert_array_equal(process(iq), [[[2, 4, 4], [2, 4, 4], [2, 4, 4]]])
@@ -432,7 +433,7 @@ def test_mux_classify_only_axes_produce_joint_counts():
 
 
 def test_iq_axis_sums_and_repeated_read_second_moments():
-    prog = compile_modules(v2.make_mock_soccfg(), [readout()])
+    prog = compile_modules(load_soccfg(), [readout()])
     iq = {0: np.array([[[[2, 3]], [[4, 5]]], [[[-1, 2]], [[1, -2]]]], dtype=np.float64)}
     process = v2.shot_sums(prog, [v2.IQ("readout"), v2.IQ("readout")])
     actual = process(iq)

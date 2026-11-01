@@ -1,5 +1,6 @@
 """Known data-memory timing/control through real native compilation."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import replace
@@ -9,7 +10,7 @@ import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.macro.loop import CloseInnerLoop, OpenInnerLoop
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -40,7 +41,7 @@ class DispatchProgram(TimelineProgramV2):
 
 def test_native_compiler_dispatch_uses_public_dmem_without_mutating_it():
     prog = DispatchProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
         initial_delay=20 / 430.08,
         relax_delay=7 / 430.08,
@@ -73,7 +74,7 @@ def test_native_dispatch_range_edges_and_transported_words(count, cycles, end):
         pass
 
     Program.count = count
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(
             prog.prog_list, prog.labels, prog.timing_layout, prog.binprog["dmem"]
@@ -96,7 +97,7 @@ def compile_memory(
             for instruction in instructions:
                 self.append_macro(AsmInst(inst=instruction, addr_inc=1))
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list,
         prog.labels,

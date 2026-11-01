@@ -1,12 +1,13 @@
 """Repeat boundaries through native compilation and linked timing analysis."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 from contextlib import nullcontext
 
 import pytest
 from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.macro.wmem import PulseFromRegs
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
 from tests.program.v2.timing_support import shots as _shots
@@ -38,7 +39,7 @@ def _program(
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=0)
 
 
 class _CountRegister(Macro):

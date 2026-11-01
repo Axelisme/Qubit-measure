@@ -1,5 +1,6 @@
 """Offline probe contracts through public orchestration and in-process entry."""
 
+from tests.program._profiles import load_soccfg
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -63,7 +64,7 @@ def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path:
                 assert custom.xaxis.label.get_fontsize() == 31
             return super().analyze(source, options, plots=plots)
 
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         with matplotlib.rc_context({"axes.labelsize": 37}):
             report = probe(StyledExperiment(), SavingCfg(), environment, tmp_path)
@@ -76,7 +77,7 @@ def test_probe_applies_style_before_run_and_preserves_native_overrides(tmp_path:
 
 
 def test_probe_roundtrips_result_and_exports_live_and_analysis_pngs(tmp_path: Path):
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(ProbeExperiment(), SavingCfg(gain=2), environment, tmp_path)
         assert report.failed_stage is None
@@ -141,7 +142,7 @@ def test_probe_exports_current_figure_sizes(
             plots["fit"].set_size_inches(*analysis_size)
             return summary
 
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(SizedExperiment(), SavingCfg(), environment, tmp_path)
         assert report.failed_stage is None
@@ -167,7 +168,7 @@ def test_probe_accepts_single_scale_native_roundoff(tmp_path: Path):
                 signal=np.array([1 + 2j, 3 - 4j, 5 + 6j]),
             )
 
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(ScaledExperiment(), SavingCfg(), environment, tmp_path)
         assert report.failed_stage is None
@@ -214,7 +215,7 @@ def test_probe_reports_grouped_scale_native_roundoff_as_equal(tmp_path: Path):
         ) -> float:
             return float(source.result.frequency[-1])
 
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(GroupedScaledExperiment(), SavingCfg(), environment, tmp_path)
         assert report.failed_stage is None
@@ -553,7 +554,7 @@ def test_probe_isolates_nested_caller_options_even_when_analysis_fails(
             return {"sample_count": len(options["window"]["samples"])}
 
     options = {"window": {"samples": [2, 4]}}
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(
             MutatingExperiment(), SavingCfg(), environment, tmp_path, options=options
@@ -634,7 +635,7 @@ def test_probe_reports_failed_stage_and_retains_original_exception(
 
     if stage in ("save", "restore"):
         monkeypatch.setattr(native_persistence, f"{stage}_run", fail)
-    environment = white_noise(seed=17)
+    environment = white_noise(load_soccfg(), seed=17, std_adc=1.0, routes=((0, 0),))
     try:
         report = probe(FailingExperiment(), SavingCfg(), environment, tmp_path)
         assert report.failed_stage == stage

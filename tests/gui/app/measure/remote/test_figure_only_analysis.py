@@ -1,5 +1,6 @@
 """Figures-only adapters retain completed analysis without numeric payloads."""
 
+from tests.program._profiles import load_soccfg
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -18,7 +19,7 @@ from zcu_tools.gui.app.measure.state import AnalysisPaneState, PostAnalysisPaneS
 from zcu_tools.gui.form_adapter import Form
 from zcu_tools.gui.session.context_types import EntryRequest, PointUseRequest
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 from tests.experiment._saving_support import SavingCfg, SavingCore
 from tests.gui._qt_waits import qt_until
@@ -84,7 +85,7 @@ def figures_rpc(tmp_path, qapp, post):
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
         controller.session_services.soc_connection.install_soc(
-            MagicMock(), make_mock_soccfg()
+            MagicMock(), load_soccfg()
         )
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), ImmediateScheduler()

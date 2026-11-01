@@ -1,5 +1,6 @@
 """Actual waveform/ADC ends govern module emission at the public compiler seam."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 from fractions import Fraction
 from functools import lru_cache
@@ -8,7 +9,7 @@ from math import ceil
 import numpy as np
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSpan, QickSweep1D
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import (
     ComputedPulse,
     LoadValue,
@@ -64,7 +65,7 @@ def _program(
         def _body(self, cfg):
             body(self)
 
-    profile = make_mock_soccfg(3, 1)
+    profile = load_soccfg(3, 1)
     for generator in profile["gens"]:
         generator["f_fabric"] = fabric_clock
     return Program(profile, reps=2, initial_delay=0, relax_delay=0.02)

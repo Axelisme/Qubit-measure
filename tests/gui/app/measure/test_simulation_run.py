@@ -1,5 +1,6 @@
 """A registered synthetic experiment acquires, stops, fails and saves via RPC."""
 
+from tests.program._profiles import load_soccfg
 import sys
 from threading import Event
 
@@ -71,7 +72,7 @@ NoiseAdapter = Adapter(
 
 @pytest.fixture
 def noise_run(qapp, tmp_path, outcome):
-    env = white_noise(std_adc=0, seed=17)
+    env = white_noise(load_soccfg(), std_adc=0, seed=17, routes=((0, 0),))
     source = env.soc.binding.execute
     entered, release = Event(), Event()
     fail = outcome == "failure_then_retry"

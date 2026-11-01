@@ -1,5 +1,6 @@
 """Composite declarations and runtime playback at the public compiler seam."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -10,7 +11,7 @@ from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
@@ -95,7 +96,7 @@ def test_mux_end_follows_generator_plus_one_post_and_shot_waits_for_adcs(
 
 
 def _table_readout() -> TablePulseReadout:
-    soccfg = make_mock_soccfg(1, 1)
+    soccfg = load_soccfg(1, 1)
     freq_words, ro_words = readout_freq_words(
         soccfg, [1000.0, 1010.0, 1020.0], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -122,7 +123,7 @@ def _table_readout() -> TablePulseReadout:
 def test_table_readout_uses_loop_hook_and_wraps_paired_words_without_padding():
     readout = _table_readout()
     prog = _program(
-        make_mock_soccfg(1, 1),
+        load_soccfg(1, 1),
         [readout],
         lambda p: p.emit(readout),
         lambda p: p.add_loop("frequency", 3),
@@ -180,7 +181,7 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
         ],
     )
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         lambda p: p.emit(pulse),
         lambda p: p.add_loop("selector", 2),
@@ -206,7 +207,7 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
         prog.emit(pulse)
 
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         body,
         lambda p: p.add_loop("selector", 2),
@@ -225,7 +226,7 @@ def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
     second = first.model_copy(update={"post_delay": 0.001})
     pulse = ComputedPulse("selected_post", val_reg="selector", pulses=[first, second])
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         lambda p: p.emit(pulse),
         lambda p: p.add_loop("selector", 2),
@@ -250,7 +251,7 @@ def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
         prog.emit(pulse)
 
     prog = _program(
-        make_mock_soccfg(1, 0),
+        load_soccfg(1, 0),
         [pulse],
         body,
         lambda p: p.add_loop("index", 3),
@@ -280,7 +281,7 @@ def _runtime_selected(kind: str, *, pre_delay: float = 0.01) -> Module:
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_shared_selected_pulse_keeps_each_programs_addresses_and_loader(kind):
-    soccfg = make_mock_soccfg(1, 0)
+    soccfg = load_soccfg(1, 0)
     shared = _runtime_selected(kind)
     others = []
 
@@ -329,7 +330,7 @@ def test_selected_branch_paths_inside_repeat_use_actual_ends(kind):
                         prog.emit(pulse)
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     assert [waves(s) for s in result] == [[5, 54], [5, 110]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [98, 210] * 2
@@ -350,7 +351,7 @@ def test_selected_playback_requires_full_selector_bounds(kind, index):
         prog.add_reg("index")
 
     with pytest.raises(ValueError, match="index"):
-        _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+        _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -367,7 +368,7 @@ def test_selected_runtime_origin_rejects_possible_signed_overflow(kind):
         prog.emit(pulse)
 
     with pytest.raises(ValueError, match="overflow"):
-        _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+        _program(load_soccfg(1, 0), [pulse], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -387,7 +388,7 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
         _program(
-            make_mock_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2)
+            load_soccfg(1, 0), [pulse], body, lambda p: p.add_loop("index", 2)
         )
 
 
@@ -419,7 +420,7 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
         prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
         prog.emit(pulse)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     # Integer origin 100 plus ceil(.01 * 430.08) = 105.
     assert [waves(s) for s in result] == [[105]] * 4
@@ -446,9 +447,9 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
 
     if not wait:
         with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-            _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+            _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     else:
-        prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
         assert [waves(s) for s in shots(prog)] == [[105, 154]] * 4
         assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [198] * 4
 
@@ -469,7 +470,7 @@ def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(ki
         prog.delay_auto(0, gens=True, ros=False)
         prog.emit(following)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
     # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
     assert [waves(s) for s in result] == [[105, 154], [105, 182]] * 2
@@ -501,9 +502,9 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 
     if sum(advances) < 60:
         with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-            _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+            _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     else:
-        prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
         result = shots(prog)
         assert [waves(s) for s in result] == [[105, 149], [105, 177]] * 2
         assert [s.body_end_cycle - s.start_cycle for s in result] == [193, 221] * 2
@@ -535,7 +536,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
         prog.emit(following, timeline="stale")
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -561,7 +562,7 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         prog.emit(following)
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
-        _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+        _program(load_soccfg(1, 0), [pulse, following], body, initialize)
 
 
 @pytest.mark.parametrize("kind", ["computed", "table"])
@@ -593,7 +594,7 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
         prog.timeline_inc(60 / 430.08, timeline="default")
         prog.emit(following)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse, following], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
     result = shots(prog)
     # max(89/117,100) +60 =>160/177. No sweep-wide max177.
     assert [waves(s) for s in result] == [[105, 160], [105, 177]] * 2
@@ -639,7 +640,7 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
 
     def build():
         return _program(
-            make_mock_soccfg(2, 0), [*selected, following], body, initialize
+            load_soccfg(2, 0), [*selected, following], body, initialize
         )
 
     if post + advance < 0:
@@ -677,7 +678,7 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
             prog.timeline_inc(60 / 430.08, timeline="default")
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     assert [waves(s) for s in result] == [[105, 254], [105, 282]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in result] == [298, 354] * 2
@@ -720,7 +721,7 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
             prog.emit(pulse)
             prog.delay_by_timeline()
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     # Origin 7 plus pre-delay 5 starts at 12; selected spacing is 67 or 123.
     assert [waves(s) for s in result] == [
@@ -759,7 +760,7 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
         prog.emit(right, timeline="right")
         prog.join("left", "right", into="default")
 
-    prog = _program(make_mock_soccfg(2, 0), [left, right], body, initialize)
+    prog = _program(load_soccfg(2, 0), [left, right], body, initialize)
     result = shots(prog)
     # Scalar pre-delay .01 us ceils to 5 tProc ticks before adding playback/post.
     assert [waves(s) for s in result] == [[12, 12]] * 6
@@ -791,7 +792,7 @@ def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_se
         prog.write_reg("selector", 1)
         prog.emit(pulse)
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body, initialize)
+    prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
     result = shots(prog)
     # Native subcycle post steps truncate to zero in both input branches.
     assert [waves(s) for s in result] == [[5, 54], [5, 54], [5, 54]] * 2
@@ -890,7 +891,7 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
             self.record_word(length_reg)
             self.record_word("w4")
 
-    prog = Observed(make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
+    prog = Observed(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     words = [[e.value for e in shot.events if e.kind == "data"] for shot in shots(prog)]
     if kind == "table":
         # Observe both the true producer and the patched waveform field consumed
@@ -921,7 +922,7 @@ def test_native_address_playback_keeps_deferred_register_resolution(flat):
         prog.pulse_by_reg(0, "late", 0.01, flat_top_pulse=flat)
         prog.add_reg("late")
 
-    prog = _program(make_mock_soccfg(1, 0), [pulse], body)
+    prog = _program(load_soccfg(1, 0), [pulse], body)
     assert [waves(shot) for shot in shots(prog)] == [[4] * (3 if flat else 1)] * 2
 
 
@@ -992,7 +993,7 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
             super().append_macro(macro)
 
     try:
-        prog = Observed(make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
+        prog = Observed(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     except ValueError as exc:
         assert corrupt and "unregistered compiler time write at instruction" in str(exc)
         return
@@ -1087,7 +1088,7 @@ def _selection_flow_program(body, *, path_count=2):
         body(prog, loader, other)
 
     return _program(
-        make_mock_soccfg(1, 0), [template, loader, other], lower, initialize
+        load_soccfg(1, 0), [template, loader, other], lower, initialize
     )
 
 
@@ -1217,7 +1218,7 @@ def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
 
 
 def _selection_program(selection: Module) -> TimelineProgramV2:
-    return _program(make_mock_soccfg(1, 0), [selection], lambda p: p.emit(selection))
+    return _program(load_soccfg(1, 0), [selection], lambda p: p.emit(selection))
 
 
 @pytest.mark.parametrize(
@@ -1246,7 +1247,7 @@ def test_selected_playback_captures_index_before_later_in_range_change(change):
 
 def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
     builder = TimelineBuilder(
-        make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
+        load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
     )
     builder.add_loop("index", 2)
     choices = [
@@ -1316,7 +1317,7 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         prog.timeline_inc(10 / 430.08)
 
     prog = _program(
-        make_mock_soccfg(2, 0),
+        load_soccfg(2, 0),
         [a_index, b_index, change_a, first, other],
         body,
         lambda p: p.add_loop("index", 2),
@@ -1337,5 +1338,5 @@ def test_table_readout_rejects_missing_or_mismatched_public_loop(count):
 
     with pytest.raises(ValueError, match="(sweep loop|does not match loop)"):
         _program(
-            make_mock_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize
+            load_soccfg(1, 1), [readout], lambda p: p.emit(readout), initialize
         )

@@ -1,5 +1,6 @@
 """Writeback Edit dialogs: scalar parameter values and module item Forms."""
 
+from tests.program._profiles import load_soccfg
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -271,7 +272,7 @@ def module_widget(tmp_path: Path, qapp: QApplication, request: pytest.FixtureReq
         context.set_parameter(
             require_target(context.read_context()), "general.ext.gain", 0.4
         )
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         tab_id = ctrl.tab_control.new_tab("synthetic/module")
         ctrl.run_analyze_control.start_run(tab_id)

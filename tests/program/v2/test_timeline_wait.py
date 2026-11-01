@@ -1,5 +1,6 @@
 """Shell WAIT bounds through public timeline compilation and point scheduling."""
 
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 import math
 import random
 import warnings
@@ -10,7 +11,7 @@ import pytest
 from qick.asm_v2 import QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.program.v2 import SweepCfg
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
+
 from zcu_tools.program.v2.modules import (
     ComputedPulse,
     DelayAuto,
@@ -33,7 +34,7 @@ def t1_program(
 ) -> TimelineProgramV2:
     """Build synthetic T1 with a 3441-cycle origin span and ten-cycle read post."""
     if mux:
-        soccfg = make_mux_mock_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
+        soccfg = load_mux_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
         readout = MuxReadoutCfg(
             gen_ch=0,
             nqz=1,
@@ -47,7 +48,7 @@ def t1_program(
             ],
         ).build("read")
     else:
-        soccfg = make_mock_soccfg(2, 1)
+        soccfg = load_soccfg(2, 1)
         readout = PulseReadoutCfg(
             gen_ch=0,
             nqz=1,
@@ -115,7 +116,7 @@ def test_fractional_native_adc_tail_never_rounds_below_physical_end():
             self.trigger(ros=[0], t=0, width=1 / 430.08)
             self.timeline_inc(42 / 430.08)
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     (shot,) = shots(prog)
     assert shot.body_end_cycle - shot.start_cycle == 42
     # Independent ADC-clock oracle: 51 samples end at 71.4 tProc cycles.
@@ -145,12 +146,12 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
         with pytest.raises(
             ValueError, match=r"WAIT.*duration.*slack=10 cycles.*relax=9 cycles"
         ):
-            Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
     else:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             prog = Program(
-                make_mock_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
+                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
             )
         result = shots(prog)
         body = [shot.body_end_cycle - shot.start_cycle for shot in result]
@@ -188,7 +189,7 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
             self.timeline_inc(79 / 430.08)
             self.delay(QickSweep1D("advance_axis", 10 / 430.08, 30 / 430.08))
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=1)
     # Each ADC ends 70 cycles after origin; body closes ten cycles later.
     expected_body = [origin + 80 for origin in (40, 60, 50) for _ in range(3)]
     result = shots(prog)
@@ -290,7 +291,7 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
             self.delay_by_timeline()
             self.emit(readout)
 
-    prog = Program(make_mock_soccfg(3, 1), initial_delay=0, relax_delay=1)
+    prog = Program(load_soccfg(3, 1), initial_delay=0, relax_delay=1)
     result = shots(prog)
     # A lasts 112 tProc cycles; B lasts 56. All three points overlap A.
     # max(112, t + 56) is 112, 112, 140: left side, corner, right side.
@@ -343,7 +344,7 @@ def variable_tail_program(
             )
 
     return Program(
-        make_mock_soccfg(0, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+        load_soccfg(0, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
     )
 
 
@@ -419,7 +420,7 @@ def opposing_tail_program(
                 self.timeline_inc("feedback_cycles")
 
     return Program(
-        make_mock_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / 430.08
+        load_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / 430.08
     )
 
 
@@ -465,7 +466,7 @@ def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
 
     with pytest.warns(UserWarning, match=r"WAIT.*axis.*slack=50 cycles"):
         prog = Program(
-            make_mock_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08
+            load_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08
         )
     assert shell_wait(prog) == 170
     assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [270, 220, 270]
@@ -496,7 +497,7 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
     with pytest.warns(
         UserWarning, match=r"WAIT.*count_cycles.*slack=20 cycles"
     ) as caught:
-        prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
     assert all("not actual" not in str(w.message) for w in caught)
     assert shell_wait(prog) == 100
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 30, 20]
@@ -527,13 +528,13 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
         with pytest.raises(
             ValueError, match=r"WAIT.*count_cycles.*slack=10 cycles.*relax=9 cycles"
         ):
-            Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
     else:
         with pytest.warns(
             UserWarning, match=r"WAIT.*count_cycles.*slack=10 cycles"
         ) as caught:
             prog = Program(
-                make_mock_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
+                load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08
             )
         assert all("upper bound" not in str(item.message) for item in caught)
         body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
@@ -566,7 +567,7 @@ def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection
             if reuse_after:
                 self.timeline_inc("delay_cycles")
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == (20 if reuse_after else 40)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         50 if reuse_after else 30
@@ -593,7 +594,7 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
                 self.timeline_inc("delay_cycles")
                 self.delay_by_timeline()
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == 20
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [210]
 
@@ -623,7 +624,7 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
     slack = 15 if branch else 10
     with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
         prog = Program(
-            make_mock_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08
+            load_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08
         )
     assert shell_wait(prog) == 30
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
@@ -663,9 +664,9 @@ def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
 
     # Native waveform rounding gives aggregate ends 71 and 140 cycles.
     with pytest.raises(ValueError, match=r"selected.*slack=69 cycles.*relax=68 cycles"):
-        Program(make_mock_soccfg(1, 1), initial_delay=0, relax_delay=68 / 430.08)
+        Program(load_soccfg(1, 1), initial_delay=0, relax_delay=68 / 430.08)
     with pytest.warns(UserWarning, match=r"selected.*slack=69 cycles"):
-        prog = Program(make_mock_soccfg(1, 1), initial_delay=0, relax_delay=69 / 430.08)
+        prog = Program(load_soccfg(1, 1), initial_delay=0, relax_delay=69 / 430.08)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [71, 140]
     assert shell_wait(prog) == 139
 
@@ -694,7 +695,7 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             self.timeline_inc(39 / 430.08)
             self.timeline_inc("right_cycles", timeline="other")
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=1)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=1)
     expected_body = []
     remaining = []
     for origin in origins:
@@ -724,7 +725,7 @@ def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
             self.timeline_inc(QickSweep1D("j", 0, 10 / 430.08), timeline="extra")
             self.join("right", "extra", into="default")
 
-    prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     assert shell_wait(prog) == 30
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [40] * 4
 
@@ -800,7 +801,7 @@ class MixedWaitProgram(TimelineProgramV2):
     def __init__(self, recipe: WaitRecipe, *, relax_cycles: int = 1000):
         self.recipe = recipe
         super().__init__(
-            make_mock_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+            load_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
         )
 
     def _initialize(self, cfg):
@@ -948,7 +949,7 @@ class SweptLengthWaitProgram(TimelineProgramV2):
         self.samples = samples
         self.post_tenths = post_tenths
         super().__init__(
-            make_mock_soccfg(1, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+            load_soccfg(1, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
         )
 
     def _initialize(self, cfg):

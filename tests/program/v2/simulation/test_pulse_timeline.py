@@ -1,5 +1,6 @@
 """Generator and ADC timing observed at the public acquisition boundary."""
 
+from tests.program._profiles import load_soccfg
 import math
 
 import numpy as np
@@ -36,9 +37,7 @@ from tests.program.v2.simulation.time_observations import (
     ids=["const", "cosine", "gauss", "drag", "flat_top"],
 )
 def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(waveform):
-    env = white_noise(
-        std_adc=0, seed=4, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1))
-    )
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=2), std_adc=0, seed=4, routes=((0, 0), (1, 1)))
     pulse = PulseCfg(
         ch=1, nqz=1, freq=80, gain=-0.4, phase=37, waveform=waveform
     ).build("drive")

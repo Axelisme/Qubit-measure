@@ -1,5 +1,6 @@
 """Cross-preparation waveform ownership through the public frontend seam."""
 
+from tests.program._profiles import load_soccfg
 import math
 import sys
 
@@ -16,7 +17,7 @@ from tests.program._timeline import compile_modules
 
 @pytest.fixture
 def environment():
-    env = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, seed=4, routes=((0, 0), (1, 0)))
     yield env
     env.devices.close_all_devices()
 
@@ -61,7 +62,7 @@ def test_new_preparations_share_equal_content_not_program_or_name(environment):
     second = envelope(program(environment, name="renamed"), soc, 1)
     assert second is first
     # The environment, not a global cache, owns the pool.
-    other = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    other = white_noise(load_soccfg(n_gens=2), std_adc=0, seed=4, routes=((0, 0), (1, 0)))
     try:
         independent = envelope(program(other), other.soc, 0)
         assert independent == first

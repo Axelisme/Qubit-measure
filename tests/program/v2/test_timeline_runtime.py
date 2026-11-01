@@ -1,5 +1,6 @@
 """Runtime timeline ends observed through linked compiler timing."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 
 import pytest
@@ -13,7 +14,7 @@ from qick.asm_v2 import (
     WriteReg,
 )
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -48,7 +49,7 @@ def program(
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=0)
 
 
 def test_crossing_floor_places_at_pointwise_remaining_end_and_resets_each_shot():
@@ -117,7 +118,7 @@ def test_k_way_join_has_one_copy_and_two_instructions_per_comparison(candidate_c
                 )
             self.join(*names, into="default")
 
-    prog = Program(make_mock_soccfg(0, 0), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 0), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [100] + [180] * (
         2 ** (candidate_count - 1) - 1
     )
@@ -510,7 +511,7 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
                 self.trigger([0], width=1 / 430.08, timeline="local")
 
     with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
-        prog = Program(make_mock_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
     assert wait["TIME"] == "@56"

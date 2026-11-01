@@ -5,6 +5,7 @@ The handwritten parity oracle remains until TimelineProgramV2 author hooks are
 retired; changes to the common compiler must preserve parity, not old ASM bytes.
 """
 
+from tests.program._profiles import load_mux_soccfg, load_soccfg
 from collections.abc import Callable, Sequence
 
 import numpy as np
@@ -14,7 +15,7 @@ from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
+
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
     PulseReadout,
@@ -36,7 +37,7 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
     hint, tail_sync
 ):
     builder = v2.TimelineBuilder(
-        v2.make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0
+        load_soccfg(), reps=2, initial_delay=0, relax_delay=0
     )
     builder.add_loop("depth", 2)
     builder.emit(v2.LoadValue("load_count", [0, 2], "depth", "count"))
@@ -64,7 +65,7 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
     assert [waves(shot) for shot in result] == [[], [0, 17]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, 52] * 2
 
-    env = white_noise(std_adc=0, n_gens=2, routes=((1, 0),))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((1, 0),), seed=None)
     try:
         request = build_compiled_request(
             prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
@@ -333,7 +334,7 @@ def test_branch_rejects_reference_advances_at_build(
 def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     heralded, reset
 ):
-    soccfg = make_mux_mock_soccfg(3, 2, gen_ch=0, ro_chs=(0, 1))
+    soccfg = load_mux_soccfg(3, 2, gen_ch=0, ro_chs=(0, 1))
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=1)
     builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
     builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
@@ -447,7 +448,7 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
 
 def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     """Record three parallel groups and mux readout without a reference advance."""
-    soccfg = make_mux_mock_soccfg(4, 3, gen_ch=1, ro_chs=(1, 2))
+    soccfg = load_mux_soccfg(4, 3, gen_ch=1, ro_chs=(1, 2))
     builder = v2.TimelineBuilder(soccfg, reps=4096, initial_delay=1, relax_delay=1)
     frequency = builder.add_sweep(
         "frequency",
@@ -541,9 +542,9 @@ def test_unsynchronized_dual_drive_groups_and_mux_fit_sixteen_registers(heralded
 @pytest.mark.parametrize("family", ["pulse", "table", "mux"])
 def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     soccfg = (
-        make_mux_mock_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
+        load_mux_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
         if family == "mux"
-        else make_mock_soccfg(2, 1)
+        else load_soccfg(2, 1)
     )
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
     readout: v2.Module
@@ -1065,7 +1066,7 @@ def test_duplicate_builder_axes_raise_at_recording(mock_soccfg, first, second):
 
 
 def test_mux_objects_share_resources_despite_different_emission_timing():
-    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    soccfg = load_mux_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
     cfg = MuxReadoutCfg(
         gen_ch=0,
         nqz=1,

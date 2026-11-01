@@ -7,6 +7,7 @@ reception) lives next to the tests that need it.
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import json
 import logging
 import socket
@@ -51,7 +52,7 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
@@ -75,7 +76,7 @@ def make_ctx(root: Path) -> SessionEnv:
         SessionEnv(
             parameters=None,
             soc=MagicMock(),
-            soccfg=make_mock_soccfg(),
+            soccfg=load_soccfg(),
         )
     )
     context = ContextService(state, EventBus(), bind_assets=ArbWaveformDatabase.info_at)
@@ -189,7 +190,7 @@ class Fixture:
             )
             self.state.set_context(
                 replace(
-                    self.state.session_env, soc=MagicMock(), soccfg=make_mock_soccfg()
+                    self.state.session_env, soc=MagicMock(), soccfg=load_soccfg()
                 )
             )
         if opts is None:

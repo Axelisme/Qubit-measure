@@ -1,9 +1,10 @@
 """Native QICK operations retain reference/channel selection around B1 ends."""
 
+from tests.program._profiles import load_soccfg
 import pytest
 from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from .timing_support import shots as _shots
@@ -34,7 +35,7 @@ def _program(body, initialize=None):
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(2, 1), reps=1, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(2, 1), reps=1, initial_delay=0, relax_delay=0)
 
 
 def _shot(prog):

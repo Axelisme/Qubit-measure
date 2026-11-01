@@ -1,11 +1,12 @@
+from tests.program._profiles import load_soccfg
 from zcu_tools.program.v2.ir.base import IRCompileMixin
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 
 # A minimal concrete subclass to instantiate the mixin
 class MockProg(IRCompileMixin):
     def __init__(self):
-        soccfg = make_mock_soccfg()
+        soccfg = load_soccfg()
         super().__init__(soccfg)
         self.tproccfg = {"pmem_size": 1024}
         self.prog_list = []

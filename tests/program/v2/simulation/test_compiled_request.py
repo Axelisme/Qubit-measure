@@ -1,5 +1,6 @@
 """Compiled request outputs from public native and Module compile seams."""
 
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
@@ -82,7 +83,7 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
 
 
 def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0),), seed=None)
     env.soccfg["gens"][1]["f_fabric"] = 512.0
 
     def build(extra):
@@ -279,7 +280,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
         waveform=ConstWaveformCfg(length=0.1),
         ro_length=0.1,
     )
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0),), seed=None)
     prog = compile_modules(
         env.soccfg,
         modules=[
@@ -322,7 +323,7 @@ def test_native_ordinals_ignore_module_pulses_in_mixed_compiled_body():
 
 def test_compiled_mux_output_keeps_tone_and_declared_adc_order():
     prog = compile_modules(mux_soccfg(), modules=[native_mux().build("mux")], reps=2)
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=9), std_adc=0, routes=((0, 4), (0, 1)), seed=None)
     result = request(prog, env)
     point = result.materialize_point(0)
     assert [e.frequency_mhz for e in point.events] == pytest.approx(
@@ -357,7 +358,7 @@ def test_static_mux_readout_retains_absolute_frequencies_without_any_pulse():
             self.trigger([4, 1], t=0)
 
     prog = Program(mux_soccfg(), reps=1, initial_delay=0, relax_delay=0)
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=9), std_adc=0, routes=((0, 4), (0, 1)), seed=None)
     point = request(prog, env).materialize_point(0)
     assert point.events == ()
     assert [r.frequency_mhz[0] for r in point.readouts] == pytest.approx(
@@ -684,7 +685,7 @@ def test_raw_trigger_count_mismatch_fails_with_static_and_actual_per_shot():
 
 
 def test_declared_zero_read_adc_fails_before_request_with_channel_reason():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
 
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -698,7 +699,7 @@ def test_declared_zero_read_adc_fails_before_request_with_channel_reason():
 
 
 def test_ordinary_adc_triggers_are_distinct_output_effects():
-    env = white_noise(std_adc=0, n_gens=1, n_readouts=2, routes=((0, 0), (0, 1)))
+    env = white_noise(load_soccfg(n_gens=1, n_readouts=2), std_adc=0, routes=((0, 0), (0, 1)), seed=None)
 
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):

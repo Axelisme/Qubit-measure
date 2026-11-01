@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import pytest
 from zcu_tools.program.v2 import PulseCfg, TableLengthPulse, TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
@@ -24,7 +25,7 @@ def _pulse(waveform) -> PulseCfg:
 
 def _program(module: TableLengthPulse, count: int) -> TimelineProgramV2:
     return compile_modules(
-        make_mock_soccfg(n_gens=1, n_readouts=1),
+        load_soccfg(n_gens=1, n_readouts=1),
         modules=[module],
         sweep=[("length", count)],
     )
@@ -73,7 +74,7 @@ def test_flat_top_uses_one_template_and_patches_only_flat_segment() -> None:
 
 
 def test_flat_top_preserves_int4_dummy_segment() -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     soccfg["gens"][0]["type"] = "axis_sg_int4_v1"
     module = TableLengthPulse(
         "probe",
@@ -119,7 +120,7 @@ def test_rejects_zero_length_before_program_build() -> None:
 
 
 def test_rejects_nonzero_length_below_hardware_minimum() -> None:
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    soccfg = load_soccfg(n_gens=1, n_readouts=1)
     too_short = float(soccfg.cycles2us(2, gen_ch=0))
     module = TableLengthPulse(
         "probe",

@@ -1,5 +1,6 @@
 """QICK callable metadata and argument semantics at public simulation acquire."""
 
+from tests.program._profiles import load_soccfg
 import gc
 import inspect
 import weakref
@@ -54,7 +55,7 @@ def program(env: SimulationEnvironment) -> TimelineProgramV2:
 
 @pytest.fixture
 def acquisition() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
-    env = white_noise(std_adc=3, seed=123456)
+    env = white_noise(load_soccfg(), std_adc=3, seed=123456, routes=((0, 0),))
     prog = program(env)
     try:
         yield env, prog
@@ -138,7 +139,7 @@ def test_acquire_preserves_bind_errors_sampling_identity_and_bitwise_output(
     acquisition, monkeypatch: pytest.MonkeyPatch, invalid: str
 ):
     env, prog = acquisition
-    replay_env = white_noise(std_adc=3, seed=123456)
+    replay_env = white_noise(load_soccfg(), std_adc=3, seed=123456, routes=((0, 0),))
     replay = program(replay_env)
     callable = QickCallable(inspect.signature(AcquireMixin.acquire))
 

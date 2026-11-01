@@ -1,5 +1,6 @@
 """Analyze terminal feedback through real owners and visible component input."""
 
+from tests.program._profiles import load_soccfg
 import os
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from zcu_tools.gui.session.context_types import (
 )
 from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import make_mock_soccfg
+
 
 from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
@@ -64,7 +65,7 @@ def test_analyze_shows_errors_and_publishes_returns(
             analysis=Analysis(fn=analyze, options=lambda source, env: SampleParams()),
         ),
     )
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl = Controller(
         State(SessionEnv(parameters=None, soc=None, soccfg=None)),
         registry,

@@ -1,10 +1,11 @@
 """Native table declarations and register consumers through linked compilation."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import pytest
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -47,7 +48,7 @@ def compile_lookup(
                     }
                 )
 
-    return Program(make_mock_soccfg(), initial_delay=5 / 430.08, relax_delay=7 / 430.08)
+    return Program(load_soccfg(), initial_delay=5 / 430.08, relax_delay=7 / 430.08)
 
 
 def compiled_words(prog: TimelineProgramV2) -> list[int]:
@@ -207,7 +208,7 @@ def test_empty_lookup_preserves_destination_and_allocates_no_dmem(
                 }
             )
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     assert prog.compile_datamem() is None
     result = analyze(prog)
     assert [(event.cycle, event.value) for event in result.shots[0].events] == [(3, 29)]
@@ -252,7 +253,7 @@ def test_lookup_reports_register_exhaustion(values):
             self.emit(loader)
 
     with pytest.raises(RuntimeError, match="more data registers than are available"):
-        Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+        Program(load_soccfg(), initial_delay=0, relax_delay=0)
 
 
 @pytest.mark.parametrize("loader_type", [LoadValue, LoadWord])

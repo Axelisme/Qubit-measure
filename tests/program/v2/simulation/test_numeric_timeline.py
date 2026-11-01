@@ -1,5 +1,6 @@
 """Numeric timeline contracts independent of a physical solver."""
 
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
@@ -35,7 +36,7 @@ def readout(name="readout", *, channel=0, samples=31, waveform=None):
 
 @pytest.mark.parametrize("loader", [LoadValue, LoadWord])
 def test_empty_table_is_a_semantic_noop_if_no_consumer_needs_its_register(loader):
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     prog = compile_modules(
         env.soccfg,
         modules=[
@@ -57,7 +58,7 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     np.savez(
         path, time=[0, 0.05, 0.1], idata=[-0.2, 0.1, -0.1], qdata=[0.1, -0.05, 0.05]
     )
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     module = readout(waveform=ArbWaveformCfg(data="signed", path=str(path)))
     prog = compile_modules(
         env.soccfg,
@@ -86,7 +87,7 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
 
 
 def test_adc_read_windows_retain_each_generator_association():
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0), (1, 0)), seed=None)
     second = readout("second")
     second.cfg.gen_ch = 1
     # Build again so the owned Pulse and flat readout share the selected route.
@@ -101,7 +102,7 @@ def test_adc_read_windows_retain_each_generator_association():
 
 
 def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((1, 1), (0, 0)))
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=2), std_adc=0, routes=((1, 1), (0, 0)), seed=None)
     prog = compile_modules(
         env.soccfg,
         modules=[
@@ -149,7 +150,7 @@ def test_two_adc_sample_counts_order_round_averaging_and_companion_raw():
 
 
 def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1)))
+    env = white_noise(load_soccfg(n_gens=2, n_readouts=2), std_adc=0, routes=((0, 0), (1, 1)), seed=None)
     builder = TimelineBuilder(env.soccfg)
     builder.add_loop("axis", 2)
     builder.fork("default", into="fixed")
@@ -183,7 +184,7 @@ def test_join_swept_branch_emission_order_is_fixed_even_when_times_cross():
 
 
 def test_undefined_register_in_unselected_branch_fails_before_signals():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     builder = TimelineBuilder(env.soccfg)
     builder.add_loop("axis", 2)
     with builder.branch(by="axis", align_timeline=True) as cases:
@@ -200,7 +201,7 @@ def test_undefined_register_in_unselected_branch_fails_before_signals():
 
 
 def test_short_table_fails_before_signals():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     out_of_bounds = compile_modules(
         env.soccfg,
         modules=[

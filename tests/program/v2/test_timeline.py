@@ -1,10 +1,11 @@
 """B1 scheduling through the public compiler and linked timing analysis."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable
 
 import pytest
 from qick.asm_v2 import QickSweep1D
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 from tests.program.v2.timing_support import shots as _shots
@@ -38,7 +39,7 @@ def _program(
             body(self)
 
     return Program(
-        make_mock_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=relax_delay
+        load_soccfg(2, 1), reps=reps, initial_delay=0, relax_delay=relax_delay
     )
 
 

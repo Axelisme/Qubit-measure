@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import dataclasses
 import threading
 from collections.abc import Iterator
@@ -55,7 +56,7 @@ from zcu_tools.gui.session.ports import (
     OperationKind,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 from tests.gui._controller_adapter import (
     InteractiveAdapter,
@@ -75,7 +76,7 @@ def _make_ctx() -> SessionEnv:
     return SessionEnv(
         parameters=None,
         soc=MagicMock(),  # simulate connected soc
-        soccfg=make_mock_soccfg(),
+        soccfg=load_soccfg(),
     )
 
 

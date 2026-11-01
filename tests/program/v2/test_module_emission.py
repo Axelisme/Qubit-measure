@@ -1,10 +1,11 @@
 """Module emissions are measured at the public compiler/analysis seam."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 
 import pytest
 from qick.asm_v2 import Macro, QickParam, QickSweep1D, WriteReg
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import Module, Pulse, PulseCfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
@@ -53,7 +54,7 @@ def _program(
             else:
                 body(self)
 
-    return Program(make_mock_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(3, 1), reps=2, initial_delay=0, relax_delay=0)
 
 
 def _envelope_shapes(prog: TimelineProgramV2) -> list[tuple[int, ...]]:

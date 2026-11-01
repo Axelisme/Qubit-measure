@@ -1,5 +1,6 @@
 """Framework operation-attempt evidence grouped by explicit authored commits."""
 
+from tests.program._profiles import load_soccfg
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -41,7 +42,7 @@ def test_attempt_facts_are_grouped_by_explicit_commits(
     devices = RecordingDevices()
     devices.drivers["flux"] = FakeDevice(address="memory", fast_mode=True)
     plots = w.WorkflowPlots(NonPresentingHost())
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     engine = w.Engine(
         w.EnginePorts(
             plots,

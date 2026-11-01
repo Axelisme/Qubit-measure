@@ -1,5 +1,6 @@
 """Native Save RPC reports through the real connection-owned dispatcher."""
 
+from tests.program._profiles import load_soccfg
 import socket
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -117,7 +118,7 @@ def native_save_rpc(
         )
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler

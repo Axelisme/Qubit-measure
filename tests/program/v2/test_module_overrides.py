@@ -1,5 +1,6 @@
 """Constructor overrides preserve cfg routing at the public compile boundary."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Sequence
 from typing import Literal
 
@@ -7,7 +8,7 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
@@ -63,7 +64,7 @@ def _reset_module(
 
 
 def _compile(kind: ProgramKind, modules: Sequence[Module], swept: bool):
-    soccfg = make_mock_soccfg(n_gens=3, n_readouts=1)
+    soccfg = load_soccfg(n_gens=3, n_readouts=1)
     if kind == "builder":
         builder = TimelineBuilder(soccfg)
         if swept:

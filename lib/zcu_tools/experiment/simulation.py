@@ -15,7 +15,6 @@ from zcu_tools.core.simulation import (
     RoundSignals,
 )
 from zcu_tools.device import DeviceManager, FakeDevice
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.simulation import (
     IntegratedRound,
     SimulationBinding,
@@ -101,24 +100,26 @@ class SimulationEnvironment:
 
 
 def white_noise(
+    soccfg: QickConfig,
     *,
-    std_adc: float = 1.0,
-    seed: int | None = None,
-    n_gens: int = 2,
-    n_readouts: int = 1,
-    routes: tuple[tuple[int, int], ...] | Literal["all"] | None = None,
+    std_adc: float,
+    seed: int | None,
+    routes: tuple[tuple[int, int], ...] | Literal["all"],
 ) -> SimulationEnvironment:
-    """Build an explicit noise environment using the fixed offline QICK profile.
+    """Bind independent Gaussian ADC noise to the caller-provided QICK config.
 
-    Defaults bind each ADC to the same-index generator (requires enough gens).
-    routes overrides wiring only, not clocks, DDS, channel types or memory sizes.
+    soccfg supplies channel capabilities and clocks, for example from
+    program.build_soccfg with a caller-owned YAML mapping. std_adc is the
+    nonnegative per-sample ADC standard deviation. seed is an integer for
+    reproducible acquisition or None for a fresh random root. All are required.
+    routes is a tuple of (generator, ADC) integer pairs or "all" to connect
+    every generator to every ADC in soccfg. Routes do not change the profile.
     No physical pulse response is modeled. Charge-drive requirements are accepted
     without validation: every generator produces only noise, so there is no
     physical line model or incorrect physical response from a role mismatch.
     Invalid amplitude/seed/routes raise.
     """
     source = WhiteNoise(std_adc)
-    soccfg = make_mock_soccfg(n_gens, n_readouts)
 
     def execute(request: RoundRequest) -> IntegratedRound | RoundSignals:
         result = source.execute(request)
@@ -130,11 +131,15 @@ def white_noise(
     binding = SimulationBinding(
         source.snapshot, execute, backend_version="white_noise-v2", seed=seed
     )
-    wiring = tuple((ch, ch) for ch in range(n_readouts)) if routes is None else routes
-    if routes == "all":
-        wiring = tuple(
-            (gen, adc) for gen in range(n_gens) for adc in range(n_readouts)
+    wiring = (
+        tuple(
+            (gen, adc)
+            for gen in range(len(soccfg["gens"]))
+            for adc in range(len(soccfg["readouts"]))
         )
+        if routes == "all"
+        else routes
+    )
     soc = SimulationSoc(soccfg, binding, routes=wiring)
     return SimulationEnvironment(
         soc, soccfg, DeviceManager(), "white_noise: independent Gaussian ADC samples"

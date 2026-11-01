@@ -1,5 +1,6 @@
 """Workflow RPC uses the shared headless facet, not the selected GUI pane."""
 
+from tests.program._profiles import load_soccfg
 import base64
 
 import pytest
@@ -75,7 +76,7 @@ def workflow_rpc(qapp, tmp_path):
     entry.new_point("source", description="synthetic")
     controller.session_services.context.install_entry(entry)
     controller.session_services.context.use_point(PointUseRequest("source"))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     facet = controller.workflow_control()
     facet.configure(

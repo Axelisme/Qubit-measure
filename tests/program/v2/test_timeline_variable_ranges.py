@@ -1,9 +1,10 @@
 """Correlated timeline bounds through public compile and linked timing."""
 
+from tests.program._profiles import load_soccfg
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import Macro, QickSweep1D
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
@@ -12,7 +13,7 @@ from .timing_support import shots, waves
 
 def v6_profile() -> QickConfig:
     """Use a clock-consistent v6 generator with tProc/fabric ratio 28/39."""
-    cfg = make_mock_soccfg(1, 1).get_cfg()
+    cfg = load_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
         clock.update(fs=9584.64, fs_mult=39, fs_div=1, interpolation=1, f_fabric=599.04)
     cfg["gens"][0]["f_dds"] = 9584.64
@@ -20,7 +21,7 @@ def v6_profile() -> QickConfig:
 
 
 def test_complementary_tproc_pulses_leave_a_literal_constant_end():
-    cfg = make_mock_soccfg(1, 1).get_cfg()
+    cfg = load_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
         clock.update(fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=430.08)
     cfg["gens"][0].update(
@@ -75,7 +76,7 @@ def test_complementary_fabric_pulses_keep_pointwise_ceil_differences():
             self.pulse(0, "complement", timeline="default")
             self.pulse(0, "after", timeline="default", tag="after")
 
-    prog = Program(make_mock_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
     # At 384 MHz the k=8 upper conversion is 287/256. Separate ceils
     # of complementary lengths alternate between 4306 and 4305, not one end.
     expected = [

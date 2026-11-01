@@ -1,11 +1,11 @@
 """Synthetic mixmux/PFB wiring and a deterministic, non-physical transport."""
 
+from tests.program._profiles import load_mux_soccfg
 import numpy as np
 import pytest
-from qick import QickConfig
 from zcu_tools.cfg_model import MuxReadoutCfg, MuxReadoutTone
 from zcu_tools.program.v2 import TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import ModuleCfgFactory, readout
 
 
@@ -36,36 +36,7 @@ def native_mux(channels=(4, 1), **updates):
 
 
 def mux_soccfg():
-    cfg = make_mock_soccfg(n_gens=2, n_readouts=9).get_cfg()
-    cfg["gens"][0].update(
-        type="axis_sg_mixmux8_v1",
-        has_mixer=True,
-        n_tones=8,
-        has_gain=True,
-        has_phase=True,
-        interpolation=8,
-        fdds_div=8,
-        f_dds=1536.0,
-    )
-    for i, ro in enumerate(cfg["readouts"][:8]):
-        ro.pop("tproc_ctrl")
-        ro.update(
-            type="axis_pfb_readout_v4",
-            ro_type="axis_pfb_readout_v4",
-            ro_fullpath="pfb0",
-            pfb_port=i,
-            pfb_nout=8,
-            pfb_nch=64,
-            pfb_ch_offset=32,
-            pfb_dds_on_output=True,
-            has_outsel=False,
-            f_output=76.8,
-            f_dds=76.8,
-            fdds_div=32,
-            b_phase=32,
-            trigger_bit=i,
-        )
-    return QickConfig(cfg)
+    return load_mux_soccfg(2, 9, gen_ch=0, ro_chs=tuple(range(8)))
 
 
 class RecordingProgram(TimelineProgramV2):

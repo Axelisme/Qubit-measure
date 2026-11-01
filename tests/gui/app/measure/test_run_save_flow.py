@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import logging
 from collections.abc import Generator, Sequence
 from pathlib import Path
@@ -28,7 +29,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.resources.entry import ComponentSchema
 
 from tests.experiment._saving_support import SavingCfg, SavingResult
@@ -133,7 +134,7 @@ def measure_window(
         if global_context:
             app.controller.setup_control.open_entry(EntryRequest("component-flow"))
         app.controller.session_services.soc_connection.install_soc(
-            MagicMock(), make_mock_soccfg()
+            MagicMock(), load_soccfg()
         )
         app.controller.tab_control.new_tab("synthetic")
         # Load's File chooser starts at the opened entry's database directory.

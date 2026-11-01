@@ -1,5 +1,6 @@
 """Emission order and fail-fast capability checks at public acquisition."""
 
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick.asm_v2 import AsmInst, QickParam
@@ -17,7 +18,7 @@ from tests.program.v2.simulation.time_observations import times_us
 
 
 def test_offline_board_declares_mock_identity():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     assert env.soc.is_mock is True
 
 
@@ -37,7 +38,7 @@ def test_offline_board_declares_mock_identity():
     ],
 )
 def test_soc_rejects_routes_outside_tuple_contract(routes):
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     try:
         with pytest.raises(TypeError, match=r"routes.*tuple.*int.*int"):
             SimulationSoc(env.soccfg, env.soc.binding, routes=routes)
@@ -81,7 +82,7 @@ class RawCleanupProgram(RawProgram):
 @pytest.mark.parametrize("program_type", [RawProgram, RawCleanupProgram])
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_supported_raw_effects_acquire(program_type, method):
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     prog = program_type(env.soccfg, modules=[readout("readout")])
     result = getattr(prog, method)(env.soc, progress=False)
     request = request_of(env)
@@ -97,7 +98,7 @@ def test_supported_raw_effects_acquire(program_type, method):
 
 @pytest.mark.parametrize("method", ["acquire", "acquire_decimated"])
 def test_raw_content_after_terminal_jump_rejected_before_backend(method):
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     prog = RawMakeProgram(env.soccfg, modules=[readout("readout")])
     with pytest.raises(ValueError, match=r"JumpInst.*preopt"):
         getattr(prog, method)(env.soc, progress=False)
@@ -105,7 +106,7 @@ def test_raw_content_after_terminal_jump_rejected_before_backend(method):
 
 
 def test_raw_loop_nop_preserves_sweep_readouts():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     module = readout("readout")
 
     class Program(TimelineProgramV2):
@@ -133,7 +134,7 @@ def test_raw_loop_nop_preserves_sweep_readouts():
 
 
 def test_unwired_generator_pulse_is_not_silently_accepted():
-    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((0, 0),), seed=None)
     drive = PulseCfg(
         ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     ).build("unwired_drive")
@@ -156,7 +157,7 @@ def readout(name):
 
 
 def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     cfg = PulseReadoutCfg(
         gen_ch=0,
         ro_ch=0,
@@ -182,7 +183,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
-    env = white_noise(std_adc=0)
+    env = white_noise(load_soccfg(), std_adc=0, seed=None, routes=((0, 0),))
     builder = TimelineBuilder(env.soccfg, reps=2)
     builder.fork("default", into="middle")
     builder.emit(readout("first"))

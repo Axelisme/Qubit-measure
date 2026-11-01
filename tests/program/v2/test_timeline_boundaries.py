@@ -1,7 +1,8 @@
 """Public compiler boundaries and independent scheduled-cycle expectations."""
 
+from tests.program._profiles import load_soccfg
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -13,7 +14,7 @@ def test_body_layout_tracks_reference_and_native_shell_across_shots():
         def _body(self, cfg):
             self.delay(10 / 430.08)
 
-    prog = Program(make_mock_soccfg(0, 0), reps=2, initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(0, 0), reps=2, initial_delay=0, relax_delay=0)
     assert prog.timing_layout.loops == (
         ir.TimingLoop("reps", 2),
         ir.TimingLoop("scan", 2),

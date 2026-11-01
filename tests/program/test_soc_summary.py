@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import pytest
 from qick import QickConfig
 from qick.qick_asm import get_version
 from zcu_tools.program import describe_soc
-from zcu_tools.program.v2 import make_mock_soccfg
+
 
 
 def test_describe_soc_sections_and_counts() -> None:
-    text = describe_soc(make_mock_soccfg(n_gens=2, n_readouts=1))
+    text = describe_soc(load_soccfg(n_gens=2, n_readouts=1))
 
     assert "QICK running on ZCU216" in text
     assert f"software version {get_version()}" in text
@@ -21,7 +22,7 @@ def test_describe_soc_sections_and_counts() -> None:
 
 
 def test_describe_soc_columns_present() -> None:
-    text = describe_soc(make_mock_soccfg(n_gens=2, n_readouts=1))
+    text = describe_soc(load_soccfg(n_gens=2, n_readouts=1))
 
     # ZCU216 port labels: dac "00"->"0_228", "01"->"1_228"; adc "00"->"0_224"
     assert "0_228" in text
@@ -39,14 +40,14 @@ def test_describe_soc_columns_present() -> None:
 
 
 def test_describe_soc_rejects_non_zcu216() -> None:
-    cfg = make_mock_soccfg()
+    cfg = load_soccfg()
     cfg["board"] = "ZCU111"
     with pytest.raises(NotImplementedError, match="ZCU216"):
         describe_soc(cfg)
 
 
 def test_describe_soc_handles_gen_without_envelope() -> None:
-    cfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    cfg = load_soccfg(n_gens=1, n_readouts=1)
     del cfg["gens"][0]["maxlen"]
     text = describe_soc(cfg)
 
@@ -57,19 +58,19 @@ def test_describe_soc_handles_gen_without_envelope() -> None:
 
 def test_describe_soc_accepts_qickconfig_from_dict() -> None:
     # describe_soc must work on a plain QickConfig, not only MockQickSoc
-    cfg = QickConfig(make_mock_soccfg().get_cfg())
+    cfg = QickConfig(load_soccfg().get_cfg())
     assert "Generators" in describe_soc(cfg)
 
 
 def test_describe_soc_accepts_plain_dict() -> None:
     # SocCfgLike is structural (__getitem__ only): a raw cfg dict — like the
     # GUI's thinner SocCfgProtocol handle — must work without a QickConfig wrapper
-    cfg = make_mock_soccfg().get_cfg()
+    cfg = load_soccfg().get_cfg()
     assert "Generators" in describe_soc(cfg)
 
 
 def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
-    cfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+    cfg = load_soccfg(n_gens=1, n_readouts=1)
     gen = cfg["gens"][0]
     gen["type"] = "axis_sg_int4_v1"
     gen["dac"] = "21"

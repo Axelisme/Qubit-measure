@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -460,10 +461,10 @@ def _install_real_mock_soccfg(fx) -> None:
     describe_soc()'s field access and dump_cfg() return real content."""
     import dataclasses
 
-    from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+    
 
     ctx = fx.state.session_env
-    fx.state.session_env = dataclasses.replace(ctx, soccfg=make_mock_soccfg())
+    fx.state.session_env = dataclasses.replace(ctx, soccfg=load_soccfg())
 
 
 def test_soc_info_returns_description_and_cfg(fx):

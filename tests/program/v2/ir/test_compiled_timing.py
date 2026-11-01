@@ -1,12 +1,13 @@
 """Scheduled-cycle analysis through the public compiler and IR analysis seams."""
 
+from tests.program._profiles import load_soccfg
 from copy import deepcopy
 
 import pytest
 from qick.asm_v2 import AsmInst, Pulse, QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 
 
 class ScalarProgram(MyProgramV2):
@@ -35,7 +36,7 @@ class ScalarProgram(MyProgramV2):
 def test_compiled_scalar_shots_include_shell_and_preserve_boundaries():
     layout_from_metadata = ir.TimingLayout.from_metadata
     prog = ScalarProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
         initial_delay=20 / 430.08,
         relax_delay=30 / 430.08,
@@ -70,7 +71,7 @@ class DelayOnlyProgram(MyProgramV2):
 
 def test_linked_boundary_separates_body_advance_from_mergeable_shell_delay():
     prog = DelayOnlyProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
         initial_delay=20 / 430.08,
         relax_delay=30 / 430.08,
@@ -121,7 +122,7 @@ class SweptProgram(ScalarProgram):
 
 def test_compiled_sweeps_step_and_reset_register_times_and_trigger_edges():
     prog = SweptProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
         initial_delay=20 / 430.08,
         relax_delay=30 / 430.08,
@@ -189,7 +190,7 @@ class RuntimeProgram(ScalarProgram):
 
 def test_known_runtime_repeat_and_wave_patch_keep_scheduled_times():
     prog = RuntimeProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
         initial_delay=20 / 430.08,
         relax_delay=0,
@@ -222,7 +223,7 @@ class RegisterDispatchProgram(ScalarProgram):
 
 
 def test_native_register_loop_dispatch_preserves_events_and_reference():
-    prog = RegisterDispatchProgram(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = RegisterDispatchProgram(load_soccfg(), initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -258,7 +259,7 @@ def compile_absolute_time(value: int | str) -> ir.CompiledTimingInput:
     class Program(AbsoluteTimeProgram):
         input_value = value
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
     )
@@ -332,7 +333,7 @@ def compile_immediate_flags(operand: str, initial: int, literal: int, condition:
             self.asm_inst({"CMD": "TRIG", "DST": "2", "SRC": "set", "TIME": "@3"})
             self.meta_macro("TIMING_BOUNDARY", "body_end")
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
     )
@@ -393,7 +394,7 @@ class TriggerProgram(MyProgramV2):
 
 
 def test_literal_time_overrides_register_time_and_trigger_levels_are_distinct():
-    prog = TriggerProgram(make_mock_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
+    prog = TriggerProgram(load_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -524,7 +525,7 @@ def test_changing_one_compiled_pulse_time_is_observable():
     class LaterPulse(ScalarProgram):
         first_cycle = 4
 
-    prog = LaterPulse(make_mock_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
+    prog = LaterPulse(load_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -542,7 +543,7 @@ def test_resync_rejects_hardware_time_and_identifies_its_source():
             self.resync(0.1)
             self.meta_macro("TIMING_BOUNDARY", "body_end")
 
-    prog = ResyncProgram(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = ResyncProgram(load_soccfg(), initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     compiled = ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     with pytest.raises(ValueError, match="s11"):
@@ -558,7 +559,7 @@ def test_resync_rejects_hardware_time_and_identifies_its_source():
     ],
 )
 def test_layout_axes_validate_but_do_not_override_executed_shots(loops, message):
-    prog = ScalarProgram(make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    prog = ScalarProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, loops)
     with pytest.raises(ValueError, match=message):
         ir.analyze_timing(ir.CompiledTimingInput(prog.prog_list, prog.labels, layout))
@@ -627,7 +628,7 @@ def test_native_waveform_sweep_updates_do_not_require_waveform_contents():
             )
 
     prog = GainSweepProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         initial_delay=20 / 430.08,
         relax_delay=30 / 430.08,
     )

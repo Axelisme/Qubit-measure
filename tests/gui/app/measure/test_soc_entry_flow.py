@@ -1,5 +1,6 @@
 """SoC and Setup toolbar entry points share the host's run edit lock."""
 
+from tests.program._profiles import load_soccfg
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -52,7 +53,7 @@ def soc_app(
     registry = Registry()
     registry.register("held", HeldAdapter)
     with launched_measure_app(qapp, tmp_path, registry=registry) as app:
-        env = white_noise()
+        env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         app.controller.session_services.soc_connection.install_soc(env.soc, env.soccfg)
         app.controller.setup_control.new_entry(EntryRequest("synthetic"))
         app.controller.setup_control.new_point(

@@ -1,5 +1,6 @@
 """RunRecord envelopes carry adapter-owned opaque Results through host handovers."""
 
+from tests.program._profiles import load_soccfg
 import json
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -33,7 +34,7 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.resources.entry import AcquiredPayload
 
 from tests.experiment._saving_support import SavingCfg, SavingCore, SavingResult
@@ -95,7 +96,7 @@ def opaque_host(
     registry = Registry()
     registry.register("opaque", OpaqueAdapter)
     state = State(
-        SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())
+        SessionEnv(parameters=None, soc=MagicMock(), soccfg=load_soccfg())
     )
     controller = Controller(
         state=state,

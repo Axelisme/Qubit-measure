@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event, Thread, Timer
@@ -53,7 +54,7 @@ type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
 def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = w.WorkflowPlots(NonPresentingHost())
     devices = RecordingDevices()
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     engine = w.Engine(
         w.EnginePorts(
             plots,

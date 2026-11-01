@@ -1,3 +1,4 @@
+from tests.program._profiles import load_soccfg
 import numpy as np
 import pytest
 from qick import QickConfig
@@ -11,7 +12,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
     round_zcu_time,
     sweep2array,
 )
-from zcu_tools.program.v2 import Pulse, PulseCfg, make_mock_soccfg
+from zcu_tools.program.v2 import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.program._timeline import compile_modules
@@ -86,7 +87,7 @@ def test_time_sweep_rejects_invalid_scaler(soccfg: QickConfig, scaler: float) ->
 @pytest.mark.parametrize("mixer", [300.0, 317.5, 400.0])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_frequency_preview_matches_compiled_absolute_rf(mixer: float, reverse: bool):
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0].update(type="axis_sg_int4_v1", has_mixer=True)
     start, stop = 309.153205939, 309.153230019
     if reverse:
@@ -115,7 +116,7 @@ def test_frequency_preview_matches_compiled_absolute_rf(mixer: float, reverse: b
 @pytest.mark.parametrize("freq", [-8.346794061, 5345.801980847])
 @pytest.mark.parametrize("ro_ch", [None, 0])
 def test_scalar_frequency_matches_compiler_signed_and_matched(freq, ro_ch):
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     pulse = Pulse(
         "drive",
         PulseCfg(
@@ -135,7 +136,7 @@ def test_scalar_frequency_matches_compiler_signed_and_matched(freq, ro_ch):
 
 
 def test_single_frequency_point_and_scaled_negative_frequency():
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     requested = -8.346794061
     expected = round_zcu_freq(requested, soccfg, 0)
     assert round_zcu_freq(requested / 2, soccfg, 0, scaler=2.0) == pytest.approx(
@@ -158,7 +159,7 @@ def test_frequency_sweep_rejects_collapsed_steps():
         sweep2array(
             make_sweep(309.0, 309.0 + 1e-7, expts=20),
             "freq",
-            {"soccfg": make_mock_soccfg(), "gen_ch": 0},
+            {"soccfg": load_soccfg(), "gen_ch": 0},
         )
 
 
@@ -172,7 +173,7 @@ def test_vectorized_time_rounds_each_point_on_generator_clock(
 
 
 def test_vectorized_frequency_matches_scalar_qick_conversion() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     requested = np.asarray([[-8.346794061, 0.0], [100.123456789, 5345.801980847]])
     expected = np.asarray(
         [
@@ -189,7 +190,7 @@ def test_vectorized_frequency_matches_scalar_qick_conversion() -> None:
 
 
 def test_phase_rounding_preserves_scalar_and_vector_cycles() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     requested = np.asarray([0.0, 90.0, 360.0, 720.0])
     resolution = soccfg.reg2deg(1, gen_ch=0) - soccfg.reg2deg(0, gen_ch=0)
 
@@ -205,7 +206,7 @@ def test_phase_rounding_preserves_scalar_and_vector_cycles() -> None:
 
 
 def test_gain_rounding_truncates_signed_scalar_and_array_values() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     maxv = soccfg.get_maxv(0)
     requested = np.asarray([-1.9 / maxv, 0.0, 1.9 / maxv])
     expected = np.asarray([-1.0 / maxv, 0.0, 1.0 / maxv])
@@ -237,7 +238,7 @@ def test_custom_sweep_array_policy_preserves_values(
 
 @pytest.mark.parametrize("scaler", [1.0, -1.0])
 def test_unreachable_gain_word_fails_after_bounded_adjustment(scaler: float) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv_scale"] = 0.9
     with pytest.raises(RuntimeError, match="Gain word .*eight ULP adjustments"):
         round_zcu_gain(3.0, soccfg, 0, scaler=scaler)
@@ -247,14 +248,14 @@ def test_unreachable_gain_word_fails_after_bounded_adjustment(scaler: float) -> 
 def test_unreachable_array_gain_word_fails_after_bounded_adjustment(
     scaler: float,
 ) -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     soccfg["gens"][0]["maxv_scale"] = 0.9
     with pytest.raises(RuntimeError, match="Gain word .*eight ULP adjustments"):
         round_zcu_gain(np.asarray([0.0, 3.0]), soccfg, 0, scaler=scaler)
 
 
 def test_single_point_gain_sweep_matches_scalar_coordinate() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     sweep = make_sweep(0.3, 0.3, expts=1)
     info = {"soccfg": soccfg, "gen_ch": 0}
     np.testing.assert_array_equal(
@@ -263,7 +264,7 @@ def test_single_point_gain_sweep_matches_scalar_coordinate() -> None:
 
 
 def test_gain_sweep_rejects_collapsed_step() -> None:
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     sweep = make_sweep(0.3, 0.30001, expts=4)
     with pytest.raises(ValueError, match="step becomes zero"):
         sweep2array(sweep, "gain", {"soccfg": soccfg, "gen_ch": 0})
@@ -272,7 +273,7 @@ def test_gain_sweep_rejects_collapsed_step() -> None:
 @pytest.mark.parametrize("scaler", [0.0, np.nan, np.inf])
 def test_gain_rejects_invalid_scaler(scaler) -> None:
     with pytest.raises(ValueError, match="gain scaler must be finite and nonzero"):
-        round_zcu_gain(0.3, make_mock_soccfg(), 0, scaler=scaler)
+        round_zcu_gain(0.3, load_soccfg(), 0, scaler=scaler)
 
 
 def test_custom_time_sweep_quantizes_each_array_point(soccfg: QickConfig) -> None:

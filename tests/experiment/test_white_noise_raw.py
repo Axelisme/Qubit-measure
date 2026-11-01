@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -34,7 +35,7 @@ def integrated(result: IntegratedRound | RoundSignals) -> IntegratedRound:
 
 
 def test_white_noise_returns_deferred_full_raw_with_independent_round_totals():
-    environment = white_noise(std_adc=3, seed=17)
+    environment = white_noise(load_soccfg(), std_adc=3, seed=17, routes=((0, 0),))
     try:
         request = AcquireRequest(
             mode="integrated",

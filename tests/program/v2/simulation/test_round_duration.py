@@ -1,5 +1,6 @@
 """Physical round pacing at the public binding seam with virtual time."""
 
+from tests.program._profiles import load_soccfg
 import time
 from dataclasses import replace
 from fractions import Fraction
@@ -15,7 +16,7 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import make_mock_soccfg
+
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
@@ -243,7 +244,7 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
         timing=SimulationTiming(time_scale=1),
     )
     program = compile_modules(
-        make_mock_soccfg(),
+        load_soccfg(),
         modules=[
             PulseReadoutCfg(
                 gen_ch=0,
@@ -319,7 +320,7 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
         cancel.set()
 
     monkeypatch.setattr(time, "sleep", stop_on_sleep)
-    env = white_noise(std_adc=0, seed=1)
+    env = white_noise(load_soccfg(), std_adc=0, seed=1, routes=((0, 0),))
     binding = SimulationBinding(
         env.soc.binding.capture_snapshot,
         env.soc.binding.execute,

@@ -1,11 +1,12 @@
 """Emission naming scopes through public lowering, failures and compilation."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Callable, Sequence
 from typing import override
 
 import pytest
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -36,7 +37,7 @@ def compile_modules(
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(), initial_delay=0, relax_delay=0)
 
 
 def port_value(prog: TimelineProgramV2, value: int):

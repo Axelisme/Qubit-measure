@@ -1,5 +1,6 @@
 """Synthetic registered workflow host shared by component-driver scenarios."""
 
+from tests.program._profiles import load_soccfg
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -105,7 +106,7 @@ def host_window(
     )
     ctrl.setup_control.new_entry(EntryRequest("workflow-ui"))
     ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

@@ -1,5 +1,6 @@
 """Device capture, core RunContext and explicit setup through async Engine."""
 
+from tests.program._profiles import load_soccfg
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -131,7 +132,7 @@ def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
 def test_env_run_distinguishes_missing_devices_from_empty_port(
     rig: Rig, missing: bool
 ) -> None:
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     rig.engine = Engine(
         EnginePorts(
             rig.plots,

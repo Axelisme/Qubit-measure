@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.program._profiles import load_soccfg
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -157,7 +158,7 @@ def test_scoped_acquire_cancel_keeps_run_live_and_publishes_partial_metadata(
     request: pytest.FixtureRequest,
 ) -> None:
     state, tab_id, adapter = make_state()
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     request.addfinalizer(board.devices.close_all_devices)
     state.set_context(replace(state.session_env, soc=board.soc, soccfg=board.soccfg))
     service, _gate, background, handles = make_run_service(state)
