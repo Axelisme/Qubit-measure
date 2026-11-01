@@ -19,14 +19,20 @@ if TYPE_CHECKING:
 
 
 def len_rabi_initial_values(
-    parameters: ParameterContext | None, *, qubit: str = "$qubit"
+    parameters: ParameterContext | None,
+    *,
+    qubit: str = "$qubit",
+    gain_path: tuple[str | int, ...] = ("qub_pulse", "module", "gain"),
 ) -> tuple[Slot, float | None]:
     """Return the Length Rabi pulse source and sweep stop in microseconds.
 
     parameters is the fixed Open/Reset capture, or None. qubit is a direct
     component name or captured alias (default $qubit). A missing/null x180
     slot uses the Slot's fresh qub_probe Template fallback with editable gain
-    1.0 and stop 1.0 us. The fallback marks qub_pulse.module.gain uncalibrated.
+    1.0 and stop 1.0 us. gain_path is the root-relative canonical Form path
+    for that fallback gain's uncalibrated hint, including module wrappers and
+    list indexes. It defaults to qub_pulse.module.gain; mux callers supply
+    ("tones", index, "drive", "module", "gain") for each original tone index.
     An existing x180 selects its Slot without changing its gain or metadata.
     Read pi_len from its persistent waveform, following a waveform library key
     without materializing the pulse. A finite positive non-bool pi_len gives
@@ -45,7 +51,7 @@ def len_rabi_initial_values(
             bindings={"qubit": qubit},
             set={"gain": 1.0},
             seed_metadata={
-                ("qub_pulse", "module", "gain"): FieldMeta(
+                gain_path: FieldMeta(
                     description="未校準的起始值，來源：固定常數。qub_probe Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
                     calibration="uncalibrated",
                 )
