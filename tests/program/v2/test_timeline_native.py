@@ -310,6 +310,46 @@ def test_native_adc_tail_is_checked_before_a_named_trigger():
         _program(body)
 
 
+@pytest.mark.parametrize("placement", ["static", "sweep", "runtime", "repeat", "repeat_sync"])
+def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def one_read(prog):
+        prog.trigger([0], timeline="default")
+        prog.timeline_inc(130 / 430.08)
+
+    def body(prog):
+        if placement in {"repeat", "repeat_sync"}:
+            with prog.repeat("reads", 2):
+                one_read(prog)
+                if placement == "repeat_sync":
+                    prog.delay_by_timeline()
+        else:
+            one_read(prog)
+            if placement == "sweep":
+                prog.timeline_inc(QickSweep1D("scan", 0, 40 / 430.08))
+            elif placement == "runtime":
+                prog.timeline_inc("scan")
+            prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    result = _shots(prog)
+    expected = {"static": [0, 140], "sweep": [0, 180], "runtime": [0, 141]}
+    starts = [
+        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        for shot in result
+    ]
+    assert starts == [[0, 140], expected.get(placement, [0, 140])]
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
+    assert all(
+        shot.body_end_cycle - shot.start_cycle + wait_cycles >= times[-1] + 140
+        for shot, times in zip(result, starts, strict=True)
+    )
+
+
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():
     def body(prog):
         with pytest.raises(ValueError, match="t=None"):

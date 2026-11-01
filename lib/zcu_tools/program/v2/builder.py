@@ -463,8 +463,13 @@ class TimelineBuilder:
         enable capture buffers, default
         False. tag names the occurrence, default None. timeline defaults to
         None (scoped name, or native reference outside a scope); a name places
-        at its end plus t and advances through ADC/trigger completion. Named t=None, unknown resources and
-        invalid timing fail at build. Unknown keywords raise TypeError now.
+        at its end plus t and advances only through trigger width. ADC windows
+        stay on their channels and shot closure still waits for them. Named/scoped
+        triggers reject unprovable ordering against the previous ADC window at
+        build, including a previous native trigger. The error names timeline,
+        channel and overlap cycles. Pure native triggers keep QICK behavior.
+        Named t=None, unknown resources and invalid timing fail at build.
+        Unknown keywords raise TypeError now.
         """
         self._ensure_recording()
         unknown = options.keys() - {"ddr4", "mr", "tag", "timeline"}

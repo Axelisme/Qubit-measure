@@ -718,6 +718,22 @@ def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite()
     assert [s.body_end_cycle - s.start_cycle for s in result] == [53, 58, 53] * 2
 
 
+def test_unknown_runtime_adc_start_must_prove_previous_window_is_complete():
+    def initialize(prog):
+        prog.add_dmem([200])
+        prog.declare_readout(0, length=100 / 307.2)
+
+    def body(prog):
+        prog.fork("default", into="next_read")
+        prog.trigger([0], timeline="default")
+        prog.read_dmem("duration", 0)
+        prog.timeline_inc("duration", timeline="next_read")
+        prog.trigger([0], timeline="next_read")
+
+    with pytest.raises(ValueError, match=r"next_read.*channel 0.*ADC overlap.*cycles"):
+        program(body, initialize=initialize)
+
+
 def test_native_trigger_replaces_prior_runtime_adc_tail_for_shot_closure():
     def initialize(prog):
         prog.declare_readout(0, length=4 / 307.2)

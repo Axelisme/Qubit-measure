@@ -1025,8 +1025,13 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         None uses the scoped name, or native reference timing outside a scope.
 
         Native args select ros/tts/pins, t, width (us), ddr4/mr and tag. Named end
-        includes ADC integration and trigger width, rounded up to tProc cycles.
-        Named t=None raises ValueError at entry; native special values are unchanged.
+        includes only trigger width, rounded up to tProc cycles. ADC integration
+        ends stay on their channels and shot closure still waits for them.
+        A named/scoped trigger raises ValueError unless its start is provably
+        at or after each selected ADC's previous end, including native triggers.
+        Diagnostics name timeline, channel and overlap cycles. Pure native
+        triggers retain QICK timing and overlap behavior, including t=None.
+        Named t=None raises ValueError at entry.
         """
         timeline = timeline if timeline is not None else self._timeline_default
         super().trigger(*args, **kwargs)

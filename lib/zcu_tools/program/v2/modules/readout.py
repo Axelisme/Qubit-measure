@@ -67,7 +67,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     classifier: ReadoutClassifier | None = None
 
     def build(self, name: str) -> PulseReadout:
-        """Capture this cfg as a named, blocking QICK readout module."""
+        """Capture this cfg as a named readout ending at generator plus post-delay."""
         return PulseReadout(name, self)
 
     def nominal_duration_us(self) -> float:
@@ -307,7 +307,12 @@ class _ReadoutDeclaration:
 
 
 class PulseReadout(AbsReadout):
-    """Play and acquire a pulse readout configured with ``PulseReadout.Cfg``."""
+    """Play and acquire a pulse readout configured with ``PulseReadout.Cfg``.
+
+    Timeline completion is generator end plus post-delay once. ADC integration
+    stays on its channel, independent of the author timeline, until shot closure.
+    A later timeline trigger on that ADC must prove the previous window complete.
+    """
 
     Cfg: TypeAlias = PulseReadoutCfg
 
@@ -444,6 +449,8 @@ class TablePulseReadout(AbsReadout):
     readout-config path. At the sweep loop's exec-after hook, the next point is
     loaded from rotated dmem tables and persisted into dedicated templates. The
     final table entry wraps back to the first point for the next outer repetition.
+    Timeline completion is generator end plus post-delay once; ADC windows do
+    not extend it. A later timeline trigger must prove its ADC window disjoint.
     """
 
     def __init__(
@@ -585,7 +592,9 @@ class TablePulseReadout(AbsReadout):
 class MuxReadout(AbsReadout):
     """Fixed mixmux8 playback and simultaneous static PFBv4 acquisition.
 
-    zcu_lab declares native settings as ``MuxReadout.Cfg``.
+    zcu_lab declares native settings as ``MuxReadout.Cfg``. Timeline completion
+    is generator end plus post-delay once. Each ADC retains its own window for
+    shot closure and overlap checks, without extending the author timeline.
 
     Only explicit tone channels are used, in their original order. Initialization
     rejects incompatible hardware, duplicate routes and sub-cycle windows. No
