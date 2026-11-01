@@ -12,8 +12,6 @@
 # (d) PFB readback tproc_ch values are consecutive; hardware readouts 8 and 9
 #     instead have tproc_ch -1.
 # (e) Dyn readout b_phase (32 in hardware) cannot be represented.
-# WIP: PFB readout group and mux readout settings await the decimation ruling.
-# No PFB decimation or derived PFB rate has been selected in this checkpoint.
 board: ZCU216
 sw_version: 0.2.436
 fw_timestamp: 'Tue Sep 10 16:13:40 2024'
@@ -112,7 +110,28 @@ readouts:
     trigger_type: dport
     trigger_port: 0
     coupling: AC
-  # WIP: channels 2..9 (PFB) intentionally omitted pending decimation ruling.
+  # Channels 2..9: PFB readouts, with one builder-assigned ADC per output.
+  - count: 8
+    type: axis_pfb_readout_v4
+    ro_type: axis_pfb_readout_v4
+    fs_mult: 40
+    fs_div: 4
+    # Provisional, pending user confirmation; HWH C_ADC_Decimation_Mode21=2,
+    # not verified on the board. Derived PFB rates are provisional too.
+    decimation: 2
+    samps_per_clk: 4
+    b_dds: 32
+    buf_maxlen: 1024
+    avg_maxlen: 8192
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: '1.0'
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: false
+    iq_offset: -0.5
+    trigger_type: dport
+    trigger_port: 1
+    coupling: AC
 rf:
   # HWH C_DAC_VOP_Mode=0 and C_DAC_Output_Current=0 select 20 mA.
   dac_power: 20mA
@@ -128,4 +147,13 @@ mux:
       has_gain: true
       has_phase: true
       interpolation: 4
-    # WIP: readout mapping intentionally omitted pending decimation ruling.
+    readout:
+      type: axis_pfb_readout_v4
+      ro_type: axis_pfb_readout_v4
+      ro_fullpath: axis_pfb_readout_v4_0
+      pfb_nout: 8
+      pfb_nch: 64
+      pfb_ch_offset: 32
+      pfb_dds_on_output: true
+      has_outsel: false
+      b_phase: 32
