@@ -6,7 +6,7 @@ status: retired
 
 # 0013 — RemoteControlAdapter 作為與 MainWindow 平級的第二個 View
 
-**狀態：** retired（**已實作**，ADR-0005 M6 的展開）。實作分 6 commit：C1 typed ctrl（gui2:90835c02）、C1b F11 cfg 收斂+run-guard（73668379）、C3 正名+handler 收 adapter（f9379e36）、C2b-1 ViewProtocol 拆分+診斷 fan-out（9ccef9e3）、C2b-2 agent 收診斷+render 經 adapter.render_view+刪 ViewQueryService（d65cc55b）、C2a mcp piggyback+診斷分流+default-subscribe（ae0ca4b7）。WIRE_VERSION 6。
+**已實作**，ADR-0005 M6 的展開。實作分 6 commit：C1 typed ctrl（gui2:90835c02）、C1b F11 cfg 收斂+run-guard（73668379）、C3 正名+handler 收 adapter（f9379e36）、C2b-1 ViewProtocol 拆分+診斷 fan-out（9ccef9e3）、C2b-2 agent 收診斷+render 經 adapter.render_view+刪 ViewQueryService（d65cc55b）、C2a mcp piggyback+診斷分流+default-subscribe（ae0ca4b7）。WIRE_VERSION 6。
 **關聯：** 展開 [[0005]] M6；承 [[0001]]（Permit/Lease 共用 guard 路徑）、[[0002]]（async emit / off-main）。
 
 ## 實作偏離規劃的關鍵調整（grill 後定）

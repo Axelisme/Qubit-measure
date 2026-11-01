@@ -4,7 +4,7 @@ status: retired
 
 > 狀態：retired（2026-09-27）。現行局部契約見 外部 dev-flow／collab skills；本地資源限制見 [`CLAUDE.md`](../../../CLAUDE.md)；以下保留歷史正文。
 
-# ADR-0022 — 多 agent 協作：orchestrator-owned worktree protocol
+# 0022 — 多 agent 協作：orchestrator-owned worktree protocol
 
 ## 脈絡
 

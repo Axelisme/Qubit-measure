@@ -6,7 +6,7 @@ status: retired
 
 # 0017 — worker 線程畫圖：依「畫圖在哪呼叫」分流 marshal vs 純通知
 
-**狀態：** retired（探索後定性）。
+探索後定性。
 **關聯：** 同屬「worker 不能直接碰主線程 UI」家族（[[0002]] off-main handler）；承 plot substrate 收斂（`zcu_tools.gui.plotting`）。
 
 ## 背景

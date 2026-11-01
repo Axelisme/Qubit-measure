@@ -6,7 +6,7 @@ status: retired
 
 # 0052 — Event meta 與多前端 attribution
 
-**狀態:** retired(2026-07-11)。
+2026-07-11。
 **關聯:** [[0067]]（domain facts 與前端邊界）、[[0047]]（錯誤投影）、[[0049]]（subscriber-aware push）。
 
 ## 背景

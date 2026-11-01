@@ -4,8 +4,6 @@ status: accepted
 
 # 0072 — 模組定位與依賴邊界
 
-**狀態：** accepted。
-
 ## 脈絡
 
 `zcu_tools` 有 15 個頂層 package，過去只有 7 條 import-linter contract，其餘邊界靠「責任明確」這類原則維持。agent 會把既有耦合當成先例，也不會主動寫 contract。

@@ -4,8 +4,6 @@ status: accepted
 
 # 0064 — GUI process startup 與 app composition
 
-**狀態：** accepted。
-
 ## 脈絡
 
 獨立 GUI app 需要共用的程序啟動順序，但每個 app 的 controller、window 與 domain services 不同。這裡的 runtime 是 GUI process runtime，不是 experiment acquisition runtime，也不是 Python 執行環境。

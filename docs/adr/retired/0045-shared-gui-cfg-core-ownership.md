@@ -4,7 +4,7 @@ status: superseded
 
 # 0045 — Shared GUI cfg core ownership
 
-**狀態：** superseded。gui.cfg 與舊 renderer 已移除，共用表單與 owner 分工見 [[0065]]、[[0073]]。以下正文保留歷史設計，不是現行契約。
+gui.cfg 與舊 renderer 已移除，共用表單與 owner 分工見 [[0065]]、[[0073]]。以下正文保留歷史設計，不是現行契約。
 
 **關聯：** [[0009]]、[[0010]]、[[0011]]、[[0012]]、[[0062]]、[[0046]]、[[0051]]。
 

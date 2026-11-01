@@ -4,7 +4,7 @@ status: accepted
 
 # 0053 — Owner scheduler seam 與 hardware gate presence
 
-**狀態:** accepted（2026-07-12 contract freeze）。
+2026-07-12 contract freeze。
 **關聯:** [[0066]]、[[0067]]、[[0064]]、[[0068]]。
 
 ## 背景（2026-07-12 決策時）

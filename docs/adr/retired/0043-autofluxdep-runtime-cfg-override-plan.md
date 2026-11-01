@@ -6,7 +6,7 @@ status: retired
 
 # 0043 — Autofluxdep runtime cfg override plan
 
-**狀態：** retired（2026-07-05）。
+2026-07-05。
 **關聯：** [[0018]]、[[0040]]、`new_cfg_design.md`。
 
 ## 背景

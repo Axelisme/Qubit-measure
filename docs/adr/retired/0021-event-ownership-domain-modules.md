@@ -4,7 +4,7 @@ status: retired
 
 > 狀態：retired（2026-09-27）。接替文件：[ADR-0067](../0067-gui-application.md)。以下保留歷史正文。
 
-# ADR-0021 — Event Ownership: Domain Modules Own Enum + Payloads
+# 0021 — Event Ownership: Domain Modules Own Enum + Payloads
 
 **Status:** Accepted (Phase 152, 2026-06-10)
 **Related:** [[0004]] (three-questions dependency rule), [[0005]] (service roles DDD/Hexagonal)

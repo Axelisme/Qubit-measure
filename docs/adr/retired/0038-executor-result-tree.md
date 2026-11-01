@@ -4,7 +4,7 @@ status: retired
 
 > 狀態：retired（2026-09-26）。跨模組決策由 [ADR-0062](../0062-experiment-workflow.md) 接替；局部細節見 [`experiment/v2/runtime/README.md`](../../../lib/zcu_tools/experiment/v2/runtime/README.md)。以下保留歷史正文。
 
-# ADR-0038 — executor ResultTree + per-node event + measurement bundle contract
+# 0038 — executor ResultTree + per-node event + measurement bundle contract
 
 關聯 [[0026]]（runner scope 與 stop scope）、[[0027]]（experiment data persistence，明確排除 autofluxdep / overnight workflow collection）。
 

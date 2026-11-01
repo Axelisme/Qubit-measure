@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0062 — 實驗執行與 workflow 編排
+# 0062 — 實驗執行與 workflow 編排
 
 **Last updated:** 2026-11-01，Scope 能力、core helper 與 workflow 三層分工
 

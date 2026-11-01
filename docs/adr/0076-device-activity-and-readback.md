@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0076 — Device 活動快照與 run 後讀回
+# 0076 — Device 活動快照與 run 後讀回
 
 **Last updated:** 2026-10-19，未連線 device 改名與 FakeDevice address 身分
 

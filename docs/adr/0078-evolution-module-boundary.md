@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0078 — Evolution 黑盒邊界與算法內聚
+# 0078 — Evolution 黑盒邊界與算法內聚
 
 ## 背景
 

@@ -3,7 +3,7 @@ status: accepted
 date: 2026-10-23
 ---
 
-# ADR-0081 — Global 與 point 資料以磁碟為真相：write-through、watcher 重載、revision 樂觀鎖與 agent 直接讀寫檔案
+# 0081 — Global 與 point 資料以磁碟為真相：write-through、watcher 重載、revision 樂觀鎖與 agent 直接讀寫檔案
 
 ## 決策狀態與問題
 

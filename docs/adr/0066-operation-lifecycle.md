@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0066 — Operation 執行、取消與關閉邊界
+# 0066 — Operation 執行、取消與關閉邊界
 
 ## 問題與決策
 

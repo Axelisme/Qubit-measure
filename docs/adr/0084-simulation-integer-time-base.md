@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0084 — 模擬 request 的公共整數時基
+# 0084 — 模擬 request 的公共整數時基
 
 ## 脈絡
 

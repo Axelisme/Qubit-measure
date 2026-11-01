@@ -65,6 +65,10 @@ Workflow 作者可以使用 ProgramBuilder，也可以提供符合 run 簽名的
 
 需要調查舊 acquisition observations 時，保留原始文件直接審閱。現行 typed metadata 與 RPC 不再提供它們，也不從其他欄位補造舊 summary 計數。
 
+## 後記（2026-11-01）
+
+本文的 ProgramBuilder 是移除 acquisition facts 當時的名稱。現行 retry 與 data-driven early stop 日誌由 Schedule 的 `AcquisitionRunner` 產生，實作見 [runtime/acquisition.py](../../lib/zcu_tools/experiment/v2/runtime/acquisition.py)，職責邊界見 [ADR-0062](../adr/0062-experiment-workflow.md#capability-與-driver-limits)。這項 owner 更名不改變舊欄位在載入時忽略、不寫回的政策。
+
 ## 相關 ADR
 
 - [ADR-0062](../adr/0062-experiment-workflow.md#capability-與-driver-limits) 記錄作者自由、operation facts 與 ProgramBuilder 日誌的分工。

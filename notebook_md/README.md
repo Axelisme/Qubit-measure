@@ -6,6 +6,8 @@
 
 - [`single_qubit.md`](single_qubit.md) 已改為 FTF 公開 acquisition 範例，示範共用 GUI／Notebook environment、gen2 charge drive、R1 readout、decimated acquisition 與 round 間 A 單位 DC bias 修改。它不連硬體，不依賴尚未交付的單顆 preset。範例直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，並明示 [`zcu_lab/simulation_envs/FTF/`](../zcu_lab/simulation_envs/FTF/README.md) 的工作副本 YAML 路徑。GUI 使用該目錄的 `startup.py`。
 - [`analysis/mist/branch.md`](analysis/mist/branch.md) 示範從既有 entry 與 typed fits 讀取一個 point，計算與匯出 branch populations。它不產生 acquisition 或接受校正值。
+- [`analysis/dispersive.md`](analysis/dispersive.md) 分析 dispersive shift；[`analysis/effect_temp.md`](analysis/effect_temp.md) 計算有效溫度。
+- [`analysis/mist/data_analysis.md`](analysis/mist/data_analysis.md) 分析 MIST 的 dispersive、CKP 與 AC Stark 結果；[`analysis/mist/overlay.md`](analysis/mist/overlay.md) 疊繪量測與模擬資料。
 - [`analysis/`](analysis/) 另有 flux-dependence、T1/T2 等主題；Fluxonium 擬合工具的契約見 [fluxdep README](../lib/zcu_tools/notebook/analysis/fluxdep/README.md)。
 - [`circuit_design/`](circuit_design/) 收錄電路設計 Notebook。相關程式見 [circuit design README](../lib/zcu_tools/notebook/circuit_design/README.md)。
 

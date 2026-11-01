@@ -6,7 +6,7 @@ status: retired
 
 # 0015 — PersistenceCaretaker（Memento + Caretaker）+ 單檔 app-state + 關閉才寫
 
-**狀態：** retired（Phase 126 gui2，live-verified）。
+Phase 126 gui2，live-verified。
 **關聯：** 採 [[0005]]（Hexagonal：Caretaker = Driven Adapter；Originator = Controller façade）；用 [[0004]]（狀態進 State 兩軸：startup 偏好進 `State.startup_prefs`）；承 [[0008]]（tabs cfg raw↔live codec 留 owner 服務）；起因於用戶質疑「persist 為何 runtime 一直寫盤 / 為何兩個檔 / PersistService 為何叫 Service」。
 
 ## 背景

@@ -1,7 +1,9 @@
 ---
 date: 2026-10-21
-status: active
-superseded_by: null
+status: superseded
+superseded_by:
+  - docs/adr/0062-experiment-workflow.md
+  - docs/adr/0075-agent-interface-layers.md
 related:
   - docs/adr/0075-agent-interface-layers.md
   - docs/adr/0062-experiment-workflow.md

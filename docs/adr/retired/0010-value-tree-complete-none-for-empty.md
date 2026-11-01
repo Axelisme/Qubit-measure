@@ -2,9 +2,9 @@
 status: superseded
 ---
 
-# Value 樹永遠完整 + `None` 統一表「空」（停用 optional ref + 未填 scalar）
+# 0010 — Value 樹永遠完整 + `None` 統一表「空」（停用 optional ref + 未填 scalar）
 
-**狀態：** superseded。完整 Value tree 由 [[0065]] 的 Form input／result 契約接替。以下正文保留歷史設計，不是現行契約。
+完整 Value tree 由 [[0065]] 的 Form input／result 契約接替。以下正文保留歷史設計，不是現行契約。
 
 **關聯：** 承 [[0009]]（spec/value fluent，「要不要畫是 GUI 決策不是 spec 概念」同源延伸）；persistence 的保存權威與 memento 降級見 [[0063]]；成品邊界驗證見 [[0011]]。
 

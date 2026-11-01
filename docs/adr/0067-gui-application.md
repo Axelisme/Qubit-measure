@@ -2,9 +2,7 @@
 status: accepted
 ---
 
-# ADR-0067 — GUI 應用核心與前端邊界
-
-**狀態：** accepted。
+# 0067 — GUI 應用核心與前端邊界
 
 **Last updated:** 2026-10-29，workflow 嵌入 measure 與 headless owner；獨立 SoC dialog 與窄 control ports；predictor 與 experiment figure area 的控件 owner；腳本 session 所有權、動態資源與儀器 adapter 邊界
 

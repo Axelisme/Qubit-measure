@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0008 — Headless Form 與 writeback draft
+# 0008 — Headless Form 與 writeback draft
 
 ## 脈絡
 

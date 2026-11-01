@@ -12,8 +12,6 @@ basis:
   - "研究工作檔（歷史項分解、候選 closure、成本計時）未入庫；結論與必要數字寫在本文"
 ---
 
-**讀者：** framework-dev。記錄 FTF 模擬腔驅動模型為何停在半古典近似、哪些 reduced closure 已被量化否決，以及接下來為何走 joint Fock 性能研究。
-
 # CKP reduced closure 研究：精度過但成本 42 倍
 
 ## 結論

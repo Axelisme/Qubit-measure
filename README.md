@@ -1,10 +1,10 @@
 # ZCU-Tools
 
-**讀者：** operator、framework-dev、agent。查找 ZCU-Tools 的執行環境和文件入口。
+**讀者：** operator、lab-author、framework-dev、agent。查找 ZCU-Tools 的執行環境和文件入口。
 
 ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。
 
-**Last updated:** 2026-10-25
+**Last updated:** 2026-11-01
 
 ## 執行環境
 
@@ -24,6 +24,17 @@ uv run --directory <worktree> --no-sync -- python -m apps.measure
 - [量測領域詞彙](docs/CONTEXT.md) 說明參數、量測成果與分析交接用語。
 - [結果傳輸](docs/result-transfer.md)：首次以官方 rclone GUI 授權並保存雲端位置，之後使用 `python scripts/transfer_results.py upload/download <name>`，agent 可直接從 Bash 呼叫。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
+
+## 資料遷移與升級
+
+- [舊資料遷移](docs/storage-migration.md) 說明 dry-run、正式執行、備份與中斷後重跑。
+- [Component flux 升級](docs/flux-migration.md) 說明 v1→v2→v3 的來源宣告、診斷與重新校準。
+- [Component 參數升級](docs/parameter-upgrades.md) 說明文件版本、預覽、套用與還原。
+- [Record device 升級與改名改接線](docs/record-device-upgrades.md) 說明歷史 record 的分類、修復與備份。
+
+## 實驗與 lab 擴充
+
+- Lab-author 從 [zcu_lab 入口](zcu_lab/README.md) 確認領域定義的位置，再依 [教學](zcu_lab/tutorial/README.md) 新增 component、experiment 或 recipe。
 
 ## 框架開發
 

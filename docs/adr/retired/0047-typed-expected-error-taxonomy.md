@@ -6,7 +6,7 @@ status: retired
 
 # 0047 — Typed expected-error taxonomy
 
-**狀態：** retired。關聯：[[0067]] 的 application/domain ownership、[[0014]] 的 app-local dispatch policy。
+關聯：[[0067]] 的 application/domain ownership、[[0014]] 的 app-local dispatch policy。
 
 ## 背景
 

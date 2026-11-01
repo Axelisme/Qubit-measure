@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0073 — Measure 表單從 core cfg 推導
+# 0073 — Measure 表單從 core cfg 推導
 
 ## 局部取代範圍
 
