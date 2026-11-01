@@ -153,8 +153,13 @@ print(saved.record.result)
 ```
 
 驗證分析時，以實驗自己的 Result 組 RunRecord，明填 analyze 所需的 options。
-需要已知真值時，從 `zcu_tools.experiment.probe.generators` 取陣列填 Result。
-GE 與 singleshot rabi 產生器回 raw complex IQ，直接按該實驗的 Result 形狀組裝，不先轉 histogram。
+需要模型資料時，從 `zcu_tools.experiment.probe.generators` import `synthesize`，
+並直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`。
+按模型原始簽名填 params，明填 noise_std 與 seed，輸出 shape 由模型決定。
+需要 raw IQ 時，使用同模組的 `sample_iq_shots`，明填 g／e 複數中心、每個 quadrature
+的 width、每列 shots 與 seed。GE 傳 `[0,1]`，對稱錯置傳 `[p,1-p]`，掃描傳 population 曲線。
+兩個機制不替 caller 定義實驗 Result。Caller 按實驗的欄位與 shape 包裝陣列，
+再組 RunRecord。Raw IQ 不先轉 histogram。
 分析不需要先 run 或 save：
 
 ```python

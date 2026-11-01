@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，獨立離線驗收階段與模型產生器
+**Last updated:** 2026-11-01，獨立離線驗收階段與兩個資料生成機制
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -137,13 +137,19 @@ Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式]
 實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
 Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
 
-`probe.generators` 提供 decay、decay fringe、rabi、Lorentzian、resonator、qubit frequency、
-singleshot GE、singleshot rabi、anticrossing 與 multi decay 陣列產生器。
-各函式重用 fitting owner 的公共模型，座標、真值參數、雜訊與 seed 由 caller 明填，沒有預設值。
-用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 save 或 analysis。
-GE 與 singleshot rabi 回 raw complex IQ，不回 histogram。
-Anticrossing 回兩支曲線，multi decay 回 g／e／o population；形狀、係數與 rate 定義見各函式 docstring。
-工具與框架測試不 import `zcu_lab`，測試用最小合成實驗。
+`probe.generators` 提供兩個資料生成機制，所有參數都由 caller 明填。
+`synthesize(model, xs, params, *, noise_std, seed)` 直接呼叫 `model(xs, *params)`，
+再對每個輸出元素加獨立高斯噪聲，complex 的實部與虛部分別抽樣。
+Caller 直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`，
+按該模型簽名填 params。Model 決定 shape，probe 只驗 xs 有限非空及 noise_std 有限非負。
+`sample_iq_shots(population, *, g_center, e_center, width, shots, seed)` 按每列的 excited
+population 選 g／e 中心，再以 width 作為每個 quadrature 的高斯 sigma。
+它回傳 shape 為 `(len(population), shots)` 的 raw complex128 IQ，不回 histogram。
+Population 是一維有限的 [0,1] 機率，可空。Width 有限且非負，兩個中心有限。
+Shots 是非負整數，不接受 bool，零 shots 回零欄。GE 用 `[0,1]`，對稱錯置用 `[p,1-p]`，
+population 曲線也用同一函式。兩個機制都只使用本地 RNG。
+Caller 用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 save 或 analysis。
+工具與框架測試不 import `zcu_lab`，測試用最小合成模型、population 與實驗。
 
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
 Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。

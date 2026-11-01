@@ -31,7 +31,7 @@ def test_synthesize_forwards_native_model_call_and_preserves_model_shape(shape):
 def test_synthesize_adds_independent_gaussian_noise_with_local_seed(complex_output):
     xs = np.arange(3.0)
     values = np.full((2, 30000), 2.0 + 3.0j if complex_output else 2.0)
-    state = np.random.get_state()
+    state = np.random.get_state(legacy=True)
 
     def model(coordinates: NDArray[np.float64]):
         return values
@@ -51,7 +51,7 @@ def test_synthesize_adds_independent_gaussian_noise_with_local_seed(complex_outp
         assert noise.imag.mean() == pytest.approx(0.0, abs=0.005)
         assert noise.imag.std() == pytest.approx(0.4, abs=0.005)
         assert abs(np.corrcoef(noise.real.ravel(), noise.imag.ravel())[0, 1]) < 0.02
-    after = np.random.get_state()
+    after = np.random.get_state(legacy=True)
     assert state[0] == after[0]
     assert_array_equal(state[1], after[1])
     assert state[2:] == after[2:]
@@ -105,7 +105,7 @@ def test_synthesize_leaves_parameters_output_and_exceptions_to_model():
 
 def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
     populations = np.array([0.0, 1.0, 0.2, 0.8, 0.5])
-    state = np.random.get_state()
+    state = np.random.get_state(legacy=True)
     samples = generators.sample_iq_shots(
         populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
         width=0.0, shots=30000, seed=17,
@@ -127,7 +127,7 @@ def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
     assert_array_equal(samples[1], np.full(30000, 3.0 - 1j))
     assert_allclose(np.mean(samples == 3.0 - 1j, axis=1), populations, atol=0.007)
     assert abs(np.corrcoef((samples[2:4] == 3.0 - 1j).astype(float))[0, 1]) < 0.02
-    after = np.random.get_state()
+    after = np.random.get_state(legacy=True)
     assert state[0] == after[0]
     assert_array_equal(state[1], after[1])
     assert state[2:] == after[2:]

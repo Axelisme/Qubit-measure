@@ -82,7 +82,8 @@ API 契約見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-e
 - `save_stage(record, spec, directory)` 接執行結果或用實驗 Result 型別直接構造的 `RunRecord`。
   它寫入 `directory/data.h5`、讀回並逐欄比較，回傳還原的 record、路徑、`roundtrip_equal` 與 `cfg_issue`。
 - `analysis_stage(experiment, record, options)` 接明確來源，不需要先 run 或 save。
-  可用已知模型產生器的陣列填實驗自己的 Result，再組成 RunRecord。
+  可用 `probe.generators.synthesize` 配 fitting 公開模型，或用 `sample_iq_shots` 抽 raw IQ。
+  Caller 將陣列填入實驗自己的 Result，再組成 RunRecord。
   它回傳 analyze 的實際結果與 PNG bytes，不轉成文字摘要。
 
 Run 與 analysis 的 `pngs` 都是 `dict[str, bytes]`。
@@ -103,7 +104,8 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
 Caller 擁有環境生命週期，須在 `finally` 清理 backend 與 devices，失敗時也一樣。
 階段不重設 caller 的 seed、不改接線，也不建立硬體連線。
 離線驗收不代表實機校準或物理模型已獲驗證。
-框架的 stage／generator 測試用最小合成實驗，不 import `zcu_lab`。
+框架的 stage 測試用最小合成實驗，兩個生成機制用合成模型與 population 測試。
+測試不 import `zcu_lab`，不逐家族驗證 fitting 回復真值。
 
 ## 搬遷驗收
 
