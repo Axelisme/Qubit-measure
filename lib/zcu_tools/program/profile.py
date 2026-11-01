@@ -72,6 +72,34 @@ class _RF(_Settings):
     clk_groups: list[object]
 
 
+class _MuxGenerator(_Settings):
+    type: str
+    has_mixer: bool
+    n_tones: _PositiveInt
+    has_gain: bool
+    has_phase: bool
+    interpolation: _PositiveInt
+
+
+class _PFB(_Settings):
+    type: str
+    ro_type: str
+    ro_fullpath: str
+    pfb_nout: _PositiveInt
+    pfb_nch: _PositiveInt
+    pfb_ch_offset: _Count
+    pfb_dds_on_output: bool
+    has_outsel: bool
+    b_phase: _PositiveInt
+
+
+class _Mux(_Settings):
+    gen_ch: _Count
+    ro_chs: Annotated[list[_Count], Field(min_length=1)]
+    generator: _MuxGenerator
+    readout: _PFB
+
+
 class _Profile(_Settings):
     board: str
     sw_version: str
@@ -82,7 +110,7 @@ class _Profile(_Settings):
     generators: list[_Generator]
     readouts: list[_Readout]
     rf: _RF
-    mux: list[dict[str, object]]
+    mux: list[_Mux]
 
 
 def _generators(profile: _Profile) -> tuple[list[dict], dict[str, dict]]:
@@ -147,6 +175,42 @@ def _readouts(profile: _Profile, n_gens: int) -> tuple[list[dict], dict[str, dic
     return readouts, adcs
 
 
+def _apply_mux(profile: _Profile, gens: list[dict], readouts: list[dict]) -> None:
+    used_gens: set[int] = set()
+    used_readouts: set[int] = set()
+    for index, mux in enumerate(profile.mux):
+        path = f"mux.{index}"
+        if mux.gen_ch >= len(gens) or mux.gen_ch in used_gens:
+            raise ValueError(f"{path}.gen_ch: requires an unused in-range generator")
+        if (
+            len(mux.ro_chs) > mux.readout.pfb_nout
+            or len(set(mux.ro_chs)) != len(mux.ro_chs)
+            or any(ch >= len(readouts) or ch in used_readouts for ch in mux.ro_chs)
+        ):
+            raise ValueError(f"{path}.ro_chs: requires unique unused in-range ADCs within pfb_nout")
+        used_gens.add(mux.gen_ch)
+        used_readouts.update(mux.ro_chs)
+        gen = gens[mux.gen_ch]
+        gen.update(mux.generator.model_dump())
+        gen.update(
+            f_dds=gen["fs"] / mux.generator.interpolation,
+            fdds_div=gen["fs_div"] * mux.generator.interpolation,
+        )
+        for port, ch in enumerate(mux.ro_chs):
+            ro = readouts[ch]
+            ro.pop("tproc_ctrl")
+            ro.update(mux.readout.model_dump())
+            output_div = ro["decimation"] * mux.readout.pfb_nch / 2
+            dds_div = output_div if mux.readout.pfb_dds_on_output else ro["decimation"]
+            ro.update(
+                pfb_port=port,
+                trigger_bit=port,
+                f_output=ro["fs"] / output_div,
+                f_dds=ro["fs"] / dds_div,
+                fdds_div=ro["fs_div"] * dds_div,
+            )
+
+
 def build_soccfg(profile: Mapping[str, object]) -> QickConfig:
     """Build an isolated compile profile from a YAML-decoded mapping.
 
@@ -162,6 +226,7 @@ def build_soccfg(profile: Mapping[str, object]) -> QickConfig:
     settings = _Profile.model_validate(profile)
     gens, dacs = _generators(settings)
     readouts, adcs = _readouts(settings, len(gens))
+    _apply_mux(settings, gens, readouts)
     cfg = settings.model_dump(exclude={"generators", "readouts", "rf", "mux"})
     cfg.update(
         gens=gens,
