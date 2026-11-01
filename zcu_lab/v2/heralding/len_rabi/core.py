@@ -8,7 +8,7 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -67,8 +67,9 @@ class HeraldingLenRabiAnalysis:
         pi2_len_err: Pi/2-duration standard uncertainty in us; never None.
         rabi_f: Fitted Rabi oscillation frequency in MHz; never None.
         rabi_f_err: Frequency standard uncertainty in MHz; never None.
-        fit_quality: Dimensionless diagnostics keyed by "fit"; None when not
-            supplied. analyze always supplies the fit diagnostics.
+        fit_quality: Fitter diagnostics keyed by "fit", including dimensionless
+            residual and relative-error metrics and fixed-phase diagnostics;
+            None when not supplied. analyze always supplies them.
     """
 
     pi_len: float
@@ -329,7 +330,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
 
         Discard nonfinite lengths and complex IQ, then rotate onto a real
         contrast axis. options.decay enables the envelope; options.fit_phase
-        frees the otherwise fixed zero phase. Compute fit quality and publish
+        frees the otherwise fixed zero phase. Return the fitter's quality and publish
         fit with pi/pi2 markers, uncertainty spans and frequency in MHz.
         Pass fraction is diagnostic, not a fit weight. Saved cfg is not
         required. All-NaN data raise ValueError("All data are NaN!"); other
@@ -353,7 +354,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
         )
-        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = (
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit = (
             fit.pi_x,
             fit.pi_x_err,
             fit.pi2_x,
@@ -361,18 +362,6 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             fit.freq,
             fit.freq_err,
             fit.curve,
-            fit.params,
-            fit.cov,
-        )
-
-        names = ("y0", "yscale", "freq", "phase") + (
-            ("decay_time",) if options.decay else ()
-        )
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
         )
 
         # 3. Show the oscillation and the fitted calibration lengths.
@@ -412,5 +401,5 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
             pi2_len_err,
             freq,
             freq_err,
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )

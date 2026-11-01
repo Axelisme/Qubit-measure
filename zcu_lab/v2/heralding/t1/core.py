@@ -9,7 +9,6 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import (
     FitQuality,
-    compute_fit_quality,
     expfunc,
     fit_decay,
     fit_dual_decay,
@@ -62,13 +61,14 @@ class HeraldingT1Result:
 
 @dataclass(frozen=True)
 class HeraldingT1Analysis:
-    """Herald-g conditional T1 fit and model-independent diagnostics.
+    """Herald-g conditional T1 fit and fitting-owner diagnostics.
 
     t1 is the primary decay time in us; t1_err is its standard error in us.
     Neither is None. t1b is the second decay time in us and t1b_err its
     standard error in us; both are None for a single-exponential fit.
-    fit_quality maps "fit" to dimensionless residual and relative-error
-    diagnostics, or is None when diagnostics were not supplied.
+    fit_quality maps "fit" to the fitter's dimensionless residual and
+    relative-error metrics and decay-bound diagnostics, or is None when
+    diagnostics were not supplied.
     """
 
     t1: float
@@ -250,7 +250,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         Skip options.skip points on the original grid, discard nonfinite times
         and IQ, then rotate onto the real signal axis. options.dual_exp selects
         two decays instead of one. Draw the data and fit, and return lifetimes
-        and standard errors in us with model-independent fit quality.
+        and standard errors in us with the fitter's quality diagnostics.
         Pass fractions are not fit weights. Saved cfg is unused; insufficient
         finite data raises in the fitting tool.
         """
@@ -263,35 +263,24 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
 
         if options.dual_exp:
             fit = fit_dual_decay(xs, real_signals)
-            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = (
+            t1, t1err, t1b, t1berr, y_fit, pOpt = (
                 fit.decay_time1,
                 fit.decay_time1_err,
                 fit.decay_time2,
                 fit.decay_time2_err,
                 fit.curve,
                 fit.params,
-                fit.cov,
             )
-            names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         else:
             fit = fit_decay(xs, real_signals)
-            t1, t1err, y_fit, pOpt, pCov = (
+            t1, t1err, y_fit, pOpt = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.curve,
                 fit.params,
-                fit.cov,
             )
-            names = ("y0", "yscale", "decay_time")
             t1b = 0.0
             t1berr = 0.0
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
-        )
-
         fig, ax = plots.subplots(num="fit")
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
@@ -317,5 +306,5 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             t1_err=float(t1err),
             t1b=float(t1b) if options.dual_exp else None,
             t1b_err=float(t1berr) if options.dual_exp else None,
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )

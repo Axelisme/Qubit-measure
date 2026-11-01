@@ -7,7 +7,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
+from zcu_tools.analysis.fitting import FitQuality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -62,8 +62,9 @@ class HeraldingAmpRabiAnalysis:
         pi_amp_err: Pi-gain standard uncertainty in a.u.; never None.
         pi2_amp: Fitted pi/2-pulse gain in a.u.; never None.
         pi2_amp_err: Pi/2-gain standard uncertainty in a.u.; never None.
-        fit_quality: Dimensionless diagnostics keyed by "fit"; None when not
-            supplied. analyze always supplies the fit diagnostics.
+        fit_quality: Fitter diagnostics keyed by "fit", including dimensionless
+            residual and relative-error metrics and fixed-phase diagnostics;
+            None when not supplied. analyze always supplies them.
     """
 
     pi_amp: float
@@ -203,7 +204,8 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         Skip leading points on the original gain grid, discard nonfinite gain
         and IQ, then rotate IQ onto a real contrast axis. The point nearest zero
         gain fixes the nondecaying Rabi phase to 0 or 180 degrees. Publish a
-        fit plot with pi/pi2 markers and uncertainty spans. Pass fraction is
+        fit plot with pi/pi2 markers and uncertainty spans, and return the
+        fitter's quality diagnostics. Pass fraction is
         diagnostic, not a fit weight. Saved cfg is not required. Negative skip
         is rejected by Options; empty or insufficient traces propagate errors.
         """
@@ -220,22 +222,12 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
             init_phase = 180.0
 
         fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit, pOpt, pCov = (
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit = (
             fit.pi_x,
             fit.pi_x_err,
             fit.pi2_x,
             fit.pi2_x_err,
             fit.curve,
-            fit.params,
-            fit.cov,
-        )
-
-        names = ("y0", "yscale", "freq", "phase")
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
         )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
@@ -263,5 +255,5 @@ class HeraldingAmpRabiExp(Experiment[HeraldingAmpRabiResult, HeraldingAmpRabiCfg
         # fit_rabi computes the per-gain fit uncertainties; surface them so the GUI
         # summary carries the gain errors (the figure labels already show them).
         return HeraldingAmpRabiAnalysis(
-            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": quality}
+            pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fit_quality={"fit": fit.quality}
         )

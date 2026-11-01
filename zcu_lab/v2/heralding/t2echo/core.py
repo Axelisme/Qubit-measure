@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.fitting import (
     FitQuality,
-    compute_fit_quality,
     fit_decay,
     fit_decay_fringe,
 )
@@ -65,14 +64,15 @@ class HeraldingT2EchoResult:
 
 @dataclass(frozen=True)
 class HeraldingT2EchoAnalysis:
-    """Herald-g conditional Echo fit and model-independent diagnostics.
+    """Herald-g conditional Echo fit and fitting-owner diagnostics.
 
     t2e is the Echo decay time in us; t2e_err is its standard error in us.
     detune is the observed fringe frequency in MHz, including the applied
     phase ramp; detune_err is its standard error in MHz. Both are zero for
     decay-only fits. These four numeric fields are never None.
-    fit_quality maps "fit" to dimensionless residual and relative-error
-    diagnostics, or is None when diagnostics were not supplied.
+    fit_quality maps "fit" to the fitter's dimensionless residual and
+    relative-error metrics, fixed-phase and decay-bound diagnostics, or is
+    None when diagnostics were not supplied.
     """
 
     t2e: float
@@ -250,7 +250,7 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         true_activate_detune; a requested fringe without finite detune raises
         ValueError. Unknown fit_method also raises ValueError.
         Draw data and fit, and return lifetime/error in us, observed fringe
-        frequency/error in MHz (both zero for decay), and fit quality.
+        frequency/error in MHz (both zero for decay), and the fitter's quality.
         Pass fractions are not fit weights; insufficient data raises in the
         fitting tool.
         """
@@ -285,40 +285,24 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
         if fit_method == "fringe":
             fixedparams = None if fit_phase else [None, None, None, 0.0, None]
             fit = fit_decay_fringe(xs, real_signals, fixedparams=fixedparams)
-            t2e, t2eerr, detune, detune_err, y_fit, pOpt, pCov = (
+            t2e, t2eerr, detune, detune_err, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.freq,
                 fit.freq_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
         elif fit_method == "decay":
             fit = fit_decay(xs, real_signals)
-            t2e, t2eerr, y_fit, pOpt, pCov = (
+            t2e, t2eerr, y_fit = (
                 fit.decay_time,
                 fit.decay_time_err,
                 fit.curve,
-                fit.params,
-                fit.cov,
             )
             detune = 0.0
             detune_err = 0.0
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
-
-        names = (
-            ("y0", "yscale", "freq", "phase", "decay_time")
-            if fit_method == "fringe"
-            else ("y0", "yscale", "decay_time")
-        )
-        quality = compute_fit_quality(
-            real_signals,
-            y_fit,
-            {name: float(value) for name, value in zip(names, pOpt, strict=True)},
-            pCov,
-        )
 
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
@@ -349,5 +333,5 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
             t2e_err=float(t2eerr),
             detune=float(detune),
             detune_err=float(detune_err),
-            fit_quality={"fit": quality},
+            fit_quality={"fit": fit.quality},
         )
