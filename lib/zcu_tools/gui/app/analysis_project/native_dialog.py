@@ -96,7 +96,7 @@ class NativeSpectrumDialog(LoadDataDialog):
 
     def _build_source_options(self, row: QHBoxLayout) -> None:
         """Place the Labber axis mapping; subclasses may add domain options."""
-        row.addWidget(self._axis_combo)
+        row.addWidget(self._axis_button)
 
     def _read_source(
         self, filepath: str
@@ -114,7 +114,7 @@ class NativeSpectrumDialog(LoadDataDialog):
                 self._variable,
                 self._device_axis,
                 self._device,
-                self._axis_combo,
+                self._axis_button,
             ):
                 control.setEnabled(False)
             self._unit_label.setText("native")
@@ -126,9 +126,9 @@ class NativeSpectrumDialog(LoadDataDialog):
         self._variable.setEnabled(native)
         self._device_axis.setEnabled(native)
         self._device.setEnabled(native)
-        self._axis_combo.setEnabled(not native)
+        self._axis_button.setEnabled(not native)
         if native:
-            self._axis_combo.setCurrentIndex(0)
+            self._axis_button.setChecked(False)
         self._variable.blockSignals(True)
         self._variable.clear()
         self._device.clear()
