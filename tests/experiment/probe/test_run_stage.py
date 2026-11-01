@@ -64,12 +64,38 @@ def test_run_rejects_result_shape_that_disagrees_with_axes(environment: Simulati
         probe.run_stage(WrongShape(), SavingCfg(), environment)
 
 
-def test_run_rejects_result_dtype_that_disagrees_with_axes(environment: SimulationEnvironment):
+@pytest.mark.parametrize("field", ["frequency", "signal"])
+def test_run_rejects_result_dtype_that_disagrees_with_axes(
+    environment: SimulationEnvironment, field: str,
+):
     class WrongDtype(ProbeExperiment):
         def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
             result = super().run(config, context=context)
-            result.frequency = result.frequency.astype("float32")
+            setattr(result, field, getattr(result, field).astype("float32"))
             return result
 
-    with pytest.raises(ValueError, match="frequency.*dtype|dtype.*frequency"):
+    with pytest.raises(ValueError, match=rf"{field}.*dtype|dtype.*{field}"):
         probe.run_stage(WrongDtype(), SavingCfg(), environment)
+
+
+@pytest.mark.parametrize("failure", ["run", "live"])
+def test_run_propagates_original_run_or_live_update_error(
+    environment: SimulationEnvironment, failure: str,
+):
+    error = RuntimeError("synthetic stage error")
+
+    class Broken(ProbeExperiment):
+        def run(self, config: SavingCfg, *, context: RunContext) -> SavingResult:
+            if failure == "run":
+                raise error
+            result = super().run(config, context=context)
+
+            def broken_draw(_figure):
+                raise error
+
+            context.plots.draw("signal/trace", broken_draw)
+            return result
+
+    with pytest.raises(RuntimeError) as caught:
+        probe.run_stage(Broken(), SavingCfg(), environment)
+    assert caught.value is error
