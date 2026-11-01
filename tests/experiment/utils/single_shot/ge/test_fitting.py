@@ -18,6 +18,15 @@ from zcu_tools.experiment.utils.single_shot.ge.base import (
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"numbins": None}, {"length_ratio": "invalid"}, {"logscale": []}],
+)
+def test_fit_options_reject_invalid_types_at_construction(kwargs):
+    with pytest.raises(ValueError):
+        GEFitOptions(**kwargs)
+
+
 @pytest.mark.parametrize("swap_rows", [False, True])
 @pytest.mark.parametrize("reflect_axis", [False, True])
 def test_assignment_fidelity_scores_the_selected_histogram_edge(

@@ -14,7 +14,13 @@ Live plots and Analyze divide each row by its total count before displaying popu
 
 Open and Reset take a snapshot of the current aliases, parameters and module choices. Relax delay and delay stop are 5 * `$qubit.t1`.
 
-Classification uses the selected readout module's circle `classifier`. It divides raw ADC sums by integration length without subtracting IQ offset. Run rejects missing calibration or radius and asks for GE Post analysis. Linear has no Other state and cannot supply this three-state T1 measurement. Analyze uses the saved cfg's confusion matrix; old cfg without a classifier skips correction.
+Readout accepts only the pulse family.
+A mux readout in the library is incompatible.
+Classification uses the readout's circle classifier under Readout → Advanced.
+Run requires a positive radius; missing radius prompts singleshot GE Post.
+Linear has no Other state and is rejected.
+Analyze corrects populations only with the saved readout cfg's confusion matrix.
+Historical cfg without a classifier or matrix skips correction.
 
 Pulse templates use `$qubit.freq`, `$qubit.wiring.ch`, `$resonator.freq`, `$resonator.wiring.ch` and `$resonator.wiring.ro_ch`. The readout trigger uses `$resonator.time_of_fly` + 0.05 us. Missing required sources leave the corresponding fields Invalid; supply them before Run.
 

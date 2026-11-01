@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -29,7 +30,7 @@ from .analysis import GEConfusionResult, calc_confusion_matrix, plot_confusion_m
 
 @dataclass(frozen=True)
 class GE_Result:
-    """Raw probe-off/on rows; prepared_states=[0, 1] records that acquisition order."""
+    """Raw IQ rows in fixed probe-off/on acquisition order."""
 
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
@@ -41,8 +42,8 @@ class GEAnalyzeOptions:
     backend: Literal["pca", "center"] = "pca"
     logscale: bool = False
     align_t1: bool = True
-    length_ratio: float | None = None
-    angle: float | None = None
+    length_ratio: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    angle: float | None = Field(default=None, allow_inf_nan=False)
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,7 @@ class GEAnalysis:
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class GEPostAnalyzeOptions:
-    radius: float | None = None
+    radius: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     consider_other: bool = False
 
 

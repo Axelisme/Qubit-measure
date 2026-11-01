@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -115,18 +114,6 @@ def analyze_ge(
     if any(f"fit_{i}" in plots for i in indices):
         raise ValueError("fit_i figures already exist in this operation")
     selected = [options.overrides.get(i, options.default) for i in indices]
-    for option in selected:
-        if option.backend not in ("pca", "center") or option.initial_state not in (
-            "ground",
-            "excited",
-        ):
-            raise ValueError("invalid GE backend or initial_state")
-        if option.angle is not None and not math.isfinite(option.angle):
-            raise ValueError("GE angle must be finite degrees")
-        if option.length_ratio is not None and (
-            not math.isfinite(option.length_ratio) or option.length_ratio < 0
-        ):
-            raise ValueError("GE length_ratio must be finite and nonnegative")
     outcomes: list[MuxGEAnalysis | MuxFitFailure] = []
     for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
         name = f"fit_{index}"
@@ -207,11 +194,6 @@ def post_analyze_ge(
     if any(f"post_{i}" in plots for i in indices):
         raise ValueError("post_i figures already exist in this operation")
     selected = [options.overrides.get(i, options.default) for i in indices]
-    if any(
-        o.radius is not None and (not math.isfinite(o.radius) or o.radius < 0)
-        for o in selected
-    ):
-        raise ValueError("post radius must be finite and nonnegative ADC units")
     outcomes: list[MuxGEPostAnalysis | MuxFitFailure] = []
     for row, (item, option) in enumerate(zip(primary, selected, strict=True)):
         name = f"post_{item.index}"
