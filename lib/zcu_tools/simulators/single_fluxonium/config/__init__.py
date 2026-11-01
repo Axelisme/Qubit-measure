@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from zcu_tools.resources.simulation_schema import validation_message
 from zcu_tools.resources.yaml import load_yaml
-
 from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
 
 

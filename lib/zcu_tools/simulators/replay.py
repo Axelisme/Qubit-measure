@@ -35,7 +35,6 @@ from zcu_tools.core.simulation import (
     TimeBase,
     TimelineTemplate,
 )
-
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings
 

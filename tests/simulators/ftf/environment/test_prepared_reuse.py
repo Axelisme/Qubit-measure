@@ -6,18 +6,19 @@ from dataclasses import replace
 import pytest
 from zcu_tools.core.simulation import ChargeDriveRequirement, RoundRequest
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment import replay
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulators.ftf.environment import FTFSource, replay
 
 from tests.core._simulation import tick_array, ticks
-from tests.simulators.ftf.environment._templates import expect_statistics
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators.ftf.environment._templates import (
+    expect_statistics,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 
@@ -460,9 +461,9 @@ def test_preparation_hits_reemit_accuracy_warning_and_keep_numeric_identity():
 
 
 def test_public_acquire_stop_reentry_and_delayed_raw_survive_preparation_hits():
-    from zcu_tools.simulators.ftf.environment import ftf
     from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+    from zcu_tools.simulators.ftf.environment import ftf
 
     env = ftf(settings(), soccfg=profile_soccfg("ftf"))
     try:

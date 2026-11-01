@@ -5,16 +5,16 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import TimeBase
-from zcu_tools.simulators.ftf.environment import FTFMuxReadoutConfig
-from zcu_tools.simulators.ftf.environment import FTFReadoutConfig
-from zcu_tools.simulators.ftf.environment import FTFReceiverConfig
-from zcu_tools.simulators.ftf.environment import plan_template
 from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
+from zcu_tools.simulators.ftf.environment import (
+    FTFMuxReadoutConfig,
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+    plan_template,
+)
 
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import load_mux_soccfg
+from tests.simulators.ftf.environment._templates import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
 

@@ -14,17 +14,15 @@ from zcu_tools.core.simulation import (
     ReadoutWindow,
     TimelineTemplate,
 )
-from zcu_tools.simulators.ftf.environment import FTFModelFacts
-from zcu_tools.simulators.ftf.environment import plan_template
-from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulate.baths import H_OVER_K
 from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulators.ftf.config import FTFSettings, parse_ftf
+from zcu_tools.simulators.ftf.environment import FTFModelFacts, plan_template
 
 from tests.core._simulation import TIME_BASE, single_point_template, ticks
-from tests.simulators.ftf.environment._templates import snapshot
 from tests.program._profiles import profile_soccfg
 from tests.simulators.ftf.config._data import ftf_document
+from tests.simulators.ftf.environment._templates import snapshot
 
 pytestmark = pytest.mark.sim
 

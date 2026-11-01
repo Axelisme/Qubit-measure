@@ -20,7 +20,6 @@ from zcu_tools.experiment.readout_plan import (
     drive_track,
     logical_event_contents,
 )
-from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
 from zcu_tools.simulate.adc import ReadoutPulse
 from zcu_tools.simulate.evolution import (
     ControlPulse,
@@ -33,7 +32,7 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
 )
 from zcu_tools.simulate.lines import DistortionTerm, FilteredFlux, FluxLine
-
+from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
 from zcu_tools.simulators.single_fluxonium.environment.numeric import dc_flux
 
 

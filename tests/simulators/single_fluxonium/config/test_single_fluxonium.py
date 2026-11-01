@@ -9,8 +9,10 @@ import yaml
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from zcu_tools.simulators.single_fluxonium.config.schema import FluxLine
-    from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
+    from zcu_tools.simulators.single_fluxonium.config.schema import (
+        FluxLine,
+        SingleFluxoniumSettings,
+    )
 
 
 DOCUMENT = """

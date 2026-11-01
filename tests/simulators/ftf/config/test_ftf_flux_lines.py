@@ -4,8 +4,7 @@ import pytest
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.single_fluxonium.config.schema import FluxLine
 
-from tests.simulators.ftf.config._data import dual_readout_document
-from tests.simulators.ftf.config._data import ftf_document
+from tests.simulators.ftf.config._data import dual_readout_document, ftf_document
 
 
 @pytest.mark.parametrize(

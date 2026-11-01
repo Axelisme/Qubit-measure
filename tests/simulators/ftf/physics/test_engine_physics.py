@@ -5,7 +5,6 @@ from threading import Event
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.simulators.ftf import physics as ftf
 from zcu_tools.simulate.evolution import (
     DriveSource,
     DriveTrack,
@@ -19,6 +18,7 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.evolution.kernel import SegmentTable
 from zcu_tools.simulate.evolution.kernels.t4 import T4
 from zcu_tools.simulate.lines import FluxLine
+from zcu_tools.simulators.ftf import physics as ftf
 
 from tests.simulate.evolution.contract.kernel_suite import KernelCase, reference
 

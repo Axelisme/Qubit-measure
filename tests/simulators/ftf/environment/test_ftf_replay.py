@@ -7,16 +7,17 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import RoundRequest
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFAcquisitionOptions
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment import ftf
-from zcu_tools.simulators.ftf.environment import replay_round
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound, SimulationClock
 from zcu_tools.simulators.ftf.config import parse_ftf
-from zcu_tools.simulators.replay import read_replay
-from zcu_tools.simulators.replay import replay_paths
+from zcu_tools.simulators.ftf.environment import (
+    FTFAcquisitionOptions,
+    FTFSource,
+    ftf,
+    replay_round,
+)
+from zcu_tools.simulators.replay import read_replay, replay_paths
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
@@ -27,9 +28,7 @@ pytestmark = pytest.mark.sim
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated"])
 def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
-    from tests.simulators.ftf.environment._templates import request
-    from tests.simulators.ftf.environment._templates import settings
-    from tests.simulators.ftf.environment._templates import snapshot
+    from tests.simulators.ftf.environment._templates import request, settings, snapshot
 
     source = FTFSource(
         settings().with_telemetry(enabled=False),
@@ -88,9 +87,7 @@ def test_replay_retains_round_raw_after_source_release(tmp_path: Path, mode):
 def test_replay_freezes_drifted_settings_and_identity_without_clock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tests.simulators.ftf.environment._templates import request
-    from tests.simulators.ftf.environment._templates import settings
-    from tests.simulators.ftf.environment._templates import snapshot
+    from tests.simulators.ftf.environment._templates import request, settings, snapshot
 
     document = settings().model_dump(mode="json")
     for loop in ("f1", "coupler", "f2"):
@@ -176,9 +173,7 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
     backend: str,
 ) -> None:
     from zcu_tools.simulators.ftf.environment import replay_round
-    from zcu_tools.simulators.replay import read_replay
-    from zcu_tools.simulators.replay import replay_paths
-    from zcu_tools.simulators.replay import save_replay
+    from zcu_tools.simulators.replay import read_replay, replay_paths, save_replay
 
     archive = tmp_path / "current"
     env = ftf(
@@ -219,16 +214,15 @@ def test_replay_rejects_archive_from_obsolete_numeric_backend(
 def test_replay_recomputes_statistics_without_numeric_records(tmp_path: Path) -> None:
     from zcu_tools.core.simulation import RoundRequest
     from zcu_tools.device import DeviceManager
-    from zcu_tools.simulators.ftf.environment import FTFSource
-    from zcu_tools.simulators.ftf.environment import replay_round
-    from zcu_tools.simulators.replay import read_replay
-    from zcu_tools.simulators.replay import replay_paths
-    from zcu_tools.simulators.replay import save_replay
+    from zcu_tools.simulators.ftf.environment import FTFSource, replay_round
+    from zcu_tools.simulators.replay import read_replay, replay_paths, save_replay
 
-    from tests.simulators.ftf.environment._templates import expect_statistics
-    from tests.simulators.ftf.environment._templates import request
-    from tests.simulators.ftf.environment._templates import settings
-    from tests.simulators.ftf.environment._templates import snapshot
+    from tests.simulators.ftf.environment._templates import (
+        expect_statistics,
+        request,
+        settings,
+        snapshot,
+    )
 
     source = FTFSource(
         settings(),

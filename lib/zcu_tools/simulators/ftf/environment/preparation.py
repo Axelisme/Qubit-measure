@@ -11,7 +11,6 @@ from typing import Generic, TypeVar
 import numpy as np
 
 from zcu_tools.core.simulation import AcquireRequest, PulseEnvelope
-
 from zcu_tools.simulators.ftf.environment.readout import FTFReadoutConfig
 
 T = TypeVar("T")

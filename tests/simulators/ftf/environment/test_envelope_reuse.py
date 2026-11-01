@@ -8,10 +8,8 @@ from zcu_tools.core.simulation import PulseEnvelope
 from zcu_tools.simulators.ftf.environment import plan_template
 
 from tests.core._simulation import TIME_BASE, ticks
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import settings, snapshot, template
 
 pytestmark = pytest.mark.sim
 

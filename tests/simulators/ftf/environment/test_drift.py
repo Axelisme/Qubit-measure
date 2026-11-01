@@ -10,21 +10,21 @@ import pytest
 from threadpoolctl import threadpool_limits
 from zcu_tools.core.simulation import RoundSignals
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFAcquisitionOptions
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment import ftf
-from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import FTFAcquisitionOptions, FTFSource, ftf
+from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
 
 from tests.core._simulation import TIME_BASE
-from tests.simulators.ftf.environment._templates import expect_statistics
-from tests.simulators.ftf.environment._templates import herald_template
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import (
+    expect_statistics,
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 

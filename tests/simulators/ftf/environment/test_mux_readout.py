@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf import environment as ftf_module
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulate.adc import (
     ADC,
@@ -23,14 +22,17 @@ from zcu_tools.simulate.evolution import (
     PathDiagnostics,
     TimelineBatch,
 )
+from zcu_tools.simulators.ftf import environment as ftf_module
 
 from tests.core._simulation import TIME_BASE, ticks
-from tests.simulators.ftf.environment._templates import herald_template
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import (
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 

@@ -2,10 +2,12 @@
 
 import numpy as np
 import pytest
-from zcu_tools.simulators.ftf.physics import FluxoniumCircuit
-from zcu_tools.simulators.ftf.physics import JointModel
-from zcu_tools.simulators.ftf.physics import JointParameters
-from zcu_tools.simulators.ftf.physics import SquidCircuit
+from zcu_tools.simulators.ftf.physics import (
+    FluxoniumCircuit,
+    JointModel,
+    JointParameters,
+    SquidCircuit,
+)
 
 
 @pytest.fixture

@@ -5,11 +5,13 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, field_validator, model_validator
 
 from zcu_tools.resources.simulation_schema import Finite, Index, Name, Positive, Values
-from zcu_tools.simulators.single_fluxonium.config.schema import Chip
-from zcu_tools.simulators.single_fluxonium.config.schema import CoherenceDrift
-from zcu_tools.simulators.single_fluxonium.config.schema import DriveLine
-from zcu_tools.simulators.single_fluxonium.config.schema import Numerics
-from zcu_tools.simulators.single_fluxonium.config.schema import Readout
+from zcu_tools.simulators.single_fluxonium.config.schema import (
+    Chip,
+    CoherenceDrift,
+    DriveLine,
+    Numerics,
+    Readout,
+)
 
 
 class CurrentSource(Values):

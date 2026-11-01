@@ -7,10 +7,12 @@ from scipy.linalg import expm
 def test_native_embedding_preserves_physical_operators_across_truncations() -> None:
     """Compare physical native coordinates, not matching energy-index labels."""
     import scqubits as scq
-    from zcu_tools.simulators.ftf.physics import FluxoniumCircuit
-    from zcu_tools.simulators.ftf.physics import JointModel
-    from zcu_tools.simulators.ftf.physics import JointParameters
-    from zcu_tools.simulators.ftf.physics import SquidCircuit
+    from zcu_tools.simulators.ftf.physics import (
+        FluxoniumCircuit,
+        JointModel,
+        JointParameters,
+        SquidCircuit,
+    )
 
     f = FluxoniumCircuit(3.0, 0.8, 0.6, 6, 3)
     c = SquidCircuit(10.0, 0.3, 0.2, 2, 3)
@@ -68,10 +70,12 @@ def test_native_embedding_preserves_physical_operators_across_truncations() -> N
 
 
 def test_fixed_squid_static_spectrum_and_native_charge_square() -> None:
-    from zcu_tools.simulators.ftf.physics import FluxoniumCircuit
-    from zcu_tools.simulators.ftf.physics import JointModel
-    from zcu_tools.simulators.ftf.physics import JointParameters
-    from zcu_tools.simulators.ftf.physics import SquidCircuit
+    from zcu_tools.simulators.ftf.physics import (
+        FluxoniumCircuit,
+        JointModel,
+        JointParameters,
+        SquidCircuit,
+    )
 
     f = FluxoniumCircuit(ej_ghz=3.0, ec_ghz=0.8, el_ghz=0.6, native_cutoff=10, levels=3)
     c = SquidCircuit(
@@ -105,11 +109,13 @@ def test_fixed_squid_static_spectrum_and_native_charge_square() -> None:
 
 
 def test_signed_direct_coupling_and_parent_readout_states() -> None:
-    from zcu_tools.simulators.ftf.physics import FluxoniumCircuit
-    from zcu_tools.simulators.ftf.physics import JointModel
-    from zcu_tools.simulators.ftf.physics import JointParameters
-    from zcu_tools.simulators.ftf.physics import Resonator
-    from zcu_tools.simulators.ftf.physics import SquidCircuit
+    from zcu_tools.simulators.ftf.physics import (
+        FluxoniumCircuit,
+        JointModel,
+        JointParameters,
+        Resonator,
+        SquidCircuit,
+    )
 
     f1 = FluxoniumCircuit(3.0, 0.8, 0.6, 8, 3, q_cap=1e5)
     f2 = FluxoniumCircuit(3.3, 0.7, 0.55, 8, 3)

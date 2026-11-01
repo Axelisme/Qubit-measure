@@ -9,17 +9,16 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import AcquireRequest, ReadoutWindow, RoundRequest
-from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
-from zcu_tools.simulators.six_fluxonium.environment.runtime import SixFluxoniumSource
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import SimulationClock
 from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
+from zcu_tools.simulators.six_fluxonium.environment import six_fluxonium
+from zcu_tools.simulators.six_fluxonium.environment.runtime import SixFluxoniumSource
 
 from tests.core._simulation import TIME_BASE, tick_tuple
-from tests.simulators.single_fluxonium.environment._inputs import slot
-from tests.simulators.single_fluxonium.environment._inputs import template
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators.single_fluxonium.environment._inputs import slot, template
 from tests.simulators.six_fluxonium.config._data import six_document
 
 

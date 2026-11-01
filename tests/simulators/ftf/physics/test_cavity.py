@@ -7,8 +7,8 @@ import pytest
 from scipy.integrate import trapezoid
 from scipy.linalg import expm
 from zcu_tools.simulate import adc
-from zcu_tools.simulators.ftf import physics as ftf
 from zcu_tools.simulate.adc import ReadoutPulse
+from zcu_tools.simulators.ftf import physics as ftf
 
 pytestmark = pytest.mark.sim
 

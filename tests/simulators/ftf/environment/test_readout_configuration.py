@@ -3,10 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from zcu_tools.simulators.ftf import environment as ftf_module
-from zcu_tools.simulators.ftf.environment.preparation import preparation_key
-from zcu_tools.simulators.ftf.environment.readout import readout_configuration
-from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.resources.simulation_schema import ReceiverBackground
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -14,10 +10,13 @@ from zcu_tools.simulate.adc import (
     BackgroundRipple,
     BackgroundRoughness,
 )
+from zcu_tools.simulators.ftf import environment as ftf_module
+from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment.preparation import preparation_key
+from zcu_tools.simulators.ftf.environment.readout import readout_configuration
 
+from tests.simulators.ftf.config._data import dual_readout_document, ftf_document
 from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.config._data import dual_readout_document
-from tests.simulators.ftf.config._data import ftf_document
 
 
 def test_readout_configuration_preserves_pulse_without_mux() -> None:

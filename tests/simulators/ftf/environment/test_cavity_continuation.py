@@ -7,8 +7,6 @@ import pytest
 from numpy.typing import NDArray
 from zcu_tools.core.simulation import PulseEnvelope
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment import plan_template
 from zcu_tools.simulate.adc import cavity_field_average, cavity_fields
 from zcu_tools.simulate.evolution import (
     Engine,
@@ -17,14 +15,17 @@ from zcu_tools.simulate.evolution import (
     TimelineBatch,
     segment_spans,
 )
+from zcu_tools.simulators.ftf.environment import FTFSource, plan_template
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
-from tests.simulators.ftf.environment._templates import herald_template
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import (
+    herald_template,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 

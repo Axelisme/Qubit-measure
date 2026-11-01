@@ -12,14 +12,15 @@ from zcu_tools.core.simulation import (
     ReadoutWindow,
 )
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.single_fluxonium.environment import SingleFluxoniumSource
 from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
+from zcu_tools.simulators.single_fluxonium.environment import SingleFluxoniumSource
 
 from tests.core._simulation import TIME_BASE, tick_tuple
-
-from tests.simulators.single_fluxonium.environment._inputs import settings
-from tests.simulators.single_fluxonium.environment._inputs import snapshot
-from tests.simulators.single_fluxonium.environment._inputs import template
+from tests.simulators.single_fluxonium.environment._inputs import (
+    settings,
+    snapshot,
+    template,
+)
 
 
 @pytest.fixture
@@ -94,7 +95,9 @@ def test_preflight_accepts_named_charge_requirements_with_legal_fast_flux(
 
 
 def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
-    planner = importlib.import_module("zcu_tools.simulators.single_fluxonium.environment.template")
+    planner = importlib.import_module(
+        "zcu_tools.simulators.single_fluxonium.environment.template"
+    )
     plan = planner.plan_template(
         settings(), snapshot(), template(), time_base=TIME_BASE
     )
@@ -133,7 +136,9 @@ def test_plan_preserves_complete_timeline_and_filtered_flux() -> None:
 
 
 def test_ideal_flux_platforms_use_levels_without_artificial_ramps() -> None:
-    planner = importlib.import_module("zcu_tools.simulators.single_fluxonium.environment.template")
+    planner = importlib.import_module(
+        "zcu_tools.simulators.single_fluxonium.environment.template"
+    )
     config = settings()
     if config.flux_line is None:
         raise AssertionError("pulsed fixture requires a bound fast-flux line")

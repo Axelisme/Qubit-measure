@@ -8,21 +8,25 @@ from sys import getsizeof
 import pytest
 from zcu_tools.core.simulation import CancellationQuery, PulseEnvelope, RoundRequest
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment.preparation import EnvelopeEncoder
-from zcu_tools.simulators.ftf.environment.preparation import preparation_key
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     ModelSource,
     TimelineBatch,
 )
+from zcu_tools.simulators.ftf.environment import FTFSource
+from zcu_tools.simulators.ftf.environment.preparation import (
+    EnvelopeEncoder,
+    preparation_key,
+)
 
-from tests.simulators.ftf.environment._templates import expect_statistics
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import (
+    expect_statistics,
+    request,
+    settings,
+    snapshot,
+)
 
 
 def test_envelope_encoding_is_a_fixed_size_content_fingerprint():

@@ -9,16 +9,16 @@ from zcu_tools.core.simulation import (
     RoundSignals,
     TimeBase,
 )
-from zcu_tools.simulators.single_fluxonium.environment.runtime import SingleFluxoniumSource
-from zcu_tools.simulators.single_fluxonium.environment.runtime import single_fluxonium
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+from zcu_tools.simulators.single_fluxonium.environment.runtime import (
+    SingleFluxoniumSource,
+    single_fluxonium,
+)
 
 from tests.core._simulation import TIME_BASE
 from tests.program._profiles import profile_soccfg
 from tests.program.v2.simulation._compiled_support import clock_invariance_program
-
-from tests.simulators.single_fluxonium.environment._inputs import settings
-from tests.simulators.single_fluxonium.environment._inputs import template
+from tests.simulators.single_fluxonium.environment._inputs import settings, template
 
 
 def test_source_plan_and_preparation_reinterpret_ticks_when_clock_changes():

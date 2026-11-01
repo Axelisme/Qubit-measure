@@ -5,8 +5,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from scipy.linalg import expm
-from zcu_tools.simulators.ftf import physics as ftf
 from zcu_tools.simulate.evolution import DriveSource
+from zcu_tools.simulators.ftf import physics as ftf
 
 
 @pytest.fixture

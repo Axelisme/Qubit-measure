@@ -4,11 +4,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from zcu_tools.simulators.ftf.config import load_ftf
-from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.config import load_ftf, parse_ftf
 
-from tests.simulators.ftf.config._data import dual_readout_document
-from tests.simulators.ftf.config._data import ftf_document
+from tests.simulators.ftf.config._data import dual_readout_document, ftf_document
 
 
 @pytest.mark.parametrize("floor", [0.0, 0.1, 0.999])

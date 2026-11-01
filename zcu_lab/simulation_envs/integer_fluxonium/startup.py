@@ -6,12 +6,12 @@ from shlex import quote
 
 import yaml
 from pydantic import TypeAdapter
-from zcu_tools.simulators.single_fluxonium.environment import single_fluxonium
 from zcu_tools.format_version import YamlMap
 from zcu_tools.gui.app.measure.startup_context import StartupContext
 from zcu_tools.gui.session.aliases import AliasRow
 from zcu_tools.program import build_soccfg
 from zcu_tools.resources.entry import DestinationExistsError, load_entry_template
+from zcu_tools.simulators.single_fluxonium.environment import single_fluxonium
 
 
 def startup(ctx: StartupContext) -> None:

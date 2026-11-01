@@ -7,8 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.linalg import cosm, sinm
 
-from zcu_tools.simulators.ftf.physics.parameters import FluxoniumCircuit
-from zcu_tools.simulators.ftf.physics.parameters import SquidCircuit
+from zcu_tools.simulators.ftf.physics.parameters import FluxoniumCircuit, SquidCircuit
 
 Matrix = NDArray[np.complex128]
 

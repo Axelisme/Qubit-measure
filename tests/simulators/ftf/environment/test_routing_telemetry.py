@@ -8,13 +8,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulators.ftf.environment import ftf
 
-from tests.simulators.ftf.environment._templates import settings
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators.ftf.environment._templates import settings
 
 
 @pytest.mark.sim

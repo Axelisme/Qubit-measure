@@ -9,8 +9,8 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.simulators.ftf.environment import plan_template
 from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import plan_template
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
 from tests.program._profiles import profile_soccfg

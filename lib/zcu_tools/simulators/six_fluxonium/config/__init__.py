@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from zcu_tools.resources.simulation_schema import validation_message
 from zcu_tools.resources.yaml import load_yaml
-
 from zcu_tools.simulators.six_fluxonium.config.schema import SixFluxoniumSettings
 
 __all__ = ["SixFluxoniumSettings", "load_six_fluxonium", "parse_six_fluxonium"]

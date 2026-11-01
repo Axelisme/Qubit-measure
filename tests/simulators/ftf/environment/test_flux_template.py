@@ -8,23 +8,22 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from zcu_tools.core.simulation import EventSlot, PulseEnvelope, TimelineTemplate
-from zcu_tools.simulators.ftf.environment import FTFModelFacts
-from zcu_tools.simulators.ftf.environment import ftf
-from zcu_tools.simulators.ftf.environment import plan_template
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulate.evolution import Engine, segment_spans
+from zcu_tools.simulators.ftf.config import FTFSettings, parse_ftf
+from zcu_tools.simulators.ftf.environment import FTFModelFacts, ftf, plan_template
 
 from tests.core._simulation import TIME_BASE, tick_array, ticks
-from tests.simulators.ftf.environment._templates import herald_template
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
+from tests.simulators.ftf.environment._templates import (
+    herald_template,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 

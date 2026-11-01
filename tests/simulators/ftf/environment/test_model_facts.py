@@ -8,23 +8,24 @@ import numpy as np
 import pytest
 from zcu_tools.core.simulation import CancellationQuery
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.ftf.environment import FTFSource
-from zcu_tools.simulators.ftf.environment import replay
-from zcu_tools.simulators.ftf.environment import template as template_module
 from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     ModelSource,
     TimelineBatch,
 )
+from zcu_tools.simulators.ftf.environment import FTFSource, replay
+from zcu_tools.simulators.ftf.environment import template as template_module
 from zcu_tools.simulators.ftf.physics import JointModel
 
-from tests.simulators.ftf.environment._templates import expect_statistics
-from tests.simulators.ftf.environment._templates import request
-from tests.simulators.ftf.environment._templates import settings
-from tests.simulators.ftf.environment._templates import snapshot
-from tests.simulators.ftf.environment._templates import template
 from tests.program._profiles import profile_soccfg
+from tests.simulators.ftf.environment._templates import (
+    expect_statistics,
+    request,
+    settings,
+    snapshot,
+    template,
+)
 
 pytestmark = pytest.mark.sim
 

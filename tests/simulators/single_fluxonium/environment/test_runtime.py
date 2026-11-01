@@ -20,20 +20,24 @@ from zcu_tools.device import DeviceManager, FakeDevice
 
 from tests.core._simulation import TIME_BASE, tick_tuple, ticks
 from tests.program._profiles import profile_soccfg
-
-from tests.simulators.single_fluxonium.environment._inputs import settings
-from tests.simulators.single_fluxonium.environment._inputs import template
+from tests.simulators.single_fluxonium.environment._inputs import settings, template
 
 if TYPE_CHECKING:
-    from zcu_tools.simulators.single_fluxonium.environment.runtime import SingleFluxoniumSource
-    from zcu_tools.simulators.single_fluxonium.config.schema import SingleFluxoniumSettings
+    from zcu_tools.simulators.single_fluxonium.config.schema import (
+        SingleFluxoniumSettings,
+    )
+    from zcu_tools.simulators.single_fluxonium.environment.runtime import (
+        SingleFluxoniumSource,
+    )
 
 
 @contextmanager
 def source_environment() -> Generator[
     tuple[SingleFluxoniumSource, FakeDevice, SingleFluxoniumSettings]
 ]:
-    runtime = importlib.import_module("zcu_tools.simulators.single_fluxonium.environment.runtime")
+    runtime = importlib.import_module(
+        "zcu_tools.simulators.single_fluxonium.environment.runtime"
+    )
     config = settings()
     devices = DeviceManager()
     try:
@@ -105,7 +109,9 @@ def test_source_refreshes_model_and_plan_for_live_dc_and_waveform_content() -> N
 def test_builder_binds_control_generators_and_live_dc_with_single_cavity_readout() -> (
     None
 ):
-    runtime = importlib.import_module("zcu_tools.simulators.single_fluxonium.environment.runtime")
+    runtime = importlib.import_module(
+        "zcu_tools.simulators.single_fluxonium.environment.runtime"
+    )
     config = settings()
     environment = runtime.single_fluxonium(
         config, soccfg=profile_soccfg("single_fluxonium")

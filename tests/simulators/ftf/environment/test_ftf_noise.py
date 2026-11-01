@@ -88,9 +88,8 @@ def test_execution_grid_converts_spectral_density_to_sample_covariance() -> None
 
 
 def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> None:
-    from zcu_tools.simulators.ftf.environment import ftf
-    from zcu_tools.simulators.ftf.environment import plan_template
     from zcu_tools.simulate.adc import ADC
+    from zcu_tools.simulators.ftf.environment import ftf, plan_template
 
     document = ftf_document()
     model = document["chip"]

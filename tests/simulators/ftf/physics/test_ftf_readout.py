@@ -5,11 +5,13 @@ import numpy as np
 
 def test_virtual_transitions_include_full_local_parent_and_counterrotation() -> None:
     import scqubits as scq
-    from zcu_tools.simulators.ftf.physics import FluxoniumCircuit
-    from zcu_tools.simulators.ftf.physics import JointModel
-    from zcu_tools.simulators.ftf.physics import JointParameters
-    from zcu_tools.simulators.ftf.physics import Resonator
-    from zcu_tools.simulators.ftf.physics import SquidCircuit
+    from zcu_tools.simulators.ftf.physics import (
+        FluxoniumCircuit,
+        JointModel,
+        JointParameters,
+        Resonator,
+        SquidCircuit,
+    )
 
     f1 = FluxoniumCircuit(3.0, 0.8, 0.6, 12, 3)
     f2 = FluxoniumCircuit(3.3, 0.7, 0.55, 12, 2)

@@ -6,9 +6,9 @@ from pathlib import Path
 from zcu_tools.core.simulation import RoundRequest, RoundSignals
 from zcu_tools.device import DeviceManager
 from zcu_tools.program.v2.simulation import IntegratedRound
+from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 from zcu_tools.simulators.replay import read_replay
 from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings
-from zcu_tools.simulate.evolution import SEGMENT_NUMERIC_VERSION
 
 BACKEND_VERSION = "single-fluxonium-segment-v1"
 
@@ -39,7 +39,9 @@ def replay_round(path: Path) -> IntegratedRound | RoundSignals:
     Returns unnormalized statistics/deferred raw or unrounded decimated shots;
     these contain model truth and must not enter ordinary GUI/RPC metadata.
     """
-    from zcu_tools.simulators.single_fluxonium.environment.runtime import SingleFluxoniumSource
+    from zcu_tools.simulators.single_fluxonium.environment.runtime import (
+        SingleFluxoniumSource,
+    )
 
     inputs = read_replay(path)
     acquire, record = inputs.acquire, inputs.round

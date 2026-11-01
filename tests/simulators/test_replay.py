@@ -34,9 +34,7 @@ def test_replay_retains_complex_samples_and_deduplicated_acquire(
     requirements: tuple[ChargeDriveRequirement, ...],
     time_base: TimeBase,
 ) -> None:
-    from zcu_tools.simulators.replay import ReplayAcquire
-    from zcu_tools.simulators.replay import read_replay
-    from zcu_tools.simulators.replay import save_replay
+    from zcu_tools.simulators.replay import ReplayAcquire, read_replay, save_replay
 
     window = ReadoutWindow(0, 0, 3, TIME_BASE.period_ticks(100.0), tick_tuple((0.02,)))
     event = PulseEvent(
@@ -89,9 +87,7 @@ def test_single_fluxonium_replay_roundtrip_keeps_its_own_settings(
     tmp_path: Path,
 ) -> None:
     from pydantic import ValidationError
-    from zcu_tools.simulators.replay import ReplayAcquire
-    from zcu_tools.simulators.replay import read_replay
-    from zcu_tools.simulators.replay import save_replay
+    from zcu_tools.simulators.replay import ReplayAcquire, read_replay, save_replay
     from zcu_tools.simulators.single_fluxonium.config import parse_single_fluxonium
 
     settings = parse_single_fluxonium(
@@ -218,9 +214,7 @@ def test_replay_round_trips_every_template_array_with_dtype_and_shape(tmp_path: 
 
     import numpy as np
     from zcu_tools.core.simulation import EventSlot, ReadoutSlot, TimelineTemplate
-    from zcu_tools.simulators.replay import ReplayAcquire
-    from zcu_tools.simulators.replay import read_replay
-    from zcu_tools.simulators.replay import save_replay
+    from zcu_tools.simulators.replay import ReplayAcquire, read_replay, save_replay
 
     event = EventSlot(
         gen_ch=2,

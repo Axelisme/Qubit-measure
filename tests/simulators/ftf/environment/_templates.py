@@ -15,11 +15,13 @@ from zcu_tools.core.simulation import (
     RoundStatistics,
     TimelineTemplate,
 )
-from zcu_tools.simulators.ftf.environment import FTFMuxReadoutConfig
-from zcu_tools.simulators.ftf.environment import FTFReadoutConfig
-from zcu_tools.simulators.ftf.environment import FTFReceiverConfig
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import (
+    FTFMuxReadoutConfig,
+    FTFReadoutConfig,
+    FTFReceiverConfig,
+)
 
 from tests.core._simulation import TIME_BASE, tick_array, tick_tuple, ticks
 from tests.simulators.ftf.config._data import ftf_document

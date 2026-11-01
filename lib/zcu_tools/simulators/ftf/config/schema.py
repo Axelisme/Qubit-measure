@@ -32,9 +32,11 @@ from zcu_tools.resources.simulation_schema import (
     Solver,
     Values,
 )
-from zcu_tools.simulators.single_fluxonium.config.schema import CoherenceDrift
-from zcu_tools.simulators.single_fluxonium.config.schema import DriftParameter
-from zcu_tools.simulators.single_fluxonium.config.schema import FluxLine
+from zcu_tools.simulators.single_fluxonium.config.schema import (
+    CoherenceDrift,
+    DriftParameter,
+    FluxLine,
+)
 
 LoopValue = TypeVar("LoopValue")
 

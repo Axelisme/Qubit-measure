@@ -16,8 +16,9 @@ from zcu_tools.simulate.evolution import (
     batch_populations,
     merge_path_diagnostics,
 )
-
-from zcu_tools.simulators.single_fluxonium.environment.template import SingleFluxoniumPlan
+from zcu_tools.simulators.single_fluxonium.environment.template import (
+    SingleFluxoniumPlan,
+)
 
 
 @dataclass(frozen=True)

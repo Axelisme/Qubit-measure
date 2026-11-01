@@ -4,8 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.config.schema import Receiver
 from zcu_tools.resources.simulation_schema import ReceiverBackground
 from zcu_tools.simulate.adc import (
     BackgroundBandEdge,
@@ -13,6 +11,8 @@ from zcu_tools.simulate.adc import (
     BackgroundRipple,
     BackgroundRoughness,
 )
+from zcu_tools.simulators.ftf.config import FTFSettings
+from zcu_tools.simulators.ftf.config.schema import Receiver
 
 
 @dataclass(frozen=True)

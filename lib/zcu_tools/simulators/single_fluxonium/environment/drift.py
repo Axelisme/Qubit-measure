@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import numpy as np
 
-from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings
 from zcu_tools.simulate import drift as numeric_drift
+from zcu_tools.simulators.single_fluxonium.config import SingleFluxoniumSettings
 
 
 @dataclass(frozen=True)

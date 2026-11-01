@@ -6,10 +6,10 @@ from threading import Event, Thread
 import pytest
 from tqdm.auto import tqdm
 from zcu_tools.experiment import simulation
-from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.simulators.ftf.config import parse_ftf
+from zcu_tools.simulators.ftf.environment import ftf
 
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules

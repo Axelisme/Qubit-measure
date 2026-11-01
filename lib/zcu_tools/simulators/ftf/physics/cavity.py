@@ -11,9 +11,7 @@ from zcu_tools.simulate.adc import (
     cavity_field_average,
     cavity_fields,
 )
-
-from zcu_tools.simulators.ftf.physics.model import JointModel
-from zcu_tools.simulators.ftf.physics.model import readout_model
+from zcu_tools.simulators.ftf.physics.model import JointModel, readout_model
 from zcu_tools.simulators.ftf.physics.parameters import Resonator
 
 RealArray = NDArray[np.float64]

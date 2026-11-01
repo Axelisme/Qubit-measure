@@ -3,16 +3,16 @@
 import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
-from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.simulators.ftf.config import parse_ftf
 from zcu_tools.simulators.ftf.config.schema import MuxReadoutSource
+from zcu_tools.simulators.ftf.environment import ftf
 
-from tests.simulators.ftf.environment._templates import settings
 from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
 from tests.simulators.ftf.config._data import mux_document
+from tests.simulators.ftf.environment._templates import settings
 
 pytestmark = pytest.mark.sim
 

@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from zcu_tools.simulators.ftf import physics as ftf
 from zcu_tools.simulate.evolution import (
     ControlPulse,
     ControlSequence,
@@ -10,6 +9,7 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
 )
 from zcu_tools.simulate.lines import DistortionTerm, FilteredFlux, FluxLine
+from zcu_tools.simulators.ftf import physics as ftf
 
 
 @pytest.mark.parametrize("gain", [0.7, -0.7])

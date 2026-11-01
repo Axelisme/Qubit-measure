@@ -6,12 +6,12 @@ from threading import Event
 
 import pytest
 from zcu_tools.device import DeviceManager
-from zcu_tools.simulators.six_fluxonium.environment.runtime import SixFluxoniumSource
-from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
 from zcu_tools.simulate.evolution import Engine, ModelSource
+from zcu_tools.simulators.six_fluxonium.config import parse_six_fluxonium
+from zcu_tools.simulators.six_fluxonium.environment.runtime import SixFluxoniumSource
 
-from tests.simulators.six_fluxonium.config._data import six_document
 from tests.simulate.evolution._engine import batch, source
+from tests.simulators.six_fluxonium.config._data import six_document
 
 
 @contextmanager
