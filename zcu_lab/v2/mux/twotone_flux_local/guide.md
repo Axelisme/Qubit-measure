@@ -22,7 +22,7 @@ edits and captures sources again.
 - `participants` selects original tone indices in acquisition order. The tone picker only
   selects which full-list position to edit.
 - `tones[i].flux_dev` starts from that Q's captured `flux_dev`.
-- Each `tones[i].sweep` has independent native-unit Start and Stop.
+- Each `tones[i].flux` has independent native-unit Start and Stop.
   `flux_expts` is the one point count shared by all local lines, initially 101.
   Lines advance together by point index, not as a Cartesian product.
 - Project integer (flux=0) and half (flux=0.5) from each Q's `{offset, period}`
@@ -33,7 +33,7 @@ edits and captures sources again.
 - `settle` is the wait in seconds after all DC writes at each flux point.
 - `modules` contains the optional common reset and full mux readout.
 - `frequency` contains only frequency-scan inputs.
-  Each `frequency.tones[i].sweep` has drive-frequency Start/Stop in MHz.
+  Each `frequency.tones[i].freq` has drive-frequency Start/Stop in MHz.
   `frequency.expts` is the shared hardware point count. The frequency tone picker retains all original names;
   top-level participants supplies the Run selection. All selected drives sweep together in one hardware loop.
 
@@ -99,8 +99,8 @@ uniqueness is checked only for selected tones.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.tones[i]` contains the fixed name, numeric drive pulse and `sweep.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
-`tones[i]` contains its fixed name, `flux_dev`, and `sweep.start/stop` in native DC units. `flux_expts` is their shared positive count.
+`frequency.tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
+`tones[i]` contains its fixed name, `flux_dev`, and `flux.start/stop` in native DC units. `flux_expts` is their shared positive count.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`
 are finite nonnegative microseconds. `settle` is finite nonnegative seconds.

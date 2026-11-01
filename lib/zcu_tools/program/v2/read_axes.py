@@ -1,26 +1,18 @@
 """Compile read labels into joint shot-vector outer-product sums."""
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from qick.asm_v2 import Macro, Trigger
+from qick.asm_v2 import Trigger
 
 from zcu_tools.cfg_model import ReadoutClassifier
 from zcu_tools.program.acquisition import ShotSumProcessor
 
-from ._timeline_macros import (
-    ModuleEmission,
-    PreparedTimelineMacro,
-    RepeatLoweringEnter,
-    RepeatLoweringExit,
-    TimelineBranch,
-    TimeProducer,
-)
-from .macro.readout import ReadoutEmission, readout_control_scope
-from .modular import ModularProgramV2
+from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
+from .readout_observation import observe_readouts
 from .timeline import TimelineProgramV2
 
 
@@ -54,35 +46,15 @@ class Classify:
     classifier: ReadoutClassifier | None = None
 
 
-def _read_macros(
-    macros: Sequence[Macro],
-    scope: str | None = None,
-) -> Iterator[tuple[Macro, str | None]]:
-    scopes = [scope]
-    for macro in macros:
-        source = macro.source if isinstance(macro, PreparedTimelineMacro) else macro
-        if isinstance(source, RepeatLoweringEnter):
-            scopes.append("Repeat")
-        elif isinstance(source, RepeatLoweringExit):
-            scopes.pop()
-        elif isinstance(source, TimelineBranch):
-            for case in source.cases:
-                yield from _read_macros(case, f"Branch {source.name!r}")
-        elif isinstance(source, (ModuleEmission, TimeProducer)):
-            yield from _read_macros(source.macros, scopes[-1])
-        else:
-            yield source, scopes[-1]
-
-
 def shot_sums(
-    prog: ModularProgramV2 | TimelineProgramV2, axes: Sequence[Classify | IQ]
+    prog: TimelineProgramV2, axes: Sequence[Classify | IQ]
 ) -> ShotSumProcessor:
     """Resolve compiled read labels and return a per-point shot-sum processor.
 
-    prog is a compiled ModularProgramV2 or TimelineProgramV2. axes lists vectors
+    prog is a compiled TimelineProgramV2. axes lists vectors
     in output-axis order; repeat a read for second moments. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
-    emit tags, or module names when untagged. Modular labels are module names.
+    emit tags, or module names when untagged.
     Each label must identify one emission; missing/ambiguous labels raise
     ValueError listing available labels. QICK rejects duplicate explicit tags
     during compilation with RuntimeError, before this helper runs. Repeat/Branch
@@ -132,14 +104,14 @@ type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int
 
 
 def _collect_reads(
-    prog: ModularProgramV2 | TimelineProgramV2,
+    prog: TimelineProgramV2,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
-    """Read compiled emission provenance and every trigger, preserving execution order."""
+    """Resolve labels and trigger indices from static source readout observations."""
     counts = dict.fromkeys(prog.ro_chs, 0)
     labels: _LabelReads = {}
     unsupported: dict[int, str] = {}
-    prefix: list[Macro] = []
-    for macro, scope in _read_macros(prog.macro_list):
+    for observation in observe_readouts(prog):
+        macro = observation.source
         if isinstance(macro, ReadoutEmission) and isinstance(
             macro.owner, (PulseReadout, MuxReadout)
         ):
@@ -154,17 +126,16 @@ def _collect_reads(
                 (owner, {ch: counts[ch] for ch in channels})
             )
         if isinstance(macro, Trigger):
-            control = scope or readout_control_scope(prefix)
+            control = observation.control_scope
             for ch in macro.ros:
                 if control is not None:
                     unsupported[ch] = control
                 counts[ch] += 1
-        prefix.append(macro)
     return labels, counts, unsupported
 
 
 def _resolve_axis(
-    prog: ModularProgramV2 | TimelineProgramV2,
+    prog: TimelineProgramV2,
     axis: Classify | IQ,
     labels: _LabelReads,
     counts: dict[int, int],

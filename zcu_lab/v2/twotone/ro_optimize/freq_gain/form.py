@@ -13,18 +13,18 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
         FreqGainCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "qub_pulse": Slot("$qubit.module.x180")
-            if ctx.has("$qubit.module.x180")
-            else Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            "qub_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
             "readout": Slot(
                 "$resonator.module.readout",
                 set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
-            )
-            if ctx.has("$resonator.module.readout")
-            else Template(
-                "readout",
-                bindings={"resonator": "$resonator"},
-                set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
+                ),
             ),
             "freq": Range.around("$resonator.freq", "0.5 * $resonator.kappa", expts=31),
             "gain": Range(0.0, 0.2, expts=31),

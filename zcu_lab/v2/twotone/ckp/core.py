@@ -22,13 +22,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
-    Join,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -217,6 +215,14 @@ def _plot_resonance_maps(
 
 
 class CKP_Cfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
+    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -233,31 +239,30 @@ class CKP_Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    res_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Resonator Drive Pulse")]
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    res_freq: Annotated[SweepCfg, FieldMeta(label="Resonator drive freq", unit="MHz")]
-    qub_freq: Annotated[SweepCfg, FieldMeta(label="Qubit probe freq", unit="MHz")]
 
 
 class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
     AXES_SPEC: ClassVar[AxesSpec[CKP_Result, CKP_Cfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "qub_freqs", "Qubit Frequency", "Hz", scale=1e6, dtype=np.float64
-            ),
-            AxesSpec.Axis(
-                "res_freqs",
-                "Resonator Frequency",
-                "Hz",
+                "qub_freqs",
+                label="Qubit Frequency",
+                unit="Hz",
                 scale=1e6,
                 dtype=np.float64,
             ),
-            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
+            AxesSpec.Axis(
+                "res_freqs",
+                label="Resonator Frequency",
+                unit="Hz",
+                scale=1e6,
+                dtype=np.float64,
+            ),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=CKP_Result,
         cfg_type=CKP_Cfg,
         cfg_schema_version="3.0",
@@ -326,31 +331,30 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         )
 
         # Acquire both preparations and the full frequency grid in one program.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            res_freq_param = sweep2param("res_freq", sched.cfg.res_freq)
-            qub_freq_param = sweep2param("qub_freq", sched.cfg.qub_freq)
-            sched.cfg.res_pulse.set_param("freq", res_freq_param)
-            sched.cfg.qub_pulse.set_param("freq", qub_freq_param)
-
-            # State preparation precedes the parallel probes and common readout.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg=sched.cfg.reset),
-                    Branch("ge", [], Pulse("pi_pulse", cfg=sched.cfg.pi_pulse)),
-                    Join(
-                        Pulse("res_pulse", cfg=sched.cfg.res_pulse),
-                        Pulse("qub_pulse", cfg=sched.cfg.qub_pulse),
-                    ),
-                    Readout("readout", cfg=sched.cfg.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("res_freq", sched.cfg.res_freq)
-                .declare_sweep("qub_freq", sched.cfg.qub_freq)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            builder.add_loop("ge", 2)
+            res_freq = builder.add_sweep("res_freq", cfg.res_freq)
+            qub_freq = builder.add_sweep("qub_freq", cfg.qub_freq)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.fork("default", into=["resonator", "qubit"])
+            builder.emit(
+                Pulse("res_pulse", cfg.res_pulse, freq=res_freq), timeline="resonator"
+            )
+            builder.emit(
+                Pulse("qub_pulse", cfg.qub_pulse, freq=qub_freq), timeline="qubit"
+            )
+            builder.join("resonator", "qubit", into="default")
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return CKP_Result(
             res_freqs=res_freqs,

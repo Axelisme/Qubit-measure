@@ -682,7 +682,7 @@ def build_compiled_request(
 ) -> AcquireRequest:
     """Detach compiled instructions into numeric slots without calling a backend.
 
-    prog is a compiled native or Modular v2 program. routes is the SimulationSoc's
+    prog is a compiled native v2 program. routes is the SimulationSoc's
     explicit (generator, ADC) wiring, not program declarations. mode chooses sums
     or traces; binding and sequence supply sampling identity. charge_requirements
     is forwarded unchanged for environment-owned physical validation; the builder
@@ -690,7 +690,7 @@ def build_compiled_request(
     malformed/missing loop definitions, cross-shot state or pending config carry,
     and ambiguous routing raise ValueError
     with instruction type, pre-optimization position and available source/loops.
-    SimulationSoc acquisition uses this builder for native and Modular programs.
+    SimulationSoc acquisition uses this builder for native programs.
     """
     prog.compile()
     records, loops, branches = predecode(prog)

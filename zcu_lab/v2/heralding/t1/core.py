@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -17,6 +17,7 @@ from zcu_tools.experiment import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
@@ -24,15 +25,13 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     IQ,
     Classify,
-    Delay,
     DelayAuto,
     LoadValue,
-    ModularProgramV2,
     Pulse,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
     split_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import PulseReadout
 
@@ -58,15 +57,15 @@ class HeraldingT1Result:
 
 
 class HeraldingT1Cfg(ConfigBase):
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[int, FieldMeta(label="Reps")] = 1000
     rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
     relax_delay: Annotated[
         float, FieldMeta(label="Relax delay", unit="us", decimals=3)
     ] = 1.0
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
 def restore_result(data: GroupedLoadData[HeraldingT1Cfg]) -> HeraldingT1Result:
@@ -90,7 +89,9 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
                     axes=(
                         VariableAxisSpec.generated_arange("components", ""),
                         VariableAxisSpec.generated_arange("herald_states", ""),
-                        VariableAxisSpec("Time", "s", field_name="times", scale=1e-6),
+                        VariableAxisSpec(
+                            label="Time", unit="s", field_name="times", scale=1e-6
+                        ),
                     ),
                     z=VariableZSpec(
                         field_name="sums", label="Shot sums", unit="", dtype=np.float64
@@ -99,6 +100,7 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
             ),
             result_type=HeraldingT1Result,
             cfg_type=HeraldingT1Cfg,
+            cfg_schema_version="2.0",
             tag="heralding/t1",
             result_builder=restore_result,
         )
@@ -112,126 +114,104 @@ class HeraldingT1Exp(Experiment[HeraldingT1Result, HeraldingT1Cfg]):
         Host post-selection adds no active reset. Rounds add sums without
         normalization. Live and analyze use the herald-g conditional IQ.
         Zero-count means are NaN; unmeasured sums remain NaN.
-        Uniform mode requires SweepCfg. Nonuniform delays use the shared T1
-        hardware-grid owner and reject colliding points. cfg is not mutated.
+        Linear sampling uses SweepCfg. Decay sampling uses the shared T1
+        hardware-grid owner and rejects colliding points. cfg is not mutated.
         """
         if cfg.readout.classifier is None or cfg.readout.classifier.mode != "circle":
             raise ValueError(
                 "Heralding requires a circle classifier with g/e/other; run GE Post"
             )
         cfg = deepcopy(cfg)
-        if cfg.uniform:
-            return self._run_uniform(cfg, context=context)
-        return self._run_non_uniform(cfg, context=context)
+        if cfg.sampling == "linear":
+            return self._run_linear(cfg, context=context)
+        return self._run_decay(cfg, context=context)
 
-    def _run_uniform(
+    def _run_linear(
         self, cfg: HeraldingT1Cfg, *, context: RunContext
     ) -> HeraldingT1Result:
-        """Acquire herald/signal sums with a native linear Delay sweep."""
-        soccfg = context.soccfg
-        if not isinstance(cfg.length, SweepCfg):
-            raise ValueError("uniform mode requires SweepCfg")
-        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
+        """Sweep uniformly spaced free-evolution delays on the FPGA."""
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="IQ magnitude (a.u.)")
+        viewer = live_line(ax)
 
-        viewer = live_line(
-            context.plots, "measurement", "Time (us)", "IQ magnitude (a.u.)"
-        )
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, np.abs(split_sums(data)[1][..., 0]))
+
+        fig.show()
         buffer = SignalBuffer(
             (len(lengths), 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                lengths, np.abs(split_sums(data)[1][..., 0])
-            ),
+            on_update=update,
         )
 
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            herald_readout = PulseReadout("herald", cfg.readout)
-            signal_readout = PulseReadout("signal", cfg.readout)
-
-            length_sweep = cfg.length
-            if not isinstance(length_sweep, SweepCfg):
-                raise ValueError("uniform mode requires SweepCfg")
-            delay = Delay("t1_delay", sweep2param("length", length_sweep))
-            # Unique readout names resolve the herald and signal shot-sum axes.
-            prog = ModularProgramV2(
-                soccfg,
-                modules=[
-                    herald_readout,
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    delay,
-                    signal_readout,
-                ],
-                sweep=[("length", length_sweep)],
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
+        with Schedule(buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_summed(
+            delay = builder.add_sweep("delay", cfg.delay)
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.timeline_inc(delay)
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
                 prog,
+                context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                sums2signal_fn=np.copy,
+                options=RunOptions(converter=np.copy),
             )
-
         return HeraldingT1Result(lengths, buffer.array)
 
-    def _run_non_uniform(
+    def _run_decay(
         self, cfg: HeraldingT1Cfg, *, context: RunContext
     ) -> HeraldingT1Result:
-        """Acquire herald/signal sums with LoadValue and register DelayAuto."""
-        soccfg = context.soccfg
-        delay_table = materialize_nonuniform_t1_delays(cfg.length, soccfg=soccfg)
+        """Load decay-spaced delays quantized by the shared T1 grid owner."""
+        delay_table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = delay_table.times_us
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="IQ magnitude (a.u.)")
+        viewer = live_line(ax)
 
-        viewer = live_line(
-            context.plots, "measurement", "Time (us)", "IQ magnitude (a.u.)"
-        )
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, np.abs(split_sums(data)[1][..., 0]))
+
+        fig.show()
         buffer = SignalBuffer(
             (len(lengths), 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                lengths, np.abs(split_sums(data)[1][..., 0])
-            ),
+            on_update=update,
         )
 
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            herald_readout = PulseReadout("herald", cfg.readout)
-            signal_readout = PulseReadout("signal", cfg.readout)
-
-            prefix = [
+        with Schedule(buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("delay_idx", len(delay_table.cycles))
+            builder.emit(
                 LoadValue(
                     "load_t1_delay",
                     values=list(delay_table.cycles),
-                    idx_reg="length_idx",
+                    idx_reg="delay_idx",
                     val_reg="t1_delay_cycle",
                     auto_compress=False,
                 )
-            ]
-            delay = DelayAuto("t1_delay", t="t1_delay_cycle")
-            # Unique readout names resolve the herald and signal shot-sum axes.
-            prog = ModularProgramV2(
-                soccfg,
-                modules=[
-                    *prefix,
-                    herald_readout,
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    delay,
-                    signal_readout,
-                ],
-                sweep=[("length_idx", len(delay_table.cycles))],
-                reps=cfg.reps,
-                relax_delay=cfg.relax_delay,
             )
-            builder = sched.prog_builder(context.soc, soccfg)
-            builder.run_program_summed(
+            builder.emit(PulseReadout("herald", cfg.readout))
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(PulseReadout("signal", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire_summed(
                 prog,
+                context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                sums2signal_fn=np.copy,
+                options=RunOptions(converter=np.copy),
             )
-
         return HeraldingT1Result(lengths, buffer.array)
 
     def analyze(

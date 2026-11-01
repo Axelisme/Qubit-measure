@@ -2,12 +2,10 @@
 
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Branch, Repeat
-from zcu_tools.program.v2.modules.delay import Join
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
@@ -20,7 +18,6 @@ from zcu_tools.program.v2.modules.reset import (
     TwoPulseResetCfg,
 )
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
-from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation._compiled_support import request
@@ -50,43 +47,24 @@ def receiver():
     )
 
 
-def module_program(
-    modules, *, native=True, sweep=(), reps=2, body=None, data_registers=16
-):
+def module_program(modules, *, sweep=(), reps=2, body=None, data_registers=16):
     env = white_noise(std_adc=0, n_gens=3, routes=((0, 0),))
     env.soccfg["tprocs"][0]["dreg_qty"] = data_registers
-    if not native:
-        return ModularProgramV2(
-            env.soccfg,
-            modules=modules,
-            sweep=list(sweep),
-            reps=reps,
-            initial_delay=0,
-            relax_delay=0.1,
-        ), env
-
-    class Program(TimelineProgramV2):
-        def _initialize(self, cfg):
-            for name, count in sweep:
-                self.add_loop(name, count)
-            for module in modules:
-                self.declare(module)
-
-        def _body(self, cfg):
-            if body is None:
-                for module in modules:
-                    self.emit(module)
-            else:
-                body(self)
-
-    return Program(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1), env
+    builder = TimelineBuilder(env.soccfg, reps=reps, initial_delay=0, relax_delay=0.1)
+    for name, count in sweep:
+        builder.add_loop(name, count)
+    if body is None:
+        for module in modules:
+            builder.emit(module)
+    else:
+        body(builder)
+    builder.delay_by_timeline()
+    return builder.build(), env
 
 
-def test_modular_shared_readout_cfg_keeps_each_semantic_source():
+def test_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
-    prog, env = module_program(
-        [cfg.build("herald"), cfg.build("terminal")], native=False
-    )
+    prog, env = module_program([cfg.build("herald"), cfg.build("terminal")])
     observed = request(prog, env)
     point = observed.materialize_point(0)
     assert [event.source for event in point.events] == ["herald", "terminal"]
@@ -115,9 +93,8 @@ def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
     assert len(times_us(observed.time_base, point.readouts[0].trigger_ticks)) == 1
 
 
-@pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("compressed", [False, True])
-def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compressed):
+def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
     loader = LoadValue(
         "select", [1, 0] * 16, "scan", "selected", auto_compress=compressed
     )
@@ -126,7 +103,6 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compres
     )
     prog, env = module_program(
         [loader, computed, receiver().build("readout")],
-        native=native,
         sweep=(("scan", 32),),
     )
     result = request(prog, env)
@@ -139,15 +115,13 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(native, compres
         )
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_tablelength_places_next_emission_after_each_selected_quantized_length(native):
+def test_tablelength_places_next_emission_after_each_selected_quantized_length():
     table = TableLengthPulse("length", drive(), lengths=[0.1, 0.3], idx_reg="scan")
     prog, env = module_program(
-        [table, receiver().build("readout")], native=native, sweep=(("scan", 2),)
+        [table, receiver().build("readout")], sweep=(("scan", 2),)
     )
     result = request(prog, env)
-    # Legacy lowering keeps its existing duration-table timestamp policy.
-    ends = [43, 129] if native else [44, 130]
+    ends = [43, 129]
     for index, (duration, end) in enumerate(zip([38, 115], ends, strict=True)):
         events = result.materialize_point(index).events
         assert events[0].source == "length"
@@ -159,8 +133,7 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length(n
         )
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers(native):
+def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
     gen, adc = readout_freq_words(
         make_mock_soccfg(), [100, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
@@ -176,7 +149,7 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers(native):
             gain_val="gain_word",
         ),
     ]
-    prog, env = module_program(modules, native=native, sweep=(("scan", 2),))
+    prog, env = module_program(modules, sweep=(("scan", 2),))
     result = request(prog, env)
     for index, (frequency, gain) in enumerate([(100, 3276), (200, -6552)]):
         point = result.materialize_point(index)
@@ -186,15 +159,14 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers(native):
         assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps(native):
+def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps():
     gen, adc = readout_freq_words(
         make_mock_soccfg(), [100, 250, 200], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
     )
     table = TablePulseReadout(
         "readout", receiver(), idx_reg="scan", freq_words=gen, ro_freq_words=adc
     )
-    prog, env = module_program([table], native=native, sweep=(("scan", 3),), reps=3)
+    prog, env = module_program([table], sweep=(("scan", 3),), reps=3)
     result = request(prog, env)
     assert [result.materialize_point(i).events[0].source for i in range(3)] == [
         "readout",
@@ -210,57 +182,38 @@ def test_table_readout_exec_after_updates_and_wrap_survive_outer_reps(native):
     assert request(prog, env).materialize_point(0) == result.materialize_point(0)
 
 
-@pytest.mark.parametrize("native", [False, True])
-def test_scanwith_uses_local_counter_to_select_each_candidate(native):
-    choice = ComputedPulse(
-        "choice",
-        val_reg="selected",
-        pulses=[drive(gain=0.1), drive(gain=0.2), drive(gain=0.3)],
-    )
-    scan = ScanWith("local", [2, 0, 1], val_reg="selected").add_content(choice)
-    prog, env = module_program([scan, receiver().build("readout")], native=native)
-    result = request(prog, env)
-    events = result.materialize_point(0).events
-    assert [e.gain for e in events[:3]] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
-    assert result.point_dims == ()
-    assert [e.iterations[0][1] for e in events[:3]] == [0, 1, 2]
+def test_join_preserves_readout_owner_and_author_pulse_child():
+    readout = receiver().build("readout")
+    child = drive(ch=1).build("author_child")
 
+    def body(p):
+        p.fork("default", into="child")
+        p.emit(readout)
+        p.emit(child, timeline="child")
+        p.join("default", "child", into="default")
 
-@pytest.mark.parametrize("native", [False, True])
-def test_join_preserves_readout_owner_and_author_pulse_child(native):
-    joined = Join(receiver().build("readout"), drive(ch=1).build("author_child"))
-    prog, env = module_program([joined], native=native)
+    prog, env = module_program([readout, child], body=body)
     point = request(prog, env).materialize_point(0)
     assert [event.source for event in point.events] == ["readout", "author_child"]
     assert [event.gen_ch for event in point.events] == [0, 1]
     assert point.readouts[0].generator_channels == (0,)
 
 
-def test_legacy_table_join_compiled_request_keeps_each_authored_source():
-    joined = Join(
-        TableLengthPulse("left", drive(), lengths=[0.1, 0.2], idx_reg="scan"),
-        TableLengthPulse("right", drive(ch=2), lengths=[0.2, 0.1], idx_reg="scan"),
-    )
-    prog, env = module_program(
-        [joined, receiver().build("readout")], native=False, sweep=(("scan", 2),)
-    )
-    result = request(prog, env)
-    for index in range(2):
-        assert [event.source for event in result.materialize_point(index).events] == [
-            "left",
-            "right",
-            "readout",
-        ]
+def test_branch_dispatch_and_repeat_preserve_selected_sources():
+    first = drive(gain=0.2).build("first")
+    second = drive(gain=-0.4).build("second")
+    readout = receiver().build("readout")
 
+    def body(p):
+        with p.branch(by="scan", align_timeline=True) as cases:
+            with cases.case(0):
+                p.emit(first)
+            with cases.case(1), p.repeat("inner", 2):
+                p.emit(second)
+        p.emit(readout)
 
-def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
-    choice = Branch(
-        "scan",
-        drive(gain=0.2).build("first"),
-        Repeat("inner", 2).add_content(drive(gain=-0.4).build("second")),
-    )
     prog, env = module_program(
-        [choice, receiver().build("readout")], native=False, sweep=(("scan", 2),)
+        [first, second, readout], sweep=(("scan", 2),), body=body
     )
     result = request(prog, env)
     assert [e.source for e in result.materialize_point(0).events] == [
@@ -275,53 +228,6 @@ def test_legacy_branch_dispatch_table_and_repeat_preserve_selected_sources():
     assert [e.iterations for e in result.materialize_point(1).events[:2]] == [
         (("inner", 0),),
         (("inner", 1),),
-    ]
-
-
-def test_legacy_branch_uses_loaded_selector_not_acquisition_lane_order():
-    loader = LoadValue("selector", [2, 0, 1], "scan", "selected")
-    choice = Branch(
-        "choice",
-        drive(gain=0.1).build("first"),
-        drive(gain=0.2).build("second"),
-        drive(gain=0.3).build("third"),
-        compare_by="selected",
-    )
-    prog, env = module_program(
-        [loader, choice, receiver().build("readout")],
-        native=False,
-        sweep=(("scan", 3),),
-    )
-    result = request(prog, env)
-    assert [result.materialize_point(i).events[0].source for i in range(3)] == [
-        "third",
-        "first",
-        "second",
-    ]
-    assert [
-        result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx([0.3, 0.1, 0.2], abs=1e-4)
-
-
-@pytest.mark.parametrize(
-    ("kind", "count"), [("single", 1), ("parallel", 2), ("bath", 3)]
-)
-def test_legacy_reset_compiled_events_keep_wrapper_owner(kind, count):
-    cavity, qubit = drive(ch=1), drive(ch=2)
-    if kind == "single":
-        reset = PulseResetCfg(pulse_cfg=cavity)
-    elif kind == "parallel":
-        reset = TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
-    else:
-        reset = BathResetCfg(
-            cavity_tone_cfg=cavity, qubit_tone_cfg=qubit, pi2_cfg=drive(ch=1)
-        )
-    prog, env = module_program(
-        [reset.build("authored_reset"), receiver().build("readout")], native=False
-    )
-    events = request(prog, env).materialize_point(0).events
-    assert [event.source for event in events] == ["authored_reset"] * count + [
-        "readout"
     ]
 
 
@@ -361,12 +267,29 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
 ):
     short = drive(25 / 384).build("short")
     long = drive(50 / 384, ch=2).build("long")
-    choice = Branch("choice", [short, None, long], None, short, compare_by="scan")
-    if nested:
-        choice = Branch("outer", choice, None, short, compare_by="scan")
-    prog, env = module_program(
-        [choice, choice, receiver().build("readout")], sweep=(("scan", 3),)
-    )
+    readout = receiver().build("readout")
+
+    def choose(p):
+        with p.branch(by="scan", align_timeline=True) as cases:
+            with cases.case(0):
+                p.emit(short)
+                p.emit(long)
+            with cases.case(2):
+                p.emit(short)
+
+    def body(p):
+        for _ in range(2):
+            if nested:
+                with p.branch(by="scan", align_timeline=True) as cases:
+                    with cases.case(0):
+                        choose(p)
+                    with cases.case(2):
+                        p.emit(short)
+            else:
+                choose(p)
+        p.emit(readout)
+
+    prog, env = module_program([short, long, readout], sweep=(("scan", 3),), body=body)
     result = request(prog, env)
     assert result.point_names == ("scan",)
     for index, (sources, times) in enumerate(
@@ -392,16 +315,9 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
     ]
 
 
-@pytest.mark.parametrize("bookkeeping", [False, True])
-@pytest.mark.parametrize("nested", [False, True])
-def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_ends(
-    bookkeeping, nested
-):
+def test_program_join_only_merges_runtime_ends():
     left = drive(38 / 384).build("left")
     right = drive(77 / 384, ch=2).build("right")
-    joined = Join([left, left], right)
-    if nested:
-        joined = Join(None, joined)
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
     readout = receiver().build("readout")
 
@@ -410,21 +326,20 @@ def test_parallel_modules_emit_children_but_program_join_only_merges_runtime_end
         p.fork("default", into="parallel")
         p.timeline_inc("origin_cycles", timeline="parallel")
         for occurrence in range(2):
-            if bookkeeping:
-                # Only the emits output waves. Fork/join manipulate timeline ends.
-                left_time, right_time = f"left_{occurrence}", f"right_{occurrence}"
-                p.fork("parallel", into=[left_time, right_time])
-                p.emit(left, timeline=left_time)
-                p.emit(left, timeline=left_time)
-                p.emit(right, timeline=right_time)
-                p.join(left_time, right_time, into="parallel")
-            else:
-                p.emit(joined, timeline="parallel")
+            left_time, right_time = f"left_{occurrence}", f"right_{occurrence}"
+            p.fork("parallel", into=[left_time, right_time])
+            p.emit(left, timeline=left_time)
+            p.emit(left, timeline=left_time)
+            p.emit(right, timeline=right_time)
+            p.join(left_time, right_time, into="parallel")
         p.join("parallel", into="default")
         p.emit(readout)
 
     prog, env = module_program(
-        [origin, joined, readout], sweep=(("scan", 3),), body=body, data_registers=32
+        [origin, left, right, readout],
+        sweep=(("scan", 3),),
+        body=body,
+        data_registers=32,
     )
     result = request(prog, env)
     for index, start in enumerate([7, 20, 10]):
@@ -447,19 +362,25 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
     right = TableLengthPulse(
         "right", drive(ch=2), lengths=[75 / 384, 50 / 384, 25 / 384], idx_reg="scan"
     )
-    joined = Join(left, right)
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
     readout = receiver().build("readout")
 
     def body(p):
         p.emit(origin)
         p.timeline_inc("origin_cycles")
-        p.emit(joined)
-        p.emit(joined)
+        for occurrence in range(2):
+            other = f"right_{occurrence}"
+            p.fork("default", into=other)
+            p.emit(left)
+            p.emit(right, timeline=other)
+            p.join("default", other, into="default")
         p.emit(readout)
 
     prog, env = module_program(
-        [origin, joined, readout], sweep=(("scan", 3),), body=body, data_registers=32
+        [origin, left, right, readout],
+        sweep=(("scan", 3),),
+        body=body,
+        data_registers=32,
     )
     result = request(prog, env)
     for index, (origin_cycle, maximum) in enumerate([(7, 84), (20, 56), (10, 84)]):

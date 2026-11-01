@@ -15,7 +15,14 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ComputedPulse, LoadValue, Pulse, Readout, Reset
+from zcu_tools.program.v2 import (
+    ComputedPulse,
+    LoadValue,
+    Pulse,
+    Readout,
+    Reset,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -135,6 +142,11 @@ def _configure_allxy_axes(ax: Axes) -> None:
 
 
 class AllXYCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
+    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
+    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -151,11 +163,6 @@ class AllXYCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    I_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Identity Pulse")] = None
-    X180_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X180 Pulse")]
-    X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
 
 
 @dataclass(frozen=True)
@@ -191,8 +198,12 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
     Options: ClassVar[type[AllXYAnalyzeOptions]] = AllXYAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[AllXY_Result, AllXYCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("gate_idxs", "Gate Pair Index", "", dtype=np.int64),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(
+            AxesSpec.Axis(
+                "gate_idxs", label="Gate Pair Index", unit="", dtype=np.int64
+            ),
+        ),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AllXY_Result,
         cfg_type=AllXYCfg,
         cfg_schema_version="3.0",
@@ -226,11 +237,11 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
                 allxy_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             # Derive Y rotations from X calibrations and retain an identity time slot.
-            I_pulse = sched.cfg.I_pulse
-            X180_pulse = sched.cfg.X180_pulse
-            X90_pulse = sched.cfg.X90_pulse
+            I_pulse = cfg.I_pulse
+            X180_pulse = cfg.X180_pulse
+            X90_pulse = cfg.X90_pulse
             Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
             Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
@@ -241,31 +252,37 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
             gate_pulses = [I_pulse, X90_pulse, Y90_pulse, X180_pulse, Y180_pulse]
 
             # Load each gate pair, reset, then play gate 1 -> gate 2 -> readout.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    LoadValue(
-                        "load_gate1_idx",
-                        values=ALLXY_GATE1_IDX,
-                        idx_reg="allxy_idx",
-                        val_reg="gate_idx1",
-                    ),
-                    LoadValue(
-                        "load_gate2_idx",
-                        values=ALLXY_GATE2_IDX,
-                        idx_reg="allxy_idx",
-                        val_reg="gate_idx2",
-                    ),
-                    Reset("reset", cfg=sched.cfg.reset),
-                    ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses),
-                    ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses),
-                    Readout("readout", cfg=sched.cfg.readout),
-                )
-                .declare_sweep("allxy_idx", len(ALLXY_SEQUENCE))
-                .build_and_acquire(rounds=cfg.rounds)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            builder.add_loop("allxy_idx", len(ALLXY_SEQUENCE))
+            builder.emit(
+                LoadValue(
+                    "load_gate1_idx",
+                    values=ALLXY_GATE1_IDX,
+                    idx_reg="allxy_idx",
+                    val_reg="gate_idx1",
+                )
+            )
+            builder.emit(
+                LoadValue(
+                    "load_gate2_idx",
+                    values=ALLXY_GATE2_IDX,
+                    idx_reg="allxy_idx",
+                    val_reg="gate_idx2",
+                )
+            )
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(
+                ComputedPulse("gate1", val_reg="gate_idx1", pulses=gate_pulses)
+            )
+            builder.emit(
+                ComputedPulse("gate2", val_reg="gate_idx2", pulses=gate_pulses)
+            )
+            builder.emit(Readout("readout", cfg=cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return AllXY_Result(
             gate_idxs=np.arange(len(ALLXY_SEQUENCE), dtype=np.int64),

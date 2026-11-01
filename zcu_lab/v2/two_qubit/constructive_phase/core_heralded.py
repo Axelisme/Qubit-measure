@@ -22,7 +22,6 @@ from zcu_tools.program.v2 import Classify, Pulse, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
-    Join,
     MuxReadout,
     Reset,
 )
@@ -148,7 +147,7 @@ class ConstructivePhaseHeraldedExp(
         class_shape = (3, 3, 3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=config.reps,
@@ -172,13 +171,22 @@ class ConstructivePhaseHeraldedExp(
             if config.reset is not None:
                 builder.emit(Reset("reset", config.reset))
             builder.emit(readout, tag="herald")
-            builder.emit(Join(prepare_f1, prepare_f2))
-            builder.emit(Join(drive_f1, drive_f2))
+            builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
+            builder.emit(prepare_f1, timeline="prepare_f1_time")
+            builder.emit(prepare_f2, timeline="prepare_f2_time")
+            builder.join("prepare_f1_time", "prepare_f2_time", into="default")
+            builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
+            builder.emit(drive_f1, timeline="drive_f1_time")
+            builder.emit(drive_f2, timeline="drive_f2_time")
+            builder.join("drive_f1_time", "drive_f2_time", into="default")
             # Advance reference to consume duration-sweep runtime ends here.
             # Contrast, readout, ADC and shot end then use constant relative
             # times while their absolute event times remain unchanged.
             builder.delay_by_timeline()
-            builder.emit(Join(contrast_f1, contrast_f2))
+            builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
+            builder.emit(contrast_f1, timeline="contrast_f1_time")
+            builder.emit(contrast_f2, timeline="contrast_f2_time")
+            builder.join("contrast_f1_time", "contrast_f2_time", into="default")
             builder.emit(readout, tag="terminal")
             prog = builder.build()
             axes = [
@@ -223,7 +231,7 @@ class ConstructivePhaseHeraldedExp(
         buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         # Sampled cosine/Gauss/DRAG envelopes reject QickParam lengths. Only their
         # duration stays on the host; coordinate remains a hardware sweep.
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for duration, step in sched.scan("duration", durations.tolist()):
                 builder = TimelineBuilder(
                     context.soccfg,
@@ -248,12 +256,21 @@ class ConstructivePhaseHeraldedExp(
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
                 builder.emit(readout, tag="herald")
-                builder.emit(Join(prepare_f1, prepare_f2))
-                builder.emit(Join(drive_f1, drive_f2))
+                builder.fork("default", into=["prepare_f1_time", "prepare_f2_time"])
+                builder.emit(prepare_f1, timeline="prepare_f1_time")
+                builder.emit(prepare_f2, timeline="prepare_f2_time")
+                builder.join("prepare_f1_time", "prepare_f2_time", into="default")
+                builder.fork("default", into=["drive_f1_time", "drive_f2_time"])
+                builder.emit(drive_f1, timeline="drive_f1_time")
+                builder.emit(drive_f2, timeline="drive_f2_time")
+                builder.join("drive_f1_time", "drive_f2_time", into="default")
                 # Advance reference at the same drive boundary as the hardware path.
                 # Keep downstream relative times constant without moving absolute events.
                 builder.delay_by_timeline()
-                builder.emit(Join(contrast_f1, contrast_f2))
+                builder.fork("default", into=["contrast_f1_time", "contrast_f2_time"])
+                builder.emit(contrast_f1, timeline="contrast_f1_time")
+                builder.emit(contrast_f2, timeline="contrast_f2_time")
+                builder.join("contrast_f1_time", "contrast_f2_time", into="default")
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
                 axes = [

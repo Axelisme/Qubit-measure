@@ -8,12 +8,10 @@ import numpy as np
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.base import Module
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Branch, Repeat
-from zcu_tools.program.v2.modules.delay import DelayAuto, Join
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules.delay import DelayAuto
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
@@ -28,6 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -52,7 +51,7 @@ def receiver():
 
 def acquire(modules, *, sweep=None, reps=1):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=modules,
         sweep=sweep,
@@ -65,56 +64,21 @@ def acquire(modules, *, sweep=None, reps=1):
     return request_of(env), prog, env
 
 
-@pytest.mark.parametrize("compress", [False, True])
-def test_loadvalue_repeat_branch_computedpulse_and_wait_follow_execution_order(
-    compress,
-):
-    loader = LoadValue(
-        "selection",
-        [1, 0] * 16,
-        idx_reg="shot",
-        val_reg="selected",
-        auto_compress=compress,
-    )
-    candidates = [drive(0.1, 0.2), drive(0.3, -0.4)]
-    computed = ComputedPulse("gate", val_reg="selected", pulses=candidates)
-    branch = Branch("choice", computed, drive(0.2).build("other"), compare_by="inner")
-    loop = Repeat("inner", 2).add_content(branch)
-    request, _, _ = acquire(
-        [loader, loop, receiver().build("readout")], sweep=[("shot", 32)]
-    )
-    for i, timeline in enumerate(
-        request.materialize_point(p) for p in range(int(np.prod(request.point_dims)))
-    ):
-        first, second, readout = timeline.events
-        assert first.gain == pytest.approx(-0.4 if i % 2 == 0 else 0.2, abs=1e-4)
-        assert time_us(request.time_base, first.duration_ticks) == pytest.approx(
-            0.3 if i % 2 == 0 else 0.1, abs=0.003
-        )
-        # ComputedPulse reserves the max candidate, even when selecting the short one.
-        assert time_us(request.time_base, second.start_ticks) == pytest.approx(
-            0.3, abs=0.007
-        )
-        assert time_us(request.time_base, readout.start_ticks) == pytest.approx(
-            0.5, abs=0.012
-        )
-        assert ("inner", 0) in first.iterations
-        assert ("inner", 1) in second.iterations
-        assert dict(timeline.coordinates)["shot"] == i
-
-
-def test_scanwith_runtime_repeat_count_and_delay_cycles_are_local_to_each_acquire():
-    scan = ScanWith("scan", [0, 1, 2], val_reg="count").add_content(
-        Repeat("repeat", "count", range_hint=(0, 2)).add_content(drive().build("drive"))
-    )
-    wait = LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles")
-    modules = [
-        wait,
-        scan,
-        DelayAuto("wait_loaded", t="cycles"),
-        receiver().build("readout"),
-    ]
-    request, prog, env = acquire(modules, sweep=[("shot", 2)])
+def test_repeat_count_and_delay_cycles_are_local_to_each_acquire():
+    env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
+    builder = TimelineBuilder(env.soccfg)
+    builder.add_loop("shot", 2)
+    builder.emit(LoadValue("wait", [43, 86], idx_reg="shot", val_reg="cycles"))
+    for count in [0, 1, 2]:
+        with builder.repeat(f"repeat_{count}", count):
+            builder.emit(drive().build("drive"))
+    builder.delay_by_timeline()
+    builder.emit(DelayAuto("wait_loaded", t="cycles"))
+    builder.emit(receiver().build("readout"))
+    builder.delay_by_timeline()
+    prog = builder.build()
+    prog.acquire(env.soc, progress=False)
+    request = request_of(env)
     assert request.point_dims == (2,)
     for point, readout_start in enumerate([0.4, 0.5]):
         timeline = request.materialize_point(point)
@@ -185,16 +149,18 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
         TableLengthPulse("first", first, lengths=[0.1, 0.3], idx_reg="length"),
         TableLengthPulse("second", second, lengths=[0.2, 0.1], idx_reg="length"),
     ]
-    modules: list[Module] = [
-        Join(None, [None], *[[None, pulse, None] for pulse in pulses[:branches]]),
-        receiver().build("readout"),
-    ]
+    builder = TimelineBuilder(env.soccfg)
+    builder.add_loop("length", 2)
     if preceding_pulse:
-        modules.insert(0, drive(length=0.04).build("reset"))
-    try:
-        prog = ModularProgramV2(env.soccfg, modules=modules, sweep=[("length", 2)])
-    except RuntimeError as exc:
-        pytest.fail(f"parallel table-length pulses must compile: {exc}")
+        builder.emit(drive(length=0.04).build("reset"))
+    names = [f"branch_{i}" for i in range(branches)]
+    builder.fork("default", into=names)
+    for name, pulse in zip(names, pulses[:branches], strict=True):
+        builder.emit(pulse, timeline=name)
+    builder.join(*names, into="default")
+    builder.emit(receiver().build("readout"))
+    builder.delay_by_timeline()
+    prog = builder.build()
     prog.acquire(env.soc, progress=False)
     request = request_of(env)
     origin = 0.04 if preceding_pulse else 0.0
@@ -276,7 +242,7 @@ def test_table_readout_wrap_conflicting_with_initial_template_is_rejected():
     readout = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = ModularProgramV2(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
+    prog = compile_modules(env.soccfg, modules=[readout], sweep=[("axis", 2)], reps=1)
     with pytest.raises(
         ValueError, match=r"MetaInst.*preopt.*axis.*table wrap disagrees"
     ):
@@ -351,7 +317,7 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
         ro_length=0.1,
     )
     try:
-        prog = ModularProgramV2(
+        prog = compile_modules(
             env.soccfg,
             modules=[reset.build("reset"), readout.build("readout")],
             sweep=[("length", 3)],
@@ -359,7 +325,7 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
         prog.acquire(env.soc, progress=False)
         request = request_of(env)
         timelines = [request.materialize_point(point) for point in range(3)]
-        # Machine scheduling emits literal tProc timestamps 84, 93 and 181.
+        # Each native point covers the actual waveform plus pre/post once.
         # The two swept waveforms remain 19, 38 and 57 generator clocks long.
         for point, timeline in enumerate(timelines):
             assert [event.source for event in timeline.events] == [
@@ -373,27 +339,27 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
             ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
             assert time_us(
                 request.time_base, timeline.events[-1].start_ticks
-            ) == pytest.approx(84 / 430.08)
+            ) == pytest.approx([40, 62, 83][point] / 430.08)
             assert times_us(
                 request.time_base, timeline.readouts[0].trigger_ticks
-            ) == pytest.approx((93 / 430.08,))
+            ) == pytest.approx(([48, 70, 91][point] / 430.08,))
             assert time_us(request.time_base, timeline.duration_ticks) == pytest.approx(
-                181 / 430.08
+                [135, 157, 178][point] / 430.08
             )
     finally:
         env.devices.close_all_devices()
 
 
-def test_reps_counter_lookup_in_join_rejected_before_backend():
-    modules = [
-        Join(
-            LoadValue("writer", [0], "reps", "selection"),
-            ComputedPulse("reader", val_reg="selection", pulses=[drive(), drive(0.2)]),
-        ),
-        receiver().build("readout"),
-    ]
+def test_reps_counter_lookup_rejected_before_backend():
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
-    prog = ModularProgramV2(env.soccfg, modules=modules)
+    builder = TimelineBuilder(env.soccfg)
+    builder.emit(LoadValue("writer", [0], "reps", "selection"))
+    builder.emit(
+        ComputedPulse("reader", val_reg="selection", pulses=[drive(), drive(0.2)])
+    )
+    builder.emit(receiver().build("readout"))
+    builder.delay_by_timeline()
+    prog = builder.build()
     with pytest.raises(
         ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
     ):
@@ -408,7 +374,7 @@ def test_reps_counter_word_lookup_rejected_before_backend():
         receiver().build("readout"),
     ]
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(env.soccfg, modules=modules)
+    prog = compile_modules(env.soccfg, modules=modules)
     with pytest.raises(
         ValueError, match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)"
     ):

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
@@ -15,12 +14,11 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     GainSweep,
-    Join,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -39,6 +37,12 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class TwotoneCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    flux_pulse: Pulse.Cfg
+    qub_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
+    freq: SweepCfg
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -55,22 +59,16 @@ class TwotoneCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    flux_pulse: Pulse.Cfg
-    qub_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    gain: Annotated[GainSweep, FieldMeta(label="gain", unit="a.u.")]
-    freq: SweepCfg
 
 
 class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer gains -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[TwoToneResult, TwotoneCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("gains", "Flux Pulse Gain", "a.u."),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("gains", label="Flux Pulse Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=TwoToneResult,
         cfg_type=TwotoneCfg,
         cfg_schema_version="3.0",
@@ -87,7 +85,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         calibrate gain to physical flux.
         """
         # Quantize flux gain and probe frequency for their own generators.
-        cfg = deepcopy(config)
+        cfg = config
         soc, soccfg = context.soc, context.soccfg
 
         gains = sweep2array(
@@ -112,27 +110,24 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.flux_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            sched.cfg.qub_pulse.set_param("freq", sweep2param("freq", sched.cfg.freq))
-
-            # Schedule flux and spectroscopy in parallel, then acquire mean IQ.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Join(
-                        Pulse("flux_pulse", sched.cfg.flux_pulse),
-                        Pulse("qub_pulse", sched.cfg.qub_pulse),
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("gain", sched.cfg.gain)
-                .declare_sweep("freq", sched.cfg.freq)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            # Build the pulse sequence without changing the caller's cfg.
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            gain = builder.add_sweep("gain", cfg.gain)
+            freq = builder.add_sweep("freq", cfg.freq)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.fork("default", into=["flux", "probe"])
+            builder.emit(
+                Pulse("flux_pulse", cfg.flux_pulse, gain=gain), timeline="flux"
+            )
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq), timeline="probe")
+            builder.join("flux", "probe", into="default")
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return TwoToneResult(gains, freqs, signals_buffer.array)
 
@@ -151,7 +146,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
 
         real_signals = twotone_signal2real(signals2D)
 
-        fig, ax = plots.subplots("fit")
+        fig, ax = plots.subplots(num="fit")
 
         ax.imshow(
             real_signals.T,

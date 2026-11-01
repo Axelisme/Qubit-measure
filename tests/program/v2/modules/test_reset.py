@@ -118,52 +118,10 @@ class TestResetFactory:
         r = Reset("myname", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
         assert r.name == "myname"
 
-    def test_allow_rerun_pulse(self):
-        assert (
-            Reset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg())).allow_rerun() is True
-        )
-
-    def test_allow_rerun_two_pulse(self):
-        assert (
-            Reset(
-                "r",
-                TwoPulseResetCfg(
-                    pulse1_cfg=_make_pulse_cfg(), pulse2_cfg=_make_pulse_cfg(ch=2)
-                ),
-            ).allow_rerun()
-            is True
-        )
-
-    def test_allow_rerun_bath(self):
-        assert (
-            Reset(
-                "r",
-                BathResetCfg(
-                    cavity_tone_cfg=_make_pulse_cfg(ch=1),
-                    qubit_tone_cfg=_make_pulse_cfg(ch=2),
-                    pi2_cfg=_make_pi2_cfg(),
-                ),
-            ).allow_rerun()
-            is True
-        )
-
 
 # ---------------------------------------------------------------------------
 # Cfg → Module construction + runtime via mock prog
 # ---------------------------------------------------------------------------
-
-
-class TestPulseResetRuntime:
-    def test_init_declares_gen(self, mock_prog):
-        r = PulseReset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
-        r.init(mock_prog)
-        assert mock_prog.count("declare_gen") == 1
-
-    def test_run_emits_pulse(self, mock_prog):
-        r = PulseReset("r", PulseResetCfg(pulse_cfg=_make_pulse_cfg()))
-        r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        assert mock_prog.count("pulse") == 1
 
 
 class TestTwoPulseResetRuntime:
@@ -176,17 +134,6 @@ class TestTwoPulseResetRuntime:
             ),
         )
 
-    def test_init_declares_both_gens(self, mock_prog):
-        r = self._make()
-        r.init(mock_prog)
-        assert mock_prog.count("declare_gen") == 2
-
-    def test_run_emits_both_pulses(self, mock_prog):
-        r = self._make()
-        r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        assert mock_prog.count("pulse") == 2
-
 
 class TestBathResetRuntime:
     def _make(self):
@@ -198,14 +145,3 @@ class TestBathResetRuntime:
                 pi2_cfg=_make_pi2_cfg(),
             ),
         )
-
-    def test_init_declares_three_gens(self, mock_prog):
-        r = self._make()
-        r.init(mock_prog)
-        assert mock_prog.count("declare_gen") == 3
-
-    def test_run_emits_three_pulses(self, mock_prog):
-        r = self._make()
-        r.init(mock_prog)
-        r.run(mock_prog, t=0.0)
-        assert mock_prog.count("pulse") == 3

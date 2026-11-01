@@ -13,12 +13,12 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -51,6 +51,17 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AmpRabiCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Init Pulse",
+            description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation.",
+        ),
+    ] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -81,25 +92,14 @@ class AmpRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None,
-        FieldMeta(
-            label="Init Pulse",
-            description="Fixed preparation pulse before each gain-swept Rabi pulse; None skips preparation.",
-        ),
-    ] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
 
 
 class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
     Options: ClassVar[type[AmpRabiAnalyzeOptions]] = AmpRabiAnalyzeOptions
 
     AXES_SPEC: ClassVar[AxesSpec[AmpRabiResult, AmpRabiCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("amps", "Gain", ""),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("amps", label="Gain", unit=""),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AmpRabiResult,
         cfg_type=AmpRabiCfg,
         cfg_schema_version="3.0",
@@ -137,30 +137,29 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         )
 
         # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             gain_sweep = cfg.gain
-            cfg.qub_pulse.set_param("gain", sweep2param("gain", gain_sweep))
+            gain_param = builder.add_sweep("gain", gain_sweep)
 
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add_reset("reset", cfg.reset)
-                .add_pulse("init_pulse", cfg.init_pulse)
-                .add_pulse("qubit_pulse", cfg.qub_pulse)
-                .add_readout("readout", cfg.readout)
-                .declare_sweep("gain", gain_sweep)
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
-                        ),
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, gain=gain_param))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
                     ),
-                )
+                ),
             )
 
         return AmpRabiResult(amps=gains, signals=signals_buffer.array)
@@ -193,8 +192,15 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         else:
             init_phase = 180.0
 
-        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, _, _, y_fit, (pOpt, pCov) = fit_rabi(
-            gains, real_signals, decay=False, init_phase=init_phase
+        fit = fit_rabi(gains, real_signals, decay=False, init_phase=init_phase)
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, y_fit, pOpt, pCov = (
+            fit.pi_x,
+            fit.pi_x_err,
+            fit.pi2_x,
+            fit.pi2_x_err,
+            fit.curve,
+            fit.params,
+            fit.cov,
         )
 
         names = ("y0", "yscale", "freq", "phase")

@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import AsmInst, Macro, QickSweep1D, WriteReg
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2._timeline_bounds import CycleBounds
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 from zcu_tools.program.v2.macro.pluse_reg import PulseByReg
@@ -809,6 +810,25 @@ def _change_selection(prog, loader, other, change):
         prog.write_reg("length", 89)
     elif change == "other_table":
         prog.emit(other)
+    elif change == "consumed_other_table":
+        relation = other.lower_selected(prog)
+        prog.pulse_from_length_reg(
+            0,
+            "template",
+            length_reg="length",
+            flat_top=False,
+            timeline="default",
+            selection=SelectedPlayback(
+                relation.selector,
+                "length",
+                (
+                    PlaybackChoice("template", length_cycles=89),
+                    PlaybackChoice("template", length_cycles=39),
+                ),
+                relation,
+            ),
+        )
+        prog.timeline_inc(0, timeline="default")
     elif change == "selector":
         prog.write_reg("index", 1)
     elif change == "translate":
@@ -1045,6 +1065,151 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
     return _selection_program(Selection())
 
 
+def _selection_flow_program(body, *, path_count=2):
+    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
+    other = LoadValue(
+        "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
+    )
+
+    def initialize(prog):
+        prog.add_loop("path", path_count)
+        prog.add_reg("index")
+
+    def lower(prog):
+        prog.write_reg("index", 0)
+        body(prog, loader, other)
+
+    return _program(
+        make_mock_soccfg(1, 0), [template, loader, other], lower, initialize
+    )
+
+
+def _play_selected_length(prog, relation, values, timeline="default"):
+    prog.pulse_from_length_reg(
+        0,
+        "template",
+        length_reg="length",
+        flat_top=False,
+        timeline=timeline,
+        selection=SelectedPlayback(
+            relation.selector,
+            "length",
+            tuple(PlaybackChoice("template", length_cycles=n) for n in values),
+            relation,
+        ),
+    )
+    prog.timeline_inc(0, timeline=timeline)
+
+
+@pytest.mark.parametrize("other_case", [0, 1])
+@pytest.mark.parametrize("empty_case", [False, True])
+def test_selected_playback_rejects_consumed_alternative_after_branch_join(
+    other_case, empty_case
+):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.branch(by="path", align_timeline=True) as branch:
+            for index in range(2):
+                if empty_case and index != other_case:
+                    continue  # Undeclared cases execute the unchanged entry state.
+                with branch.case(index) as timeline:
+                    current = other if index == other_case else loader
+                    relation = current.lower_selected(prog)
+                    values = (89, 39) if index == other_case else (39, 89)
+                    _play_selected_length(prog, relation, values, timeline)
+        # Both tables have valid writers/consumers, but path=other_case leaves
+        # length=89 while initial's independent capture still selects A's 39.
+        _play_selected_length(prog, initial, (39, 89))
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _selection_flow_program(body)
+
+
+@pytest.mark.parametrize("count", [2, "path"])
+def test_selected_playback_rejects_consumed_overwrite_on_repeat_backedge(count):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.repeat("again", count):
+            # The first iteration is valid; B reaches this consumer only via
+            # the second iteration's backedge, not linear preprocess order.
+            _play_selected_length(prog, initial, (39, 89))
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _selection_flow_program(body, path_count=3)
+
+
+def test_selected_playback_rejects_relation_missing_on_repeat_skipped_path():
+    def body(prog, loader, other):
+        previous = other.lower_selected(prog)
+        _play_selected_length(prog, previous, (89, 39))
+        prog.delay_by_timeline()
+        initial = loader.lower_selected(prog)
+        _play_selected_length(prog, initial, (39, 89))
+        prog.delay_by_timeline()
+        with prog.repeat("maybe", "path", range_hint=(0, 1)):
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+        _play_selected_length(prog, previous, (89, 39))
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _selection_flow_program(body)
+
+
+@pytest.mark.parametrize("count, reload_each_time", [(1, False), (2, True)])
+def test_selected_playback_allows_single_iteration_or_fresh_repeat_lookup(
+    count, reload_each_time
+):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.repeat("again", count):
+            current = loader.lower_selected(prog) if reload_each_time else initial
+            _play_selected_length(prog, current, (39, 89))
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+
+    result = shots(_selection_flow_program(body))
+    expected = [144 * i + offset for i in range(count) for offset in (0, 44)]
+    assert [waves(shot) for shot in result] == [expected] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [144 * count] * 4
+
+
+@pytest.mark.parametrize("declare_case", [False, True])
+def test_selected_playback_preserves_deferred_capture_across_empty_branch(declare_case):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        prog.write_reg("index", 1)  # The loader-owned capture must still select39.
+        with prog.branch(by="path", align_timeline=True) as branch:
+            if declare_case:
+                with branch.case(0):
+                    pass
+        _play_selected_length(prog, initial, (39, 89))
+
+    result = shots(_selection_flow_program(body))
+    assert [waves(shot) for shot in result] == [[0]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [44] * 4
+
+
+def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.branch(by="path", align_timeline=False) as branch:
+            with branch.case(0) as timeline:
+                current = other.lower_selected(prog)
+                _play_selected_length(prog, current, (89, 39), timeline)
+            with branch.case(1) as timeline:
+                _play_selected_length(prog, initial, (39, 89), timeline)
+
+    result = shots(_selection_flow_program(body))
+    assert [waves(shot) for shot in result] == [[0]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100, 44] * 2
+
+
 def _selection_program(selection: Module) -> TimelineProgramV2:
     return _program(make_mock_soccfg(1, 0), [selection], lambda p: p.emit(selection))
 
@@ -1054,6 +1219,7 @@ def _selection_program(selection: Module) -> TimelineProgramV2:
     [
         "constant",
         "other_table",
+        "consumed_other_table",
         "translate",
         "constant_branch",
         "constant_backedge",
@@ -1070,6 +1236,89 @@ def test_selected_playback_captures_index_before_later_in_range_change(change):
     prog = _selected_length_with_change(change)
     # The first length remains39 despite the author changing index to1.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [49] * 2
+
+
+def test_repeated_computed_playback_preserves_selected_ends_within_register_budget():
+    builder = TimelineBuilder(
+        make_mock_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0
+    )
+    builder.add_loop("index", 2)
+    choices = [
+        _pulse_cfg(cycles / 384).model_copy(
+            update={"pre_delay": 0, "post_delay": 1 / 430.08}
+        )
+        for cycles in (39, 89)
+    ]
+    pulses = [
+        ComputedPulse(f"selected_{index}", val_reg="index", pulses=choices)
+        for index in range(5)
+    ]
+    with builder.repeat("twice", 2):
+        for pulse in pulses:
+            builder.emit(pulse)
+    builder.emit(pulses[0])
+    result = shots(builder.build())
+    # ceil(39*1.12+1)=45; ceil(89*1.12+1)=101. Each of eleven
+    # emissions must consume its own selected end, including the repeat backedge.
+    assert [waves(s) for s in result] == [
+        [45 * i for i in range(11)],
+        [101 * i for i in range(11)],
+    ] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
+
+
+def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
+    first = ComputedPulse(
+        "first",
+        val_reg="a_index",
+        pulses=[
+            _pulse_cfg(n / 384).model_copy(
+                update={"pre_delay": 0, "post_delay": -10 / 430.08}
+            )
+            for n in (39, 89)
+        ],
+    )
+    other = ComputedPulse(
+        "other",
+        val_reg="b_index",
+        pulses=[
+            _pulse_cfg(n / 384, ch=1).model_copy(
+                update={"pre_delay": 0, "post_delay": 0}
+            )
+            for n in (20, 40, 60)
+        ],
+    )
+    a_index = LoadValue("a_index", [0, 1], idx_reg="index", val_reg="a_index")
+    b_index = LoadValue("b_index", [2, 0], idx_reg="index", val_reg="b_index")
+    change_a = LoadValue(
+        "change_a", [1, 0], idx_reg="index", val_reg="a_index", use_existed=True
+    )
+
+    def body(prog):
+        prog.emit(a_index)
+        prog.emit(b_index)
+        prog.fork("default", into="saved")
+        prog.emit(first, timeline="saved")
+        prog.emit(other)
+        prog.emit(change_a)
+        # The first end and its physical coverage survive another table's
+        # capture and a later author-selector change. Pay its negative-post debt.
+        prog.timeline_inc(10 / 430.08, timeline="saved")
+        prog.join("saved", into="default")
+        prog.emit(first)
+        prog.timeline_inc(10 / 430.08)
+
+    prog = _program(
+        make_mock_soccfg(2, 0),
+        [a_index, b_index, change_a, first, other],
+        body,
+        lambda p: p.add_loop("index", 2),
+    )
+    result = shots(prog)
+    assert [waves(s) for s in result] == [[0, 0, 68], [0, 0, 100]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [168, 144] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [177, 153] * 2
 
 
 @pytest.mark.parametrize("count", [None, 2])

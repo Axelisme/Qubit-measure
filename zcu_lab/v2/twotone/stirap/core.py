@@ -1,4 +1,4 @@
-"""Two-generator Gaussian STIRAP scans through legacy Modules."""
+"""Two-generator Gaussian STIRAP scans with independent timelines."""
 
 from __future__ import annotations
 
@@ -24,15 +24,15 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
-    Join,
     Pulse,
     PulseReadout,
-    SoftDelay,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
@@ -94,12 +94,12 @@ class StirapCfg(ConfigBase):
     stokes_lead: Annotated[float, FieldMeta(label="Fixed Stokes lead", unit="us")] = (
         0.05
     )
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     scan: Annotated[
         DelayScan | AmplitudeScan | DetuningScan,
         Field(discriminator="kind"),
         FieldMeta(label="Scan mode"),
     ]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=4096, ge=1
     )
@@ -143,6 +143,28 @@ def restore_result(data: GroupedLoadData[StirapCfg]) -> StirapResult:
     )
 
 
+def _scan_coordinates(
+    scan: DelayScan | AmplitudeScan | DetuningScan,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], str]:
+    """Return requested x/y coordinates and the selected scan's x label."""
+    if scan.kind == "delay":
+        x_sweep, y_sweep = scan.stokes_lead, None
+        x_label = "Stokes lead (us; positive = Stokes first)"
+    elif scan.kind == "amplitude":
+        x_sweep, y_sweep = scan.scale, None
+        x_label = "Common amplitude scale (fixed sigma)"
+    else:
+        x_sweep, y_sweep = scan.pump, scan.stokes
+        x_label = "Pump detuning (MHz)"
+    xs = np.linspace(x_sweep.start, x_sweep.stop, x_sweep.expts)
+    ys = (
+        np.array([0.0])
+        if y_sweep is None
+        else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
+    )
+    return xs, ys, x_label
+
+
 class StirapExp(Experiment[StirapResult, StirapCfg]):
     """Acquire the same two-branch STIRAP sequence under three scan modes."""
 
@@ -181,23 +203,9 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
         """
         centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         scan = cfg.scan
-        if scan.kind == "delay":
-            x_sweep, y_sweep = scan.stokes_lead, None
-            x_label = "Stokes lead (us; positive = Stokes first)"
-        elif scan.kind == "amplitude":
-            x_sweep, y_sweep = scan.scale, None
-            x_label = "Common amplitude scale (fixed sigma)"
-        else:
-            x_sweep, y_sweep = scan.pump, scan.stokes
-            x_label = "Pump detuning (MHz)"
-        xs = np.linspace(x_sweep.start, x_sweep.stop, x_sweep.expts)
-        ys = (
-            np.array([0.0])
-            if y_sweep is None
-            else np.linspace(y_sweep.start, y_sweep.stop, y_sweep.expts)
-        )
+        xs, ys, x_label = _scan_coordinates(scan)
         buffer = SignalBuffer((len(ys), len(xs), 3), dtype=np.float64)
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             for y, row in sched.scan("stokes_detuning", ys.tolist()):
                 for x, step in row.scan("scan_x", xs.tolist()):
                     lead, scale = cfg.stokes_lead, 1.0
@@ -227,29 +235,26 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                             length=6 * cfg.width, sigma=cfg.width
                         ),
                     )
-                    builder = step.prog_builder(
-                        context.soc,
+                    builder = TimelineBuilder(
                         context.soccfg,
                         reps=cfg.shots,
                         relax_delay=cfg.relax_delay,
-                    ).add(
-                        Join(
-                            [
-                                SoftDelay("stokes_start", max(-lead, 0.0)),
-                                Pulse("stokes", stokes),
-                            ],
-                            [
-                                SoftDelay("pump_start", max(lead, 0.0)),
-                                Pulse("pump", pump),
-                            ],
-                        ),
-                        PulseReadout("readout", step.cfg.readout),
                     )
+                    builder.fork("default", into=["stokes", "pump"])
+                    with builder.timeline("stokes"):
+                        builder.timeline_inc(max(-lead, 0.0))
+                        builder.emit(Pulse("stokes", stokes))
+                    with builder.timeline("pump"):
+                        builder.timeline_inc(max(lead, 0.0))
+                        builder.emit(Pulse("pump", pump))
+                    builder.join("stokes", "pump", into="default")
+                    builder.emit(PulseReadout("readout", cfg.readout))
                     program = builder.build()
-                    builder.run_program_summed(
+                    step.run_acquire_summed(
                         program,
+                        context.soc,
                         processor=shot_sums(program, [Classify("readout")]),
-                        sums2signal_fn=lambda sums: sums.reshape(3),
+                        options=RunOptions(converter=lambda sums: sums.reshape(3)),
                         charge_requirements=(
                             ChargeDriveRequirement("Pump", cfg.pump_ch),
                             ChargeDriveRequirement("Stokes", cfg.stokes_ch),

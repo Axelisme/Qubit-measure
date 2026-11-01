@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools import experiment
 from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
 
@@ -209,22 +210,21 @@ def test_schedule_scope_and_acquire_cancel_preserve_next_acquisition() -> None:
     class Program:
         calls = 0
 
-        def acquire(self, soc: object, **_kwargs: object) -> np.ndarray:
+        def acquire(self, soc: object, **_kwargs: object) -> list[NDArray[np.float64]]:
             self.calls += 1
             assert root.active_path == f"run/schedule:readout#1/acquire#{self.calls}"
             if self.calls == 1:
                 assert root.cancel("acquire").cancelled
-            return np.array([float(self.calls)])
+            return [np.array([[[float(self.calls), 0.0]]], dtype=np.float64)]
 
         acquire_decimated = acquire
 
     program = Program()
-    with Schedule({}, SignalBuffer(1), scope=root, name="readout") as schedule:
+    with Schedule(SignalBuffer(1), scope=root, name="readout") as schedule:
         assert schedule.scope.active_path == "run/schedule:readout#1"
-        builder = schedule.prog_builder(object(), object())
-        builder.run_program(program, raw2signal_fn=lambda value: value)
+        schedule.run_acquire(program, object())
         assert not schedule.scope.cancelled
-        builder.run_program(program, raw2signal_fn=lambda value: value)
+        schedule.run_acquire(program, object())
         assert schedule.data[0] == 2.0
     assert root.active_path == "run"
     assert not root.cancelled

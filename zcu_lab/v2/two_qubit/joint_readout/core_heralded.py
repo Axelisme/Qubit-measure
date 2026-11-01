@@ -226,7 +226,7 @@ class JointReadoutHeraldedExp(
         buffer = SignalBuffer(
             (2, 2, 3, 3, 3, 3), dtype=np.float64, on_update=update_view
         )
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
                 context.soccfg,
                 reps=config.reps,

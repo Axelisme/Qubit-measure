@@ -4,12 +4,12 @@ import numpy as np
 import pytest
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -54,7 +54,7 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
             waveform=ConstWaveformCfg(length=0.016),
             ro_length=0.016,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[pulse.build("charge"), ro.build("readout")],
             reps=2,
@@ -76,7 +76,7 @@ def test_v2_derives_sparse_channels_and_acquires_with_live_dc() -> None:
             (("bias", 0.2),),
             (("bias", 0.4),),
         ]
-        unbound = ModularProgramV2(
+        unbound = compile_modules(
             env.soccfg,
             modules=[pulse.with_updates(ch=1).build("unbound"), ro.build("readout")],
             reps=1,

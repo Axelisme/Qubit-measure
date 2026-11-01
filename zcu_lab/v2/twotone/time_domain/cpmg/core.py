@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from qick import QickConfig
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -22,7 +23,7 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils import make_sweep
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
@@ -31,13 +32,11 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     Pulse,
     Readout,
-    Repeat,
     Reset,
-    SoftDelay,
     SweepCfg,
+    TimelineBuilder,
     sweep2param,
 )
 from zcu_tools.utils.process import rotate2real
@@ -66,6 +65,19 @@ class CPMG_Result:
 
 
 class CPMG_Cfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    pi2_pulse: Pulse.Cfg
+    pi_pulse: Pulse.Cfg
+    readout: Readout.Cfg
+    count: Annotated[
+        list[Annotated[int, Field(strict=True, ge=1)]],
+        Field(min_length=1),
+        FieldMeta(label="Pi pulse counts"),
+    ]
+    delay: SweepCfg | list[SweepCfg]
+    detune_ratio: Annotated[
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+    ] = 0.0
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -82,21 +94,6 @@ class CPMG_Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    pi2_pulse: Pulse.Cfg
-    pi_pulse: Pulse.Cfg
-    readout: Readout.Cfg
-    times: Annotated[
-        list[Annotated[int, Field(strict=True, ge=1)]],
-        Field(min_length=1),
-        FieldMeta(label="Pi pulse counts"),
-    ]
-    length: SweepCfg | None = None
-    length_range: list[tuple[float, float]] | tuple[float, float]
-    length_expts: int
-    detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
-    ] = 0.0
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
@@ -200,11 +197,45 @@ CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
     ),
     result_type=CPMG_Result,
     cfg_type=CPMG_Cfg,
-    cfg_schema_version="3.0",
+    cfg_schema_version="4.0",
     tag="twotone/ge/cpmg",
     result_builder=_build_cpmg_result,
     result_validator=_validate_cpmg_result,
 )
+
+
+def _prepare_delays(
+    cfg: CPMG_Cfg, times: NDArray[np.int64], soccfg: QickConfig
+) -> tuple[list[SweepCfg], NDArray[np.float64]]:
+    """Round each count's total-time grid and reject intervals too short for pulses."""
+    pi2_pulse, pi_pulse = cfg.pi2_pulse, cfg.pi_pulse
+    windows = [cfg.delay] * len(times) if isinstance(cfg.delay, SweepCfg) else cfg.delay
+    if len(windows) != len(times):
+        raise ValueError("Provide one delay window or one per pi-pulse count")
+    if len({window.expts for window in windows}) != 1:
+        raise ValueError("All delay windows must have the same number of points")
+    lengths = np.array(
+        [
+            sweep2array(window, "time", {"soccfg": soccfg, "scaler": 1 / (2 * count)})
+            for window, count in zip(windows, times, strict=True)
+        ]
+    )
+
+    # Reject timing that cannot fit the preparation and refocusing pulses.
+    min_interval = min(
+        window.start / (2 * count) for window, count in zip(windows, times, strict=True)
+    )
+    if min_interval < 0.5 * (  # the first and last delays are half of the interval
+        pi2_pulse.waveform.length + pi_pulse.waveform.length
+    ):
+        raise ValueError(
+            "The interval is too short to measure the CPMG signal",
+            f"min_interval: {min_interval:.2g}, ",
+            f"pi2_pulse_length: {pi2_pulse.waveform.length:.2g}, ",
+            f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
+        )
+
+    return windows, lengths
 
 
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
@@ -226,9 +257,9 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         the finite pi and pi/2 pulse-width correction. detune_ratio advances the
         final projection phase by 360 * detune_ratio degrees per time index.
 
-        cfg.times supplies positive integer pi-pulse counts. length_range
-        gives total-time bounds in us, shared or one pair per count, sampled at
-        length_expts points. Too-short intervals or invalid counts raise
+        cfg.count supplies positive integer pi-pulse counts. delay supplies
+        a shared SweepCfg time window in us or one window per count, with equal
+        point counts. Too-short intervals or invalid counts raise
         ValueError. acquire_kwargs forwards optional acquisition settings.
         Return each count's quantized times and mean complex IQ; analyze fits
         their decay to estimate T_CPMG. earlystop_snr can stop averaging a row.
@@ -241,44 +272,10 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         pi2_pulse = cfg.pi2_pulse
         pi_pulse = cfg.pi_pulse
 
-        times = np.array(cfg.times, dtype=np.int64)
+        times = np.array(cfg.count, dtype=np.int64)
 
-        length_ranges = cfg.length_range
-        if isinstance(length_ranges, tuple):
-            ranges = np.zeros((len(times), 2), dtype=np.float64)
-            ranges[:, 0] = length_ranges[0]
-            ranges[:, 1] = length_ranges[1]
-        else:
-            ranges = np.array(length_ranges, dtype=np.float64)
-        length_ranges = ranges
-
-        lengths = np.array(  # (times x length)
-            [
-                sweep2array(
-                    make_sweep(
-                        start=length_ranges[i, 0],
-                        stop=length_ranges[i, 1],
-                        expts=cfg.length_expts,
-                    ),
-                    "time",
-                    {"soccfg": soccfg, "scaler": 1 / (2 * t)},
-                )
-                for i, t in enumerate(times)
-            ]
-        )
-        length_idxs = np.arange(cfg.length_expts, dtype=np.int64)
-
-        # Reject timing that cannot fit the preparation and refocusing pulses.
-        min_interval = np.min(length_ranges[:, 0] / (2 * times))
-        if min_interval < 0.5 * (  # the first and last delays are half of the interval
-            pi2_pulse.waveform.length + pi_pulse.waveform.length
-        ):
-            raise ValueError(
-                "The interval is too short to measure the CPMG signal",
-                f"min_interval: {min_interval:.2g}, ",
-                f"pi2_pulse_length: {pi2_pulse.waveform.length:.2g}, ",
-                f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
-            )
+        windows, lengths = _prepare_delays(cfg, times, soccfg)
+        length_idxs = np.arange(windows[0].expts, dtype=np.int64)
 
         # 2. Track mean IQ and the SNR used to stop averaging each decay curve.
         current_snr = 0.0
@@ -300,7 +297,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             (len(times), len(length_idxs)),
             on_update=lambda data: update_viewer(data),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
                 viewer.update(
@@ -311,75 +308,66 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
                 )
 
             # Scan pi-pulse counts on the host; sweep evolution time on the board.
-            for idx, (time_value, step) in enumerate(sched.scan("times", times)):
+            for idx, (time_value, step) in enumerate(sched.scan("count", times)):
                 current_length_idx = idx
-                cfg = step.cfg
 
                 time = int(time_value)
                 pi2_pulse = cfg.pi2_pulse
                 pi_pulse = cfg.pi_pulse
                 dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
-                length_sweep = make_sweep(
-                    start=length_ranges[idx, 0],
-                    stop=length_ranges[idx, 1],
-                    expts=cfg.length_expts,
+                delay_sweep = windows[idx]
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
-                cfg.length = length_sweep
-                length_param = sweep2param("length", length_sweep)
+                delay = builder.add_sweep("delay", delay_sweep)
                 detune_param = (
                     360
                     * detune_ratio
                     * sweep2param(
-                        "length",
-                        make_sweep(start=0, step=1, expts=length_sweep.expts),
+                        "delay", make_sweep(start=0, step=1, expts=delay_sweep.expts)
                     )
                 )
+                interval = delay / (2 * time)
 
-                # Half-spacing sets the end intervals; inner pi pulses use twice it.
-                interval = length_param / (2 * time)
-
-                # 3. Refocus n times, project with the phase ramp, then read out.
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
+                # Pulse starts do not consume their duration from the spacing timeline.
+                if cfg.reset is not None:
+                    builder.emit(cfg.reset.build("reset"))
+                builder.fork("default", into="preparation")
+                builder.emit(Pulse("pi2_pulse", pi2_pulse), timeline="preparation")
+                builder.timeline_inc(interval - 0.5 * dpulse_len)
+                builder.delay_by_timeline()
+                with builder.repeat("pi_loop", time - 1):
+                    builder.fork("default", into="refocus")
+                    builder.emit(Pulse("pi_pulse", pi_pulse), timeline="refocus")
+                    builder.timeline_inc(2 * interval)
+                    builder.delay_by_timeline()
+                builder.fork("default", into="last_refocus")
+                builder.emit(Pulse("last_pi_pulse", pi_pulse), timeline="last_refocus")
+                builder.timeline_inc(interval + 0.5 * dpulse_len)
+                builder.delay_by_timeline()
+                builder.emit(
+                    Pulse(
+                        "pi2_projection",
+                        pi2_pulse,
+                        phase=pi2_pulse.phase + detune_param,
                     )
-                    .add(
-                        Reset("reset", cfg.reset),
-                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
-                        Delay("first_delay", interval - 0.5 * dpulse_len),
-                        Repeat("pi_loop", time - 1).add_content(
-                            [
-                                Pulse("pi_pulse", pi_pulse, block_mode=False),
-                                SoftDelay("inner_delay", 2 * interval),
-                            ]
-                        ),
-                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
-                        Delay("last_delay", interval + 0.5 * dpulse_len),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg=pi2_pulse.with_updates(
-                                phase=pi2_pulse.phase + detune_param
-                            ),
-                        ),
-                        Readout("readout", cfg.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(
-                        options=AcquireOptions(
-                            stop_condition=snr_checker(
-                                signals_buffer[step],
-                                earlystop_snr,
-                                lambda x: rotate2real(x).real,
-                                after_check=update_snr,
-                            )
-                        ),
-                        **(acquire_kwargs or {}),
-                        rounds=cfg.rounds,
-                    )
+                )
+                builder.emit(Readout("readout", cfg.readout))
+                prog = builder.build()
+                step.run_acquire(
+                    prog,
+                    soc,
+                    rounds=cfg.rounds,
+                    options=RunOptions(
+                        stop_condition=snr_checker(
+                            signals_buffer[step],
+                            earlystop_snr,
+                            lambda x: rotate2real(x).real,
+                            after_check=update_snr,
+                        )
+                    ),
+                    **(acquire_kwargs or {}),
                 )
 
         # 4. Keep the per-count time grids alongside the unnormalized mean IQ.
@@ -432,9 +420,15 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
 
             plens = lens - lens[0]
             if fit_fringe:
-                t2, t2err, _, _, fit_signal, _ = fit_decay_fringe(plens, real_signal)
+                fit = fit_decay_fringe(plens, real_signal)
+                t2 = fit.decay_time
+                t2err = fit.decay_time_err
+                fit_signal = fit.curve
             else:
-                t2, t2err, fit_signal, _ = fit_decay(plens, real_signal)
+                fit = fit_decay(plens, real_signal)
+                t2 = fit.decay_time
+                t2err = fit.decay_time_err
+                fit_signal = fit.curve
 
             if is_good_fit(plens, fit_signal, real_signal, t2, t2err):
                 t2s[i] = t2

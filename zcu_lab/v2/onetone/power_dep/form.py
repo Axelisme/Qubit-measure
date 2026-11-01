@@ -12,16 +12,6 @@ def make_form(ctx: FormContext) -> Form[PowerDepCfg]:
     timing = initial_readout_timing(ctx)
     return Form(
         PowerDepCfg,
-        field_order=(
-            "reset",
-            "readout",
-            "gain",
-            "freq",
-            "earlystop_snr",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={
             "reset": Hidden(),
             "readout": Template(

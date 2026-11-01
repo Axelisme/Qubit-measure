@@ -7,7 +7,6 @@ import pytest
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
-from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
 from tests.experiment.v2.runtime._flow_fakes import (
     RecordingBuffer,
     RootUpdateRecordingBuffer,
@@ -73,7 +72,7 @@ def test_schedule_array_writes_reject_shape_mismatch_without_update(
     storage = np.array([1.0, 2.0])
     buffer = RootUpdateRecordingBuffer([{"signals": storage}] if use_step else storage)
 
-    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+    with Schedule(buffer, scope=Scope("run")) as sched:
         _, step = next(sched.scan("point", [0]))
         target = step.child("signals") if use_step else sched
         with pytest.raises(ValueError, match="shape") as error:
@@ -94,7 +93,7 @@ def test_schedule_array_writes_accept_exact_shapes(
     buffer = RootUpdateRecordingBuffer([{"signals": storage}] if use_step else storage)
     value = 7.0 if scalar else np.array([7.0, 8.0])
 
-    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+    with Schedule(buffer, scope=Scope("run")) as sched:
         _, step = next(sched.scan("point", [0]))
         target = step.child("signals") if use_step else sched
         target.set_data(value, flush=True)
@@ -112,7 +111,7 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
         on_update=lambda step: updates.append((step.path, root[0]["signals"].copy())),
     )
 
-    with Schedule(_cfg(), result_buffer, scope=Scope("run")) as sched:
+    with Schedule(result_buffer, scope=Scope("run")) as sched:
         for _, step in sched.scan("point", [0]):
             signals_step = step.child("signals")
             buffer = signals_step.buffer((1,), dtype=np.float64)
@@ -128,7 +127,6 @@ def test_schedule_child_buffer_syncs_result_buffer_without_throttling() -> None:
 def test_schedule_rejects_multiple_root_buffers_at_construction() -> None:
     with np.testing.assert_raises_regex(ValueError, "at most one root result buffer"):
         Schedule(
-            _cfg(),
             RecordingBuffer(np.zeros((1,))),
             RecordingBuffer(np.zeros((1,))),
             scope=Scope("run"),
@@ -140,7 +138,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
     second = RecordingBuffer(np.zeros((1,)))
 
     with (
-        Schedule(_cfg(), first, scope=Scope("run")) as sched,
+        Schedule(first, scope=Scope("run")) as sched,
         np.testing.assert_raises_regex(ValueError, "at most one root result buffer"),
     ):
         sched.register_buffer(second)
@@ -149,7 +147,7 @@ def test_schedule_rejects_registering_multiple_root_buffers() -> None:
 def test_schedule_allows_registering_one_root_buffer_later() -> None:
     buffer = RecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), scope=Scope("run")) as sched:
+    with Schedule(scope=Scope("run")) as sched:
         sched.register_buffer(buffer)
         assert sched.data is buffer.data
 
@@ -157,7 +155,7 @@ def test_schedule_allows_registering_one_root_buffer_later() -> None:
 def test_schedule_root_trigger_update_passes_none_step() -> None:
     buffer = RootUpdateRecordingBuffer(np.zeros((1,)))
 
-    with Schedule(_cfg(), buffer, scope=Scope("run")) as sched:
+    with Schedule(buffer, scope=Scope("run")) as sched:
         sched.trigger_update(flush=True)
 
     assert buffer.calls == [(None, True)]
@@ -171,7 +169,7 @@ def test_schedule_child_buffer_validates_target_before_acquire() -> None:
         }
     ]
 
-    with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
+    with Schedule(RecordingBuffer(root), scope=Scope("run")) as sched:
         for _, step in sched.scan("point", [0]):
             signals_step = step.child("signals")
             try:

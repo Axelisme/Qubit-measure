@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，runtime 結尾的字面值偏移與 storage 重用
+**Last updated:** 2026-11-01，timeline ceil、storage 重用與靜態 readout observation
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -137,22 +137,25 @@ The cfg-based APIs delegate to these same word decoders.
 - `ir/passes/` is split by concern into sub-packages: `loop/`, `dataflow/`, `control_flow/`, `timeline/`, with a shared `base.py`.
 
 - `MyProgramV2`: Base class for experiments, wraps QICK's `AveragerProgramV2`.
-- `ModularProgramV2`: Supports pulse blocks and reusable modules.
+- `TimelineProgramV2`: Native program authoring with borrowed module declarations.
+- `TimelineBuilder`: Records declarations and body operations, then builds a compiled program.
 - Program 不持有 experiment cfg。建構時以具名參數傳 `reps=1`、
   `initial_delay=1.0`、`relax_delay=1.0`，兩個 delay 的單位為 us。
 - `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
   `reps` 與 `rounds` 必須為正整數，bool 不算整數。無效值在編譯或 acquire admission 前 raise ValueError。
 - `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
   `shot_sums(prog, axes)` 在 compile 後以讀出 label 解析 `Classify` 與 `IQ` 軸。
-  Timeline 以 emit tag 或未標記 module 名稱識別讀出，modular 以 module 名稱識別。
+  讀出以 emit tag 或未標記 module 名稱識別。
   外積總和與取消契約見 [program](../README.md#summed-acquisition)。
-- `BaseCustomProgramV2.make_modules()` 回傳 modules。作者自行保存組裝 modules 所需的輸入，
-  program 的控制參數仍由建構子接收。
+- `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，
+  為 Mux collection 與 shot sums 提供 readout provenance、Trigger 順序及控制 scope。
+  它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
+  Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## 原生寫法與具名 timeline
 
-`timeline.TimelineProgramV2` 繼承 `MyProgramV2` 加 `resources.ProgramResourcesMixin`，不經 `ModularProgramV2`。
+`timeline.TimelineProgramV2` 繼承 `MyProgramV2` 加 `resources.ProgramResourcesMixin`。
 跨 owner 分工、設計理由與階段邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
 作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
 在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
@@ -162,13 +165,15 @@ The cfg-based APIs delegate to these same word decoders.
 Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
 全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
+建構子另收 `**program_kwargs`，在 `build()` 原樣轉交 `MyProgramV2` 的 QICK compilation options。
+例如 `reps_innermost=True` 將 reps 放在所有 top-level loop 內側。
+Compiler 在 build 時回報不支援或衝突的選項；取數選項仍傳給 Schedule 的 `run_acquire*`。
 它不接收 SoC，不取數，也不依賴 experiment runtime。
 Builder 依物件身分在第一次 emit 時記錄 module 宣告。
 同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。
 每個 program 依 module 物件身分保存宣告結果，compile 時重新配置自己的資源。
 Pulse 在各 program 內按定義去重，同名不同 cfg 的 Pulse 使用不同 waveform 名稱。
 原生 QICK 呼叫需要 pulse 名稱時，用 `pulse.pulse_name(prog)` 取得該 program 的宣告結果。
-Legacy `ModularProgramV2` 仍將宣告狀態保存在 module 上，不適用跨 program 重用。
 同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
 Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
 Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
@@ -179,7 +184,7 @@ Index 是 zero-based，可不按順序宣告。未宣告的點不發射動作，
 在 case 內仍呼叫原 builder 的 emit、timeline_inc 或其他不推進 reference 的 body 方法。
 關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
 Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
-`SimulationSoc` acquisition 由 compiled frontend 解讀兩種 program 的最佳化前 stream。
+`SimulationSoc` acquisition 由 compiled frontend 解讀 program 的最佳化前 stream。
 既有 acquire 擴充仍由共同基底提供。
 
 `TimelineProgramV2` 的 module 與原生直接 generator／ADC 宣告沿用 QICK 規則。
@@ -193,7 +198,6 @@ Timeline module 不自動保護 route。作者明確呼叫繼承的 `protect_rea
 不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
 Register 名稱與地址仍歸屬到宣告物件，衝突訊息列出兩個 module 名稱與物件。
 明示 register 借用與 Pulse registry 的 template 共用規則不變。
-`ModularProgramV2` 的宣告與 route protection 規則不變。
 Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
 
 每條 timeline 只保存相對 reference 的結尾。
@@ -412,19 +416,14 @@ def _body(self, cfg):
 Register 次數可改寫成 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`。
 `n_pair` 須先準備，執行值必須符合作者保證的範圍。Register 超限保留 QICK 原錯誤。
 
-ScanWith 先同步母 timeline，再載入 scalar、依序執行 children，每個 point 結尾明寫 delay_by_timeline。
-同一宣告可重複 emit，每次使用獨立 fixed counter，沿用原 table 與 destination。
-`LoadValue.lower_index` 接受本次 index，`emission_name` 只在 module lower 期間配置本次名稱。
-
-Module Branch lower 到原生 branch/case。Module Join 為各 sequence fork timeline，依作者順序發射，再 join 回母 timeline。
-各 sequence 從共同 origin 開始，不重排，與只記帳的 `prog.join` 不同。
-Join 與 TwoPulseReset／BathReset 的 child 必須保留 reference。
-原生 delay、delay_auto、delay_by_timeline、register delay 與內含這些操作的 Repeat／ScanWith 在 build 時報錯。
-普通 Branch 只合併結尾，可以放進 Join。
-同 generator 的 physical-end 與全部 case、Repeat backedge guards 保留，不加 padding 或 rewind。
+以 `LoadValue` 宣告非均勻 scalar table，配合作者的 `repeat` 或 top-level sweep index 載入值。
+平行序列直接 fork 各 child timeline，依作者順序發射，再 join 回母 timeline。
+各序列從共同 origin 開始，join 只合併結尾，不發射動作。
+TwoPulseReset／BathReset 的 children 與 branch case 不得推進 reference。
+同 generator 的 physical-end 與全部 case、repeat backedge guards 保留，不加 padding 或 rewind。
 
 守衛只涵蓋 timeline／module API 的 reference 操作。
-Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeline 記帳，也不受 Join／Reset 或 case 守衛保護，結果由作者負責。
+Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeline 記帳，也不受 Reset 或 case 守衛保護，結果由作者負責。
 它們不是已分析 instruction effects 的安全入口。
 
 Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
@@ -447,7 +446,7 @@ Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `Compil
 Resync 讀取硬體 s11，analysis 會明確拒絕，不宣稱其後精確時序。
 
 `resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護。
-TimelineProgramV2 與 ModularProgramV2 共用它，傳輸時由 MyProgramV2 將 dmem 轉為 list[int]。
+TimelineProgramV2 使用它，傳輸時由 MyProgramV2 將 dmem 轉為 list[int]。
 
 ## Macro Layer
 
@@ -502,7 +501,7 @@ pulse_by_reg(ch, wmem_reg, ...)
 
 ## Big-Jump Threshold
 
-Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 `pmem_size > 2048`。小 pmem（≤ 2048）用 label-mode JUMP；大 pmem 用 `WriteLabel(s15) + JUMP ADDR=s15` 兩步。`macro/loop.py` 與 `modules/control.py` 皆從 `ir.hw_semantics` import，確保閾值一致。`ir/dispatch.py` 也從 `hw_semantics` import 此函式（非定義處）。`UnpackIRBranchPass` 使用 `PipeLineConfig.pmem_capacity` 做相同判斷：`pmem_capacity > 2048` 時在 case 間插入 `RegWriteInst(dst=s15, src=SrcKeyword.LABEL)` + `JumpInst(addr=s15)`，否則直接插入 label-mode `JumpInst`。
+Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 `pmem_size > 2048`。小 pmem（≤ 2048）用 label-mode JUMP；大 pmem 用 `WriteLabel(s15) + JUMP ADDR=s15` 兩步。`macro/loop.py` 從 `ir.hw_semantics` import，確保閾值一致。`ir/dispatch.py` 也從 `hw_semantics` import 此函式（非定義處）。`UnpackIRBranchPass` 使用 `PipeLineConfig.pmem_capacity` 做相同判斷：`pmem_capacity > 2048` 時在 case 間插入 `RegWriteInst(dst=s15, src=SrcKeyword.LABEL)` + `JumpInst(addr=s15)`，否則直接插入 label-mode `JumpInst`。
 
 ## LoadValue（dmem 值表）
 
@@ -512,13 +511,9 @@ Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 
 
 **值域限制：0 ≤ v ≤ 2³¹−1**（有號 32-bit 正數範圍）。此限制只針對**未壓縮**路徑——直接以 `read_dmem` 將 word 讀進 register，若 bit 31 被設定讀回為負數會造成語意錯誤。
 
-**壓縮路徑的 packed word 可合法設定 bit 31**：`_pack_values()` 在打包後若 word > INT32_MAX，以 two's complement 轉換（`word -= 2^32`）存成負的 int32，讓 `np.array(..., dtype=np.int32)` 不溢位。硬體 bit pattern 完全相同；`run()` 結尾的 `SR` + `AND value_mask` 提取路徑在 arithmetic 或 logical shift 模式下都能還原正確值（AND 會清掉 SR 帶上來的符號擴展位元）。
+**壓縮路徑的 packed word 可合法設定 bit 31**：`_pack_values()` 在打包後若 word > INT32_MAX，以 two's complement 轉換（`word -= 2^32`）存成負的 int32，讓 `np.array(..., dtype=np.int32)` 不溢位。硬體 bit pattern 完全相同；lowering 的 `SR` + `AND value_mask` 提取路徑在 arithmetic 或 logical shift 模式下都能還原正確值（AND 會清掉 SR 帶上來的符號擴展位元）。
 
 **壓縮條件**：`bits_per_value` 圓整至 2 的冪次後，`values_per_word = 32 // bits`；若 `values_per_word < 2` 則不壓縮。max value > 65535（bits 圓整至 32）時 `values_per_word = 1`，不壓縮。
-
-## Repeat（control module）n=0 短路
-
-`Repeat` 在 `n` 為整數 `0` 時，`init()` 直接返回。`run()` 只執行開頭的 `delay(t)`／`delay_auto(0)` 對齊時間基準後返回。此路徑使用零個 counter register，子模組與 loop macro 保持未初始化及未展開。
 
 ## ArbWaveform reference time axis
 

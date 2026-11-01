@@ -14,11 +14,14 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.simulation import SimulationEnvironment, white_noise
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.runtime.acquisition import (
-    AcquireOptions,
     SynchronousAcquireKeywords,
 )
-from zcu_tools.program.acquisition import CancelFlagProtocol, ShotSumProcessor
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.acquisition import (
+    AcquisitionContractError,
+    CancelFlagProtocol,
+    ShotSumProcessor,
+)
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.progress_bar import use_pbar_factory
@@ -28,6 +31,7 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
+from tests.program._timeline import compile_modules
 
 
 class RawProgram:
@@ -52,7 +56,7 @@ class RawProgram:
         return self.acquire(soc, **kwargs)
 
 
-@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("entry", ["schedule"])
 @pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
 @pytest.mark.parametrize("retry", [0, 2])
 @pytest.mark.parametrize("cancel_on_failure", [False, True])
@@ -93,42 +97,23 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
             return np.ones((1,))
 
     program = FailingProgram([np.array([[[3.0, 4.0]]])])
-    sched = Schedule({}, buffer, scope=root)
+    sched = Schedule(buffer, scope=root)
 
     def acquire() -> None:
-        if entry == "schedule":
-            options = RunOptions[list[NDArray[np.float64]]](
-                retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
-            )
-            if mode == "integrated":
-                sched.run_acquire(program, object(), options=options)
-            elif mode == "decimated":
-                sched.run_acquire_decimated(program, object(), options=options)
-            else:
-                sched.run_acquire_summed(
-                    program,
-                    object(),
-                    processor=lambda _iq: np.ones((1,)),
-                    options=RunOptions(retry=retry),
-                )
+        options = RunOptions[list[NDArray[np.float64]]](
+            retry=retry, converter=lambda raw: raw[0].dot([1, 1j]).reshape(1)
+        )
+        if mode == "integrated":
+            sched.run_acquire(program, object(), options=options)
+        elif mode == "decimated":
+            sched.run_acquire_decimated(program, object(), options=options)
         else:
-            builder = sched.prog_builder(object(), object())
-            acquire_options = AcquireOptions(retry=retry)
-            if mode == "integrated":
-                builder.run_program(program, options=acquire_options)
-            elif mode == "decimated":
-                builder.run_program_decimated(
-                    program,
-                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]).reshape(1),
-                    options=acquire_options,
-                )
-            else:
-                builder.run_program_summed(
-                    program,
-                    processor=lambda _iq: np.ones((1,)),
-                    sums2signal_fn=lambda raw: raw,
-                    options=acquire_options,
-                )
+            sched.run_acquire_summed(
+                program,
+                object(),
+                processor=lambda _iq: np.ones((1,)),
+                options=RunOptions(retry=retry),
+            )
 
     with pytest.raises(RuntimeError, match="producer failed") as caught, sched:
         acquire()
@@ -138,7 +123,7 @@ def test_producer_failure_propagates_same_exception_after_explicit_retries(
         np.testing.assert_array_equal(buffer.array, [3 + 4j])
 
 
-@pytest.mark.parametrize("entry", ["schedule", "builder"])
+@pytest.mark.parametrize("entry", ["schedule"])
 @pytest.mark.parametrize(
     ("mode", "reads"),
     [("integrated", (1, 2)), ("integrated", (2,)), ("decimated", (1, 1))],
@@ -154,29 +139,18 @@ def test_ambiguous_raw_requires_explicit_converter(
     def convert(payload: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
         return sum((adc.sum(axis=0) for adc in payload), np.zeros((2, 2))).dot([1, 1j])
 
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
-        if entry == "schedule":
-            run = (
-                schedule.run_acquire
-                if mode == "integrated"
-                else schedule.run_acquire_decimated
-            )
-            acquire = partial(
-                run,
-                program,
-                "soc",
-                options=RunOptions(converter=convert if explicit_converter else None),
-            )
-        else:
-            builder = schedule.prog_builder("soc", "soccfg")
-            run = (
-                builder.run_program
-                if mode == "integrated"
-                else builder.run_program_decimated
-            )
-            acquire = partial(
-                run, program, raw2signal_fn=convert if explicit_converter else None
-            )
+    with Schedule(buffer, scope=Scope("run")) as schedule:
+        run = (
+            schedule.run_acquire
+            if mode == "integrated"
+            else schedule.run_acquire_decimated
+        )
+        acquire = partial(
+            run,
+            program,
+            "soc",
+            options=RunOptions(converter=convert if explicit_converter else None),
+        )
         if explicit_converter:
             np.testing.assert_array_equal(acquire(), np.full(2, sum(reads) * (1 + 1j)))
         else:
@@ -198,7 +172,7 @@ def test_single_adc_default_converter_preserves_all_signal_axes(
 ) -> None:
     raw = np.arange(np.prod(raw_shape), dtype=np.float64).reshape(raw_shape)
     buffer = SignalBuffer(signal_shape)
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         run = (
             schedule.run_acquire
             if mode == "integrated"
@@ -212,7 +186,7 @@ def test_single_adc_default_converter_preserves_all_signal_axes(
 
 
 @pytest.fixture
-def simulated_program() -> Iterator[tuple[SimulationEnvironment, ModularProgramV2]]:
+def simulated_program() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
     """Borrow a seeded, zero-noise real program and close its environment after use."""
     env = white_noise(std_adc=0, seed=11)
     readout = PulseReadoutCfg(
@@ -224,7 +198,7 @@ def simulated_program() -> Iterator[tuple[SimulationEnvironment, ModularProgramV
         ro_length=0.1,
         freq=100.0,
     ).build("readout")
-    program = ModularProgramV2(env.soccfg, modules=[readout], reps=2)
+    program = compile_modules(env.soccfg, modules=[readout], reps=2)
     try:
         yield env, program
     finally:
@@ -232,7 +206,7 @@ def simulated_program() -> Iterator[tuple[SimulationEnvironment, ModularProgramV
 
 
 def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
 ) -> None:
     env, program = simulated_program
     updates = []
@@ -242,7 +216,7 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
     )
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, buffer, scope=Scope("run")) as schedule,
+        Schedule(buffer, scope=Scope("run")) as schedule,
     ):
         for _, step in schedule.scan("point", [10, 20]):
             result = step.run_acquire(program, env.soc, rounds=2)
@@ -257,7 +231,7 @@ def test_run_integrated_writes_scan_slot_and_notifies_live_buffer(
 
 
 def test_run_summed_writes_raw_cumulative_sums_by_default(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
 ) -> None:
     env, program = simulated_program
     updates = []
@@ -271,7 +245,7 @@ def test_run_summed_writes_raw_cumulative_sums_by_default(
     def count_shots(iq):
         return np.ones((*iq[0].shape[:2], 1), dtype=np.float64).sum(axis=1)
 
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         result = schedule.run_acquire_summed(
             program, env.soc, processor=count_shots, rounds=2
         )
@@ -281,7 +255,7 @@ def test_run_summed_writes_raw_cumulative_sums_by_default(
 
 
 def test_run_decimated_writes_default_complex_trace_and_live_updates(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
 ) -> None:
     env, program = simulated_program
     samples = program.ro_chs[0]["length"]
@@ -291,7 +265,7 @@ def test_run_decimated_writes_default_complex_trace_and_live_updates(
         on_update=lambda data: updates.append(data.copy()),
         update_interval=1,
     )
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         result = schedule.run_acquire_decimated(program, env.soc, rounds=2)
         np.testing.assert_array_equal(result, np.zeros((2, samples), dtype=complex))
         assert np.shares_memory(result, buffer.array)
@@ -301,7 +275,7 @@ def test_run_decimated_writes_default_complex_trace_and_live_updates(
 
 @pytest.mark.parametrize("mode", ["integrated", "decimated", "summed"])
 def test_run_converter_is_selected_by_none_not_callable_truthiness(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
     mode: str,
 ) -> None:
     env, program = simulated_program
@@ -316,7 +290,7 @@ def test_run_converter_is_selected_by_none_not_callable_truthiness(
         def __call__(self, raw: object) -> np.ndarray:
             return np.array([-7.0])
 
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
             result = schedule.run_acquire(
                 program, env.soc, options=RunOptions(converter=Converter())
@@ -335,8 +309,97 @@ def test_run_converter_is_selected_by_none_not_callable_truthiness(
         np.testing.assert_array_equal(result, [-7.0])
 
 
+@pytest.mark.parametrize("mode", ["integrated", "summed"])
+@pytest.mark.parametrize(
+    "retry,recover,initial",
+    [
+        pytest.param(0, True, 7 + 8j, id="no-retry-preserves-slot"),
+        pytest.param(1, True, 7 + 8j, id="retry-replaces-slot"),
+        pytest.param(1, True, complex("nan"), id="retry-from-empty-slot"),
+        pytest.param(1, False, complex("nan"), id="exhaustion-discards-attempts"),
+    ],
+)
+def test_shot_overrun_restarts_all_rounds_and_discards_failed_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+    retry: int,
+    recover: bool,
+    initial: complex,
+) -> None:
+    soc, program = make_chunk_acquisition(reps=3, reads=1)
+    length = program.ro_chs[0]["length"]
+
+    def chunk(shots: int, value: int):
+        return (shots, ([np.tile([value * length, -value * length], (shots, 1))], {}))
+
+    # The failed attempt completes round one, then overruns round two.
+    failed = [[chunk(3, 91)], [chunk(1, 99)], [chunk(3, 99)]]
+    batches = iter(failed + ([[chunk(3, 4)], [chunk(3, 6)]] if recover else failed))
+    polls = []
+
+    def poll():
+        polls.append(1)
+        return next(batches)
+
+    monkeypatch.setattr(soc, "poll_data", poll)
+    buffer = SignalBuffer((), dtype=np.complex128)
+    buffer.set(np.array(initial))
+    bars: list[RecordingProgressBar] = []
+    succeeds = retry > 0 and recover
+    result = buffer.array
+    with (
+        use_pbar_factory(recording_pbar_factory(bars)),
+        Schedule(buffer, scope=Scope("run")) as schedule,
+    ):
+        with (
+            nullcontext()
+            if succeeds
+            else pytest.raises(AcquisitionContractError) as caught
+        ):
+            if mode == "integrated":
+                result = schedule.run_acquire(
+                    program, soc, rounds=2, options=RunOptions(retry=retry)
+                )
+            else:
+                result = schedule.run_acquire_summed(
+                    program,
+                    soc,
+                    rounds=2,
+                    processor=lambda iq: iq[0][..., 0, 0].sum(axis=1),
+                    options=RunOptions(retry=retry),
+                )
+        assert schedule.outcome.status == ("completed" if succeeds else "failed")
+        if not succeeds:
+            assert caught is not None
+            assert schedule.outcome.exception is caught.value
+
+    assert len(polls) == (5 if succeeds else 3 * (retry + 1))
+    if succeeds:
+        expected = 30 if mode == "summed" else 5 - 5j
+        np.testing.assert_allclose(result, expected)
+        np.testing.assert_allclose(buffer.array, expected)
+        raw = program.get_raw()
+        assert raw is not None
+        np.testing.assert_array_equal(raw[0], np.tile([6, -6], (3, 1, 1)) * length)
+    else:
+        np.testing.assert_array_equal(buffer.array, initial)
+
+    rounds_bar = next(bar for bar in bars if bar.desc == "rounds")
+    assert rounds_bar.total == 2
+    assert rounds_bar.reset_count == retry + 1
+    assert rounds_bar.n == (2 if succeeds else 1)
+    assert rounds_bar.closed
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == retry
+    for warning in warnings:
+        assert "expected_shots=3, received_shots=1, chunk_shots=3" in warning.message
+        assert "round_index=1" in warning.message
+        assert "attempt 2" in warning.message
+
+
 def _policy_poll(
-    program: ModularProgramV2,
+    program: TimelineProgramV2,
     root: Scope,
     ending: str,
 ) -> Callable[[], list[tuple[int, tuple[list[NDArray[np.int64]], dict[str, object]]]]]:
@@ -400,7 +463,7 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
     with (
         pytest.raises(KeyboardInterrupt) if ending == "interrupt" else nullcontext(),
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, buffer, scope=root) as schedule,
+        Schedule(buffer, scope=root) as schedule,
     ):
         result = schedule.run_acquire(
             program,
@@ -445,13 +508,13 @@ def test_run_integrated_policy_keeps_completed_rounds_and_outcomes(
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
 @pytest.mark.parametrize("rounds", [0, -1, True, 1.5, "2"])
 def test_run_rejects_invalid_rounds_before_acquisition(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
     mode: str,
     rounds: object,
 ) -> None:
     env, program = simulated_program
     buffer = SignalBuffer((1,))
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
             acquire = partial(schedule.run_acquire, program, env.soc)
         elif mode == "decimated":
@@ -472,12 +535,12 @@ def test_run_rejects_invalid_rounds_before_acquisition(
 
 @pytest.mark.parametrize("mode", ["integrated", "summed", "decimated"])
 def test_run_rejects_negative_retry(
-    simulated_program: tuple[SimulationEnvironment, ModularProgramV2],
+    simulated_program: tuple[SimulationEnvironment, TimelineProgramV2],
     mode: str,
 ) -> None:
     env, program = simulated_program
     buffer = SignalBuffer((1,))
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         if mode == "integrated":
             acquire = partial(schedule.run_acquire, program, env.soc)
         elif mode == "decimated":
@@ -524,7 +587,7 @@ def test_run_callback_failure_propagates_without_retry_or_failed_outcome(
             raise cause
 
     buffer = SignalBuffer((1,), update_interval=1, on_update=update)
-    schedule = Schedule({}, buffer, scope=root)
+    schedule = Schedule(buffer, scope=root)
     monkeypatch.setattr(soc, "poll_data", poll)
     with pytest.raises(RuntimeError) as caught, schedule:
         schedule.run_acquire(
@@ -563,7 +626,7 @@ def test_run_accepts_acquire_only_program_and_forwards_native_keywords() -> None
             round_hook(2, raw, cancel_flag)
             return raw
 
-    with Schedule({}, buffer, scope=Scope("run")) as schedule:
+    with Schedule(buffer, scope=Scope("run")) as schedule:
         result = schedule.run_acquire(
             AcquireOnly(),
             transport,

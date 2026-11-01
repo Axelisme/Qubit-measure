@@ -13,7 +13,11 @@ from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import (
+    RunOptions,
+    Schedule,
+    SignalBuffer,
+)
 from zcu_tools.experiment.workflows import (
     Actor,
     Completed,
@@ -23,7 +27,6 @@ from zcu_tools.experiment.workflows import (
     WorkflowEnv,
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2.modules import SoftDelay
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 
@@ -116,7 +119,7 @@ def test_call_delivers_the_original_experiment_exception_to_the_author(
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
 
-        with Schedule(Cfg(), buffer, scope=ctx.scope):
+        with Schedule(buffer, scope=ctx.scope):
             raise cause
         return 99
 
@@ -158,20 +161,24 @@ def test_nested_scope_completion_preserves_outcome_and_next_operation_is_clean(
     cause = OSError("readout disconnected")
 
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             attempts.append(1)
             raise cause
 
         acquire_decimated = acquire
 
     def operation(ctx: CallContext) -> int:
-        with Schedule(Cfg(), SignalBuffer(1), scope=ctx.scope) as schedule:
+        with Schedule(SignalBuffer(1), scope=ctx.scope) as schedule:
             assert schedule.stop is not ctx.scope.stop, "Schedule must own a child"
             if failed:
-                schedule.prog_builder("soc", "soccfg").run_program(
+                schedule.run_acquire(
                     Program(),
-                    raw2signal_fn=lambda raw: raw,
-                    options=AcquireOptions(retry=1),
+                    "soc",
+                    options=RunOptions(
+                        retry=1, converter=lambda raw: raw[0][0].dot([1, 1j])
+                    ),
                 )
             else:
                 schedule.set_stop()
@@ -249,7 +256,7 @@ def test_unhandled_exception_fails_run(rig: Rig) -> None:
 
 def test_schedule_interrupt_reaches_the_author_unchanged(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
-        with Schedule(Cfg(), scope=ctx.scope):
+        with Schedule(scope=ctx.scope):
             raise KeyboardInterrupt
         return 7
 
@@ -353,7 +360,7 @@ def test_author_failure_retains_files_without_committing(
 def test_data_driven_early_return_with_nan_slots_is_not_partial(rig: Rig) -> None:
     def acquire(ctx: CallContext) -> int:
         buffer = SignalBuffer((3,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
+        with Schedule(buffer, scope=ctx.scope) as schedule:
             for _value, step in schedule.scan("sample", (0, 1, 2)):
                 step.set_data(np.complex128(2))
                 break
@@ -381,29 +388,31 @@ def test_program_failures_keep_their_classification_and_do_not_repeat_build_or_c
             if source == "build":
                 raise OSError("build failed")
 
-        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             attempts.append("acquire")
             if source == "acquire":
                 raise OSError("acquire failed")
-            return np.array([1.0], dtype=np.complex128)
+            return [np.array([[[1.0, 0.0]]], dtype=np.float64)]
 
         def acquire_decimated(
             self, *_args: object, **_kwargs: object
-        ) -> NDArray[np.complex128]:
+        ) -> list[NDArray[np.float64]]:
             raise AssertionError("unexpected decimated acquire")
 
-    def convert(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
+    def convert(raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
         attempts.append("conversion")
         if source == "conversion":
             raise OSError("conversion failed")
-        return raw
+        return raw[0][0].dot([1, 1j])
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder("soc", "soccfg", program_cls=Program)
-            builder.add(SoftDelay("wait", 0.0)).build_and_acquire(
-                raw2signal_fn=convert, options=AcquireOptions(retry=1)
+        with Schedule(buffer, scope=ctx.scope) as schedule:
+            program = Program("soccfg")
+            schedule.run_acquire(
+                program, "soc", options=RunOptions(converter=convert, retry=1)
             )
         return 99
 
@@ -430,25 +439,32 @@ def test_program_stop_keeps_partial_delivery_without_failed_outcome(
     mode: str,
 ) -> None:
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> NDArray[np.complex128]:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             rig.engine.cancel("run", scope="iteration")
             if first_round_stop:
                 raise StoppedPartialAcquireError("stopped before first completed round")
-            return np.array([1.0], dtype=np.complex128)
+            return [np.array([[[1.0, 0.0]]], dtype=np.float64)]
 
         def acquire_decimated(
             self, *_args: object, **_kwargs: object
-        ) -> NDArray[np.complex128]:
+        ) -> list[NDArray[np.float64]]:
             return self.acquire()
 
     def operation(ctx: CallContext) -> int:
         buffer = SignalBuffer((1,))
-        with Schedule(Cfg(), buffer, scope=ctx.scope) as schedule:
-            builder = schedule.prog_builder("soc", "soccfg")
-            if mode == "integrated":
-                builder.run_program(Program(), raw2signal_fn=lambda raw: raw)
-            else:
-                builder.run_program_decimated(Program(), raw2signal_fn=lambda raw: raw)
+        with Schedule(buffer, scope=ctx.scope) as schedule:
+            acquire = (
+                schedule.run_acquire
+                if mode == "integrated"
+                else schedule.run_acquire_decimated
+            )
+            acquire(
+                Program(),
+                "soc",
+                options=RunOptions(converter=lambda raw: raw[0][0].dot([1, 1j])),
+            )
         return 99
 
     observed = start_call(rig, operation)

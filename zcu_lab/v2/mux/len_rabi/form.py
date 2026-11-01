@@ -36,7 +36,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
         # Core requires const/flat_top and replaces each total duration.
         drive = replace(drive, set={**drive.set, "waveform.length": Hidden(0.0)})
         tones.append(
-            {"name": name, "drive": drive, "sweep": {"start": 0.03, "stop": stop}}
+            {"name": name, "drive": drive, "length": {"start": 0.03, "stop": stop}}
         )
     readout = mux_readout_initial(ctx)
     return Form(
@@ -49,7 +49,7 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
                 participants,
                 fields=(
                     "drive",
-                    "sweep",
+                    "length",
                 ),
             ),
             "expts": 101,
@@ -62,16 +62,5 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
-        ),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "expts",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
         ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

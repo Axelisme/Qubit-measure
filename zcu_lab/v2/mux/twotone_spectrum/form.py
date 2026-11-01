@@ -36,7 +36,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
                 # Run supplies this independent frequency scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
-            "sweep": {
+            "freq": {
                 "start": Expr(f"{name}.freq - 1.5 * {name}.kappa"),
                 "stop": Expr(f"{name}.freq + 1.5 * {name}.kappa"),
             },
@@ -51,7 +51,7 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         tree={
             "reset": Slot("$mux.module.reset"),
             "readout": readout,
-            "tones": mux_tone_initials(tones, participants, fields=("drive", "sweep")),
+            "tones": mux_tone_initials(tones, participants, fields=("drive", "freq")),
             "expts": 301,
             "participants": [index for index in participants],
             "relax_delay": 1.0,
@@ -62,17 +62,6 @@ def make_form(ctx: FormContext) -> Form[MuxFreqCfg]:
         fixed_elements=(
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
-        ),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "expts",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
         ),
     ).with_seed_metadata(
         {

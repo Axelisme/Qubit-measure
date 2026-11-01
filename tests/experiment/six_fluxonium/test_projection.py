@@ -27,9 +27,7 @@ from zcu_tools.experiment.simulation import SimulationEnvironment
 from zcu_tools.experiment.six_fluxonium import six_fluxonium
 from zcu_tools.experiment.six_fluxonium.routing import route_request
 from zcu_tools.experiment.six_fluxonium.runtime import SixFluxoniumSource
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Repeat
-from zcu_tools.program.v2.modules.delay import SoftDelay
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.six_fluxonium import parse_six_fluxonium
@@ -117,15 +115,12 @@ def repeated_mux_program(env: SimulationEnvironment, *, reads=2, reps=4096):
         ],
     )
     module = readout.build("readout")
-    program = ModularProgramV2(
-        env.soccfg,
-        modules=[
-            Repeat("reads", reads).add_content([module, SoftDelay("wait", 0.096)])
-        ],
-        reps=reps,
-        initial_delay=0,
-        relax_delay=0,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=reps, initial_delay=0, relax_delay=0)
+    with builder.repeat("reads", reads):
+        builder.emit(module)
+        builder.timeline_inc(0.096)
+    builder.delay_by_timeline()
+    program = builder.build()
     program.set_reads_per_shot(reads)
     return program
 
@@ -340,9 +335,10 @@ def test_observed_cavity_requires_terminal_tone_even_with_a_herald(
         route_request(source.settings, request)
 
 
-def test_terminal_only_raw_integrated_and_decimated_are_elementwise_unchanged(
+def test_terminal_only_native_integrated_and_decimated_match_fixed_seed_reference(
     projection_environment,
 ):
+    """Keep exact outputs for native ceil-quantized mux ADC windows."""
     env, source = projection_environment
     program = repeated_mux_program(env, reads=1, reps=3)
     program.acquire(env.soc, progress=False)
@@ -369,14 +365,14 @@ def test_terminal_only_raw_integrated_and_decimated_are_elementwise_unchanged(
         name: sha256(values.tobytes()).hexdigest() for name, values in arrays.items()
     } == {
         "counts": "2061cec4721ab2aba8dbf9bd4f7ff16887ca87713b79563650cb52fcd1da75bc",
-        "sums0": "b895c904658d7a9497446783af70f36852e741f9209cbc8def100a1126efd63c",
-        "conditional0": "730922dd267a9b8bfa21597343ca6dd7f74c5ebc4b79b2c37e8e0d0fdf1411d9",
-        "sums1": "43fafcdf2c408a8a81f8e4e5f5a2bbf7971edfe66224d8d0953b24da85deed52",
-        "conditional1": "065a789b761c576a2b12ea68227500fb2ae1139449ddf86fe241570036e71b80",
-        "raw0": "f271471104180be5fcca418238afb9549c018a5086311c6a23dad9347eee4fa6",
-        "raw1": "8030d418965d414739ab0dabf0a79a92f6e66e05e687ae4366559cb3c8e19f03",
-        "traces0": "7cab5c632c297256550dbffd2d20fd6778d18431abf006daf96fedd42935dd2b",
-        "traces1": "d8ec2ad21dd94051ad496cdca63e810b750da1475c3fdc8d72a71d5d02c6d153",
+        "sums0": "c510624582ff4b4b6723d0ede230c1023d19a145fbb8dec541ef13a31cda9e77",
+        "conditional0": "1c5e77fbde464dc76e7ab13af4ba6c6dcfaea10ec553a1cb7f57e560c9e19dd6",
+        "sums1": "539a7d6b87b498fcdfe216a91235669c36ceb7a0da3ad40ac8470f4ec67ff671",
+        "conditional1": "e7ace828750b3a3a3270e91f12144ba86ee77794b5bf0c88debd96a5bee460b4",
+        "raw0": "b92e0950ba75fdd126b6ac455a2000c02e928a6db5b395f4942ee8bcc122afaf",
+        "raw1": "cc1f7295a55f19ea896a7fd00f814e640300fbab671132d1c2005aeadda71993",
+        "traces0": "f4fd3d34ddba2c42e8c32a5e8ef23ba914afd16ec3d16cd865555fd8f4c76ba6",
+        "traces1": "6216e8b2d0ee0f2648576eb4a0b169df1931b864cca449415c9ba4cfe138ee53",
     }
 
 

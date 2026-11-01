@@ -12,12 +12,12 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import minus_background, rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -69,6 +69,30 @@ def qubfreq_signal2real(
 
 
 class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[
+        Pulse.Cfg | None,
+        FieldMeta(
+            label="Init Pulse",
+            description="Optional preparation before the swept probe. Enter a calibrated fixed-frequency pulse (MHz, us), or None for ground-state spectroscopy.",
+        ),
+    ] = None
+    qub_pulse: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Probe Pulse",
+            description="Qubit drive; its frequency is set by the sweep.",
+        ),
+    ]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Frequency",
+            unit="MHz",
+            description="Qubit drive frequency sweep.",
+        ),
+    ]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -99,30 +123,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[
-        Pulse.Cfg | None,
-        FieldMeta(
-            label="Init Pulse",
-            description="Optional preparation before the swept probe. Enter a calibrated fixed-frequency pulse (MHz, us), or None for ground-state spectroscopy.",
-        ),
-    ] = None
-    qub_pulse: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Probe Pulse",
-            description="Qubit drive; its frequency is set by the sweep.",
-        ),
-    ]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[
-        SweepCfg,
-        FieldMeta(
-            label="Frequency",
-            unit="MHz",
-            description="Qubit drive frequency sweep.",
-        ),
-    ]
 
 
 @dataclass(frozen=True)
@@ -141,8 +141,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
     # freq stores MHz on disk -> scale=IDENTITY (1.0)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "Frequency", "MHz"),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("freqs", label="Frequency", unit="MHz"),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -180,33 +180,33 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             ),
         )
 
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
             freq_sweep = cfg.freq
-            cfg.qub_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+            freq_param = builder.add_sweep("freq", freq_sweep)
 
             # Reset and initialize before the FPGA-swept probe, then read out.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add_reset("reset", cfg.reset)
-                .add_pulse("init_pulse", cfg.init_pulse)
-                .add_pulse("qub_pulse", cfg.qub_pulse)
-                .add_readout("readout", cfg.readout)
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(),
-                            cfg.earlystop_snr,
-                            lambda data: rotate2real(data).real,
-                        ),
+
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, freq=freq_param))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals_buffer.at(),
+                        cfg.earlystop_snr,
+                        lambda data: rotate2real(data).real,
                     ),
-                )
+                ),
             )
 
         return FreqResult(

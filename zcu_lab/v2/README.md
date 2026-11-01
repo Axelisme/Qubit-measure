@@ -289,7 +289,7 @@ Helpers 對其他 device 種類報 TypeError，driver 錯誤原樣傳播。FakeD
 
 ## 序列與量化入口
 
-- [ZigZag core](twotone/zigzag/core.py) 的 `run()` 明列 register loop 的 pulse 序列，`build_zigzag_modules` 提供離線編譯序列。
+- [ZigZag core](twotone/zigzag/core.py) 的 `run()` 明列 register loop 的 pulse 序列。
 - [Actual detune](twotone/time_domain/detune.py) 的公開 docstring 說明 Ramsey／Echo 的 time_scaler、MHz 計算與原生量化失敗語意。
 
 ## Layout

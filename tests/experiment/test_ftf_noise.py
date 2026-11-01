@@ -8,12 +8,12 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -106,7 +106,7 @@ def test_public_integrated_thermal_mixture_matches_conditional_field_mean() -> N
             waveform=ConstWaveformCfg(length=0.08),
             ro_length=0.1,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=2048,
@@ -174,7 +174,7 @@ def test_public_decimated_receiver_noise_psd_and_offset() -> None:
             ro_length=0.06,
             trig_offset=0.01,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[readout.build("ro")],
             reps=256,

@@ -26,7 +26,7 @@ from qick.asm_v2 import (
 )
 
 from ._timeline_axis import CycleAxis
-from ._timeline_bounds import CycleBounds, FixedLoopIndex
+from ._timeline_bounds import CycleBounds, FixedLoopIndex, SelectionProvenance
 from ._timeline_expression import time_variables
 from ._timeline_guard import PulseGuard as _PulseGuard
 from ._timeline_guard import bounds as _bounds
@@ -713,6 +713,7 @@ class RepeatLoweringEnter(Macro):
 
     def preprocess(self, prog) -> None:
         self.defined = prog._time_bounds.defined.copy()
+        self.selections = prog._time_bounds.enter_selection_loop()
         if self.counter is not None:
             maximum = self.maximum
             # Only a certified count supplies an implicit finite index range.
@@ -818,6 +819,7 @@ class RepeatLoweringExit(Macro):
         self.entry = entry
         self.iterations = iterations
         self.minimum = minimum
+        self.maximum = maximum
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
@@ -838,6 +840,9 @@ class RepeatLoweringExit(Macro):
             self.accumulator.preprocess(prog)
         if self.minimum == 0:
             prog._time_bounds.defined.intersection_update(self.entry.defined)
+        prog._time_bounds.exit_selection_loop(
+            self.entry.selections, self.minimum, self.maximum
+        )
 
     def translate(self, prog) -> None:
         pass
@@ -1117,6 +1122,10 @@ class TimeProducer(Macro):
         for macro in self.prepared:
             macro.preprocess(prog)
         prog._time_bounds.defined.add(self.register)
+        if self.selection is not None:
+            prog._time_bounds.selection_at_position[self.register] = (
+                SelectionProvenance(self.selection)
+            )
         prog._timeline_book.observe_selection(prog, self.register, self.selection)
 
     def translate(self, prog) -> None:
@@ -1180,7 +1189,8 @@ class BranchCaseState:
     and runtime_ros hold runtime native channel tails, while gens and ros hold
     their static QICK timestamps. provenance pairs register/channel expressions.
     frames captures active Repeat guard and advance state. defined contains
-    registers with certified producers at this case exit. All containers are
+    registers with certified producers at this case exit. selections retains
+    reaching table relations for consumer auditing. All containers are
     detached snapshots; native times use us and RuntimeEnd stores cycle bounds.
     """
 
@@ -1193,6 +1203,7 @@ class BranchCaseState:
     provenance: BranchProvenance
     frames: list[RepeatFrameSnapshot]
     defined: set[str]
+    selections: dict[str, SelectionProvenance]
 
 
 class TimelineBranch(Macro):
@@ -1244,6 +1255,7 @@ class TimelineBranch(Macro):
         )
         outer_used = self.book.used
         initial_defined = prog._time_bounds.defined.copy()
+        initial_selections = prog._time_bounds.selection_at_position.copy()
         saved_pins = self.book.pinned.copy()
         self.book.pinned.update(prog._timeline_live_registers())
         self.book.pinned.update(
@@ -1256,6 +1268,7 @@ class TimelineBranch(Macro):
         for index, case in enumerate(self.cases):
             self._restore_frames(frames)
             prog._time_bounds.defined = initial_defined.copy()
+            prog._time_bounds.selection_at_position = initial_selections.copy()
             self.book.runtime_gens, self.book.runtime_ros = (
                 runtime_gens.copy(),
                 runtime_ros.copy(),
@@ -1276,6 +1289,7 @@ class TimelineBranch(Macro):
         prog._time_bounds.defined = set.intersection(
             *(state.defined for state in states)
         )
+        prog._time_bounds.merge_selections([state.selections for state in states])
         results = [{name: state.ends[name] for name in initial} for state in states]
         self.book.finish_branch_sources(prog, self.by)
         self.book.used = outer_used
@@ -1386,6 +1400,7 @@ class TimelineBranch(Macro):
             self.book.snapshot_branch_provenance(prog),
             self._save_frames(),
             prog._time_bounds.defined.copy(),
+            prog._time_bounds.selection_at_position.copy(),
         )
 
     def _record_case_sources(
@@ -1405,6 +1420,7 @@ class TimelineBranch(Macro):
         self.book.runtime_gens = state.runtime_gens.copy()
         self.book.runtime_ros = state.runtime_ros.copy()
         prog._time_bounds.defined = state.defined.copy()
+        prog._time_bounds.selection_at_position = state.selections.copy()
         for ch, value in state.gens.items():
             self.book.native_timestamp(prog, value, gen_ch=ch)
         for ch, value in state.ros.items():

@@ -26,11 +26,9 @@ from ..macro.wmem import PatchWmemFromDmem
 from .base import AbsModuleCfg, Module, apply_cfg_overrides
 from .dmem import LoadWord
 from .pulse import Pulse, PulseCfg
-from .util import calc_max_length, round_timestamp
 from .waveform import WaveformCfg, resolve_waveform_ref
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 
@@ -45,8 +43,9 @@ class PulseReadoutCfg(AbsReadoutCfg):
     gen_ch/ro_ch select generator/ADC channels; nqz is Nyquist zone 1 or 2.
     freq/mixer_freq are MHz, gain is normalized, phase is degrees. waveform is
     an expanded native envelope (arb holds its absolute asset path). pre_delay
-    and post_delay bracket generator playback in us; ro_length is the ADC window
-    and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
+    and post_delay are in us. pre_delay offsets generator playback; post_delay
+    follows the later of generator and ADC completion. ro_length is the ADC
+    window and trig_offset the trigger delay in us. Scalar knobs except mixer_freq accept
     QICK sweeps. desc is optional prose. type is readout/pulse. classifier stores
     offset-free normalized ADC calibration (including radians for linear angle);
     None means no calibration is available. The module does not apply it.
@@ -76,18 +75,16 @@ class PulseReadoutCfg(AbsReadoutCfg):
 
         Timing fields and waveform length must be finite nonnegative scalar us.
         Return the later of ADC trigger + window and generator pre-delay +
-        waveform length + post-delay. No program, initialization or hardware is
-        needed, and this cfg is unchanged. This is nominal timing, not the
-        clock-rounded blocking duration returned by PulseReadout.total_length.
+        waveform length, then add post-delay once. No program or hardware is
+        needed, and this cfg is unchanged. This nominal estimate does not
+        quantize either event or the final duration to hardware clocks.
         Non-scalar timing raises TypeError during float conversion; waveform
         length lookup errors (for example an unreadable arb asset) propagate.
         """
         return max(
             float(self.trig_offset) + float(self.ro_length),
-            float(self.pre_delay)
-            + float(self.waveform.length)
-            + float(self.post_delay),
-        )
+            float(self.pre_delay) + float(self.waveform.length),
+        ) + float(self.post_delay)
 
     def to_pulse_cfg(self) -> PulseCfg:
         """Return a fresh outer PulseCfg containing only generator settings.
@@ -255,11 +252,7 @@ def classification_processor(
 
 
 class AbsReadout(Module):
-    @abstractmethod
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam: ...
-
-    def allow_rerun(self) -> bool:
-        return True
+    """Base declaration for readout modules emitted on a TimelineProgramV2."""
 
 
 class PulseReadoutOverrides(TypedDict, total=False):
@@ -346,25 +339,15 @@ class PulseReadout(AbsReadout):
         self.ro_freq_val = ro_freq_val
         pulse_cfg = self.cfg.to_pulse_cfg()
         self.pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg, ro_ch=self.cfg.ro_ch)
-        self._runtime_pulse: Pulse | None = None
-        self._runtime_ro_name: str | None = None
 
     @property
     def adc_name(self) -> str:
         """Registered ADC template name, also used for table-backed word updates."""
         return f"{self.name}_adc"
 
-    def init(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        """Declare the generator, ADC window and fixed/runtime configuration templates."""
-        state = self._declare_resources(
-            prog, declare_pulse=lambda pulse: pulse.init(prog)
-        )
-        self._runtime_pulse = state.runtime_pulse
-        self._runtime_ro_name = state.runtime_ro_name
-
     def _declare_resources(
         self,
-        prog: ModularProgramV2 | TimelineProgramV2,
+        prog: TimelineProgramV2,
         *,
         declare_pulse: Callable[[Pulse], None],
     ) -> _ReadoutDeclaration:
@@ -396,63 +379,9 @@ class PulseReadout(AbsReadout):
             )
         return _ReadoutDeclaration(runtime_pulse, runtime_ro_name)
 
-    def total_length(
-        self, prog: ModularProgramV2 | TimelineProgramV2
-    ) -> float | QickParam:
-        """Return blocking us after init, covering generator delays and ADC window.
-
-        Trigger offset and ADC length follow their respective clock rounding;
-        generator playback uses Pulse's registered scalar/sweep duration.
-        """
-        return calc_max_length(
-            round_timestamp(
-                prog,
-                round_timestamp(prog, self.cfg.trig_offset)
-                + round_timestamp(prog, self.cfg.ro_length, ro_ch=self.cfg.ro_ch),
-            ),
-            self.pulse.total_length(prog),
-        )
-
     @property
     def _uses_runtime_pulse(self) -> bool:
         return self.gain_val is not None or self.freq_val is not None
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        """Send configuration at t, trigger at t+offset, and pulse at t+pre_delay.
-
-        t and the returned blocking end time are us; scalar and QICK sweeps are
-        supported after init. Re-running leaves captured cfg/templates unchanged.
-        """
-        prog.append_macro(ReadoutEmission(self, self.cfg.ro_ch))
-        if self.ro_freq_val is None:
-            prog.send_readoutconfig(self.cfg.ro_ch, self.adc_name, t=t)
-            prog.trigger([self.cfg.ro_ch], t=t + self.cfg.trig_offset)
-        else:
-            runtime_ro_name = self._runtime_ro_name
-            assert runtime_ro_name is not None
-            self._run_readout_config_from_regs(prog, runtime_ro_name, t)
-
-        if not self._uses_runtime_pulse:
-            # The helper pulse belongs to this semantic readout's source scope.
-            self.pulse.run(prog, t)
-        else:
-            runtime_pulse = self._runtime_pulse
-            assert runtime_pulse is not None
-            pulse_id = runtime_pulse.pulse_id
-            assert pulse_id is not None
-            pulse_cfg = runtime_pulse.cfg
-            assert pulse_cfg is not None
-            prog.pulse_from_regs(
-                pulse_cfg.ch,
-                pulse_id,
-                t=t + pulse_cfg.pre_delay,
-                tag=runtime_pulse.tag,
-                freq_reg=self.freq_val,
-                gain_reg=self.gain_val,
-            )
-        return t + self.total_length(prog)
 
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare generator/ADC templates on prog before emission."""
@@ -505,13 +434,6 @@ class PulseReadout(AbsReadout):
         else:
             self.pulse.play(prog, timeline=timeline)
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
-
-    def _run_readout_config_from_regs(
-        self, prog: ModularProgramV2, name: str, t: float | QickParam
-    ) -> None:
-        ro_ch = self.cfg.ro_ch
-        prog.send_readoutconfig_from_regs(ro_ch, name, t=t, freq_reg=self.ro_freq_val)
-        prog.trigger([ro_ch], t=t + self.cfg.trig_offset)
 
 
 class TablePulseReadout(AbsReadout):
@@ -585,14 +507,6 @@ class TablePulseReadout(AbsReadout):
         """
         return self._readout
 
-    def init(self, prog: ModularProgramV2) -> None:
-        self._validate_loop_count(prog)
-        self._readout.init(prog)
-        self._freq_loader.init(prog)
-        self._ro_freq_loader.init(prog)
-        prog.add_reg(self._addr_reg)
-        self._append_updates(prog)
-
     def declare(self, prog: TimelineProgramV2) -> None:
         """Declare independent templates and paired words for a public sweep loop.
 
@@ -626,7 +540,7 @@ class TablePulseReadout(AbsReadout):
         """
         self._readout.lower(prog, timeline=timeline, tag=tag)
 
-    def _append_updates(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
+    def _append_updates(self, prog: TimelineProgramV2) -> None:
         pulse_id = self._readout.pulse.pulse_name(prog)
         prog.append_loop_after(
             self.idx_reg,
@@ -646,18 +560,7 @@ class TablePulseReadout(AbsReadout):
             ),
         )
 
-    def total_length(self, prog: ModularProgramV2) -> float | QickParam:
-        return self._readout.total_length(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        return self._readout.run(prog, t)
-
-    def allow_rerun(self) -> bool:
-        return True
-
-    def _validate_loop_count(self, prog: ModularProgramV2) -> None:
+    def _validate_loop_count(self, prog: TimelineProgramV2) -> None:
         sweep_dict = prog.sweep_dict
         if sweep_dict is None:
             raise ValueError(
@@ -694,15 +597,9 @@ class MuxReadout(AbsReadout):
         """Copy numeric cfg; name identifies the const mask pulse and diagnostics."""
         self.name = name
         self.cfg = deepcopy(cfg)
-        self._program: ModularProgramV2 | None = None
-
-    def init(self, prog: ModularProgramV2) -> None:
-        """Declare legacy playback and retain prog for IQ collection."""
-        self._declare_resources(prog)
-        self._program = prog
 
     def declare(self, prog: TimelineProgramV2) -> None:
-        """Declare tones/routes without enabling legacy raw-IQ collection.
+        """Declare tones/routes for playback and compiled-emission IQ collection.
 
         Incompatible wiring and illegal rounded durations raise ValueError.
         ADC/generator declarations follow QICK: later declarations overwrite
@@ -717,7 +614,7 @@ class MuxReadout(AbsReadout):
         """Play all tones and trigger all ADCs at one origin, then add post once.
 
         The end covers the actual all-tone waveform and every rounded ADC window.
-        timeline=None selects default. Legacy collection remains unavailable.
+        timeline=None selects default. Collection validates this compiled emission.
         """
         timeline = timeline if timeline is not None else "default"
         prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch, tag))
@@ -731,12 +628,9 @@ class MuxReadout(AbsReadout):
         )
         prog.timeline_inc(self.cfg.post_delay, timeline=timeline)
 
-    def _declare_resources(self, prog: ModularProgramV2 | TimelineProgramV2) -> None:
-        from ..timeline import TimelineProgramV2
-
-        allow_shared = isinstance(prog, TimelineProgramV2)
-        self._validate_generator(prog, allow_shared=allow_shared)
-        self._validate_readouts(prog, allow_shared=allow_shared)
+    def _declare_resources(self, prog: TimelineProgramV2) -> None:
+        self._validate_generator(prog)
+        self._validate_readouts(prog)
         cfg = self.cfg
         prog.declare_gen(
             ch=cfg.gen_ch,
@@ -762,16 +656,8 @@ class MuxReadout(AbsReadout):
             mask=list(range(len(cfg.tones))),
             length=cfg.length,
         )
-        # Timeline authors own declaration consistency; legacy programs protect
-        # these routes explicitly to prevent QICK from overwriting them.
-        if not allow_shared:
-            prog.protect_readout_routes(
-                self.name, cfg.gen_ch, [tone.ro_ch for tone in cfg.tones]
-            )
 
-    def _validate_generator(
-        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
-    ) -> None:
+    def _validate_generator(self, prog: TimelineProgramV2) -> None:
         ch = self.cfg.gen_ch
         gens = prog.soccfg["gens"]
         if ch >= len(gens):
@@ -787,19 +673,13 @@ class MuxReadout(AbsReadout):
             raise ValueError(
                 f"{self.name}.gen_ch: generator {ch} requires mixmux8 mixer/gain/phase capacity"
             )
-        if ch in prog.gen_chs and not allow_shared:
-            raise ValueError(
-                f"{self.name}.gen_ch: generator route {ch} already declared"
-            )
         cycles = prog.us2cycles(self.cfg.length, gen_ch=ch)
         if not 3 <= cycles < 2**32:
             raise ValueError(
                 f"{self.name}.length: generator {ch} rounded length must be 3..2**32-1 cycles"
             )
 
-    def _validate_readouts(
-        self, prog: ModularProgramV2 | TimelineProgramV2, *, allow_shared: bool
-    ) -> None:
+    def _validate_readouts(self, prog: TimelineProgramV2) -> None:
         channels: set[int] = set()
         ports: set[int] = set()
         path: str | None = None
@@ -807,11 +687,7 @@ class MuxReadout(AbsReadout):
         for i, tone in enumerate(self.cfg.tones):
             ch = tone.ro_ch
             where = f"{self.name}.tones[{i}].ro_ch: ADC {ch}"
-            if (
-                ch >= len(readouts)
-                or ch in channels
-                or (ch in prog.ro_chs and not allow_shared)
-            ):
+            if ch >= len(readouts) or ch in channels:
                 raise ValueError(f"{where} missing or duplicate readout route")
             ro = readouts[ch]
             if (
@@ -838,60 +714,16 @@ class MuxReadout(AbsReadout):
             channels.add(ch)
             ports.add(port)
 
-    def total_length(self, prog: ModularProgramV2) -> float:
-        """Return blocking us covering actual rounded playback and every ADC window.
-
-        init must have succeeded. Start/post delays round upward on the processor
-        clock; playback and ADC windows use QICK's actual channel-cycle rounding.
-        """
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: initialize this module with this program first"
-            )
-        cfg = self.cfg
-        duration = prog.cycles2us(
-            prog.us2cycles(cfg.length, gen_ch=cfg.gen_ch), gen_ch=cfg.gen_ch
-        )
-        gen_end = round_timestamp(
-            prog,
-            round_timestamp(prog, cfg.pre_delay)
-            + duration
-            + round_timestamp(prog, cfg.post_delay),
-        )
-        adc_duration = max(
-            prog.cycles2us(prog.us2cycles(cfg.ro_length, ro_ch=t.ro_ch), ro_ch=t.ro_ch)
-            for t in cfg.tones
-        )
-        adc_end = round_timestamp(
-            prog, round_timestamp(prog, cfg.trig_offset) + adc_duration
-        )
-        return float(max(gen_end, adc_end))
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        """Play all tones at t+pre_delay and trigger all chains at t+trig_offset.
-
-        init must precede run; returns blocking end in us. Repeated fixed
-        playback is supported, but cfg/program must be rebuilt for any update.
-        """
-        length = self.total_length(prog)
-        prog.append_macro(ReadoutEmission(self, self.cfg.tones[0].ro_ch))
-        prog.pulse(ch=self.cfg.gen_ch, name=self.name, t=t + self.cfg.pre_delay)
-        prog.trigger(
-            [tone.ro_ch for tone in self.cfg.tones], t=t + self.cfg.trig_offset
-        )
-        return t + length
-
     def collect_raw_iq(
         self,
-        prog: ModularProgramV2,
+        prog: TimelineProgramV2,
         *,
         read_index: int | None = None,
     ) -> NDArray[np.float64]:
         """Return last-round raw IQ in tone order, normalized by ADC length.
 
-        prog must be the program that initialized this module. Call after its
+        prog must contain this module's compiled emission.
+        Call after its
         integrated acquire(), or in a completed-round hook. This reads get_raw()
         from that program, never acquires or samples a new round. A simulation
         getter may materialize retained shots using that round's fixed identity.
@@ -915,10 +747,7 @@ class MuxReadout(AbsReadout):
         raw buffers/channels, count/dtype/loop/read/IQ shape mismatches or invalid
         read_index. Unrelated channels' shapes are ignored. Getter errors propagate.
         """
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
+        self._validate_collection_program(prog)
         if read_index is not None and (type(read_index) is not int or read_index < 0):
             raise ValueError(
                 f"{self.name}: read_index must be None or a nonnegative integer"
@@ -956,16 +785,30 @@ class MuxReadout(AbsReadout):
             selected.append(iq if read_index is None else iq[..., read_index, :])
         return np.stack(selected, axis=-2)
 
+    def _validate_collection_program(self, prog: TimelineProgramV2) -> None:
+        # Import at collection time: the program observer also depends on modules.
+        from ..readout_observation import observe_readouts
+
+        if not any(
+            isinstance(observation.source, ReadoutEmission)
+            and observation.source.owner is self
+            for observation in observe_readouts(prog)
+        ):
+            raise ValueError(
+                f"{self.name}: module has no compiled readout emission on this program"
+            )
+
     def collect_iq(
         self,
-        prog: ModularProgramV2,
+        prog: TimelineProgramV2,
         acquired: Sequence[NDArray[np.float64]],
         *,
         read_index: int = 0,
     ) -> NDArray[np.float64]:
         """Select one averaged read in tone order, returning (*sweep_shape,N,2).
 
-        Caller must supply the same initialized program's same acquire result:
+        prog must contain this module's compiled emission.
+        Caller must supply that program's same acquire result:
         an unclassified averaged list of float64 arrays (reads,*sweep_shape,2).
         The list carries no source identity, so another acquisition's same-shaped
         arrays cannot be detected. Raw, single-shot, classified and decimated
@@ -976,16 +819,11 @@ class MuxReadout(AbsReadout):
         missing initialization/channels, list count, read_index, dtype or shape.
         Unrelated channels' shapes are ignored.
         """
-        if self._program is None:
-            raise ValueError(f"{self.name}: module is not initialized")
+        self._validate_collection_program(prog)
         positions = {ch: i for i, ch in enumerate(prog.ro_chs)}
         for i, tone in enumerate(self.cfg.tones):
             if tone.ro_ch not in positions:
                 raise ValueError(f"{self.name}: tone {i} missing ro_ch {tone.ro_ch}")
-        if self._program is not prog:
-            raise ValueError(
-                f"{self.name}: use the program that initialized this module"
-            )
         if len(acquired) != len(positions):
             raise ValueError(
                 f"{self.name}: acquired item count {len(acquired)} != channels {len(positions)}"

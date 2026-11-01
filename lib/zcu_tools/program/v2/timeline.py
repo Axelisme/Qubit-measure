@@ -476,8 +476,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         events share its current end; actual output ends plus owner post-delay
         determine the ceiled end without moving reference time. Snapshot source
         markers use module.name; nested emissions retain their own labels.
-        Branch joins case ends without moving reference; ScanWith retains
-        iteration reference synchronization.
+        Author control flow directly with branch, repeat, fork and join.
         DelayAuto is native reference advance and rejects explicit timelines.
         Undeclared objects raise ValueError; owner lowering failures propagate.
         """

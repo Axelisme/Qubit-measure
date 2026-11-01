@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
-from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -20,7 +19,7 @@ from zcu_tools.experiment.utils.single_shot.ge import (
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
-from zcu_tools.program.v2 import Pulse, PulseReadout, Reset
+from zcu_tools.program.v2 import Pulse, PulseReadout, Reset, TimelineBuilder
 
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to_signal
 
@@ -113,6 +112,11 @@ class GEPostAnalysis:
 
 
 class GE_Cfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    shots: Annotated[int, FieldMeta(label="Shots")]
     initial_delay: Annotated[
         float,
         FieldMeta(
@@ -128,11 +132,6 @@ class GE_Cfg(ConfigBase):
             description="Delay after each shot.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    shots: Annotated[int, FieldMeta(label="Shots")]
 
 
 class GE_Exp(Experiment[GE_Result, GE_Cfg]):
@@ -141,10 +140,14 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[GE_Result, GE_Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("shot_indices", "Shot Index", "None", dtype=np.int64),
-            AxesSpec.Axis("prepared_states", "Prepared State", "None", dtype=np.int64),
+            AxesSpec.Axis(
+                "shot_indices", label="Shot Index", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "prepared_states", label="Prepared State", unit="None", dtype=np.int64
+            ),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
         cfg_schema_version="3.0",
@@ -169,52 +172,46 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(config)
 
-        context.plots.subplots("measurement")
+        figure, axes = context.plots.subplots(num="measurement")
 
-        def update(data: NDArray[np.complex128]) -> None:
-            clouds = data.copy()
+        @context.plots.on_plot_thread
+        def update(clouds: NDArray[np.complex128]):
+            axes.clear()
+            for cloud, label, color in zip(
+                clouds,
+                ("g preparation (probe off)", "e preparation (probe on)"),
+                ("tab:blue", "tab:red"),
+                strict=True,
+            ):
+                axes.scatter(
+                    cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
+                )
+            axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
+            axes.set_aspect("equal", adjustable="datalim")
+            axes.grid()
+            axes.legend()
+            return (figure,)
 
-            def draw(figure: Figure) -> None:
-                axes = figure.axes[0]
-                axes.clear()
-                for cloud, label, color in zip(
-                    clouds,
-                    ("g preparation (probe off)", "e preparation (probe on)"),
-                    ("tab:blue", "tab:red"),
-                    strict=True,
-                ):
-                    axes.scatter(
-                        cloud.real, cloud.imag, s=8, alpha=0.5, color=color, label=label
-                    )
-                axes.set(xlabel="I (a.u.)", ylabel="Q (a.u.)", title="GE IQ")
-                axes.set_aspect("equal", adjustable="datalim")
-                axes.grid()
-                axes.legend()
-
-            context.plots.draw("measurement", draw)
+        figure.show()
 
         signals_buffer = SignalBuffer((2, cfg.shots), on_update=update)
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for with_probe, step in sched.scan("w/o probe pulse", [False, True]):
-                probe_cfg = step.cfg.probe_pulse if with_probe else None
+                probe_cfg = cfg.probe_pulse if with_probe else None
 
                 # Compare identical preparations with the probe omitted/applied.
-                program = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=cfg.shots,
-                        initial_delay=cfg.initial_delay,
-                        relax_delay=cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step.cfg.reset),
-                        Pulse("init_pulse", step.cfg.init_pulse),
-                        Pulse("probe_pulse", probe_cfg),
-                        PulseReadout("readout", step.cfg.readout),
-                    )
-                    .build()
+                builder = TimelineBuilder(
+                    soccfg,
+                    reps=cfg.shots,
+                    initial_delay=cfg.initial_delay,
+                    relax_delay=cfg.relax_delay,
                 )
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                builder.emit(Pulse("probe_pulse", probe_cfg))
+                builder.emit(PulseReadout("readout", cfg.readout))
+                program = builder.build()
 
                 # Store each cloud independently, preserving every complex shot.
                 try:
@@ -263,7 +260,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
             raise ValueError(f"Unknown backend: {options.backend}")
         if "fit" in plots:
             raise ValueError("Figure already exists: fit")
-        _, axes = plots.subplots("fit")
+        _, axes = plots.subplots(num="fit")
         for cloud, label, color in zip(
             signals,
             ("g preparation", "e preparation"),

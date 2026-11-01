@@ -8,13 +8,13 @@ from zcu_tools.core.simulation import (
     PulseEvent,
     ReadoutWindow,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 
 from tests.core._simulation import TIME_BASE, single_point_template, tick_tuple, ticks
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -171,7 +171,7 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
             waveform=ConstWaveformCfg(length=0.016),
             post_delay=0.016,
         )
-        program = ModularProgramV2(
+        program = compile_modules(
             env.soccfg,
             modules=[pulse.build("charge"), _readout().build("ro")],
             reps=2,
@@ -199,7 +199,7 @@ def test_ftf_public_charge_acquire_round_dc_and_same_trace_raw() -> None:
         assert np.isfinite(result[0]).all()
         assert np.any(np.asarray(result[0]) != 0)
         # Companion raw uses the last round trace, not a fresh realization.
-        program2 = ModularProgramV2(
+        program2 = compile_modules(
             env.soccfg,
             modules=[pulse.build("charge2"), _readout().build("ro2")],
             reps=2,

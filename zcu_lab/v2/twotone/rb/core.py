@@ -20,9 +20,9 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    Repeat,
     Reset,
     ResetCfg,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -48,6 +48,19 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class RBCfg(ConfigBase):
+    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
+    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
+    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
+    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
+    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
+    depth: Annotated[
+        list[Annotated[int, Field(ge=0, strict=True)]],
+        FieldMeta(label="Clifford depths"),
+    ] = Field(min_length=1)
+    """Ordered nonempty, unique nonnegative integer Clifford depths."""
+    seed: Annotated[int, FieldMeta(label="Random seed")]
+    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -64,23 +77,11 @@ class RBCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[ResetCfg | None, FieldMeta(label="Reset")] = None
-    I_pulse: Annotated[PulseCfg | None, FieldMeta(label="Identity Pulse")] = None
-    X90_pulse: Annotated[PulseCfg, FieldMeta(label="X90 Pulse")]
-    X180_pulse: Annotated[PulseCfg, FieldMeta(label="X180 Pulse")]
-    readout: Annotated[ReadoutCfg, FieldMeta(label="Readout")]
-    depths: Annotated[
-        list[Annotated[int, Field(ge=0, strict=True)]],
-        FieldMeta(label="Clifford depths"),
-    ] = Field(min_length=1)
-    """Ordered nonempty, unique nonnegative integer Clifford depths."""
-    seed: Annotated[int, FieldMeta(label="Random seed")]
-    n_seeds: Annotated[int, FieldMeta(label="Number of sequences")]
 
     @model_validator(mode="after")
     def validate_depths(self) -> Self:
         """Reject repeated depths before building any sequence or doing device I/O."""
-        if len(set(self.depths)) != len(self.depths):
+        if len(set(self.depth)) != len(self.depth):
             raise ValueError("RB requires unique nonnegative integer depths")
         return self
 
@@ -97,13 +98,13 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
     # (n_seeds, n_depths) with zero transpose.
     AXES_SPEC: ClassVar[AxesSpec[RB_Result, RBCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("depths", "Depth", "a.u.", dtype=np.int64),
-            AxesSpec.Axis("sub_seeds", "Entropy", "a.u.", dtype=np.int64),
+            AxesSpec.Axis("depths", label="Depth", unit="a.u.", dtype=np.int64),
+            AxesSpec.Axis("sub_seeds", label="Entropy", unit="a.u.", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals2D", "Signal", "a.u."),
+        z=AxesSpec.Z("signals2D", label="Signal", unit="a.u."),
         result_type=RB_Result,
         cfg_type=RBCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/rb",
     )
 
@@ -120,7 +121,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         run_cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        depths = np.asarray(run_cfg.depths, dtype=np.int64)
+        depths = np.asarray(run_cfg.depth, dtype=np.int64)
 
         ss = np.random.SeedSequence(run_cfg.seed)
         entropys = np.array(
@@ -137,11 +138,11 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 rb_signal2real(data),
             ),
         )
-        with Schedule(run_cfg, signals_buffer, scope=context.scope) as sched:
+        with Schedule(signals_buffer, scope=context.scope) as sched:
             for _, step in sched.scan("seed", entropys.tolist()):
                 tables = make_seed_tables(int(step.value), depths)
-                builder = step.prog_builder(
-                    soc, soccfg, reps=step.cfg.reps, relax_delay=step.cfg.relax_delay
+                builder = TimelineBuilder(
+                    soccfg, reps=run_cfg.reps, relax_delay=run_cfg.relax_delay
                 )
 
                 # 2. Map the seed's physical gate IDs to calibrated pulses.
@@ -153,9 +154,9 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 ) = tables
                 max_rand_len = max(prefix_len_by_depth, default=0)
 
-                Id_pulse = step.cfg.I_pulse
-                X90_pulse = step.cfg.X90_pulse
-                X180_pulse = step.cfg.X180_pulse
+                Id_pulse = run_cfg.I_pulse
+                X90_pulse = run_cfg.X90_pulse
+                X180_pulse = run_cfg.X180_pulse
                 MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
                 Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
@@ -175,66 +176,67 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
                 ]
 
                 # 3. Reset, play the depth prefix, recover the full Clifford, read out.
-                program = (
-                    builder.add(
-                        LoadValue(
-                            "load_rand_len",
-                            values=prefix_len_by_depth,
-                            idx_reg="depth_idx",
-                            val_reg="rand_len",
-                        ),
-                        LoadValue(
-                            "load_recovery_gate_0",
-                            values=recovery_gate0_by_depth,
-                            idx_reg="depth_idx",
-                            val_reg="recovery_gate_0",
-                        ),
-                        LoadValue(
-                            "load_recovery_gate_1",
-                            values=recovery_gate1_by_depth,
-                            idx_reg="depth_idx",
-                            val_reg="recovery_gate_1",
-                        ),
-                        Reset("reset", cfg=step.cfg.reset),
-                        Repeat(
-                            "rand_gate_idx",
-                            "rand_len",
-                            range_hint=(0, max_rand_len),
-                        ).add_content(
-                            [
-                                LoadValue(
-                                    "load_rand_gate",
-                                    values=rand_gate_seq,
-                                    idx_reg="rand_gate_idx",
-                                    val_reg="gate_idx",
-                                ),
-                                ComputedPulse(
-                                    "basic_gate",
-                                    val_reg="gate_idx",
-                                    pulses=gate_pulses,
-                                ),
-                            ]
-                        ),
-                        # Full candidates in both slots keep recovery timing
-                        # independent of depth, even for identity padding.
-                        ComputedPulse(
-                            "recovery_gate_0",
-                            val_reg="recovery_gate_0",
-                            pulses=gate_pulses,
-                        ),
-                        ComputedPulse(
-                            "recovery_gate_1",
-                            val_reg="recovery_gate_1",
-                            pulses=gate_pulses,
-                        ),
-                        Readout("readout", cfg=step.cfg.readout),
+                builder.add_loop("depth", len(prefix_len_by_depth))
+                builder.emit(
+                    LoadValue(
+                        "load_rand_len",
+                        values=prefix_len_by_depth,
+                        idx_reg="depth",
+                        val_reg="rand_len",
                     )
-                    .declare_sweep("depth_idx", len(prefix_len_by_depth))
-                    .build()
                 )
+                builder.emit(
+                    LoadValue(
+                        "load_recovery_gate_0",
+                        values=recovery_gate0_by_depth,
+                        idx_reg="depth",
+                        val_reg="recovery_gate_0",
+                    )
+                )
+                builder.emit(
+                    LoadValue(
+                        "load_recovery_gate_1",
+                        values=recovery_gate1_by_depth,
+                        idx_reg="depth",
+                        val_reg="recovery_gate_1",
+                    )
+                )
+                if run_cfg.reset is not None:
+                    builder.emit(Reset("reset", run_cfg.reset))
+                builder.delay_by_timeline()
+                with builder.repeat(
+                    "rand_gate_idx", "rand_len", range_hint=(0, max_rand_len)
+                ):
+                    builder.emit(
+                        LoadValue(
+                            "load_rand_gate",
+                            values=rand_gate_seq,
+                            idx_reg="rand_gate_idx",
+                            val_reg="gate_idx",
+                        )
+                    )
+                    builder.emit(
+                        ComputedPulse(
+                            "basic_gate", val_reg="gate_idx", pulses=gate_pulses
+                        )
+                    )
+                    builder.delay_by_timeline()
+                # Both recovery slots retain the complete candidate set for fixed timing.
+                builder.emit(
+                    ComputedPulse(
+                        "recovery_gate_0", val_reg="recovery_gate_0", pulses=gate_pulses
+                    )
+                )
+                builder.emit(
+                    ComputedPulse(
+                        "recovery_gate_1", val_reg="recovery_gate_1", pulses=gate_pulses
+                    )
+                )
+                builder.emit(Readout("readout", run_cfg.readout))
+                program = builder.build()
 
                 # 4. Average reps/rounds into this seed's depth trace.
-                _ = builder.run_program(program, rounds=cfg.rounds)
+                step.run_acquire(program, soc, rounds=run_cfg.rounds)
 
         return RB_Result(
             sub_seeds=entropys,
@@ -258,7 +260,12 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         real_signals_avg = rb_signal2real(signals2D)
         depths_f = depths.astype(np.float64)
 
-        decay_time, decay_err, fit_signals, _ = fit_decay(depths_f, real_signals_avg)
+        fit = fit_decay(depths_f, real_signals_avg)
+        decay_time, decay_err, fit_signals = (
+            fit.decay_time,
+            fit.decay_time_err,
+            fit.curve,
+        )
 
         p = np.exp(-1.0 / decay_time)
         p_err = p / (decay_time**2) * decay_err

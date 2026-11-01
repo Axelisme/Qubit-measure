@@ -24,7 +24,7 @@ def make_form(ctx: FormContext) -> Form[IRBCfg]:
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
             "I_pulse": Hidden(),
-            "depths": LogPoints(max=128, points=9),
+            "depth": LogPoints(max=128, points=9),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "seed": 42,
             "n_seeds": 20,

@@ -6,7 +6,7 @@ MuxFreqExp.run(config, *, context) drives selected qubits simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxFreqToneCfg has a fixed name, a required drive and freq bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -16,7 +16,7 @@ does not resolve component identities.
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program sweeps drive DAC frequencies in a shared hardware loop.
-Each point executes optional common reset, Join of independent drive pulses,
+Each point executes optional common reset, parallel emission of independent drive pulses,
 then active fixed-frequency mux readout. Branches start together;
 short branches wait for the longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -84,12 +84,11 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import AcquireOptions, Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ResetCfg, sweep2param
+from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder, sweep2param
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
@@ -98,10 +97,27 @@ from zcu_tools.program.v2.modules import (
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
 from zcu_lab.v2.twotone.freq.core import FreqAnalyzeOptions
 
 from .analysis import MuxFreqFit, analyze_frequency
+
+
+class MuxFreqToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent freq bounds in MHz."""
+
+    freq: Annotated[ToneRangeCfg | None, FieldMeta(unit="MHz")] = None
+
+    def require_freq(self) -> ToneRangeCfg:
+        """Return active freq bounds, or raise ValueError naming this tone."""
+        if self.freq is None:
+            raise ValueError(f"{self.name}: active tone requires freq")
+        return self.freq
 
 
 class MuxFreqCfg(ConfigBase):
@@ -115,6 +131,17 @@ class MuxFreqCfg(ConfigBase):
     Sweeps advance together by point, not as a Cartesian product. reps/rounds are positive averaging counts;
     initial_delay/relax_delay are finite nonnegative waits in us.
     """
+
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxFreqToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True,
+        gt=0,
+        title="Expts",
+        description="Hardware scan point count shared by all tones.",
+    )
+    participants: list[StrictInt]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -140,21 +167,13 @@ class MuxFreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
-        strict=True,
-        gt=0,
-        title="Expts",
-        description="Hardware scan point count shared by all tones.",
-    )
-    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxFreqCfg:
         """Reject mismatched tones, shared drive channels or an invalid point count."""
         validate_mux_scan(self, self.tones, self.participants, self.expts)
+        for index in self.participants:
+            require_tone_value(self.tones[index].freq, ("tones", index, "freq"))
         return self
 
 
@@ -190,9 +209,7 @@ def prepare_frequency_scan(cfg: MuxFreqCfg, *, soccfg: QickConfig) -> MuxFreqSca
         tone = cfg.tones[index]
         drive = tone.require_drive()
         actual = sweep2array(
-            make_sweep(
-                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
-            ),
+            make_sweep(tone.require_freq().start, tone.require_freq().stop, cfg.expts),
             "freq",
             {"soccfg": soccfg, "gen_ch": drive.ch, "mixer_freq": drive.mixer_freq},
         )
@@ -251,62 +268,67 @@ class MuxFreqExp(Experiment[MuxSweepResult, MuxFreqCfg]):
         )
 
         # 2. Keep each spectrum on its own hardware-rounded frequency axis.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Drive frequency (MHz)",
-                "Magnitude (a.u.)",
+        viewers = []
+        for index in scan.indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Drive frequency (MHz)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in scan.indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(scan.coordinates[row], np.abs(data[:, row]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
+            )
 
         # 3. A shared DAC register loop advances the independent frequency ranges.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.require_drive().model_copy(deep=True)
-                drive.set_param(
-                    "freq",
-                    sweep2param(
-                        "point",
-                        make_sweep(
-                            tone.require_sweep().start,
-                            tone.require_sweep().stop,
-                            cfg.expts,
-                        ),
+                freq = sweep2param(
+                    "point",
+                    make_sweep(
+                        tone.require_freq().start, tone.require_freq().stop, cfg.expts
                     ),
                 )
-                drives.append(Pulse(f"drive_{index}", drive))
+                drives.append(Pulse(f"drive_{index}", tone.require_drive(), freq=freq))
 
             # Reset -> simultaneous drives -> fixed mux readout after the longest drive.
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(Join(*drives), MuxReadout("readout", readout))
-                .declare_sweep("point", scan.coordinates.shape[1])
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
+            builder.add_loop("point", scan.coordinates.shape[1])
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"drive_{index}" for index in scan.indices]
+            builder.fork("default", into=timelines)
+            for drive, timeline in zip(drives, timelines, strict=True):
+                builder.emit(drive, timeline=timeline)
+            builder.join(*timelines, into="default")
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
 
             # 4. Each completed round supplies the full point/tone IQ matrix.
             prog = builder.build()
-            _ = builder.run_program(
+            _ = sched.run_acquire(
                 prog,
-                raw2signal_fn=partial(averaged_mux_signal, prog),
+                context.soc,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module),
+                    on_stop=on_acquire_stop,
+                ),
                 rounds=cfg.rounds,
-                options=AcquireOptions(on_stop=on_acquire_stop),
             )
 
         # Publish the final spectra and restore tone-major result storage.

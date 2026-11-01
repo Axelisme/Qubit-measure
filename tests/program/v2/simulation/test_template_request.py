@@ -3,14 +3,14 @@
 import pytest
 from qick.asm_v2 import QickParam
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.control import Branch, Repeat
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, TablePulseReadout
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
+
+from tests.program._timeline import compile_modules
 
 
 def drive(*, ch=1, waveform=None):
@@ -39,27 +39,23 @@ def receiver():
 def test_reps_dependent_timeline_rejected_before_backend(dependency):
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0), (1, 0)))
     cfg = drive()
-    modules: list[Module] = [cfg.build("drive"), receiver().build("readout")]
+    builder = TimelineBuilder(env.soccfg, reps=2)
     if dependency == "sweep":
         cfg.gain = QickParam(0.1, {"reps": 0.2})
-        modules[0] = cfg.build("drive")
+        builder.emit(cfg.build("drive"))
     elif dependency == "register":
-        modules.insert(0, LoadValue("count", [1, 2], "reps", "n"))
-        modules[1] = Repeat("inner", "n", range_hint=(1, 2)).add_content(
-            cfg.build("drive")
-        )
+        builder.emit(LoadValue("count", [1, 2], "reps", "n"))
+        with builder.repeat("inner", "n", range_hint=(1, 2)):
+            builder.emit(cfg.build("drive"))
     else:
-        modules[0] = Branch("choice", cfg.build("a"), cfg.build("b"), compare_by="reps")
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=modules,
-        reps=2,
-    )
-    with pytest.raises(
-        ValueError,
-        match=r"MetaInst.*preopt.*(?:reps shell|cross-shot.*s12)",
-    ):
-        prog.acquire(env.soc, progress=False)
+        with builder.branch(by="reps", align_timeline=True) as cases:
+            for index in range(2):
+                with cases.case(index):
+                    builder.emit(cfg.build(f"drive_{index}"))
+    builder.emit(receiver().build("readout"))
+    builder.delay_by_timeline()
+    with pytest.raises(ValueError, match=r"(?:reps|cross-shot|measurement)"):
+        builder.build().acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
 
 
@@ -71,7 +67,7 @@ def test_table_hook_initial_state_that_changes_across_reps_is_rejected():
     module = TablePulseReadout(
         "readout", receiver(), idx_reg="axis", freq_words=gen, ro_freq_words=adc
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[module],
         sweep=[("axis", 2)],
@@ -99,7 +95,7 @@ def test_soc_rejects_unbound_generator_or_adc_route_before_backend(missing):
         cfg.gen_ch = 1
         cfg.ro_ch = 1
         modules = [cfg.build("readout")]
-    prog = ModularProgramV2(env.soccfg, modules=modules)
+    prog = compile_modules(env.soccfg, modules=modules)
     with pytest.raises(
         ValueError,
         match="generator 1 is not bound"

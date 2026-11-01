@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
 from tests.experiment._ftf_templates import settings
+from tests.program._timeline import compile_modules
 
 
 @pytest.mark.sim
@@ -34,7 +34,7 @@ def test_acquire_writes_one_line_for_all_rounds_and_opt_out_is_bitwise(tmp_path:
         time_scale=0,
     )
     try:
-        program = ModularProgramV2(
+        program = compile_modules(
             observed.soccfg,
             modules=[
                 PulseReadoutCfg(

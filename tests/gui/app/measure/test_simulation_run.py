@@ -20,7 +20,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
@@ -29,10 +28,11 @@ from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
+from tests.program._timeline import compile_modules
 
 
 def NoiseAdapter_run(cfg, *, context):
-    prog = ModularProgramV2(
+    prog = compile_modules(
         context.soccfg,
         modules=[
             PulseReadoutCfg(

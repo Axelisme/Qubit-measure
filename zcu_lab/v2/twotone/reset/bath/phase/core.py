@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.base import cosfunc, fitcos
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -14,7 +15,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import BathReset, Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import (
+    BathReset,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -39,6 +47,12 @@ class PhaseAnalysis:
 
 
 class PhaseCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
+    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    phase: Annotated[SweepCfg, FieldMeta(label="Phase", unit="deg")]
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -55,17 +69,12 @@ class PhaseCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init pulse")] = None
-    tested_reset: Annotated[BathReset.Cfg, FieldMeta(label="Tested reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    phase: Annotated[SweepCfg, FieldMeta(label="Phase", unit="deg")]
 
 
 class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
     AXES_SPEC: ClassVar[AxesSpec[PhaseResult, PhaseCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("phases", "Phase", "deg"),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("phases", label="Phase", unit="deg"),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=PhaseResult,
         cfg_type=PhaseCfg,
         cfg_schema_version="3.0",
@@ -101,30 +110,30 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # Display the phase fringe without discarding the complex IQ response.
-        viewer = live_line(context.plots, "measurement", "Phase (deg)", "Signal (a.u.)")
-        signals_buffer = SignalBuffer(
-            (len(phases),),
-            on_update=lambda data: viewer.update(phases, bathreset_signal2real(data)),
-        )
+        plots = context.plots
+        fig, ax = plots.subplots(num="measurement")
+        ax.set(xlabel="Phase (deg)", ylabel="Signal (a.u.)")
+        viewer = live_line(ax, num_lines=1)
+
+        @plots.on_plot_thread
+        def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
+            return viewer.set(phases, bathreset_signal2real(data))
+
+        fig.show()
+        signals_buffer = SignalBuffer((len(phases),), on_update=update)
 
         # Sweep only the final rotation; keep the simultaneous bath tones fixed.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "pi2_phase", sweep2param("phase", sched.cfg.phase)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("init_pulse", sched.cfg.init_pulse),
-                    BathReset("tested_reset", sched.cfg.tested_reset),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("phase", sched.cfg.phase)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+            phase = builder.add_sweep("phase", cfg.phase)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(BathReset("tested_reset", cfg.tested_reset, pi2_phase=phase))
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return PhaseResult(phases, signals_buffer.array)
 

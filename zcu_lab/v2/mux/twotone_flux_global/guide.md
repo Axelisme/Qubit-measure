@@ -33,7 +33,7 @@ edits and captures sources again.
 - `settle` is the wait in seconds after all DC writes at each flux point.
 - `modules` contains the optional common reset and full mux readout.
 - `frequency` contains only frequency-scan inputs.
-  Each `frequency.tones[i].sweep` has drive-frequency Start/Stop in MHz.
+  Each `frequency.tones[i].freq` has drive-frequency Start/Stop in MHz.
   `frequency.expts` is the shared hardware point count. The frequency tone picker retains all original names;
   top-level participants supplies the Run selection. All selected drives sweep together in one hardware loop.
 
@@ -99,7 +99,7 @@ uniqueness is checked only for selected tones.
 `reset` is optional; `readout` is the complete numeric mux
 readout. In the form, module selectors expose inline fields below
 `readout.module`; this selector wrapper is not part of Python cfg.
-`frequency.tones[i]` contains the fixed name, numeric drive pulse and `sweep.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
+`frequency.tones[i]` contains the fixed name, numeric drive pulse and `freq.start/stop` in absolute MHz. `frequency.expts` is the shared positive hardware count.
 `tones[i]` contains only its fixed name. `flux_dev` names the coil; `flux` is a SweepCfg in native DC units.
 `flux_unit` is `A`, `V` or `native`; no conversion occurs.
 `reps` and `rounds` are positive counts. `initial_delay` and `relax_delay`

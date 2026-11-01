@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.device import FakeDevice
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
     SignalBuffer,
@@ -29,15 +30,17 @@ class PartialProgram:
         self,
         soc: object,
         *,
-        round_hook: Callable[[int, NDArray[np.complex128], CancelFlagProtocol], object],
+        round_hook: Callable[
+            [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+        ],
         cancel_flag: CancelFlagProtocol,
         progress: bool = False,
         **kwargs: object,
-    ) -> NDArray[np.complex128]:
+    ) -> list[NDArray[np.float64]]:
         """Emulate program output; the interrupt path returns no completed round."""
         if self.interrupt:
             signal.raise_signal(signal.SIGINT)
-        return np.array(self.value, dtype=np.complex128)
+        return [np.array([[self.value, 0.0]], dtype=np.float64)]
 
     def acquire_decimated(self, soc: object, **kwargs: object) -> object:
         """Reject decimated acquisition, which these contract tests do not use."""
@@ -55,13 +58,19 @@ class RoundInterruptedProgram:
         self,
         soc: object,
         *,
-        round_hook: Callable[[int, NDArray[np.complex128], CancelFlagProtocol], object],
+        round_hook: Callable[
+            [int, list[NDArray[np.float64]], CancelFlagProtocol], object
+        ],
         cancel_flag: CancelFlagProtocol,
         progress: bool = False,
         **kwargs: object,
-    ) -> NDArray[np.complex128]:
+    ) -> list[NDArray[np.float64]]:
         """Deliver partial data through the hook, then request stop and return."""
-        partial = np.array([1.0, np.nan, np.nan], dtype=np.complex128)
+        partial = [
+            np.array(
+                [[[1.0, 0.0], [np.nan, np.nan], [np.nan, np.nan]]], dtype=np.float64
+            )
+        ]
         round_hook(1, partial, cancel_flag)
         signal.raise_signal(signal.SIGINT)
         return partial
@@ -71,9 +80,9 @@ class RoundInterruptedProgram:
         raise NotImplementedError
 
 
-def identity_signal(raw: NDArray[np.complex128]) -> NDArray[np.complex128]:
-    """Keep synthetic program signals in working volts."""
-    return raw
+def iq_signal(raw: list[NDArray[np.float64]]) -> NDArray[np.complex128]:
+    """Decode one ADC/read while retaining scalar or partial scan shape."""
+    return np.asarray(raw[0][0].dot([1, 1j]), dtype=np.complex128)
 
 
 class InterruptedCore(SavingCore):
@@ -100,10 +109,13 @@ class InterruptedCore(SavingCore):
                 raise TypeError("This synthetic experiment requires FakeDevice")
             device.set_value(0.5)
         buffer = SignalBuffer(3)
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             if self.mode == "program-round":
-                sched.prog_builder(context.soc, context.soccfg).run_program(
-                    RoundInterruptedProgram(), rounds=2, raw2signal_fn=identity_signal
+                sched.run_acquire(
+                    RoundInterruptedProgram(),
+                    context.soc,
+                    rounds=2,
+                    options=RunOptions(converter=iq_signal),
                 )
             else:
                 for index, step in sched.scan("point", range(3)):
@@ -111,9 +123,10 @@ class InterruptedCore(SavingCore):
                         signal.raise_signal(signal.SIGINT)
                         break
                     if self.mode == "program":
-                        step.prog_builder(context.soc, context.soccfg).run_program(
+                        step.run_acquire(
                             PartialProgram(float(index + 1), interrupt=index == 1),
-                            raw2signal_fn=identity_signal,
+                            context.soc,
+                            options=RunOptions(converter=iq_signal),
                         )
                     else:
                         buffer[step].set(np.array(index + 1, dtype=np.complex128))

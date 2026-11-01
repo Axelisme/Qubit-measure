@@ -17,14 +17,13 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Classify,
     GainSweep,
     Pulse,
     Readout,
     Reset,
+    TimelineBuilder,
     shot_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
@@ -35,6 +34,11 @@ BRANCH_LINESTYLES = ("-", "--", ":")
 
 
 class ResetCheckCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -51,11 +55,6 @@ class ResetCheckCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    rabi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    tested_reset: Annotated[Reset.Cfg, FieldMeta(label="Tested Reset")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
 
 
 @dataclass(frozen=True)
@@ -101,11 +100,15 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[ResetCheckResult, ResetCheckCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("reset_states", "Reset State", "None", dtype=np.int64),
-            AxesSpec.Axis("gains", "Gain", "a.u.", dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "reset_states", label="Reset State", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis("gains", label="Gain", unit="a.u.", dtype=np.float64),
         ),
-        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
         data_variable=DataVariable("counts"),
         result_type=ResetCheckResult,
         cfg_type=ResetCheckCfg,
@@ -131,7 +134,6 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         # 1. Validate classification and prepare hardware-quantized gain points.
         soc, soccfg = context.soc, context.soccfg
         cfg = deepcopy(cfg)
-        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
         ro_ch = (
             cfg.readout.ro_ch
             if isinstance(cfg.readout, PulseReadoutCfg)
@@ -139,7 +141,12 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
         classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
         axis = Classify(
-            "readout", tone=None if pulse_readout else 0, classifier=classifier
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
+            classifier=classifier,
         )
         gains = sweep2array(
             cfg.gain,
@@ -154,52 +161,51 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
                 line.set(**kwargs)
             ax.legend()
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Pulse gain (a.u.)",
-            "Classified population",
-            num_lines=9,
-            configure_axes=configure_axes,
-        )
+        figure, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain (a.u.)", ylabel="Classified population")
+        viewer = live_line(ax, num_lines=9)
+        configure_axes(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            return viewer.set(
+                gains,
+                (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T,
+            )
+
+        figure.show()
         buffer = SignalBuffer(
             (gains.size, 3, 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                gains,
-                (data / data.sum(axis=-1, keepdims=True)).reshape(gains.size, 9).T,
-            ),
+            on_update=update,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # 3. Sweep gain outside the three-way hardware branch loop.
-            sched.cfg.rabi_pulse.set_param("gain", sweep2param("gain", sched.cfg.gain))
-            builder = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Pulse("rabi_pulse", sched.cfg.rabi_pulse),
-                    Branch(
-                        "reset_sel",
-                        [],  # Before tested reset.
-                        Reset("tested_reset_1", sched.cfg.tested_reset),
-                        [
-                            Reset("tested_reset_2", sched.cfg.tested_reset),
-                            Pulse("rabi_pulse_after_reset", sched.cfg.rabi_pulse),
-                        ],
-                    ),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("gain", sched.cfg.gain)
-                .declare_sweep("reset_sel", 3)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            gain = builder.add_sweep("gain", cfg.gain)
+            rabi_pulse = Pulse("rabi_pulse", cfg.rabi_pulse, gain=gain)
+            tested_reset = Reset("tested_reset", cfg.tested_reset)
+            builder.add_loop("reset_sel", 3)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(rabi_pulse)
+            builder.delay_by_timeline()
+            with builder.branch(by="reset_sel", align_timeline=False) as cases:
+                with cases.case(1):
+                    builder.emit(tested_reset)
+                with cases.case(2):
+                    builder.emit(tested_reset)
+                    builder.emit(rabi_pulse)
+            builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
 
             # 4. Retain cumulative class counts, including completed partial rounds.
             program = builder.build()
-            builder.run_program_summed(
+            sched.run_acquire_summed(
                 program,
-                sums2signal_fn=lambda sums: sums,
+                soc,
                 processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
@@ -254,7 +260,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
         )
 
         # 3. Compare the independent preparations on the same gain axis.
-        _, ax = plots.subplots("populations", figsize=(10, 6))
+        _, ax = plots.subplots(num="populations", figsize=(10, 6))
         order = np.argsort(result.gains)
         for values, kwargs in zip(
             populations[order].reshape(result.gains.size, 9).T,

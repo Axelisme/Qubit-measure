@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 import zcu_tools.analysis.fitting as ft
@@ -20,21 +20,20 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Delay,
     DelayAuto,
     LoadValue,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -52,6 +51,11 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class T1Cfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "linear"
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -82,11 +86,6 @@ class T1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = True
 
 
 @validated_dataclass(frozen=True)
@@ -117,128 +116,105 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     # times stored as seconds on disk -> scale=1e-6
     AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("times", "Time", "s", 1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("times", label="Time", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=T1Result,
         cfg_type=T1Cfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/t1",
     )
 
     def run(self, config: T1Cfg, *, context: RunContext) -> T1Result:
-        """Measure energy relaxation with reset → π → delay → readout.
+        """Measure reset → π → delay → readout on a linear or decay grid.
 
-        config selects a linear delay sweep or nonuniform delays in us.
-        Uniform sampling requires SweepCfg; nonuniform delays must remain
-        distinct and increasing after hardware quantization or raise ValueError.
-        context supplies acquisition and live plots. Return quantized delays
-        and mean complex IQ with shape (time,); unmeasured points remain NaN.
+        delay is a SweepCfg time window in us. Decay sampling concentrates
+        points near the start; quantized points must remain distinct.
+        Return quantized delays and mean complex IQ with shape (time,).
+        Unmeasured points remain NaN.
         """
-        # Copy the configuration before dispatching to either acquisition path.
         cfg = deepcopy(config)
-        if cfg.uniform and not isinstance(cfg.length, SweepCfg):
-            raise ValueError("uniform mode requires SweepCfg")
-        if cfg.uniform:
-            return self._run_uniform(cfg, context)
-        return self._run_non_uniform(cfg, context)
+        if cfg.sampling == "linear":
+            return self._run_linear(cfg, context=context)
+        return self._run_decay(cfg, context=context)
 
-    def _run_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
-        soc, soccfg, plots = context.soc, context.soccfg, context.plots
-
-        lengths = sweep2array(cfg.length, "time", {"soccfg": soccfg})
+    def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
         viewer = live_line(
-            plots, "measurement", "Time (us)", "Amplitude", title="T1 relaxation"
+            context.plots,
+            "measurement",
+            "Time (us)",
+            "Amplitude",
+            title="T1 relaxation",
         )
-        signals_buffer = SignalBuffer(
+        signals = SignalBuffer(
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            length_sweep = cfg.length
-            if not isinstance(length_sweep, SweepCfg):
-                raise TypeError("uniform mode requires SweepCfg")
-            length_param = sweep2param("length", length_sweep)
-
-            # Excite, wait a linearly swept delay, then acquire readout IQ.
-            _ = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add(
-                    Reset("reset", cfg.reset),
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    Delay("t1_delay", length_param),
-                    Readout("readout", cfg.readout),
-                )
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
-                        ),
-                    ),
-                )
+        with Schedule(signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            delay = builder.add_sweep("delay", cfg.delay)
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.timeline_inc(delay)
+            builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                    ),
+                ),
+            )
+        return T1Result(times=lengths, signals=signals.array)
 
-        return T1Result(times=lengths, signals=signals_buffer.array)
-
-    def _run_non_uniform(self, cfg: T1Cfg, context: RunContext) -> T1Result:
-        soc, soccfg, plots = context.soc, context.soccfg, context.plots
-
-        delay_table = materialize_nonuniform_t1_delays(
-            cfg.length,
-            soccfg=soccfg,
-        )
-        length_cycles = delay_table.cycles
-        lengths = delay_table.times_us
-        viewer = live_line(plots, "measurement", "Time (us)", "Amplitude")
-        signals_buffer = SignalBuffer(
+    def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
+        lengths = table.times_us
+        viewer = live_line(context.plots, "measurement", "Time (us)", "Amplitude")
+        signals = SignalBuffer(
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, t1_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-
-            # Load each nonuniform delay in cycles before reset and excitation.
-            _ = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(length_cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    ),
-                    Reset("reset", cfg.reset),
-                    Pulse("pi_pulse", cfg.pi_pulse),
-                    DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", cfg.readout),
-                )
-                .declare_sweep("length_idx", len(length_cycles))
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(), cfg.earlystop_snr, t1_signal2real
-                        ),
-                    ),
+        with Schedule(signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("delay", len(lengths))
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(table.cycles),
+                    idx_reg="delay",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
                 )
             )
-
-        return T1Result(times=lengths, signals=signals_buffer.array)
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, t1_signal2real
+                    ),
+                ),
+            )
+        return T1Result(times=lengths, signals=signals.array)
 
     def analyze(
         self,
@@ -254,12 +230,26 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         real_signals = rotate2real(signals).real
 
         if options.dual_exp:
-            t1, t1err, t1b, t1berr, y_fit, (pOpt, pCov) = fit_dual_decay(
-                xs, real_signals
+            fit = fit_dual_decay(xs, real_signals)
+            t1, t1err, t1b, t1berr, y_fit, pOpt, pCov = (
+                fit.decay_time1,
+                fit.decay_time1_err,
+                fit.decay_time2,
+                fit.decay_time2_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
             )
             names = ("y0", "yscale1", "decay_time1", "yscale2", "decay_time2")
         else:
-            t1, t1err, y_fit, (pOpt, pCov) = fit_decay(xs, real_signals)
+            fit = fit_decay(xs, real_signals)
+            t1, t1err, y_fit, pOpt, pCov = (
+                fit.decay_time,
+                fit.decay_time_err,
+                fit.curve,
+                fit.params,
+                fit.cov,
+            )
             names = ("y0", "yscale", "decay_time")
             t1b = 0.0
             t1berr = 0.0

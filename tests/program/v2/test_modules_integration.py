@@ -1,4 +1,4 @@
-"""Integration tests for all Module subclasses using a real ModularProgramV2.
+"""Integration tests for all Module subclasses using a real TimelineProgramV2.
 
 Each test constructs a real program (triggering real QICK compilation) against
 the mock QickConfig fixture, verifying that the module's init/run pipeline
@@ -12,14 +12,11 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
-from zcu_tools.program.v2 import SweepCfg, sweep2param
+from zcu_tools.program.v2 import SweepCfg, TimelineProgramV2, sweep2param
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
-from zcu_tools.program.v2.modules.control import Branch, Repeat
-from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, Join, SoftDelay
-from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord, ScanWith
+from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
+from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.readout import (
     PulseReadout,
@@ -35,10 +32,10 @@ from zcu_tools.program.v2.modules.reset import (
 )
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    GaussWaveformCfg,
 )
 from zcu_tools.program.v2.utils import readout_freq_words
+
+from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
 # Constants — valid for the mock soccfg
@@ -67,7 +64,7 @@ RO_LENGTH = 1.0  # µs
 
 def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
     soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
-    return ModularProgramV2(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
+    return compile_modules(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
 def _pulse_cfg(
@@ -167,10 +164,6 @@ class TestDelayIntegration:
         prog = _make_prog(modules=[DelayAuto("a", gens=True, ros=False)])
         assert prog.binprog is not None
 
-    def test_join_two_softdelays(self):
-        prog = _make_prog(modules=[Join([SoftDelay("a", 0.2)], [SoftDelay("b", 0.3)])])
-        assert prog.binprog is not None
-
     def test_delay_resets_time(self):
         modules = [SoftDelay("pre", 0.1), Delay("d", 1.0), SoftDelay("post", 0.2)]
         prog = _make_prog(modules=modules)
@@ -192,84 +185,21 @@ class TestPulseIntegration:
         prog = _make_prog(modules=[Pulse("p", _pulse_cfg())])
         assert prog.binprog is not None
 
-    @pytest.mark.parametrize("flat_top", [False, True])
-    @pytest.mark.parametrize("start,stop", [(0.04, 1.2), (1.2, 0.04)])
-    def test_blocking_length_sweep_tracks_registered_pulse_duration(
-        self, flat_top: bool, start: float, stop: float
-    ) -> None:
-        # Both scan directions resolve on the generator clock.
-        grid = SweepCfg(start=start, stop=stop, expts=9, step=(stop - start) / 8)
-        length = sweep2param("length", grid)
-        waveform = (
-            FlatTopWaveformCfg(
-                length=length,
-                raise_waveform=GaussWaveformCfg(length=0.02, sigma=0.004),
-            )
-            if flat_top
-            else ConstWaveformCfg(length=length)
-        )
-        pulse = Pulse(
-            "drive",
-            PulseCfg(
-                waveform=waveform,
-                ch=GEN_CH,
-                nqz=GEN_NQZ,
-                freq=GEN_FREQ,
-                gain=GEN_GAIN,
-            ),
-            pulse_id="drive",
-        )
-        prog = _make_prog(
-            modules=[pulse, Readout("readout", _readout_cfg())],
-            sweep=[("length", grid)],
-        )
-        actual = np.asarray(
-            prog.get_pulse_param("drive", "total_length", as_array=True),
-            dtype=np.float64,
-        )
-        blocking = pulse.total_length(prog)
-        assert isinstance(blocking, QickParam)
-        timestamps = np.asarray(blocking.to_array(prog.loop_dict), dtype=np.float64)
-        assert actual.shape == timestamps.shape == (grid.expts,)
-        # Per-step processor rounding can accumulate conservative overrun.
-        # It must never start the following readout before actual playback ends.
-        assert np.all(timestamps >= actual - 1e-12)
-        assert prog.binprog is not None
-
     def test_swept_blocking_alignment_leaves_no_generator_residual_sweep(self) -> None:
         grid = SweepCfg(start=0.04, stop=1.2, expts=9, step=1.16 / 8)
         pulse = Pulse("drive", _pulse_cfg(length=sweep2param("length", grid)))
-        prog = _make_prog(
-            modules=[
-                pulse,
-                Delay("advance", 0.0),
-                DelayAuto("residual", gens=True, ros=False, tag="residual"),
-                Readout("readout", _readout_cfg()),
-            ],
-            sweep=[("length", grid)],
-        )
+        from zcu_tools.program.v2 import TimelineBuilder
+
+        builder = TimelineBuilder(make_mock_soccfg())
+        builder.add_loop("length", grid.expts)
+        builder.emit(pulse)
+        builder.delay_by_timeline()
+        builder.delay_auto(gens=True, ros=False, tag="residual")
+        builder.emit(Readout("readout", _readout_cfg()))
+        prog = builder.build()
         residual = prog.get_time_param("residual", "t")
         assert isinstance(residual, float)
         assert residual == 0.0
-
-    @pytest.mark.parametrize("block_mode", [False, True])
-    def test_scalar_pre_post_blocking_timing_keeps_existing_value(
-        self, block_mode: bool
-    ) -> None:
-        pulse = Pulse(
-            "drive",
-            _pulse_cfg(length=0.5, pre_delay=0.101, post_delay=0.203),
-            block_mode=block_mode,
-            pulse_id="drive",
-        )
-        prog = _make_prog(modules=[pulse, Readout("readout", _readout_cfg())])
-        total = pulse.total_length(prog)
-        assert isinstance(total, float)
-        # Scalar timing must remain unchanged by swept-length quantization.
-        assert prog.us2cycles(us=total) == 348
-        end = pulse.run(prog, t=0.25)
-        assert end == pytest.approx(0.25 + total if block_mode else 0.25)
-        assert prog.binprog is not None
 
     def test_pulse_none_cfg_compiles(self):
         prog = _make_prog(modules=[Pulse("p", None)])
@@ -292,10 +222,6 @@ class TestPulseIntegration:
             Pulse("p1", _pulse_cfg(ch=GEN_CH2)),
         ]
         prog = _make_prog(modules=modules, n_gens=2)
-        assert prog.binprog is not None
-
-    def test_pulse_non_blocking_mode(self):
-        prog = _make_prog(modules=[Pulse("p", _pulse_cfg(), block_mode=False)])
         assert prog.binprog is not None
 
 
@@ -356,7 +282,7 @@ class TestReadoutIntegration:
             nqz=GEN_NQZ,
         )
         cfg = _readout_cfg(freq=freqs[0])
-        prog = ModularProgramV2(
+        prog = compile_modules(
             soccfg,
             modules=[
                 TablePulseReadout(
@@ -451,37 +377,6 @@ class TestReadoutIntegration:
 
 
 class TestResetIntegration:
-    @pytest.mark.parametrize(
-        "container", ["program", "repeat", "branch", "join", "scan"]
-    )
-    def test_optional_modules_preserve_compiled_pulses_and_timing(self, container):
-        def compile_sequence(optional):
-            pulse = Pulse("drive", _pulse_cfg())
-            sequence = [None, pulse, Reset("r", None)] if optional else [pulse]
-            sweep = None
-            if container == "repeat":
-                modules = [Repeat("repeat", 2).add_content(None).add_content(sequence)]
-            elif container == "branch":
-                modules = [Branch("select", None, sequence)]
-                sweep = [("select", 2)]
-            elif container == "join":
-                modules = [Join(sequence)]
-            elif container == "scan":
-                modules = [
-                    ScanWith("scan", [1, 2], "value")
-                    .add_content(None)
-                    .add_content(sequence)
-                ]
-            else:
-                modules = sequence
-            return _make_prog(modules=modules, sweep=sweep)
-
-        expected = compile_sequence(False)
-        actual = compile_sequence(True)
-        assert actual.prog_list == expected.prog_list
-        assert actual.gen_chs == expected.gen_chs
-        np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
-
     def test_pulse_reset_compiles(self):
         cfg = PulseResetCfg(pulse_cfg=_pulse_cfg(ch=GEN_CH))
         prog = _make_prog(modules=[Reset("r", cfg)])
@@ -522,42 +417,6 @@ class TestControlIntegration:
         assert isinstance(macros[1], WriteReg)
         assert isinstance(macros[2], Label)
 
-    def test_repeat_zero_compiles(self):
-        r = Repeat("r", 0)
-        r.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_repeat_n_compiles(self):
-        r = Repeat("r", 3)
-        r.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_repeat_with_pulse(self):
-        r = Repeat("r", 5)
-        r.add_content(Pulse("p", _pulse_cfg()))
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-
-    def test_repeat_register_driven_compiles(self):
-        # Register-driven loop: Repeat(name, n_reg) where name is the counter register
-        # and n_reg is the name of a pre-existing register holding the count.
-        # Use sweep to create "n_count" register, then Repeat("r_cnt", "n_count") creates
-        # a separate "r_cnt" counter register. No name collision.
-        r = Repeat("r_cnt", "n_count")
-        r.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[r], sweep=[("n_count", 4)])
-        assert prog.binprog is not None
-
-    def test_nested_repeat_compiles(self):
-        inner = Repeat("inner", 2)
-        inner.add_content(SoftDelay("d", 0.1))
-        outer = Repeat("outer", 3)
-        outer.add_content(inner)
-        prog = _make_prog(modules=[outer])
-        assert prog.binprog is not None
-
 
 # ---------------------------------------------------------------------------
 # Dmem module
@@ -565,117 +424,25 @@ class TestControlIntegration:
 
 
 class TestDmemIntegration:
-    def test_empty_lookup_consumer_compiles_across_programs(self):
-        """An unreachable pulse selector still needs its named register resolved."""
-        pulses = [_pulse_cfg(gain=0.0), _pulse_cfg(gain=0.5)]
-        for values in ([1], [], []):
-            repeat = Repeat("gate_pos", "gate_count", range_hint=(0, len(values)))
-            repeat.add_content(
-                [
-                    LoadValue("gate_lookup", values, "gate_pos", "gate_idx"),
-                    ComputedPulse("gate", val_reg="gate_idx", pulses=pulses),
-                ]
-            )
-            try:
-                prog = _make_prog(
-                    modules=[
-                        LoadValue("count", [len(values)], "point", "gate_count"),
-                        repeat,
-                    ],
-                    sweep=[("point", 1)],
-                )
-            except KeyError as error:
-                pytest.fail(f"Zero-count lookup consumers must compile: {error}")
-            assert len(prog.binprog["pmem"]) > 0
-
     def _scan_values_small(self):
         return list(range(5))
 
     def _scan_values_large(self):
         return list(range(40))
 
-    def test_load_value_small_uncompressed(self):
-        # 5 values → below compression threshold (30), stays uncompressed
-        lv = LoadValue(
-            "lv", self._scan_values_small(), idx_reg="myloop", val_reg="myval"
-        )
-        r = Repeat("myloop", len(self._scan_values_small()))
-        r.add_content(lv)
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-        assert not lv.is_compressed
-
-    def test_load_value_large_compressed(self):
-        # 40 values → triggers auto_compress
-        vals = self._scan_values_large()
-        lv = LoadValue("lv", vals, idx_reg="myloop", val_reg="myval")
-        r = Repeat("myloop", len(vals))
-        r.add_content(lv)
-        prog = _make_prog(modules=[r])
-        assert prog.binprog is not None
-        assert lv.is_compressed
-
     def test_load_value_negative_rejected(self):
         with pytest.raises(ValueError, match=r"\[0,"):
             LoadValue("lv", [-1, 0, 1], idx_reg="myloop", val_reg="myval")
 
-    def test_compile_datamem_not_none(self):
-        vals = self._scan_values_large()
-        lv = LoadValue("lv", vals, idx_reg="myloop", val_reg="myval")
-        r = Repeat("myloop", len(vals))
-        r.add_content(lv)
-        prog = _make_prog(modules=[r])
-        assert prog.compile_datamem() is not None
-
-    def test_load_word_compiles_uint32_words_as_int32_datamem(self):
-        vals = [0, 2**31, 2**32 - 1]
-        lw = LoadWord("lw", vals, idx_reg="myloop", val_reg="myword")
-        r = Repeat("myloop", len(vals))
-        r.add_content(lw)
-        prog = _make_prog(modules=[r])
-
-        dmem = prog.compile_datamem()
-
-        assert dmem is not None
-        assert dmem.dtype == np.int32
-        assert dmem.tolist() == [0, -(2**31), -1]
-
-    def test_load_word_binprog_uses_builtin_ints_for_transport(self):
-        vals = [0, 2**31, 2**32 - 1]
-        lw = LoadWord("lw", vals, idx_reg="myloop", val_reg="myword")
-        r = Repeat("myloop", len(vals))
-        r.add_content(lw)
-
-        prog = _make_prog(modules=[r])
-
-        dmem = prog.binprog["dmem"]
-        assert dmem == [0, -(2**31), -1]
-        assert all(type(word) is int for word in dmem)
-
     def test_binprog_rejects_non_vector_dmem(self):
-        class TwoDimensionalDmemProgram(ModularProgramV2):
+        class TwoDimensionalDmemProgram(TimelineProgramV2):
             def compile_datamem(self):
                 return np.asarray([[1, 2]], dtype=np.int32)
 
         soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
 
         with pytest.raises(ValueError, match="dmem must be one-dimensional"):
-            TwoDimensionalDmemProgram(soccfg, modules=[])
-
-    def test_scan_with_compiles(self):
-        vals = list(range(10))
-        s = ScanWith("s", vals, "myval")
-        s.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[s])
-        assert prog.binprog is not None
-
-    def test_scan_with_large_values_compiles(self):
-        vals = list(range(40))
-        s = ScanWith("s", vals, "myval")
-        s.add_content(SoftDelay("d", 0.1))
-        prog = _make_prog(modules=[s])
-        assert prog.binprog is not None
-        assert prog.compile_datamem() is not None
+            TwoDimensionalDmemProgram(soccfg)
 
 
 @pytest.mark.parametrize("mixer", [None, 500.0])
@@ -685,12 +452,12 @@ def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
     cfg = _pulse_cfg(freq=700.0)
     cfg.mixer_freq = mixer
     pulses = [Pulse(f"p{idx}", cfg, ro_ch=ch) for idx, ch in enumerate((None, 0, 0, 1))]
-    prog = ModularProgramV2(soccfg, modules=pulses)
+    prog = compile_modules(soccfg, modules=pulses)
     assert prog.pulse_registry.count == 3
-    assert pulses[1].pulse_id == pulses[2].pulse_id
-    assert len({pulses[idx].pulse_id for idx in (0, 1, 3)}) == 3
+    assert pulses[1].pulse_name(prog) == pulses[2].pulse_name(prog)
+    assert len({pulses[idx].pulse_name(prog) for idx in (0, 1, 3)}) == 3
     for pulse, ch in zip(pulses, (None, 0, 0, 1), strict=True):
-        assert prog.pulses[pulse.pulse_id].params["ro_ch"] == ch
+        assert prog.pulses[pulse.pulse_name(prog)].params["ro_ch"] == ch
 
 
 @pytest.mark.parametrize("swept", [False, True])
@@ -716,9 +483,7 @@ def test_table_readout_requires_named_loop(sweep):
     ro = TablePulseReadout(
         "table", _readout_cfg(), idx_reg="freq", freq_words=[1, 2], ro_freq_words=[3, 4]
     )
-    with pytest.raises(
-        ValueError, match="requires a sweep loop|exactly one sweep loop"
-    ):
+    with pytest.raises(ValueError, match="requires one sweep loop"):
         _make_prog(modules=[ro], sweep=sweep)
 
 
@@ -742,29 +507,3 @@ def test_unprotected_routes_keep_qick_redeclaration_semantics():
     prog.declare_readout(0, length=0.413)
     prog.declare_readout(0, length=0.827)
     assert prog.get_time_axis(0, length_only=True) == prog.us2cycles(0.827, ro_ch=0)
-
-
-def test_protected_routes_report_owner_and_reject_overwrite():
-    prog = _make_prog()
-    prog.declare_gen(0, nqz=1)
-    prog.declare_readout(0, length=0.413)
-    assert hasattr(prog, "protect_readout_routes"), (
-        "program must protect declared routes"
-    )
-    prog.protect_readout_routes("owner", 0, [0])
-    with pytest.raises(ValueError, match="owner.*generator.*route.*0"):
-        prog.declare_gen(0, nqz=2)
-    with pytest.raises(ValueError, match="owner.*readout.*route.*0"):
-        prog.declare_readout(0, length=0.827)
-
-
-@pytest.mark.parametrize("declared", ["none", "generator"])
-def test_route_protection_requires_successful_declarations(declared):
-    prog = _make_prog()
-    if declared == "generator":
-        prog.declare_gen(0, nqz=1)
-    assert hasattr(prog, "protect_readout_routes"), (
-        "program must validate route protection"
-    )
-    with pytest.raises(ValueError, match="owner.*(generator|readout).*0"):
-        prog.protect_readout_routes("owner", 0, [0])

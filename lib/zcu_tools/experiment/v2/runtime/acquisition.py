@@ -207,7 +207,7 @@ class AcquisitionRunner:
     """
 
     def __init__(
-        self, owner: Schedule[Any, Any] | ScheduleStep[Any, Any, Any], soc: object
+        self, owner: Schedule[Any] | ScheduleStep[Any, Any], soc: object
     ) -> None:
         from zcu_tools.experiment.v2.runtime.schedule import Schedule
 

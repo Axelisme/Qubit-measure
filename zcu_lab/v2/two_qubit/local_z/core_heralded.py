@@ -26,7 +26,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import Join, MuxReadout
+from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
@@ -159,7 +159,7 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             dtype=np.float64,
             on_update=update_view,
         )
-        with Schedule(config, buffer, scope=context.scope) as sched:
+        with Schedule(buffer, scope=context.scope) as sched:
             # gate_count changes sequence structure, so only this axis stays on host.
             for n, step in sched.scan("gate_count", config.gate_counts):
                 builder = TimelineBuilder(
@@ -193,12 +193,22 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
                         builder.emit(prepare_f1)
                     with cases.case(1):
                         builder.emit(prepare_f2)
-                drive = Join(
+                drive = (
                     Pulse("cz_f1", config.drive.f1),
                     Pulse("cz_f2", config.drive.f2),
                 )
-                for _ in range(n):
-                    builder.emit(drive)
+                for gate_index in range(n):
+                    builder.fork(
+                        "default",
+                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
+                    )
+                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.join(
+                        f"drive_f1_{gate_index}",
+                        f"drive_f2_{gate_index}",
+                        into="default",
+                    )
                 builder.delay_by_timeline()  # finish the common train before target projection
                 with builder.branch(by="target", align_timeline=True) as cases:
                     with cases.case(0):

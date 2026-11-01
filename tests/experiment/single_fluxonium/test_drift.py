@@ -14,7 +14,6 @@ from zcu_tools.experiment.single_fluxonium import (
     replay_round,
     single_fluxonium,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
@@ -29,6 +28,7 @@ from zcu_tools.resources.single_fluxonium import (
 )
 
 from tests.core._simulation import TIME_BASE, tick_tuple
+from tests.program._timeline import compile_modules
 
 from ._inputs import settings, template
 
@@ -218,7 +218,7 @@ def test_drift_stream_does_not_change_sampling_and_disabled_drift_writes_nothing
         with environment(
             parse_single_fluxonium(document), tmp_path / name, clock
         ) as env:
-            program = ModularProgramV2(
+            program = compile_modules(
                 env.soccfg,
                 reps=8,
                 modules=[

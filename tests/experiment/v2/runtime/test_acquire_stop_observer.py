@@ -21,23 +21,16 @@ from zcu_tools.program.acquisition import (
 from zcu_tools.progress_bar import use_pbar_factory
 
 from tests.experiment.v2.runtime._flow_fakes import (
-    FakeModule,
     RecordingProgressBar,
     recording_pbar_factory,
 )
 
 Entry = Literal[
-    "builder",
-    "builder_decimated",
-    "builder_summed",
     "direct",
     "direct_decimated",
     "direct_summed",
 ]
 ENTRIES: tuple[Entry, ...] = (
-    "builder",
-    "builder_decimated",
-    "builder_summed",
     "direct",
     "direct_decimated",
     "direct_summed",
@@ -105,33 +98,12 @@ class Producer:
 
 def run_entry(
     entry: Entry,
-    sched: Schedule[Any, Any],
+    sched: Schedule[Any],
     producer: Producer,
     options: AcquireOptions,
     convert: Callable[[NDArray[np.float64]], NDArray[np.float64]] = lambda raw: raw,
 ) -> NDArray[np.float64]:
     """Exercise either public options family through its acquisition entry."""
-    if entry.startswith("builder"):
-        builder = sched.prog_builder(object(), object())
-        if entry == "builder_summed":
-            return builder.run_program_summed(
-                producer,
-                processor=lambda iq: iq[0],
-                sums2signal_fn=convert,
-                rounds=2,
-                options=options,
-            )
-        method = (
-            builder.run_program_decimated
-            if entry == "builder_decimated"
-            else builder.run_program
-        )
-        return method(
-            producer,
-            rounds=2,
-            raw2signal_fn=lambda raw: convert(raw[0]),
-            options=options,
-        )
     if entry == "direct_summed":
         direct_sums = RunOptions(
             retry=options.retry,
@@ -160,56 +132,6 @@ def run_entry(
     return method(producer, object(), rounds=2, options=direct)
 
 
-@pytest.mark.parametrize("decimated", [False, True])
-@pytest.mark.parametrize("callback_fails", [False, True])
-def test_pre_stopped_build_shortcut_notifies_once_without_build_or_retry(
-    decimated: bool, callback_fails: bool
-) -> None:
-    builds: list[object] = []
-    observed: list[bool] = []
-    cause = ValueError("stop observer failed")
-
-    def factory(soccfg: object, **kwargs: Any) -> Producer:
-        builds.append(soccfg)
-        return Producer(root, "complete")
-
-    def on_stop() -> None:
-        observed.append(True)
-        if callback_fails:
-            raise cause
-
-    options = AcquireOptions(retry=2, on_stop=on_stop)
-    root = Scope("run")
-    buffer = SignalBuffer((1,), dtype=np.float64)
-    buffer.set(np.array([19.0]))
-    with Schedule({}, buffer, scope=root) as sched:
-        builder = sched.prog_builder(object(), object(), program_cls=factory).add(
-            FakeModule("readout")
-        )
-        run = (
-            builder.build_and_acquire_decimated
-            if decimated
-            else builder.build_and_acquire
-        )
-        sched.set_stop()
-        if callback_fails:
-            with pytest.raises(ValueError, match="stop observer failed") as caught:
-                run(options=options)
-            assert caught.value is cause
-        else:
-            np.testing.assert_array_equal(run(options=options), [19.0])
-        assert observed == [True]
-        assert builds == []
-        np.testing.assert_array_equal(buffer.data, [19.0])
-        assert sched.outcome.status == "stopped"
-    # Reusing the options on a fresh run must not replay a previous stop.
-    with Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
-        result = run_entry("builder", sched, Producer(root, "complete"), options)
-        np.testing.assert_array_equal(result, [7.0])
-        assert observed == [True]
-        assert sched.outcome.status == "completed"
-
-
 @pytest.mark.parametrize("entry", ENTRIES)
 @pytest.mark.parametrize(
     "ending",
@@ -225,7 +147,7 @@ def test_external_stop_observer_runs_after_cleanup_once_and_isolates_next_acquir
     producer = Producer(root, ending)
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
 
         def on_stop() -> None:
@@ -267,7 +189,7 @@ def test_reusing_run_options_does_not_replay_previous_stop(mode: str) -> None:
     root = Scope("run")
     producer = Producer(root, "finite")
     observed: list[bool] = []
-    with Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
+    with Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched:
         if mode == "summed":
             sums_options: RunOptions[NDArray[np.float64]] = RunOptions(
                 on_stop=lambda: observed.append(True)
@@ -329,7 +251,6 @@ def test_exception_does_not_report_cooperative_stop(entry: Entry, ending: str) -
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
         Schedule(
-            {},
             SignalBuffer(
                 (1,), dtype=np.float64, on_update=update, update_interval=None
             ),
@@ -369,7 +290,7 @@ def test_stop_callback_failure_propagates_without_retry_or_outcome_change(
 
     with (
         use_pbar_factory(recording_pbar_factory(bars)),
-        Schedule({}, SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
+        Schedule(SignalBuffer((1,), dtype=np.float64), scope=root) as sched,
     ):
         with pytest.raises(ValueError, match="observer failed") as caught:
             run_entry(entry, sched, producer, AcquireOptions(retry=2, on_stop=on_stop))

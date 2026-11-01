@@ -5,12 +5,12 @@ import pytest
 from qick.asm_v2 import AsmInst, QickParam
 from zcu_tools.core.simulation import ChannelSignals, RoundSignals
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.delay import Join, SoftDelay
+from zcu_tools.program.v2 import TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 from tests.program.v2.simulation.time_observations import times_us
 
@@ -20,15 +20,25 @@ def test_offline_board_declares_mock_identity():
     assert env.soc.is_mock is True
 
 
-class RawProgram(ModularProgramV2):
-    """Emit a supported raw NOP after the Module body."""
+class RawProgram(TimelineProgramV2):
+    """Emit a supported raw NOP after the native module body."""
+
+    def __init__(self, soccfg, modules):
+        self.modules = modules
+        super().__init__(soccfg)
+
+    def _initialize(self, cfg):
+        for module in self.modules:
+            self.declare(module)
 
     def _body(self, cfg):
-        super()._body(cfg)
+        for module in self.modules:
+            self.emit(module)
+        self.delay_by_timeline()
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawMakeProgram(ModularProgramV2):
+class RawMakeProgram(RawProgram):
     """Hardware compilation hook adding instructions outside the Modules."""
 
     def make_program(self):
@@ -36,7 +46,7 @@ class RawMakeProgram(ModularProgramV2):
         self.asm_inst({"CMD": "NOP"})
 
 
-class RawCleanupProgram(ModularProgramV2):
+class RawCleanupProgram(RawProgram):
     """Hardware cleanup hook adding instructions outside the Modules."""
 
     def _cleanup(self, cfg):
@@ -71,11 +81,19 @@ def test_raw_content_after_terminal_jump_rejected_before_backend(method):
 
 def test_raw_loop_nop_preserves_sweep_readouts():
     env = white_noise(std_adc=0)
-    prog = ModularProgramV2(
-        env.soccfg, modules=[readout("readout")], sweep=[("axis", 2)]
-    )
-    prog.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
-    prog.compile()
+    module = readout("readout")
+
+    class Program(TimelineProgramV2):
+        def _initialize(self, cfg):
+            self.add_loop("axis", 2)
+            self.declare(module)
+            self.append_loop_after("axis", AsmInst(inst={"CMD": "NOP"}, addr_inc=1))
+
+        def _body(self, cfg):
+            self.emit(module)
+            self.delay_by_timeline()
+
+    prog = Program(env.soccfg)
     result = prog.acquire(env.soc, progress=False)
     assert result[0].shape == (1, 2, 2)
     np.testing.assert_array_equal(result[0], 0)
@@ -94,7 +112,7 @@ def test_unwired_generator_pulse_is_not_silently_accepted():
     drive = PulseCfg(
         ch=1, nqz=1, freq=50, gain=0.2, waveform=ConstWaveformCfg(length=0.1)
     ).build("unwired_drive")
-    prog = ModularProgramV2(env.soccfg, modules=[drive, readout("readout")])
+    prog = compile_modules(env.soccfg, modules=[drive, readout("readout")])
     with pytest.raises(ValueError, match="unwired_drive.*1.*bound"):
         prog.acquire(env.soc, progress=False)
     assert not env.soc.binding.rounds
@@ -124,7 +142,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
         ro_length=0.1,
         trig_offset=QickParam(0, {"axis": 0.007}),
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg, modules=[cfg.build("readout")], sweep=[("axis", 3)]
     )
     prog.acquire(env.soc, progress=False)
@@ -140,17 +158,16 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():
     env = white_noise(std_adc=0)
-    modules = [
-        Join(
-            [readout("first"), SoftDelay("later", 0.3), readout("third")],
-            [SoftDelay("middle", 0.2), readout("second")],
-        )
-    ]
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=modules,
-        reps=2,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=2)
+    builder.fork("default", into="middle")
+    builder.emit(readout("first"))
+    builder.timeline_inc(0.2, timeline="middle")
+    builder.emit(readout("second"), timeline="middle")
+    builder.timeline_inc(0.3)
+    builder.emit(readout("third"))
+    builder.join("default", "middle", into="default")
+    builder.delay_by_timeline()
+    prog = builder.build()
     seen = []
 
     def execute(request):

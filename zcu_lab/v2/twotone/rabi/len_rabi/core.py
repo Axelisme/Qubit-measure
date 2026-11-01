@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,12 +13,19 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, sweep2param
+from zcu_tools.program.v2 import (
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -52,6 +59,11 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class LenRabiCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -82,11 +94,6 @@ class LenRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Rabi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Duration", unit="us")]
 
 
 class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
@@ -94,8 +101,8 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
     # lengths stored in seconds on disk (mem us) -> scale=1e-6; z complex
     AXES_SPEC: ClassVar[AxesSpec[LenRabiResult, LenRabiCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("lengths", "Length", "s", 1e-6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("lengths", label="Length", unit="s", scale=1e-6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=LenRabiResult,
         cfg_type=LenRabiCfg,
         cfg_schema_version="3.0",
@@ -127,133 +134,96 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         # 1. Prepare length coordinates without changing the caller's cfg.
         cfg = deepcopy(cfg)
+        soccfg = context.soccfg
         lengths = sweep2array(
             cfg.length,
             "time",
-            {"soccfg": context.soccfg, "gen_ch": cfg.qub_pulse.ch},
+            {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
         if cfg.qub_pulse.waveform.style in ["const", "flat_top"]:
             return self._run_for_flat(cfg, lengths, context=context)
-        return self._run_for_arb(cfg, lengths, context=context)
+        return self._run_for_arb(cfg, np.unique(lengths), context=context)
 
     def _run_for_flat(
-        self,
-        cfg: LenRabiCfg,
-        lengths: NDArray[np.float64],
-        *,
-        context: RunContext,
+        self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
-        """Sweep const/flat-top length on the FPGA and return mean IQ."""
-        soc, soccfg = context.soc, context.soccfg
         viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
-        signals_buffer = SignalBuffer(
+        signals = SignalBuffer(
             (len(lengths),),
             on_update=lambda data: viewer.update(lengths, rabi_signal2real(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            length_sweep = sched.cfg.length
-            sched.cfg.qub_pulse.set_param("length", sweep2param("length", length_sweep))
-
-            # 2. Sweep length on the FPGA: reset -> init -> drive -> readout.
-            _ = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", sched.cfg.reset)
-                .add_pulse("init_pulse", sched.cfg.init_pulse)
-                .add_pulse("qubit_pulse", sched.cfg.qub_pulse)
-                .add_readout("readout", sched.cfg.readout)
-                .declare_sweep("length", length_sweep)
-                .build_and_acquire(
-                    rounds=cfg.rounds,
-                    options=AcquireOptions(
-                        retry=cfg.acquire_retry,
-                        stop_condition=snr_checker(
-                            signals_buffer.at(), cfg.earlystop_snr, rabi_signal2real
-                        ),
-                    ),
-                )
+        with Schedule(signals, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-
-        # 3. The program acquisition supplies the completed-round mean IQ.
-        return LenRabiResult(lengths=lengths, signals=signals_buffer.array)
+            length = builder.add_sweep("length", cfg.length)
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
+            builder.emit(Readout("readout", cfg.readout))
+            prog = builder.build()
+            sched.run_acquire(
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    stop_condition=snr_checker(
+                        signals.at(), cfg.earlystop_snr, rabi_signal2real
+                    ),
+                ),
+            )
+        return LenRabiResult(lengths=lengths, signals=signals.array)
 
     def _run_for_arb(
-        self,
-        cfg: LenRabiCfg,
-        lengths: NDArray[np.float64],
-        *,
-        context: RunContext,
+        self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
-        """Scan shaped lengths on the host and average available rounds."""
-        soc, soccfg = context.soc, context.soccfg
-
-        # 2. Other waveforms need a separate program for each distinct length.
-        rounds = cfg.rounds
-        cfg = cfg.model_copy(deep=True)
-        cfg.rounds = 1  # Host repeats own the rounds; FPGA still owns reps.
-        lengths = np.unique(lengths)
-        programs: dict[float, Any] = {}
+        # Historical name: editable shaped waveforms, not native arb assets.
+        programs: dict[float, TimelineProgramV2] = {}
 
         def average_round(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
-            _signals = np.asarray(signals)  # shape: (rounds, len(lengths))
-            mask = np.any(~np.isnan(_signals), axis=0)
-            mean_signals = np.full(_signals.shape[1], np.nan, dtype=np.complex128)
-            mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
-            return mean_signals
+            mask = np.any(~np.isnan(signals), axis=0)
+            mean = np.full(signals.shape[1], np.nan, dtype=np.complex128)
+            mean[mask] = np.nanmean(signals[:, mask], axis=0)
+            return mean
 
         viewer = live_line(context.plots, "measurement", "Length (us)", "Signal")
-        length_values = lengths.tolist()
-        signals_buffer = SignalBuffer(
-            (rounds, len(lengths)),
+        signals = SignalBuffer(
+            (cfg.rounds, len(lengths)),
             on_update=lambda data: viewer.update(
                 lengths, rabi_signal2real(average_round(data))
             ),
         )
         check_snr = snr_checker(
-            signals_buffer.at(),
+            signals.at(),
             cfg.earlystop_snr,
             lambda data: rabi_signal2real(average_round(data)),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            for _, rep in sched.repeat("round", rounds):
-                for length, step in rep.scan("length", length_values):
-                    step.cfg.qub_pulse.set_param("length", length)
-
-                    # 3. Reset -> init -> shaped drive -> readout at this length.
-                    builder = (
-                        step.prog_builder(
-                            soc,
-                            soccfg,
-                            reps=step.cfg.reps,
-                            relax_delay=step.cfg.relax_delay,
-                        )
-                        .add_reset("reset", step.cfg.reset)
-                        .add_pulse("init_pulse", step.cfg.init_pulse)
-                        .add_pulse("qubit_pulse", step.cfg.qub_pulse)
-                        .add_readout("readout", step.cfg.readout)
-                    )
+        with Schedule(signals, scope=context.scope) as sched:
+            for _, rep in sched.repeat("round", cfg.rounds):
+                for length, step in rep.scan("length", lengths.tolist()):
                     length_key = float(length)
                     if length_key not in programs:
+                        builder = TimelineBuilder(
+                            context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+                        )
+                        if cfg.reset is not None:
+                            builder.emit(cfg.reset.build("reset"))
+                        builder.emit(Pulse("init_pulse", cfg.init_pulse))
+                        builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
+                        builder.emit(Readout("readout", cfg.readout))
                         programs[length_key] = builder.build()
-                    _ = builder.run_program(
+                    step.run_acquire(
                         programs[length_key],
-                        rounds=cfg.rounds,
-                        options=AcquireOptions(retry=cfg.acquire_retry),
+                        context.soc,
+                        rounds=1,
+                        options=RunOptions(retry=cfg.acquire_retry),
                     )
-                # A shaped-pulse round is a full host-side length scan.
                 if check_snr():
                     break
-
-        # 4. Average available rounds per length, keeping partial scans and NaNs.
-        return LenRabiResult(
-            lengths=lengths,
-            signals=average_round(signals_buffer.array),
-        )
+        return LenRabiResult(lengths=lengths, signals=average_round(signals.array))
 
     def analyze(
         self,
@@ -286,21 +256,22 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         real_signals = real_signals[~nan_mask]
 
         # 2. Fit this length scan with the user's envelope and phase choices.
-        (
-            pi_len,
-            pi_len_err,
-            pi2_len,
-            pi2_len_err,
-            freq,
-            freq_err,
-            y_fit,
-            (pOpt, pCov),
-        ) = fit_rabi(
-            # Signed amplitude covers both zero-drive extrema when phase is fixed.
+        fit = fit_rabi(
             lens,
             real_signals,
             decay=options.decay,
             init_phase=None if options.fit_phase else 0.0,
+        )
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, pOpt, pCov = (
+            fit.pi_x,
+            fit.pi_x_err,
+            fit.pi2_x,
+            fit.pi2_x_err,
+            fit.freq,
+            fit.freq_err,
+            fit.curve,
+            fit.params,
+            fit.cov,
         )
 
         names = ("y0", "yscale", "freq", "phase") + (

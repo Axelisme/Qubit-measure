@@ -4,8 +4,6 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
-from qick.asm_v2 import QickParam
-
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -13,7 +11,6 @@ from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
 from .._timeline_selected import PlaybackChoice, SelectedPlayback
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2.modular import ModularProgramV2
     from zcu_tools.program.v2.timeline import TimelineProgramV2
 
 logger = logging.getLogger(__name__)
@@ -65,11 +62,15 @@ class ComputedPulse(Module):
         base_idxs = self._declare_candidates(
             prog, declare_pulse=lambda pulse: pulse.declare(prog)
         )
+        # Address words are consumed by this emission before any next module
+        # lookup. Selected ends keep their own ADR-0083 runtime storage.
+        address_register = prog.add_reg("_computed_wmem_index", allow_reuse=True)
         address_loader = LoadValue(
             f"{self.name}_address",
             base_idxs,
             idx_reg=self.val_reg,
-            val_reg=f"{self.name}_wmem_index",
+            val_reg=address_register,
+            use_existed=True,
         )
         address_loader.declare(prog)
         prog.set_module_state(self, address_loader)
@@ -84,7 +85,11 @@ class ComputedPulse(Module):
         """
         del tag  # ModuleEmission owns the occurrence tag.
         address_loader = prog.get_module_state(self, LoadValue)
-        relation = address_loader.lower_selected(prog)
+        # ModuleEmission finishes the paired selected post before another
+        # ComputedPulse can overwrite this capture. It is not a temp arithmetic
+        # register: lookup scratch and pulse address preparation must not alias it.
+        captured = prog.add_reg("_computed_selected_index", allow_reuse=True)
+        relation = address_loader.lower_selected(prog, captured_index=captured)
         choices = tuple(
             PlaybackChoice(pulse.pulse_name(prog), pulse.cfg.post_delay)
             for pulse in self.pulse_modules
@@ -101,25 +106,9 @@ class ComputedPulse(Module):
             ),
         )
 
-    def init(self, prog: ModularProgramV2) -> None:
-        base_idxs = self._declare_candidates(
-            prog, declare_pulse=lambda pulse: pulse.init(prog)
-        )
-        self.dmem_offset = prog.add_dmem(base_idxs)
-        logger.debug(
-            "ComputedPulse.init: name='%s', ch=%d, style=%s, stride=%d, "
-            "dmem_offset=%d, wmem_base_idxs=%s",
-            self.name,
-            self.ref_cfg.ch,
-            self.ref_cfg.waveform.style,
-            self._stride,
-            self.dmem_offset,
-            base_idxs,
-        )
-
     def _declare_candidates(
         self,
-        prog: ModularProgramV2 | TimelineProgramV2,
+        prog: TimelineProgramV2,
         *,
         declare_pulse: Callable[[Pulse], None],
     ) -> list[int]:
@@ -153,32 +142,3 @@ class ComputedPulse(Module):
             base_idxs.append(prog.wave2idx[wave_names[0]])
 
         return base_idxs
-
-    def run(
-        self, prog: ModularProgramV2, t: float | QickParam = 0.0
-    ) -> float | QickParam:
-        ref_cfg = self.ref_cfg
-        with prog.acquire_temp_reg(2) as (addr_reg, wmem_reg):
-            # addr_reg = val_reg + dmem_offset  →  address of table[val_reg]
-            prog.write_reg_op(addr_reg, self.val_reg, "+", self.dmem_offset)
-            # wmem_reg = dmem[addr_reg]  →  starting wmem index for this candidate
-            prog.read_dmem(dst=wmem_reg, addr=addr_reg)
-            prog.pulse_by_reg(
-                ref_cfg.ch,
-                wmem_reg,
-                t=t + ref_cfg.pre_delay,
-                flat_top_pulse=self._is_flat_top,
-            )
-
-        return t + self.total_length(prog)
-
-    def total_length(self, prog: ModularProgramV2) -> float:
-        lengths = [pulse.total_length(prog) for pulse in self.pulse_modules]
-        if any(isinstance(length, QickParam) for length in lengths):
-            raise ValueError(
-                "ComputedPulse total length cannot be determined at compile time"
-            )
-        return max(float(length) for length in lengths)
-
-    def allow_rerun(self) -> bool:
-        return True

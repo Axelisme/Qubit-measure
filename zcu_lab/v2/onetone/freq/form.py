@@ -101,10 +101,12 @@ def make_form(ctx: FormContext) -> Form[FreqInput]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqInput,
+        # The union selector replaces core sampling_mode/homophasal after the sweep.
         field_order=(
             "reset",
             "readout",
             "freq",
+            "sampling",
             "reps",
             "rounds",
             "relax_delay",

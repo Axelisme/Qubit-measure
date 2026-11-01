@@ -2,12 +2,7 @@
 
 import numpy as np
 import pytest
-from zcu_tools.experiment import Scope
-from zcu_tools.experiment.stop_signal import StopSignal
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
-from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules import readout
-from zcu_tools.program.v2.modules.control import Repeat
+from zcu_tools.program.v2 import TimelineBuilder
 
 from tests.program.v2._mux_support import AcquisitionSoc, mux_soccfg, native_mux
 
@@ -43,12 +38,12 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
     soccfg["readouts"][1]["iq_offset"] = 7.0
     soc = ShotSentinelSoc(soccfg.get_cfg())
     module = native_mux().build("mux")
-    prog = ModularProgramV2(
-        soccfg,
-        [Repeat("reads", 2).add_content(module)],
-        sweep=[("preparation", 4)],
-        reps=3,
-    )
+    builder = TimelineBuilder(soccfg, reps=3)
+    builder.add_loop("preparation", 4)
+    with builder.repeat("reads", 2):
+        builder.emit(module)
+    builder.delay_by_timeline()
+    prog = builder.build()
     with pytest.raises(ValueError, match="mux.*raw"):
         module.collect_raw_iq(prog)
     # Repeated trigger execution needs an explicit QICK runtime read count.
@@ -76,27 +71,3 @@ def test_raw_getter_uses_last_acquired_round_with_per_adc_length_normalization()
         module.collect_iq(prog, averaged, read_index=1)[0],
         [[1909, -1909], [1602, -1616]],
     )
-
-
-def test_builder_converter_uses_initialized_copy_and_normalized_acquire():
-    soccfg = mux_soccfg()
-    soc = AcquisitionSoc(soccfg.get_cfg())
-    original = native_mux().build("mux")
-    buffer = SignalBuffer((2,), dtype=np.complex128)
-    stop = StopSignal()
-    result = buffer.data
-    with Schedule({}, buffer, scope=Scope("run", stop=stop)) as sched:
-        builder = sched.prog_builder(soc, soccfg, reps=3).add(original)
-        prog = builder.build()
-        module = next(m for m in prog.modules if m.name == "mux")
-        assert isinstance(module, readout.MuxReadout)
-        assert module is not original
-
-        def convert(raw):
-            iq = module.collect_iq(prog, raw, read_index=0)
-            return iq[..., 0] + 1j * iq[..., 1]
-
-        result = builder.run_program(prog, rounds=2, raw2signal_fn=convert)
-
-    np.testing.assert_array_equal(result, [5 - 5j, 2 - 2j])
-    np.testing.assert_array_equal(buffer.data, result)

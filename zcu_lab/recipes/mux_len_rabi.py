@@ -129,7 +129,7 @@ async def mux_len_rabi(
             )
         for index in range(len(input_tones)):
             tab.set(
-                f"tones.{index}.sweep",
+                f"tones.{index}.length",
                 None if inputs.sweeps is None else inputs.sweeps[index],
             )
     tab.set("expts", inputs.n)

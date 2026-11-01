@@ -11,20 +11,20 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime.program_builder import AcquireOptions
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     GainSweep,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal_nd
@@ -42,6 +42,15 @@ class FreqGainResult:
 
 
 class FreqGainCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
+    gain: Annotated[GainSweep, FieldMeta(label="Readout gain", unit="a.u.")]
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -65,14 +74,6 @@ class FreqGainCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    gain: Annotated[GainSweep, FieldMeta(label="Readout gain", unit="a.u.")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
 
 
 @dataclass(frozen=True)
@@ -94,10 +95,10 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqGainResult, FreqGainCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("gains", "Gain", "a.u."),
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
+            AxesSpec.Axis("gains", label="Gain", unit="a.u."),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.float64),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.float64),
         result_type=FreqGainResult,
         cfg_type=FreqGainCfg,
         cfg_schema_version="3.0",
@@ -149,39 +150,45 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         )
 
         # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            freq_sweep = sched.cfg.freq
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
-            sched.cfg.readout.set_param("freq", freq_param)
+            cfg.readout.set_param("freq", freq_param)
 
-            gain_sweep = sched.cfg.gain
+            gain_sweep = cfg.gain
             gain_param = sweep2param("gain", gain_sweep)
-            sched.cfg.readout.set_param("gain", gain_param)
+            cfg.readout.set_param("gain", gain_param)
             tracker = MomentTracker()
 
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg=sched.cfg.reset),
-                    Branch("ge", [], Pulse("qub_pulse", cfg=sched.cfg.qub_pulse)),
-                    Readout("readout", cfg=sched.cfg.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("freq", freq_sweep)
-                .declare_sweep("gain", gain_sweep)
-                .build_and_acquire(
-                    raw2signal_fn=lambda _raw: snr_as_signal(
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("ge", 2)
+            builder.add_sweep("freq", freq_sweep)
+            builder.add_sweep("gain", gain_sweep)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+            builder.emit(Readout("readout", cfg.readout))
+            program = builder.build()
+            sched.run_acquire(
+                program,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    retry=cfg.acquire_retry,
+                    converter=lambda _raw: snr_as_signal(
                         [tracker],
                         ge_axis=1,
-                        skew_penalty=sched.cfg.skew_penalty,
+                        skew_penalty=cfg.skew_penalty,
                     ),
-                    options=AcquireOptions(retry=cfg.acquire_retry),
-                    trackers=[tracker],
-                    **(acquire_kwargs or {}),
-                    rounds=cfg.rounds,
-                )
+                ),
+                trackers=[tracker],
+                **(acquire_kwargs or {}),
             )
 
         # Return the moment-derived score; raw shots and IQ moments are not retained.

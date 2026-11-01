@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -14,9 +15,9 @@ from zcu_tools.progress_bar import BaseProgressBar
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 
-def identity_array(raw: np.ndarray) -> np.ndarray:
-    """Return the acquired array unchanged, without copying or conversion."""
-    return raw
+def scalar_signal(raw: list[NDArray[np.float64]]) -> NDArray[np.float64]:
+    """Recover the scalar float signal from one ADC and one read."""
+    return np.asarray(raw[0][0, ..., 0])
 
 
 class FakeModule(Module):
@@ -35,14 +36,14 @@ class RecordingBuffer:
         self,
         data: Any,
         *,
-        on_update: Callable[[ScheduleStep[Any, Any, Any]], None] | None = None,
+        on_update: Callable[[ScheduleStep[Any, Any]], None] | None = None,
     ) -> None:
         self.data = data
         self._on_update = on_update
 
     def trigger_update(
         self,
-        step: ScheduleStep[Any, Any, Any] | None = None,
+        step: ScheduleStep[Any, Any] | None = None,
         *,
         flush: bool = False,
     ) -> None:
@@ -53,11 +54,11 @@ class RecordingBuffer:
 class RootUpdateRecordingBuffer:
     def __init__(self, data: Any) -> None:
         self.data = data
-        self.calls: list[tuple[ScheduleStep[Any, Any, Any] | None, bool]] = []
+        self.calls: list[tuple[ScheduleStep[Any, Any] | None, bool]] = []
 
     def trigger_update(
         self,
-        step: ScheduleStep[Any, Any, Any] | None = None,
+        step: ScheduleStep[Any, Any] | None = None,
         *,
         flush: bool = False,
     ) -> None:
@@ -214,8 +215,8 @@ class FakeScalarProgram:
 
     def acquire(
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
-    ) -> np.ndarray:
-        raw = np.array(self.value)
+    ) -> list[NDArray[np.float64]]:
+        raw = [np.array([[self.value, 0.0]], dtype=np.float64)]
         round_hook(1, raw, cancel_flag)
         return raw
 

@@ -609,10 +609,15 @@ class RuntimeMath(TimedMacro):
         self.prog = prog
         self.operations: list[Macro] = []
         self.floors: dict[tuple[int, int], tuple[Time, Time, Time]] = {}
+        self.scratch_registers: dict[int, str] = {}
+        # Incoming operands remain readable through this plan's native source
+        # translation, even if preprocessing removes them from the live book.
+        # Nested plans inherit only reserved temporaries, not the enclosing
+        # emission's stale entry ends. Their own entry operands are live now.
         self.claimed = set(prog._timeline_live_registers())
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
-        if previous is not None:
-            self.claimed.update(previous.claimed)
+        self.reserved = set() if previous is None else previous.reserved.copy()
+        self.claimed.update(self.reserved)
 
     def event_time(self, base: RuntimeEnd, offset: float | QickParam) -> RuntimeEnd:
         """Place a runtime event in s14 without allocating event-time storage.
@@ -1176,6 +1181,7 @@ class RuntimeMath(TimedMacro):
         for candidate in candidates:
             if isinstance(candidate, RuntimeEnd) and candidate.register != register:
                 self.claimed.discard(candidate.register)
+                self.reserved.discard(candidate.register)
         return RuntimeEnd(
             register,
             lower,
@@ -1279,16 +1285,23 @@ class RuntimeMath(TimedMacro):
         for register in self.prog._timeline_register_pool:
             if register not in self.claimed and register not in live:
                 self.claimed.add(register)
+                self.reserved.add(register)
                 return register
         register = self.prog.add_reg(
             f"_timeline_end_{len(self.prog._timeline_register_pool)}"
         )
         self.prog._timeline_register_pool.append(register)
         self.claimed.add(register)
+        self.reserved.add(register)
         return register
 
     def scratch(self, index: int) -> str:
-        return self.prog.add_reg(f"_timeline_tmp_{index}", allow_reuse=True)
+        # Mask intermediates and flat-top addresses are plan-local. Address
+        # preparation is last; PulseByReg consumes them before the next plan.
+        # Borrow only dead compiler ends, never QICK/author native scratch.
+        if index not in self.scratch_registers:
+            self.scratch_registers[index] = self.allocate()
+        return self.scratch_registers[index]
 
     def _operation_storage(
         self,
@@ -1305,10 +1318,29 @@ class RuntimeMath(TimedMacro):
                 right + left.offset if operator == "+" else right - left.offset
             )
         else:
-            left = self.cycles(left)
-            rhs = (
-                self.cycles(right).register if isinstance(right, RuntimeEnd) else right
+            # Offset materializations belong to this operation, not its callers.
+            # Their final reader is the WriteRegOp below. Original operands and
+            # target aliases remain reserved for their existing consumers.
+            temporaries: list[str] = []
+            if left.offset:
+                left = self.cycles(left)
+                temporaries.append(left.register)
+            if isinstance(right, RuntimeEnd):
+                if right.offset:
+                    right = self.cycles(right)
+                    temporaries.append(right.register)
+                rhs = right.register
+            else:
+                rhs = right
+            register = self.allocate() if target is None else target
+            self.operations.append(
+                WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)
             )
+            for temporary in temporaries:
+                if temporary != register:
+                    self.claimed.discard(temporary)
+                    self.reserved.discard(temporary)
+            return register, 0
         register = self.allocate() if target is None else target
         self.operations.append(
             WriteRegOp(dst=register, lhs=left.register, op=operator, rhs=rhs)

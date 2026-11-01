@@ -12,17 +12,17 @@ from zcu_tools.core.simulation import (
     SamplingIdentity,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 
 from tests.program._acquisition_soc import AcquisitionSoc
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import FixedRawShots, raw_of, request_of
 
 
 def make_program(env):
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[
             PulseReadoutCfg(

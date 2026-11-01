@@ -19,10 +19,9 @@ from zcu_tools.program.v2 import (
     LoadValue,
     Pulse,
     Readout,
-    Repeat,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -47,22 +46,6 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class ZigZagScanCfg(ConfigBase):
-    reps: Annotated[
-        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
     X90_pulse: Annotated[Pulse.Cfg, FieldMeta(label="X90 Pulse")]
     X180_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="X180 Pulse")] = None
@@ -83,6 +66,23 @@ class ZigZagScanCfg(ConfigBase):
             description="X90 repeats in pairs; each count adds one pi rotation.",
         ),
     ] = "X180_pulse"
+
+    reps: Annotated[
+        int, FieldMeta(label="Reps", description="Number of repetitions per round.")
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
 
 
 @dataclass(frozen=True)
@@ -107,10 +107,10 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
     # (int64) outer; both a.u. -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[ZigZagScanResult, ZigZagScanCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("values", "Sweep value", "a.u."),
-            AxesSpec.Axis("times", "Times", "a.u.", dtype=np.int64),
+            AxesSpec.Axis("values", label="Sweep value", unit="a.u."),
+            AxesSpec.Axis("times", label="Times", unit="a.u.", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=ZigZagScanResult,
         cfg_type=ZigZagScanCfg,
         cfg_schema_version="3.0",
@@ -176,50 +176,37 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
                 zigzag_signal2real(data),
             ),
         )
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            # Preserve the preparation pulse before changing the repeated pulse.
-            X90_pulse = deepcopy(sched.cfg.X90_pulse)
-            repeat_pulse = getattr(sched.cfg, repeat_on)
-            if repeat_pulse is None:
-                raise ValueError(f"Repeat on pulse {repeat_on} not found")
-
-            x_sweep = getattr(sched.cfg, x_key)
-            assert x_sweep is not None
-            x_param = sweep2param(x_info["param_key"], x_sweep)
-            repeat_pulse.set_param(x_info["param_key"], x_param)
-
-            # X90 repeats in pairs so both choices add one pi rotation per count.
-            # LoadValue needs plain Python ints rather than NumPy scalar types.
-            loop_n: list[int] = [
-                int(x) for x in (2 * times if repeat_on == "X90_pulse" else times)
-            ]
-
-            # 3. Load the count on the board, prepare X90, repeat, then read out.
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    LoadValue(
-                        "load_repeat_count",
-                        values=loop_n,
-                        idx_reg="times",
-                        val_reg="repeat_count",
-                    ),
-                    Reset("reset", cfg=sched.cfg.reset),
-                    Pulse("X90_pulse", cfg=X90_pulse),
-                    Repeat(
-                        "zigzag_loop",
-                        n="repeat_count",
-                        # int() cast: numpy scalar types are not plain int to pyright.
-                        range_hint=(int(min(times)), int(max(times))),
-                    ).add_content(Pulse(f"loop_{repeat_on}", cfg=repeat_pulse)),
-                    Readout("readout", cfg=sched.cfg.readout),
-                )
-                .declare_sweep("times", len(times))
-                .declare_sweep(x_key, x_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            builder.add_loop("times", len(times))
+            x_param = builder.add_sweep(x_key, x_sweep)
+            # Preparation keeps its original settings; only the repeat is swept.
+            repeated_cfg = deepcopy(repeat_pulse)
+            repeated_cfg.set_param(x_key, x_param)
+            loop_n = [
+                int(n) for n in (2 * times if repeat_on == "X90_pulse" else times)
+            ]
+            builder.emit(
+                LoadValue(
+                    "load_repeat_count",
+                    values=loop_n,
+                    idx_reg="times",
+                    val_reg="repeat_count",
+                )
+            )
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("X90_pulse", cfg.X90_pulse))
+            builder.delay_by_timeline()
+            with builder.repeat(
+                "zigzag_loop", "repeat_count", range_hint=(min(loop_n), max(loop_n))
+            ):
+                builder.emit(Pulse(repeat_on, repeated_cfg))
+                builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return ZigZagScanResult(
             times=times, values=values, signals=signals_buffer.array

@@ -60,7 +60,7 @@ class T1Tunables(BaseModel):
     current lifetime guess into delay-grid end/relax delay in microseconds.
     sweep_mode/relax_mode choose history-based auto timing or fixed endpoints/
     relax_delay_us. Auto timing uses the sweep bounds and relax_min_us; fixed
-    values bypass those clamps. uniform selects linear or exponential sampling.
+    values bypass those clamps. sampling selects linear or decay-spaced delays.
     max_rel_err and max_fit_residual are strict upper bounds for error/lifetime
     and normalized residual RMS. min_lifetime_points defaults to 5 fitted delays
     in [0, lifetime], including endpoints. Invalid quality diagnostics reject.
@@ -109,9 +109,9 @@ class T1Tunables(BaseModel):
     relax_min_us: float = Field(
         default=1.0, ge=0, description="Auto relaxation lower bound in us"
     )
-    uniform: bool = Field(
-        default=True,
-        description="Linear sampling; false selects exponential delay spacing",
+    sampling: Literal["linear", "decay"] = Field(
+        default="linear",
+        description="Linear or decay-spaced delays within the same window",
     )
     max_model_window_factor: float = Field(
         default=2.0,

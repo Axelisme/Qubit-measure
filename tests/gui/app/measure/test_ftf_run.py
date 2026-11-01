@@ -20,7 +20,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -30,6 +29,7 @@ from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import ftf_document
 
 pytestmark = pytest.mark.sim
@@ -55,7 +55,7 @@ def FTFAcquisitionAdapter_run(cfg, *, context):
             ro_length=0.03,
         ).build("ro"),
     ]
-    program = ModularProgramV2(
+    program = compile_modules(
         context.soccfg, modules=modules, sweep=[("point", 3)], reps=2
     )
     acquired = program.acquire(

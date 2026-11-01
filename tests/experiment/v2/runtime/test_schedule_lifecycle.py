@@ -9,20 +9,18 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
-from tests.experiment.v2.runtime._flow_cfg import FlowCfg
-from tests.experiment.v2.runtime._flow_cfg import make_flow_cfg as _cfg
-from tests.experiment.v2.runtime._flow_fakes import RecordingBuffer
+from tests.experiment.v2.runtime._flow_fakes import FakeScalarProgram, RecordingBuffer
 
 
 def test_schedule_uses_own_stop_signal():
     stop = StopSignal()
     stop.set()
 
-    with Schedule(_cfg(), scope=Scope("run", stop=stop)) as sched:
+    with Schedule(scope=Scope("run", stop=stop)) as sched:
         assert sched.is_stop() is True
 
     stop.clear_stop()
-    with Schedule(_cfg(), scope=Scope("run", stop=stop)) as sched:
+    with Schedule(scope=Scope("run", stop=stop)) as sched:
         assert sched.is_stop() is False
         sched.set_stop()
         assert stop.is_set() is False
@@ -47,7 +45,7 @@ def test_schedule_attaches_only_inside_context_and_releases_on_every_exit(
     monkeypatch.setattr(time, "time", lambda: now)
     buffer = SignalBuffer(1, on_update=render, update_interval=0.1)
     root = Scope("run", stop=stop)
-    sched = Schedule(_cfg(), buffer, scope=root)
+    sched = Schedule(buffer, scope=root)
     assert sched.stop is stop
     try:
         with sched:
@@ -65,18 +63,16 @@ def test_schedule_attaches_only_inside_context_and_releases_on_every_exit(
         assert ending in {"error", "flush_error"}
     assert root.active_path == "run"
     assert not stop.is_set()
-    with Schedule(_cfg(), scope=root) as following:
+    with Schedule(scope=root) as following:
         assert following.scope.sequence == 2
         assert not following.is_stop()
 
 
 def test_schedule_operations_require_context():
-    sched = Schedule(
-        _cfg(rounds=1), SignalBuffer((1,), dtype=np.float64), scope=Scope("run")
-    )
+    sched = Schedule(SignalBuffer((1,), dtype=np.float64), scope=Scope("run"))
 
     try:
-        sched.prog_builder("soc", "soccfg", marker="x")
+        sched.run_acquire(FakeScalarProgram("soccfg", modules=[], sweep=None), "soc")
     except RuntimeError as exc:
         assert "with Schedule" in str(exc)
     else:
@@ -90,7 +86,7 @@ def test_schedule_body_interrupt_propagates_with_buffer_intact(loop: str) -> Non
     interrupt = KeyboardInterrupt("host body stopped")
 
     def run() -> None:
-        with Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop)) as sched:
+        with Schedule(buffer, scope=Scope("run", stop=stop)) as sched:
             steps = (
                 sched.scan("point", range(3))
                 if loop == "scan"
@@ -113,7 +109,7 @@ def test_schedule_body_other_exception_still_propagates(error: BaseException) ->
     buffer = SignalBuffer(3, dtype=np.float64)
     stop = StopSignal()
     buffer.set(np.array([7.0, np.nan, np.nan]))
-    sched = Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop))
+    sched = Schedule(buffer, scope=Scope("run", stop=stop))
     with pytest.raises(type(error)) as caught, sched:
         raise error
     assert caught.value is error
@@ -124,7 +120,7 @@ def test_schedule_body_other_exception_still_propagates(error: BaseException) ->
 def test_schedule_repeat_obeys_stop_signal():
     seen: list[int] = []
 
-    with Schedule(_cfg(), scope=Scope("run")) as sched:
+    with Schedule(scope=Scope("run")) as sched:
         for index, _step in sched.repeat("round", 3):
             seen.append(index)
             sched.set_stop()
@@ -150,7 +146,7 @@ def test_schedule_exit_publishes_throttled_final_data(
     buffer = SignalBuffer((2, 2), on_update=render)
     partial = np.array([[1.0, 2.0], [np.nan, np.nan]])
     final = np.array([[1.0, 2.0], [3.0, 4.0]])
-    with Schedule(FlowCfg(), buffer, scope=Scope("run")) as sched:
+    with Schedule(buffer, scope=Scope("run")) as sched:
         buffer.set(partial)
         buffer.set(final)
         assert len(updates) == 1  # The second write is still throttled.
@@ -180,7 +176,7 @@ def test_schedule_exit_does_not_repeat_delivered_update(
     monkeypatch.setattr(time, "time", lambda: now)
     buffer = SignalBuffer((2,), on_update=render)
     final = np.array([1.0, 2.0])
-    with Schedule(FlowCfg(), buffer, scope=Scope("run")):
+    with Schedule(buffer, scope=Scope("run")):
         buffer.set(np.array([1.0, np.nan]))
         buffer.set(final)
         assert len(updates) == 1
@@ -211,7 +207,7 @@ def test_schedule_body_exception_is_not_replaced_by_final_callback_failure(
     monkeypatch.setattr(time, "time", lambda: now)
     buffer = SignalBuffer((2,), on_update=render)
     stop = StopSignal()
-    sched = Schedule(FlowCfg(), buffer, scope=Scope("run", stop=stop))
+    sched = Schedule(buffer, scope=Scope("run", stop=stop))
     error = (
         KeyboardInterrupt("body interrupted")
         if interrupted
@@ -237,7 +233,7 @@ def test_schedule_step_data_operations_require_context() -> None:
     step = None
     root = [{"signals": np.full((1,), np.nan)}]
 
-    with Schedule(_cfg(), RecordingBuffer(root), scope=Scope("run")) as sched:
+    with Schedule(RecordingBuffer(root), scope=Scope("run")) as sched:
         _, step = next(sched.scan("point", [0]))
         assert step.path == (0,)
 

@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Repeat
+from zcu_tools.program.v2 import TimelineBuilder
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -13,12 +13,14 @@ from tests.program.v2.simulation.time_observations import time_us, times_us
 @pytest.mark.parametrize("placement", ["direct", "repeat"])
 def test_mux_frontend_preserves_timing_and_declared_tone_order(placement):
     mux = native_mux().build("mux_probe")
-    module = Repeat("container", 1).add_content(mux) if placement == "repeat" else mux
-    prog = ModularProgramV2(
-        mux_soccfg(),
-        modules=[module],
-        reps=2,
-    )
+    builder = TimelineBuilder(mux_soccfg(), reps=2)
+    if placement == "repeat":
+        with builder.repeat("container", 1):
+            builder.emit(mux)
+    else:
+        builder.emit(mux)
+    builder.delay_by_timeline()
+    prog = builder.build()
     env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
     try:
         try:
@@ -62,7 +64,7 @@ def test_fixed_mux_compile_profile_runs_real_mux_with_every_adc(channels):
     factory = getattr(mocksoc, "make_mux_mock_soccfg", None)
     assert factory is not None, "offline mux acquisition needs a fixed compile profile"
     soccfg = factory(3, 5, gen_ch=0, ro_chs=channels)
-    prog = ModularProgramV2(
+    prog = compile_modules(
         soccfg,
         modules=[native_mux(channels).build("mux")],
         reps=3,

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
@@ -22,21 +20,19 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Classify,
-    Delay,
     DelayAuto,
     LoadValue,
     Pulse,
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
-    sweep2param,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 
-from zcu_lab.v2.support import LinePlot, live_line
+from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 
@@ -65,6 +61,11 @@ class T1Result:
 
 
 class T1Cfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -81,11 +82,6 @@ class T1Cfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    uniform: Annotated[bool, FieldMeta(label="Uniform (linear) sweep")] = False
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg | list[float], FieldMeta(label="Delay", unit="us")]
 
 
 @dataclass(frozen=True)
@@ -100,193 +96,142 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[T1Result, T1Cfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("initial_states", "Initial State", "None", dtype=np.int64),
-            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6, dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "initial_states", label="Initial State", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
+            ),
         ),
-        z=AxesSpec.Z("counts", "Class counts", "count", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Class counts", unit="count", dtype=np.float64),
         data_variable=DataVariable("counts"),
         result_type=T1Result,
         cfg_type=T1Cfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/t1",
     )
 
-    def _make_viewers(self, plots: Plots) -> tuple[LinePlot, LinePlot]:
-        def configure_axes(ax: Axes) -> None:
-            ax.set_ylim(0.0, 1.0)
+    def _live_update(self, plots: Plots, lengths: NDArray[np.float64]):
+        figure, _ = plots.subplots(ncols=2, num="measurement", figsize=(12, 5))
+        axes = figure.axes
+        lines = [live_line(ax, num_lines=3) for ax in axes]
+        for ax in axes:
+            ax.set(xlabel="Time (us)", ylabel="Amplitude", ylim=(0.0, 1.0))
             for line, label in zip(
                 ax.lines, ("Ground", "Excited", "Other"), strict=True
             ):
                 line.set_label(label)
             ax.legend()
 
-        figure, _ = plots.subplots("measurement", ncols=2, figsize=(12, 5))
-        ax_g, ax_e = figure.axes
-        return (
-            live_line(
-                plots,
-                "measurement",
-                "Time (us)",
-                "Amplitude",
-                num_lines=3,
-                configure_axes=configure_axes,
-                axes=ax_g,
-            ),
-            live_line(
-                plots,
-                "measurement",
-                "Time (us)",
-                "Amplitude",
-                num_lines=3,
-                configure_axes=configure_axes,
-                axes=ax_e,
-            ),
-        )
+        @plots.on_plot_thread
+        def update(counts: NDArray[np.float64]):
+            populations = counts / counts.sum(axis=-1, keepdims=True)
+            return (
+                *lines[0].set(lengths, populations[:, 0].T),
+                *lines[1].set(lengths, populations[:, 1].T),
+            )
+
+        figure.show()
+        return update
 
     def run(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
-        """Measure relaxation from both the unflipped and pi-prepared states.
+        """Measure I/pi-prepared relaxation with a linear or decay-sampled delay.
 
-        Reset, apply I or pi, wait a variable delay, then classify readout shots
-        using the first readout tone's circle classifier in raw normalized ADC
-        coordinates. Only that readout contributes to the saved class counts. Return quantized
-        delays in us and summed G/E/Other counts with shape
-        (delay, initial state, population state).
-        Uniform sampling requires a SweepCfg; nonuniform sampling also accepts
-        an explicit delay list and rejects collisions on the hardware time grid.
+        cfg.delay is a time window in us. Linear sampling sweeps delay on-board;
+        decay sampling concentrates points in the decay and uses a cycle table.
+        Return quantized lengths in us and summed G/E/Other counts with shape
+        (delay, initial state, population state). The first readout tone supplies
+        classification. Decay points that collide on the time grid raise ValueError.
         """
-        # Prepare classification without changing the caller's cfg.
-        cfg = deepcopy(cfg)
-        pulse_readout = isinstance(cfg.readout, PulseReadoutCfg)
-        ro_ch = (
-            cfg.readout.ro_ch
-            if isinstance(cfg.readout, PulseReadoutCfg)
-            else cfg.readout.tones[0].ro_ch
-        )
-        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
-        axis = Classify(
-            "readout", tone=None if pulse_readout else 0, classifier=classifier
-        )
-        if cfg.uniform:
-            return self._run_uniform(cfg, axis, context=context)
-        return self._run_non_uniform(cfg, axis, context=context)
+        if cfg.sampling == "linear":
+            return self._run_linear(cfg, context=context)
+        return self._run_decay(cfg, context=context)
 
-    def _run_uniform(
-        self, cfg: T1Cfg, axis: Classify, *, context: RunContext
-    ) -> T1Result:
-        soc, soccfg = context.soc, context.soccfg
-        length_sweep = cfg.length
-        assert isinstance(length_sweep, SweepCfg), "uniform mode requires SweepCfg"
-        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
-
-        # Display and retain G/E/Other for both preparations.
-        init_g, init_e = self._make_viewers(context.plots)
-
-        def plot_fn(counts: NDArray[np.float64]) -> None:
-            populations = counts / counts.sum(axis=-1, keepdims=True)
-            init_g.update(lengths, populations[:, 0].T)
-            init_e.update(lengths, populations[:, 1].T)
-
-        buffer = SignalBuffer(
-            (len(lengths), 2, 3),
-            dtype=np.float64,
-            on_update=plot_fn,
-        )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            run_cfg = sched.cfg
-
-            # Sweep delay outside the I/pi branch, then read out each state.
-            inner_length_sweep = run_cfg.length
-            assert isinstance(inner_length_sweep, SweepCfg), (
-                "uniform mode requires SweepCfg"
+    def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
+        update = self._live_update(context.plots, lengths)
+        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
+        with Schedule(buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            length_param = sweep2param("length", inner_length_sweep)
-            builder = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add(
-                    Reset("reset", run_cfg.reset),
-                    Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
-                    Delay("t1_delay", delay=length_param),
-                    Readout("readout", run_cfg.readout),
-                )
-                .declare_sweep("length", inner_length_sweep)
-                .declare_sweep("ge", 2)
-            )
-
-            # Sum classified shots across rounds, preserving partial counts.
+            delay = builder.add_sweep("delay", cfg.delay)
+            builder.add_loop("ge", 2)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.delay_by_timeline()
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.delay_by_timeline()
+            builder.timeline_inc(delay)
+            builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
-            _ = builder.run_program_summed(
+            axis = Classify(
+                "readout",
+                tone=0
+                if not isinstance(cfg.readout, PulseReadoutCfg)
+                and len(cfg.readout.tones) > 1
+                else None,
+            )
+            sched.run_acquire_summed(
                 program,
-                sums2signal_fn=lambda sums: sums,
+                context.soc,
                 processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
-
         return T1Result(lengths=lengths, counts=buffer.array)
 
-    def _run_non_uniform(
-        self, cfg: T1Cfg, axis: Classify, *, context: RunContext
-    ) -> T1Result:
-        soc, soccfg = context.soc, context.soccfg
-        delay_table = materialize_nonuniform_t1_delays(cfg.length, soccfg=soccfg)
-        length_cycles = delay_table.cycles
-        lengths = delay_table.times_us
-
-        # Display and retain G/E/Other for both preparations.
-        init_g, init_e = self._make_viewers(context.plots)
-
-        def plot_fn(counts: NDArray[np.float64]) -> None:
-            populations = counts / counts.sum(axis=-1, keepdims=True)
-            init_g.update(lengths, populations[:, 0].T)
-            init_e.update(lengths, populations[:, 1].T)
-
-        buffer = SignalBuffer(
-            (len(lengths), 2, 3),
-            dtype=np.float64,
-            on_update=plot_fn,
-        )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            run_cfg = sched.cfg
-
-            # Load each quantized delay before preparing and reading both states.
-            builder = (
-                sched.prog_builder(
-                    soc,
-                    soccfg,
-                    reps=sched.cfg.reps,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add(
-                    LoadValue(
-                        "load_t1_delay",
-                        values=list(length_cycles),
-                        idx_reg="length_idx",
-                        val_reg="t1_delay_cycle",
-                        auto_compress=False,
-                    ),
-                    Reset("reset", run_cfg.reset),
-                    Branch("ge", [], Pulse("pi_pulse", run_cfg.pi_pulse)),
-                    DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", run_cfg.readout),
-                )
-                .declare_sweep("length_idx", len(length_cycles))
-                .declare_sweep("ge", 2)
+    def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
+        table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
+        lengths = table.times_us
+        update = self._live_update(context.plots, lengths)
+        buffer = SignalBuffer((len(lengths), 2, 3), dtype=np.float64, on_update=update)
+        with Schedule(buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                context.soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-
-            # Sum classified shots across rounds, preserving partial counts.
+            builder.add_loop("delay", len(lengths))
+            builder.add_loop("ge", 2)
+            builder.emit(
+                LoadValue(
+                    "load_t1_delay",
+                    values=list(table.cycles),
+                    idx_reg="delay",
+                    val_reg="t1_delay_cycle",
+                    auto_compress=False,
+                )
+            )
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.delay_by_timeline()
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.delay_by_timeline()
+            builder.emit(DelayAuto("t1_delay", t="t1_delay_cycle"))
+            builder.emit(Readout("readout", cfg.readout))
             program = builder.build()
-            _ = builder.run_program_summed(
+            axis = Classify(
+                "readout",
+                tone=0
+                if not isinstance(cfg.readout, PulseReadoutCfg)
+                and len(cfg.readout.tones) > 1
+                else None,
+            )
+            sched.run_acquire_summed(
                 program,
-                sums2signal_fn=lambda sums: sums,
+                context.soc,
                 processor=shot_sums(program, [axis]),
                 rounds=cfg.rounds,
             )
-
         return T1Result(lengths=lengths, counts=buffer.array)
 
     def analyze(
@@ -334,7 +279,9 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         t1_b = 1.0 / lambdas[1]
 
         # 3. Show both preparations with the fitted populations and time scales.
-        fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(12, 6), sharey=True)
+        fig, _ = plots.subplots(
+            num="fit", nrows=1, ncols=2, figsize=(12, 6), sharey=True
+        )
         ax1, ax2 = fig.axes
 
         fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")

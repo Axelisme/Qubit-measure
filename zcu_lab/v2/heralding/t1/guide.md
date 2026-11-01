@@ -14,7 +14,7 @@
 
 ## Run 與 Analyze
 
-Delay 使用 us。Uniform 開啟時掃描線性延遲；關閉時使用共用 T1 非均勻取樣。硬體量化後重疊的點會報錯，不會減點。
+Delay 使用 us，只接受 Start/Stop/Expts 時間窗。Sampling 選 linear 時掃描線性延遲；選 decay 時使用共用 T1 衰減段取樣。硬體量化後重疊的點會報錯，不會減點。
 
 Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Relax delay 是每 shot 結束後的等待。序列依序為 herald readout、π pulse、delay、signal readout。沒有額外的 reset pulse。
 

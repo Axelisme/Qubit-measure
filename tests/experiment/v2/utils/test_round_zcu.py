@@ -11,8 +11,10 @@ from zcu_tools.experiment.v2.utils.round_zcu import (
     round_zcu_time,
     sweep2array,
 )
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, PulseCfg, make_mock_soccfg
+from zcu_tools.program.v2 import Pulse, PulseCfg, make_mock_soccfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._timeline import compile_modules
 
 
 @pytest.fixture
@@ -101,11 +103,11 @@ def test_frequency_preview_matches_compiled_absolute_rf(mixer: float, reverse: b
             waveform=ConstWaveformCfg(length=0.25),
         ),
     )
-    prog = ModularProgramV2(soccfg, [pulse], sweep=[("freq", 5)])
+    prog = compile_modules(soccfg, [pulse], sweep=[("freq", 5)])
     actual = sweep2array(
         sweep, "freq", {"soccfg": soccfg, "gen_ch": 0, "mixer_freq": mixer}
     )
-    expected = prog.get_pulse_param(pulse.pulse_id, "freq", as_array=True)
+    expected = prog.get_pulse_param(pulse.pulse_name(prog), "freq", as_array=True)
     np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
     assert np.all(np.diff(actual) < 0) if reverse else np.all(np.diff(actual) > 0)
 
@@ -125,8 +127,8 @@ def test_scalar_frequency_matches_compiler_signed_and_matched(freq, ro_ch):
         ),
         ro_ch=ro_ch,
     )
-    prog = ModularProgramV2(soccfg, [pulse])
-    expected = prog.get_pulse_param(pulse.pulse_id, "freq", as_array=False)
+    prog = compile_modules(soccfg, [pulse])
+    expected = prog.get_pulse_param(pulse.pulse_name(prog), "freq", as_array=False)
     assert round_zcu_freq(freq, soccfg, 0, ro_ch) == pytest.approx(
         expected, rel=0, abs=1e-10
     )

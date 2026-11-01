@@ -8,7 +8,7 @@
 
 ## Runtime
 
-[runtime](runtime/README.md) 提供 SignalBuffer、Schedule、ProgramBuilder 與 ResultTree。一般核心實驗編排 host loop 與 program acquire。Buffer、stop、retry 與 lifecycle 契約由 runtime 擁有。
+[runtime](runtime/README.md) 提供 SignalBuffer、Schedule、run_acquire 與 ResultTree。一般核心實驗編排 host loop 與 program acquire。Buffer、stop、retry 與 lifecycle 契約由 runtime 擁有。
 
 ## v2 工具與實驗輔助
 

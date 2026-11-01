@@ -27,6 +27,7 @@ from zcu_tools.experiment.axes_spec import (
 )
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_freq, round_zcu_gain
 from zcu_tools.plotting.plots import Plots
@@ -36,6 +37,7 @@ from zcu_tools.program.v2 import (
     Pulse,
     PulseReadout,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
 )
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
@@ -70,6 +72,15 @@ class RamanGFCfg(ConfigBase):
     phase and delays remain operator inputs. Calibration belongs to saved readout.
     """
 
+    drive: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Raman drive",
+            description="Select a sampled sqrt(cos) arbitrary waveform. Frequency and gain come from the scan.",
+        ),
+    ]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+
     carrier_mhz: Annotated[
         float,
         FieldMeta(
@@ -87,14 +98,6 @@ class RamanGFCfg(ConfigBase):
     ] = "frequency_area"
     detuning: Annotated[SweepCfg, FieldMeta(label="Two-photon detuning", unit="MHz")]
     gain: Annotated[GainSweep, FieldMeta(label="Area via drive gain", unit="a.u.")]
-    drive: Annotated[
-        Pulse.Cfg,
-        FieldMeta(
-            label="Raman drive",
-            description="Select a sampled sqrt(cos) arbitrary waveform. Frequency and gain come from the scan.",
-        ),
-    ]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     shots: Annotated[int, FieldMeta(label="Shots per point")] = Field(
         default=1024, ge=6
     )
@@ -210,22 +213,29 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         counts = SignalBuffer((len(point_gains), 3), dtype=np.float64)
 
         # One carrier and one envelope, immediately followed by the same readout.
-        with Schedule(cfg, counts, scope=context.scope) as sched:
+        with Schedule(counts, scope=context.scope) as sched:
             for point, step in sched.scan("point", range(len(point_gains))):
-                cfg.drive.freq = float(point_frequencies[point])
-                cfg.drive.gain = float(point_gains[point])
-                builder = step.prog_builder(
-                    context.soc,
+                builder = TimelineBuilder(
                     context.soccfg,
                     reps=cfg.shots,
                     initial_delay=cfg.initial_delay,
                     relax_delay=cfg.relax_delay,
-                ).add(Pulse("raman", cfg.drive), PulseReadout("readout", cfg.readout))
+                )
+                builder.emit(
+                    Pulse(
+                        "drive",
+                        cfg.drive,
+                        freq=float(point_frequencies[point]),
+                        gain=float(point_gains[point]),
+                    )
+                )
+                builder.emit(PulseReadout("readout", cfg.readout))
                 program = builder.build()
-                builder.run_program_summed(
+                step.run_acquire_summed(
                     program,
+                    context.soc,
                     processor=shot_sums(program, [Classify("readout")]),
-                    sums2signal_fn=lambda sums: sums.reshape(3),
+                    options=RunOptions(converter=lambda sums: sums.reshape(3)),
                 )
 
         result = RamanGFResult(

@@ -21,13 +21,11 @@ from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     GainSweep,
-    Join,
     Pulse,
     Readout,
     Reset,
-    SoftDelay,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 from zcu_tools.utils.process import rotate2real
 
@@ -56,6 +54,15 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 
 
 class AcStarkRamseyCfg(ConfigBase):
+    reset: Reset.Cfg | None = None
+    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
+    readout: Readout.Cfg
+    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
+    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
+    detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -72,14 +79,6 @@ class AcStarkRamseyCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Reset.Cfg | None = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Ramsey pi/2 pulse")]
-    stark_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Stark resonator tone")]
-    readout: Readout.Cfg
-    wait_delay: Annotated[float, FieldMeta(label="Tone settling delay", unit="us")]
-    gain: Annotated[GainSweep, FieldMeta(label="Stark gain", unit="a.u.")]
-    length: Annotated[SweepCfg, FieldMeta(label="Ramsey delay", unit="us")]
-    detune: Annotated[float, FieldMeta(label="Phase-ramp detune", unit="MHz")] = 0.0
 
 
 class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
@@ -88,13 +87,13 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
     # gains stored in a.u. -> IDENTITY; lengths stored in s on disk -> US_TO_S
     AXES_SPEC: ClassVar[AxesSpec[AcStarkRamseyResult, AcStarkRamseyCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("lengths", "Time", "s", scale=1e-6),
-            AxesSpec.Axis("gains", "Stark Pulse Gain", "a.u."),
+            AxesSpec.Axis("lengths", label="Time", unit="s", scale=1e-6),
+            AxesSpec.Axis("gains", label="Stark Pulse Gain", unit="a.u."),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=AcStarkRamseyResult,
         cfg_type=AcStarkRamseyCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="twotone/ge/ac_stark_ramsey",
     )
 
@@ -121,7 +120,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         gain_sweep = cfg.gain
 
         lengths = sweep2array(
-            cfg.length,
+            cfg.delay,
             "time",
             {"soccfg": soccfg, "gen_ch": cfg.stark_pulse.ch},
         )
@@ -149,44 +148,34 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
 
         # At each Stark gain, sweep the Ramsey delay and its programmed phase.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            for _, step in sched.scan("resonator gain", gains.tolist()):
-                step_cfg = step.cfg
-
-                step_cfg.stark_pulse.set_param("gain", step.value)
-                length_sweep = step_cfg.length
-                length_param = sweep2param("length", length_sweep)
-
-                _ = (
-                    step.prog_builder(
-                        soc,
-                        soccfg,
-                        reps=step.cfg.reps,
-                        relax_delay=step.cfg.relax_delay,
-                    )
-                    .add(
-                        Reset("reset", step_cfg.reset),
-                        # Join waits for both the tone and the Ramsey branch.
-                        Join(
-                            Pulse("stark_pulse", step_cfg.stark_pulse),
-                            [
-                                SoftDelay("wait_delay", delay=step_cfg.wait_delay),
-                                Pulse("pi2_pulse1", step_cfg.pi2_pulse),
-                                SoftDelay("t2_delay", delay=length_param),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg=step_cfg.pi2_pulse.with_updates(
-                                        phase=step_cfg.pi2_pulse.phase
-                                        + 360 * cfg.detune * length_param
-                                    ),
-                                ),
-                            ],
-                        ),
-                        Readout("readout", step_cfg.readout),
-                    )
-                    .declare_sweep("length", length_sweep)
-                    .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            for _, step in sched.scan("gain", gains.tolist()):
+                builder = TimelineBuilder(
+                    soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
                 )
+                length = builder.add_sweep("delay", cfg.delay)
+                if cfg.reset is not None:
+                    builder.emit(Reset("reset", cfg.reset))
+                builder.fork("default", into=["stark", "ramsey"])
+                builder.emit(
+                    Pulse("stark_pulse", cfg.stark_pulse, gain=step.value),
+                    timeline="stark",
+                )
+                with builder.timeline("ramsey"):
+                    builder.timeline_inc(cfg.wait_delay)
+                    pi2_pulse = Pulse("pi2_pulse", cfg.pi2_pulse)
+                    builder.emit(pi2_pulse)
+                    builder.timeline_inc(length)
+                    builder.emit(
+                        Pulse(
+                            "pi2_pulse",
+                            cfg.pi2_pulse,
+                            phase=cfg.pi2_pulse.phase + 360 * cfg.detune * length,
+                        )
+                    )
+                builder.join("stark", "ramsey", into="default")
+                builder.emit(Readout("readout", cfg.readout))
+                step.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return AcStarkRamseyResult(gains, lengths, signals_buffer.array)
 

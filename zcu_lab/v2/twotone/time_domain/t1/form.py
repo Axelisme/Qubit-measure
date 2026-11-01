@@ -16,18 +16,6 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
     relax_delay = t1_initial_time(ctx.parameters, multiplier=5.0)
     return Form(
         T1Cfg,
-        field_order=(
-            "reset",
-            "pi_pulse",
-            "readout",
-            "length",
-            "uniform",
-            "reps",
-            "rounds",
-            "acquire_retry",
-            "earlystop_snr",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "pi_pulse": Slot(
@@ -42,9 +30,9 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),
                 ),
             ),
-            "length": Range(0.0, relax_delay, expts=101),
+            "delay": Range(0.0, relax_delay, expts=101),
             "relax_delay": relax_delay,
-            "uniform": True,
+            "sampling": "linear",
             "reps": 1000,
             "rounds": 10,
         },

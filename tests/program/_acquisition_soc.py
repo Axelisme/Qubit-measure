@@ -2,10 +2,12 @@
 
 import numpy as np
 from qick import QickConfig
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modular import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+from tests.program._timeline import compile_modules
 
 
 class AcquisitionSoc(QickConfig):
@@ -74,8 +76,9 @@ def make_chunk_acquisition(
     *,
     reps: int = 4,
     reads: int = 2,
+    reps_innermost: bool = False,
     sweep: list[tuple[str, int]] | None = None,
-) -> tuple[AcquisitionSoc, ModularProgramV2]:
+) -> tuple[AcquisitionSoc, TimelineProgramV2]:
     """Build unbound single-ADC shots with repeated reads and optional point sweeps."""
     soc, soccfg = make_acquisition_soc()
     readouts = [
@@ -90,10 +93,11 @@ def make_chunk_acquisition(
         ).build(f"readout_{index}")
         for index in range(reads)
     ]
-    program = ModularProgramV2(
+    program = compile_modules(
         soccfg,
         modules=readouts,
         reps=reps,
+        reps_innermost=reps_innermost,
         sweep=None if sweep is None else [(name, count) for name, count in sweep],
     )
     return soc, program

@@ -55,15 +55,4 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "delay",
-            "reps",
-            "rounds",
-            "relax_delay",
-            "initial_delay",
-        ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

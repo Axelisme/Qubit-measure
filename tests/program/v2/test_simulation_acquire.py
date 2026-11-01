@@ -14,14 +14,14 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.builder import TimelineBuilder
-from zcu_tools.program.v2.modular import ModularProgramV2
-from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.simulate.evolution import Cancelled
 
+from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
 
@@ -33,22 +33,26 @@ def environment(**kwargs):
     return importlib.import_module(name).white_noise(**kwargs)
 
 
+def readout_modules(env, *, channels=(0,), samples=16, reads=1):
+    return [
+        PulseReadoutCfg(
+            gen_ch=ch,
+            ro_ch=ch,
+            nqz=1,
+            freq=100.0,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.1),
+            ro_length=env.soccfg.cycles2us(samples, ro_ch=ch),
+        ).build(f"readout_{ch}_{read}")
+        for read in range(reads)
+        for ch in channels
+    ]
+
+
 def program(env, *, reps=2, channels=(0,), samples=16, reads=1, sweep=None):
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
-        modules=[
-            PulseReadoutCfg(
-                gen_ch=ch,
-                ro_ch=ch,
-                nqz=1,
-                freq=100.0,
-                gain=0.1,
-                waveform=ConstWaveformCfg(length=0.1),
-                ro_length=env.soccfg.cycles2us(samples, ro_ch=ch),
-            ).build(f"readout_{ch}_{read}")
-            for read in range(reads)
-            for ch in channels
-        ],
+        modules=readout_modules(env, channels=channels, samples=samples, reads=reads),
         reps=reps,
         sweep=sweep,
     )
@@ -644,11 +648,10 @@ def test_numeric_source_round_snapshots_packing_and_fixed_quantized_controls():
     )
 
     env = environment(std_adc=0, seed=12, n_gens=2, n_readouts=2)
-    prog = program(env, reps=1, channels=(1, 0), samples=4)
+    modules = readout_modules(env, channels=(1, 0), samples=4)
+    prog = compile_modules(env.soccfg, modules=modules, reps=1)
     other = program(env, reps=1)
-    readout = prog.modules[0]
-    if not isinstance(readout, PulseReadout):
-        raise AssertionError("synthetic program must provide its declared readout")
+    readout = modules[0]
     value = 0.0
     seen = []
 
@@ -782,7 +785,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
         pre_delay=1.5,
         trig_offset=0.25,
     )
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[cfg.build("readout")],
         reps=1,
@@ -800,7 +803,7 @@ def test_scalar_readout_trigger_is_relative_to_module_not_pulse_predelay(ro_leng
     assert times_us(request.time_base, request.readouts[0].trigger_ticks) == (
         expected_trigger,
     )
-    expected_pulse = prog.cycles2us(prog.us2cycles(1.5))
+    expected_pulse = prog.cycles2us(646)  # ceil(1.5 us * 430.08 MHz)
     assert (
         time_us(request.time_base, request.materialize_point(0).events[0].start_ticks)
         == expected_pulse

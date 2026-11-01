@@ -25,12 +25,11 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Pulse,
     PulseReadout,
     Reset,
     SweepCfg,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support import live_line
@@ -54,6 +53,11 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class DispersiveCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Initial pulse")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit preparation pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -70,11 +74,6 @@ class DispersiveCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Initial pulse")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit preparation pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
 
 
 @dataclass(frozen=True)
@@ -139,10 +138,10 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
     # inner freqs stores MHz on disk (disk Hz) -> scale=1e6; outer ge index -> IDENTITY
     AXES_SPEC: ClassVar[AxesSpec[DispersiveResult, DispersiveCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),
-            AxesSpec.Axis("ge", "Amplitude", "None", dtype=np.int64),
+            AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
+            AxesSpec.Axis("ge", label="Amplitude", unit="None", dtype=np.int64),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=DispersiveResult,
         cfg_type=DispersiveCfg,
         cfg_schema_version="3.0",
@@ -183,25 +182,21 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         )
 
         # Sweep readout frequency for both preparations in the same FPGA program.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            cfg = sched.cfg
-            freq_sweep = cfg.freq
-            cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
-
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg.reset),
-                    Pulse("init_pulse", cfg.init_pulse),
-                    Branch("ge", [], Pulse("qub_pulse", cfg.qub_pulse)),
-                    PulseReadout("readout", cfg.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire(rounds=cfg.rounds)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            builder.add_loop("ge", 2)
+            freq_param = builder.add_sweep("freq", cfg.freq)
+
+            if cfg.reset is not None:
+                builder.emit(cfg.reset.build("reset"))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            with builder.branch(by="ge", align_timeline=False) as cases, cases.case(1):
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+            builder.emit(PulseReadout("readout", cfg.readout, freq=freq_param))
+            prog = builder.build()
+            sched.run_acquire(prog, soc, rounds=cfg.rounds)
 
         return DispersiveResult(freqs=freqs, signals=signals_buffer.array)
 

@@ -12,11 +12,11 @@ from zcu_tools.cfg_model import ModuleCfg as CoreModuleCfg
 if TYPE_CHECKING:
     from zcu_tools.resources.context import LibrarySnapshot
 
+from ..utils import param2str
 from .base import AbsModuleCfg, Module, resolve_module_ref
 from .computed_pulse import ComputedPulse
-from .control import Branch, Repeat
-from .delay import Delay, DelayAuto, Join, SoftDelay
-from .dmem import LoadValue, LoadWord, ScanWith
+from .delay import Delay, DelayAuto, SoftDelay
+from .dmem import LoadValue, LoadWord
 from .pulse import Pulse, PulseCfg, PulseOverrides, TableLengthPulse
 from .readout import (
     AbsReadout,
@@ -46,7 +46,7 @@ from .reset import (
     TwoPulseResetCfg,
     TwoPulseResetOverrides,
 )
-from .util import param2str, round_timestamp
+from .util import round_timestamp
 from .waveform import (
     AbsWaveform,
     AbsWaveformCfg,

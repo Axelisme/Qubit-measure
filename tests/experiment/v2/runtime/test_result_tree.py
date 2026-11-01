@@ -102,8 +102,7 @@ def test_result_tree_schedule_set_emits_per_measurement_event() -> None:
     events: list[ResultUpdateEvent[TreeEnv, Any]] = []
     tree.measurement_node("freq").subscribe(events.append)
 
-    cfg: dict[str, object] = {}
-    with Schedule(cfg, tree, env=env, scope=Scope("run")) as sched:
+    with Schedule(tree, env=env, scope=Scope("run")) as sched:
         for _, flux_step in sched.scan("flux", env.flux_values):
             if flux_step.index == 1:
                 flux_step.child("freq").set_data(
@@ -131,8 +130,7 @@ def test_result_tree_child_buffer_writes_leaf_and_flushes_node() -> None:
     events: list[ResultUpdateEvent[TreeEnv, Any]] = []
     tree.measurement_node("freq").subscribe(events.append)
 
-    cfg: dict[str, object] = {}
-    with Schedule(cfg, tree, env=env, scope=Scope("run")) as sched:
+    with Schedule(tree, env=env, scope=Scope("run")) as sched:
         _, flux_step = next(sched.scan("flux", env.flux_values))
         raw_step = flux_step.child("freq").child("raw")
         local_buffer = raw_step.buffer((2,), dtype=np.float64)
@@ -153,8 +151,7 @@ def test_result_tree_invalidates_only_updated_measurement_cache() -> None:
     freq_before = tree.measurement_result("freq")
     t1_before = tree.measurement_result("t1")
 
-    cfg: dict[str, object] = {}
-    with Schedule(cfg, tree, env=env, scope=Scope("run")) as sched:
+    with Schedule(tree, env=env, scope=Scope("run")) as sched:
         _, flux_step = next(sched.scan("flux", env.flux_values))
         flux_step.child("freq").child("fit").set_data(np.array(9.0), flush=True)
 
@@ -177,8 +174,7 @@ def test_signal_buffer_flush_keeps_public_update_shape() -> None:
         update_interval=None,
     )
 
-    cfg: dict[str, object] = {}
-    with Schedule(cfg, buffer, scope=Scope("run")) as sched:
+    with Schedule(buffer, scope=Scope("run")) as sched:
         for value, step in sched.scan("point", [0.0, 1.0]):
             step.set_data(value + 1.0, flush=True)
 

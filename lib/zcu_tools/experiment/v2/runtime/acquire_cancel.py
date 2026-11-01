@@ -8,7 +8,7 @@ from zcu_tools.experiment.stop_signal import StopSignal
 class AcquireCancelFlag:
     """Combine acquire-scope cancellation with a normal data stop condition.
 
-    external is the acquire child token owned by ProgramBuilder. Create a fresh
+    external is the acquire child token owned by AcquisitionRunner. Create a fresh
     instance per attempt. set() ends acquisition when the authored data condition
     is satisfied; it never cancels a scope or records partial completion.
     """

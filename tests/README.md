@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -397,7 +397,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 ### Level 1 — `make_mock_soccfg()`（實作在 `lib/zcu_tools/program/v2/mocksoc.py`，由 `tests/program/v2/conftest.py` 匯入）
 
 用真實 `QickConfig` 從純 dict 建構，不需要任何硬體。  
-所有 `ModularProgramV2.__init__` → `compile()` → `_initialize/_body` 都跑真實 QICK ASM。
+`TimelineBuilder.build()` 與手寫 `TimelineProgramV2` 的 compile／initialize／body 都跑真實 QICK ASM。
 
 **Gen 規格**（`axis_signal_gen_v6`，HAS_MIXER=False）：
 
@@ -415,7 +415,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 **為什麼不用 `axis_sg_int4_v1`？**  
 這個 gen 是 `HAS_MIXER=True`，`declare_gen()` 會強制要求 `mixer_freq`，  
-但 `Pulse.init_pulse()` 只在 `cfg.mixer_freq is not None` 時才傳 `mixer_freq`，  
+但 `Pulse.declare()` 只在 `cfg.mixer_freq is not None` 時才傳 `mixer_freq`，
 導致 `RuntimeError: generator N has a digital mixer, but no mixer_freq was defined`。
 
 **哪些欄位必須手動補齊？**  
@@ -427,7 +427,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Level 2 — `MagicMock` (`tests/program/v2/modules/conftest.py`)
 
-用於 `modules/` 下的**純單元測試**，只測試 cfg parsing / set_param / allow_rerun 等邏輯，  
+用於 `modules/` 下的**純單元測試**，只測試 cfg parsing、constructor overrides 與 declaration calls，
 不觸發真實 QICK 編譯。`mock_prog.soccfg` 是一個最小 dict，不需完整硬體欄位。
 
 ### IR 結構測試（`tests/program/v2/ir/`）
@@ -442,7 +442,7 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Experiment v2 Schedule runtime tests
 
-`tests/experiment/v2/runtime/test_program_builder.py` 覆蓋 ProgramBuilder 建構、cfg 投影與 program-side sweep；`test_program_acquire.py` 覆蓋 integrated／decimated acquire、caller-owned program cache、progress 與 raw conversion。`test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
+`tests/experiment/v2/runtime/test_run_acquire.py` 覆蓋 integrated／decimated／summed acquire、live update、raw conversion、retry、data stop、外部取消與 `ScheduleOutcome`。Program 建構與 sweep 的公開接縫由 `tests/program/v2/test_timeline_builder.py` 覆蓋。
 `test_schedule.py` 覆蓋 typed env、host scan／repeat；`test_schedule_buffers.py` 覆蓋 root buffer 註冊、child buffer 同步與 shape validation。`test_schedule_lifecycle.py` 擁有 context 與 stop token 生命週期，`test_signal_buffer_flush.py` 擁有 SignalBuffer 寫入通知、manual update 與 flush。
 `test_result_tree.py` 覆蓋 executor-owned ResultTree 的 node set、direct node env event / missing-env fast-fail、child buffer、per-measurement subscription、root broadcast、flush 與 ordinary SignalBuffer regression。個別 experiment module 更接近資料編排，不新增 migration-specific tests；若要測 QICK compile 行為，放到 `tests/program/v2/` 或既有 sim integration 測試。
 
@@ -486,7 +486,7 @@ and the template engine contract.
 outcome histories, pruning, partial ADC observations and elementwise terminal-only
 runtime parity against direct Engine/ADC composition. Cavity field continuation
 stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
-`ftf/test_drift.py`. Repeated frontend readouts use `Repeat` and the public
+`ftf/test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered
@@ -611,30 +611,28 @@ RO_FREQ  = 100.0    # MHz，axis_readout_v2 有效
 
 `PulseReadoutCfg` 使用平鋪的 `gen_ch`、`ro_ch` 與單一 `freq`。Runtime 先宣告 generator 與 ADC，再建立 readout configuration；caller 不另建 Pulse 或 DirectReadout 配置。
 
-### Register-driven Repeat
+### Register-driven repeat 與 branch
+
+以 `TimelineBuilder` 或 `TimelineProgramV2` 直接寫控制流程。
+Count register 必須有合法 producer，例如以 `LoadValue` 從既有 sweep index 載入：
 
 ```python
-r = Repeat("r_cnt", "n_count")   # "r_cnt" = counter reg，"n_count" = count reg（sweep 建立）
-r.add_content(...)
-_make_prog(modules=[r], sweep=[("n_count", 4)])
+builder.add_loop("scan", 3)
+builder.emit(LoadValue("count", [0, 2, 1], idx_reg="scan", val_reg="n_count"))
+with builder.repeat("r_cnt", "n_count", range_hint=(0, 2)):
+    builder.emit(drive)
 ```
 
-`Repeat(name, n_reg)` 中的 `name` 是 `OpenLoopReg.preprocess` 新建的 counter register，  
-`n_reg` 是已存在的 count register（由 sweep 的 `add_loop` 建立）。  
-**不能**用同一個名字 `Repeat("x", "x") + sweep=[("x", N)]`——sweep 和 OpenLoopReg 都會試著建 `"x"`，造成 `NameError: register name 'x' already exists`。
-
-### Branch
-
-需搭配外部 sweep loop，且 `compare_reg` 名稱要與 sweep loop 名稱一致：
+Branch 使用既有 sweep loop 的 zero-based index，case 內只累加局部 timeline：
 
 ```python
-Branch("sel", [...], [...])  # compare_reg 預設為 "sel"
-_make_prog(modules=[b], sweep=[("sel", 2)])
+builder.add_loop("sel", 2)
+with builder.branch(by="sel", align_timeline=True) as cases:
+    with cases.case(1):
+        builder.emit(drive)
 ```
 
-### Join / merge_max_length UserWarning
-
-`modules/util.py::merge_max_length()` 在兩個 length 值相等且無法 reduce 時發出 UserWarning（「Detected multiple overlapping lengths」）。在測試 `Join` 時，若兩個 branch 的 `SoftDelay` delay 值相同（例如都是 `0.0`），round 後都為 `0.0`，會觸發此 warning。解法：使用不同的 delay 值（例如 `0.1` vs `0.5`），讓 `merge_max_length` 可選出明確最大值。
+Parallel body 用 fork／emit／join，經公開 compiled timing 檢查共同 origin 與逐點最大結尾。
 
 ### LoadValue 壓縮閾值
 

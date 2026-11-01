@@ -22,8 +22,8 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     shot_sums,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
@@ -54,6 +54,11 @@ class FreqResult:
 
 
 class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
+    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
+    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -70,11 +75,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
-    probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Probe freq", unit="MHz")]
 
 
 @dataclass(frozen=True)
@@ -87,10 +87,14 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
 
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("population_states", "Population", "None", dtype=np.int64),
-            AxesSpec.Axis("freqs", "Drive Freq", "Hz", scale=1e6, dtype=np.float64),
+            AxesSpec.Axis(
+                "population_states", label="Population", unit="None", dtype=np.int64
+            ),
+            AxesSpec.Axis(
+                "freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64
+            ),
         ),
-        z=AxesSpec.Z("counts", "Counts", "shots", dtype=np.float64),
+        z=AxesSpec.Z("counts", label="Counts", unit="shots", dtype=np.float64),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         data_variable=DataVariable("counts"),
@@ -116,7 +120,11 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         # Keep the G/E/Other contract for every declared ADC.
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
-            "readout", tone=None if isinstance(cfg.readout, PulseReadoutCfg) else 0
+            "readout",
+            tone=0
+            if not isinstance(cfg.readout, PulseReadoutCfg)
+            and len(cfg.readout.tones) > 1
+            else None,
         )
 
         freqs = sweep2array(
@@ -134,42 +142,39 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
                 line.set_label(label)
             ax.legend()
 
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Pulse freq",
-            "Population",
-            num_lines=3,
-            configure_axes=configure_axes,
-        )
+        figure, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse freq", ylabel="Population")
+        viewer = live_line(ax, num_lines=3)
+        configure_axes(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]):
+            return viewer.set(freqs, (data / data.sum(axis=-1, keepdims=True)).T)
+
+        figure.show()
         buffer = SignalBuffer(
             (len(freqs), 3),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(
-                freqs, (data / data.sum(axis=-1, keepdims=True)).T
-            ),
+            on_update=update,
         )
-        with Schedule(cfg, buffer, scope=context.scope) as sched:
-            run_cfg = sched.cfg
-            freq_sweep = run_cfg.freq
-            run_cfg.probe_pulse.set_param("freq", sweep2param("freq", freq_sweep))
+        with Schedule(buffer, scope=context.scope) as sched:
+            freq_sweep = cfg.freq
 
             # Repeat reset/preparation/probe/readout at each hardware sweep point.
-            builder = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add_reset("reset", run_cfg.reset)
-                .add_pulse("init_pulse", run_cfg.init_pulse)
-                .add_pulse("probe_pulse", run_cfg.probe_pulse)
-                .add_readout("readout", run_cfg.readout)
-                .declare_sweep("freq", freq_sweep)
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
+            freq = builder.add_sweep("freq", freq_sweep)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            builder.emit(Pulse("init_pulse", cfg.init_pulse))
+            builder.emit(Pulse("probe_pulse", cfg.probe_pulse, freq=freq))
+            builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            builder.run_program_summed(
+            sched.run_acquire_summed(
                 prog,
+                soc,
                 processor=shot_sums(prog, [read_axis]),
-                sums2signal_fn=lambda sums: sums,
                 rounds=cfg.rounds,
             )
 
@@ -203,7 +208,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
 
         populations = correct_populations(populations, options.confusion_matrix)
 
-        _, ax = plots.subplots("fit", figsize=(6, 6))
+        _, ax = plots.subplots(num="fit", figsize=(6, 6))
 
         ax.plot(
             freqs,

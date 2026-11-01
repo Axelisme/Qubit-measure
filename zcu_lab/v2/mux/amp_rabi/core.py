@@ -6,7 +6,7 @@ MuxAmpRabiExp.run(config, *, context) sweeps participant gains simultaneously.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxAmpRabiToneCfg has a fixed name, a required drive and gain bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -16,7 +16,7 @@ does not resolve component identities.
 Sweep ranges may differ; cfg.expts supplies one positive point count shared by
 selected tones. Point p pairs each active tone's p-th value,
 not a Cartesian product. One program advances all gains in a shared hardware loop.
-Each point executes optional common reset, Join of independent drive pulses,
+Each point executes optional common reset, parallel emission of independent drive pulses,
 then active mux readout. Branches start together; short branches wait for the
 longest branch at that point. Pre/post delays stay
 unchanged. There is no end alignment, end padding or sweep-wide maximum padding.
@@ -87,12 +87,11 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_zcu_gain, sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
+from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
@@ -101,9 +100,14 @@ from zcu_tools.program.v2.modules import (
 from zcu_tools.program.v2.utils import sweep2param
 
 from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult
+from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
 from zcu_lab.v2.twotone.rabi.amp_rabi.core import AmpRabiAnalyzeOptions
 
 from .analysis import MuxAmpRabiFit, analyze_amplitude
@@ -125,11 +129,23 @@ class MuxPulseScan:
     point_pulses: Sequence[Sequence[PulseCfg]]
 
 
+class MuxAmpRabiToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent gain bounds in gain a.u.."""
+
+    gain: Annotated[ToneRangeCfg | None, FieldMeta(unit="")] = None
+
+    def require_gain(self) -> ToneRangeCfg:
+        """Return active gain bounds, or raise ValueError naming this tone."""
+        if self.gain is None:
+            raise ValueError(f"{self.name}: active tone requires gain")
+        return self.gain
+
+
 class MuxAmpRabiCfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     reset and readout hold the common modules. tones contains one
-    MuxToneCfg per original readout position, with unique nonempty names.
+    MuxAmpRabiToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
@@ -138,6 +154,17 @@ class MuxAmpRabiCfg(ConfigBase):
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
+
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxAmpRabiToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True,
+        gt=0,
+        title="Expts",
+        description="Hardware scan point count shared by all tones.",
+    )
+    participants: list[StrictInt]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -163,16 +190,6 @@ class MuxAmpRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
-        strict=True,
-        gt=0,
-        title="Expts",
-        description="Hardware scan point count shared by all tones.",
-    )
-    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxAmpRabiCfg:
@@ -180,8 +197,9 @@ class MuxAmpRabiCfg(ConfigBase):
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
-            if max(abs(tone.require_sweep().start), abs(tone.require_sweep().stop)) > 1:
-                raise ValueError(f"tones[{index}].sweep gains must be in [-1,1]")
+            require_tone_value(tone.gain, ("tones", index, "gain"))
+            if max(abs(tone.require_gain().start), abs(tone.require_gain().stop)) > 1:
+                raise ValueError(f"tones[{index}].gain gains must be in [-1,1]")
         return self
 
 
@@ -204,9 +222,7 @@ def prepare_amplitude_scan(cfg: MuxAmpRabiCfg, *, soccfg: QickConfig) -> MuxPuls
         tone = cfg.tones[index]
         drive = tone.require_drive()
         nominal = sweep2array(
-            make_sweep(
-                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
-            ),
+            make_sweep(tone.require_gain().start, tone.require_gain().stop, cfg.expts),
             "none",
         )
         actual = round_zcu_gain(nominal, soccfg, drive.ch)
@@ -258,65 +274,63 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
         )
 
         # Keep live traces on each drive's own quantized gain axis.
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Pulse gain",
-                "Magnitude (a.u.)",
+        viewers = []
+        for index in scan.indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Pulse gain",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in scan.indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(scan.coordinates[row], np.abs(data[:, row]))
-
-        # Normalize averaged ADC I/Q using the compiled readout windows.
-        def averaged_signal(
-            prog: ModularProgramV2, acquired: Sequence[NDArray[np.float64]]
-        ) -> NDArray[np.complex128]:
-            # Builder copies modules; read IQ through the initialized program.
-            for module in prog.modules:
-                if isinstance(module, MuxReadout) and module.name == "readout":
-                    iq = module.collect_iq(prog, acquired, read_index=0)
-                    return iq[..., 0] + 1j * iq[..., 1]
-            raise ValueError("Mux scan program is missing its named MuxReadout")
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
+            )
 
         # Advance each drive gain in the same tProc point loop.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = []
             for index in scan.indices:
                 tone = cfg.tones[index]
-                drive = tone.require_drive().model_copy(deep=True)
-                drive.set_param(
-                    "gain",
-                    sweep2param(
-                        "point",
-                        make_sweep(
-                            tone.require_sweep().start,
-                            tone.require_sweep().stop,
-                            cfg.expts,
-                        ),
+                gain = sweep2param(
+                    "point",
+                    make_sweep(
+                        tone.require_gain().start, tone.require_gain().stop, cfg.expts
                     ),
                 )
-                drives.append(Pulse(f"drive_{index}", drive, pulse_id=f"drive_{index}"))
+                drives.append(
+                    Pulse(
+                        f"drive_{index}",
+                        tone.require_drive(),
+                        gain=gain,
+                        pulse_id=f"drive_{index}",
+                    )
+                )
 
             # Reset -> simultaneous drives -> fixed readout after the longest drive.
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(Join(*drives), MuxReadout("readout", readout))
-                .declare_sweep("point", cfg.expts)
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
+            builder.add_loop("point", cfg.expts)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"drive_{index}" for index in scan.indices]
+            builder.fork("default", into=timelines)
+            for drive, timeline in zip(drives, timelines, strict=True):
+                builder.emit(drive, timeline=timeline)
+            builder.join(*timelines, into="default")
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
 
             # Integer register steps can differ from independently rounded points.
             # Keep live plots, analysis and persistence on the compiled gain grid.
@@ -325,8 +339,13 @@ class MuxAmpRabiExp(Experiment[MuxSweepResult, MuxAmpRabiCfg]):
                 scan.coordinates[row] = prog.get_pulse_param(
                     f"drive_{index}", "gain", as_array=True
                 )
-            _ = builder.run_program(
-                prog, raw2signal_fn=partial(averaged_signal, prog), rounds=cfg.rounds
+            _ = sched.run_acquire(
+                prog,
+                context.soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module)
+                ),
             )
 
         # Publish final plots and return tone-major data, including unmeasured NaNs.

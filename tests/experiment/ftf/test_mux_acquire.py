@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.ftf import ftf
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.resources.ftf import parse_ftf
 from zcu_tools.resources.ftf.schema import MuxReadoutSource
 
 from tests.experiment._ftf_templates import settings
+from tests.program._timeline import compile_modules
 from tests.resources._ftf_data import mux_document
 
 pytestmark = pytest.mark.sim
@@ -68,7 +68,7 @@ def jumping_program(env, mux):
             waveform=ConstWaveformCfg(length=0.020),
             ro_length=0.026,
         )
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[readout.build("readout")],
         reps=64,
@@ -224,7 +224,7 @@ def test_one_environment_acquires_mux_then_pulse_without_reconfiguration(
             ro_length=0.026,
         )
         for module, expected_channels in ((mux, channels), (pulse, (0,))):
-            prog = ModularProgramV2(
+            prog = compile_modules(
                 env.soccfg,
                 modules=[module.build("readout")],
                 reps=2,
@@ -260,7 +260,7 @@ def test_yaml_mux_program_produces_each_tones_raw_shots(channels, mode):
                 for i, ch in enumerate(channels)
             ],
         )
-        prog = ModularProgramV2(
+        prog = compile_modules(
             env.soccfg,
             modules=[module.build("joint")],
             reps=7,

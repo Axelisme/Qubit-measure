@@ -17,6 +17,14 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 class HeraldingT2EchoInput(ConfigBase):
     """Captured pulses, delay sweep and phase advance in fringes per step."""
 
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
+    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
+    detune_ratio: Annotated[
+        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
+    ] = 0.1
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -47,33 +55,12 @@ class HeraldingT2EchoInput(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    pi2_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi/2 Pulse")]
-    pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    length: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
-    detune_ratio: Annotated[
-        float, FieldMeta(label="Detune ratio (fringes/step)", decimals=3)
-    ] = 0.1
 
 
 def make_form(ctx: FormContext) -> Form[HeraldingT2EchoInput]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         HeraldingT2EchoInput,
-        field_order=(
-            "reset",
-            "pi2_pulse",
-            "pi_pulse",
-            "readout",
-            "length",
-            "detune_ratio",
-            "reps",
-            "rounds",
-            "acquire_retry",
-            "earlystop_snr",
-            "relax_delay",
-        ),
         tree={
             "reset": Slot("$qubit.module.reset"),
             "pi_pulse": Slot("$qubit.module.x180")
@@ -85,7 +72,7 @@ def make_form(ctx: FormContext) -> Form[HeraldingT2EchoInput]:
             "readout": Slot("$resonator.module.readout")
             if ctx.has("$resonator.module.readout")
             else Template("readout", bindings={"resonator": "$resonator"}),
-            "length": Range(0.0, "1.5 * $qubit.t2e", expts=101),
+            "delay": Range(0.0, "1.5 * $qubit.t2e", expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

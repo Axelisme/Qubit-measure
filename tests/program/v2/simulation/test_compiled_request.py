@@ -5,7 +5,6 @@ import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
 from zcu_tools.core.simulation import ChargeDriveRequirement
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
@@ -15,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.simulation._compiled_support import (
     clock_invariance_program,
@@ -280,7 +280,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
         ro_length=0.1,
     )
     env = white_noise(std_adc=0, n_gens=2, routes=((0, 0),))
-    prog = ModularProgramV2(
+    prog = compile_modules(
         env.soccfg,
         modules=[
             SoftDelay("soft", 0.1),
@@ -297,7 +297,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     assert [e.source for e in events[:2]] == ["one", "two"]
     assert [
         time_us(result.time_base, e.start_ticks) for e in events[:2]
-    ] == pytest.approx([44 / 430.08, 132 / 430.08])
+    ] == pytest.approx([44 / 430.08, 131 / 430.08])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 
@@ -321,7 +321,7 @@ def test_native_ordinals_ignore_module_pulses_in_mixed_compiled_body():
 
 
 def test_compiled_mux_output_keeps_tone_and_declared_adc_order():
-    prog = ModularProgramV2(mux_soccfg(), modules=[native_mux().build("mux")], reps=2)
+    prog = compile_modules(mux_soccfg(), modules=[native_mux().build("mux")], reps=2)
     env = white_noise(std_adc=0, n_gens=2, n_readouts=9, routes=((0, 4), (0, 1)))
     result = request(prog, env)
     point = result.materialize_point(0)

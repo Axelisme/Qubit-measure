@@ -4,9 +4,7 @@ import pytest
 from qick.asm_v2 import QickParam, QickProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.util import (
-    calc_max_length,
     get_fclk,
-    merge_max_length,
     round_timestamp,
 )
 
@@ -37,31 +35,3 @@ def test_round_timestamp():
     assert math.isclose(
         rounded.spans["a"], 3.0 / 430.08
     )  # 0.005 * 430.08 = 2.1504 -> ceil 3.0
-
-
-def test_calc_max_length():
-    assert calc_max_length(1.0, 2.0) == 2.0
-    assert calc_max_length(3.0, 1.5) == 3.0
-
-    param1 = QickParam(start=1.0, spans={"a": 2.0})  # maxval = 3.0
-    param2 = QickParam(start=2.0, spans={"a": -2.0})  # maxval = 2.0
-
-    with pytest.warns(UserWarning, match="using the maximum length for calculation"):
-        res = calc_max_length(param1, param2)
-        assert res == 3.0
-
-
-def test_merge_max_length():
-    assert merge_max_length(1.0) == 1.0
-    assert merge_max_length(1.0, 2.0, 3.0) == 3.0
-
-    with pytest.raises(ValueError, match="at least one length must be provided"):
-        merge_max_length()
-
-    param1 = QickParam(start=1.0, spans={"a": 1.0})  # maxval 2.0
-    param2 = QickParam(start=1.5, spans={"b": 2.0})  # maxval 3.5
-    param3 = QickParam(start=0.5, spans={"c": 0.1})  # maxval 0.6
-
-    with pytest.warns(UserWarning, match="Using the maximum length among them"):
-        res = merge_max_length(param1, param2, param3)
-        assert res == 3.5

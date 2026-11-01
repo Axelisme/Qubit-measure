@@ -10,9 +10,7 @@ from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.core.simulation import RoundSignals, SamplingIdentity
 from zcu_tools.device import DeviceManager
 from zcu_tools.experiment.ftf import FTFSource, ftf, plan_template
-from zcu_tools.program.v2 import ModularProgramV2
-from zcu_tools.program.v2.modules.control import Repeat
-from zcu_tools.program.v2.modules.delay import Delay
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import MuxReadoutCfg
 from zcu_tools.program.v2.simulation import IntegratedRound
 from zcu_tools.resources.ftf.schema import MuxReadoutSource
@@ -249,15 +247,12 @@ def herald_program(env, *, reads=2, reps=256):
             for ch, freq in ((4, 6000.0), (1, 6200.0))
         ],
     )
-    prog = ModularProgramV2(
-        env.soccfg,
-        modules=[
-            Repeat("reads", reads).add_content(
-                [mux.build("joint"), Delay("wait", 0.020)]
-            )
-        ],
-        reps=reps,
-    )
+    builder = TimelineBuilder(env.soccfg, reps=reps)
+    with builder.repeat("reads", reads):
+        builder.emit(mux.build("joint"))
+        builder.timeline_inc(0.020)
+    builder.delay_by_timeline()
+    prog = builder.build()
     # QICK counts the trigger macro once; Repeat executes it once per event.
     prog.set_reads_per_shot(reads)
     return prog

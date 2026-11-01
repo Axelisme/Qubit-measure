@@ -52,13 +52,4 @@ def make_form(ctx: FormContext) -> Form[MuxGECfg]:
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
-        field_order=(
-            "participants",
-            "tones",
-            "reset",
-            "readout",
-            "shots",
-            "relax_delay",
-            "initial_delay",
-        ),
     ).with_seed_metadata(mux_readout_seed_metadata(readout))

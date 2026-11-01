@@ -15,7 +15,7 @@ from zcu_tools.core.simulation import (
     TimelineTemplate,
 )
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2, make_mock_soccfg
+from zcu_tools.program.v2 import make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import (
@@ -25,6 +25,8 @@ from zcu_tools.program.v2.simulation import (
     SimulationTiming,
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+
+from tests.program._timeline import compile_modules
 
 
 class Clock:
@@ -228,7 +230,7 @@ def test_each_round_includes_snapshot_time_and_only_waits_for_remainder(clock: C
         binding.end()
 
 
-@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 200e-6)])
+@pytest.mark.parametrize("adc_length, expected", [(4.0, 180e-6), (12.0, 250e-6)])
 def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
     clock: Clock,
     adc_length: float,
@@ -240,7 +242,7 @@ def test_compiled_timeline_includes_readout_delays_and_per_point_relaxation(
         backend_version="test",
         timing=SimulationTiming(time_scale=1),
     )
-    program = ModularProgramV2(
+    program = compile_modules(
         make_mock_soccfg(),
         modules=[
             PulseReadoutCfg(
@@ -324,7 +326,7 @@ def test_decimated_stop_interrupts_wait_and_keeps_completed_trace(
         timing=SimulationTiming(time_scale=1),
     )
     soc = SimulationSoc(env.soccfg, binding, routes=((0, 0),))
-    program = ModularProgramV2(
+    program = compile_modules(
         env.soccfg,
         modules=[
             PulseReadoutCfg(

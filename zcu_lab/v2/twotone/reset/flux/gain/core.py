@@ -14,13 +14,12 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     GainSweep,
     Pulse,
     PulseReset,
     Readout,
     Reset,
-    sweep2param,
+    TimelineBuilder,
 )
 
 from zcu_lab.v2.support.reset import reset_scan_buffer
@@ -66,23 +65,6 @@ class GainAnalysis:
 class GainCfg(ConfigBase):
     """Sweep a const flux reset's gain between two calibrated pi switches."""
 
-    reps: Annotated[
-        int,
-        FieldMeta(label="Reps", description="Repetitions per branch/gain per round."),
-    ] = 1
-    rounds: Annotated[
-        int,
-        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
-    ] = 1
-    relax_delay: Annotated[
-        float,
-        FieldMeta(
-            label="Relax delay",
-            unit="us",
-            decimals=3,
-            description="Relaxation delay after each repetition.",
-        ),
-    ] = 1.0
     reset: Annotated[
         Reset.Cfg | None,
         FieldMeta(label="Reset", description="Optional reset before each branch."),
@@ -104,19 +86,43 @@ class GainCfg(ConfigBase):
     readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
     gain: Annotated[GainSweep, FieldMeta(label="Gain", unit="a.u.")]
 
+    reps: Annotated[
+        int,
+        FieldMeta(label="Reps", description="Repetitions per branch/gain per round."),
+    ] = 1
+    rounds: Annotated[
+        int,
+        FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
+    ] = 1
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relax delay",
+            unit="us",
+            decimals=3,
+            description="Relaxation delay after each repetition.",
+        ),
+    ] = 1.0
+
 
 class GainExp(Experiment[GainResult, GainCfg]):
     AXES_SPEC: ClassVar[AxesSpec[GainResult, GainCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("gains", "Flux reset gain", "a.u."),
+            AxesSpec.Axis("gains", label="Flux reset gain", unit="a.u."),
             AxesSpec.Axis(
-                "after_pi", "After reset pi (0=off, 1=on)", "None", dtype=np.int64
+                "after_pi",
+                label="After reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
             AxesSpec.Axis(
-                "before_pi", "Before reset pi (0=off, 1=on)", "None", dtype=np.int64
+                "before_pi",
+                label="Before reset pi (0=off, 1=on)",
+                unit="None",
+                dtype=np.int64,
             ),
         ),
-        z=AxesSpec.Z("signals", "Signal", "a.u.", dtype=np.complex128),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GainResult,
         cfg_type=GainCfg,
         cfg_schema_version="3.0",
@@ -151,26 +157,33 @@ class GainExp(Experiment[GainResult, GainCfg]):
         )
 
         # Each gain has the Cartesian product of the two calibrated pi switches.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            sched.cfg.tested_reset.set_param(
-                "gain", sweep2param("gain", sched.cfg.gain)
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
             )
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", sched.cfg.reset),
-                    Branch("before_pi", [], Pulse("pi_before", sched.cfg.pi_pulse)),
-                    PulseReset("tested_reset", sched.cfg.tested_reset),
-                    Branch("after_pi", [], Pulse("pi_after", sched.cfg.pi_pulse)),
-                    Readout("readout", sched.cfg.readout),
-                )
-                .declare_sweep("before_pi", 2)
-                .declare_sweep("after_pi", 2)
-                .declare_sweep("gain", sched.cfg.gain)
-                .build_and_acquire(rounds=cfg.rounds)
-            )
+            builder.add_loop("before_pi", 2)
+            builder.add_loop("after_pi", 2)
+            gain = builder.add_sweep("gain", cfg.gain)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            # Keep the selected pi duration; the off case must not gain idle time.
+            builder.delay_by_timeline()
+            with (
+                builder.branch(by="before_pi", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.delay_by_timeline()
+            builder.emit(PulseReset("tested_reset", cfg.tested_reset, gain=gain))
+            builder.delay_by_timeline()
+            with (
+                builder.branch(by="after_pi", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("pi_pulse", cfg.pi_pulse))
+            builder.delay_by_timeline()
+            builder.emit(Readout("readout", cfg.readout))
+            sched.run_acquire(builder.build(), soc, rounds=cfg.rounds)
 
         return GainResult(gains=gains, signals=signals_buffer.array)
 

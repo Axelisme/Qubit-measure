@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.cfg_model import ConstWaveformCfg, PulseReadoutSpec, PulseSpec
 from zcu_tools.datafile import load, load_labber_data
@@ -174,10 +175,14 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
     cause = RuntimeError("producer failed")
 
     class Program:
-        def acquire(self, *_args: object, **_kwargs: object) -> np.ndarray:
+        def acquire(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             raise cause
 
-        def acquire_decimated(self, *_args: object, **_kwargs: object) -> np.ndarray:
+        def acquire_decimated(
+            self, *_args: object, **_kwargs: object
+        ) -> list[NDArray[np.float64]]:
             raise NotImplementedError
 
     class Core(SavingCore):
@@ -187,10 +192,8 @@ def test_producer_failure_preserves_previous_notebook_record_and_evidence() -> N
             if self.fail:
                 if context is None:
                     raise ValueError("RunContext required")
-                with Schedule(config, SignalBuffer((3,)), scope=context.scope) as sched:
-                    sched.prog_builder(context.soc, context.soccfg).run_program(
-                        Program()
-                    )
+                with Schedule(SignalBuffer((3,)), scope=context.scope) as sched:
+                    sched.run_acquire(Program(), context.soc)
             return super().run(config, context=context)
 
     core = Core()

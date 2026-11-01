@@ -11,18 +11,19 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker.moment import MomentTracker
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
-    Branch,
     Pulse,
     PulseReadout,
     Readout,
     Reset,
     SweepCfg,
+    TimelineBuilder,
     sweep2param,
 )
 from zcu_tools.utils.process import SmoothingOptions, SmoothMethod, smooth_signal1d
@@ -39,6 +40,14 @@ class FreqResult:
 
 
 class FreqCfg(ConfigBase):
+    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
+    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
+    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
+    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
+        default=0.0, ge=0.0
+    )
+
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
     ] = 1
@@ -55,13 +64,6 @@ class FreqCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: Annotated[Reset.Cfg | None, FieldMeta(label="Reset")] = None
-    qub_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Qubit pulse")]
-    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
-    freq: Annotated[SweepCfg, FieldMeta(label="Readout freq", unit="MHz")]
-    skew_penalty: Annotated[float, FieldMeta(label="Skew penalty", decimals=3)] = Field(
-        default=0.0, ge=0.0
-    )
 
 
 @dataclass(frozen=True)
@@ -82,8 +84,8 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
 
     # freq stores Hz on disk -> scale=1e6 (disk = memory * 1e6)
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("freqs", "Frequency", "Hz", scale=1e6),),
-        z=AxesSpec.Z("signals", "Signal", "a.u."),
+        axes=(AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),),
+        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=FreqResult,
         cfg_type=FreqCfg,
         cfg_schema_version="3.0",
@@ -130,33 +132,39 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         )
 
         # Compare pulse-off/on branches at each hardware-swept readout frequency.
-        with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-            freq_sweep = sched.cfg.freq
+        with Schedule(signals_buffer, scope=context.scope) as sched:
+            freq_sweep = cfg.freq
             freq_param = sweep2param("freq", freq_sweep)
-            sched.cfg.readout.set_param("freq", freq_param)
+            cfg.readout.set_param("freq", freq_param)
             tracker = MomentTracker()
 
-            _ = (
-                sched.prog_builder(
-                    soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-                )
-                .add(
-                    Reset("reset", cfg=sched.cfg.reset),
-                    Branch("ge", [], Pulse("qub_pulse", cfg=sched.cfg.qub_pulse)),
-                    Readout("readout", cfg=sched.cfg.readout),
-                )
-                .declare_sweep("ge", 2)
-                .declare_sweep("freq", freq_sweep)
-                .build_and_acquire(
-                    raw2signal_fn=lambda _raw: snr_as_signal(
+            builder = TimelineBuilder(
+                soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
+            )
+            builder.add_loop("ge", 2)
+            builder.add_sweep("freq", freq_sweep)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            with (
+                builder.branch(by="ge", align_timeline=False) as cases,
+                cases.case(1),
+            ):
+                builder.emit(Pulse("qub_pulse", cfg.qub_pulse))
+            builder.emit(Readout("readout", cfg.readout))
+            program = builder.build()
+            sched.run_acquire(
+                program,
+                soc,
+                rounds=cfg.rounds,
+                options=RunOptions(
+                    converter=lambda _raw: snr_as_signal(
                         [tracker],
                         ge_axis=1,
-                        skew_penalty=sched.cfg.skew_penalty,
-                    ),
-                    trackers=[tracker],
-                    **(acquire_kwargs or {}),
-                    rounds=cfg.rounds,
-                )
+                        skew_penalty=cfg.skew_penalty,
+                    )
+                ),
+                trackers=[tracker],
+                **(acquire_kwargs or {}),
             )
 
         # Return the moment-derived score; raw shots and IQ moments are not retained.

@@ -6,11 +6,12 @@ import sys
 import numpy as np
 import pytest
 from zcu_tools.experiment.simulation import white_noise
-from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, GaussWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+
+from tests.program._timeline import compile_modules
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def environment():
 
 
 def program(env, *, length=0.1, name="drive"):
-    return ModularProgramV2(
+    return compile_modules(
         env.soccfg,
         modules=[
             PulseCfg(

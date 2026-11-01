@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import TypeAdapter
-from zcu_tools.program.v2.modular import ModularProgramV2
+from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules import ModuleCfg, ModuleCfgFactory, readout
 from zcu_tools.program.v2.modules.base import Module
-from zcu_tools.program.v2.modules.control import Repeat
 
+from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import (
     AcquisitionSoc,
     RecordingProgram,
@@ -74,8 +74,10 @@ def test_real_compile_and_acquire_all_tones(channels):
         mask=list(range(len(channels))),
         length=cfg.length,
     )
-    assert prog.triggers == [(list(channels), dict(t=cfg.trig_offset))]
-    assert prog.playbacks == [dict(ch=0, name="mux", t=cfg.pre_delay)]
+    assert prog.triggers == [
+        (list(channels), dict(t=cfg.trig_offset, timeline="default"))
+    ]
+    assert prog.playbacks == [dict(t=cfg.pre_delay, tag=None, timeline="default")]
     soc = AcquisitionSoc(soccfg.get_cfg())
     raw = prog.acquire(soc, progress=False)
     assert raw is not None
@@ -87,28 +89,6 @@ def test_real_compile_and_acquire_all_tones(channels):
     assert soc.pfb_configs[0][0] == "pfb0"
     assert soc.pfb_configs[0][2] is None
     assert [r["pfb_port"] for r in soc.pfb_configs[0][1]] == list(channels)
-
-
-@pytest.mark.parametrize("updates", [dict(length=0.537), dict(ro_length=1.337)])
-def test_blocking_covers_rounded_generator_and_adc_windows(updates):
-    cfg = native_mux(**updates)
-    module = cfg.build("mux")
-    prog = RecordingProgram(mux_soccfg(), [module])
-    # Scheduled scalar starts round to tProc ticks, hardware windows to their clocks.
-    tclk = prog.soccfg["tprocs"][0]["f_time"]
-
-    def ceil_t(t):
-        return np.ceil(t * tclk) / tclk
-
-    gen_duration = prog.cycles2us(prog.us2cycles(cfg.length, gen_ch=0), gen_ch=0)
-    adc_duration = prog.cycles2us(prog.us2cycles(cfg.ro_length, ro_ch=4), ro_ch=4)
-    expected = max(
-        ceil_t(ceil_t(cfg.pre_delay) + gen_duration + ceil_t(cfg.post_delay)),
-        ceil_t(ceil_t(cfg.trig_offset) + adc_duration),
-    )
-    assert module.total_length(prog) == pytest.approx(expected)
-    assert module.run(prog, 2.0) == pytest.approx(2.0 + expected)
-    assert module.allow_rerun()
 
 
 @pytest.mark.parametrize(
@@ -190,14 +170,14 @@ def test_invalid_routes_or_rounded_windows_fail(fault):
 class UnrelatedReadout(Module):
     name = "unrelated"
 
-    def init(self, prog):
+    def declare(self, prog):
         prog.declare_readout(ch=8, length=0.2)
         prog.add_readoutconfig(ch=8, name="unrelated", freq=100.0)
 
-    def run(self, prog, t=0.0):
-        prog.send_readoutconfig(8, "unrelated", t=t)
-        prog.trigger([8])
-        return t + 0.3
+    def lower(self, prog, *, timeline, tag):
+        prog.send_readoutconfig(8, "unrelated", t=0, timeline=timeline)
+        prog.trigger([8], timeline=timeline)
+        prog.timeline_inc(0.3, timeline=timeline)
 
 
 @pytest.mark.parametrize("unrelated_first", [True, False])
@@ -208,7 +188,7 @@ def test_collect_iq_uses_current_declarations_and_read_index(unrelated_first):
         if unrelated_first
         else [module, UnrelatedReadout()]
     )
-    prog = ModularProgramV2(mux_soccfg(), modules)
+    prog = compile_modules(mux_soccfg(), modules)
     selected = {
         4: np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
         1: 100 + np.arange(24, dtype=np.float64).reshape(2, 2, 3, 2),
@@ -293,7 +273,7 @@ def test_collect_iq_rejects_float32_at_runtime():
         collect(prog, raw)
 
 
-class RawBufferProgram(ModularProgramV2):
+class RawBufferProgram(TimelineProgramV2):
     """Supply synthetic acquisition buffers through the public getter boundary."""
 
     raw: list[NDArray[np.int64]] | None = None
@@ -304,13 +284,22 @@ class RawBufferProgram(ModularProgramV2):
 
 def raw_buffer_program(preparations=4):
     module = native_mux().build("mux")
-    repeated = Repeat("reads", 2).add_content(module)
-    prog = RawBufferProgram(
-        mux_soccfg(),
-        [UnrelatedReadout(), repeated],
-        sweep=[("preparation", preparations), ("point", 2)],
-        reps=3,
-    )
+    unrelated = UnrelatedReadout()
+
+    class Program(RawBufferProgram):
+        def _initialize(self, cfg):
+            self.add_loop("preparation", preparations)
+            self.add_loop("point", 2)
+            self.declare(unrelated)
+            self.declare(module)
+
+        def _body(self, cfg):
+            self.emit(unrelated)
+            with self.repeat("reads", 2):
+                self.emit(module)
+            self.delay_by_timeline()
+
+    prog = Program(mux_soccfg(), reps=3)
     # QICK counts a trigger macro once even when Repeat executes it twice.
     prog.set_reads_per_shot(2)
     # Each loop/read has a distinct sentinel. The unrelated channel deliberately
@@ -413,28 +402,3 @@ class RouteReuse(Module):
 
     def run(self, prog, t=0.0):
         return t
-
-
-@pytest.mark.parametrize("route", ["gen", "readout"])
-@pytest.mark.parametrize("nested", [False, True])
-def test_later_module_cannot_overwrite_mux_routes(route, nested):
-    module = native_mux().build("mux")
-    first = Repeat("repeat", 2).add_content(module) if nested else module
-    channel = 0 if route == "gen" else 4
-    with pytest.raises(ValueError, match=f"mux.*{route}.*route.*{channel}"):
-        RecordingProgram(mux_soccfg(), [first, RouteReuse(route)])
-
-
-@pytest.mark.parametrize("collision", ["gen", "readout"])
-def test_routes_cannot_be_silently_redeclared(collision):
-    first = native_mux((4,)).build("first")
-    second_cfg = native_mux((1,) if collision == "gen" else (4,))
-    if collision == "readout":
-        soccfg = mux_soccfg()
-        soccfg["gens"][1].update(soccfg["gens"][0])
-        soccfg["gens"][1]["tproc_ch"] = 1
-        second_cfg.gen_ch = 1
-    else:
-        soccfg = mux_soccfg()
-    with pytest.raises(ValueError, match="second"):
-        RecordingProgram(soccfg, [first, second_cfg.build("second")])

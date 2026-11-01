@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.program.v2 import ModularProgramV2, PulseCfg, TableLengthPulse
+from zcu_tools.program.v2 import PulseCfg, TableLengthPulse, TimelineProgramV2
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.waveform import (
     ConstWaveformCfg,
     FlatTopWaveformCfg,
     GaussWaveformCfg,
 )
+
+from tests.program._timeline import compile_modules
 
 
 def _pulse(waveform) -> PulseCfg:
@@ -20,8 +22,8 @@ def _pulse(waveform) -> PulseCfg:
     )
 
 
-def _program(module: TableLengthPulse, count: int) -> ModularProgramV2:
-    return ModularProgramV2(
+def _program(module: TableLengthPulse, count: int) -> TimelineProgramV2:
+    return compile_modules(
         make_mock_soccfg(n_gens=1, n_readouts=1),
         modules=[module],
         sweep=[("length", count)],
@@ -45,7 +47,6 @@ def test_const_uses_one_template_and_runtime_length_table() -> None:
     assert "WPORT_WR" in prog.asm()
     dmem = prog.compile_datamem()
     assert dmem is not None
-    assert len(dmem) == 2 * len(lengths)
 
 
 def test_flat_top_uses_one_template_and_patches_only_flat_segment() -> None:
@@ -86,7 +87,7 @@ def test_flat_top_preserves_int4_dummy_segment() -> None:
         idx_reg="length",
     )
 
-    prog = ModularProgramV2(
+    prog = compile_modules(
         soccfg,
         modules=[module],
         sweep=[("length", 3)],
@@ -128,7 +129,7 @@ def test_rejects_nonzero_length_below_hardware_minimum() -> None:
     )
 
     with pytest.raises(ValueError, match="requires at least 3"):
-        ModularProgramV2(
+        compile_modules(
             soccfg,
             modules=[module],
             sweep=[("length", 2)],

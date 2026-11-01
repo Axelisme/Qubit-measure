@@ -6,7 +6,7 @@ MuxLenRabiExp.run(config, *, context) sweeps selected drive lengths together.
 Configuration and timing
 ------------------------
 The full tones list matches the complete MuxReadoutCfg in count and order.
-Each MuxToneCfg has a fixed name, a required drive and a sweep. Participants is
+Each MuxLenRabiToneCfg has a fixed name, a required drive and length bounds. Participants is
 a nonempty, unique list of original indices. Q3/Q1 selects original indices [2, 0]
 from Q1/Q2/Q3 and retains that execution/data order. Every drive must be valid,
 only for participants, on independent generators distinct from readout.
@@ -112,13 +112,12 @@ from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.utils.sweep import make_sweep
-from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import estimate_snr
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import ModularProgramV2, ResetCfg
+from zcu_tools.program.v2 import Reset, ResetCfg, TimelineBuilder, TimelineProgramV2
 from zcu_tools.program.v2.modules import (
-    Join,
     MuxReadout,
     MuxReadoutCfg,
     Pulse,
@@ -129,17 +128,34 @@ from zcu_tools.utils.process import rotate2real
 from zcu_lab.v2.support import live_line
 from zcu_lab.v2.support.mux import MuxFitFailure, MuxSweepResult, averaged_mux_signal
 from zcu_lab.v2.support.mux_persistence import mux_sweep_spec
-from zcu_lab.v2.support.mux_sweep_cfg import MuxToneCfg, validate_mux_scan
+from zcu_lab.v2.support.mux_sweep_cfg import (
+    MuxDriveToneCfg,
+    ToneRangeCfg,
+    require_tone_value,
+    validate_mux_scan,
+)
 from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiAnalyzeOptions
 
 from .analysis import MuxLenRabiFit, analyze_length
+
+
+class MuxLenRabiToneCfg(MuxDriveToneCfg):
+    """One named drive and its independent length bounds in us."""
+
+    length: Annotated[ToneRangeCfg | None, FieldMeta(unit="us")] = None
+
+    def require_length(self) -> ToneRangeCfg:
+        """Return active length bounds, or raise ValueError naming this tone."""
+        if self.length is None:
+            raise ValueError(f"{self.name}: active tone requires length")
+        return self.length
 
 
 class MuxLenRabiCfg(ConfigBase):
     """Complete named tones, ordered participants and shared acquisition controls.
 
     reset and readout hold the common modules. tones contains one
-    MuxToneCfg per original readout position, with unique nonempty names.
+    MuxLenRabiToneCfg per original readout position, with unique nonempty names.
     participants is a nonempty, duplicate-free list of original tone indices; its order
     determines execution/data rows (Q3/Q1 maps to original indices 2/0).
     Selected drives are required/validated on independent
@@ -152,6 +168,17 @@ class MuxLenRabiCfg(ConfigBase):
     Explicit reps/rounds are positive; initial_delay/relax_delay are finite
     nonnegative us. No capture, bindings or writeback destinations are stored.
     """
+
+    reset: ResetCfg | None = None
+    readout: MuxReadoutCfg
+    tones: Annotated[list[MuxLenRabiToneCfg], FieldMeta(element_label="name")]
+    expts: int = Field(
+        strict=True,
+        gt=0,
+        title="Expts",
+        description="Scan point count shared by all tones.",
+    )
+    participants: list[StrictInt]
 
     reps: Annotated[
         int, FieldMeta(label="Reps", description="Number of repetitions per round.")
@@ -184,16 +211,6 @@ class MuxLenRabiCfg(ConfigBase):
             description="Relaxation delay after each repetition.",
         ),
     ] = 1.0
-    reset: ResetCfg | None = None
-    readout: MuxReadoutCfg
-    tones: Annotated[list[MuxToneCfg], FieldMeta(element_label="name")]
-    expts: int = Field(
-        strict=True,
-        gt=0,
-        title="Expts",
-        description="Scan point count shared by all tones.",
-    )
-    participants: list[StrictInt]
 
     @model_validator(mode="after")
     def validate_scan(self) -> MuxLenRabiCfg:
@@ -201,14 +218,15 @@ class MuxLenRabiCfg(ConfigBase):
         validate_mux_scan(self, self.tones, self.participants, self.expts)
         for index in self.participants:
             tone = self.tones[index]
+            require_tone_value(tone.length, ("tones", index, "length"))
             drive = tone.require_drive()
             if drive.waveform.style == "arb":
                 raise ValueError(
                     f"tones[{index}].drive.waveform: arb length is asset-derived "
                     "with no public length sweep"
                 )
-            if min(tone.require_sweep().start, tone.require_sweep().stop) <= 0:
-                raise ValueError(f"tones[{index}].sweep lengths must be positive us")
+            if min(tone.require_length().start, tone.require_length().stop) <= 0:
+                raise ValueError(f"tones[{index}].length lengths must be positive us")
         return self
 
 
@@ -244,14 +262,14 @@ def prepare_length_scan(cfg: MuxLenRabiCfg, *, soccfg: QickConfig) -> MuxLengthS
         drive = tone.require_drive()
         lengths = sweep2array(
             make_sweep(
-                tone.require_sweep().start, tone.require_sweep().stop, cfg.expts
+                tone.require_length().start, tone.require_length().stop, cfg.expts
             ),
             "time",
             {"soccfg": soccfg, "gen_ch": drive.ch},
         )
         if np.any(lengths <= 0):
             raise ValueError(
-                f"tones[{index}].sweep quantized lengths must be positive us"
+                f"tones[{index}].length quantized lengths must be positive us"
             )
         coordinates.append(lengths)
     return MuxLengthScan(indices, np.asarray(coordinates, dtype=np.float64))
@@ -282,7 +300,7 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
 
         config supplies full tones, ordered participants and shared averaging
         and delays. Each point pairs the participants' own quantized lengths;
-        Join starts them together and readout waits for the last drive, without
+        The fork starts them together and readout waits for the last drive, without
         end alignment or sweep-wide padding. Return original tone indices (K,),
         requested total lengths (K,P) in us and average complex IQ (K,P) in
         ADC-length-normalized a.u. Flat-top lengths include their ramps.
@@ -315,24 +333,28 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
         )
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Pulse length (us)",
-                "Magnitude (a.u.)",
+        viewers = []
+        for index in scan.indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Pulse length (us)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in scan.indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
-        def update(data: NDArray[np.complex128]) -> None:
-            for row, viewer in enumerate(viewers):
-                viewer.update(scan.coordinates[row], np.abs(data[:, row]))
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(scan.coordinates[row], np.abs(data[:, row]))
+            )
 
         # 2. One hardware point loop selects all participants' length tables.
         signals = SignalBuffer(scan.coordinates.T.shape, on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             drives = [
                 TableLengthPulse(
                     f"drive_{index}",
@@ -343,24 +365,33 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
                 for row, index in enumerate(scan.indices)
             ]
             # Reset -> simultaneous drives -> readout after this point's longest drive.
-            builder = (
-                sched.prog_builder(
-                    context.soc,
-                    context.soccfg,
-                    reps=sched.cfg.reps,
-                    initial_delay=sched.cfg.initial_delay,
-                    relax_delay=sched.cfg.relax_delay,
-                )
-                .add_reset("reset", cfg.reset)
-                .add(Join(*drives), MuxReadout("readout", readout))
-                .declare_sweep("point", cfg.expts)
+            builder = TimelineBuilder(
+                context.soccfg,
+                reps=cfg.reps,
+                initial_delay=cfg.initial_delay,
+                relax_delay=cfg.relax_delay,
             )
+            builder.add_loop("point", cfg.expts)
+            if cfg.reset is not None:
+                builder.emit(Reset("reset", cfg.reset))
+            timelines = [f"drive_{index}" for index in scan.indices]
+            builder.fork("default", into=timelines)
+            for drive, timeline in zip(drives, timelines, strict=True):
+                builder.emit(drive, timeline=timeline)
+            builder.join(*timelines, into="default")
+            # Consume this point's common end before readout to release runtime registers.
+            builder.delay_by_timeline()
+            readout_module = MuxReadout("readout", readout)
+            builder.emit(readout_module)
             prog = builder.build()
 
             # 3. Publish the full point/tone matrix after each completed round.
-            _ = builder.run_program(
+            _ = sched.run_acquire(
                 prog,
-                raw2signal_fn=partial(averaged_mux_signal, prog),
+                context.soc,
+                options=RunOptions(
+                    converter=partial(averaged_mux_signal, prog, readout_module)
+                ),
                 rounds=cfg.rounds,
             )
         signals.trigger_update(flush=True)
@@ -380,17 +411,18 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in scan.indices]
         )
-        programs: dict[int, ModularProgramV2] = {}
-        viewers = [
-            live_line(
-                context.plots,
-                f"measurement_{index}",
-                "Pulse length (us)",
-                "Magnitude (a.u.)",
+        programs: dict[int, TimelineProgramV2] = {}
+        readouts: dict[int, MuxReadout] = {}
+        viewers = []
+        for index in scan.indices:
+            fig, ax = context.plots.subplots(num=f"measurement_{index}")
+            ax.set(
+                xlabel="Pulse length (us)",
+                ylabel="Magnitude (a.u.)",
                 title=f"{index}: {cfg.tones[index].name}",
             )
-            for index in scan.indices
-        ]
+            viewers.append(live_line(ax))
+            fig.show()
 
         def average_round(data: NDArray[np.complex128]) -> NDArray[np.complex128]:
             # Average only measured entries; untouched point/tone pairs stay NaN.
@@ -399,38 +431,55 @@ class MuxLenRabiExp(Experiment[MuxSweepResult, MuxLenRabiCfg]):
             np.divide(np.nansum(data, axis=0), counts, out=mean, where=counts > 0)
             return mean
 
-        def update(data: NDArray[np.complex128]) -> None:
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.complex128]):
             mean = average_round(data)
-            for row, viewer in enumerate(viewers):
-                viewer.update(scan.coordinates[row], np.abs(mean[:, row]))
+            return tuple(
+                artist
+                for row, viewer in enumerate(viewers)
+                for artist in viewer.set(scan.coordinates[row], np.abs(mean[:, row]))
+            )
 
         signals = SignalBuffer((rounds, *scan.coordinates.T.shape), on_update=update)
-        with Schedule(cfg, signals, scope=context.scope) as sched:
+        with Schedule(signals, scope=context.scope) as sched:
             for _, rep in sched.repeat("round", rounds):
                 for point, step in rep.scan("point", list(range(cfg.expts))):
-                    drives = []
-                    for row, index in enumerate(scan.indices):
-                        drive = step.cfg.tones[index].require_drive()
-                        drive.set_param("length", float(scan.coordinates[row, point]))
-                        drives.append(Pulse(f"drive_{index}", drive))
-                    # Reset -> simultaneous scalar-length drives -> mux readout.
-                    builder = (
-                        step.prog_builder(
-                            context.soc,
-                            context.soccfg,
-                            reps=step.cfg.reps,
-                            initial_delay=step.cfg.initial_delay,
-                            relax_delay=step.cfg.relax_delay,
-                        )
-                        .add_reset("reset", step.cfg.reset)
-                        .add(Join(*drives), MuxReadout("readout", readout))
-                    )
                     if point not in programs:
+                        builder = TimelineBuilder(
+                            context.soccfg,
+                            reps=cfg.reps,
+                            initial_delay=cfg.initial_delay,
+                            relax_delay=cfg.relax_delay,
+                        )
+                        if cfg.reset is not None:
+                            builder.emit(Reset("reset", cfg.reset))
+                        timelines = [f"drive_{index}" for index in scan.indices]
+                        builder.fork("default", into=timelines)
+                        for row, (index, timeline) in enumerate(
+                            zip(scan.indices, timelines, strict=True)
+                        ):
+                            builder.emit(
+                                Pulse(
+                                    f"drive_{index}",
+                                    cfg.tones[index].require_drive(),
+                                    length=float(scan.coordinates[row, point]),
+                                ),
+                                timeline=timeline,
+                            )
+                        builder.join(*timelines, into="default")
+                        readout_module = MuxReadout("readout", readout)
+                        builder.emit(readout_module)
                         programs[point] = builder.build()
+                        readouts[point] = readout_module
                     prog = programs[point]
-                    _ = builder.run_program(
+                    _ = step.run_acquire(
                         prog,
-                        raw2signal_fn=partial(averaged_mux_signal, prog),
+                        context.soc,
+                        options=RunOptions(
+                            converter=partial(
+                                averaged_mux_signal, prog, readouts[point]
+                            )
+                        ),
                         rounds=1,
                     )
                 # Check every tone only after a complete host-side point scan.

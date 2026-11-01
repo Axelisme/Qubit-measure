@@ -17,17 +17,6 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
     return Form(
         FluxDepCfg,
         initial_values=qubit_flux_initial_values,
-        field_order=(
-            "reset",
-            "readout",
-            "flux_dev",
-            "flux_unit",
-            "freq",
-            "flux",
-            "reps",
-            "rounds",
-            "relax_delay",
-        ),
         tree={
             "reset": Hidden(),
             "readout": Template(

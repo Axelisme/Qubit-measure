@@ -1,7 +1,7 @@
 """Captured mux plan forms using the workflow host's handwritten FormModel API."""
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, JsonValue
 from zcu_tools.cfg_model import ModuleCfgFactory, MuxReadoutSpec, PulseSpec, ResetSpec
@@ -233,7 +233,7 @@ class OvernightMuxPlanForm(FormModel):
 class OvernightMuxTunablesForm(FormModel):
     """Set averaging and acceptance bounds to resolve mux lifetime drift.
 
-    Enter the longest qubit's T1/Echo guesses for the shared grids. uniform
+    Enter the longest qubit's T1/Echo guesses for the shared grids. sampling
     controls T1 sampling only; Echo retains its linear delay grid.
     reps/rounds average each native member, not monitoring pairs. Guesses are in
     microseconds; sweep_factor fixes each grid. Both relax delays have a
@@ -244,9 +244,9 @@ class OvernightMuxTunablesForm(FormModel):
     Expressions stay in FormInput; native conversion carries ordinary values.
     """
 
-    uniform: Annotated[bool, Display(label="Uniform (linear) sweep")] = Field(
-        default=True,
-        description="T1 only; False concentrates delays within the same start/stop window",
+    sampling: Annotated[Literal["linear", "decay"], Display(label="Sampling")] = Field(
+        default="linear",
+        description="T1 only; decay concentrates delays within the same start/stop window",
     )
     reps: Annotated[int, Display(label="Averages")] = Field(
         default=1000, ge=1, description="Native acquisition averages"
@@ -306,7 +306,7 @@ class OvernightMuxTunablesForm(FormModel):
         """Convert validated ordinary knobs; no source, hardware or expression parsing."""
         return OvernightMuxTunables(
             max_model_window_factor=self.max_model_window_factor,
-            uniform=self.uniform,
+            sampling=self.sampling,
             min_lifetime_points=self.min_lifetime_points,
             reps=self.reps,
             rounds=self.rounds,
