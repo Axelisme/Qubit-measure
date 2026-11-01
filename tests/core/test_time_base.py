@@ -141,6 +141,37 @@ def test_unrepresentable_time_bases_fail_at_construction(frequency: Fraction) ->
         simulation.TimeBase(frequency)
 
 
+@pytest.mark.parametrize(
+    ("clocks_mhz", "lcm_mhz", "limit_reason"),
+    [
+        (
+            (430.0801001, 599.0401),
+            "25763522617191401/10000",
+            "not exact in float64",
+        ),
+        (
+            (430.0801, 599.0401, 307.2001, 38.4),
+            "15195948907225359974592/5",
+            "exceeds int64 range",
+        ),
+    ],
+    ids=["float64-exactness", "int64-range"],
+)
+def test_common_clock_overflow_reports_clocks_lcm_and_ratio_denominators(
+    clocks_mhz: tuple[float, ...], lcm_mhz: str, limit_reason: str
+) -> None:
+    with pytest.raises(OverflowError) as raised:
+        simulation.TimeBase.from_clocks(iter(clocks_mhz))
+
+    message = str(raised.value)
+    for clock in clocks_mhz:
+        assert repr(clock) in message
+    assert f"LCM={lcm_mhz} MHz" in message
+    assert "clock ratios" in message
+    assert "denominators" in message
+    assert limit_reason in message
+
+
 def test_common_clock_build_validates_input_and_intermediate_ranges() -> None:
     with pytest.raises(ValueError, match="at least one clock"):
         simulation.TimeBase.from_clocks(())
