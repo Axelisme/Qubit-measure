@@ -80,9 +80,11 @@ Native snapshot 沿當次 capture，後續 alias 修改、Prepare 或 Save 不�
 ## 單一 run 與 remote
 
 Headless tab owner 將 fixed context/storage、typed cached device mapping、software provenance 與 native plan 交給該 run 的 controller。
-Start 只建一個 operation，pending token 不等於 Engine 已接受。Worker 持 RUN lease，透過 `await run_core(scope, core.run, cfg)` acquisition。
+Start 只建一個 operation，pending token 不等於 Engine 已接受。
+Worker 持 RUN lease，透過 `await run_core(scope, acquire, cfg)` 呼叫 workflow 自己組 program 的同步取數函式。
+Retry 從 workflow settings 以 `functools.partial` 綁入 acquire。
 每個 operation 只呼叫一次。Ask 等答時保留 operation、lease、plan、accepted input、capture 與 Plots。
-run_core 只在每次 core callback 前讀取 device actual snapshot，寫入該次 RunRecord.metadata；native 保存保留該快照。
+run_core 只在每次 workflow acquire 前讀取 device actual snapshot，寫入該次 RunRecord.metadata；native 保存保留該快照。
 Stop 等 producer 返回與 terminal delivery 後才 finish。Busy tab 拒絕 close；replacement Start 或成功 close 才 release presentation，不 disconnect 共用硬體。
 
 GUI、RPC、MCP 呼同一 WorkflowControlFacet，不另存 run。tab_id 識別 opened draft owner，run_id 識別 native run。

@@ -156,8 +156,10 @@ Linear 使用線性格點，decay 把同一時間窗的點集中在衰減段，�
 各實驗保留原本的取樣預設；既有 `uniform` 欄位待遷移時改名。
 
 取數欄位在每個 cfg 最後完整寫出，不用額外基底或型別別名藏住欄位。
-平均類建議提供 `reps`、`rounds`、`relax_delay`、`acquire_retry`，有 SNR 定義才加 `earlystop_snr`，
+平均類建議提供 `reps`、`rounds`、`relax_delay`，有 SNR 定義才加 `earlystop_snr`，
 需要才加 `initial_delay`。這是風格建議，不因缺少標準組的某一項阻擋 review。
+只有超長時間掃描才加 `acquire_retry`。目前開放 `twotone/fluxdep` 與
+`singleshot/t1/t1_with_tone_sweep`，其他實驗不加。Workflow 的 retry 從自己的 settings 傳入取數 helper，不放進 core cfg。
 
 Readout 選實驗接受的最窄型別。只接受 pulse 的寫 `PulseReadout.Cfg`，只接受 mux 的寫
 `MuxReadout.Cfg`，確實支援兩者才寫 `Readout.Cfg`。其他 module 同樣用自己的 `.Cfg`。
@@ -181,7 +183,6 @@ class DelayCfg(ConfigBase):
     reps: int = 1000
     rounds: int = 10
     relax_delay: Annotated[float, FieldMeta(unit="us")] = 1.0
-    acquire_retry: int = 0
 ```
 
 Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
@@ -578,7 +579,7 @@ Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
 
 以下片段放在實驗 `run(config, *, context)` 中。
 `config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
-以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
+以及 `reps`、`rounds`、`relax_delay` 與 `earlystop_snr`。
 `on_update` 是本次實驗的 live plot callback，接收完整 signal array。
 直接讀取傳入的 `config`。Schedule 與 step 只保存控制流程、env 與 buffer path。
 需要修改 pulse cfg 時，在 `run()` 開頭自行 deepcopy，不修改 caller 的 config。
@@ -606,7 +607,6 @@ with Schedule(signals, scope=context.scope) as sched:
     sched.run_acquire(
         prog, context.soc, rounds=config.rounds,
         options=RunOptions(
-            retry=config.acquire_retry,
             stop_condition=snr_checker(signals.at(), config.earlystop_snr, np.abs),
         ),
     )
@@ -664,7 +664,6 @@ with Schedule(signals, scope=context.scope) as sched:
 
     sched.run_acquire(
         prog, context.soc, rounds=config.rounds,
-        options=RunOptions(retry=config.acquire_retry),
     )
 ```
 
@@ -711,7 +710,6 @@ sums = SignalBuffer((config.length.expts, 3), dtype=np.float64)
 with Schedule(sums, scope=context.scope) as sched:
     sched.run_acquire_summed(
         prog, context.soc, processor=processor, rounds=config.rounds,
-        options=RunOptions(retry=config.acquire_retry),
     )
 ```
 

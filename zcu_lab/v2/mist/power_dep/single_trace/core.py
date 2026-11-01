@@ -6,13 +6,11 @@ from typing import Annotated, ClassVar
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
-from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -57,13 +55,6 @@ class PowerDepCfg(ConfigBase):
         int,
         FieldMeta(label="Rounds", description="Number of software acquisition rounds."),
     ] = 1
-    acquire_retry: Annotated[
-        int,
-        FieldMeta(
-            label="Acquire retry",
-            description="Retries after a transient acquisition failure.",
-        ),
-    ] = Field(default=0, ge=0)
     relax_delay: Annotated[
         float,
         FieldMeta(
@@ -145,7 +136,6 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
                 prog,
                 soc,
                 rounds=cfg.rounds,
-                options=RunOptions(retry=cfg.acquire_retry),
             )
 
         # 4. Preserve complex IQ so analysis can choose its own reference.

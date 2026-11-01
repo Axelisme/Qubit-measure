@@ -97,9 +97,6 @@ class HeraldingT2EchoCfg(ConfigBase):
     detune: float = 0.0
     reps: Annotated[int, FieldMeta(label="Reps")] = 1000
     rounds: Annotated[int, FieldMeta(label="Rounds")] = 10
-    acquire_retry: Annotated[int, FieldMeta(label="Acquire retry")] = Field(
-        default=0, ge=0
-    )
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = Field(
         default=None, gt=0
     )
@@ -223,7 +220,6 @@ class HeraldingT2EchoExp(Experiment[HeraldingT2EchoResult, HeraldingT2EchoCfg]):
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
                 options=RunOptions(
                     converter=np.copy,
-                    retry=cfg.acquire_retry,
                     stop_condition=snr_checker(
                         buffer.at(),
                         cfg.earlystop_snr,

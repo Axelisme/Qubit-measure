@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from functools import partial
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,9 +19,9 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
     AmpRabiCfg,
     AmpRabiExp,
     AmpRabiResult,
-    rabi_signal2real,
 )
 from zcu_lab.workflows.common.analysis import fit_or_failed, validate_fit_trace
+from zcu_lab.workflows.common.calibration_acquire import rabi_signal2real, run_amp_rabi
 from zcu_lab.workflows.common.calibration_plots import (
     CalibrationTrace,
 )
@@ -187,7 +188,6 @@ async def calibrate_amp_rabi(
     cfg = AmpRabiCfg(
         reps=tun.rabi_reps,
         rounds=tun.rabi_rounds,
-        acquire_retry=tun.rabi_acquire_retry,
         earlystop_snr=tun.rabi_earlystop_snr,
         relax_delay=tun.resolve_rabi_relax_us(guess.relax_us),
         qub_pulse=drive,
@@ -199,7 +199,9 @@ async def calibrate_amp_rabi(
             step=(stop - start) / (tun.rabi_points - 1),
         ),
     )
-    outcome = await run_core(scope, AmpRabiExp().run, cfg, name="amp Rabi")
+    outcome = await run_core(
+        scope, partial(run_amp_rabi, retry=tun.rabi_acquire_retry), cfg, name="amp Rabi"
+    )
     observe_operation(env.summary, outcome)
     amp = AmpCalibrationResult("failed", None, length, gain_clamped=tuple(gain_clamped))
     trace = None

@@ -1,6 +1,7 @@
 """One mux acquisition and independent participant fits per stage."""
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -25,6 +26,8 @@ from zcu_lab.workflows.common.lifetime_models import (
 from zcu_lab.workflows.common.saving import save_native
 from zcu_lab.workflows.common.stages import StageEnv
 from zcu_lab.workflows.common.summary import observe_operation
+from zcu_lab.workflows.overnight_mux.acquire import run_mux_t1, run_mux_t2echo
+from zcu_lab.workflows.overnight_mux.analysis import analyze_mux_t1, analyze_mux_t2echo
 from zcu_lab.workflows.overnight_mux.pulses import FixedMuxPulses
 
 
@@ -216,7 +219,6 @@ async def measure_mux_t1(
         sampling=settings.sampling,
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=max(settings.relax_min_us, settings.relax_factor * guess_us),
         reset=pulses.reset,
@@ -225,7 +227,9 @@ async def measure_mux_t1(
         participants=list(pulses.participants),
         delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await run_core(scope, MuxT1Exp().run, cfg, name="T1")
+    record = await run_core(
+        scope, partial(run_mux_t1, retry=settings.acquire_retry), cfg, name="T1"
+    )
     observe_operation(env.summary, record)
     save_native(
         record,
@@ -243,14 +247,10 @@ async def measure_mux_t1(
                 for index in cfg.participants
             ),
         )
-    # Native fit_i figures are temporary; Echo and later rounds reuse the names.
+    # Comparison fit_i figures are temporary; later rounds reuse the names.
     fit_plots = env.plots.fork()
     try:
-        fits = MuxT1Exp().analyze(
-            record.value,
-            MuxT1Exp.Options(skip=0, dual_exp=False),
-            plots=fit_plots,
-        )
+        fits = analyze_mux_t1(record.value.result)
         qubits: list[QubitFitResult] = []
         for fit in fits:
             if isinstance(fit, MuxFitFailure):
@@ -258,14 +258,14 @@ async def measure_mux_t1(
                     QubitFitResult(index=fit.index, status="failed", reason=fit.reason)
                 )
                 continue
-            quality = (fit.fit.fit_quality or {})["fit"]
+            quality = fit.quality
             comparison = compare_lifetime_models(
                 fit.times,
                 fit.observed,
                 LifetimeCurve(
                     "exponential",
-                    (fit.fit.t1,),
-                    (fit.fit.t1_err,),
+                    (fit.lifetime_us,),
+                    (fit.error_us,),
                     fit.fitted,
                     quality,
                     3,
@@ -277,8 +277,8 @@ async def measure_mux_t1(
                 fit_plots, f"fit_{fit.index}", fit.times, fit.observed, comparison
             )
             reason, gates = _acceptance(
-                fit.fit.t1,
-                fit.fit.t1_err,
+                fit.lifetime_us,
+                fit.error_us,
                 quality,
                 settings,
                 "T1",
@@ -289,8 +289,8 @@ async def measure_mux_t1(
                     index=fit.index,
                     status="accepted" if reason is None else "rejected",
                     reason=reason,
-                    lifetime_us=fit.fit.t1 if reason is None else None,
-                    error_us=fit.fit.t1_err if reason is None else None,
+                    lifetime_us=fit.lifetime_us if reason is None else None,
+                    error_us=fit.error_us if reason is None else None,
                     models=comparison.records,
                     gates=gates,
                 )
@@ -324,7 +324,6 @@ async def measure_mux_echo(
     cfg = MuxT2EchoCfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=timing.relax_delay_us,
         reset=pulses.reset,
@@ -336,7 +335,9 @@ async def measure_mux_echo(
         participants=list(pulses.participants),
         delay=SweepCfg(start=0.0, stop=stop, expts=points, step=stop / (points - 1)),
     )
-    record = await run_core(scope, MuxT2EchoExp().run, cfg, name="Echo")
+    record = await run_core(
+        scope, partial(run_mux_t2echo, retry=settings.acquire_retry), cfg, name="Echo"
+    )
     observe_operation(env.summary, record)
     save_native(
         record,
@@ -356,11 +357,7 @@ async def measure_mux_echo(
         )
     fit_plots = env.plots.fork()
     try:
-        fits = MuxT2EchoExp().analyze(
-            record.value,
-            MuxT2EchoExp.Options(fit_method="decay"),
-            plots=fit_plots,
-        )
+        fits = analyze_mux_t2echo(record.value.result)
         qubits: list[QubitFitResult] = []
         for fit in fits:
             if isinstance(fit, MuxFitFailure):
@@ -373,8 +370,8 @@ async def measure_mux_echo(
                 fit.observed,
                 LifetimeCurve(
                     "exponential",
-                    (fit.t2,),
-                    (fit.t2_err,),
+                    (fit.lifetime_us,),
+                    (fit.error_us,),
                     fit.fitted,
                     fit.quality,
                     3,
@@ -385,8 +382,8 @@ async def measure_mux_echo(
                 fit_plots, f"fit_{fit.index}", fit.times, fit.observed, comparison
             )
             reason, gates = _acceptance(
-                fit.t2,
-                fit.t2_err,
+                fit.lifetime_us,
+                fit.error_us,
                 fit.quality,
                 settings,
                 "T2 Echo",
@@ -397,8 +394,8 @@ async def measure_mux_echo(
                     index=fit.index,
                     status="accepted" if reason is None else "rejected",
                     reason=reason,
-                    lifetime_us=fit.t2 if reason is None else None,
-                    error_us=fit.t2_err if reason is None else None,
+                    lifetime_us=fit.lifetime_us if reason is None else None,
+                    error_us=fit.error_us if reason is None else None,
                     models=comparison.records,
                     gates=gates,
                 )
