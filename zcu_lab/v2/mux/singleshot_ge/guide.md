@@ -203,9 +203,15 @@ The MCP recipe is `mux_singleshot_ge`.
 
 ## Simulation limits
 
-For an offline physical smoke, use `ftf(settings, workers=1)` with typed YAML
-`readout.drive.kind: mux`, an ADC receiver list and independent drive lines.
-Use replay archives for backend `ftf-segment-v7`; older backends are rejected.
+For an offline physical smoke, use `ftf(configuration, workers=1)` with version 2
+typed YAML. Its optional `readout.mux` section binds a separate generator and
+1..8 receivers, alongside named drive lines. The removed `readout.drive.kind`
+field raises a field-path error at YAML loading.
+Use replay archives for backend `ftf-segment-v13`; archives from `ftf-segment-v12`
+and earlier backends are rejected. See
+[Readout and sampling](../../../../lib/zcu_tools/experiment/ftf/README.md#readout-and-sampling)
+and [Private replay](../../../../lib/zcu_tools/experiment/ftf/README.md#private-replay)
+in the FTF README.
 Small truncations and short smoke runs demonstrate execution only.
 Establish convergence and calibrate pulses before using fitted values.
 All receiver IQ at a shot index must come from the same joint-state draw.

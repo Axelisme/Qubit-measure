@@ -157,10 +157,14 @@ uv run --directory <worktree> --no-sync -- \
 
 ```bash
 uv run --directory <worktree> --no-sync -- \
-  pytest -n 4 --dist=worksteal -m "not sim" --durations=25 \
+  pytest --rootdir <worktree> -c <worktree>/pyproject.toml \
+  -n 4 --dist=worksteal -m "not sim" --durations=25 \
   --failure-log <per-task 目錄>/pytest-failures.jsonl
 # 若改到 lib/zcu_tools/simulate/，將上面的 -m "not sim" 換成 -m ""。
 ```
+
+`--rootdir` 與 `-c` 把 rootdir 與設定檔固定在 worktree。pytest 也從既存的選項值路徑推算 rootdir；未固定時，worktree 外既存的 `--failure-log` 檔會讓它選到主 checkout 並收集主 checkout 的測試。
+執行後核對輸出標頭的 `rootdir:` 為 `<worktree>`。
 
 Watchdog／timeout 中止 pytest 時不會印失敗摘要，junitxml／lastfailed 也只在 session 結束時寫出；此 JSONL 檔是中止後唯一能定位失敗節點的來源。
 先建立 `.agent_state/` 下的 per-task 目錄，再傳入檔案路徑，遵循 [CLAUDE.md 的暫存檔生命週期](../CLAUDE.md#暫存檔生命週期)；未給 `--failure-log` 時不寫檔。
