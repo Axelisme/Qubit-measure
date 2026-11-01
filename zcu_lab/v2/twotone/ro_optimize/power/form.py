@@ -17,7 +17,6 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
         Template(
             "readout",
             bindings={"resonator": "$resonator"},
-            set={"gain": Hidden(0.0)},
         ),
     )
     readout = replace(readout, set={**readout.set, "gain": Hidden(0.0)})

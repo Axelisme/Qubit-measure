@@ -17,7 +17,6 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
         Template(
             "readout",
             bindings={"resonator": "$resonator"},
-            set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
         ),
     )
     readout = replace(

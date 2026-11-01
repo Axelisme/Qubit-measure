@@ -17,7 +17,6 @@ def make_form(ctx: FormContext) -> Form[LengthCfg]:
         Template(
             "readout",
             bindings={"resonator": "$resonator"},
-            set={"ro_length": Hidden(0.0)},
         ),
     )
     readout = replace(readout, set={**readout.set, "ro_length": Hidden(0.0)})

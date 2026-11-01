@@ -17,7 +17,6 @@ def make_form(ctx: FormContext) -> Form[DispersiveCfg]:
         Template(
             "readout",
             bindings={"resonator": "$resonator"},
-            set={"freq": Hidden(0.0)},
         ),
     )
     readout = replace(readout, set={**readout.set, "freq": Hidden(0.0)})
