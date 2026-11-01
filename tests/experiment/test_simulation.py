@@ -37,6 +37,35 @@ def test_environment_bundle_rejects_a_different_compile_profile():
         environment.devices.close_all_devices()
 
 
+@pytest.mark.parametrize("gen_ch", range(3))
+@pytest.mark.parametrize("ro_ch", range(2))
+def test_white_noise_all_routes_acquires_on_any_generator_and_adc(gen_ch, ro_ch):
+    import numpy as np
+    from zcu_tools.program.v2 import TimelineBuilder
+    from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
+    from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+
+    env = white_noise(std_adc=0, seed=17, n_gens=3, n_readouts=2, routes="all")
+    try:
+        builder = TimelineBuilder(env.soccfg, reps=2)
+        builder.emit(
+            PulseReadoutCfg(
+                gen_ch=gen_ch,
+                ro_ch=ro_ch,
+                nqz=1,
+                freq=100.0,
+                gain=0.1,
+                waveform=ConstWaveformCfg(length=0.1),
+                ro_length=0.1,
+            ).build("readout")
+        )
+        prog = builder.build()
+        averaged = prog.acquire(env.soc, progress=False)
+        np.testing.assert_array_equal(averaged[0], np.zeros((1, 2)))
+    finally:
+        env.devices.close_all_devices()
+
+
 def test_white_noise_integrated_round_is_compact_and_decimated_remains_signals():
     import numpy as np
     from zcu_tools.core.simulation import (
