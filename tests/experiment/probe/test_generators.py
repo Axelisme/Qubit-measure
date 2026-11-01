@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 from zcu_tools.analysis.fitting.singleshot import fit_singleshot
+from zcu_tools.analysis.fitting.singleshot_rabi import RabiPhysicalParams, fit_rabi_joint
 from zcu_tools.experiment.probe import generators
 
 
@@ -112,3 +113,25 @@ def test_singleshot_ge_raw_iq_recovers_centers_width_and_misassignment():
     assert_allclose(params[:5], [-1.0, 1.0, 0.2, 0.95, 0.05], atol=0.01)
     assert_allclose(np.mean(signals.imag, axis=1), [0.4, 0.4], atol=0.005)
     assert_allclose(np.std(signals.imag, axis=1), [0.2, 0.2], atol=0.005)
+
+
+def test_singleshot_rabi_raw_iq_recovers_population_dynamics():
+    lengths = np.linspace(0.0, 1.5, 31)
+    truth = RabiPhysicalParams(
+        0.08, 0.5, -1.0, 1.0, 0.18, 0.2, 0.3, 1.5, 4 * np.pi, 0.0
+    )
+    signals = generators.generate_singleshot_rabi(
+        lengths, np.linspace(-3, 3, 2401), truth, 4000, 0.18, 17
+    )
+    assert signals.shape == (31, 4000)
+    fit = fit_rabi_joint(lengths, signals)
+    assert fit.backend.valid
+    assert fit.omega == pytest.approx(4 * np.pi, rel=0.02)
+    assert fit.t_r == pytest.approx(1.5, rel=0.1)
+    assert fit.initial_populations[1] == pytest.approx(0.08, abs=0.02)
+    assert fit.p_inf == pytest.approx(0.5, abs=0.02)
+    assert fit.g_center == pytest.approx(-1.0, abs=0.02)
+    assert fit.e_center == pytest.approx(1.0, abs=0.02)
+    assert fit.sigma == pytest.approx(0.18, abs=0.02)
+    assert fit.p_avg == pytest.approx(0.2, abs=0.08)
+    assert fit.length_ratio == pytest.approx(0.3, abs=0.06)
