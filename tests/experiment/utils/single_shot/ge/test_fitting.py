@@ -157,7 +157,13 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
         fidelity, populations, result = singleshot_ge_analysis(
             signals,
             plots=plots,
-            options=GEFitOptions(length_ratio=length_ratio),
+            options=GEFitOptions(
+                numbins=80,
+                length_ratio=length_ratio,
+                init_p0_g=1.0,
+                init_p0_e=0.0,
+                avg_p=0.5,
+            ),
             **selection,
         )
 
