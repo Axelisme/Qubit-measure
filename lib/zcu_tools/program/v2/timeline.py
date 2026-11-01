@@ -666,6 +666,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             if gen_ch is not None:
                 book.record_native(self, gen_ch, val, generator=True)
             if ro_ch is not None:
+                book.runtime_ros.pop(ro_ch, None)
                 book.record_native(self, ro_ch, val, generator=False)
             for loop in book.loop_timelines:
                 if gen_ch is not None:
