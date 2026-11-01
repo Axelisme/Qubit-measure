@@ -5,13 +5,7 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program import v2
-from zcu_tools.program.v2.modules import (
-    Branch,
-    ConstWaveformCfg,
-    Join,
-    PulseReadout,
-    Repeat,
-)
+from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
 
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 
@@ -237,16 +231,17 @@ def test_any_control_flow_trigger_on_selected_adc_is_rejected(
 def test_control_flow_on_other_adc_preserves_selected_read_sums(control):
     selected = readout()
     other = readout("other", ch=1)
-    scope = (
-        Repeat("repeat_scope", 2).add_content(other)
-        if control == "Repeat"
-        else Branch("choice", other, None)
-    )
-    prog = compile_modules(
-        v2.make_mock_soccfg(n_readouts=2),
-        [scope, selected],
-        sweep=[("choice", 2)],
-    )
+    builder = v2.TimelineBuilder(v2.make_mock_soccfg(n_readouts=2))
+    builder.add_loop("choice", 2)
+    if control == "Repeat":
+        with builder.repeat("repeat_scope", 2):
+            builder.emit(other)
+    else:
+        with builder.branch(by="choice", align_timeline=True) as cases:
+            with cases.case(0):
+                builder.emit(other)
+    builder.emit(selected)
+    prog = builder.build()
     process = v2.shot_sums(prog, [v2.IQ("readout")])
     result = process(
         {
@@ -326,14 +321,16 @@ def test_missing_or_incomplete_classification_fails_at_construction(classifier):
 def test_parallel_readout_emissions_keep_labels_without_changing_admission():
     first = readout("first", ch=0)
     second = readout("second", ch=1)
-    parallel = Join(first, second)
-
     class Program(v2.TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare(parallel)
+            self.declare(first)
+            self.declare(second)
 
         def _body(self, cfg):
-            self.emit(parallel)
+            self.fork("default", into="second")
+            self.emit(first)
+            self.emit(second, timeline="second")
+            self.join("default", "second", into="default")
 
     prog = Program(v2.make_mock_soccfg(n_gens=2, n_readouts=2))
     process = v2.shot_sums(prog, [v2.IQ("first"), v2.IQ("second")])

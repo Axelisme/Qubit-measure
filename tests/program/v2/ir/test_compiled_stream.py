@@ -23,10 +23,7 @@ from zcu_tools.program.v2.ir.instructions import (
 )
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import (
-    Repeat,
-    SoftDelay,
-)
+from zcu_tools.program.v2.modules import SoftDelay
 from zcu_tools.program.v2.modules.base import Module
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -261,23 +258,6 @@ def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
 
 
 
-def test_repeat_rejects_internal_module_that_is_not_its_child():
-    child = SoftDelay("same_name", 0.01)
-    stranger = SoftDelay("same_name", 0.01)
-
-    class InvalidOwner(Repeat):
-        def run(
-            self,
-            prog: TimelineProgramV2,
-            t: float | QickParam = 0.0,
-            *,
-            internal_modules: tuple[Module, ...] = (),
-        ) -> float | QickParam:
-            return super().run(prog, t, internal_modules=(stranger,))
-
-    owner = InvalidOwner("owner", 2).add_content(child)
-    with pytest.raises(ValueError, match="internal_modules.*children"):
-        compile_modules(make_mock_soccfg(), modules=[owner])
 
 
 

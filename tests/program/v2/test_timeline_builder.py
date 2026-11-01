@@ -488,10 +488,13 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     ).build("readout")
     if heralded:
         builder.emit(readout, tag="herald")
-    builder.emit(v2.Join(*(v2.Pulse(f"prepare_{cfg.ch}", cfg) for cfg in preparation)))
-    builder.emit(
-        v2.Join(
-            *(
+    parallel_modules = list((v2.Pulse(f"prepare_{cfg.ch}", cfg) for cfg in preparation))
+    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    builder.fork("default", into=parallel_timelines)
+    for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
+        builder.emit(module, timeline=timeline)
+    builder.join(*parallel_timelines, into="default")
+    parallel_modules = list((
                 v2.Pulse(
                     f"drive_{ch}",
                     v2.PulseCfg(
@@ -506,10 +509,18 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
                     length=duration,
                 )
                 for ch in (2, 3)
-            )
-        )
-    )
-    builder.emit(v2.Join(*(v2.Pulse(f"contrast_{cfg.ch}", cfg) for cfg in preparation)))
+            ))
+    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    builder.fork("default", into=parallel_timelines)
+    for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
+        builder.emit(module, timeline=timeline)
+    builder.join(*parallel_timelines, into="default")
+    parallel_modules = list((v2.Pulse(f"contrast_{cfg.ch}", cfg) for cfg in preparation))
+    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    builder.fork("default", into=parallel_timelines)
+    for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
+        builder.emit(module, timeline=timeline)
+    builder.join(*parallel_timelines, into="default")
     builder.emit(readout, tag="terminal")
     return builder
 
@@ -1063,9 +1074,7 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
         "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
     )
     for name, length in (("prepare", 77 / 384), ("drive", duration)):
-        builder.emit(
-            v2.Join(
-                *(
+        parallel_modules = list((
                     v2.Pulse(
                         f"{name}_{ch}",
                         v2.PulseCfg(
@@ -1080,9 +1089,12 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
                         freq=frequency,
                     )
                     for ch in (0, 1)
-                )
-            )
-        )
+                ))
+        parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+        builder.fork("default", into=parallel_timelines)
+        for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
+            builder.emit(module, timeline=timeline)
+        builder.join(*parallel_timelines, into="default")
     builder.build()
 
 
@@ -1103,9 +1115,7 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         ("drive", duration),
         ("contrast", 77 / 384),
     ):
-        builder.emit(
-            v2.Join(
-                *(
+        parallel_modules = list((
                     v2.Pulse(
                         f"{name}_{ch}",
                         v2.PulseCfg(
@@ -1128,9 +1138,12 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                         freq=frequency,
                     )
                     for ch in (0, 1)
-                )
-            )
-        )
+                ))
+        parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+        builder.fork("default", into=parallel_timelines)
+        for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
+            builder.emit(module, timeline=timeline)
+        builder.join(*parallel_timelines, into="default")
     prog = builder.build()
     # The swept fabric length uses k=8 upper conversion: 430.08/384=28/25,
     # W=287. Each aggregate ceils (n*287 + ceil(4.3*256))/256 once.
@@ -1165,8 +1178,10 @@ def test_builder_join_and_native_outputs_match_native(mock_soccfg):
         ),
         pulse_id="native_drive",
     )
-    joined = v2.Join(readout, pulse)
-    builder.emit(joined, tag="parallel")
+    builder.fork("default", into="parallel_drive")
+    builder.emit(readout, tag="parallel")
+    builder.emit(pulse, timeline="parallel_drive")
+    builder.join("default", "parallel_drive", into="default")
     builder.delay_by_timeline()
     builder.pulse(1, "native_drive", t=0.1, timeline="default", tag="pulse")
     builder.trigger(
@@ -1184,10 +1199,14 @@ def test_builder_join_and_native_outputs_match_native(mock_soccfg):
 
     class Native(v2.TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare(joined)
+            self.declare(readout)
+            self.declare(pulse)
 
         def _body(self, cfg):
-            self.emit(joined, tag="parallel")
+            self.fork("default", into="parallel_drive")
+            self.emit(readout, tag="parallel")
+            self.emit(pulse, timeline="parallel_drive")
+            self.join("default", "parallel_drive", into="default")
             self.delay_by_timeline()
             self.pulse(1, "native_drive", t=0.1, timeline="default", tag="pulse")
             self.trigger(
@@ -1509,13 +1528,15 @@ def test_timeline_scope_join_native_outputs_and_reference_delays_match_explicit(
     mock_soccfg, frontend
 ):
     readout, drive = _readout(), _pulse("drive", pulse_id="scoped_drive")
-    joined = v2.Join(readout, drive)
 
     def scoped(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         program.fork("default", into="work")
         with program.timeline("work"):
             program.timeline_inc(0.1)
-            program.emit(joined)
+            program.fork("work", into="parallel_drive")
+            program.emit(readout)
+            program.emit(drive, timeline="parallel_drive")
+            program.join("work", "parallel_drive", into="work")
             program.pulse(1, "scoped_drive", t=0.1, tag="scoped_pulse")
             program.trigger(ros=[0], t=0.05, tag="scoped_trigger")
             program.delay(0.02, tag="native_delay")
@@ -1526,12 +1547,16 @@ def test_timeline_scope_join_native_outputs_and_reference_delays_match_explicit(
 
     class Explicit(v2.TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare(joined)
+            self.declare(readout)
+            self.declare(drive)
 
         def _body(self, cfg):
             self.fork("default", into="work")
             self.timeline_inc(0.1, timeline="work")
-            self.emit(joined, timeline="work")
+            self.fork("work", into="parallel_drive")
+            self.emit(readout, timeline="work")
+            self.emit(drive, timeline="parallel_drive")
+            self.join("work", "parallel_drive", into="work")
             self.pulse(1, "scoped_drive", t=0.1, timeline="work", tag="scoped_pulse")
             self.trigger(ros=[0], t=0.05, timeline="work", tag="scoped_trigger")
             self.delay(0.02, tag="native_delay")
@@ -1541,7 +1566,7 @@ def test_timeline_scope_join_native_outputs_and_reference_delays_match_explicit(
             self.pulse(1, "scoped_drive", tag="native_after")
 
     expected = Explicit(mock_soccfg, initial_delay=0, relax_delay=0)
-    actual = _compile_scoped(mock_soccfg, frontend, scoped, (joined,))
+    actual = _compile_scoped(mock_soccfg, frontend, scoped, (readout, drive))
     assert actual.prog_list == expected.prog_list
     actual.compile()
     assert actual.prog_list == expected.prog_list

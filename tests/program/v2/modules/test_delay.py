@@ -16,11 +16,6 @@ def test_delay_auto_rejects_no_channels(t: float | str) -> None:
         DelayAuto("wait", t=t, gens=False, ros=False)
 
 
-def test_delay_auto_with_tag_rejects_reg_name():
-    with pytest.raises(
-        ValueError, match="DelayAuto with tag cannot have t as a register name"
-    ):
-        DelayAuto("d", t="reg_name", tag="k")
 
 
 

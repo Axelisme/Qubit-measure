@@ -5,7 +5,7 @@ from qick.qick_asm import AbsQickProgram
 from zcu_tools.program.v2.ir.instructions import MetaInst, WaitInst
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import Pulse, PulseCfg, ScanWith
+from zcu_tools.program.v2.modules import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -193,48 +193,3 @@ def test_native_pulse_tag_and_call_order_sources_reset_only_on_actual_compile(ti
         ]
 
 
-def test_nested_module_source_restores_parent_and_does_not_consume_native_ordinal():
-    pulse = Pulse(
-        "child",
-        PulseCfg(
-            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=0.1)
-        ),
-    )
-    scan = ScanWith("scan", [1, 2], "value").add_content(pulse)
-
-    class Program(TimelineProgramV2):
-        def _initialize(self, cfg: None) -> None:
-            self.declare(scan)
-            self.add_pulse(
-                0, "native", style="const", freq=1000, phase=0, gain=0.5, length=0.1
-            )
-
-        def _body(self, cfg: None) -> None:
-            self.emit(scan)
-            self.pulse(0, "native", t="auto")
-
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
-    active = []
-    sources = []
-    structure = []
-    for record in prog.compiled_stream.records:
-        inst = record.instruction
-        if isinstance(inst, MetaInst):
-            if inst.type == "SOURCE_START":
-                active.append(inst.name)
-                structure.append(tuple(active))
-            elif inst.type == "SOURCE_END":
-                assert active.pop() == inst.name
-                structure.append(tuple(active))
-        elif isinstance(inst, PortWriteInst):
-            sources.append(tuple(active))
-    assert structure == [
-        ("scan",),
-        ("scan", "child"),
-        ("scan",),
-        (),
-        ("native:pulse:1",),
-        (),
-    ]
-    assert sources == [("scan", "child"), ("native:pulse:1",)]
-    assert active == []

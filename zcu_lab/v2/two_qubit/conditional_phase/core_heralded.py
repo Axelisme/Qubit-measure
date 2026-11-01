@@ -27,7 +27,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import Join, MuxReadout
+from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_line
 
@@ -206,10 +206,7 @@ class ConditionalPhaseHeraldedExp(
                 projection = Pulse(
                     "projection", target, phase=target.phase + quadrature
                 )
-                drive = Join(
-                    Pulse("cz_f1", config.drive.f1, freq=frequency),
-                    Pulse("cz_f2", config.drive.f2, freq=frequency),
-                )
+                drive = (Pulse("cz_f1", config.drive.f1, freq=frequency), Pulse("cz_f2", config.drive.f2, freq=frequency))
                 readout = MuxReadout("readout", config.readout)
                 if config.reset is not None:
                     builder.emit(Reset("reset", config.reset))
@@ -220,8 +217,11 @@ class ConditionalPhaseHeraldedExp(
                 ):
                     builder.emit(x180)
                 builder.emit(prepare)
-                for _ in range(n):
-                    builder.emit(drive)
+                for gate_index in range(n):
+                    builder.fork("default", into=(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"))
+                    builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
+                    builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")
+                    builder.join(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}", into="default")
                 builder.emit(projection)
                 builder.emit(readout, tag="terminal")
                 prog = builder.build()
