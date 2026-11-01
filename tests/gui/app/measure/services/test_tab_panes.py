@@ -47,10 +47,10 @@ def test_snapshot_exposes_independent_panes_and_paths(
     run_result = state.get_tab(tab_id).run.result
     primary, post = PaneSummary(), PostSummary()
     primary_plots = Plots(NonPresentingHost())
-    primary_plots.subplots("fit")
+    primary_plots.subplots(num="fit")
     primary_plots.finish()
     post_plots = Plots(NonPresentingHost())
-    post_plots.subplots("fit")
+    post_plots.subplots(num="fit")
     post_plots.finish()
     writeback = WritebackService(session.context, arb_names=lambda: ())
     primary_draft, post_draft = (
@@ -138,14 +138,14 @@ def test_named_panes_project_paths_and_retire_original_collections(
     session = native_session
     state, tab_id = session.state, "tab"
     original = Plots(NonPresentingHost())
-    old_figure, _ = original.subplots("old")
+    old_figure, _ = original.subplots(num="old")
     original.finish()
     commit_analysis(
         state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=original)
     )
     replacement = Plots(NonPresentingHost())
-    first, _ = replacement.subplots("fit")
-    second, _ = replacement.subplots("diagnostic")
+    first, _ = replacement.subplots(num="fit")
+    second, _ = replacement.subplots(num="diagnostic")
     replacement.finish()
     commit_analysis(
         state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=replacement)
@@ -154,7 +154,7 @@ def test_named_panes_project_paths_and_retire_original_collections(
     old_figure.savefig(png, format="png")
     assert png.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
     post = Plots(NonPresentingHost())
-    post_figure, _ = post.subplots("fit")
+    post_figure, _ = post.subplots(num="fit")
     post.finish()
     commit_post_analysis(
         state, tab_id, PostAnalysisPaneState(result=PostSummary(), plots=post)
@@ -196,7 +196,7 @@ def test_named_panes_project_paths_and_retire_original_collections(
         for artifact in section.artifacts
     )
     newer = Plots(NonPresentingHost())
-    newer.subplots("fit")
+    newer.subplots(num="fit")
     newer.finish()
     commit_analysis(state, tab_id, AnalysisPaneState(result=PaneSummary(), plots=newer))
     assert state.get_tab(tab_id).post_analysis.plots is None

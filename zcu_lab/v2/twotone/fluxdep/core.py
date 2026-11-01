@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -18,7 +19,7 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 from zcu_tools.utils.process import minus_background
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.device import set_flux
 
 
@@ -116,19 +117,37 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Flux device value",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=2,
-        )
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel="Flux device value", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        heat_ax.xaxis.set_major_formatter(formatter)
+        heat_ax.yaxis.set_major_formatter(formatter)
+        heatmap = live_heatmap(heat_ax, uniform=True)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        lines = live_line(line_ax, num_lines=2)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+
+        @context.plots.on_plot_thread
+        def update(data):
+            real = freqflux_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(freqs)), np.nan)
+            for offset in range(min(2, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            return (*heatmap.set(dev_values, freqs, real), *lines.set(freqs, history))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(dev_values), len(freqs)),
-            on_update=lambda data: viewer.update(
-                dev_values, freqs, freqflux_signal2real(data)
-            ),
+            on_update=update,
         )
 
         # Set the external flux bias before acquiring each complete spectrum.

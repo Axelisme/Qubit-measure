@@ -44,8 +44,6 @@ def analyze_amplitude(
     forms or hardware.
     """
     validate_mux_result(result)
-    if type(options.skip) is not int or options.skip < 0:
-        raise ValueError("skip must be a nonnegative integer")
     outcomes: list[MuxAmpRabiFit | MuxFitFailure] = []
     for row, raw_index in enumerate(result.tone_indices):
         index = int(raw_index)
@@ -53,7 +51,7 @@ def analyze_amplitude(
         finite = np.isfinite(signal)
         xs = result.coordinates[row, options.skip :][finite]
         signal = signal[finite]
-        fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
         ax.set(xlabel="Pulse gain (a.u.)", ylabel="Signal (a.u.)")
         fig.suptitle(f"tone {index}")
         try:
@@ -62,9 +60,10 @@ def analyze_amplitude(
             real = rabi_signal2real(signal)
             zero = real[np.argmin(np.abs(xs))]
             phase = 0.0 if zero > 0.5 * (np.max(real) + np.min(real)) else 180.0
-            pi, pierr, pi2, pi2err, _, _, fitted, (params, covariance) = fit_rabi(
-                xs, real, decay=False, init_phase=phase
-            )
+            fit = fit_rabi(xs, real, decay=False, init_phase=phase)
+            pi, pierr = fit.pi_x, fit.pi_x_err
+            pi2, pi2err = fit.pi2_x, fit.pi2_x_err
+            fitted, params, covariance = fit.curve, fit.params, fit.cov
             if not np.all(np.isfinite((pi, pierr, pi2, pi2err))):
                 raise ValueError("Amp Rabi fit returned nonfinite estimates")
             names = ("y0", "yscale", "freq", "phase")

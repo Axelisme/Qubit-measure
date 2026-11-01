@@ -393,7 +393,7 @@ def test_result_commit_failure_settles_run_as_failed(
         state, plan_layout=native_session.save_service.plan_layout
     )
     plots = make_plots()
-    plots.subplots("trace")
+    plots.subplots(num="trace")
     inputs = replace(
         make_inputs(state, tab_id, adapter),
         parameters=native_session.state.get_tab("tab").run.parameters,

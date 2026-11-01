@@ -17,7 +17,7 @@ from .base import (
     gauss_func,
 )
 from .quality import compute_fit_quality, decay_time_bounds
-from .results import DecayFit, DecayFringeFit, DualDecayFit
+from .results import DecayFit, DecayFringeFit, DualDecayFit, GaussDecayFit
 from .shared import FitTrace, ParameterSpec, fit_shared
 
 
@@ -293,13 +293,12 @@ def fit_gauss_decay(
     real_signals: NDArray[np.float64],
     fit_params: Sequence[float | None] | None = None,
     fixedparams: Sequence[float | None] | None = None,
-) -> tuple[
-    float,
-    float,
-    NDArray[np.float64],
-    tuple[tuple[float, float, float, float], NDArray[np.float64]],
-]:
+) -> GaussDecayFit:
     """Fit baseline + amplitude*exp(-0.5*((x-center)/sigma)**2).
+
+    Return a named GaussDecayFit; four-value tuple unpacking follows the
+    existing transitional convention. Quality uses actual observations/curve,
+    (y0, yscale, center, sigma) and explicit fixed flags, without decay bounds.
 
     xs/real_signals are matching coordinates and observations. fit_params
     initializes offset, amplitude, center, sigma; non-None fixedparams fixes
@@ -325,4 +324,20 @@ def fit_gauss_decay(
 
     pOpt = (pOpt[0], pOpt[1], pOpt[2], pOpt[3])
 
-    return t2, t2_err, fit_signals, (pOpt, pCov)
+    names = ("y0", "yscale", "center", "sigma")
+    quality = compute_fit_quality(
+        real_signals,
+        fit_signals,
+        dict(zip(names, pOpt, strict=True)),
+        pCov,
+        fixed_parameters=(
+            tuple(
+                name
+                for name, value in zip(names, fixedparams, strict=True)
+                if value is not None
+            )
+            if fixedparams is not None
+            else ()
+        ),
+    )
+    return GaussDecayFit((t2, t2_err, fit_signals, (pOpt, pCov)), quality=quality)

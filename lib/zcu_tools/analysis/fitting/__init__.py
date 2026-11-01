@@ -33,7 +33,14 @@ from .quality import FitQuality, QualityIssue, compute_fit_quality, decay_time_b
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model
-from .results import DecayFit, DecayFringeFit, DualDecayFit, RabiFit
+from .results import (
+    DecayFit,
+    DecayFringeFit,
+    DualDecayFit,
+    GaussDecayFit,
+    GaussDecayFringeFit,
+    RabiFit,
+)
 from .sampling import FringeSamplingQuality, assess_fringe_sampling
 from .shared import (
     FitDiagnostics,

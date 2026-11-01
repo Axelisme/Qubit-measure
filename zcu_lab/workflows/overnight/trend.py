@@ -74,9 +74,12 @@ def draw_overnight_trend(
             raise ValueError("Overnight actual_start must be aware UTC")
         times.append(actual_start)
     if "overnight_trend" not in plots:
-        plots.subplots("overnight_trend", nrows=2, ncols=1, sharex=True)
+        plots.subplots(nrows=2, ncols=1, sharex=True, num="overnight_trend")
 
-    def draw(figure: Figure) -> None:
+    figure = plots["overnight_trend"]
+
+    @plots.on_plot_thread
+    def draw(_payload: None) -> tuple[Figure]:
         figure.clear()
         axes = figure.subplots(2, 1, sharex=True, squeeze=False)[:, 0]
         notes: list[str] = []
@@ -119,4 +122,7 @@ def draw_overnight_trend(
         axes[-1].set_xlabel("Actual start (UTC)")
         _draw_rejection_notes(figure, notes)
 
-    plots.draw("overnight_trend", draw)
+        return (figure,)
+
+    draw(None)
+    figure.show()

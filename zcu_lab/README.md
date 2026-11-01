@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-10-31，Analyze 例外與子層取消
+**Last updated:** 2026-11-01，Python 階段驗收
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -100,17 +100,96 @@ Analyze 的例外交給作者，包含 fitting 的 AnalysisFailed；框架不辨
 
 Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室 component 轉換輸入。
 
+## 實驗繪圖
+
+實驗繪圖使用 `plots.subplots(num=...)` 建圖、`fig.show()` 顯示，
+顯示後透過 `@plots.on_plot_thread` 更新。可選的 `live_line(ax)`、`live_heatmap(ax)`
+與 `live_scatter(ax)` 只管理本地 artists，`set(...)` 回傳 changed artists。
+詳細寫法見 [v2 authoring](v2/experiment-authoring.md#圖的建立顯示與更新)。
+
 ## 實驗定義的離線驗收
 
-實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [UI 驗證的實驗定義規則](../tests/README.md#實驗定義) 執行離線 probe。
-該節列出報告檢查與 agent 逐張 PNG 判讀的完成條件。框架 UI 的 ComponentDriver 驗收仍依該頁的框架 UI 分支。
+實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [實驗定義驗收規則](../tests/README.md#實驗定義) 執行離線 probe。
+框架 UI 的 ComponentDriver 驗收仍走該頁的框架 UI 分支。
 
-在目前 worktree 中執行以下範例。`repo` 指向目前 worktree，供 `uv --directory` 選用該 worktree 的 interpreter。
-`main_repo` 是 Git common dir 的上層主 checkout，任務 scratch 放在這裡，清除 lane 後仍保留。
-先將 `<task-id>` 換成既有任務名稱，並在該任務的 scratch 準備 `cfg.yaml`。
-此例選用 `FreqExp`，cfg 必須是它的完整 core Cfg，不是 GUI Form 輸入或尚未解析的 library 引用。
-改測其他實驗時，替換可信任的 `module:class`，該類別須可無參數建立且提供 `AXES_SPEC`。
-依 cfg 實際 generator／ADC 通道調整 `--n-gens`、`--n-readouts` 與每條 `--route GEN:ADC`，不要照抄接線。
+### 準備 Python 檔
+
+在 task scratch 寫 `probe.py`。直接 import 受影響實驗的 class 與 Cfg／Result 型別，
+以 Python constructor 填完整 cfg 與分析 options。
+例如測 `FreqExp` 就用它的 Cfg，不用 GUI Form 自動產生 cfg，也不把未解析的 library 引用交給 run。
+所有必填欄位、單位與通道都依實驗的型別與 docstring 填寫，先讓 Pyright 與 Ruff 檢查腳本。
+
+依本次改動選擇要呼叫的階段。下列片段假設腳本已建立型別化的 `experiment`、`cfg`、
+`record`、`options` 與 `output_dir: Path`，按需要採用，不是要一起執行的固定流程。
+API 與具名回傳型別見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
+
+驗證 run 時，先建立明確接線的 `SimulationEnvironment`。
+可直接呼叫 `white_noise(...)`，或依 [single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md)
+建立物理模擬環境。Generator／ADC 數目、每條 route 與 seed 都由腳本明填，不照抄其他實驗的接線。
+Caller 在成功與失敗路徑都要清理自己建立的環境：
+
+```python
+from zcu_tools.experiment.probe import run_stage
+
+try:
+    acquired = run_stage(experiment, cfg, environment)
+    print(acquired.elapsed_seconds)
+    print(acquired.record.result)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name, png in acquired.pngs.items():
+        (output_dir / name).write_bytes(png)
+finally:
+    try:
+        if environment.close_backend is not None:
+            environment.close_backend()
+    finally:
+        environment.devices.close_all_devices()
+```
+
+驗證存檔時，用實驗的 Result 型別與 Cfg 組成 `RunRecord`，metadata 依
+[RunMetadata 契約](../lib/zcu_tools/experiment/README.md#實驗介面與資料) 填寫，experiment tag 須符合 spec。
+也可選擇用 run 階段回傳的 record。Save 不需要環境：
+
+```python
+from zcu_tools.experiment.probe import save_stage
+
+saved = save_stage(record, experiment.AXES_SPEC, output_dir)
+print(saved.native_path)  # output_dir/data.h5
+print(saved.roundtrip_equal, saved.cfg_issue)
+print(saved.record.result)
+```
+
+驗證分析時，以實驗自己的 Result 組 RunRecord，明填 analyze 所需的 options。
+需要模型資料時，從 `zcu_tools.experiment.probe.generators` import `synthesize`，
+並直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`。
+按模型原始簽名填 params，明填 noise_std 與 seed，輸出 shape 由模型決定。
+需要 raw IQ 時，使用同模組的 `sample_iq_shots`，明填 g／e 複數中心、每個 quadrature
+的 width、每列 shots 與 seed。GE 傳 `[0,1]`，對稱錯置傳 `[p,1-p]`，掃描傳 population 曲線。
+兩個機制不替 caller 定義實驗 Result。Caller 按實驗的欄位與 shape 包裝陣列，
+再組 RunRecord。Raw IQ 不先轉 histogram。
+分析不需要先 run 或 save：
+
+```python
+from zcu_tools.experiment.probe import analysis_stage
+
+analyzed = analysis_stage(experiment, record, options)
+print(analyzed.analysis)
+output_dir.mkdir(parents=True, exist_ok=True)
+for name, png in analyzed.pngs.items():
+    (output_dir / name).write_bytes(png)
+```
+
+Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，key 含 `live-`／`analysis-`、
+URL-escaped 圖名與 `.png`。圖片使用 figure 目前尺寸與 100 dpi。
+階段只回 bytes，不寫圖片；腳本決定保存位置，agent 再逐張開啟並記錄判讀。
+不同案例用不同目錄，同名輸出會被覆寫。
+
+### 檢查與執行
+
+`repo` 指向目前 worktree。`main_repo` 是 Git common dir 的上層主 checkout，
+scratch 放在這裡，清除 lane 後仍保留。
+將 `<task-id>` 換成既有任務，先完成 `$scratch/probe.py`，再執行下列命令。
+受管理 lane 的 pytest 與 affected checks 仍須經當次任務指定的 runner，遵守其授權與時間上限。
 
 ```bash
 repo="$(git rev-parse --show-toplevel)"
@@ -118,28 +197,22 @@ git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
 main_repo="$(dirname "$git_common_dir")"
 scratch="$main_repo/.agent_state/plans/<task-id>/scratch/experiment-probe"
 mkdir -p "$scratch"
-# Prepare cfg.yaml in scratch before running this command.
+export PYTHONPATH="$repo:$repo/lib${PYTHONPATH:+:$PYTHONPATH}"
+uv run --directory "$repo" --no-sync -- pyright -p "$repo/pyproject.toml" "$scratch/probe.py" \
+  > "$scratch/pyright.log" 2>&1 &&
+uv run --directory "$repo" --no-sync -- ruff check "$scratch/probe.py" \
+  > "$scratch/ruff.log" 2>&1 &&
 env -u QT_QPA_PLATFORMTHEME QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg \
   OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
-  uv run --directory "$repo" --no-sync -- python -m zcu_tools.experiment.probe \
-  zcu_lab.v2.onetone.freq.core:FreqExp \
-  --cfg "$scratch/cfg.yaml" \
-  --environment white_noise --std-adc 1.0 --seed 7 \
-  --n-gens 2 --n-readouts 1 --route 0:0 \
-  --output-dir "$scratch/output" \
-  > "$scratch/report.json" 2> "$scratch/probe.log"
+  uv run --directory "$repo" --no-sync -- python "$scratch/probe.py" \
+  > "$scratch/probe.log" 2>&1
 status=$?
 printf '%s\n' "$status" > "$scratch/exit-status.txt"
 ```
 
-`--cfg` 接受 YAML 或 JSON，入口依實驗的 cfg 型別驗證。要指定分析選項時，加入 `--options "$scratch/options.yaml"`，也可使用 JSON。
-入口依類別宣告的 `Options` 型別驗證選項，未宣告時傳入解碼資料。省略選項時，有 `Options` 就建立 `Options()`，否則傳 `None`。
-需要物理模擬時，把 white-noise 的環境與接線參數換成 `--environment single_fluxonium --environment-config "$scratch/environment.yaml"`。
-設定檔格式見 [single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md)。
-
-入口不建立 GUI，會自行關閉它建立的環境。改用 Python 的 `probe()` 時，由 caller 在 `finally` 清理 backend 與 devices，包含失敗路徑。
-輸出目錄含 native `data.h5` 與以 `live-`／`analysis-` 開頭的 PNG。同目錄重跑會覆寫同名輸出，請為不同驗收案例選不同目錄。
-`report.json` 包含 Result shape／dtype、讀回比較、分析摘要、PNG 路徑與各階段耗時。
-階段失敗時，JSON 的 `failed_stage` 與 `exception` 保留失敗階段、例外型別及訊息，traceback 留在 `probe.log`，module shell 回非零 exit status。
-Import、cfg／options 驗證或環境建立失敗會直接拋錯，此時可能沒有 JSON 報告，應先讀錯誤輸出。
-Exit 0 仍須依驗收規則確認 `roundtrip_equal` 為 true，並由 agent 親自看完每張 PNG，把判讀寫入 task scratch。
+保存腳本、實際命令、靜態檢查、階段結果與 traceback。
+各階段直接傳出原始例外，腳本沒有捕捉的錯誤會使 Python 回非零 exit status。
+Run 成功後核對 record shape／dtype；save 成功後確認 `roundtrip_equal is True` 並判讀 `cfg_issue`；
+analysis 成功後判讀實際回傳物件。
+Exit 0、native 檔存在或 PNG 存在都不能代替這些檢查與逐張看圖。
+離線驗收不代表實機校準或物理模型已獲驗證。

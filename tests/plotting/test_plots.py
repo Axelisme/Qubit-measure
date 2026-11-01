@@ -59,15 +59,11 @@ def test_subplots_accepts_matplotlib_dimensions_and_unique_optional_names() -> N
     plots.subplots(num="figure_1")
     first, _ = plots.subplots()
     second, _ = plots.subplots(nrows=2, ncols=1)
-    legacy, _ = plots.subplots("legacy", nrows=2)
     assert plots["grid"] is figure
     assert plots["figure_2"] is first
     assert plots["figure_3"] is second
-    assert plots["legacy"] is legacy
     with pytest.raises(ValueError, match="already belongs"):
         plots.subplots(num="grid")
-    with pytest.raises(TypeError):
-        plots.subplots("old", num="new")
     assert host.presented == []
     plots.finish(present=False)
     plots.release()
@@ -129,7 +125,7 @@ def test_live_updates_and_native_save_work_without_presentation() -> None:
     plots = Plots(NonPresentingHost())
     viewer = create_trace(plots, "measurement", "Time", "Signal", title="T1")
     xs, ys = np.array([0.0, 1.0]), np.array([2.0, 3.0])
-    viewer.update((xs, ys), refresh=False)
+    viewer((xs, ys))
     xs[:] = 99
     ys[:] = 99
     figures = plots.finish()
@@ -142,25 +138,25 @@ def test_live_updates_and_native_save_work_without_presentation() -> None:
     figures["measurement"].savefig(output, format="png")
     assert output.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
     with pytest.raises(RuntimeError, match="finished"):
-        viewer.update((xs, ys))
+        viewer((xs, ys))
 
 
 def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    regular, _ = plots.subplots("fit")
+    regular, _ = plots.subplots(num="fit")
     assert host.presented == []
     viewer = create_trace(plots, "measurement", "x", "y")
     live = plots["measurement"]
     assert host.presented == [live]
-    viewer.update((np.array([1.0]), np.array([2.0])), refresh=False)
-    assert host.refreshed == []
+    viewer((np.array([1.0]), np.array([2.0])))
+    assert host.refreshed == [(live, False)]
     with pytest.raises(RuntimeError, match="Finish"):
         plots.release()
     result = plots.finish()
     assert result["fit"] is regular
     assert host.presented == [live, regular]
-    assert host.refreshed == [(live, True)]
+    assert host.refreshed == [(live, False), (live, True)]
     assert plots.finish() is result
     assert host.presented == [live, regular]
     plots.release()
@@ -170,7 +166,7 @@ def test_normal_figures_wait_for_finish_and_last_live_frame_refreshes() -> None:
 
 def test_finished_figures_keep_ownership_without_the_presentation_handle() -> None:
     plots = Plots(NonPresentingHost())
-    figure, axes = plots.subplots("fit")
+    figure, axes = plots.subplots(num="fit")
     axes.plot([0.0, 1.0], [2.0, 3.0])
 
     figures = plots.finish()
@@ -192,19 +188,19 @@ def test_finished_figures_keep_ownership_without_the_presentation_handle() -> No
 def test_diagnostic_finish_does_not_present_ordinary_figures() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    figure, _ = plots.subplots("diagnostic")
+    figure, _ = plots.subplots(num="diagnostic")
     assert plots.finish(present=False)["diagnostic"] is figure
     assert host.presented == []
     with pytest.raises(RuntimeError, match="sealed"):
-        plots.subplots("late")
+        plots.subplots(num="late")
     plots.release()
 
 
 def test_release_attempts_every_figure_and_retains_failed_item_for_retry() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    first, _ = plots.subplots("first")
-    second, _ = plots.subplots("second")
+    first, _ = plots.subplots(num="first")
+    second, _ = plots.subplots(num="second")
     plots.finish()
     host.fail_release = first
     with pytest.raises(ExceptionGroup, match="Failed to release") as captured:
@@ -236,54 +232,12 @@ def test_failed_live_presentation_can_finish_diagnostics_and_release() -> None:
 def test_live_name_conflict_does_not_present_another_figure() -> None:
     host = RecordingHost()
     plots = Plots(host)
-    figure, _ = plots.subplots("same")
+    figure, _ = plots.subplots(num="same")
     with pytest.raises(ValueError, match="already belongs"):
         create_trace(plots, "same", "x", "y")
     assert host.presented == []
     assert plots["same"] is figure
     plots.finish()
-
-
-def test_live_axes_reject_foreign_reused_and_removed_axes_before_mutation() -> None:
-    host = RecordingHost()
-    plots = Plots(host)
-    figure, _ = plots.subplots("workflow", ncols=3)
-    other, other_ax = plots.subplots("other")
-    first, second, removed = figure.axes
-    figure.delaxes(removed)
-    with pytest.raises(ValueError, match="named figure"):
-        create_trace(plots, "workflow", axes=other_ax)
-    with pytest.raises(ValueError, match="named figure"):
-        create_trace(plots, "workflow", axes=removed)
-    with pytest.raises(ValueError, match="distinct"):
-        plots.create_live("workflow", lambda *_: None, axes=(first, first), count=2)
-    with pytest.raises(ValueError, match="named figure"):
-        plots.create_live("workflow", lambda *_: None, axes=(second, other_ax), count=2)
-    assert not first.lines and not second.images and not other.axes[0].lines
-    assert host.presented == []
-    create_trace(plots, "workflow", axes=first)
-    with pytest.raises(ValueError, match="already belong"):
-        create_trace(plots, "workflow", axes=first)
-    assert len(first.lines) == 1
-    plots.finish()
-    plots.release()
-
-
-def test_typed_plots_share_one_named_frame_and_preserve_it_after_release() -> None:
-    host = RecordingHost()
-    plots = Plots(host)
-    figure, _ = plots.subplots("workflow", ncols=2)
-    handles = [create_trace(plots, "workflow", axes=ax) for ax in figure.axes]
-    assert host.presented == [figure]
-    for handle in handles:
-        handle.update((np.array([1.0]), np.array([2.0])), refresh=False)
-    plots.refresh("workflow")
-    assert host.refreshed == [(figure, False)]
-    figures = plots.finish()
-    plots.release()
-    assert figures["workflow"] is figure
-    assert host.released == [figure]
-    assert host.refreshed == [(figure, False), (figure, True)]
 
 
 def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
@@ -301,7 +255,7 @@ def test_fork_shares_host_but_has_independent_membership_and_lifetime() -> None:
     ]
     child.finish()
     with pytest.raises(RuntimeError, match="finished"):
-        viewer.update((np.array([0.0]), np.array([1.0])))
+        viewer((np.array([0.0]), np.array([1.0])))
     child.release()
     create_trace(parent, "trend", "x", "y")
     with pytest.raises(ValueError, match="another figure"):
