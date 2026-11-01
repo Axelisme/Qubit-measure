@@ -6,6 +6,8 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -64,7 +66,7 @@ class LengthAnalysis:
     epsilon: float
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class LengthAnalyzeOptions:
     """Residual threshold for selection only; it does not change acquisition."""
 
@@ -74,6 +76,7 @@ class LengthAnalyzeOptions:
             label="Epsilon",
             description="Maximum p0≈0 residual at the candidate and all longer finite points.",
         ),
+        Field(allow_inf_nan=False),
     ] = 0.05
 
 
@@ -231,8 +234,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         No finite or qualifying candidate gives selected_length=None.
         Publish raw I/Q, r and residual curves. source.cfg may be None.
         """
-        if not np.isfinite(options.epsilon):
-            raise ValueError("Epsilon must be finite")
         result = source.result
         lengths, signals = result.lengths, result.signals
         if lengths.ndim != 1 or signals.shape != (2, 2, lengths.size):
