@@ -8,7 +8,6 @@ from ..ir.io_instructions import (
     DmemWriteInst,
     DportWriteInst,
     PortWriteInst,
-    TrigInst,
     WmemWriteInst,
 )
 from ..ir.operands import AluExpr, AluOp, Immediate, MemAddr, Register, SrcKeyword
@@ -22,8 +21,7 @@ def _register_effects(inst: BaseInst) -> tuple[set[str], set[str]]:
     if isinstance(inst, TimeInst):
         return set(inst.r1.regs()) if inst.r1 is not None else set(), set()
     if (
-        isinstance(inst, (PortWriteInst, DportWriteInst, TrigInst))
-        and inst.time is not None
+        isinstance(inst, (PortWriteInst, DportWriteInst)) and inst.time is not None
     ) or (
         isinstance(inst, RegWriteInst)
         and inst.src == SrcKeyword.WMEM

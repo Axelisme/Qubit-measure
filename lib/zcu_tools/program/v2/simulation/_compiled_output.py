@@ -17,7 +17,7 @@ from zcu_tools.core.simulation import (
 )
 
 from ..base import MyProgramV2
-from ..ir.io_instructions import DportWriteInst, PortWriteInst, TrigInst
+from ..ir.io_instructions import DportWriteInst, PortWriteInst
 from ..ir.operands import Register, SrcKeyword
 from ..utils import generator_frequencies_from_words, readout_frequencies_from_words
 from ._compiled_state import BoolArray, IntArray, Machine
@@ -92,14 +92,13 @@ class Outputs:
         self.pool = pool
         self.time_base = time_base
         self.envelopes: dict[tuple[int, int, int], PulseEnvelope] = {}
-        self.ports: dict[tuple[int, int | None], tuple[str, int]] = {}
+        self.ports: dict[int, tuple[str, int]] = {}
         for ch in prog.gen_chs:
-            cfg = prog.soccfg["gens"][ch]
-            self._port(int(cfg["tproc_ch"]), cfg.get("tmux_ch"), "gen", ch)
+            self._port(int(prog.soccfg["gens"][ch]["tproc_ch"]), "gen", ch)
         for ch in prog.ro_chs:
             ctrl = prog.soccfg["readouts"][ch].get("tproc_ctrl")
             if ctrl is not None:
-                self._port(int(ctrl), prog.soccfg["readouts"][ch].get("tmux_ch"), "ro", ch)
+                self._port(int(ctrl), "ro", ch)
         self.iterations: tuple[tuple[str, int], ...] = ()
         self.loop_positions: dict[str, int] = {}
         self.events: dict[tuple[int, int, tuple[tuple[str, int], ...]], EventSlot] = {}
@@ -131,16 +130,12 @@ class Outputs:
         self.time_base.validate_ticks(duration)
         return duration
 
-    def _port(self, port: int, tmux_ch: int | None, kind: str, ch: int) -> None:
-        key = (port, tmux_ch)
-        if key in self.ports or any(
-            used_port == port and (used_tmux is None or tmux_ch is None)
-            for used_port, used_tmux in self.ports
-        ):
+    def _port(self, port: int, kind: str, ch: int) -> None:
+        if port in self.ports:
             raise ValueError(
-                f"PortWriteInst WPORT_WR at preopt setup: ambiguous wave output port {port}, tmux_ch={tmux_ch}"
+                f"PortWriteInst WPORT_WR at preopt setup: ambiguous wave output port {port}"
             )
-        self.ports[key] = (kind, ch)
+        self.ports[port] = (kind, ch)
 
     def begin(self, machine: Machine, points: IntArray) -> None:
         """Start the current shot lanes at their actual reference-time origin."""
@@ -168,6 +163,7 @@ class Outputs:
         port = machine.value(inst.dst)
         if np.any(port != port[0]):
             raise ValueError("lane-dependent wave output port")
+        kind, ch = self.ports[int(port[0])]
         if inst.src == SrcKeyword.WMEM:
             words = machine.wave(inst.addr)
         elif inst.src == SrcKeyword.REG or (
@@ -178,18 +174,6 @@ class Outputs:
             )
         else:
             raise ValueError("unsupported wave port source")
-        port_number = int(port[0])
-        key = (port_number, None)
-        if key not in self.ports:
-            tmux = (words[machine.active, 5] >> 8) & 0xFF
-            if np.any(tmux != tmux[0]):
-                raise ValueError("lane-dependent tmux channel")
-            key = (port_number, int(tmux[0]))
-            if key not in self.ports:
-                raise ValueError(
-                    f"unregistered wave output port {port_number}, tmux_ch={key[1]}"
-                )
-        kind, ch = self.ports[key]
         timestamp = machine.ref + machine.value(
             inst.time if inst.time is not None else Register("s14")
         )
@@ -412,30 +396,21 @@ class Outputs:
         if not conf & 8 and envelope.values[-1] != 0:
             raise ValueError("stdysel=last has nonzero final DAC envelope sample")
 
-    def trigger(self, machine: Machine, inst: DportWriteInst | TrigInst) -> None:
-        """Record dport masks or tport sets; clears do not create ADC reads."""
-        port = machine.value(inst.dst)
+    def trigger(self, machine: Machine, inst: DportWriteInst) -> None:
+        """Record ADC rising trigger effects, preserving declaration/read order."""
+        port, data = machine.value(inst.dst), machine.value(inst.data)
         if np.any(port != port[0]):
             raise ValueError("lane-dependent trigger port")
-        if isinstance(inst, TrigInst) and inst.src == "clr":
-            return
         timestamp = machine.ref + machine.value(
             inst.time if inst.time is not None else Register("s14")
         )
         start = self._ticks(timestamp - self.origin, self.prog.tproccfg["f_time"])
         for ch in self.prog.ro_chs:
             cfg = self.prog.soccfg["readouts"][ch]
-            if int(cfg["trigger_port"]) != int(port[0]):
+            active = (data & (1 << int(cfg["trigger_bit"]))) != 0
+            if int(cfg["trigger_port"]) != int(port[0]) or not np.any(active):
                 continue
-            if isinstance(inst, DportWriteInst):
-                if cfg["trigger_type"] != "dport":
-                    continue
-                data = machine.value(inst.data)
-                active = machine.active & ((data & (1 << int(cfg["trigger_bit"]))) != 0)
-            else:
-                if cfg["trigger_type"] != "tport":
-                    continue
-                active = machine.active.copy()
+            active &= machine.active
             if not np.any(active):
                 continue
             indexes = self.read_count[ch]
