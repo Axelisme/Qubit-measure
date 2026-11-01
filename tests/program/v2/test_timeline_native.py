@@ -362,6 +362,7 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
 def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
     def initialize(prog):
         prog.add_loop("scan", 2)
+        prog.relax_delay = 200 / 430.08
 
     def body(prog):
         prog.write_reg("s_out_time", 0)
