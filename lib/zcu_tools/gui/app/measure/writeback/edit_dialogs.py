@@ -382,7 +382,7 @@ class _ModuleDialog(_EditDialog):
         buttons.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.setAutoDefault(False)
-        self.scope.connect(cancel.clicked, self.reject)
+        self.scope.connect(cancel.clicked, lambda: self.reject())
         buttons.addWidget(cancel)
         self._save_button = QPushButton("Save")
         # Enter finishes a field, not the dialog, like the shared FormEditor.
