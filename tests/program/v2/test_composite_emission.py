@@ -1065,6 +1065,57 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
     return _selection_program(Selection())
 
 
+@pytest.mark.parametrize("other_case", [0, 1])
+@pytest.mark.parametrize("empty_case", [False, True])
+def test_selected_playback_rejects_consumed_alternative_after_branch_join(
+    other_case, empty_case
+):
+    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
+    other = LoadValue(
+        "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
+    )
+
+    def playback(prog, relation, values, timeline):
+        prog.pulse_from_length_reg(
+            0,
+            "template",
+            length_reg="length",
+            flat_top=False,
+            timeline=timeline,
+            selection=SelectedPlayback(
+                relation.selector,
+                "length",
+                tuple(PlaybackChoice("template", length_cycles=n) for n in values),
+                relation,
+            ),
+        )
+        prog.timeline_inc(0, timeline=timeline)
+
+    def initialize(prog):
+        prog.add_loop("path", 2)
+        prog.add_reg("index")
+
+    def body(prog):
+        prog.write_reg("index", 0)
+        initial = loader.lower_selected(prog)
+        with prog.branch(by="path", align_timeline=True) as branch:
+            for index in range(2):
+                if empty_case and index != other_case:
+                    continue  # Undeclared cases execute the unchanged entry state.
+                with branch.case(index) as timeline:
+                    current = other if index == other_case else loader
+                    relation = current.lower_selected(prog)
+                    values = (89, 39) if index == other_case else (39, 89)
+                    playback(prog, relation, values, timeline)
+        # Both tables have valid writers/consumers, but path=other_case leaves
+        # length=89 while initial's independent capture still selects A's 39.
+        playback(prog, initial, (39, 89), "default")
+
+    with pytest.raises(ValueError, match="length: .*selected playback selection"):
+        _program(make_mock_soccfg(1, 0), [template, loader, other], body, initialize)
+
+
 def _selection_program(selection: Module) -> TimelineProgramV2:
     return _program(make_mock_soccfg(1, 0), [selection], lambda p: p.emit(selection))
 
