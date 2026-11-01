@@ -73,7 +73,11 @@ def _compare_field(
             selection[index_axis] = index
         region = tuple(selection)
         covered[region] = True
-        difference = _comparison_difference(before[region], after[region], scale=scale)
+        # A slice that selects one element is a NumPy scalar, or the bare Python
+        # object (e.g. None) for object arrays; keep it an ndarray to compare.
+        difference = _comparison_difference(
+            np.asarray(before[region]), np.asarray(after[region]), scale=scale
+        )
         if difference is not None:
             logger.warning(
                 "Roundtrip field=%s index_axis=%s index=%s: %s",
@@ -106,7 +110,9 @@ def compare_roundtrip(
     Both inputs must be dataclass instances of spec.result_type with the same
     fields; otherwise raise TypeError. Compare every field, including fields
     not named by the persistence declaration.
-    Return False for any differing field shape or dtype. AxesSpec and
+    Return False for any differing field shape or dtype. Each field value is
+    compared as np.asarray(value), so a scalar float field restored as None
+    differs in dtype (float64 vs object). AxesSpec and
     GroupedAxesSpec fields with a finite, nonzero scale other than 1 allow
     relative error <= 2*eps, atol=0, for
     floating values (each real/imaginary component for complex arrays). eps is
