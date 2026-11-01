@@ -15,6 +15,7 @@ from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 
 from .shot_generators import GaussianCloudParameters as GaussianCloudParameters
 from .shot_generators import generate_singleshot_ge as generate_singleshot_ge
+from .shot_generators import generate_singleshot_rabi as generate_singleshot_rabi
 
 
 @dataclass(frozen=True)
