@@ -609,7 +609,11 @@ class RuntimeMath(TimedMacro):
         self.prog = prog
         self.operations: list[Macro] = []
         self.floors: dict[tuple[int, int], tuple[Time, Time, Time]] = {}
-        self.claimed = set(prog._timeline_live_registers())
+        # Incoming ends are checked dynamically by allocate(). They may die
+        # while nested emissions prepare; inheriting them would pin stale
+        # snapshots for the entire enclosing emission. Only plan-local storage
+        # must survive until this math's deferred operations have run.
+        self.claimed: set[str] = set()
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
         if previous is not None:
             self.claimed.update(previous.claimed)
