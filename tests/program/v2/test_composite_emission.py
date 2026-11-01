@@ -1103,6 +1103,59 @@ def test_repeated_computed_playback_preserves_selected_ends_within_register_budg
     assert [s.end_cycle - s.start_cycle for s in result] == [495, 1111] * 2
 
 
+def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
+    first = ComputedPulse(
+        "first",
+        val_reg="a_index",
+        pulses=[
+            _pulse_cfg(n / 384).model_copy(
+                update={"pre_delay": 0, "post_delay": -10 / 430.08}
+            )
+            for n in (39, 89)
+        ],
+    )
+    other = ComputedPulse(
+        "other",
+        val_reg="b_index",
+        pulses=[
+            _pulse_cfg(n / 384, ch=1).model_copy(
+                update={"pre_delay": 0, "post_delay": 0}
+            )
+            for n in (20, 40, 60)
+        ],
+    )
+    a_index = LoadValue("a_index", [0, 1], idx_reg="index", val_reg="a_index")
+    b_index = LoadValue("b_index", [2, 0], idx_reg="index", val_reg="b_index")
+    change_a = LoadValue(
+        "change_a", [1, 0], idx_reg="index", val_reg="a_index", use_existed=True
+    )
+
+    def body(prog):
+        prog.emit(a_index)
+        prog.emit(b_index)
+        prog.fork("default", into="saved")
+        prog.emit(first, timeline="saved")
+        prog.emit(other)
+        prog.emit(change_a)
+        # The first end and its physical coverage survive another table's
+        # capture and a later author-selector change. Pay its negative-post debt.
+        prog.timeline_inc(10 / 430.08, timeline="saved")
+        prog.join("saved", into="default")
+        prog.emit(first)
+        prog.timeline_inc(10 / 430.08)
+
+    prog = _program(
+        make_mock_soccfg(2, 0),
+        [a_index, b_index, change_a, first, other],
+        body,
+        lambda p: p.add_loop("index", 2),
+    )
+    result = shots(prog)
+    assert [waves(s) for s in result] == [[0, 0, 68], [0, 0, 100]] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [168, 144] * 2
+    assert [s.end_cycle - s.start_cycle for s in result] == [177, 153] * 2
+
+
 @pytest.mark.parametrize("count", [None, 2])
 def test_table_readout_rejects_missing_or_mismatched_public_loop(count):
     readout = _table_readout()
