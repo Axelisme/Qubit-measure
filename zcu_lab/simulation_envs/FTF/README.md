@@ -2,7 +2,7 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-01，獨立板子與物理接線
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
@@ -108,7 +108,7 @@ FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線�
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
-`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。這份佈局推導出 4 個 generator 與 3 個 readout。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由獨立的 [profile.yaml](profile.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。隨附的板子 YAML 明確設定 4 個 generator 與 3 個 readout，並指定 mux 型別。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
 [Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 

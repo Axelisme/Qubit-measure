@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，獨立離線階段、caller 自備板子 profile、grouped 逐 slice 比較與 simulators owner
+**Last updated:** 2026-11-01，caller-owned board and model routing
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -69,8 +69,11 @@ acquisition drains; device cleanup remains separate.
 
 [`six_fluxonium`](../simulators/six_fluxonium/environment/README.md) composes six independent single-cavity
 sources with six local DC drivers and one shared coil. Each circuit uses the sum
-of its local and coil reduced flux. Mux gen0/ADC0..5 and pulse gen13/ADC6 use
-per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
+of its local and coil reduced flux. The caller's model YAML selects mux and
+pulse generator/ADC routes; gen0/ADC0..5 and gen13/ADC6 are the supplied YAML
+example, not fixed runtime channels. The independent board YAML owns channel
+counts, types and clocks; the caller must keep both YAML files consistent.
+Readout uses per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
 marginal counts without building a joint model; raw shots retain physical ADC
 sources independently of backend lifetime.
 

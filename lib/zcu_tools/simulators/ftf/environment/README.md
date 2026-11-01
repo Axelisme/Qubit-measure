@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-01，caller-owned board examples
 
 **讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
 
@@ -13,7 +13,8 @@ The builder does not infer channel counts from wiring. `FTFSource` and
 `plan_template` require the same acquisition profile for numeric PFB carrier selection. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
 The GUI example is `zcu_lab/simulation_envs/FTF/startup.py`, which calls `ftf(...)`
-with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`.
+with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`, and
+`profile.yaml` for the board.
 The Notebook walkthrough is `notebook_md/single_qubit.md`; it calls the same public
 builder with an explicit YAML path. Neither caller uses an environment wrapper.
 欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
@@ -49,7 +50,23 @@ decimated acquisition keeps the completed trace and stops before the next round.
 Startup preparation, program construction and round hooks are outside this
 budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
-For profiling or benchmarking, call `ftf(path_or_settings, time_scale=0)`.
+For profiling or benchmarking, build the board from the caller-owned YAML and
+pass it explicitly. From the repository root, after preparing `ftf.yaml`:
+
+```python
+from pathlib import Path
+
+import yaml
+from zcu_tools.program import build_soccfg
+from zcu_tools.simulators.ftf.environment import ftf
+
+configuration = Path("zcu_lab/simulation_envs/FTF/ftf.yaml")
+board_yaml = configuration.with_name("profile.yaml")
+soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
+env = ftf(configuration, soccfg=soccfg, time_scale=0)
+```
+
+The caller must close `env.devices` with `close_all_devices()` after use.
 This public override disables waiting without changing numeric
 settings, RNG streams, density, readout or routes. Alternatively set
 `numerics.time_scale: 0` in the caller-owned YAML. With the default
@@ -65,8 +82,11 @@ one JSON line, including all software rounds and partial work after a failure.
 UTC. Relative explicit directories resolve at environment startup. The GUI and
 experiment acquisition calls need no changes.
 
-Use `ftf(settings.with_telemetry(enabled=False), time_scale=0)` for
-profiles and benchmarks. The public settings method returns a copy, disabling
+To also disable telemetry, load `settings` with
+`from zcu_tools.simulators.ftf.config import load_ftf` and
+`settings = load_ftf(configuration)`. Use the same `soccfg` built above in
+`ftf(settings.with_telemetry(enabled=False), soccfg=soccfg, time_scale=0)`.
+The public settings method returns a copy, disabling
 routing timers and all telemetry I/O without changing the original settings.
 No directory is created. `settings.with_telemetry(enabled=True, directory=Path(...))`
 selects another directory; omitted directory preserves the current setting.

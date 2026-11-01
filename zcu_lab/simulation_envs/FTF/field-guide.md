@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-01，獨立板子與物理接線
 
 本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [simulators.ftf.config](../../../lib/zcu_tools/simulators/ftf/config/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
@@ -473,17 +473,11 @@ FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP
 
 ## Generator、ADC 與 entry 接線對照
 
-所有 channel index 都從 0 開始。數量不是綁定條數，而是最大索引加一：
+所有 channel index 都從 0 開始。獨立的 [profile.yaml](profile.yaml) 擁有 generator／ADC 數量、時脈、DDS、firmware channel type 與 memory limits。Caller 以 `program.build_soccfg` 建立板子，再用 required `soccfg=` 交給 `ftf`。Runtime 不從模型接線的最大索引或綁定條數建立板子。
 
-```text
-generator_count = max(pulse generator, all drive-line generators,
-                      mux generator if configured) + 1
-readout_count = max(pulse ADC, all mux receivers if configured) + 1
-```
+`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line。共用線上的兩個元件共用同一個綁定，不是再綁兩次。模型 YAML 擁有這些物理接線與校準，caller 要讓索引與所需型別符合獨立板子 YAML。索引通過模型 schema 不代表任意 pulse 都符合該板子的能力。
 
-`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line；共用線上的兩個元件共用同一個綁定，不是再綁兩次。Clock、DDS、firmware channel type 與 memory limits 使用固定 mock QICK capability profile，YAML 不提供 `channels` 或改 profile 的欄位。索引通過 schema 不代表任意 pulse 都符合該 profile。
-
-樣板使用 pulse gen0、mux gen1、f1_charge gen2、f2_charge gen3，推導出 4 個 generator。Pulse ADC0 加上 mux ADC1 與 ADC2，推導出 3 個 readout。這是樣板接線，不是 engine 的固定通道上限；schema 接受非負整數索引，runtime 依最大索引建立 mock SoC。使用未綁定 generator 仍按既有行為拒絕。
+樣板使用 pulse gen0、mux gen1、f1_charge gen2、f2_charge gen3，以及 pulse ADC0 與 mux ADC1、ADC2。隨附板子 YAML 明確提供 4 個 generator 與 3 個 readout，gen1 與 ADC1、ADC2 為 mux 型別。這是 caller 的範例設定，不是 engine 的固定通道上限。更換接線時也要核對板子 YAML，不能只改模型 YAML。使用未綁定 generator 仍按既有行為拒絕。
 
 [Entry 範本](entry-template.yaml) 的具體對照如下，entry 路徑以 `components` 下的元件為起點。
 

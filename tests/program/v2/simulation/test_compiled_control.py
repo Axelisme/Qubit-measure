@@ -11,6 +11,7 @@ from zcu_tools.program.v2.ir.labels import Label, LabelRef
 from zcu_tools.program.v2.ir.operands import AluExpr, AluOp, Immediate, Register
 from zcu_tools.program.v2.modules import LoadValue
 
+from tests.program._timing_expectations import generator_duration, tproc_ceil
 from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -66,10 +67,13 @@ def test_nested_native_repeats_keep_each_event_and_iteration_coordinate(sync_at_
     prog, env = program(body, trigger_time=None)
     result = request(prog, env)
     events = result.materialize_point(0).events
+    step = env.soccfg.cycles2us(
+        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1))
+    )
     assert len(events) == 4
     assert [e.source for e in events] == ["repeated"] * 4
     assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
-        [0, 43 / 430.08, 86 / 430.08, 129 / 430.08]
+        [i * step for i in range(4)]
     )
     assert [e.iterations for e in events] == [
         (("outer", 0), ("inner", 0)),
@@ -99,16 +103,19 @@ def test_register_repeat_zero_guard_and_counts_are_local_to_each_scan_point(
                 p.delay_by_timeline()
         p.pulse(0, "p", timeline="default", tag="final")
 
-    # Counts 0..2 leave 86 cycles of shell WAIT slack; allow that exact budget.
+    # Counts 0..2 leave two pulse advances of shell WAIT slack.
     prog, env = program(body, initialize, trigger_time=None, relax_delay=0.2)
     result = request(prog, env)
+    step = env.soccfg.cycles2us(
+        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1))
+    )
     assert result.point_names == ("scan",)
     for index in range(3):
         events = result.materialize_point(index).events
         assert [e.source for e in events] == ["repeated"] * index + ["final"]
         assert [
             time_us(result.time_base, e.start_ticks) for e in events
-        ] == pytest.approx([i * 43 / 430.08 for i in range(index + 1)])
+        ] == pytest.approx([i * step for i in range(index + 1)])
         assert [e.iterations for e in events[:-1]] == [
             (("inner", i),) for i in range(index)
         ]
@@ -132,19 +139,27 @@ def test_variable_repeats_in_cases_preserve_numeric_slot_times(align):
             ):
                 p.pulse(1, "drive", tag="repeated")
             with cases.case(1):
-                p.timeline_inc(43 / 430.08)
+                step_cycles = tproc_ceil(p.soccfg, generator_duration(p.soccfg, 0.1, 1))
+                p.timeline_inc(p.cycles2us(step_cycles))
         p.pulse(1, "drive", timeline="default", tag="final")
 
     prog, env = program(body, initialize, trigger_time=None)
     result = request(prog, env)
+    step = env.soccfg.cycles2us(
+        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1, 1))
+    )
     for index in range(2):
         events = [
             e for e in result.materialize_point(index).events if e.source != "carrier"
         ]
-        expected = [0, 43, 86, 129, 172] if index == 0 else [172 if align else 43]
-        assert [time_us(result.time_base, e.start_ticks) * 430.08 for e in events] == (
-            pytest.approx(expected)
+        expected = (
+            [i * step for i in range(5)]
+            if index == 0
+            else [(4 if align else 1) * step]
         )
+        assert [
+            time_us(result.time_base, e.start_ticks) for e in events
+        ] == pytest.approx(expected)
         assert [e.iterations for e in events[:-1]] == (
             [(("outer", o), ("inner", i)) for o in range(2) for i in range(2)]
             if index == 0
@@ -162,12 +177,12 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
     def body(p):
         p.trigger([0], t=0)
         p.fork("default", into="external")
-        p.timeline_inc(100 / 430.08, timeline="external")
+        p.timeline_inc(p.cycles2us(100), timeline="external")
         with p.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
                     p.pulse(0, "p", tag=f"case-{index}")
-                    p.timeline_inc((10 + index * 10) / 430.08)
+                    p.timeline_inc(p.cycles2us(10 + index * 10))
         p.join("external", into="default")
         p.pulse(1, "tail", timeline="default", tag="tail")
 
@@ -178,7 +193,7 @@ def test_native_branch_selects_each_lane_and_debits_runtime_external_timeline():
         assert [e.source for e in events] == [f"case-{index}", "tail"]
         assert [
             time_us(result.time_base, e.start_ticks) for e in events
-        ] == pytest.approx([0, 100 / 430.08])
+        ] == pytest.approx([0, env.soccfg.cycles2us(100)])
 
 
 @pytest.mark.parametrize("register_count", [False, True])
@@ -300,9 +315,9 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
         p.emit(right)
         p.timeline_inc("left_time", timeline="left")
         p.timeline_inc("right_time", timeline="right")
-        p.timeline_inc(25 / 430.08)
+        p.timeline_inc(p.cycles2us(25))
         p.join("left", "right", into="default")
-        p.delay(20 / 430.08)
+        p.delay(p.cycles2us(20))
         p.delay_by_timeline()
         p.pulse(0, "p", timeline="default")
 
@@ -311,7 +326,7 @@ def test_runtime_timeline_max_floor_fork_join_and_sync_use_selected_table_values
     assert [
         time_us(result.time_base, result.materialize_point(i).events[0].start_ticks)
         for i in range(3)
-    ] == pytest.approx([30 / 430.08, 30 / 430.08, 25 / 430.08])
+    ] == pytest.approx([env.soccfg.cycles2us(cycles) for cycles in (30, 30, 25)])
 
 
 @pytest.mark.parametrize("counts", [(2, 0), (0, 2)])
@@ -353,7 +368,8 @@ def test_branch_validates_each_executed_lane_not_total_static_case_triggers():
         p.trigger([0], t=0)
         p.pulse(0, "p", timeline="default")
         with p.branch(by="scan", align_timeline=True) as branch, branch.case(0):
-            p.trigger([0], t=43 / 430.08)
+            pulse_end = tproc_ceil(p.soccfg, generator_duration(p.soccfg, 0.1))
+            p.trigger([0], t=p.cycles2us(pulse_end))
             p.pulse(0, "p")
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
@@ -381,9 +397,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
                         p.fork(case, into="capture")
                         p.trigger([0, 1], t=0, timeline="capture")
                         p.pulse(0, "p", tag=f"case-{index}")
-                        # ADC0: 61/307.2 us, ADC1: 31/307.2 us. The 43-cycle
-                        # pulse plus 44 cycles gives 87-cycle trigger spacing.
-                        p.timeline_inc(44 / 430.08)
+                        # Add 44 tProc cycles after the pulse so both ADC
+                        # windows finish before the next trigger.
+                        p.timeline_inc(p.cycles2us(44))
             p.delay_by_timeline()
 
     prog, env = program(
@@ -393,6 +409,9 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
         routes=((0, 0), (0, 1)),
         trigger_time=None,
     )
+    spacing = env.soccfg.cycles2us(
+        tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.1)) + 44
+    )
     static = {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()}
     assert static == {0: 3, 1: 3}
     result = request(prog, env)
@@ -401,7 +420,7 @@ def test_balanced_branch_repeats_match_each_adc_static_count_in_every_case():
         assert [e.source for e in point.events] == [f"case-{index}"] * 3
         for readout in point.readouts:
             assert times_us(result.time_base, readout.trigger_ticks) == pytest.approx(
-                (0, 87 / 430.08, 174 / 430.08)
+                tuple(i * spacing for i in range(3))
             )
     assert {ch: cfg["trigs"] for ch, cfg in prog.ro_chs.items()} == static
 

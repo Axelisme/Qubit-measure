@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev。FTF YAML schema、單位與欄位診斷契約。
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-01，independent board and model YAML ownership
 
 `load_ftf(path)` 一次讀取 UTF-8 YAML，`parse_ftf(document)` 驗證記憶體中的文件。兩者回傳 immutable `FTFSettings`。本模組擁有 schema、單位與欄位路徑診斷，不依賴 `simulate`、`device` 或 `program`，也不建立裝置或決定物理適用性。
 
@@ -39,11 +39,30 @@ Private replay 保存當次 effective settings，`drift=None`，不依賴時鐘�
 
 可省略的 `design` map 以 entry qubit 名稱保存完整的獨立標稱值，不從 `chip` 或 `dc_bias` 補值。每筆必填正值 `ej_ghz/ec_ghz/el_ghz`、A/V `flux_unit`、有限的 `flux_half/flux_bias` 與有限非零 signed `flux_period`。缺欄位在載入時報 `design.<qubit>.<field>`。省略或空 map 表示沒有設計初猜。Startup 負責依 entry-template 驗證 qubit 名稱與 device 單位，再交 predictor 檔案 owner 保存；schema 不建立 predictor 或讀 entry。
 
-`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(..., time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
+`numerics.time_scale` 是有限非負的物理時間倍率。省略為 1.0，0.1 為十倍速，0 關閉補等。每 round 的目標秒數為 `time_scale × reps × Σ(各點 timeline 長度 + relax_delay) × 1e-6`，長度與 delay 使用 us。Binding 扣掉計算耗時，只等待正餘量，Stop 可中斷等待。成功 round 仍向共用時鐘補入 unscaled physical duration 的正差額，所以 `time_scale=0` 不會停止漂移時間；閒置時間也照常推進。Builder 提供 `ftf(settings, soccfg=soccfg, time_scale=0)` 覆寫，無須改寫 YAML。舊欄位 `min_round_duration_s` 會報錯並指出新名稱。
 
 `numerics.projection_weight_floor` 接受有限的 `[0, 1)` 機率，必填，範本明填 `1e-9`。Runtime 在每次 projective read 後剪除低於此值的全域 outcome 權重，將權重按比例歸到其餘 outcomes。設為 0 保留零權重 outcomes。若某 point 剪空，runtime 會報錯並指名 point 與 floor。Telemetry 記錄保留數與剪除機率。
 
-`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False))` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
+以下範例從 repo root 讀取 caller 的模型工作副本與獨立板子 YAML。先依環境 README 準備 `ftf.yaml`。
+
+```python
+from pathlib import Path
+
+import yaml
+from zcu_tools.program import build_soccfg
+from zcu_tools.simulators.ftf.config import load_ftf
+from zcu_tools.simulators.ftf.environment import ftf
+
+configuration = Path("zcu_lab/simulation_envs/FTF/ftf.yaml")
+settings = load_ftf(configuration)
+board_yaml = configuration.with_name("profile.yaml")
+soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
+env = ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)
+```
+
+使用完畢後，caller 呼叫 `env.devices.close_all_devices()`。相同 acquisition 情境沿用這份 `soccfg`，不從模型接線重建板子。
+
+`numerics.telemetry.enabled` 省略為 `true`，記錄每次 acquire 的路由彙總。`numerics.telemetry.directory` 省略或 `null` 時，由環境選擇 project root 下的 `.sim_telemetry/`。明確相對路徑在環境建立時解析。公開方法 `settings.with_telemetry(enabled=False)` 回傳關閉記錄的設定副本，供 `ftf(settings.with_telemetry(enabled=False), soccfg=soccfg)` 使用。`directory=Path(...)` 可指定另一個目錄，省略則保留原設定。此方法只建立記憶體中的設定副本，原設定保持不變。欄位、50 MiB 輪替與 warning 語意見 [FTF runtime](../environment/README.md#routing-telemetry)。
 
 錯誤包含欄位路徑。未知欄位、重複 source 名稱或 generator 綁定、非 A/V 的電源單位、無效 limits／dimensions，以及非 positive-semidefinite 的 ADC noise PSD 都在建立資源前拒絕。Loader 要求 v2 文件，對 v1 明確報錯並保留本機工作副本與既有 entry。
 
@@ -63,6 +82,8 @@ Program 提供 tones 的頻率、gain、phase 與順序，YAML 綁定各路徑�
 兩條路徑共用兩個物理 resonator，不新增 tone-to-qubit mapping。
 `readout.receivers` 依 pulse、mux 設定順序回傳全部 receiver，不決定 program 輸出順序。
 
-Generator 數量是所有 drive、flux、pulse readout 與可選 mux generator index 的最大值加一，ADC 數量是所有 `ro_ch` 最大值加一。索引必須是非負整數，不設固定上限。索引空洞不是已綁定的線路。Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。這些設定與固定 QICK profile 的對照見欄位指南。
+獨立板子 YAML 擁有 generator／ADC 數量、型別與時脈，caller 用 `program.build_soccfg` 建立 `soccfg` 後明確交給 `ftf`。模型 YAML 只擁有物理接線與校準，不從最大索引推導板子。索引必須是非負整數，caller 要確保每個綁定都符合實際板子的通道與型別。索引空洞不是已綁定的線路。
+
+Charge 係數與 resonator coupling 乘 full charge operator，不隱藏 n01 正規化。ADC noise 採 two-sided white PSD，sample covariance 為 PSD/dt_ns，receiver gain 不縮放 noise。板子設定與物理接線的對照見欄位指南。
 
 [default.yaml](../../../../../zcu_lab/simulation_envs/FTF/default.yaml) 的 circuit energies、couplings 與 resonator frequencies 採 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。
