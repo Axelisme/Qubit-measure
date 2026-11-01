@@ -383,7 +383,7 @@ async def run_mist_stage(
         env,
         run_mist,
         cfg,
-        name=f"MIST {mode}",
+        name="MIST",
         output=NativeOutput(filename=f"mist-{mode}.h5", spec=PowerDepExp.AXES_SPEC),
     )
     if acquisition.result is None:

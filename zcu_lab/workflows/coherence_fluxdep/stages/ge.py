@@ -93,7 +93,7 @@ async def measure_ge(
         env,
         GE_Exp().run,
         cfg,
-        name="singleshot GE",
+        name="singleshot",
         output=NativeOutput(filename="singleshot-ge.h5", spec=GE_Exp.AXES_SPEC),
     )
     return SingleshotResult(
