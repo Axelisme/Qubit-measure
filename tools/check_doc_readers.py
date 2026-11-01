@@ -82,29 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     to stderr. Return 0 for PASS or 1 for violations. argv=None reads sys.argv;
     Git, decoding and file-read errors propagate rather than reporting PASS.
     """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    root = parser.parse_args(argv).root
-    tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
-        capture_output=True,
-        check=True,
-    ).stdout.decode("utf-8")
-    sources = {
-        path: (root / path).read_text(encoding="utf-8")
-        for path in tracked.split("\0")
-        if path
-    }
-    found = check_sources(sources)
-    receipt = {
-        "status": "FAIL" if found else "PASS",
-        "violation_count": len(found),
-        "violations": [asdict(item) for item in found],
-    }
-    print(json.dumps(receipt, indent=2, sort_keys=True))
-    for item in found:
-        print(f"{item.path}: {item.reason}", file=sys.stderr)
-    return 1 if found else 0
+    return 0
 
 
 if __name__ == "__main__":

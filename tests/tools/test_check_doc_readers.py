@@ -23,7 +23,7 @@ def test_main_reports_json_diagnostics_and_exit_code(
         subprocess,
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
-            args, 0, stdout=b"guide.md\\0", stderr=b""
+            args, 0, stdout=b"guide.md\0", stderr=b""
         ),
     )
 
