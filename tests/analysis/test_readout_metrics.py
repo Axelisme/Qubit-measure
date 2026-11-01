@@ -68,6 +68,15 @@ def test_empty_point_has_no_metrics() -> None:
     assert np.all(np.isnan(astuple(result)))
 
 
+@pytest.mark.parametrize(
+    "shape",
+    [(8, 3, 3, 3, 2), (9, 3, 3, 3, 3), (3, 3, 3, 3), (8, 3, 3, 3, 3, 1)],
+)
+def test_rejects_wrong_branch_or_moment_shape(shape: tuple[int, ...]) -> None:
+    with pytest.raises(ValueError, match="shape"):
+        readout_metrics(np.zeros(shape, dtype=np.float64))
+
+
 @pytest.mark.parametrize("branch", range(8))
 def test_empty_branch_only_invalidates_dependent_metrics(
     model_sums: NDArray[np.float64], branch: int
