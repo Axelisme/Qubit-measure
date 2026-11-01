@@ -18,6 +18,14 @@ def generator_duration(soccfg: QickConfig, length_us: float, ch: int = 0) -> Fra
     return Fraction(int(cycles)) / Fraction(str(soccfg["gens"][ch]["f_fabric"]))
 
 
+def generator_tproc_grid(soccfg: QickConfig, ch: int = 0) -> int:
+    """Smallest generator-cycle step spanning a whole number of tProc cycles."""
+    ratio = Fraction(str(soccfg["tprocs"][0]["f_time"])) / Fraction(
+        str(soccfg["gens"][ch]["f_fabric"])
+    )
+    return ratio.denominator
+
+
 def readout_duration(soccfg: QickConfig, length_us: float, ch: int = 0) -> Fraction:
     """Return the exact ADC window after native output-clock quantization."""
     cycles = soccfg.us2cycles(length_us, ro_ch=ch)

@@ -25,6 +25,7 @@ from zcu_tools.program.v2.utils import readout_freq_words
 from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
     generator_duration,
+    generator_tproc_grid,
     runtime_cycles,
     tproc_ceil,
 )
@@ -399,16 +400,20 @@ def test_program_join_only_merges_runtime_ends():
 
 
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
+    # Keep exact integer-affine candidates on any caller-owned clock ratio.
+    step = generator_tproc_grid(load_soccfg(3, 1), 1)
+    left_lengths = [n * step / GEN_MHZ for n in (1, 2, 3)]
+    right_lengths = list(reversed(left_lengths))
     left = TableLengthPulse(
         "left",
         drive(),
-        lengths=[25 / GEN_MHZ, 50 / GEN_MHZ, 75 / GEN_MHZ],
+        lengths=left_lengths,
         idx_reg="scan",
     )
     right = TableLengthPulse(
         "right",
         drive(ch=2),
-        lengths=[75 / GEN_MHZ, 50 / GEN_MHZ, 25 / GEN_MHZ],
+        lengths=right_lengths,
         idx_reg="scan",
     )
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
@@ -436,13 +441,13 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
     maxima = [
         max(
             tproc_ceil(
-                prog.soccfg, generator_duration(prog.soccfg, left_n / GEN_MHZ, 1)
+                prog.soccfg, generator_duration(prog.soccfg, left_length, 1)
             ),
             tproc_ceil(
-                prog.soccfg, generator_duration(prog.soccfg, right_n / GEN_MHZ, 2)
+                prog.soccfg, generator_duration(prog.soccfg, right_length, 2)
             ),
         )
-        for left_n, right_n in ((25, 75), (50, 50), (75, 25))
+        for left_length, right_length in zip(left_lengths, right_lengths, strict=True)
     ]
     for index, (origin_cycle, maximum) in enumerate(
         zip((7, 20, 10), maxima, strict=True)
@@ -459,7 +464,10 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         )
         assert [
             time_us(result.time_base, e.duration_ticks) for e in point.events[:2]
-        ] == pytest.approx([(25 + 25 * index) / GEN_MHZ, (75 - 25 * index) / GEN_MHZ])
+        ] == pytest.approx([
+            float(generator_duration(prog.soccfg, left_lengths[index], 1)),
+            float(generator_duration(prog.soccfg, right_lengths[index], 2)),
+        ])
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
         ) == pytest.approx(((origin_cycle + 2 * maximum) / TPROC_MHZ,))

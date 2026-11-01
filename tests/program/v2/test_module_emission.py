@@ -19,6 +19,7 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
     generator_duration,
+    generator_tproc_grid,
     native_sweep,
     readout_duration,
     tproc_ceil,
@@ -147,11 +148,14 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(timeline, delay
 @pytest.mark.parametrize("swept", [False, True])
 def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
     a = _pulse("a")
-    # The authored generator-grid step remains affine across this sweep.
+    # Choose a generator step that is integral on the tProc grid. The fractional
+    # start retains one common ceil bias, rather than requiring k=8 conversion.
+    step = generator_tproc_grid(PROFILE, 1)
+    start, stop = 77 / GEN_MHZ, (77 + 2 * step) / GEN_MHZ
     b = _pulse(
         "b",
         ch=1,
-        length=QickSweep1D("scan", 77 / GEN_MHZ, 127 / GEN_MHZ) if swept else 0.2,
+        length=QickSweep1D("scan", start, stop) if swept else 0.2,
     )
     tail = _pulse("tail", ch=2)
 
@@ -168,7 +172,7 @@ def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
 
     shots = _shots(_program([a, b, tail], body, initialize))
     lengths = (
-        native_sweep(PROFILE, 77 / GEN_MHZ, 127 / GEN_MHZ, 3, gen_ch=1)
+        native_sweep(PROFILE, start, stop, 3, gen_ch=1)
         if swept
         else [int(PROFILE.us2cycles(0.2, gen_ch=1))]
     )

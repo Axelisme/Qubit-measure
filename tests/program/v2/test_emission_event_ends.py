@@ -154,11 +154,10 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
     result = shots(prog)
     # Scalar triggers ceil; authored sweeps retain native start/step rounding.
     # The generator plus post sets the named end; ADC duration affects only shell.
-    steps = [0, 1, 2] if swept_trigger else [0]
-    trigger_start = (
-        int(prog.us2cycles(offset))
+    triggers = (
+        native_sweep(prog.soccfg, offset, offset + 2 / TPROC_MHZ, 3)
         if swept_trigger
-        else tproc_ceil(prog.soccfg, offset)
+        else [tproc_ceil(prog.soccfg, offset)]
     )
     generator_end = tproc_ceil(
         prog.soccfg, generator_duration(prog.soccfg, 10 / GEN_MHZ) + Fraction(str(post))
@@ -174,22 +173,22 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
         ]
         for shot in result
     ] == [
-        [(origin + trigger_start + step, 1), (origin + trigger_start + step + width, 0)]
-        for step in steps
+        [(origin + trigger_cycle, 1), (origin + trigger_cycle + width, 0)]
+        for trigger_cycle in triggers
     ] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        origin + generator_end for _ in steps
+        origin + generator_end for _ in triggers
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        origin + trigger_start + adc_shell + step + RELAX for step in steps
+        origin + trigger_cycle + adc_shell + RELAX for trigger_cycle in triggers
     ] * 2
     # Native final reference can round a fractional ADC tail down. The physical
     # WAIT remains ceiled and blocks until integration completes at every point.
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
     assert all(
-        generator_end + wait_cycles >= trigger_start + step + ceil(adc_cycles)
-        for step in steps
+        generator_end + wait_cycles >= trigger_cycle + ceil(adc_cycles)
+        for trigger_cycle in triggers
     )
 
 
@@ -260,16 +259,20 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
     result = shots(_program([owner], body, initialize))
     # Keep the fractional generator tail through post addition, never the ADC tail.
     # Native post sweep increments retain their authored tProc grid.
-    base = (
-        40
-        + PRE
-        + tproc_ceil(
-            PROFILE,
-            generator_duration(PROFILE, 0.101 if kind == "pulse" else 0.051)
-            + (Fraction(0) if swept_post else Fraction("0.0005")),
-        )
+    posts = (
+        [Fraction(p) / Fraction(str(TPROC_MHZ)) for p in native_sweep(
+            PROFILE, 0.0005, 0.0005 + 4 / TPROC_MHZ, 3
+        )]
+        if swept_post
+        else [Fraction("0.0005")]
     )
-    ends = [base, base + 2, base + 4] if swept_post else [base]
+    ends = [
+        40 + PRE + tproc_ceil(
+            PROFILE,
+            generator_duration(PROFILE, 0.101 if kind == "pulse" else 0.051) + post,
+        )
+        for post in posts
+    ]
     assert [waves(shot) for shot in result] == (
         [[40, 40 + PRE]] if kind == "readout" else [[40 + PRE]]
     ) * (2 * len(ends))
@@ -311,7 +314,9 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
     prog = _program([pulse], body, lambda prog: prog.add_loop("scan", 3))
     # Ceil the pre-delay separately, then aggregate each registered length and post.
     posts = (
-        [0, 2, 4] if swept_post else [Fraction("0.0005") * Fraction(str(TPROC_MHZ))] * 3
+        native_sweep(prog.soccfg, 0.0005, 0.0005 + 4 / TPROC_MHZ, 3)
+        if swept_post
+        else [Fraction("0.0005") * Fraction(str(TPROC_MHZ))] * 3
     )
     ends = [
         PRE + ceil(runtime_cycles(PROFILE, n) + p)
@@ -673,7 +678,11 @@ def test_readout_post_follows_generator_without_waiting_for_adc(length, swept_po
         (lambda prog: prog.add_loop("scan", 3)) if swept_post else None,
     )
     result = shots(prog)
-    posts = [0, 2, 4] if swept_post else [Fraction("0.0005") * Fraction(str(TPROC_MHZ))]
+    posts = (
+        native_sweep(prog.soccfg, 0.0005, 0.0005 + 4 / TPROC_MHZ, 3)
+        if swept_post
+        else [Fraction("0.0005") * Fraction(str(TPROC_MHZ))]
+    )
     ends = [
         PRE
         + ceil(

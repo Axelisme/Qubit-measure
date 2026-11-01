@@ -31,6 +31,7 @@ from zcu_tools.program.v2.utils import readout_freq_words
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import (
     generator_duration,
+    generator_tproc_grid,
     native_sweep,
     readout_duration,
     runtime_cycles,
@@ -188,16 +189,17 @@ def _pulse_cfg(length: float, *, ch: int = 0) -> PulseCfg:
 
 
 def test_integer_candidate_selection_uses_only_author_waveform_table():
+    # Author candidates on the common clock grid so exact selection stays covered.
+    step = generator_tproc_grid(PROFILE)
+    lengths = (step, 2 * step)
     pulse = ComputedPulse(
         "selected_integer",
         val_reg="selector",
         pulses=[
-            _pulse_cfg(25 / GEN_MHZ).model_copy(
+            _pulse_cfg(n / GEN_MHZ).model_copy(
                 update={"pre_delay": 0, "post_delay": 0}
-            ),
-            _pulse_cfg(50 / GEN_MHZ).model_copy(
-                update={"pre_delay": 0, "post_delay": 0}
-            ),
+            )
+            for n in lengths
         ],
     )
     prog = _program(
@@ -210,7 +212,7 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
     assert [waves(s) for s in result] == [[0]] * 4
     assert [s.body_end_cycle - s.start_cycle for s in result] == [
         tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, n / GEN_MHZ))
-        for n in (25, 50)
+        for n in lengths
     ] * 2
     memory = prog.compile_datamem()
     # Only the author-declared two waveform addresses occupy data memory.
