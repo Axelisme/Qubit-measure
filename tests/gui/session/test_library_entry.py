@@ -92,10 +92,13 @@ def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> N
     assert written.gain == 0.5
 
 
-@pytest.mark.parametrize("kind,name,path,value", [
-    ("module", PULSE, ("gain",), 0.5),
-    ("waveform", WAVEFORM, ("length",), 3.0),
-])
+@pytest.mark.parametrize(
+    "kind,name,path,value",
+    [
+        ("module", PULSE, ("gain",), 0.5),
+        ("waveform", WAVEFORM, ("length",), 3.0),
+    ],
+)
 def test_detached_copy_edits_do_not_change_original_input(
     session: LibrarySession, kind, name, path, value
 ) -> None:

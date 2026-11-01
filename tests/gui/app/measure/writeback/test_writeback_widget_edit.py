@@ -391,7 +391,9 @@ def test_module_cancel_then_save_updates_only_saved_ledger(module_ui):
     assert "5100.125" in driver.observe(object_name="writebackProposed").tooltip
 
 
-def test_module_save_keeps_captured_expression_and_waveform_key(module_widget, module_ui):
+def test_module_save_keeps_captured_expression_and_waveform_key(
+    module_widget, module_ui
+):
     ctrl, widget, tab_id, pane = module_widget
     driver, evidence = module_ui
     driver.click("Edit")
@@ -401,7 +403,8 @@ def test_module_save_keeps_captured_expression_and_waveform_key(module_widget, m
     editor.enter_text(object_name="form.input.freq", value="5100.125")
     editor.screenshot(evidence / "02-frequency.png")
     editor.invoke_context_action(
-        object_name="form.input.gain", action="Expression",
+        object_name="form.input.gain",
+        action="Expression",
         evidence=evidence / "03-expression-menu.png",
     )
     editor.screenshot(evidence / "04-expression.png")
@@ -410,7 +413,9 @@ def test_module_save_keeps_captured_expression_and_waveform_key(module_widget, m
     editor.enter_text(object_name="writebackApplyAs", value="Q1.pulses.retuned")
     editor.screenshot(evidence / "06-name.png")
     context = ctrl.context_control
-    context.set_parameter(require_target(context.read_context()), "general.ext.gain", 0.8)
+    context.set_parameter(
+        require_target(context.read_context()), "general.ext.gain", 0.8
+    )
     editor.click("Save")
     driver.screenshot(evidence / "07-saved.png")
     form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
@@ -440,13 +445,15 @@ def test_module_option_command_is_local_until_save(module_widget, module_ui, bus
     captured = form.parameters.library.waveform_spec(MODULE_PROPOSAL_WAVEFORM)
     context = ctrl.context_control
     context.set_waveform(
-        require_target(context.read_context()), MODULE_PROPOSAL_WAVEFORM,
+        require_target(context.read_context()),
+        MODULE_PROPOSAL_WAVEFORM,
         ConstWaveformCfg(length=0.75),
     )
     ctrl.set_running(tab_id, running=busy)
     try:
         editor.invoke_context_action(
-            object_name="form.input.waveform", action="Convert to inline",
+            object_name="form.input.waveform",
+            action="Convert to inline",
             evidence=evidence / "02-convert-menu.png",
         )
         editor.screenshot(evidence / "03-converted.png")
@@ -455,7 +462,9 @@ def test_module_option_command_is_local_until_save(module_widget, module_ui, bus
         driver.screenshot(evidence / "04-save.png")
         if busy:
             assert driver.dialogs()
-            assert "busy" in editor.observe(object_name="writebackEditError").text.lower()
+            assert (
+                "busy" in editor.observe(object_name="writebackEditError").text.lower()
+            )
             assert form.state.input.data == before
         else:
             assert not driver.dialogs()
@@ -465,9 +474,7 @@ def test_module_option_command_is_local_until_save(module_widget, module_ui, bus
 
 
 @pytest.mark.parametrize("invalid_kind", ["unparsed", "expression"])
-def test_invalid_module_copy_keeps_ledger_and_can_be_cancelled(
-    module_ui, invalid_kind
-):
+def test_invalid_module_copy_keeps_ledger_and_can_be_cancelled(module_ui, invalid_kind):
     driver, evidence = module_ui
     original = driver.observe(object_name="writebackProposed")
     driver.click("Edit")
@@ -476,7 +483,8 @@ def test_invalid_module_copy_keeps_ledger_and_can_be_cancelled(
     editor.screenshot(evidence / "01-edit.png")
     if invalid_kind == "expression":
         editor.invoke_context_action(
-            object_name="form.input.gain", action="Expression",
+            object_name="form.input.gain",
+            action="Expression",
             evidence=evidence / "02-expression-menu.png",
         )
         editor.screenshot(evidence / "03-expression.png")

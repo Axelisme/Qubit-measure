@@ -292,9 +292,10 @@ def test_module_cancel_discards_content_and_name(module_editor, module_driver, f
     driver.screenshot(prefix / "03-name.png")
     assert form.spec().freq == 6001.0
     assert item.target_name == "pulse"
-    assert "freq  6000.0 → 6002.0" in driver.observe(
-        object_name="writebackModuleChanges"
-    ).text
+    assert (
+        "freq  6000.0 → 6002.0"
+        in driver.observe(object_name="writebackModuleChanges").text
+    )
     if finish == "cancel":
         driver.click("Cancel")
     elif finish == "escape":
@@ -364,6 +365,7 @@ def test_module_install_refusal_keeps_original_draft(
             FailedPreconditionError("Tab is busy")
         )
     else:
+
         def reject_input(*args):
             raise FormInputRejected((), "Input rejected")
 
