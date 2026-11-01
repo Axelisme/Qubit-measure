@@ -267,7 +267,8 @@ def test_t1_including_readout_uses_event_end_at_each_scan_point(
 
     shots = _shots(_program(modules, body, initialize))
     # Drive closes43. Native wait sweep starts86 and steps86; scalar ceils87.
-    # Readout trigger ceil43.008=44; ceil(44+172.2+8.6016)=225.
+    # Readout generator closesceil(22+129*1.12+8.6016)=160.
+    # ADC closesceil(44+172.2)=217, independently of that named end.
     offsets = [129, 215, 301, 387] if swept else [130]
     assert [_waves(s) for s in shots] == [
         [0, offset, offset + 22] for offset in offsets
@@ -277,10 +278,10 @@ def test_t1_including_readout_uses_event_end_at_each_scan_point(
         for s in shots
     ] == [[(offset + 44, 1), (offset + 54, 0)] for offset in offsets] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [
-        offset + 225 for offset in offsets
+        offset + 160 for offset in offsets
     ] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
-        offset + 225 for offset in offsets
+        offset + 216 for offset in offsets
     ] * 2
 
 
@@ -358,8 +359,8 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
     assert [_waves(s) for s in shots] == [
         [10 + t for t in reset_waves] + [length + 10, length + 32]
     ] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 235] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 235] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 170] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 226] * 2
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in shots
     ] == [[length + 54, length + 64]] * 2
@@ -610,7 +611,7 @@ def test_runtime_words_bind_requested_registers_to_output_fields(words, timeline
             )
             assert (output["DST"], output["SRC"]) == (str(port), "r_wave")
     assert [_waves(s) for s in _shots(prog)] == [[0, 22]] * 2
-    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [225] * 2
+    assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [160] * 2
 
 
 @pytest.mark.parametrize("timeline", ["default", "other"])

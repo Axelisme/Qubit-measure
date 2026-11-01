@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，selected waveform 結尾、pointwise fork/join 與 readout observation owner
+**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -27,7 +27,11 @@ Module 不是 QICK Macro，不能直接交給 `append_macro`。
 `Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
 Tag 屬於每次 emit，不存於 module constructor。
 
-Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
+Pulse、PulseReadout、TablePulseReadout 與 MuxReadout 以 generator waveform 的實際結尾加一次 post-delay，再向上取整到 tProc cycle。
+Readout 的 ADC 視窗只更新各 ADC channel 的尾端，不延長作者 timeline。
+後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
+原生 scalar／sweep trigger 以實際量化起點留下 ADC 尾端證據，供重疊檢查與 shell WAIT 使用。
+前一個原生 trigger 使用 `t=None` 時，後一同 ADC 的 timeline trigger 因起點無法定位而報錯。
 Lowering 直接使用實際事件結尾，不移動 reference。
 省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
 同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
@@ -189,12 +193,12 @@ Zero or unmeasured NaN counts give NaN means without divide warnings.
 `PulseReadoutCfg` owns flat generator/ADC settings and a native waveform. One
 semantic `freq` configures both channels. `PulseReadout` declares and schedules
 the ADC itself, sends configuration at the module start, triggers at
-`trig_offset`, and plays the generator at `pre_delay`. Blocking covers both the
-ADC window and generator playback including `post_delay`, with clock rounding.
-`PulseReadoutCfg.nominal_duration_us()` returns the scalar completion time without
-clock rounding or program initialization. It covers the later ADC/generator end
-for offline shot-time estimates: `max(trig_offset + ro_length, pre_delay + waveform.length) + post_delay`.
-Post-delay is applied once after the later end. This does not replace runtime timing.
+`trig_offset`, and plays the generator at `pre_delay`. Timeline completion covers
+only generator playback plus `post_delay`, with clock rounding. ADC windows stay
+on their channels; shot closure waits for all ADCs.
+`PulseReadoutCfg.nominal_duration_us()` returns
+`pre_delay + waveform.length + post_delay` without clock rounding or program
+initialization. It excludes ADC timing and does not replace runtime scheduling.
 
 `Pulse` takes optional runtime `ro_ch` for QICK frequency matching. That channel
 is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,

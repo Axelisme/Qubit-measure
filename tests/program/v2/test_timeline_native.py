@@ -1,7 +1,7 @@
 """Native QICK operations retain reference/channel selection around B1 ends."""
 
 import pytest
-from qick.asm_v2 import QickSweep1D
+from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
@@ -113,7 +113,7 @@ def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
     assert [e.cycle for e in shot.events if e.kind == "wave"] == [0, expected]
 
 
-def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
+def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
     def body(prog):
         prog.timeline_inc(10 / 430.08)
         prog.trigger([0], timeline="default")
@@ -122,15 +122,16 @@ def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
 
     prog = _program(body)
     # Native ADC window is123/307.2 us =172.2 tProc cycles.
-    # Timeline closure ceilings 10+172.2 to183; native wait rounds to182.
+    # The named end is20 (trigger width only); native ADC wait still rounds to182.
     assert prog.get_time_param("wait", "t") * 430.08 == pytest.approx(182)
     shot = _shot(prog)
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (10, 1),
         (20, 0),
     ]
-    assert [e.cycle for e in shot.events if e.kind == "wave"] == [183]
-    assert shot.body_end_cycle == 226
+    assert [e.cycle for e in shot.events if e.kind == "wave"] == [20]
+    assert shot.body_end_cycle == 63
+    assert shot.end_cycle == 182
 
 
 def test_fractional_event_start_and_trigger_width_ceil_once():
@@ -148,7 +149,7 @@ def test_fractional_event_start_and_trigger_width_ceil_once():
     assert prog.get_time_param("config", "t") * 430.08 == pytest.approx(1)
     assert prog.get_time_param("edge", "t") * 430.08 == pytest.approx(2)
     assert prog.get_time_param("edge", "width") * 430.08 == pytest.approx(1)
-    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 175]
+    assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 3]
 
 
 @pytest.mark.parametrize("operation", ["pulse", "config", "trigger", "delay"])
@@ -197,7 +198,7 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
         + {
             "pulse": 43,
             "config": 0,
-            "trigger": max(rounded, 173),
+            "trigger": rounded,
             "delay": 0,
         }[operation]
     )
@@ -212,7 +213,12 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
         prog.delay_by_timeline()
         prog.pulse(0, "pulse", timeline="default", tag="after")
 
-    prog = _program(body, lambda p: p.add_loop("scan", 4))
+    # Width sweep leaves0..3 cycles of ADC slack; this synthetic fixture allows it.
+    def initialize(prog):
+        prog.add_loop("scan", 4)
+        prog.relax_delay = 3 / 430.08
+
+    prog = _program(body, initialize)
     assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx(
         [0, 1, 2, 3]
     )
@@ -222,8 +228,253 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "wave"]
         for s in _shots(prog)
-    ] == [[173], [174], [175], [176]]
+    ] == [[0], [2], [4], [6]]
     assert prog.compile_datamem() is None
+
+
+@pytest.mark.parametrize("placement", ["static", "sweep", "runtime"])
+def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        prog.fork("default", into="next_read")
+        prog.trigger([0], timeline="default")
+        if placement == "sweep":
+            prog.timeline_inc(
+                QickSweep1D("scan", 100 / 430.08, 180 / 430.08), timeline="next_read"
+            )
+        else:
+            prog.timeline_inc(100 / 430.08, timeline="next_read")
+            if placement == "runtime":
+                prog.timeline_inc("scan", timeline="next_read")
+        prog.trigger([0], timeline="next_read")
+
+    with pytest.raises(
+        ValueError, match=r"next_read.*channel 0.*ADC overlap.*40 cycles"
+    ):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        "repeat",
+        "repeat_sync",
+        "nested_repeat",
+        "branch_then_trigger",
+        "trigger_then_branch",
+    ],
+)
+def test_adc_overlap_is_rejected_across_control_flow(control):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def trigger(prog, timeline: str | None = "default"):
+        prog.trigger([0], timeline=timeline)
+        prog.timeline_inc(90 / 430.08, timeline=timeline)
+
+    def body(prog):
+        if control in {"repeat", "repeat_sync"}:
+            with prog.repeat("reads", 2):
+                trigger(prog)
+                if control == "repeat_sync":
+                    prog.delay_by_timeline()
+        elif control == "nested_repeat":
+            with prog.repeat("outer", 2), prog.repeat("inner", 1):
+                trigger(prog)
+        elif control == "branch_then_trigger":
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                trigger(prog, None)
+            prog.trigger([0], timeline="default")
+        else:
+            trigger(prog)
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                prog.trigger([0])
+
+    with pytest.raises(ValueError, match=r"channel 0.*ADC overlap.*40 cycles"):
+        _program(body, initialize)
+
+
+@pytest.mark.parametrize("previous", [None, "default"])
+def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
+    def body(prog):
+        prog.trigger([0], timeline=previous)
+        prog.trigger([0], t=0, tag="raw")
+        prog.write_reg("s_out_time", 20)
+        prog.trigger([0], t=None)
+
+    prog = _program(body)
+    assert prog.get_time_param("raw", "t") == 0
+    assert [(e.cycle, e.value) for e in _shot(prog).events if e.kind == "data"][:4] == [
+        (0, 1),
+        (10, 0),
+        (0, 1),
+        (10, 0),
+    ]
+
+
+@pytest.mark.parametrize("swept", [False, True])
+def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def body(prog):
+        start = (
+            QickSweep1D("scan", 0.2 / 430.08, 1.2 / 430.08) if swept else 0.2 / 430.08
+        )
+        prog.trigger([0], t=start, width=10 / 430.08)
+        next_start = (
+            QickSweep1D("scan", 140 / 430.08, 141 / 430.08) if swept else 140 / 430.08
+        )
+        prog.timeline_inc(next_start)
+        prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    assert [
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
+        for shot in _shots(prog)
+    ] == ([[0, 140], [1, 141]] if swept else [[0, 140]] * 2)
+
+
+def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+
+    def native(prog):
+        prog.trigger([0], t=0.2 / 430.08, width=10 / 430.08)
+
+    def qick(prog):
+        prog.append_macro(
+            Trigger(
+                ros=[0],
+                tts=None,
+                pins=None,
+                t=0.2 / 430.08,
+                width=10 / 430.08,
+                ddr4=False,
+                mr=False,
+                tag=None,
+            )
+        )
+
+    prog = _program(native, initialize)
+    reference = _program(qick, initialize)
+    assert [i for i in prog.prog_list if i["CMD"] == "DPORT_WR"] == [
+        i for i in reference.prog_list if i["CMD"] == "DPORT_WR"
+    ]
+    (wait,) = [i for i in prog.prog_list if i["CMD"] == "WAIT"]
+    assert wait["TIME"] == "@140"
+
+
+@pytest.mark.parametrize("control", ["flat", "branch", "repeat"])
+def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
+    def initialize(prog):
+        prog.add_loop("scan", 2)
+        prog.relax_delay = 200 / 430.08
+
+    def body(prog):
+        prog.write_reg("s_out_time", 0)
+        prog.trigger([0], t=None)
+        if control == "branch":
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                prog.timeline_inc(200 / 430.08)
+                prog.trigger([0])
+        elif control == "repeat":
+            with prog.repeat("reads", 2):
+                prog.timeline_inc(200 / 430.08)
+                prog.trigger([0])
+        else:
+            prog.timeline_inc(200 / 430.08)
+            prog.trigger([0], timeline="default")
+
+    with pytest.raises(
+        ValueError,
+        match=r"channel 0.*cannot locate previous native trigger.*cycles unknown",
+    ):
+        _program(body, initialize)
+
+
+def test_known_native_adc_window_replaces_unlocatable_predecessor():
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+
+    def body(prog):
+        prog.write_reg("s_out_time", 0)
+        prog.trigger([0], t=None)
+        prog.trigger([0], t=0)
+        prog.timeline_inc(140 / 430.08)
+        prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    assert [e.cycle for e in _shot(prog).events if e.kind == "data" and e.value] == [
+        0,
+        0,
+        140,
+    ]
+
+
+def test_native_adc_tail_is_checked_before_a_named_trigger():
+    def body(prog):
+        prog.trigger([0], t=0)
+        prog.timeline_inc(100 / 430.08)
+        prog.trigger([0], timeline="default")
+
+    with pytest.raises(ValueError, match=r"default.*channel 0.*ADC overlap.*73 cycles"):
+        _program(body)
+
+
+@pytest.mark.parametrize(
+    "placement", ["static", "sweep", "runtime", "repeat", "repeat_sync"]
+)
+def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
+    def initialize(prog):
+        prog.declare_readout(0, length=100 / 307.2)
+        prog.add_loop("scan", 2)
+
+    def one_read(prog):
+        prog.trigger([0], timeline="default")
+        prog.timeline_inc(130 / 430.08)
+
+    def body(prog):
+        if placement in {"repeat", "repeat_sync"}:
+            with prog.repeat("reads", 2):
+                one_read(prog)
+                if placement == "repeat_sync":
+                    prog.delay_by_timeline()
+        else:
+            one_read(prog)
+            if placement == "sweep":
+                prog.timeline_inc(QickSweep1D("scan", 0, 40 / 430.08))
+            elif placement == "runtime":
+                prog.timeline_inc("scan")
+            prog.trigger([0], timeline="default")
+
+    prog = _program(body, initialize)
+    result = _shots(prog)
+    expected = {"static": [0, 140], "sweep": [0, 180], "runtime": [0, 141]}
+    starts = [
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
+        for shot in result
+    ]
+    assert starts == [[0, 140], expected.get(placement, [0, 140])]
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
+    assert all(
+        shot.body_end_cycle - shot.start_cycle + wait_cycles >= times[-1] + 140
+        for shot, times in zip(result, starts, strict=True)
+    )
 
 
 def test_timeline_trigger_rejects_implicit_output_time_at_entry():

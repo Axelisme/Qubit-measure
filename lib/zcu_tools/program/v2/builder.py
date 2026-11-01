@@ -201,7 +201,12 @@ class TimelineBuilder:
         name identifies the counter. n is a nonnegative integer or existing
         count register. Optional range_hint guarantees a closed nonnegative count
         range without hardware checks; fixed counts forbid hints. Zero discards
-        the body. Invalid count/hint/timeline raises ValueError at build; QICK
+        the body. Unhinted register counts skip generator backedge proofs only.
+        ADC backedges still require proof that the next ADC window starts at or
+        after the previous window ends; overlap or an unprovable gap raises
+        ValueError at build. Both backedge checks are skipped for a fixed count
+        or hint maximum < 2.
+        Invalid count/hint/timeline raises ValueError at build; QICK
         register exhaustion propagates. Close contexts before build. Recording
         after build raises ValueError.
         """
@@ -463,8 +468,15 @@ class TimelineBuilder:
         enable capture buffers, default
         False. tag names the occurrence, default None. timeline defaults to
         None (scoped name, or native reference outside a scope); a name places
-        at its end plus t and advances through ADC/trigger completion. Named t=None, unknown resources and
-        invalid timing fail at build. Unknown keywords raise TypeError now.
+        at its end plus t and advances only through trigger width. ADC windows
+        stay on their channels and shot closure still waits for them. Named/scoped
+        triggers reject unprovable ordering against the previous ADC window at
+        build, including a previous native trigger. The error names timeline,
+        channel and overlap cycles. Pure native triggers keep QICK behavior.
+        Their quantized scalar/sweep starts supply ADC tail evidence. A preceding
+        native t=None makes that ADC tail unlocatable for a later managed trigger.
+        Named t=None, unknown resources and invalid timing fail at build.
+        Unknown keywords raise TypeError now.
         """
         self._ensure_recording()
         unknown = options.keys() - {"ddr4", "mr", "tag", "timeline"}

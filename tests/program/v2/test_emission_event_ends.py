@@ -100,11 +100,9 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, timelin
 
 @pytest.mark.parametrize("origin", [0, 40])
 @pytest.mark.parametrize("swept_trigger", [False, True])
-@pytest.mark.parametrize(
-    "offset, post, end", [(0.0013, 0.0005, 20), (0.0011, 0.0012, 19)]
-)
-def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
-    origin, swept_trigger, offset, post, end
+@pytest.mark.parametrize("offset, post", [(0.0013, 0.0005), (0.0011, 0.0012)])
+def test_readout_trigger_quantization_does_not_extend_generator_end(
+    origin, swept_trigger, offset, post
 ):
     trigger = (
         QickSweep1D("scan", offset, offset + 2 / 430.08) if swept_trigger else offset
@@ -136,14 +134,13 @@ def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
             prog.timeline_inc("duration")
         prog.emit(readout)
 
-    result = shots(_program([readout], body, initialize))
+    prog = _program([readout], body, initialize)
+    result = shots(prog)
     # Scalar triggers ceil both .559104 and .473088 to 1. Author
     # sweeps start at native round(.559104/.473088), then step by one.
-    # ADC length is 18.2 cycles. Add post before final ceil.
+    # ADC length is18.2 cycles; generator is11.2 cycles plus post.
     steps = [0, 1, 2] if swept_trigger else [0]
     trigger_start = 1 if not swept_trigger or offset == 0.0013 else 0
-    if not swept_trigger and offset == 0.0011:
-        end = 20
     assert [
         [
             (event.cycle - shot.start_cycle, event.value)
@@ -156,11 +153,16 @@ def test_readout_end_uses_quantized_trigger_before_adding_adc_window_and_post(
         for step in steps
     ] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        origin + end + step for step in steps
+        origin + 12 for _ in steps
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        origin + end + step + 9 for step in steps
+        origin + trigger_start + (19 if origin else 18) + step + 9 for step in steps
     ] * 2
+    # Native final reference can round a fractional ADC tail down. The physical
+    # WAIT remains ceiled and blocks until integration completes at every point.
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
+    assert all(12 + wait_cycles >= trigger_start + step + 19 for step in steps)
 
 
 class _AllocateDuration(Macro):
@@ -228,15 +230,16 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
         prog.emit(owner)
 
     result = shots(_program([owner], body, initialize))
-    # Integer origin40 + ceil(start5 + tail43.68/43.4 + post)=89.
-    # Native post sweep starts at zero and adds 0/2/4 cycles.
-    ends = [89, 91, 93] if swept_post else [89]
+    # Generator tail is43.68 for pulse,22.4 for readout, never the ADC tail.
+    # Native post sweep starts at zero and adds0/2/4 cycles.
+    base = 89 if kind == "pulse" else 68
+    ends = [base, base + 2, base + 4] if swept_post else [base]
     assert [waves(shot) for shot in result] == (
         [[40, 45]] if kind == "readout" else [[45]]
     ) * (2 * len(ends))
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        end + 9 for end in ends
+        (end if kind == "pulse" else 89) + 9 for end in ends
     ] * 2
     if kind == "readout":
         assert [
@@ -284,28 +287,6 @@ def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
     )
     prog = _program([pulse], lambda p: p.emit(pulse))
     # Exact 28-tick playback plus post: only the tail outside tolerance adds a tick.
-    assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
-
-
-@pytest.mark.parametrize("post_ticks, end", [(5e-11, 14), (2e-10, 15)])
-def test_scalar_adc_aggregate_ceil_applies_noise_tolerance(post_ticks, end):
-    readout = PulseReadout(
-        "precise_adc",
-        PulseReadoutCfg(
-            gen_ch=0,
-            nqz=1,
-            freq=1000,
-            gain=0.5,
-            waveform=ConstWaveformCfg(length=3 / 384),
-            pre_delay=0,
-            post_delay=post_ticks / 430.08,
-            ro_ch=0,
-            ro_length=10 / 307.2,
-            trig_offset=0,
-        ),
-    )
-    prog = _program([readout], lambda p: p.emit(readout))
-    # Ten ADC samples are exactly 14 ticks; apply tolerance after adding post.
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [end] * 2
 
 
@@ -577,8 +558,10 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
 
 
 @pytest.mark.parametrize("swept_post", [False, True])
-@pytest.mark.parametrize("length, end", [(0.051, 49), (0.201, 92)])
-def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_post):
+@pytest.mark.parametrize("length, end", [(0.051, 28), (0.201, 92)])
+def test_readout_post_follows_generator_without_waiting_for_adc(
+    length, end, swept_post
+):
     readout = PulseReadout(
         "read",
         PulseReadoutCfg(
@@ -609,8 +592,8 @@ def test_readout_post_follows_maximum_of_generator_and_adc(length, end, swept_po
     )
     result = shots(prog)
     ends = [end, end + 2, end + 4] if swept_post else [end]
-    # Start5 plus ADC43.4 or generator86.24 dominates. Scalar post .21504
-    # or native swept post0 gives final ceil49/92, with swept steps2.
+    # Generator starts5 and lasts22.4/86.24 cycles. Add scalar post.21504
+    # or native swept post0 once: ceil28/92, with swept steps2.
     assert [waves(shot) for shot in result] == [
         [0, 5, point_end] for point_end in ends
     ] * 2
@@ -707,7 +690,7 @@ def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [53, 95, 137] * 2
 
 
-def test_crossing_fractional_generator_and_adc_ends_add_post_before_ceil():
+def test_readout_length_sweep_adds_post_to_generator_without_adc_padding():
     readout = PulseReadout(
         "read",
         PulseReadoutCfg(
@@ -732,17 +715,15 @@ def test_crossing_fractional_generator_and_adc_ends_add_post_before_ceil():
     result = shots(
         _program([readout, tail], body, lambda prog: prog.add_loop("scan", 3))
     )
-    # ADC61 clocks gives85.4 tProc cycles. Generator44.8/87.36/129.92
-    # crosses that end. Add post.086016 before rounding:86/88/131.
-    # Premature conversion of this sweep rounds start45 and step42;
-    # adding post to that integer max instead gives130 at the last point.
-    assert [waves(shot) for shot in result] == [[0, 0, 86], [0, 0, 88], [0, 0, 131]] * 2
+    # Generator k=8 tails44.84375/87.4453125/130.046875 plus post.086016
+    # ceil to45/88/131, even where ADC61 samples last85.4 cycles.
+    assert [waves(shot) for shot in result] == [[0, 0, 45], [0, 0, 88], [0, 0, 131]] * 2
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        130,
+        89,
         132,
         175,
     ] * 2
-    assert [shot.end_cycle - shot.start_cycle for shot in result] == [139, 141, 184] * 2
+    assert [shot.end_cycle - shot.start_cycle for shot in result] == [98, 141, 184] * 2
 
 
 @pytest.mark.parametrize("kind", ["two", "bath"])
