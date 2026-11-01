@@ -443,7 +443,9 @@ def test_template_in_tree_merges_metadata_with_explicit_path_priority(
     input = form.default_input(env)
     rows = {row.path: row for row in form.diagnostics(input, env, None)}
     gain = rows[("probe", "module", "gain")]
-    assert gain.seed_source == ("Explicit source" if override else "Template starting gain")
+    assert gain.seed_source == (
+        "Explicit source" if override else "Template starting gain"
+    )
     assert gain.uncalibrated is (None if override else True)
     frequency = rows[("probe", "module", "freq")]
     assert frequency.seed_source == "Template starting frequency"
@@ -477,7 +479,9 @@ def test_template_nested_slot_is_direct_key_or_unfilled_invalid(path: str) -> No
     value = state.result(env)
     if path != "Q.pulses.probe":
         assert isinstance(value, FormErrors)
-        assert any(error[:3] == ("reset", "module", "pi2_cfg") for error in value.messages)
+        assert any(
+            error[:3] == ("reset", "module", "pi2_cfg") for error in value.messages
+        )
         return
     assert not isinstance(value, FormErrors), value
     reset = state.input.data["reset"]

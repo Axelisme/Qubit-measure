@@ -89,9 +89,7 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
     assert expanded["detune"] == cfg_model.Expr("$unbound.freq")
     assert definition.expanded_seeds(bindings={"qubit": "$qubit"})[
         "pi2_cfg"
-    ] == cfg_model.Slot(
-        "$qubit.module.x90", copy=True, set=slot.set
-    )
+    ] == cfg_model.Slot("$qubit.module.x90", copy=True, set=slot.set)
 
 
 @pytest.mark.parametrize("path", ["{drive.module.x90", "{drive.attr}"])

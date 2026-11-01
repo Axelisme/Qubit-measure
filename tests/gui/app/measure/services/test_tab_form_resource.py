@@ -513,7 +513,7 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
                         )
                     },
                 )
-            )
+            ),
         )
         before = resource.input.data
         resource.refresh_sources()
@@ -560,10 +560,7 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
     initializations: list[str] = []
 
     def make_form(ctx: FormContext) -> Form[PulseInput]:
-        if ctx.has("Q1.pulses.pi"):
-            node = Slot("Q1.pulses.pi", copy=True)
-        else:
-            node = template
+        node = Slot("Q1.pulses.pi", copy=True) if ctx.has("Q1.pulses.pi") else template
         form = Form(
             PulseInput,
             {"pulse": node},
@@ -606,14 +603,17 @@ def test_refresh_explicit_branch_updates_projection_without_reseeding(
             resource.refresh_sources()
             assert resource.input.to_json() == before
             gain = next(
-                field for field in resource.describe(("pulse", "module")).children
+                field
+                for field in resource.describe(("pulse", "module")).children
                 if field.name == "gain"
             )
             assert gain.hidden is (projection == "hidden" and not has_source)
             result = resource.result()
             if projection == "expression" and not available and not has_source:
                 assert isinstance(result, FormErrors)
-                assert result.messages == {("pulse", "module", "phase"): "Field required"}
+                assert result.messages == {
+                    ("pulse", "module", "phase"): "Field required"
+                }
             else:
                 assert not isinstance(result, FormErrors), result
             assert {
