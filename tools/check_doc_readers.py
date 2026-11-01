@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
+import subprocess
+import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
-from pathlib import PurePosixPath
+from dataclasses import asdict, dataclass
+from pathlib import Path, PurePosixPath
 from typing import Final
 
 _ALLOWED_READERS: Final = frozenset({"operator", "lab-author", "framework-dev", "agent"})
@@ -26,7 +30,15 @@ class Violation:
 def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
     """Check repo-relative Markdown paths mapped to UTF-8 document text.
 
+    Skip ADR/discussion snapshots, except docs/adr/README.md and
+    docs/discussions/INDEX.md. After optional --- YAML front matter, check the
+    first eight body lines for a Chinese or English declaration. Reader names
+    must be operator, lab-author, framework-dev or agent, separated by commas or
+    Chinese enumeration commas, before the first period. Module READMEs under
+    lib/ or tests/ also need **Last updated:** YYYY-MM-DD somewhere in the body.
+
     Return path-sorted violations without reading files or changing the mapping.
+    Raise ValueError if opening YAML front matter has no closing --- line.
     """
     found: list[Violation] = []
     for path, source in sorted(sources.items()):
@@ -64,5 +76,36 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Scan tracked Markdown and emit JSON stdout plus diagnostics on stderr."""
-    return 0
+    """Scan tracked Markdown under --root, defaulting to this checkout.
+
+    Print a check_file_size-style JSON receipt to stdout and path/reason lines
+    to stderr. Return 0 for PASS or 1 for violations. argv=None reads sys.argv;
+    Git, decoding and file-read errors propagate rather than reporting PASS.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    root = parser.parse_args(argv).root
+    tracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
+        capture_output=True,
+        check=True,
+    ).stdout.decode("utf-8")
+    sources = {
+        path: (root / path).read_text(encoding="utf-8")
+        for path in tracked.split("\0")
+        if path
+    }
+    found = check_sources(sources)
+    receipt = {
+        "status": "FAIL" if found else "PASS",
+        "violation_count": len(found),
+        "violations": [asdict(item) for item in found],
+    }
+    print(json.dumps(receipt, indent=2, sort_keys=True))
+    for item in found:
+        print(f"{item.path}: {item.reason}", file=sys.stderr)
+    return 1 if found else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
