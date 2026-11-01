@@ -33,6 +33,10 @@ def synthesize(
         >>> xs = np.linspace(0.0, 10.0, 101)
         >>> ys = synthesize(expfunc, xs, [0.2, 0.8, 4.0], noise_std=0.01, seed=17)
     """
+    if xs.size == 0 or not np.all(np.isfinite(xs)):
+        raise ValueError("xs must be finite and nonempty")
+    if not np.isfinite(noise_std) or noise_std < 0:
+        raise ValueError("noise_std must be finite and nonnegative")
     values = model(xs, *params)
     rng = np.random.default_rng(seed)
     noise = rng.normal(0.0, noise_std, values.shape)
