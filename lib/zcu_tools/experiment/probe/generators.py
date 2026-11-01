@@ -63,8 +63,9 @@ class LorentzianParameters:
 class ResonatorParameters:
     """Complex resonance truth in fitting's MHz frequency convention.
 
-    frequency is resonance MHz; loaded_quality is positive Ql. coupling_quality
-    selects hanger when positive and transmission when None. asymmetry_phase
+    frequency is finite positive resonance frequency in MHz; loaded_quality
+    is finite positive Ql. coupling_quality selects hanger when finite positive
+    and transmission when None. asymmetry_phase
     is hanger phi in radians (unused for transmission). amplitude is complex
     a0 at resonance, electrical_delay is in inverse MHz. amplitude_slope is
     real log-amplitude slope per MHz; phase_curvature is radians per MHz squared.
@@ -212,12 +213,18 @@ def generate_resonator(
 
     Select the public HangerModel or TransmissionModel through truth's coupling
     quality. noise_std is independent Gaussian noise in each IQ quadrature;
-    seed initializes a local RNG. Nonpositive frequency/quality or invalid
-    coordinates/noise raise ValueError. Inputs are unchanged.
+    seed initializes a local RNG. truth.frequency (MHz), loaded_quality and
+    non-None coupling_quality must be finite and positive. Invalid frequency,
+    quality, coordinates or noise raise ValueError. Inputs are unchanged.
     """
     _coordinates(freqs)
-    if truth.frequency <= 0 or truth.loaded_quality <= 0:
-        raise ValueError("frequency and loaded_quality must be positive")
+    if (
+        not np.isfinite(truth.frequency)
+        or truth.frequency <= 0
+        or not np.isfinite(truth.loaded_quality)
+        or truth.loaded_quality <= 0
+    ):
+        raise ValueError("frequency and loaded_quality must be finite and positive")
     if truth.coupling_quality is None:
         signals = TransmissionModel.calc_signals(
             freqs,
@@ -229,8 +236,8 @@ def generate_resonator(
             truth.phase_curvature,
         )
     else:
-        if truth.coupling_quality <= 0:
-            raise ValueError("coupling_quality must be positive or None")
+        if not np.isfinite(truth.coupling_quality) or truth.coupling_quality <= 0:
+            raise ValueError("coupling_quality must be finite and positive or None")
         signals = HangerModel.calc_signals(
             freqs,
             truth.frequency,
