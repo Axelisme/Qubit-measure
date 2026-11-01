@@ -3,6 +3,7 @@
 from zcu_tools.cfg_model import FormNode, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
@@ -29,9 +30,10 @@ def make_form(ctx: FormContext) -> Form[MuxT1Cfg]:
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,
-            "drive": Slot(
+            "drive": source(
+                ctx,
                 f"{name}.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": name}),
+                Template("pi_pulse", bindings={"qubit": name}),
             ),
         }
         for name in names

@@ -4,7 +4,7 @@ from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.t1.t1.core import T1Cfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[T1Cfg]:
@@ -14,13 +14,15 @@ def make_form(ctx: FormContext) -> Form[T1Cfg]:
         T1Cfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "delay": Range(0.0, relax_delay, expts=101),
             "relax_delay": relax_delay,

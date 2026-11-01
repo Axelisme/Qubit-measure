@@ -436,31 +436,27 @@ def test_refresh_retains_seed_metadata_and_sources_until_reset() -> None:
     assert row.uncalibrated is None
 
 
+@pytest.mark.usefixtures("factory_component")
 @pytest.mark.parametrize("override", [False, True])
 def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -> None:
     class PulseInput(ConfigBase):
         pulse: PulseCfg
 
-    latest = FormEnv()
+    latest = factory_env(2.0)
 
-    def make_form(_ctx: FormContext) -> Form[PulseInput]:
-        form = Form(
-            PulseInput,
-            {
-                "pulse": Slot(
-                    "Q.pulses.pi",
-                    copy=True,
-                    fallback=Template(
-                        "pulse",
-                        seed_metadata={
-                            ("pulse", "module", "gain"): FieldMeta(
-                                description="Template gain", calibration="uncalibrated"
-                            )
-                        },
-                    ),
-                )
-            },
-        )
+    def make_form(ctx: FormContext) -> Form[PulseInput]:
+        if ctx.has("Q1.pulses.pi"):
+            node = Slot("Q1.pulses.pi", copy=True)
+        else:
+            node = Template(
+                "pulse",
+                seed_metadata={
+                    ("pulse", "module", "gain"): FieldMeta(
+                        description="Template gain", calibration="uncalibrated"
+                    )
+                },
+            )
+        form = Form(PulseInput, {"pulse": node})
         form.bind_templates(
             {
                 "pulse": TemplateDef(
@@ -495,13 +491,14 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
         original = resource.diagnostics()
         gain = next(row for row in original if row.path == ("pulse", "module", "gain"))
         assert gain.uncalibrated is (None if override else True)
-        latest = FormEnv(
+        latest = factory_env(
+            2.0,
             library=LibrarySnapshot(
                 ModuleLibraryDocument(
                     format="zcu.module-library",
                     format_version="2.0",
                     components={
-                        "Q": ComponentLibrary(
+                        "Q1": ComponentLibrary(
                             pulses={
                                 "pi": PulseSpec.model_validate(
                                     {
@@ -516,7 +513,7 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
                         )
                     },
                 )
-            )
+            ),
         )
         before = resource.input.data
         resource.refresh_sources()
@@ -529,7 +526,7 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
             if row.path == ("pulse", "module", "gain")
         )
         assert gain.uncalibrated is None
-        assert gain.seed_source == ("Explicit source" if override else "Q.pulses.pi")
+        assert gain.seed_source == ("Explicit source" if override else "Q1.pulses.pi")
     finally:
         resource.revoke()
 
@@ -537,7 +534,7 @@ def test_refresh_retains_adopted_template_metadata_until_reset(override: bool) -
 @pytest.mark.usefixtures("factory_component")
 @pytest.mark.parametrize("available", [False, True])
 @pytest.mark.parametrize("projection", ["hidden", "expression"])
-def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
+def test_refresh_explicit_branch_updates_projection_without_reseeding(
     available: bool, projection: str
 ) -> None:
     class PulseInput(ConfigBase):
@@ -554,7 +551,7 @@ def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
         )
     )
     latest = factory_env(2.0, library=library if available else None)
-    fallback = Template(
+    template = Template(
         "pulse",
         set={"gain": Hidden(0.2)}
         if projection == "hidden"
@@ -562,12 +559,8 @@ def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
     )
     initializations: list[str] = []
 
-    def make_form(ctx: FormContext, *, explicit: bool = False) -> Form[PulseInput]:
-        node = (
-            (Slot("Q1.pulses.pi", copy=True) if ctx.has("Q1.pulses.pi") else fallback)
-            if explicit
-            else Slot("Q1.pulses.pi", copy=True, fallback=fallback)
-        )
+    def make_form(ctx: FormContext) -> Form[PulseInput]:
+        node = Slot("Q1.pulses.pi", copy=True) if ctx.has("Q1.pulses.pi") else template
         form = Form(
             PulseInput,
             {"pulse": node},
@@ -592,13 +585,10 @@ def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
         )
         return form
 
-    resource, explicit = (
-        resource_api.TabFormResource(
-            factory,
-            capture=lambda _aliases: resource_api.TabFormSources(latest),
-            mutation_allowed=lambda: True,
-        )
-        for factory in (make_form, lambda ctx: make_form(ctx, explicit=True))
+    resource = resource_api.TabFormResource(
+        make_form,
+        capture=lambda _aliases: resource_api.TabFormSources(latest),
+        mutation_allowed=lambda: True,
     )
     try:
         before = resource.input.to_json()
@@ -611,20 +601,28 @@ def test_refresh_fallback_projection_matches_explicit_branch_without_reseeding(
         for has_source in (available, not available, available):
             latest = factory_env(2.0, library=library if has_source else None)
             resource.refresh_sources()
-            explicit.refresh_sources()
-            assert resource.input.to_json() == explicit.input.to_json() == before
-            assert resource.describe(("pulse", "module")) == explicit.describe(
-                ("pulse", "module")
+            assert resource.input.to_json() == before
+            gain = next(
+                field
+                for field in resource.describe(("pulse", "module")).children
+                if field.name == "gain"
             )
-            assert resource.result() == explicit.result()
+            assert gain.hidden is (projection == "hidden" and not has_source)
+            result = resource.result()
+            if projection == "expression" and not available and not has_source:
+                assert isinstance(result, FormErrors)
+                assert result.messages == {
+                    ("pulse", "module", "phase"): "Field required"
+                }
+            else:
+                assert not isinstance(result, FormErrors), result
             assert {
                 row.path: (row.seed_source, row.seed_status, row.uncalibrated)
                 for row in resource.diagnostics()
             } == provenance
-        assert initializations == ["fresh", "fresh"]
+        assert initializations == ["fresh"]
     finally:
         resource.revoke()
-        explicit.revoke()
 
 
 def test_refresh_preserves_authored_expression_and_direct_defaults() -> None:

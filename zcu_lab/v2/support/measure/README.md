@@ -2,7 +2,7 @@
 
 **讀者：** lab-author。查閱多個量測 adapter 共用的表單初值、分析載體與 writeback 工具。
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-01，來源選擇、mux readout 與 Length Rabi 初值
 
 這個公開支援 package 擁有至少兩個 measure experiment adapters 共用的 implementation
 mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilities。
@@ -12,8 +12,8 @@ mechanics：analysis carriers、writeback helpers 與跨實驗的 context utilit
 `mux_forms.py` 集中八個 mux Forms 的 readout 初值，以及七個 qubit Forms 的固定名稱與 recovery 初值。
 Qubit Forms 先要求完整 qubit/resonator 綁定。缺 readout slot 時從 group resonators 產生清單，每個 resonator 一個槽位。
 Group tones 的 freq 取捕捉的 resonator.freq，label 初值為 resonator 名稱。缺 slot 時，gen_ch 取 `$mux.wiring.gen_ch`，第 i 個 tone 的 ro_ch 取 `$mux.wiring.ro_ch[i]`，gain 填 0.1。gen_ch、mixer_freq 與 freq 使用 Expr 初值。各 tone 的 ro_ch 是從固定 capture 的 group.wiring.ro_ch[i] 取出的整數初值，scalar Expr 不支援 indexing。操作員仍須確認通道與振幅。
-`mux_readout_initial` 未選 ringup 時回傳帶 `readout/mux:blank` Template fallback 的 Slot。
-有 captured readout 時使用 library 完整 tones 與 scalar 設定，不讀取未使用 fallback 的來源。
+`mux_readout_initial` 未選 ringup 時，以 `source` 選擇 captured readout 的 Slot 或 `readout/mux:blank` Template。
+有 captured readout 時使用 library 完整 tones 與 scalar 設定，不讀取未使用 Template 的來源。
 缺 slot 時才採用 Template 的 scalar 初值、group tones 與 group wiring，並合併 Template 自有的 seed metadata。
 Blank 的 mixer_freq 從 `$mux.mixer_freq` 取初值，缺失或 null 時留空必填，不依賴 tone 頻率或 kappa。
 length、ro_length 與 trig_offset 保持必填且未填，不猜時長或以 0 代替 trigger timing。
@@ -28,7 +28,7 @@ trig_offset 取 `$mux.time_of_fly` 加 ringup，length 取 trig_offset + ro_leng
 任一 kappa 或 group time_of_fly 缺值時，trig_offset／length 留空必填，mixer_freq 不受影響。
 上述缺值情境仍填入 ro_length=1.0 us。
 已設的 frequency 須為有限數，time_of_fly 須為有限非負數，否則 Open／Reset 報錯。
-候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。純 fallback 的 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
+候選未經裝置確認，capability 檢查仍在 Run 邊界。Fine 的 Readout FieldMeta.description 逐項列來源。`mux_readout_seed_metadata(initial)` 依實際 Slot／Template overrides 產生 canonical 逐位置 metadata。缺來源時採用的初值 metadata 由 Template 持有；ringup caller 以 `Form(...).with_seed_metadata(...)` 加入 detached copy 的來源公式。`seed_metadata` 供 readout 與 flux 表單共用，只把固定常數 fallback（如 gain 0.1、ADC window 1.0 us、掃描點數）標為 uncalibrated，description 寫明「未校準的起始值，來源：固定常數」。Mixer、推導 timing 與 frequency／flux endpoints 寫明 capture 來源，不宣稱 measured，也不標 uncalibrated。Ref-only slot 不標記，未改寫的 captured 欄位保持未知。
 每個已設成員的 kappa 都須為有限正數，否則 Open／Reset 報錯。其他 mux Forms 沿用來源 timing。
 Onetone 的 Open／Reset 產生 detached、可編輯的初值，cfg 輸出保留操作員之後的編輯。
 READOUT_ELEMENTS 使用公開 FixedElements 的無 participants 固定槽位模式，只拒絕增刪，所有 tone 欄位仍可編輯。
@@ -74,13 +74,18 @@ Group model 仍擁有長度與重複 qubit 的結構規則。
 
 `ctx_helpers.t1_initial_time` 集中 T1 衍生初值的選源。它從固定 capture 讀普通 T1，tone 掃描先讀歷史 tone T1，只有缺值才下探普通 T1。無 capture 或所有候選 leaf 缺失／null 時使用 30 µs 時間尺度；已存無效值回 None，讓衍生必填欄位留空。來源與 alias／path 錯誤仍傳遞，不寫回校準。各 Form 明確指定等待或掃描所需倍率，自然等待不使用 tone T1。
 
-`rabi_initial_values.len_rabi_initial_values` 為兩種 Length Rabi 選擇相同的 pulse 來源與掃描上限。
-已有 x180 時保留 Slot 與 gain，以有效 pi_len 的四倍作上限。
-pi_len leaf 缺失或 null 時上限為 1 µs，已存但無效的 scalar 則留空。
-arb 沒有持久 scalar length，使用缺 leaf 的 1 µs 上限，不讀 runtime length。
-沒有 x180 時使用 gain=1 的 qub_probe Template 與 1 µs 上限。
+`ctx_helpers.source(ctx, path, template)` 依固定 capture 的 `ctx.has(path)` 回傳 ref-only `Slot(path)` 或原樣的 Template。
+Template 持有自己的 set 與 seed metadata。
+路徑語法與來源故障由 `ctx.has` 傳出，family 不相容由 Form 報錯。
+
+`rabi_initial_values.len_rabi_length_stop` 只推導四個 Length Rabi Forms 的掃描上限。
+無 capture、缺失或 null x180、arb waveform 時上限為 1 µs。
+Scalar waveform 的有效 pi_len 給出四倍上限，已存但無效的 pi_len 則留空。
 它只讀固定 capture 中的 validated Spec，跟隨 waveform key，但不 materialize、不讀 asset、不寫回校準。
 原始來源在 owner 驗證前被拒絕或轉型的值，不屬於此 typed capture 的可觀察輸入。
+各 Form 用 `source` 選擇 x180 或 gain=1 的 qub_probe Template。
+`qub_probe_gain_seed_metadata(path)` 為 Template gain 提供 uncalibrated 提示，path 包含各 Form 的 module wrapper 與 mux 原始 tone index。
+Singleshot 與 mux 對選出的節點共用一次 `replace(node, set=...)`，隱藏由 Run 取代的 waveform.length。
 
 `rabi_initial_values.amp_rabi_initial_pulse` 為兩種 Amplitude Rabi 選擇相同的 pulse 來源與長度。
 x180 為 arb waveform 時保留原來源 Slot、形狀與 data，不複製、不覆寫 length，也不讀 asset。gain 仍掃 −0.3～1.0；要調長度須先換 waveform。

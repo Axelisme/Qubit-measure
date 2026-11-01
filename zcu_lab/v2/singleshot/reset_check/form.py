@@ -1,32 +1,36 @@
 """Starting values for singleshot/reset_check; sources are captured at Open/Reset."""
 
+from dataclasses import replace
+
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.reset_check.core import ResetCheckCfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[ResetCheckCfg]:
     """Build starting values and shape from the captured source availability."""
+    rabi_pulse = source(
+        ctx,
+        "$qubit.module.x180",
+        Template("pi_pulse", bindings={"qubit": "$qubit"}),
+    )
+    rabi_pulse = replace(rabi_pulse, set={**rabi_pulse.set, "gain": Hidden(0.0)})
     return Form(
         ResetCheckCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "rabi_pulse": Slot(
-                "$qubit.module.x180",
-                set={"gain": Hidden(0.0)},
-                fallback=Template(
-                    "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
-                ),
-            ),
-            "tested_reset": Slot(
+            "rabi_pulse": rabi_pulse,
+            "tested_reset": source(
+                ctx,
                 "$qubit.module.reset",
-                fallback=Template("reset", bindings={"qubit": "$qubit"}),
+                Template("reset", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(0.0, "4.0 * $qubit.module.x180.gain", expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),

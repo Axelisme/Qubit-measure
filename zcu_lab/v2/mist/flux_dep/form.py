@@ -5,7 +5,7 @@ from functools import partial
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.flux_defaults import qubit_flux_initial_values
 
 from .core import FluxDepCfg
@@ -29,9 +29,10 @@ def make_form(ctx: FormContext) -> Form[FluxDepCfg]:
                 # Run supplies these probe scan coordinates.
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "flux": Range(None, None, expts=101),
             "gain": Range(0.0, 0.5, expts=101),

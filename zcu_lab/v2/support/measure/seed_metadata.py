@@ -18,6 +18,24 @@ def seed_metadata(source: str, *, fallback: bool = False) -> FieldMeta:
     return FieldMeta(description=source)
 
 
+def qub_probe_gain_seed_metadata(
+    path: tuple[str | int, ...],
+) -> dict[tuple[str | int, ...], FieldMeta]:
+    """Describe the uncalibrated gain 1.0 a.u. authored by a qub_probe Template.
+
+    path is the root-relative canonical Form gain path, including module
+    wrappers and list indexes. Attach this metadata to the Template only;
+    captured slots retain their existing unknown calibration status.
+    No cfg values, sources or calibration records are changed.
+    """
+    return {
+        path: FieldMeta(
+            description="未校準的起始值，來源：固定常數。qub_probe Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
+            calibration="uncalibrated",
+        )
+    }
+
+
 def pulse_readout_seed_metadata(
     *, gain: float
 ) -> dict[tuple[str | int, ...], FieldMeta]:

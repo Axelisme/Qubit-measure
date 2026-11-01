@@ -71,15 +71,6 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
         "{qubit}.module.x90",
         copy=True,
         set={"freq": cfg_model.Expr("{resonator}.freq"), "ch": 2},
-        fallback=cfg_model.Template(
-            "pulse",
-            bindings={"qubit": "$fallback"},
-            seed_metadata={
-                ("pulse", "module", "gain"): cfg_model.FieldMeta(
-                    calibration="uncalibrated"
-                )
-            },
-        ),
     )
     definition = cfg_model.TemplateDef(
         cfg_model.BathResetSpec,
@@ -93,15 +84,12 @@ def test_slot_path_expands_without_resolving_or_rewriting_form_options() -> None
         "$unbound.module.x90",
         copy=True,
         set={"freq": cfg_model.Expr("{resonator}.freq"), "ch": 2},
-        fallback=slot.fallback,
     )
     assert expanded["desc"] == "$literal"
     assert expanded["detune"] == cfg_model.Expr("$unbound.freq")
     assert definition.expanded_seeds(bindings={"qubit": "$qubit"})[
         "pi2_cfg"
-    ] == cfg_model.Slot(
-        "$qubit.module.x90", copy=True, set=slot.set, fallback=slot.fallback
-    )
+    ] == cfg_model.Slot("$qubit.module.x90", copy=True, set=slot.set)
 
 
 @pytest.mark.parametrize("path", ["{drive.module.x90", "{drive.attr}"])
