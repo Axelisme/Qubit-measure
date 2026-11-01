@@ -280,7 +280,7 @@ def test_post_presence_controls_without_numeric_results(
             return None
         figures = Plots(NonPresentingHost())
         if collection == "figures_only":
-            figures.subplots("fit")
+            figures.subplots(num="fit")
         figures.finish()
         return figures
 

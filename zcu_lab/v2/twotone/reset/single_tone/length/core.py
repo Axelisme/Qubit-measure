@@ -131,7 +131,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         real_signals = reset_signal2real(signals)
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("ProbeTime (us)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)

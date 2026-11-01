@@ -65,7 +65,7 @@ def _build_result(data: GroupedLoadData[_GroupedCfg]) -> _GroupedResult:
 
 
 _ITERATION_AXIS = (
-    VariableAxisSpec.generated_arange("Iteration", "a.u.", dtype=np.int64),
+    VariableAxisSpec.generated_arange(label="Iteration", unit="a.u.", dtype=np.int64),
 )
 _GROUPED_SPEC = GroupedAxesSpec(
     variables=(

@@ -5,7 +5,7 @@ after the longest branch. Initial pulses run in both preparations; probe pulses
 run only in the second. Acquire one round with reps=shots, preserving same-shot
 IQ across tones. Probe-off/on rows are not guaranteed pure ground/excited states.
 
-Return complex signals (K,2,shots), original tone indices, prepared_states [0,1]
+Return complex signals (K,2,shots), original tone indices, fixed preparation order [0,1]
 and shot indices. IQ is normalized by each ADC integration length. Missing
 preparations remain NaN. These two acquires are not four-state joint assignment
 calibration. Primary analysis fits each tone's GE clouds; post uses that same
@@ -169,7 +169,7 @@ class MuxGEResult:
     """Paired ADC-length-normalized raw complex IQ, not averaged or classified.
 
     signals is complex128 (K,2,S), original active tone order, probe off/on,
-    then shot. shot_indices is int64 arange(S), prepared_states is int64 [0,1]
+    then shot. shot_indices is int64 arange(S); the fixed preparation axis is [0,1]
     (probe off/on, not physical pure-state labels), tone_indices is int64 (K,)
     of original full-readout indices. All tones at a preparation/shot position
     share the same acquisition shot. The two preparations are separate acquires,
@@ -179,7 +179,7 @@ class MuxGEResult:
 
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
-    prepared_states: NDArray[np.int64]
+
     tone_indices: NDArray[np.int64]
 
     def __post_init__(self) -> None:
@@ -213,11 +213,8 @@ def validate_ge_result(result: MuxGEResult) -> None:
         or signals.shape[2] == 0
     ):
         raise ValueError("signals must be complex128 (K,2,S), K,S>0")
-    if (
-        result.shot_indices.dtype != np.int64
-        or not np.array_equal(result.shot_indices, np.arange(signals.shape[2]))
-        or result.prepared_states.dtype != np.int64
-        or not np.array_equal(result.prepared_states, [0, 1])
+    if result.shot_indices.dtype != np.int64 or not np.array_equal(
+        result.shot_indices, np.arange(signals.shape[2])
     ):
         raise ValueError("shot/preparation axes must preserve acquisition order")
     for preparation in range(2):
@@ -291,7 +288,7 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
     AXES_SPEC: ClassVar[AxesSpec[MuxGEResult, MuxGECfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("shot_indices", label="Shot Index", unit="", dtype=np.int64),
-            AxesSpec.Axis("prepared_states", label="Probe On", unit="", dtype=np.int64),
+            AxesSpec.Axis(values=(0, 1), label="Probe On", unit="", dtype=np.int64),
             AxesSpec.Axis("tone_indices", label="Tone", unit="", dtype=np.int64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
@@ -398,6 +395,5 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
         return MuxGEResult(
             buffer.array.transpose(2, 0, 1).copy(),
             shots,
-            np.array([0, 1], dtype=np.int64),
             np.asarray(indices, dtype=np.int64),
         )

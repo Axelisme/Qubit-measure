@@ -15,12 +15,14 @@ def make_form(ctx: FormContext) -> Form[AccPhaseCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "flux_pulse": Template("flux_pulse", bindings={"qubit": "$qubit"}),
-            "pi2_pulse": Slot("$qubit.module.x90")
-            if ctx.has("$qubit.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "pi2_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "length": Range(0.0, 2.0, expts=101),
             "phase": Range(0.0, 360.0, expts=21),
             "readout_t": 2.0,

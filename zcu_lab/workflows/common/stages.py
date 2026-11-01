@@ -12,7 +12,11 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.workflows.common.saving import save_native
-from zcu_lab.workflows.common.summary import SummaryAccumulator, observe_operation
+from zcu_lab.workflows.common.summary import (
+    StageName,
+    SummaryAccumulator,
+    observe_operation,
+)
 
 
 @dataclass(frozen=True)
@@ -60,12 +64,13 @@ async def acquire_saved[Cfg: ConfigBase, Result](
     experiment: RunFunction[Cfg, Result],
     cfg: Cfg,
     *,
-    name: str,
+    name: StageName,
     output: NativeOutput[Cfg, Result],
 ) -> SavedAcquisition[Result]:
     """Run a core experiment, observe facts and save raw before exposing data.
 
-    cfg is the detached native configuration; name labels the operation.
+    cfg is the detached native configuration; name is the canonical stage
+    label recorded as the operation name and used by the run summary.
     output pairs a filename relative to scope.dir with its native axes mapping.
     Acquisition exceptions propagate without creating a file. Completions with
     facts.stopped save raw with completion=stopped, then return status=partial

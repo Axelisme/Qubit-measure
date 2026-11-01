@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.singleshot import transition_state_bin_probabilities
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiJointFitResult
 from zcu_tools.analysis.singleshot import classify_rabi_iq
@@ -132,7 +132,7 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     ax.set_ylabel("True state")
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class RabiJointPlotOptions:
     """Caller-owned display settings for a joint Rabi chart.
 

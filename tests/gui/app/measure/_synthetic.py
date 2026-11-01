@@ -72,7 +72,7 @@ def SampleAdapter_run[C: ConfigBase](
 def SampleAdapter_analyze[C: ConfigBase](
     req: AnalyzeRequest[RunRecord[C, SampleResult], SampleParams], *, plots: Plots
 ) -> SampleAnalysis:
-    _, ax = plots.subplots("fit")
+    _, ax = plots.subplots(num="fit")
     ax.plot(req.run_result.result.data)
     return SampleAnalysis(peak=float(np.max(req.run_result.result.data)))
 

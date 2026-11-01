@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -24,7 +25,7 @@ class LookbackResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class LookbackAnalyzeOptions:
     ratio: float = 0.3
     smooth: float | None = None

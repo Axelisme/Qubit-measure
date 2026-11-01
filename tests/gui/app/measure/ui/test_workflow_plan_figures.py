@@ -65,7 +65,7 @@ def FluxAdapter_run(
     viewer = create_trace(
         context.plots, "flux trace", "Flux", f"fluxes={values.tolist()}"
     )
-    viewer.update((values, values))
+    viewer((values, values))
     return SampleAdapter.run(cfg, context=context)
 
 
@@ -115,7 +115,7 @@ async def _plot_fluxes(
     if plan.fluxes:
         viewer = create_trace(env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}")
         values = np.asarray(plan.fluxes)
-        viewer.update((values, values * tun.current.gain))
+        viewer((values, values * tun.current.gain))
     await env.wait_until(env.started_at)
 
 
@@ -125,7 +125,7 @@ async def _plot_sweep(
 ) -> None:
     values = np.asarray(plan.fluxes)
     viewer = create_trace(env.plots, "flux trace", "Flux", f"fluxes={plan.fluxes}")
-    viewer.update((values, values * tun.current.gain))
+    viewer((values, values * tun.current.gain))
     await env.wait_until(env.started_at)
 
 

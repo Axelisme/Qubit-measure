@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -32,9 +34,9 @@ class AmpRabiResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class AmpRabiAnalyzeOptions:
-    skip: Annotated[int, FieldMeta(label="Skip points")] = 0
+    skip: Annotated[int, FieldMeta(label="Skip points"), Field(ge=0)] = 0
 
 
 @dataclass(frozen=True)
@@ -130,10 +132,20 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        viewer = live_line(context.plots, "measurement", "Pulse gain", "Amplitude")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Pulse gain", ylabel="Amplitude")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(gains, rabi_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains),),
-            on_update=lambda data: viewer.update(gains, rabi_signal2real(data)),
+            on_update=update,
         )
 
         # Keep pulse duration fixed while the FPGA sweeps its rotation amplitude.
@@ -211,7 +223,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
             pCov,
         )
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(gains, y_fit, label="fit")
