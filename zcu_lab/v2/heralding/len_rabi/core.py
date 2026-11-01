@@ -235,9 +235,7 @@ class HeraldingLenRabiExp(Experiment[HeraldingLenRabiResult, HeraldingLenRabiCfg
                 context.soc,
                 rounds=cfg.rounds,
                 processor=shot_sums(prog, [Classify("herald"), IQ("signal")]),
-                options=RunOptions(
-                    converter=np.copy, stop_condition=check_snr
-                ),
+                options=RunOptions(converter=np.copy, stop_condition=check_snr),
             )
         return HeraldingLenRabiResult(lengths, buffer.array)
 
