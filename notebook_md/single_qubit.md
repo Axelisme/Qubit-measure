@@ -32,7 +32,7 @@ from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.notebook import NotebookAdapter
-from zcu_tools.program.v2 import ModularProgramV2, ProgramV2Cfg
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
@@ -64,10 +64,10 @@ readout = PulseReadoutCfg(
     waveform=ConstWaveformCfg(length=1.0), ro_length=0.9,
     trig_offset=0.05,
 )
-program = ModularProgramV2(
-    env.soccfg, ProgramV2Cfg(reps=8, rounds=2),
-    modules=[microwave.build("microwave"), readout.build("readout")],
-)
+builder = TimelineBuilder(env.soccfg, reps=8)
+builder.emit(microwave.build("microwave"))
+builder.emit(readout.build("readout"))
+program = builder.build()
 ```
 
 These channels match `default.yaml`: gen2 drives F1 charge, and gen0 with ADC0 reads the shared resonator line. Gen1 is unbound. The illustrative frequencies target the default initial bias and R1; changing the model or working point requires a new spectroscopy calibration.
@@ -89,9 +89,9 @@ def next_bias(round_count, raw, cancel_flag):
         set_flux(bias, 0.0001, unit="A", stop=StopSignal())
 
 
-averaged_iq = program.acquire(env.soc, progress=False, round_hook=next_bias)
+averaged_iq = program.acquire(env.soc, rounds=2, progress=False, round_hook=next_bias)
 last_round_raw = program.get_raw()
-decimated_iq = program.acquire_decimated(env.soc, progress=False)
+decimated_iq = program.acquire_decimated(env.soc, rounds=2, progress=False)
 ```
 
 Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_template`, `Engine.evolve` and `populations` to inspect numeric states, outside the operator calibration path.

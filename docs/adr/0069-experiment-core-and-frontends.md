@@ -45,9 +45,9 @@ Interactive core 不實作 analyze，GUI adapter／plugin 與 Notebook 獨立分
 
 RunContext 提供單次 run 的 soc、soccfg、具名 devices、plots 與顯式 scope，不保留 QickContext alias。Caller 在 run 前固定名稱到 BaseDevice 的綁定，核心只借用 driver。核心仍決定每個 sweep point 何時 setup；setup helper 在整批 setup 前驗證所有必要名稱，不查全域 manager。Connect、disconnect、registry 與 ResourceManager 生命週期留在前端 owner。Hardware handles 不進 cfg 或 records。
 
-每次 run 建立新的 context、Plots 與 Scope，硬體 handles 可以重用，停止請求不能沿用。GUI 與 Notebook 建 run 根，workflow 使用作者明填 parent 下的 operation child。Schedule(scope=..., name=None) 在入口建立 schedule child，每次 acquire 建 acquire child，離開時 release。Driver、clock 與 program builder 只接 scope.stop，不反向依賴 Scope。
+每次 run 建立新的 context、Plots 與 Scope，硬體 handles 可以重用，停止請求不能沿用。GUI 與 Notebook 建 run 根，workflow 使用作者明填 parent 下的 operation child。Schedule(scope=..., name=None) 在入口建立 schedule child，每次 acquire 建 acquire child，離開時 release。Driver 與 clock 只接 scope.stop，不反向依賴 Scope。TimelineBuilder 只組裝 program，不接停止訊號。
 
-StopSignal 只承載停止請求與不解析的自由文字 reason，release 只解除父子關係，不上交 partial 或 error。Schedule 的 outcome 與資料累積屬於作者工具，不寫回框架。ProgramBuilder 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。Runtime 可向作者交付本次 acquire 的合作停止狀態，但不把它當成前端的完成事實，也不污染下次 acquire。Retry 留在取數 owner，partial 結果由作者定義，不引入另一個 runner。Progress bar 暫留環境注入。
+StopSignal 只承載停止請求與不解析的自由文字 reason，release 只解除父子關係，不上交 partial 或 error。Schedule 的 outcome 與資料累積屬於作者工具，不寫回框架。Schedule 的 AcquisitionRunner 保留 acquire-local cancel flag，SNR 等 data-driven early stop 不取消整次 run。Runtime 可向作者交付本次 acquire 的合作停止狀態，但不把它當成前端的完成事實，也不污染下次 acquire。Retry 留在取數 owner，partial 結果由作者定義，不引入另一個 runner。Progress bar 暫留環境注入。
 
 Scope 是 experiment 的共用控制與生命週期契約。作者看 scope.cancelled，底層只借 stop bit。Kind/name 路徑、fork status、selector 歧義與根 ScriptCancelled 的出口規則見 [[0075]]。2026-10-22 使用者要求「signal scope應該搭配有作用域保證的with以及for來規範scope範圍」。Host 與 caller 都不得以 latest child 或 callable 反射補 parent/name。Workflow 根及所有 child 具有相同 conveniences；scope.dir 鏡射 scope 路徑，scope.commit 每個 scope 只能一次，commit 當下保存 record 快照。Reader 走目錄樹並按 commit 序號排序。
 

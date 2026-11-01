@@ -136,7 +136,7 @@ Single／six 的 `numerics.projection_prune_floor` 與 FTF 的 `numerics.project
 
 ### Compiled frontend 與小介面依賴
 
-C 已交付 `ModularProgramV2` 與 `TimelineProgramV2` 共用的 compiled simulation frontend。
+`TimelineProgramV2` 使用已交付的 compiled simulation frontend。
 IR compiler 發布具型別、不可變、與 simulation 無關的優化前 snapshot；producer 提供 loop／branch／source 與 body 邊界及 resolved sweep／table definitions。
 Frontend 讀取 detached instructions 並核對結構，不回讀 Module tree，也不從 jump 反推結構。
 Sweep points 是獨立向量 lanes，reps 只保留次數；shot 內的非 sweep loops 依標記迭代，不展開指令流。
@@ -145,7 +145,7 @@ Sweep points 是獨立向量 lanes，reps 只保留次數；shot 內的非 sweep
 `SimulationAcquireMixin` 對 `SimulationSoc` 使用唯一 compiled request builder，傳入 SoC routes；其他 SoC 保留 QICK acquire。
 Builder 輸出 detached numeric requests，舊 Module-tree frontend 已移除，沒有 selector、legacy oracle 或 fallback。
 Owner 決策與日期引文見 [[0083]]，snapshot 與 admission 細節分別見 [IR README](../../../lib/zcu_tools/program/v2/ir/README.md#pre-optimization-compile-snapshot) 及 [simulation README](../../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
-Builder 已交付；大量實驗遷移與 D 的 legacy program／init／run 移除仍未交付。
+全部實驗已遷移至 TimelineBuilder／TimelineProgramV2，legacy program、builder、module init／run 與 control module 已移除。
 
 2026-10-14，使用者選擇「我也認為保持Module語義的解析比較可行」，並對 execution context／分段求解回答「可以」。這是原 Module 語意 frontend 的歷史依據，已由 [[0083]] 的 compiled frontend 決策取代，不再規範現行 acquisition 如何解析控制流。
 
@@ -360,7 +360,7 @@ Lookback／acquire_decimated 使用相同有限 pulse 與條件平均場，輸�
 
 ## 交付狀態與限制
 
-- Program 提供具名環境 binding、compiled timeline 與 request／signal 契約。C 已切換 compiled frontend 並移除舊 Module-tree simulation frontend，未移除 `ModularProgramV2` 或舊 init／run。指令效果的 admission 見上節。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。
+- Program 提供具名環境 binding、compiled timeline 與 request／signal 契約。全部實驗使用 TimelineProgramV2，模擬取數使用 compiled frontend。舊 Module-tree simulation frontend 與 legacy program／module lifecycle 均已移除。指令效果的 admission 見上節。FTF startup 腳本先建 entry／point，再組裝環境，透過一般 facets 安裝 SoC、逐一 register drivers，留給使用者從 New Tab 開實驗。GUI 不載入 environment，也不持有模擬啟動模式。
 - Resources 提供 FTF YAML schema 與 checked JSON private replay 容器。Experiment 組合環境及單 round 重播；重播用相同數值與 RNG 版本重算，不引用已保存的 density。
 - Single、six、FTF 提供中途 projective readout、同 shot herald／終端關聯與部分 ADC 觀測。Rank-1 DC 投影及 CTMC 不回饋是模型近似，不代表正式規模數值驗收或 production 認證。
 - Evolution 提供預設快速分段算法及有界 routing facts。數值 preparation 只活在一次 evolve，見 [[0078]]。離線 U 表、Intel OpenCL、持久 exact records 及建庫入口已刪除。Routing 預算不是 process RAM 上限。

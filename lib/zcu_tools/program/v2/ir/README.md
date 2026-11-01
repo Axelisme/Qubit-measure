@@ -177,7 +177,7 @@ Instruction counts describe the post-IR stream, not QICK's temporary self-copies
 - `IRBranch.cases` 保持泛化 `IRNode` contract；analysis helper 必須能估算 direct `BasicBlockNode`、`BlockNode` 與 nested structure case，不能 cast 成 `BlockNode`。
 - `IRParser._check_sese()` 會禁止從任一結構 region 外部跳入或透過 label-address instruction 引用該 region 的 internal label，包含 parent region 內部跳入 nested child region 的情況。
 - 所有帶 `if_cond` 的 `JumpInst` 不能與 `-op` 寫在同一行。所有的寫法都必須拆分為先 `TEST (op)` 更新 flag，再 `JUMP (if_cond)` 判斷跳轉。
-- `ADDR_REG` 是 lowering scratch register，不可作為 dispatch selector 或 branch compare register。`IRBranch.compare_reg`、`IRDispatch.value_reg` 與 high-level `modules.control.Branch(compare_by=...)` 會拒絕 canonical name 為 `s15` 的 register（含 `s_addr` alias），避免 big-PMEM jump setup 覆寫 selector。
+- `ADDR_REG` 是 lowering scratch register，不可作為 dispatch selector 或 branch compare register。`IRBranch.compare_reg` 與 `IRDispatch.value_reg` 會拒絕 canonical name 為 `s15` 的 register（含 `s_addr` alias），避免 big-PMEM jump setup 覆寫 selector。
 
 ## Serialization boundary
 
