@@ -810,6 +810,25 @@ def _change_selection(prog, loader, other, change):
         prog.write_reg("length", 89)
     elif change == "other_table":
         prog.emit(other)
+    elif change == "consumed_other_table":
+        relation = other.lower_selected(prog)
+        prog.pulse_from_length_reg(
+            0,
+            "template",
+            length_reg="length",
+            flat_top=False,
+            timeline="default",
+            selection=SelectedPlayback(
+                relation.selector,
+                "length",
+                (
+                    PlaybackChoice("template", length_cycles=89),
+                    PlaybackChoice("template", length_cycles=39),
+                ),
+                relation,
+            ),
+        )
+        prog.timeline_inc(0, timeline="default")
     elif change == "selector":
         prog.write_reg("index", 1)
     elif change == "translate":
@@ -1055,6 +1074,7 @@ def _selection_program(selection: Module) -> TimelineProgramV2:
     [
         "constant",
         "other_table",
+        "consumed_other_table",
         "translate",
         "constant_branch",
         "constant_backedge",

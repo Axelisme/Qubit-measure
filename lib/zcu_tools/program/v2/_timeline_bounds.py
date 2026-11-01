@@ -367,10 +367,6 @@ class ProducerBounds:
             inst = BaseInst.from_dict(raw)
             address = raw["P_ADDR"]
             origin = self.origins.get(address)
-            if name := self.stale_selection_consumers.get(id(origin)):
-                raise ValueError(
-                    f"{name}: overwritten selected playback selection at instruction {address}"
-                )
             for physical in inst.reg_write & watched.keys():
                 name = watched[physical]
                 if physical in self.generated:
