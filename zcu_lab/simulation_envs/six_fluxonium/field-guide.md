@@ -1,6 +1,6 @@
 # Six-fluxonium settings guide
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-02，shared v2 board wiring
 
 **Readers:** operator, lab-author, framework-dev, agent. Read physical units, per-qubit parameters and approximation limits before changing this environment.
 
@@ -22,28 +22,36 @@ separate field, not a source from which the mux form infers ADCs.
 
 | Route | Generator | ADC |
 | --- | --- | --- |
-| Mux readout | 0 | 0 through 5, in R1 through R6 order |
+| Mux readout | 7 | 2 through 7, in R1 through R6 order |
 | Charge drive Q1 through Q6 | 1 through 6 | None |
-| Shared pulse readout | 13 | 6 |
+| Shared pulse readout | 0 | 0 |
 
-The example settings declare `mux_gen_ch: 0`, `pulse_gen_ch: 13` and
-`pulse_ro_ch: 6`. These IDs are caller-owned YAML values. The board profile
-must contain every configured channel. Each qubit's drive generator and mux
+Startup's `PROFILE_PATH` selects the shared
+[`../profiles/qick_216_v2.yaml`](../profiles/qick_216_v2.yaml). It follows
+`bitfiles/qick_216_v2.hwh` port types, not its channel count or numbering.
+The example settings declare `mux_gen_ch: 7`, `pulse_gen_ch: 0` and
+`pulse_ro_ch: 0`. These IDs are caller-owned YAML values. The board profile
+must contain every configured channel. All seven non-mux generators are v6;
+drives require neither int4 configuration nor an extra `mixer_freq`.
+The existing `MG123456` mux mixer setting remains unchanged.
+For existing `six_fluxonium.yaml` working copies and `six-fluxonium-demo`
+entries, follow the [manual migration steps](README.md#migrate-existing-working-copies-and-entries).
+Startup does not migrate either file or entry. Each qubit's drive generator and mux
 ADC are unique; pulse and mux routes cannot overlap. Top-level `dc_source` holds the shared device's name, unit,
 limits, initial current and ramp step. Each qubit's `dc_bias` contains its local
 `source` settings and `offset`, `period`, `coil_offset`, `coil_period` in A.
 Each nested Q1 through Q6 value keeps `format`, `version`, `chip`, `drive_line`,
-`readout` and `numerics`. Its readout generator is 0 and its ADC is its mux tone
-index. The schema requires source names `coil_bias` and matching `Qn_bias`.
+`readout` and `numerics`. Its readout generator is 7 and its ADC is its mux tone
+index plus 2. The schema requires source names `coil_bias` and matching `Qn_bias`.
 It rejects zero periods, nonfinite calibrations and `flux_line` sections.
-Old `offset_phi0`/`flux_per_unit` six-system documents have no schema fallback. Generators 7 through 12 are not configured.
+Old `offset_phi0`/`flux_per_unit` six-system documents have no schema fallback.
 Each resonator component instead declares
-pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
+pulse wiring `ch: 0`, `ro_ch: 0`. `onetone/range_find` uses that pulse route.
 
 ## Receiver background
 
 Each `qubits.Q1..Q6.readout.adc` receiver accepts its own `background`.
-The shared pulse ADC6 uses Q1's receiver background, as it does Q1's gain and noise.
+The shared pulse ADC0 uses Q1's receiver background, as it does Q1's gain and noise.
 
 The required receiver `background` object multiplies each carrier's microwave
 I+iQ line response before receiver gain and phase. It uses the absolute incident
@@ -98,6 +106,9 @@ conclusions are unchanged. They do not measure the effect of removing those
 layers. See the current [evolution contract](../../../lib/zcu_tools/simulate/evolution/README.md#evolve-local-preparations-and-caller-reuse).
 
 ## Cache budget measurements
+
+The measurements in this section, including its recheck and warm timings, used
+the board before the v2 switch. They have not been recorded again on v2.
 
 The 2026-10-23 check ran `range_find`, `mux/onetone`,
 `mux/twotone_spectrum` and `mux/amp_rabi` in that order. The check analyzed each
@@ -289,7 +300,7 @@ The backend uses six independent single-cavity models rather than one six-cavity
 ADC model. Each mux tone and each pulse scan point routes by frequency to the
 nearest bare cavity. An equal-distance tie raises an error. A 6900 to 7600 MHz
 scan with 300 points avoids the five cavity midpoints in this configuration.
-Sharing pulse ADC 6 does not combine all six cavity responses at one frequency.
+Sharing pulse ADC 0 does not combine all six cavity responses at one frequency.
 Do not use this environment to infer inter-cavity radiative damping or collective
 readout effects. Each qubit evolves independently, and each shot starts from
 its configured equilibrium rather than the previous shot's final state.
@@ -333,6 +344,9 @@ from that root. Q2 through Q6 seeds do not control their corresponding noise
 streams. Startup performs no numerical warmup.
 
 ## Acceptance timings
+
+The walkthrough, signal observations and memory measurements below used the
+board before the v2 switch. They have not been recorded again on v2.
 
 The 2026-10-23 offscreen walkthrough loaded this environment's `startup.py`
 into the measure GUI with the production experiment catalog and backend.

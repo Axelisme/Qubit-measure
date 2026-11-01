@@ -29,8 +29,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7000.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q2:
     kind: qubit/fluxonium
     EJ: 4.5 # GHz
@@ -52,8 +52,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7100.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q3:
     kind: qubit/fluxonium
     EJ: 5.0 # GHz
@@ -75,8 +75,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7200.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q4:
     kind: qubit/fluxonium
     EJ: 3.5 # GHz
@@ -98,8 +98,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7300.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q5:
     kind: qubit/fluxonium
     EJ: 6.0 # GHz
@@ -121,8 +121,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7400.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q6:
     kind: qubit/fluxonium
     EJ: 4.2 # GHz
@@ -144,8 +144,8 @@ components:
     kappa: 1.1 # MHz; kappa_external_mhz + kappa_internal_mhz.
     freq: 7500.0 # MHz
     wiring:
-      ch: 13 # Shared pulse readout, separate from the mux group.
-      ro_ch: 6
+      ch: 0 # Shared pulse readout, separate from the mux group.
+      ro_ch: 0
   Q1_bias:
     kind: device/current_source
   Q2_bias:
@@ -168,8 +168,8 @@ components:
     qubits: [Q1, Q2, Q3, Q4, Q5, Q6]
     flux_dev: coil_bias
     wiring:
-      gen_ch: 0
-      ro_ch: [0, 1, 2, 3, 4, 5]
+      gen_ch: 7
+      ro_ch: [2, 3, 4, 5, 6, 7]
 aliases:
   format: zcu.aliases
   format_version: "1.0"
