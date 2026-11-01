@@ -157,14 +157,13 @@ Processor 對每個掃描點計算 `Σ_shots v₁ ⊗ v₂ ⊗ …`，輸出形�
 
 讀出以字串 label 指定，不要求作者計算 ADC 的 read index。
 `shot_sums(prog, axes)` 在 compile 後、取數前解析 label。
-Emit 寫法用發射的 tag，未標記的發射以 module 名稱識別。
-舊 `ModularProgramV2` 過渡期暫用 module 名稱；這個替代隨舊 program 寫法移除。
+Timeline 發射用 emit tag，未標記的發射以 module 名稱識別。
 Label 必須唯一指向一次讀出發射，否則在取數前報錯。
 Classifier 取自該 readout 的 cfg 或作者明確提供的 override，不查 live library。
 
 Result 原樣保存 processor 的 float64 總和，不在 run 中換成平均或比例。
 分析與繪圖從計數和總和計算比例、平均 IQ 或條件平均。
-Builder 的 summed 方法要求 explicit converter，讓 caller 選擇 live signal，不把類別計數當作 IQ。
+Schedule 的 `run_acquire_summed` 讓 caller 以 `RunOptions(converter=...)` 選擇 live signal；未提供 converter 時原樣寫入總和，不把類別計數當作 IQ。
 搬遷後的實驗拒絕缺少 counts／sums 的舊格式，不從舊比例推算計數，也不加相容路徑。
 
 單 qubit heralding 使用 `[Classify("herald"), IQ("readout")]` 保存各 herald 類別下的終端 IQ 總和。

@@ -40,6 +40,7 @@ from ._timeline_macros import (
 )
 from ._timeline_outputs import (
     TimelineObservedPulse,
+    TimelineObservedTrigger,
     TimelinePlacedConfig,
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
@@ -666,6 +667,7 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
             if gen_ch is not None:
                 book.record_native(self, gen_ch, val, generator=True)
             if ro_ch is not None:
+                book.runtime_ros.pop(ro_ch, None)
                 book.record_native(self, ro_ch, val, generator=False)
             for loop in book.loop_timelines:
                 if gen_ch is not None:
@@ -797,8 +799,13 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         n is a nonnegative integer or existing count register distinct from name.
         Optional range_hint guarantees a closed nonnegative integer count range,
         without runtime checks. Fixed counts forbid hints. Zero discards the body.
-        Unhinted counts skip backedge bounds proofs. Invalid count/hint/name
-        raises ValueError; QICK register exhaustion propagates unchanged.
+        Unhinted register counts skip generator backedge bounds proofs only.
+        ADC backedges still require proof that the next ADC window starts at or
+        after the previous window ends; overlap or an unprovable gap raises
+        ValueError. Both backedge checks are skipped when the fixed count or
+        range_hint maximum is < 2.
+        Invalid count/hint/name raises ValueError; QICK register exhaustion
+        propagates unchanged.
         Runtime-only event getters raise RuntimeError, never return bounds.
         Table loads written in the body are available to subsequent consumers in
         that iteration. A hint or certified count bounds the counter's table
@@ -1024,18 +1031,28 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         None uses the scoped name, or native reference timing outside a scope.
 
         Native args select ros/tts/pins, t, width (us), ddr4/mr and tag. Named end
-        includes ADC integration and trigger width, rounded up to tProc cycles.
-        Named t=None raises ValueError at entry; native special values are unchanged.
+        includes only trigger width, rounded up to tProc cycles. ADC integration
+        ends stay on their channels and shot closure still waits for them.
+        A named/scoped trigger raises ValueError unless its start is provably
+        at or after each selected ADC's previous end, including native triggers.
+        Diagnostics name timeline, channel and overlap cycles. Pure native
+        triggers retain QICK timing and overlap behavior, including t=None.
+        Native scalar/sweep tails use actual quantized starts for overlap and
+        shell WAIT evidence. A preceding native t=None has an unlocatable tail,
+        so a later managed trigger on that ADC raises instead of guessing.
+        Named t=None raises ValueError at entry.
         """
         timeline = timeline if timeline is not None else self._timeline_default
         super().trigger(*args, **kwargs)
+        source = self._pop_native(Trigger)
         if timeline is not None:
-            source = self._pop_native(Trigger)
             if source.t is None:
                 raise ValueError("timeline trigger does not support t=None")
             self.append_macro(
                 TimelinePlacedTrigger(self._timeline_book, timeline, source)
             )
+        else:
+            self.append_macro(TimelineObservedTrigger(self._timeline_book, source))
 
     def pulse(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs

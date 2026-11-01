@@ -58,17 +58,26 @@ class TimeBase:
         do not affect the result. Empty, nonpositive or nonfinite clocks raise
         ValueError; lossy decimal conversion raises ValueError. Rational clock
         components and the common frequency obey the constructor's range limits
-        and raise OverflowError when exceeded.
+        and raise OverflowError when exceeded. Common-frequency overflow reports
+        the input clocks, exact LCM and the range violation; clock ratios with
+        large denominators can make the LCM exceed these limits.
         """
-        clocks = [_clock_fraction(clock) for clock in clocks_mhz]
+        clock_values = tuple(clocks_mhz)
+        clocks = [_clock_fraction(clock) for clock in clock_values]
         if not clocks:
             raise ValueError("at least one clock is required")
-        return cls(
-            Fraction(
-                lcm(*(clock.numerator for clock in clocks)),
-                gcd(*(clock.denominator for clock in clocks)),
-            )
+        frequency = Fraction(
+            lcm(*(clock.numerator for clock in clocks)),
+            gcd(*(clock.denominator for clock in clocks)),
         )
+        try:
+            return cls(frequency)
+        except OverflowError as error:
+            raise OverflowError(
+                f"Cannot build time base from clocks {clock_values!r} MHz: "
+                f"LCM={frequency} MHz; clock ratios with large denominators can "
+                f"inflate the LCM beyond int64/float64-exact limits: {error}"
+            ) from error
 
     def period_ticks(self, clock_mhz: float) -> int:
         """Return one clock period in ticks, rejecting off-grid clocks.

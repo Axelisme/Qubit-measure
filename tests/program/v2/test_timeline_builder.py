@@ -14,15 +14,17 @@ from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
-from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg
+from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
     PulseReadout,
     PulseReadoutCfg,
+    TablePulseReadout,
 )
 from zcu_tools.program.v2.modules.reset import TwoPulseResetCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
+from zcu_tools.program.v2.utils import readout_freq_words
 
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
@@ -212,7 +214,7 @@ def test_builder_forwards_author_register_time_hint(mock_soccfg):
     assert [waves(s) for s in shots(builder.build())] == [[10], [20], [30]]
 
 
-def _readout(name="read", *, gain: float | QickParam = 0.5):
+def _readout(name="read", *, gain: float | QickParam = 0.5, post_delay: float = 0.05):
     return PulseReadout(
         name,
         PulseReadoutCfg(
@@ -223,7 +225,7 @@ def _readout(name="read", *, gain: float | QickParam = 0.5):
             gain=gain,
             waveform=ConstWaveformCfg(length=0.1),
             ro_length=0.2,
-            post_delay=0.05,
+            post_delay=post_delay,
         ),
     )
 
@@ -536,6 +538,83 @@ def test_unsynchronized_dual_drive_groups_and_mux_fit_sixteen_registers(heralded
     assert len(prog.binprog["pmem"]) > 0
 
 
+@pytest.mark.parametrize("family", ["pulse", "table", "mux"])
+def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
+    soccfg = (
+        make_mux_mock_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
+        if family == "mux"
+        else make_mock_soccfg(2, 1)
+    )
+    builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
+    readout: v2.Module
+    if family == "mux":
+        readout = MuxReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            mixer_freq=1000,
+            length=0.125,
+            pre_delay=3 / 430.08,
+            post_delay=5 / 430.08,
+            ro_length=1.0,
+            trig_offset=0.5,
+            tones=[
+                MuxReadoutTone(ro_ch=ch, freq=1000 + 80 * ch, gain=0.1) for ch in (0, 1)
+            ],
+        ).build("read")
+    else:
+        cfg = PulseReadoutCfg(
+            gen_ch=0,
+            nqz=1,
+            freq=100,
+            gain=0.1,
+            waveform=ConstWaveformCfg(length=0.125),
+            pre_delay=3 / 430.08,
+            post_delay=5 / 430.08,
+            ro_ch=0,
+            ro_length=1.0,
+            trig_offset=0.5,
+        )
+        if family == "table":
+            builder.add_loop("frequency", 2)
+            gen_words, adc_words = readout_freq_words(
+                soccfg, [100, 101], gen_ch=0, ro_ch=0, mixer_freq=None, nqz=1
+            )
+            readout = TablePulseReadout(
+                "read",
+                cfg,
+                idx_reg="frequency",
+                freq_words=gen_words,
+                ro_freq_words=adc_words,
+            )
+        else:
+            readout = PulseReadout("read", cfg)
+    builder.emit(readout)
+    builder.emit(_pulse("next_drive"))
+    prog = builder.build()
+    result = shots(prog)
+    # 48 generator clocks last53.76 cycles. ceil(3+53.76+5)=62.
+    # Trigger starts216, well after the next drive; it never extends readout end.
+    assert [waves(shot) for shot in result] == (
+        [[3, 62]] if family == "mux" else [[0, 3, 62]] * len(result)
+    )
+    assert all(
+        [
+            e.cycle - shot.start_cycle
+            for e in shot.events
+            if e.kind == "data" and e.value
+        ]
+        == [216]
+        for shot in result
+    )
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
+    adc_end = 648 if family == "mux" else 646
+    assert all(
+        shot.body_end_cycle - shot.start_cycle + wait_cycles >= adc_end
+        for shot in result
+    )
+
+
 def test_builder_sweep_reused_readout_and_timing_match_native(mock_soccfg: QickConfig):
     builder = v2.TimelineBuilder(
         mock_soccfg, reps=2, initial_delay=0.1, relax_delay=0.3
@@ -581,7 +660,7 @@ def test_builder_nested_fixed_repeat_matches_native_and_reuses_declarations(
     mock_soccfg,
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.emit(readout, tag="before")
     builder.delay_by_timeline()
     with builder.repeat("outer", 2):
@@ -663,7 +742,7 @@ def test_builder_branch_timeline_delays_inside_repeat_match_native(mock_soccfg):
 
 def test_builder_fork_emit_join_matches_native_and_captures_target_names(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout, pulse = _readout(), _pulse("drive")
+    readout, pulse = _readout(post_delay=0.1), _pulse("drive")
     targets = ["read", "drive"]
     builder.fork("default", into=targets)
     targets.clear()
@@ -798,7 +877,7 @@ def test_builder_repeat_rebases_external_end_and_expires_local_names(
     mock_soccfg, count
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.fork("default", into=["external", "parent"])
     builder.timeline_inc(2.0, timeline="external")
     builder.timeline_inc(0.1, timeline="parent")
@@ -843,7 +922,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     builder.add_loop("scan", 2)
     loader = v2.LoadValue("count", [2, 3], idx_reg="scan", val_reg="n")
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.emit(loader)
     builder.fork("default", into="external")
     builder.timeline_inc(2.0, timeline="external")
@@ -1001,6 +1080,7 @@ def test_mux_objects_share_resources_despite_different_emission_timing():
     )
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
     builder.emit(first)
+    builder.timeline_inc(0.1)  # Author spacing keeps the shared ADC windows disjoint.
     builder.emit(second)
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
@@ -1010,8 +1090,8 @@ def test_mux_objects_share_resources_despite_different_emission_timing():
 
 def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    builder.emit(_readout("first"))
-    builder.emit(_readout("second"))
+    builder.emit(_readout("first", post_delay=0.1))
+    builder.emit(_readout("second", post_delay=0.1))
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
     assert prog.ro_chs[0]["length"] == 61

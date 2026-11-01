@@ -432,7 +432,7 @@ NotebookAdapter 執行量測，互動選線由獨立 FluxDepAnalyzer 處理，�
 Inactive tone 不限制掃描點數。
 Freq 的座標是 MHz，Amp Rabi 是 gain in a.u. within [-1, 1]。不同範圍按 index zip，不展開 Cartesian product。
 
-兩個 run 各自在函式本體直接組成 reset、`Join(Pulse(...), ...)` 與 active
+兩個 run 各自在函式本體用 `TimelineBuilder` 組成 reset、各 drive 的 fork／emit／join 與 active
 `MuxReadout`，不經共用 acquisition helper 選擇或隱藏序列。
 Freq preparation 回傳 `MuxFreqScan`，只包含原始 indices 與量化座標。
 Amp Rabi preparation 仍回傳含逐點 pulses 的 `MuxPulseScan`。兩者都不 acquire。
@@ -441,10 +441,10 @@ Readout DAC tones 與 ADC 頻率保持固定。Freq 座標按硬體 start/span/s
 不逐點獨立 round。Amp Rabi 仍每點 compile 一次。
 所有 branch 同時開始，短 branch 完成後等待；readout 接在最長 branch 之後。
 沒有末端 padding，也沒有第二次 compile 或自訂 Module。
-既有 Pulse 與 Join 擁有 native timing，不改 pulse 的 pre/post delay。
+Pulse owner 提供實際事件結尾，program 的 join 取逐點最大值，保留 pulse 的 pre/post delay。
 
 `SignalBuffer` 以 `(P,K)` 儲存，讓 Schedule 每步寫入整個 tone vector，回傳時轉為 `(K,P)`。
-Program 擁有 reps/rounds 平均；取資料時只經初始化後的 `MuxReadout.collect_iq` 取得平均 IQ。
+Program 擁有 reps/rounds 平均；取資料時經 `MuxReadout.collect_iq` 依該 program 已編譯的 readout emission 取得平均 IQ。
 Freq 的 round hook 保留全 sweep 已完成 rounds 的平均；第一個 round 未完成時保留 NaN。
 Amp Rabi 的 round hook 保留目前點已完成 rounds 的平均，取消後未寫入點仍是 NaN。
 Acquisition 例外直接傳出。作者決定回傳資料是否足夠分析，不從 StopSignal 判斷資料完整度。
@@ -574,7 +574,7 @@ Singleshot Len Rabi的length軸由host-side `Schedule.scan`逐點執行；每個
 Len Rabi numeric analysis以backend minimum validity作為finite calibration與writeback的前置條件。raw-IQ initializer以pooled PCA two-cluster assignment取得各群median center、群內pooled MAD noise scale與per-length粗略population；high-shot histogram超過coarse resolution時，同時保留quantile initializer作為另一個deterministic basin，先比較較粗的integrated-bin likelihood，再以較佳candidate回到原始共同bins求最終minimum，必要時才嘗試另一個candidate。coarse stage不取代或放寬final validity。各預設Migrad在invalid時最多續跑一次；caller提供explicit `max_calls`時略過coarse stage且只執行一次Migrad，不把該budget延伸成restart。Analysis Figure由experiment Module負責，以上方population estimates/global fit、左下第一個acquired point的integrated-bin histogram decomposition及右下derived confusion matrix呈現同一份joint-fit證據；valid histogram依cfg acquisition length與fitted length ratio顯示effective T1，並列出該point落入G/E classification circles與circle外L區域的observed fractions，不顯示Rabi pulse length。layout在GUI preview與fixed-size save geometry都維持panel、labels與annotations分離；invalid結果保留observed histogram，但不顯示fitted decomposition、effective T1或calibration matrix。
 
 Singleshot consumers 的分類參數由 RunRecord.cfg.readout 的 classifier 提供。
-分類取數先 build program，再用 `shot_sums(prog, [Classify("readout")])` 解析讀出 label，交給 `run_program_summed`。
+分類取數先 build program，再用 `shot_sums(prog, [Classify("readout")])` 解析讀出 label，交給 Schedule 的 `run_acquire_summed`。
 Result 的 `counts` 保存各 round 的 class counts 總和，形狀與原有狀態軸相同；分析與 live plot 才按每點總計數轉成比例。
 需要 Other 的讀出須有 circle 與 radius，不能用 linear 或 centroid3 表達 Other。
 舊比例存檔缺少 counts 時明確拒絕，不以比例推算計數。
@@ -996,8 +996,8 @@ distinct depths 時分析明確失敗。
 
 - RB 量測採「每個 seed 一個 program」的結構：在 program 內用 sweep index 遍歷 depth，而不是在 host 端對 `(seed, depth)` 重複建立程式。
 - recovery gate 是累積 Clifford 的**完整 group inverse**（24 種），不是只把態送回 +Z 的 state-restoring gate：module load 時從 `CLIFFORD_GROUP` 的 6-state permutation（對 24 元 quotient group faithful）程式化生成 `CAYLEY` / `INVERSE_INDEX` 查表，順序約定 `CAYLEY[i][j]` = 先作用 C_j 再 C_i、累積寫 `acc = CAYLEY[next][acc]`，兩處註解互相錨定，改其中一邊必須同步。
-- seed 對應的 random gate prefix 長度與 recovery gate id 以 `LoadValue` 從 dmem 查表；random 段用 register-driven `Repeat`；recovery 因 inverse decomposition 最多含 2 個 physical pulse，使用兩個獨立 `ComputedPulse` slot（`recovery_gate_0/1`），不足處以 `BasicGate.Id`（gain=0）補位。兩個 slot 必須共用完整 `gate_pulses` candidate list，使 recovery 段時長與 depth 無關。
-- random 段 `Repeat` 固定使用 `n="rand_len"`；當 random 序列可為空時，交由 `LoadValue(values=[])` 的 no-op 行為吸收，不在 RB 層做 sentinel value 邏輯。
+- seed 對應的 random gate prefix 長度與 recovery gate id 以 `LoadValue` 從 dmem 查表；random 段用 program 的 register-driven `repeat()`；recovery 因 inverse decomposition 最多含 2 個 physical pulse，使用兩個獨立 `ComputedPulse` slot（`recovery_gate_0/1`），不足處以 `BasicGate.Id`（gain=0）補位。兩個 slot 必須共用完整 `gate_pulses` candidate list，使 recovery 段時長與 depth 無關。
+- random 段 `repeat()` 固定使用 `n="rand_len"`；當 random 序列可為空時，交由 `LoadValue(values=[])` 的 no-op 行為吸收，不在 RB 層做 sentinel value 邏輯。
 - rounds 交給 `acquire()` 原生流程處理，host 層只掃 seed。
 
 ---

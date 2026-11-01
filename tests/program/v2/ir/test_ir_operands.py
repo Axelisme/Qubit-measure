@@ -104,7 +104,7 @@ def test_parse_immediate_paths():
     assert parse_immediate(imm) is imm
     assert parse_immediate(5) == Immediate(5)
     assert parse_immediate("#7") == Immediate(7)
-    assert parse_immediate("#u0x10") == Immediate(16)
+    assert parse_immediate("#u0x10") == Immediate(16, unsigned=True)
     assert parse_immediate("#b1010_0101") == Immediate(0b1010_0101)
     assert parse_immediate("#hff_00") == Immediate(0xFF00)
     assert parse_immediate("#1_000") == Immediate(1000)
@@ -163,7 +163,9 @@ def test_parse_alu_expr_success_paths():
     assert prefixed == AluExpr(Register("r1"), AluOp.ADD, Immediate(0x7F_0000))
 
     unsigned_hex = parse_alu_expr("r1 + #u0x10")
-    assert unsigned_hex == AluExpr(Register("r1"), AluOp.ADD, Immediate(16))
+    assert unsigned_hex == AluExpr(
+        Register("r1"), AluOp.ADD, Immediate(16, unsigned=True)
+    )
 
     reg_rhs = parse_alu_expr("r1 AND s2")
     assert reg_rhs == AluExpr(Register("r1"), AluOp.AND, Register("s2"))

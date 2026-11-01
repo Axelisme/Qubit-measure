@@ -288,6 +288,9 @@ def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_ge
         second = PulseReadout("second", cfg)
         builder = TimelineBuilder(env.soccfg, initial_delay=0, relax_delay=0)
         builder.emit(first)
+        # First ADC integrates for .2 us, longer than its .1-us generator.
+        # Delay the next config as well as its trigger until that window closes.
+        builder.timeline_inc(0.2)
         builder.emit(second)
         prog = builder.build()
         read = request(prog, env).materialize_point(0).readouts[0]

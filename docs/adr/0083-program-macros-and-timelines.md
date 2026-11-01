@@ -1,7 +1,7 @@
 # 0083 — Program macro 與具名 timeline
 
-日期：2026-10-29。B 與 builder 契約更新：2026-10-30。Timeline、Repeat 與收尾證明更新：2026-11-01。
-狀態：Accepted。A、B、builder 與 C compiled frontend 已交付；大量實驗遷移與 D 舊路徑移除另行交付。
+日期：2026-10-29。Builder 契約更新：2026-10-30。Timeline、Repeat、收尾證明與全面遷移裁定更新：2026-11-01。
+狀態：Accepted。全部實驗使用 TimelineBuilder／TimelineProgramV2，legacy program 與 control module 已移除。
 相關：[[0072]]、[[0074]]、[[0078]]
 
 ## 脈絡
@@ -13,16 +13,22 @@ Program 作者需要在同一個 body 混用原生 QICK 操作與可重用的 Pu
 
 ## 決策
 
-B 與 builder 的 owner 細節由 advisor 依使用者 2026-10-30 代理授權裁定。
-Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 C 授權裁定。
+Module 與 builder 的 owner 細節由 advisor 依使用者 2026-10-30 代理授權裁定。
+Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 compiled frontend 授權裁定。
 使用者的設計選擇另附日期與逐字原話，與 advisor 的細節裁定分開記錄。
 2026-11-01 的 timeline 整理由 advisor 依使用者「1代理模式就都給你決定，我事後看就好」的代理授權確認，涵蓋下述 owner 邊界、證明模型與 lowering 細節。
 
+2026-11-01，使用者裁定：「不要留Join」，並要求：「ModularProgram連同Join/Branch/Repeat/ScanWith都刪掉，全面用新的TimelineProgram，我應該早就這樣要求了」。
+全部實驗使用 `TimelineBuilder`／`TimelineProgramV2`。`ModularProgramV2`、`BaseCustomProgramV2`、`ProgramBuilder`、`Schedule.prog_builder` 與 control module `Join`／`Branch`／`Repeat`／`ScanWith` 已移除。
+Module 的 legacy `init`／`run`／`block_mode`／`tag` 與 `set_param` 不再是作者介面。Tag 由每次 emit 指定，數值覆寫由 constructor keyword 指定。
+並行只用 builder／program 的 `fork`／`join`，分支用 `branch`／`case`，迴圈用 `repeat()`。這不移除原生 program 的分支與迴圈能力。
+使用者同日選擇「B, 我要睡了，預期起來後我規劃都落地」，將 Schedule 移除 cfg 與實驗 cfg 寫法慣例納入遷移。
+
 ### Program 基底與 module owner
 
-`TimelineProgramV2` 繼承 repo 的 `MyProgramV2` 加 `ProgramResourcesMixin`，不經 `ModularProgramV2`。
+`TimelineProgramV2` 繼承 repo 的 `MyProgramV2` 加 `ProgramResourcesMixin`。
 它承接既有 `SimulationAcquireMixin`、`ImproveAsmV2`、`IRCompileMixin` 與 classify／herald acquire 擴充。
-`TimelineProgramV2` 與 `ModularProgramV2` 共用 compiled simulation frontend。
+`TimelineProgramV2` 使用唯一的 compiled simulation frontend。
 支援範圍依指令效果判定，不代表所有 native 操作均可模擬；admission 契約見 [simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#compiled-request-builder)。
 原生操作與 module lowering 共用既有 IR 管線及 `TimedMergePass` 的安全條件，不按來源分流或另建 canonicalization。
 共用 `ProgramResourcesMixin` 只集中 dmem 配置與 readout route 保護。
@@ -30,7 +36,7 @@ Compiled snapshot 的存取形式、routes 與 FIFO 細則由 advisor 依下述 
 它不做宣告等值檢查或提供查詢介面，作者需要資訊時讀 QICK 的 gen_chs／ro_chs。
 Timeline module 不自動保護 readout route，只有作者明確呼叫繼承的 protect_readout_routes 才啟用保護。
 Register 名稱／地址衝突仍由 program owner 檢查，錯誤指出兩個 module 的名稱與物件。
-明示 register 借用、Pulse registry 的 template 共用及 `ModularProgramV2` 的規則不變。
+明示 register 借用與 Pulse registry 的 template 共用規則不變。
 tProc readout 仍以各自具名 config 在 runtime 切換 freq／phase／outsel，add_readoutconfig 保留 QICK template 契約。
 每 shot 取數以編譯出的 trigger 總數為準，不按宣告或單一 module 的 emit 次數拒絕共用。
 2026-10-31，使用者裁定：「既然做这些检查这么的麻烦，那就干脆不检查了，就跟原生机制一样就好。」
@@ -41,7 +47,6 @@ Module 描述資源需求，不繼承 QICK Macro，也不能直接傳給 `append
 原生路徑由 `TimelineProgramV2` 以 module 物件身分為 key 持有宣告結果，宣告時寫入，lowering 從該 program 讀取。
 同一 module 物件可同時宣告進多個原生 program，手寫 program 與 `TimelineBuilder` 都適用。
 重新 compile 只重建該 program 的宣告結果，不覆寫其他 program 的資源。
-Legacy `ModularProgramV2` 仍將宣告狀態放在 module 上，不提供此跨 program 重用契約。
 
 2026-10-30，對宣告結果改由 program 持有的 B1 方案，使用者回答：「我也傾向B1，原因是對作者而言最小驚訝」。
 Builder 深複製只解決 builder 的重用，且會分離原物件與複本的身分，手寫 program 不受益。
@@ -57,7 +62,7 @@ Registry identity、read axes 與 lowering 都使用有效 cfg。
 使用者選擇「11B」，採用建構時 keyword 覆寫。
 
 每次 emit 建立新的通用 `ModuleEmission`，時間與 tag 屬於那次發射。
-各 module owner 提供宣告與 lowering，原生 declare／lower 不呼叫 legacy `init`／`run`。
+各 module owner 提供宣告與 lowering，module 不保存跨 program 的宣告狀態。
 只有確實需要不同 preprocess／expand 行為時，才另建 macro 類別。
 
 使用者於 2026-10-29 對原生作者入口指出：「我覺得不太好，用program寫法就該接近原生的寫法，而builder才該設計成一個with scope，內部是像body的寫法」。
@@ -72,8 +77,8 @@ Program／emission owner 配置每次 lower 的內部名稱，scope 隨 compile 
 平行排程由作者或 module owner 以 fork／emit／join 表達，保留作者次序。
 Builder 只重播公開方法，不自行組 emission 的內部名稱。
 LoadValue owner 提供本次 index 的 lookup，重用已宣告的 table 與 destination。
-ScanWith 使用固定次數 Repeat 與該 lookup，不複製或改寫 loader 的宣告狀態。
-Repeat owner 提供固定 counter 的名稱、次數與 writer metadata；nested loop 不加入 QICK 的 top-level sweep metadata。
+作者以原生 `repeat()` 或 top-level sweep index 配合該 lookup，不複製或改寫 loader 的宣告狀態。
+Program 的 repeat owner 提供固定 counter 的名稱、次數與 writer metadata；nested loop 不加入 QICK 的 top-level sweep metadata。
 這些分工讓 emission 狀態與宣告資源分開，也避免呼叫端鏡射 QICK 私有 discovery 流程。
 
 ### Builder 與 Schedule 的職責
@@ -83,6 +88,7 @@ Builder 不管理取數生命週期，不是 context manager，也不接收 SoC 
 它在 module 物件第一次 emit 時記錄宣告，同一物件再次 emit 沿用宣告。
 不同物件不按內容合併；硬體資源的共享與衝突交給各 module 家族和 program owner。
 
+Schedule 與 scan step 不保存 cfg。實驗 run 讀取自己的 cfg 參數，步驟差異由區域變數或 `with_updates` 表達。
 Schedule 與 scan step 的 `run_acquire`、`run_acquire_summed`、`run_acquire_decimated` 接收已建立的 program。
 它們以 `RunOptions` 管理轉換後寫入 slot、即時顯示、retry 與 stop_condition。
 Builder 產生的 program 與手寫 program 使用相同入口；program 自身的 `acquire*` 只取數並回傳。
@@ -114,14 +120,20 @@ Branch 的 case 另以自己的 timeline 屏蔽預設，不能藉外層 scope �
 
 一般 emission 先取所選 timeline 的結尾作為內部事件的共同起點。
 完成後採規則 b，不從 `total_length` 重建 duration，也不把 composite 內原本重疊的事件串接。
-單一 post-delay owner 取實際 waveform／ADC event end 的最大值，加一次 post-delay，再對完整結尾向上取整到 tProc cycle。
+單一 post-delay owner 取實際 generator waveform 結尾，加一次 post-delay，再對完整結尾向上取整到 tProc cycle。
+Readout 的 ADC 視窗只記在該 ADC channel 自己的尾端，不延長也不 join 回作者 timeline。
+`PulseReadoutCfg.nominal_duration_us`＝pre_delay＋generator waveform 長度＋post_delay。
 分數尾段保留到 aggregate 收尾，不先各自取整。
 Reset 保留各 child 的 post-delay，不新增 composite post。
 BathReset 的 pi/2 在 cavity end 加 post-delay 向上取整後開始，最後合併 qubit 與 pi/2 的實際結尾。
 Delay 與 SoftDelay 都只加結尾，不推進 reference。
-帶 timeline 的 pulse／trigger 在 E+t 發射，結尾更新到事件結束點。
+帶 timeline 的 pulse／trigger 在 E+t 發射，pulse 結尾更新到 generator 結束，trigger 結尾只含 trigger 寬度。
 兩種 readout config 是瞬時事件，結尾更新到 E+t，不加 config length 或其他 ADC window。
 同 generator 可證明的 pulse 重疊在編譯期報錯，另一條 timeline 不能豁免此檢查。
+後一個 trigger 帶 timeline 時，必須證明起點不早於同 ADC 前一視窗結尾。重疊或無法證明時在編譯期報錯。
+純原生的後一個 trigger 保留 QICK 行為。每個 shot 收尾仍等待全部 ADC。
+2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
+對編譯期報錯方式，使用者同日回答：「B」。
 
 `timeline_inc(t, timeline=X)` 只加 X 的結尾，`delay_by_timeline(timeline=X)` 才將 reference 推到 X 的結尾。
 Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d)`。
@@ -133,14 +145,14 @@ Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d
 DelayAuto module 是一般 emission 規則的唯一例外。
 它只在 timeline 範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto，保留 gens／ros，移 reference 並扣減全部結尾。
 顯式指定任何 timeline，包含 default，或由範圍選出 timeline，均在 emit 入口報錯。
-在 Repeat 等範圍內需要此效果時，作者直接呼叫原生操作，仍須遵守 case 與 Join／Reset 的 reference 守衛。
+在 Repeat 等範圍內需要此效果時，作者直接呼叫原生操作，仍須遵守 case 與 Reset 的 reference 守衛。
 原生 delay_reg_auto 先消耗選定 native channels，再推進非負 register cycles。
 尚未完整消耗的 timeline 依 producer bounds 扣除實際推進量；全部已消耗時，register 部分沿用原生非負時間契約。
 PulseReadout 的 gain／frequency runtime words 是非時間 consumer，不受此時間限制排除。
 
 使用者於 2026-10-31 指出：「ModularProgram那個是沒有rintime timeline功能時的無可奈何辦法，新program有就不要模仿了」。
 新 program 的 runtime delay_by_timeline 依逐點實際結尾對齊，不模仿 legacy DelayAuto symbolic max 權宜行為。
-Compiled frontend 仍忠實執行 `ModularProgramV2` 的編譯指令，不將其行為當作新 program 的相容性要求。
+已移除的 legacy program 行為不構成 Timeline 的相容性要求。
 
 ### Runtime end 與範圍證明
 
@@ -296,12 +308,12 @@ Shot 收尾、join、fork、delay_by_timeline 本來需要的 selected-end／deb
 2026-11-01，對取消外部 timeline 的 wait-only 拒絕、從實際結尾繼續放事件的方案，使用者回答：「1B」。
 Storage 重用範圍由 advisor 同日依代理授權裁定，仍保留 16 個 data register 上限與不用時間 DMEM 的限制。
 
-### Module Join 與 program join 的分工
+### 並行序列與 reference 守衛
 
-Module Join 為每個 sequence fork timeline，依作者順序發射 children，最後 join 回母 timeline。
-各 sequence 從共同 origin 開始，sequence 及內部 Module 都不重排。
-它與只合併結尾的 program join 是兩個契約；Module Branch lower 到上述 branch／case，並傳入 emission 的母 timeline。
-Join 與 TwoPulseReset／BathReset 的 child 不得經 reference owner 推進 reference；普通 Branch 不推進 reference，可以使用。
+作者以 builder／program 為每個 sequence fork timeline，依作者順序 emit，最後 join 回母 timeline。
+各 sequence 從共同 origin 開始，sequence 及內部 Module 都不重排。`join` 只合併結尾，不發射 children。
+分支與迴圈直接使用上述 `branch`／`case` 與 `repeat()`，沒有 control module 包裝。
+TwoPulseReset／BathReset 的 child 與 branch case 不得經 reference owner 推進 reference。
 守衛設在實際推進 reference 的 owner 接縫，不按 macro 名稱或效果分類，不保留交換 admission。
 Producer provenance、全流寫入稽核、physical-end 與 case／Repeat backedge guards 照常執行，不加 padding 或 reference rewind。
 
@@ -313,7 +325,7 @@ Raw asm_inst 或自訂 Macro.translate 推進 reference 不經 timeline 記帳�
 
 IR compiler 每次成功 compile 後在 program 發布具型別、不可變的 `compiled_stream`。
 它保存優化前的 logical instructions、labels 與結構 metadata，是與 simulation 無關的 compiler artifact。
-`ModularProgramV2` 與 `TimelineProgramV2` 使用相同契約。
+`TimelineProgramV2` 的手寫與 builder 路徑使用相同契約。
 Snapshot 不借用可變的 Module／macro graph，與後續 program 變更隔離；consumer 取得 detached typed instructions。
 Compiler 擁有結構與資料，不依賴 simulation，也不透過 observer callback 管理 consumer。
 Simulation 不接管 compile lifecycle。
@@ -382,25 +394,21 @@ A 不支援的 owner／runtime 組合列具體原因，A timing 與 delta 記 N/
 例如修正漏算的較長 qubit tail 可以讓 B 的 body 結尾晚於 A，不能以 delta 的正負取代正確性判斷。
 新缺陷須修正，未知差異須回報；報告不成為常駐的新舊 equality test。
 
-### 已採用的階段邊界
+### 現行交付範圍與裁定沿革
 
-| 階段 | 範圍與狀態 |
-|---|---|
-| A，已交付底層 | B1、顯式 module／emission、fork／join、Repeat 與 IR 時序 analysis。A 交付時採規則 a，無法靜態證明時拒絕，register Repeat 使用等待上界；這些限制由 B 的現行契約取代。Builder、實驗與模擬 frontend 不切換。 |
-| B，已交付 | 其餘 Module lowering、規則 b、runtime timeline 與 a→b 時序差異報告。新路徑不讀 block_mode，legacy 欄位與 init／run 保留到 D。B 不遷移實驗、不改模擬 frontend，也不刪舊路徑。MuxReadout 只轉換 declaration／playback，collect_raw_iq 仍只接受 legacy program。 |
-| Builder，已交付 | 在 B 的 TimelineProgramV2 上提供序列錄製與 build，Schedule 提供共用 run_acquire*。交付時與舊 builder 並存，不遷移實驗，也不等待 C 的 frontend 切換。 |
-| C，已交付 | 兩種 program 共用優化前 compiled snapshot 與唯一 compiled simulation frontend，已完成既定語料的 parity／完整 acquire 效能驗收並移除舊 Module-tree simulation frontend。現行支援與拒絕範圍見上節；大量實驗遷移仍未交付。 |
-| D，另行交付 | 原生宣告 ownership 與 constructor overrides 已交付。2026-10-31，對 D 移回大量實驗遷移結尾的安排，使用者回答：「採用建議」。屆時一併刪除舊 init／run／block_mode、ModularProgramV2 與 ProgramBuilder。set_param 也於大量遷移時退出作者介面。目前 legacy 路徑與 set_param 保留，不先替即將退役的 ModularProgramV2 改寫 declare／lower 路徑。D 不再切換規則 b。 |
+Timeline module lowering、規則 b、runtime timeline、builder／Schedule 分工與 compiled simulation frontend 均已交付。
+全部實驗已改用 Timeline；舊 program、builder、module lifecycle 與 control module 不再保留為平行路徑。
+MuxReadout 的 `collect_iq`／`collect_raw_iq` 依 Timeline program 已編譯的 readout emission 取數，保留平均、ADC 長度正規化、offset、tone／ADC 順序與輸出 shape。
 
+早期 A／B／C／D 是交付順序，不是現行功能開關。A 的規則 a、靜態證明限制與 register Repeat 等待上界已由本篇的規則 b 與 runtime 契約取代。
 2026-10-29，對規則 b 與差異報告提前到 B、D 只刪舊路徑的安排，使用者回答：「採用建議」。
 同日，對 B 的 register delay、Module Join lowering 與 Mux 取數範圍，使用者回答：「1A  2B 3A」。
-三項分別採用 register 名稱表示 timeline cycles、保留 Module Join 的原生 lowering，以及只轉 Mux 宣告／播放、不擴 collect_raw_iq。
-新路徑不讀 block_mode、legacy 保留到 D 的細節由 advisor 依既有階段裁定具體化，不要求 B 改寫實驗。
+當時三項分別採用 register 名稱表示 timeline cycles、保留 Module Join 的原生 lowering，以及只轉 Mux 宣告／播放、不擴 collect_raw_iq。後兩項已由 2026-11-01 的全面遷移裁定取代。
+2026-10-31，對 D 移回大量實驗遷移結尾的安排，使用者回答：「採用建議」。遷移與刪除現已完成，不再留待 D 交付。
 
 2026-10-30，對先交付 builder／Schedule 取數、實驗遷移另開工作且等待模擬 frontend 的安排，使用者回答：「沒問題，採用建議，我思考soc/prog的順序，感覺prog應該要是第一個才對」。
-因此 run 入口以 program 在前、soc 在後；builder 交付當時不含模擬 frontend 切換。
-C 現已支援 compiled emission；大量 lab 實驗遷移仍未交付。
-C 刪除的是舊 simulation frontend，`ModularProgramV2` 與舊 init／run 仍保留到 D。
+因此現行 run 入口以 program 在前、soc 在後。Builder 不管理取數，Schedule 不組裝 program。
+Compiled frontend 已取代舊 Module-tree simulation frontend，沒有 legacy selector 或 fallback。
 
 ## 依賴與後果
 
@@ -412,5 +420,8 @@ IR analysis 是編譯結果分析，不是物理模擬 frontend，不產生模�
 
 作者必須明確同步 timeline 與原生 reference，不能以未同步的原生 pulse 代替序列發射。
 Runtime timeline 承接無法靜態精確表示的時間。已知來源保留 bounds、provenance 與可證明重疊的拒絕，無 hint 作者時間的未知段由作者負責合法性。
-Data register 上限仍為 16，不保證任意序列都能編譯。實驗仍保留 drive Join 後的明確同步。
+Data register 上限仍為 16，不保證任意序列都能編譯。
+register-economy 後，chevron／constructive_phase 四個實驗的硬體與 host 路徑共八處 drive Join 後同步已刪除。
+原 cfg 仍可編譯，公開 compiled 事件時間與刪除前逐點相同。
+2026-11-01，使用者裁定：「13沒影響就移除多餘的同步」。
 原生寫法與公開 API 範例由 [program README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline) 維護，module 宣告與 owner 邊界見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)。

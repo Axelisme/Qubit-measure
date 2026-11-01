@@ -355,8 +355,8 @@ Adapter 不重跑 fit，不直接 Apply。
 
 其他需要 Other 的 singleshot consumers 先從 readout cfg 要求 circle 與 radius。
 作者先 `prog = builder.build()`，再以 `shot_sums(prog, [Classify("readout")])`
-解析讀出 label，交給 `builder.run_program_summed(prog, processor=..., sums2signal_fn=...)`。
-Modular program 的 label 是 module 名稱；timeline 使用 emit tag，未給 tag 才用 module 名稱。
+解析讀出 label，交給 `sched.run_acquire_summed(prog, soc, processor=..., options=RunOptions(converter=...))`。
+Timeline 使用 emit tag，未給 tag 才用 module 名稱。
 Mux 軸另指定 cfg tone 位置。Circle 明列 `[g,e,other]`，缺 radius 時提示做 GE Post。
 同一 converter 收到 cumulative round updates 與 final sums，不使用預設 IQ converter。
 Result 保存每點 class counts，不除以 reps 或 rounds；分析與 live plot 才除以該點總計數。

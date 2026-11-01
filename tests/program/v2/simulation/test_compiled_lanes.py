@@ -243,17 +243,20 @@ def test_branch_trigger_masks_do_not_extend_other_lanes_body_duration():
                         p.fork(timeline, into="capture")
                         p.trigger([0], t=0, timeline="capture")
                         p.pulse(0, "p")
-                        p.timeline_inc(case * 43 / 430.08)
+                        # ADC integrates 61/307.2 us (85.4 tProc cycles).
+                        # A 43-cycle pulse plus 44 cycles clears it; case 1
+                        # keeps its additional 43 cycles of lane-local duration.
+                        p.timeline_inc((44 + case * 43) / 430.08)
             p.delay_by_timeline()
 
     prog, env = program(body, lambda p: p.add_loop("scan", 2), trigger_time=None)
     result = request(prog, env)
     assert time_us(
         result.time_base, result.materialize_point(0).duration_ticks
-    ) == pytest.approx(43 / 430.08 + 61 / 307.2)
+    ) == pytest.approx(174 / 430.08)
     assert time_us(
         result.time_base, result.materialize_point(1).duration_ticks
-    ) == pytest.approx(172 / 430.08)
+    ) == pytest.approx(260 / 430.08)
 
 
 def test_progress_counter_read_in_body_is_not_a_sweep_lane_input():

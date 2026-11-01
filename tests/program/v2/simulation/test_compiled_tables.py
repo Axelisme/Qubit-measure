@@ -4,7 +4,7 @@ import pytest
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
-from zcu_tools.program.v2.modules import LoadValue, LoadWord
+from zcu_tools.program.v2.modules import Delay, LoadValue, LoadWord
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg, TableLengthPulse
 from zcu_tools.program.v2.modules.readout import (
@@ -64,7 +64,10 @@ def module_program(modules, *, sweep=(), reps=2, body=None, data_registers=16):
 
 def test_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
-    prog, env = module_program([cfg.build("herald"), cfg.build("terminal")])
+    # ADC length is 31/307.2 us = 43.4 tProc cycles; generator ends at 43.
+    prog, env = module_program(
+        [cfg.build("herald"), Delay("adc_gap", 1 / 430.08), cfg.build("terminal")]
+    )
     observed = request(prog, env)
     point = observed.materialize_point(0)
     assert [event.source for event in point.events] == ["herald", "terminal"]

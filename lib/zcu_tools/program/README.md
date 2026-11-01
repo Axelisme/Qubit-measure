@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-01，s14 runtime event time
+**Last updated:** 2026-11-01，readout generator end 與 ADC channel tails
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -10,7 +10,7 @@
 
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
-`v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行兩種 program 的受支援 instruction effects。
+`v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
 
 ## Native acquisition
 
@@ -77,13 +77,15 @@ Retry, progress and stop conditions follow the other Schedule run methods.
 `shot_time_s(rounds=..., reps=..., shot_lengths_us=..., relax_delay_us=...)`
 從各 sweep 點的 shot 長度與共同 relax 計算完整 acquisition 的 shot 秒數。
 輸入時間單位為 µs，rounds 與 reps 為正整數；不計 acquisition 固定開銷與 flux ramp。
+`PulseReadoutCfg.nominal_duration_us()` 以 `pre_delay + waveform.length + post_delay` 估算 readout 的 generator 結尾。
+此估值不含 ADC 視窗或時脈取整。Timeline readout 不等待 ADC 才開始後續 pulse，但每個 shot 收尾仍等待所有 ADC。
+後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊會在編譯期報錯。純原生 trigger 保留 QICK 行為。
 `request_round_time_s(request)` 從整數 request 計算一輪 pacing 秒數。它以 Python 整數加總各點與 relax，再乘 reps，由 TimeBase 一次換成秒。整輪總和不套用單一 request 時間的 ns 精確界限。模擬 binding 只呼叫此入口，不累計 acquisition 的硬體總時間。既有 µs API 與硬體路徑不變。
 
 ## Conditional readout
 
 Declare separate read labels for herald and terminal emissions. One readout
-module may be emitted twice with distinct timeline tags. With modular programs,
-use separate module names. Both paths keep every herald class:
+module may be emitted twice with distinct emit tags. Every herald class is kept:
 
 ```python
 from zcu_tools.program.v2 import Classify, IQ, shot_sums, split_sums

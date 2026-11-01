@@ -106,10 +106,15 @@ replace a separate GUI/MCP acceptance run.
 
 ## Readout and replay limits
 
-Only terminal readout is supported. Any earlier pulse on the readout generator
-raises ValueError before evolution. The environment does not model its Stark
-shift, cavity memory or backaction. Do not treat such a sequence as a completed
-simulation. See [field-guide.md](field-guide.md) for basis, bath and line assumptions.
+A nonterminal readout block with an ADC trigger causes one projective read at
+its pulse start. The terminal readout block still ends evolution. An earlier
+readout pulse without an ADC trigger raises ValueError before evolution.
+The environment does not model its Stark shift, cavity memory or backaction.
+Each projective read splits the state into DC energy-basis outcomes. ADC CTMC
+jumps during that read change its IQ only, not later evolution. See
+[Complete timelines](../../../lib/zcu_tools/experiment/single_fluxonium/README.md#complete-timelines)
+for trigger binding and layout rules, and [field-guide.md](field-guide.md) for
+basis, bath and line assumptions.
 
 Notebook authors can pass an absolute `private_replay` directory to
 `zcu_tools.experiment.single_fluxonium.single_fluxonium`. The resource owner saves

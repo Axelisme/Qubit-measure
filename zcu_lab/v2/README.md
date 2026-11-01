@@ -198,8 +198,8 @@ Save 以各 output 的 status 回報其失敗，不影響成功保存的 native 
 兩個 `run()` 各自在 core 直接寫出掃描與 pulse 序列。
 Twotone spectrum 用一個 program 的共用硬體 loop 掃 drive DAC 頻率，mux readout 保持固定。
 Amp Rabi 仍逐點 compile。
-共同 reset 後，既有 Join 讓 drives 同時起跑，短 branch 完成後等待當點最長 branch，
-再做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
+共同 reset 後，TimelineBuilder 以 fork／emit 讓 drives 同時起跑，再以 join 取得當點最長結尾，
+接著做共同 mux readout。不補齊末端，不以全 sweep 最大長度 padding。
 七個 mux qubit adapters 已註冊在 catalog，透過各 leaf 的 native `form.py` 生成完整
 固定具名 tones 及獨立 Participants 輸入。元素 picker 只選編輯對象；名稱 readonly。
 普通改名、增刪及重排由公開 FixedElements owner 原子拒絕。
