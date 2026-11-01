@@ -718,6 +718,26 @@ def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite()
     assert [s.body_end_cycle - s.start_cycle for s in result] == [53, 58, 53] * 2
 
 
+def test_native_trigger_replaces_prior_runtime_adc_tail_for_shot_closure():
+    def initialize(prog):
+        prog.declare_readout(0, length=4 / 307.2)
+
+    def body(prog):
+        prog.write_reg("duration", 40)
+        prog.timeline_inc("duration")
+        prog.trigger([0], width=1 / 430.08, timeline="default")
+        prog.trigger([0], t=100 / 430.08, width=1 / 430.08)
+
+    prog = program(body, initialize=initialize)
+    result = shots(prog)
+    assert [
+        [e.cycle - s.start_cycle for e in s.events if e.kind == "data" and e.value]
+        for s in result
+    ] == [[40, 100]] * 3
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    assert int(str(wait["TIME"]).removeprefix("@")) >= 65
+
+
 def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
     def initialize(prog):
         prog.declare_readout(0, length=4 / 307.2)

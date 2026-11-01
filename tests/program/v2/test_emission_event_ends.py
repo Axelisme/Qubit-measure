@@ -136,7 +136,8 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
             prog.timeline_inc("duration")
         prog.emit(readout)
 
-    result = shots(_program([readout], body, initialize))
+    prog = _program([readout], body, initialize)
+    result = shots(prog)
     # Scalar triggers ceil both .559104 and .473088 to 1. Author
     # sweeps start at native round(.559104/.473088), then step by one.
     # ADC length is18.2 cycles; generator is11.2 cycles plus post.
@@ -157,8 +158,13 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
         origin + 12 for _ in steps
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        origin + trigger_start + 18 + step + 9 for step in steps
+        origin + trigger_start + (19 if origin else 18) + step + 9 for step in steps
     ] * 2
+    # Native final reference can round a fractional ADC tail down. The physical
+    # WAIT remains ceiled and blocks until integration completes at every point.
+    (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
+    wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
+    assert all(12 + wait_cycles >= trigger_start + step + 19 for step in steps)
 
 
 class _AllocateDuration(Macro):
