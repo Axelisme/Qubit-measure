@@ -29,7 +29,7 @@ from ..base import Experiment
 from ..records import RunRecord
 from ..simulation import SimulationEnvironment, white_noise
 from ..single_fluxonium import single_fluxonium
-from ._acquisition import acquire_record
+from ._acquisition import acquire_record as _acquire_record
 from ._comparison import compare_roundtrip as compare_roundtrip
 from .run_save import RunStageResult as RunStageResult
 from .run_save import SaveStageResult as SaveStageResult
@@ -144,7 +144,7 @@ def probe(
         with _timed(report, "setup"):
             output_dir.mkdir(parents=True, exist_ok=True)
         with _timed(report, "run"):
-            record = acquire_record(experiment, cfg, environment, live)
+            record = _acquire_record(experiment, cfg, environment, live)
             report.fields = _describe(record.result)
         with _timed(report, "live_png"):
             _export(live, "live", report, output_dir)
