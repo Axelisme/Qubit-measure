@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -274,7 +275,6 @@ def _mist_cfg(
     return PowerDepCfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         relax_delay=(
             5.0 * t1_us
             if t1_us is not None
@@ -381,7 +381,7 @@ async def run_mist_stage(
     acquisition = await acquire_saved(
         scope,
         env,
-        run_mist,
+        partial(run_mist, retry=settings.acquire_retry),
         cfg,
         name="MIST",
         output=NativeOutput(filename=f"mist-{mode}.h5", spec=PowerDepExp.AXES_SPEC),
