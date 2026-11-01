@@ -142,6 +142,49 @@ def test_histogram_calibration_retains_centers_populations_and_diagnostics(
 @pytest.mark.parametrize(
     "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
 )
+@pytest.mark.parametrize("length_ratio", [None, 0.0])
+@pytest.mark.parametrize("draw", [False, True])
+def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
+    selection, length_ratio, draw
+):
+    from scipy.special import ndtri
+
+    noise = 0.25 * ndtri((np.arange(1000) + 0.5) / 1000)
+    quadrature = 0.1j * np.sin(np.arange(1000))
+    signals = np.asarray([-1 + noise + quadrature, 1 + noise + quadrature])
+    plots = Plots(NonPresentingHost()) if draw else None
+    try:
+        fidelity, populations, result = singleshot_ge_analysis(
+            signals,
+            plots=plots,
+            options=GEFitOptions(length_ratio=length_ratio),
+            **selection,
+        )
+
+        if length_ratio is None:
+            assert result["length_ratio"] is None
+        else:
+            assert result["length_ratio"] == 0.0
+        assert 0.9 < fidelity <= 1.0
+        np.testing.assert_allclose(populations, [[1.0, 0.0], [0.0, 1.0]], atol=0.03)
+        assert result["g_center"] == pytest.approx(-1.0, abs=0.03)
+        assert result["e_center"] == pytest.approx(1.0, abs=0.03)
+        assert result["s"] == pytest.approx(0.25, abs=0.03)
+        if plots is not None:
+            title = " ".join(text.get_text() for text in plots["fit"].texts)
+            if result["length_ratio"] is None:
+                assert "Readout length: not identifiable" in title
+            else:
+                assert "Readout length =" in title
+    finally:
+        if plots is not None:
+            plots.finish(present=False)
+            plots.release()
+
+
+@pytest.mark.parametrize(
+    "selection", [{"backend": "pca"}, {"backend": "center"}, {"angle": 0.0}]
+)
 def test_ge_analysis_custom_names_coexist_with_default_owned_figures(selection):
     from scipy.special import ndtri
 
