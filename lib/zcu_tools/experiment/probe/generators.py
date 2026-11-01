@@ -3,11 +3,11 @@
 from collections.abc import Callable, Sequence
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 
 def synthesize(
-    model: Callable[..., NDArray[np.number]],
+    model: Callable[..., ArrayLike],
     xs: NDArray[np.number],
     params: Sequence[float],
     *,
@@ -22,10 +22,12 @@ def synthesize(
     deviation in each real and imaginary component. seed initializes a local
     NumPy RNG without changing global random state.
 
-    The model determines the output shape, not xs. NumPy addition determines
-    the output dtype. Only finite, nonempty xs and noise_std are validated;
-    violations raise ValueError. Model parameters and output are not validated,
-    converted or repaired. Model and NumPy exceptions propagate unchanged.
+    The model's array-like output is converted once with np.asarray; that
+    conversion determines shape, not xs. A tuple of two length-N arrays becomes
+    shape (2, N). NumPy addition determines the output dtype. Only finite,
+    nonempty xs and noise_std are validated; violations raise ValueError.
+    Model parameters and output are not otherwise validated or repaired.
+    Model and NumPy exceptions propagate unchanged.
     Synthesis does not modify inputs; the supplied model owns its side effects.
 
     Example using the fitting owner's parameter order:
@@ -37,7 +39,7 @@ def synthesize(
         raise ValueError("xs must be finite and nonempty")
     if not np.isfinite(noise_std) or noise_std < 0:
         raise ValueError("noise_std must be finite and nonnegative")
-    values = model(xs, *params)
+    values = np.asarray(model(xs, *params))
     rng = np.random.default_rng(seed)
     noise = rng.normal(0.0, noise_std, values.shape)
     if np.iscomplexobj(values):

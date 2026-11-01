@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，獨立離線驗收階段與兩個資料生成機制
+**Last updated:** 2026-11-01，離線階段按需載入與 array-like 模型輸出
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -137,9 +137,11 @@ Caller 自行保存 bytes 並逐張看圖。建立 Plots 前套用[共用樣式]
 實驗的原生 Matplotlib 參數與 style context 可覆寫外觀。
 Caller 負責環境 backend 與 devices 的清理，階段不更改 seed 或接線。
 
+`probe` 按公開名稱載入 stage owner。單獨 import `probe.generators` 不載入 acquisition 或 simulation。
 `probe.generators` 提供兩個資料生成機制，所有參數都由 caller 明填。
-`synthesize(model, xs, params, *, noise_std, seed)` 直接呼叫 `model(xs, *params)`，
+`synthesize(model, xs, params, *, noise_std, seed)` 只做一次 `np.asarray(model(xs, *params))`，
 再對每個輸出元素加獨立高斯噪聲，complex 的實部與虛部分別抽樣。
+Model 可回傳 array-like，兩個長度 N 陣列的 tuple 會轉成 `(2, N)` 陣列。
 Caller 直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`，
 按該模型簽名填 params。Model 決定 shape，probe 只驗 xs 有限非空及 noise_std 有限非負。
 `sample_iq_shots(population, *, g_center, e_center, width, shots, seed)` 按每列的 excited
