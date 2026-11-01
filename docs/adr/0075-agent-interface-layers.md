@@ -133,7 +133,7 @@ Recipe 本地樹在 MCP process，GUI Run 是另一棵樹。Schedule／acquire �
 
 子層分析合作取消且沒有結果時仍可回 `AnalysisResult(result=None, status="failed", reason=...)`。這是取消路徑，不是 fitting 例外；根取消仍拋 `ScriptCancelled`。
 
-2026-10-31 advisor 代理裁定：Run／Analyze 共用既有 fallback，空字串或缺少錯誤訊息時顯示通用 operation failed 文字，因為空訊息沒有可交付的資訊，補上顯示文字不需要辨識例外型別或原因。
+2026-11-01 使用者裁定：「9我其實只要呈現error本身就好，比如就顯示ValueError()」，在 `repr(error)` 與「型別: 訊息」兩案中答「9a」。由例外產生的 operation 失敗結果，訊息一律是 `repr(error)`，例如 `ValueError()`、`ValueError('fit did not converge')`；`OperationOutcome.from_exception` 是唯一的轉換點。失敗結果在建構時拒絕缺少或空的訊息，GUI wire、MCP recipe 與 setup 不補預設文字。以字串原因建立的失敗維持原字串；event、UI 狀態與 log 的文字不受影響。repr 只決定顯示文字，不依例外型別分支，所以仍符合上述「框架不識別 raise 的原因」。
 
 Fitting owner 的 fit_func 把 optimizer 不收斂與已知自由參數數目下的資料不足轉為 AnalysisFailed，不再回初猜加 warning。Model callback 自己的例外原樣傳播。其餘 backend 的有效性或 fallback 契約不因此全改，已分類路徑見 fitting README。這些 frontend→experiment／analysis 依賴受既有 import contracts 約束。
 
