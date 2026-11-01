@@ -18,9 +18,7 @@ from zcu_lab.v2.support import live_line
 from zcu_lab.workflows.mist_fluxdep.analysis import mist_signal2real
 
 
-def run_mist(
-    cfg: PowerDepCfg, *, context: RunContext, retry: int
-) -> PowerDepResult:
+def run_mist(cfg: PowerDepCfg, *, context: RunContext, retry: int) -> PowerDepResult:
     """Acquire a disturbance gain trace after optional pi preparation.
 
     Supply native PowerDepCfg: init_pulse is the calibrated pi pulse for excited
