@@ -19,4 +19,11 @@ def check_sources(sources: Mapping[str, str]) -> tuple[Violation, ...]:
 
     Return path-sorted violations without reading files or changing the mapping.
     """
-    return ()
+    found: list[Violation] = []
+    for path, source in sorted(sources.items()):
+        header = "\n".join(source.splitlines()[:8])
+        if "**讀者：**" not in header and "**Readers:**" not in header:
+            found.append(
+                Violation(path, "missing reader declaration in first 8 body lines")
+            )
+    return tuple(found)
