@@ -4,7 +4,7 @@ status: accepted
 
 # ADR-0062 — 實驗執行與 workflow 編排
 
-**Last updated:** 2026-11-01，Scope 能力、core helper 與 workflow 三層分工
+**Last updated:** 2026-11-02，workflow 自有取數與 run_core 轉接
 
 關聯 [[0066]]，operation 與取消。保存權威見 [[0063]]，表單與 cfg 的使用邊界見 [[0065]]。
 
@@ -30,7 +30,7 @@ Workflow 作者可在步驟開頭檢查所需的 soc、devices 或 context 並 f
 
 `Scope.call(fn, name=...)` 是唯一 operation 原語，呼叫 `fn(CallContext)` 並交付 `Completed(value, facts)`。CallContext 帶本次 operation 的 scope、soc、soccfg、connected devices 與 plots。未供應的資源為 None，devices={} 表示已供應但沒有連線裝置。Raw ScriptHost 只供應 scope，WorkflowEnv 注入可用資源，並為每個 operation 建立與收尾獨立 Plots。Fn 返回或拋錯都先 finish；若同時發生 cleanup 錯誤，保留原始錯誤並附 note，沒有原始錯誤時則傳出 cleanup 錯誤。作者直接 `await env.ask(question)`，Future 留在共用 async host 內部。Engine 使用 `experiment.script_host.ScriptHost`，控制命令、request_id 與 scope 樹依 [[0075]]，不另建協定。
 
-`from zcu_tools.experiment.run_core import run_core` 提供 core 轉接。`await run_core(scope, T1Exp().run, cfg, name="T1")` 接受 `(cfg, *, context: RunContext) -> Result` 的同步 callable。Helper 驗證 cfg 是 ConfigBase 並 deepcopy，以 CallContext 的資源組 RunContext，在 core 呼叫前捕捉全部 connected drivers 的快照，再包成 RunRecord。缺必要資源時 raise MissingCapability，不把缺 devices 當成零 device。正常返回時交付 `Completed[RunRecord[Cfg, Result]]`，快照只寫入 `record.metadata["device_snapshot"]`，不進 OperationFacts 或 journal。一般 blocking 工作直接用 Scope.call。分析政策與接受門檻仍由 workflow 擁有，不經 adapter Form 或 adapter analysis。
+`from zcu_tools.experiment.run_core import run_core` 提供同步取數函式的轉接。Workflow 自己實作同步的 `acquire(cfg, *, context)`，以 `await run_core(scope, acquire, cfg, name="T1")` 執行。Callable 的簽名為 `(cfg, *, context: RunContext) -> Result`。Helper 驗證 cfg 是 ConfigBase 並 deepcopy，以 CallContext 的資源組 RunContext，在取數函式呼叫前捕捉全部 connected drivers 的快照，再包成 RunRecord。缺必要資源時 raise MissingCapability，不把缺 devices 當成零 device。正常返回時交付 `Completed[RunRecord[Cfg, Result]]`，快照只寫入 `record.metadata["device_snapshot"]`，不進 OperationFacts 或 journal。一般 blocking 工作直接用 Scope.call。分析政策與接受門檻仍由 workflow 擁有，不經 adapter Form 或 adapter analysis。
 
 2026-10-22 的舊裁定曾採用 env.run。使用者當時對「一個原語 env.call，env.run 是 Experiment 的 typed 糖」回覆「可以」，並說：「我會預期這個run_t1的接口與core的run一致，這樣我就可以按需直接用core的run，有客製化需求也可以獨立寫一個一樣接口的helper，而env. run的工作就是提供run的接口，最好是能復用Run類」「補充，我說的run_t1是你剛剛指的_acquire_t1」，再以「OK」確認。2026-11-01 的三層裁定將這個 core 轉接責任移到獨立 lib helper，不再提供 Scope.run、ScopeRuntime.execute_run 或 WorkflowEnv.execute_run。
 
@@ -103,7 +103,7 @@ Coherence 的每個 enabled/measured kind 各有 Signal/Time Flux×Index 與 Flu
 
 `scope.dir` 第一次使用時建立並回傳該 scope 的目錄：root 是 data_root，iteration 是 `iteration-<六位序號>/`，作者 child 用 `<label>-<六位序號>`，內建 child 用 `<kind>-<六位序號>`。`env.iterations()` 逐趟產生新的 iteration scope，可用 `zip(plan.fluxes, env.iterations())`，有限序列放前面。作者用同步的 `scope.commit(record)` 把一個 BaseModel 快照寫入該 scope 的 record.json，不傳目錄。同一 scope 二次 commit raise ValueError。目錄序號與 commit 序號分開，信封同時記錄目錄與 commit 序號，reader 按 commit 序號排序。Iteration 序號在 scope 建立時決定，commit 不改它；未提交 scope 已建立的目錄與作者檔案保留，但沒有 record.json。
 
-Scope.call 只執行一般 callable，run_core helper 才負責 cfg deepcopy、device capture 與 core 介面轉接。兩者都不解讀 callable 內部的序列。`Completed` 只表示 operation 返回，不代表 Result 完整或已保存。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。
+Scope.call 只執行一般 callable，run_core helper 才負責 cfg deepcopy、device capture，並把 `(cfg, *, context)` 取數函式轉接到 RunContext／RunRecord。兩者都不解讀 callable 內部的序列。`Completed` 只表示 operation 返回，不代表 Result 完整或已保存。Workflow 自行呼叫 native saver，決定存什麼、檔名及是否保存，並在自己的 point record 記錄檔名與用途。
 
 `record_with_metadata` 與 lab 的 `save_native` 要求 caller 明確傳入 completion，不提供預設值。Lab 的 acquire_saved 在 facts.stopped 為 true 時，以 completion="stopped" 保存 raw，再回傳 status="partial"，不交付 fit data。未停止時以 completion="complete" 保存，並交付原始結果。只取消 operation 的子孫時，operation 自己的位元不變，這個 helper 仍可標 complete。這是選用 helper 的作者所採的完整度政策，不是框架對 core 結果的判斷。合併 metadata 時保留呼叫前 device_snapshot 與額外 key；完整保存規則見 [[0063]]。
 
@@ -141,6 +141,6 @@ Journal writer 與 Engine 提交順序不變。Iteration 檔案保存依上節�
 
 一 run 一 handle 讓 root Stop、tunables failure 與 worker failure 使用同一終局政策。代價是 Ask waiting 仍保留本地 RUN lease，同程序的其他硬體 mutation 受 lease 阻擋。框架不提供從 artifact 還原的跨程序 resume，也不提供 hardware rollback。
 
-Scope.call 不認識 core 簽名或保存格式，run_core 承擔這些能力到 RunContext／RunRecord 的轉接。作者因此要明選 completion，不能靠 ScriptHost 的取消追蹤推斷資料完整度。這個分工不新增 package 依賴方向，沿用 C8 分層、C9 無循環與 C16 framework-no-user；ScopeRuntime 注入也不讓 experiment 反向 import workflows。
+Scope.call 不認識取數函式的簽名或保存格式，run_core 把 `(cfg, *, context)` 取數函式轉接到 RunContext／RunRecord。作者因此要明選 completion，不能靠 ScriptHost 的取消追蹤推斷資料完整度。這個分工不新增 package 依賴方向，沿用 C8 分層、C9 無循環與 C16 framework-no-user；ScopeRuntime 注入也不讓 experiment 反向 import workflows。
 
 通用迭代與 journal 契約見 [workflows engine](../../lib/zcu_tools/experiment/workflows/README.md)。GUI run owner 與 tunables 提交見 [measure workflow host](../../lib/zcu_tools/gui/app/measure/README.md#workflow-hosting)。具體定義與 T1 attachments 見 [使用者 workflows](../../zcu_lab/workflows/README.md)及 [GUI attachments](../../zcu_lab/workflows/forms.md)。

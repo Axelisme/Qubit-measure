@@ -243,7 +243,11 @@ GUI／Notebook 共用的模擬參數檔與 startup 範例放在 `zcu_lab/simulat
 
 2026-10-16，使用者要求：「比如components我希望除了基礎原件，其他的都是獨立的子模塊檔。」對上述拆分與環境搬移確認：「可以移到zcu_lab/simulation_envs/中嗎？2同意」。
 
-Workflow 使用的實驗在其 `zcu_lab/v2/<family>/<exp>/` 目錄內以 `workflow_helper.py` 與 `core.py` 並列，放該實驗給 workflow 用的 acquisition helper；只限 workflow 實際使用的實驗。2026-10-21 使用者裁決：「可以是獨立檔案與core並列來方便維護」、「不要每個實驗，workflow需要的實驗就好」。Recipe 以 `@recipe` 裝飾函式並由 `zcu_lab/recipes` 的顯式清單註冊，與 `@workflow` 同形；三種腳本（startup、recipe、workflow）的作者慣例見 `zcu_lab/POLICY.md`（待實作 task 補寫）。
+Workflow 的取數 helper 放在 `zcu_lab/workflows/` 側。共用 helper 放 `common/`，專屬 helper 放各 workflow 目錄。Helper 自己組 program、自己呼叫 runner，存檔沿用 core 的 Cfg／Result 型別與 `AXES_SPEC`，不借用其他實驗的取數或分析流程。客製化需求留在 workflow，不加到 core、lib 或其他不需要它的位置。
+
+2026-10-21 使用者曾裁決 helper 與 core 並列：「可以是獨立檔案與core並列來方便維護」、「不要每個實驗，workflow需要的實驗就好」。2026-11-01 使用者改為 workflow 獨立實作：「所以我才不想要一個實驗使用另外一個實驗，twotone freq與workflow用的helper應該要獨立實現需要的流程」，並確認位置與理由：「3a可以，b是根據一個設計理念，耦合的邏輯就該放在同一個位置，這樣改邏輯的修改範圍才局部」。
+
+Recipe 以 `@recipe` 裝飾函式並由 `zcu_lab/recipes` 的顯式清單註冊，與 `@workflow` 同形；三種腳本（startup、recipe、workflow）的作者慣例見 `zcu_lab/POLICY.md`（待實作 task 補寫）。
 
 Kickstart 腳本放在 `zcu_lab/kickstart/<env>/`，只建 entry、元件參數與 alias，不連 SoC 與 device。每個 startup 腳本（模擬環境與 kickstart）各自擁有同目錄的 `entry-template.yaml`，腳本之間不共用範本：改一份範本只影響用該腳本新建的 entry。2026-10-21，使用者裁決：「3我希望startup腳本間獨立，而不是過早共用template」；目錄名：「既然都叫kickstart了，那我認為可以將envs/FTF改成kickstart/FTF」。
 
