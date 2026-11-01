@@ -272,7 +272,7 @@ class FluxDepSearchOwner:
                 outcome = OperationOutcome("cancelled")
             elif bg.error is not None:
                 logger.error("search worker failed", exc_info=bg.error)
-                outcome = OperationOutcome("failed", str(bg.error))
+                outcome = OperationOutcome.from_exception(bg.error)
             elif self._closing:
                 outcome = OperationOutcome("cancelled")
             elif any(
@@ -287,7 +287,7 @@ class FluxDepSearchOwner:
         except Exception as exc:
             # Isolate domain commit failures while still releasing admission.
             logger.exception("search result publication failed")
-            outcome = OperationOutcome("failed", str(exc))
+            outcome = OperationOutcome.from_exception(exc)
         settle(outcome)
         self._finish_activity(activity.token, outcome)
 

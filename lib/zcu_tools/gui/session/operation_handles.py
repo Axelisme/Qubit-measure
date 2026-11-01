@@ -67,11 +67,22 @@ class OperationOutcome:
     interprets ``status``; it is carried verbatim to the awaiter.
 
     status is pending, finished, failed or cancelled. error is an optional
-    failure message; None means no message was supplied.
+    failure message; from_exception sets it to repr(error), including the
+    exception type when its message is empty. Other callers supply their own
+    reason string. None means no message was supplied.
     """
 
     status: OperationStatus
     error: str | None = None
+
+    @classmethod
+    def from_exception(cls, error: BaseException) -> OperationOutcome:
+        """Return a failed outcome whose message is repr(error).
+
+        Pass the original operation exception, including KeyboardInterrupt.
+        This conversion does not classify the exception or change its traceback.
+        """
+        return cls("failed", repr(error))
 
 
 @dataclass(frozen=True)
