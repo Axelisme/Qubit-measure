@@ -82,7 +82,9 @@ def test_run_rejects_result_shape_that_disagrees_with_axes(
         probe.run_stage(WrongShape(), SavingCfg(), environment)
 
 
-@pytest.mark.parametrize("field, dtype", [("frequency", "float32"), ("signal", "complex64")])
+@pytest.mark.parametrize(
+    "field, dtype", [("frequency", "float32"), ("signal", "complex64")]
+)
 def test_run_rejects_result_dtype_that_disagrees_with_axes(
     environment: SimulationEnvironment,
     field: str,
