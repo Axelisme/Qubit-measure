@@ -11,10 +11,19 @@ from ._support import make_client
 
 
 @pytest.mark.parametrize(
-    "diagnostic",
-    ["fit did not converge", "ValueError()", "ValueError('no result')"],
+    ("diagnostic", "expected"),
+    [
+        ("fit did not converge", "fit did not converge"),
+        ("ValueError()", "ValueError()"),
+        ("ValueError('no result')", "ValueError('no result')"),
+        (None, None),
+        ("", None),
+        ({"reason": "failed", "message": ""}, None),
+    ],
 )
-def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path, diagnostic: str) -> None:
+def test_unhandled_analysis_failure_ends_recipe(
+    tmp_path: Path, diagnostic: object, expected: str | None
+) -> None:
     gui = SyntheticGui()
     observed: list[tuple[str, object, str | None]] = []
 
@@ -44,6 +53,9 @@ def test_unhandled_analysis_failure_ends_recipe(tmp_path: Path, diagnostic: str)
         assert snapshot.status == "failed"
         assert observed == []
         assert snapshot.error is not None
-        assert snapshot.error.message == diagnostic
+        if expected is None:
+            assert "failed operation requires a non-empty error message" in snapshot.error.message
+        else:
+            assert snapshot.error.message == expected
     finally:
         client.context.session.close()
