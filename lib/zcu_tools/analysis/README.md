@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-01，singleshot 初態與 joint-fit 數學
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -52,6 +52,21 @@ Confusion diagnostic 使用各自 refined 的 preparation populations，不以�
 Optimizer 不收斂時不以 initial guess 當校準。實驗 caller 只有在 backend valid、
 centers／radius／confusion matrix 有限時才提出校準。
 實驗的 acquisition、圖形與 writeback 仍由各 leaf 擁有，不由數值分析決定。
+
+## Readout QND 指標
+
+`readout_metrics.readout_metrics(sums)` 分析單一 gain 點的
+`(8, 3, 3, 3, 3)` shot sums，回傳 frozen `ReadoutMetrics`。
+四個 moment 軸依序是 R1、R1、R2、R2 的 `(1, I, Q)`。
+Branch index 是 `prepare_pi*4 + r1_on*2 + middle_pi`。
+
+SNR、Gaussian 分離保真度與熱布居共用 R1 開、中間 I 的兩製備校準。
+保持率、QND、向上／向下翻轉率與中間 π 未作用比例各有 `_on`、`_off` scalar 欄位。
+`retention_from_covariance` 用同一校準兩分支的 R1–R2 covariance 檢查保持率。
+所有欄位都無單位，不裁切到物理範圍。
+缺少 shots 或退化分母使依賴該資料的指標為 NaN，shape 錯誤拋出 ValueError。
+模型假設與各欄位的 NaN 條件見函式及結果型別的 docstring。
+本模組不分類、不修正 leakage，也不選 gain。
 
 ## 多 device flux 座標
 

@@ -1,13 +1,19 @@
 """Timed native entry points select lexical scope through both author frontends."""
 
 from contextlib import nullcontext
+from math import ceil
 from typing import TypedDict
 
 import pytest
 from zcu_tools.program import v2
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import (
+    generator_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2.timing_support import shots, waves
 
 
@@ -35,7 +41,7 @@ class _TimedOperation(v2.Module):
     def declare(self, prog: v2.TimelineProgramV2) -> None:
         prog.declare_gen(0, nqz=1)
         prog.add_pulse(
-            0, "p", style="const", freq=100, phase=0, gain=0.5, length=39 / 384
+            0, "p", style="const", freq=100, phase=0, gain=0.5, length=39 / GEN_MHZ
         )
         prog.declare_readout(0, length=0.2)
         prog.add_readoutconfig(0, "ro", freq=100)
@@ -50,7 +56,7 @@ class _TimedOperation(v2.Module):
         """Leave timeline selection to the timed API, not module.emit."""
         prog.write_reg("index", 0)
         prog.write_reg("runtime_word", 1000)
-        t = 10 / 430.08
+        t = 10 / TPROC_MHZ
         if self.operation == "send_readoutconfig":
             prog.send_readoutconfig(0, "ro", t=t, **self.placement)
         elif self.operation == "send_readoutconfig_from_regs":
@@ -91,9 +97,9 @@ def _compile_operation(frontend: str, operation: str, context: str):
 
     def body(prog: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         prog.fork("default", into=["outer", "inner"])
-        prog.timeline_inc(100 / 430.08, timeline="outer")
-        prog.timeline_inc(200 / 430.08, timeline="inner")
-        prog.timeline_inc(300 / 430.08, timeline="default")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="outer")
+        prog.timeline_inc(200 / TPROC_MHZ, timeline="inner")
+        prog.timeline_inc(300 / TPROC_MHZ, timeline="default")
         scope = nullcontext() if context == "outside" else prog.timeline("outer")
         with scope:
             if context == "restored":
@@ -109,7 +115,7 @@ def _compile_operation(frontend: str, operation: str, context: str):
         prog.delay_by_timeline(timeline=selected)
         prog.pulse(0, "p", t=0)
 
-    soccfg = make_mock_soccfg(1, 1)
+    soccfg = load_soccfg(1, 1)
     if frontend == "builder":
         builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
         body(builder)
@@ -146,7 +152,11 @@ def test_timed_entry_points_select_scope_and_preserve_native_placement(
     expected_tick = {"explicit": 310, "outside": 10, "nested": 210}.get(context, 110)
     expected_end = 100 if context == "outside" else expected_tick
     if context != "outside" and operation.startswith("pulse"):
-        expected_end += 44
+        expected_end += (
+            ceil(runtime_cycles(prog.soccfg, 39))
+            if operation in ("pulse_by_reg", "pulse_from_length_reg")
+            else tproc_ceil(prog.soccfg, generator_duration(prog.soccfg, 39 / GEN_MHZ))
+        )
     # The second, native pulse observes the selected end after delay_by_timeline. This also
     # covers register-selected ends that have no affine get_time_param value.
     assert [waves(shot) for shot in shots(prog)] == [[expected_tick, expected_end]]

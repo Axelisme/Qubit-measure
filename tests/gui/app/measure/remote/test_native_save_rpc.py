@@ -42,6 +42,7 @@ from tests.gui.app.measure._native_save_support import (
     native_save_session,
 )
 from tests.gui.app.measure._record_support import require_metadata, require_record
+from tests.program._profiles import load_soccfg
 
 from ._helpers import call, open_client, reset_inbox
 
@@ -117,7 +118,7 @@ def native_save_rpc(
         )
         controller.setup_control.open_entry(EntryRequest("original"))
         controller.setup_control.use_point(PointUseRequest("p"))
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
         remote = RemoteControlAdapter(
             controller, ControlOptions(port=0), controller.owner_scheduler

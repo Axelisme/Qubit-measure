@@ -5,9 +5,10 @@ from typing import override
 
 import pytest
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import TPROC_MHZ, load_soccfg
 
 
 class LoweringModule(Module):
@@ -36,7 +37,7 @@ def compile_modules(
         def _body(self, cfg):
             body(self)
 
-    return Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(), initial_delay=0, relax_delay=0)
 
 
 def port_value(prog: TimelineProgramV2, value: int):
@@ -116,7 +117,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
         names.append(name)
         prog.delay_by_timeline()
         with prog.repeat(name, 2):
-            prog.timeline_inc(1 / 430.08)
+            prog.timeline_inc(1 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     module = LoweringModule("loop_owner", lower)
@@ -126,7 +127,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
         if native_loop == "repeat":
             prog.delay_by_timeline()
             with prog.repeat(names[0], 1):
-                prog.timeline_inc(1 / 430.08)
+                prog.timeline_inc(1 / TPROC_MHZ)
                 prog.delay_by_timeline()
         else:
             prog.open_loop(1, name=names[0])

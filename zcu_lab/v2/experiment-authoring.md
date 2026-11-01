@@ -135,7 +135,7 @@ and mean complex IQ per participating tone; the fringe decay measures T2.
 
 ## 寫法慣例
 
-實驗使用以下存檔軸、分析選項、Slot fallback 與繪圖寫法。
+實驗使用以下存檔軸、分析選項、來源選擇與繪圖寫法。
 序列、獨立分析與 docstring 的規則及短例見[前節](#讓使用者只看一個檔案就能理解實驗)。
 
 ### Cfg 名稱、順序與取數欄位
@@ -188,14 +188,20 @@ Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
 `None` 表示沿用 cfg。以下例子在 builder 上建立頻率 sweep，再交給 Pulse：
 
 ```python
-from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, make_mock_soccfg
+from pathlib import Path
+
+import yaml
+from zcu_tools.program import build_soccfg
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse
 
 pulse_cfg = Pulse.Cfg(
     ch=0, nqz=1, freq=100.0, gain=0.2,
     waveform=ConstWaveformCfg(length=0.1),
 )
-builder = TimelineBuilder(make_mock_soccfg())
+profile_path = Path("zcu_lab/simulation_envs/profiles/ordinary.yaml")
+soccfg = build_soccfg(yaml.safe_load(profile_path.read_text()))
+builder = TimelineBuilder(soccfg)
 freq = builder.add_sweep("freq", SweepCfg(start=100.0, stop=102.0, step=1.0, expts=3))
 builder.emit(Pulse("probe", pulse_cfg, freq=freq))
 program = builder.build()
@@ -269,32 +275,73 @@ curve = fit.curve
 params, covariance, quality = fit.params, fit.cov, fit.quality
 ```
 
-### Slot fallback 與分類 read axis
+### 來源選擇與分類 read axis
 
-有 library slot 就引用，沒有才採用 Template。Metadata 放在 Template 上，只有採用該範本才合併。
-Metadata key 是 Form root-relative canonical path，同路徑以 `Form.with_seed_metadata` 的顯式值優先。
-以下宣告給 Form tree 的 readout 欄位，不會在建構 node 時讀來源：
+在 `make_form(ctx)` 用 `source(ctx, path, template)` 選來源。
+`path` 接受 module slot 或 library root，可含 `$alias`。
+Helper 查詢固定 capture 的 `ctx.has(path)`，有來源就回傳 `Slot(path)`。
+這個 Slot 保持 reference，不 copy，也不附加 set。
+缺 capture、缺 key、未設定或懸空的 slot、缺或未綁 alias 都讓 `ctx.has(path)` 回 False。
+這時 helper 原樣回傳 Template，保留作者的 `set` 與 `seed_metadata`。
+路徑語法錯誤、其他 alias 解析錯誤與來源故障直接傳出。
+來源可解析但 family 不相容時，Form 仍報錯，不改用 Template。
+
+Metadata 寫在 Template 上，Form 只有採用該範本才合併其 metadata。
+Metadata key 使用 Form root-relative canonical path，同路徑以 `Form.with_seed_metadata` 的顯式值優先。
+以下範例使用前述 core 的 `DelayCfg`，將選出的 node 放在 tree 的 readout 欄位：
 
 ```python
-from zcu_tools.cfg_model import FieldMeta, Slot, Template
+from zcu_tools.cfg_model import FieldMeta, Template
+from zcu_tools.gui.form_adapter import Form, FormContext
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
+from .core import DelayCfg
 
 
-readout = Slot(
-    "$resonator.module.readout",
-    fallback=Template(
-        "readout",
-        bindings={"resonator": "$resonator"},
-        seed_metadata={
-            ("readout", "module", "gain"): FieldMeta(
-                description="Confirm readout gain before Run.",
-            ),
-        },
-    ),
-)
+def make_form(ctx: FormContext) -> Form[DelayCfg]:
+    readout = source(
+        ctx,
+        "$resonator.module.readout",
+        Template(
+            "readout",
+            bindings={"resonator": "$resonator"},
+            seed_metadata={
+                ("readout", "module", "gain"): FieldMeta(
+                    description="Confirm readout gain before Run.",
+                ),
+            },
+        ),
+    )
+    return Form(DelayCfg, tree={"readout": readout})
 ```
 
-Slot 可解析時忽略 fallback，family 不相容仍報錯，不以範本掩蓋。
-未提供 fallback 時，required 欄位缺來源保持 Invalid，nullable 且預設 None 的欄位保持停用。
+其餘必填欄位仍由實驗自己的 tree 提供。
+若只宣告 `Slot(path)` 而不提供 Template，缺來源時 required 欄位保持 Invalid。
+Nullable 且預設 None 的欄位保持停用且有效。
+
+兩分支共用 `set` 時，在選出的 node 上做一次 `dataclasses.replace`。
+以下指派放在 `make_form(ctx)` 內，再將 `pi_pulse` 放進 tree 的同名欄位。
+若實驗的 Run 會覆寫 waveform.length，用下例隱藏它，並保留 node 原有的 set：
+
+```python
+from dataclasses import replace
+
+from zcu_tools.cfg_model import Hidden, Template
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
+
+pi_pulse = source(
+    ctx,
+    "$qubit.module.x180",
+    Template("qub_probe", bindings={"qubit": "$qubit"}, set={"gain": 1.0}),
+)
+pi_pulse = replace(pi_pulse, set={**pi_pulse.set, "waveform.length": Hidden(0.0)})
+```
+
+Slot 與 Template 都有 `set`，不需分別 replace，也不擴充 `source` 的參數。
+`Slot.set` 的初值仍只套用到 copy，這段不將 reference 改為 copy。
 
 單 tone 的分類宣告用 `Classify("readout")`，不用依 readout 類型手選 tone 0。
 `shot_sums(prog, [axis])` 在 program 編譯後解析 label；pulse 或單 tone mux 自動選取。
@@ -359,6 +406,9 @@ Mux 的 zip acquisition、participants、座標形狀與 partial data 見
 [v2 README](README.md#mux-qubit-numeric-cores)。
 操作入口見 [Mux two-tone spectrum](mux/twotone_spectrum/guide.md) 與
 [Mux Amp Rabi](mux/amp_rabi/guide.md)。
+
+Readout power 的八分支 QND 序列、native tag、指標與選擇 gain 的流程見
+[Power guide](twotone/ro_optimize/power/guide.md)。
 
 ## 目錄佈局
 
@@ -634,9 +684,20 @@ Timeline、reference、`timeline_inc`、`delay_by_timeline` 與 branch／repeat 
 
 ### 用 run_acquire* 寫入與停止
 
-Schedule 的三種 `run_acquire*`、slot、converter、stop 與 retry 契約見
+Schedule 的 `run_acquire*`、slot、converter、stop 與 retry 契約見
 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md#schedule-run-acquisition)。
 以下只示範實驗如何接上 summed 與 decimated 取數。
+
+`run_acquire_shots` 需要已進入 context 的 Schedule，但不需要預建 buffer，也不做轉換或 live update。
+它只取一輪，`rounds` 省略或設為整數 1，其他值會拋出 `ValueError`。
+需要多輪 raw shots 時，由作者在 host loop 重複呼叫。
+它接受 `RunOptions(retry=..., progress=..., on_stop=...)`。
+`converter` 或 `stop_condition` 非 `None` 時，入口會拋出 `ValueError`。
+成功取數後，`program.get_raw()` 若回傳 `None`，入口會拋出 `RuntimeError`。
+外部取消時入口回傳 `None`，不讀 raw buffer。
+只取消 `"acquire"` 子 scope 不改父 Schedule outcome，下一次 acquire 可繼續。
+只有父 Schedule 的 stop token 已設時，Schedule outcome 才記為 `stopped`。
+Producer 失敗沿用上述 retry 預算，不做 slot 還原。Raw-buffer 讀取失敗不 retry。
 
 Summed 範例先 build 再解析 read label。以下是上方 builder 範例的替代取數段，
 使用同一個 `prog`，但 slot 改為 float64 的 count、sum I、sum Q 三欄。
@@ -674,6 +735,17 @@ with Schedule(trace_buffer, scope=context.scope) as sched:
         options=RunOptions(progress=True),
     )
 ```
+
+Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數並回傳。
+它們不寫 Schedule slot，不管理 live update 或 Schedule stop_condition。
+直接呼叫 `program.acquire*` 時，作者自行負責以下事項：
+
+- 傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，讓 program 收到 Schedule 的停止請求。
+- 接住 `StoppedPartialAcquireError` 並決定是否呼叫 `sched.set_stop()` 或 `step.set_stop()`，以及如何處理未完成的資料。
+- 直接呼叫不建立 `"acquire"` 子 scope，所以 `scope.cancel("acquire")` 停不到這次取數。
+- 直接呼叫不會自動 retry，需要重試時由作者撰寫重試流程。
+
+直接取數仍是作者的自由。Runner 入口是代管 scope、取消轉譯與 retry 的慣例工具，不限制 core 的取數方式。
 
 ## v2 cfg 組合慣例
 
@@ -757,7 +829,10 @@ Schedule 的 acquire-local cancel flag、部分資料、retry 與 `on_stop` 契�
 1. 定義 `XxxCfg(ConfigBase)`，頂層欄位與 module 型別依[寫法慣例](#cfg-名稱順序與取數欄位)宣告。平鋪、版本與 Advanced group 見[v2 cfg 組合慣例](#v2-cfg-組合慣例)。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
-4. Schedule 的 `run_acquire*` 自動注入 acquire-local `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(...))`。
+4. Schedule 與 step 的 `run_acquire`、`run_acquire_summed`、`run_acquire_decimated`、`run_acquire_shots` 自動注入 acquire-local `cancel_flag`。
+   `run_acquire_shots` 不寫 slot，外部取消時回傳 `None`。只有父 Schedule 的 stop token 已設才記 `stopped`。
+   直接呼叫 `program.acquire*` 時，依[作者責任清單](#用-run_acquire-寫入與停止)傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，自行處理取消轉譯、scope 與 retry。
+   SNR early stop 使用三個 slot 入口的 `RunOptions(stop_condition=snr_checker(...))`，不適用於 raw-shot 入口。
 5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
 6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `TimelineBuilder.add_sweep(...)` 或 `add_loop(...)`。Host soft sweep 若需重用每點 program，在 `run()` 裡維護 dict；cache miss 時建立新的 builder 並 build，每次量測時呼叫 `step.run_acquire(program, context.soc, ...)`。
 

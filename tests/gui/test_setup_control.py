@@ -31,11 +31,11 @@ from zcu_tools.gui.session.services.project_settings import (
 from zcu_tools.gui.session.setup_control import SetupControlFacet, SocControlFacet
 from zcu_tools.gui.session.state import SessionState
 from zcu_tools.gui.session.types import SessionEnv, SocCfgHandle
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._control_fakes import CallLog, RecordedCall, RecordingSignal, call
 from tests.gui.app.measure.remote._helpers import Fixture
+from tests.program._profiles import load_soccfg
 
 
 class RecordingSettings(ProjectSettingsService):
@@ -95,7 +95,7 @@ class RecordingContext(ContextService):
 class RecordingConnection(SoCConnectionService):
     def __init__(self, log: CallLog) -> None:
         self._log = log
-        self.cfg = make_mock_soccfg()
+        self.cfg = load_soccfg()
         self.connection_finished = RecordingSignal(log, "connection_finished")
         self.connection_failed = RecordingSignal(log, "connection_failed")
 

@@ -6,7 +6,9 @@ import pytest
 from qick.asm_v2 import AsmInst, Pulse, QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.base import MyProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
+
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import generator_duration, readout_duration
 
 
 class ScalarProgram(MyProgramV2):
@@ -21,36 +23,40 @@ class ScalarProgram(MyProgramV2):
             freq=100,
             phase=0,
             gain=0.1,
-            length=10 / 384,
+            length=10 / GEN_MHZ,
         )
 
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
-        self.append_macro(Pulse(ch=0, name="p", t=self.first_cycle / 430.08))
-        self.delay(5 / 430.08)
-        self.append_macro(Pulse(ch=0, name="p", t=20 / 430.08))
+        self.append_macro(Pulse(ch=0, name="p", t=self.first_cycle / TPROC_MHZ))
+        self.delay(5 / TPROC_MHZ)
+        self.append_macro(Pulse(ch=0, name="p", t=20 / TPROC_MHZ))
         self.meta_macro("TIMING_BOUNDARY", "body_end")
 
 
 def test_compiled_scalar_shots_include_shell_and_preserve_boundaries():
     layout_from_metadata = ir.TimingLayout.from_metadata
     prog = ScalarProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
-        relax_delay=30 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=30 / TPROC_MHZ,
     )
     layout = layout_from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
-    # Generator length10 / 384 us = 11.2 tProc cycles.
-    # Ref20, pulse23, advance5, pulse45; round(20 + 11.2 + relax30)=61.
+    # Native shell rounds the final waveform tail plus relax after body advance.
+    tail = generator_duration(prog.soccfg, 10 / GEN_MHZ)
+    shell = round(20 + tail * TPROC_MHZ + 30)
+    length = 5 + shell
+    starts = [20 + i * length for i in range(2)]
     assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == [
-        (20, 25, 86),
-        (86, 91, 152),
+        (start, start + 5, start + length) for start in starts
     ]
-    assert [[e.cycle for e in s.events] for s in result.shots] == [[23, 45], [89, 111]]
+    assert [[e.cycle for e in s.events] for s in result.shots] == [
+        [start + 3, start + 25] for start in starts
+    ]
     assert [s.loop_indices for s in result.shots] == [(0,), (1,)]
     assert [(e.kind, e.port) for e in result.shots[0].events] == [
         ("wave", 0),
@@ -64,16 +70,16 @@ class DelayOnlyProgram(MyProgramV2):
 
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
-        self.delay(5 / 430.08)
+        self.delay(5 / TPROC_MHZ)
         self.meta_macro("TIMING_BOUNDARY", "body_end")
 
 
 def test_linked_boundary_separates_body_advance_from_mergeable_shell_delay():
     prog = DelayOnlyProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
-        relax_delay=30 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=30 / TPROC_MHZ,
     )
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
     result = ir.analyze_timing(
@@ -89,19 +95,19 @@ def test_linked_boundary_separates_body_advance_from_mergeable_shell_delay():
 class SweptProgram(ScalarProgram):
     def _initialize(self, cfg):
         super()._initialize(cfg)
-        self.declare_readout(ch=0, length=10 / 307.2)
+        self.declare_readout(ch=0, length=10 / RO_MHZ)
         self.add_loop("scan", 3)
 
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
         self.append_macro(Pulse(ch=0, name="p", t=0))
-        self.delay(5 / 430.08)
-        self.delay(QickSweep1D("scan", 10 / 430.08, 14 / 430.08))
+        self.delay(5 / TPROC_MHZ)
+        self.delay(QickSweep1D("scan", 10 / TPROC_MHZ, 14 / TPROC_MHZ))
         self.append_macro(
             Pulse(
                 ch=0,
                 name="p",
-                t=QickSweep1D("scan", 20 / 430.08, 24 / 430.08),
+                t=QickSweep1D("scan", 20 / TPROC_MHZ, 24 / TPROC_MHZ),
             )
         )
         self.append_macro(
@@ -109,8 +115,8 @@ class SweptProgram(ScalarProgram):
                 ros=[0],
                 pins=None,
                 tts=None,
-                t=QickSweep1D("scan", 30 / 430.08, 34 / 430.08),
-                width=2 / 430.08,
+                t=QickSweep1D("scan", 30 / TPROC_MHZ, 34 / TPROC_MHZ),
+                width=2 / TPROC_MHZ,
                 ddr4=False,
                 mr=False,
                 tag=None,
@@ -121,10 +127,10 @@ class SweptProgram(ScalarProgram):
 
 def test_compiled_sweeps_step_and_reset_register_times_and_trigger_edges():
     prog = SweptProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
-        relax_delay=30 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=30 / TPROC_MHZ,
     )
     before = deepcopy((prog.prog_list, prog.labels, prog.meta_infos))
     layout = ir.TimingLayout.from_metadata(
@@ -134,24 +140,22 @@ def test_compiled_sweeps_step_and_reset_register_times_and_trigger_edges():
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
-    # Body adds 5 + (10,12,14); trigger offset=(30,32,34).
-    # ADC10 / 307.2 us = 14 tProc cycles; shell=(74,76,78).
-    assert [(s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots] == [
-        (20, 35, 109),
-        (109, 126, 202),
-        (202, 221, 299),
-        (299, 314, 388),
-        (388, 405, 481),
-        (481, 500, 578),
-    ]
-    assert [[e.cycle for e in s.events] for s in result.shots] == [
-        [20, 55, 65, 67],
-        [109, 148, 158, 160],
-        [202, 245, 255, 257],
-        [299, 334, 344, 346],
-        [388, 427, 437, 439],
-        [481, 524, 534, 536],
-    ]
+    # Body advances and trigger offsets share scan; only ADC tail is cross-grid.
+    adc_tail = readout_duration(prog.soccfg, 10 / RO_MHZ) * TPROC_MHZ
+    expected_boundaries = []
+    expected_events = []
+    start = 20
+    for scan in [0, 1, 2] * 2:
+        body_end = start + 15 + 2 * scan
+        trigger = body_end + 30 + 2 * scan
+        end = body_end + round(30 + 2 * scan + adc_tail + 30)
+        expected_boundaries.append((start, body_end, end))
+        expected_events.append([start, body_end + 20 + 2 * scan, trigger, trigger + 2])
+        start = end
+    assert [
+        (s.start_cycle, s.body_end_cycle, s.end_cycle) for s in result.shots
+    ] == expected_boundaries
+    assert [[e.cycle for e in s.events] for s in result.shots] == expected_events
     assert [s.loop_indices for s in result.shots] == [
         (0, 0),
         (0, 1),
@@ -181,17 +185,17 @@ class RuntimeProgram(ScalarProgram):
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
         self.open_inner_loop("repeat", "counter", "count")
-        self.pulse_from_regs(ch=0, name="p", gain_reg="gain", t=3 / 430.08)
-        self.delay(20 / 430.08)
+        self.pulse_from_regs(ch=0, name="p", gain_reg="gain", t=3 / TPROC_MHZ)
+        self.delay(20 / TPROC_MHZ)
         self.close_inner_loop("repeat", "counter", "count")
         self.meta_macro("TIMING_BOUNDARY", "body_end")
 
 
 def test_known_runtime_repeat_and_wave_patch_keep_scheduled_times():
     prog = RuntimeProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
         relax_delay=0,
     )
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("reps", 2),))
@@ -216,13 +220,13 @@ class RegisterDispatchProgram(ScalarProgram):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
         self.open_inner_loop("repeat", "counter", "count", range_hint=(2, 4))
         self.append_macro(Pulse(ch=0, name="p", t=0))
-        self.delay(25 / 430.08)
+        self.delay(25 / TPROC_MHZ)
         self.close_inner_loop("repeat", "counter", "count")
         self.meta_macro("TIMING_BOUNDARY", "body_end")
 
 
 def test_native_register_loop_dispatch_preserves_events_and_reference():
-    prog = RegisterDispatchProgram(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = RegisterDispatchProgram(load_soccfg(), initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -248,7 +252,7 @@ class AbsoluteTimeProgram(MyProgramV2):
         self.write_reg("s_out_time", "magnitude")
         self.asm_inst({"CMD": "TRIG", "DST": "2", "SRC": "set"})
         self.cond_jump("zero_magnitude", "magnitude", "Z")
-        self.delay(5 / 430.08)
+        self.delay(5 / TPROC_MHZ)
         self.label("zero_magnitude")
         self.asm_inst({"CMD": "TIME", "C_OP": "inc_ref", "R1": "r11"})
         self.meta_macro("TIMING_BOUNDARY", "body_end")
@@ -258,7 +262,7 @@ def compile_absolute_time(value: int | str) -> ir.CompiledTimingInput:
     class Program(AbsoluteTimeProgram):
         input_value = value
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
     )
@@ -326,13 +330,13 @@ def compile_immediate_flags(operand: str, initial: int, literal: int, condition:
                 }
             )
             self.asm_inst({"CMD": "JUMP", "LABEL": "selected", "IF": condition})
-            self.delay(7 / 430.08)
+            self.delay(7 / TPROC_MHZ)
             self.label("selected")
             self.asm_inst({"CMD": "TIME", "C_OP": "inc_ref", "R1": "r10"})
             self.asm_inst({"CMD": "TRIG", "DST": "2", "SRC": "set", "TIME": "@3"})
             self.meta_macro("TIMING_BOUNDARY", "body_end")
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list, prog.labels, ir.TimingLayout.from_metadata(prog.meta_infos)
     )
@@ -376,7 +380,7 @@ class TriggerProgram(MyProgramV2):
     def _body(self, cfg):
         self.meta_macro("TIMING_BOUNDARY", "body_start")
         self.write_reg("s_out_time", 7)
-        self.delay(5 / 430.08)
+        self.delay(5 / TPROC_MHZ)
         self.append_macro(
             AsmInst(
                 inst={"CMD": "TRIG", "DST": "2", "SRC": "set", "TIME": "@3"},
@@ -393,7 +397,7 @@ class TriggerProgram(MyProgramV2):
 
 
 def test_literal_time_overrides_register_time_and_trigger_levels_are_distinct():
-    prog = TriggerProgram(make_mock_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
+    prog = TriggerProgram(load_soccfg(), initial_delay=20 / TPROC_MHZ, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -524,7 +528,7 @@ def test_changing_one_compiled_pulse_time_is_observable():
     class LaterPulse(ScalarProgram):
         first_cycle = 4
 
-    prog = LaterPulse(make_mock_soccfg(), initial_delay=20 / 430.08, relax_delay=0)
+    prog = LaterPulse(load_soccfg(), initial_delay=20 / TPROC_MHZ, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
@@ -542,7 +546,7 @@ def test_resync_rejects_hardware_time_and_identifies_its_source():
             self.resync(0.1)
             self.meta_macro("TIMING_BOUNDARY", "body_end")
 
-    prog = ResyncProgram(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = ResyncProgram(load_soccfg(), initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos)
     compiled = ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     with pytest.raises(ValueError, match="s11"):
@@ -558,7 +562,7 @@ def test_resync_rejects_hardware_time_and_identifies_its_source():
     ],
 )
 def test_layout_axes_validate_but_do_not_override_executed_shots(loops, message):
-    prog = ScalarProgram(make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    prog = ScalarProgram(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, loops)
     with pytest.raises(ValueError, match=message):
         ir.analyze_timing(ir.CompiledTimingInput(prog.prog_list, prog.labels, layout))
@@ -623,24 +627,25 @@ def test_native_waveform_sweep_updates_do_not_require_waveform_contents():
                 freq=100,
                 phase=0,
                 gain=QickSweep1D("scan", 0.1, 0.3),
-                length=10 / 384,
+                length=10 / GEN_MHZ,
             )
 
     prog = GainSweepProgram(
-        make_mock_soccfg(),
-        initial_delay=20 / 430.08,
-        relax_delay=30 / 430.08,
+        load_soccfg(),
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=30 / TPROC_MHZ,
     )
     layout = ir.TimingLayout.from_metadata(prog.meta_infos, (ir.TimingLoop("scan", 3),))
     result = ir.analyze_timing(
         ir.CompiledTimingInput(prog.prog_list, prog.labels, layout)
     )
+    tail = generator_duration(prog.soccfg, 10 / GEN_MHZ)
+    length = 5 + round(20 + tail * TPROC_MHZ + 30)
+    starts = [20 + i * length for i in range(3)]
     assert [[e.cycle for e in s.events] for s in result.shots] == [
-        [23, 45],
-        [89, 111],
-        [155, 177],
+        [start + 3, start + 25] for start in starts
     ]
-    assert [s.end_cycle for s in result.shots] == [86, 152, 218]
+    assert [s.end_cycle for s in result.shots] == [start + length for start in starts]
 
 
 def test_unknown_wave_data_invalidates_updated_flags_before_control_flow():

@@ -4,8 +4,9 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 import pytest
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _program(
@@ -18,7 +19,7 @@ def _program(
         def _body(self, cfg):
             pass
 
-    return Native(make_mock_soccfg(2, 2), reps=1, initial_delay=0.0, relax_delay=0.0)
+    return Native(load_soccfg(2, 2), reps=1, initial_delay=0.0, relax_delay=0.0)
 
 
 @pytest.mark.parametrize("values", [[], [7, -1, 42]])

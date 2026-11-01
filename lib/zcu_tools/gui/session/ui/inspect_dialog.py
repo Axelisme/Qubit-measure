@@ -112,7 +112,8 @@ class InspectDialog(QDialog):
     """Non-modal inspector for components and library entries of one session.
 
     Public child object names (buttons are found by their text):
-      - Toolbar: "Arb Waveforms…", "Refresh", "Close".
+      - Toolbar: "Arb Waveforms…", "Refresh".
+      - Bottom button row: "Close" closes the dialog.
       - Tabs "Parameters" (a ComponentTreeWidget), "Modules" and "Aliases"
         (an AliasPanel; inspect.aliases.* names as AliasPanel documents).
       - inspect.parameters.filter and inspect.library.filter: live Filter
@@ -723,7 +724,15 @@ class InspectDialog(QDialog):
             self._close_entry()
             self._saved_hint.clear()
         self.refresh()
-        if isinstance(payload, (MdChangedPayload, MlChangedPayload)):
+        if isinstance(
+            payload,
+            (
+                MdChangedPayload,
+                MlChangedPayload,
+                AliasesChangedPayload,
+                EntryDocumentsChangedPayload,
+            ),
+        ):
             set_foreground(self._saved_hint, success_colour(self))
             self._saved_hint.setText(f"Saved at {datetime.now():%H:%M:%S}")
 

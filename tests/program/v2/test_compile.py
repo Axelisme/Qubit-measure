@@ -11,10 +11,10 @@ from collections.abc import Mapping
 
 import pytest
 from zcu_tools.program.v2 import TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Delay, SoftDelay
 from zcu_tools.program.v2.sweep import SweepCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def _make_prog(
     n_readouts: int = 1,
     **cfg_kwargs,
 ) -> TimelineProgramV2:
-    soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
+    soccfg = load_soccfg(n_gens=n_gens, n_readouts=n_readouts)
     return compile_modules(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 

@@ -4,7 +4,7 @@ from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.jpa.power.core import PowerCfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[PowerCfg]:
@@ -20,13 +20,15 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
         PowerCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "jpa_rf_dev": rf_source,
             "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),

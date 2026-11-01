@@ -2,11 +2,14 @@
 
 **讀者：** operator、lab-author、agent。準備 FTF 模擬參數與 entry，並從 GUI 或 Notebook 啟動模擬環境。
 
-**Last updated:** 2026-10-28，flux pulse 能力、路由與 reset 近似
+**Last updated:** 2026-11-01，獨立板子與物理接線
 
 既有 entry 把 resonator 與 mux group 的 `ext.time_of_fly` 搬到頂層 `time_of_fly`。程式不自動搬移。
 
-這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。Startup 與 Notebook 直接呼叫公開 `zcu_tools.experiment.ftf.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
+這裡放 FTF 模擬參數、entry 樣板與可信 GUI startup 範例。
+Startup 另讀相鄰 `profile.yaml`，用 `program.build_soccfg` 建立板子後以 `soccfg=`
+交給 FTF。這份板子設定有四個 generator、三個 ADC，gen1 與 ADC1、2 提供 mux。
+板子的時脈與型別不放入物理模型 YAML。Startup 與 Notebook 直接呼叫公開 `zcu_tools.simulators.ftf.environment.ftf(...)`，不另設 environment 薄包裝。Startup 讀取相鄰 `ftf.yaml`；Notebook 明示 YAML 路徑。指定檔案不存在或內容有誤時直接報錯，不改讀另一份設定。
 
 `default.yaml` 是納入 Git 的樣板；`ftf.yaml` 是各自的工作副本，不納入 Git。第一次使用時複製一份：
 
@@ -99,15 +102,15 @@ MCP 先呼叫 `predictor.list_files` 發現檔案，再使用
 
 序列內的 flux pulse 另以 `flux_lines` 宣告，不放在 `drive_lines`。`f1`、`coupler`、`f2` 各可選填一條 single-fluxonium 格式的 `FluxLine`，填入 `name`、`gen_ch`、`flux_phi0_per_gain`，再依需求設定 ns 單位的延遲與濾波。Flux 線的 generator 不可與另一 flux loop、任一 drive line、pulse readout 或可選 mux readout 重複。載入失敗時，錯誤會列出兩端綁定的欄位路徑與 channel。省略或填 `{}` 保留原本設定，各迴路省略或填 `null` 停用該線。`default.yaml` 只附註解範例，不預設啟用 pulsed flux，entry 範本也不預填快速 flux channel。欄位與單位見 [Flux lines](field-guide.md#flux-lines序列內磁通校準與濾波)。
 
-FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線的校準與該小訊號算符分開，數值接線與限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。未綁定 generator 沿用既有處理。採用新樣板時請保留自己的工作副本，逐欄核對，不覆寫尚未保存的本機調整。
+FTF 的 `DriveLine.operator: flux` 仍只在 DC 附近線性化。Fast-flux 線的校準與該小訊號算符分開，數值接線與限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。未綁定 generator 沿用既有處理。採用新樣板時請保留自己的工作副本，逐欄核對，不覆寫尚未保存的本機調整。
 
 無微波的連續 flux motion 走 `adiabatic_map`，即使 bath 含 rates 也保持 populations，只衰減 coherence。只有 ramp 遠短於 T1 才能忽略這項近似，接近 T1 的 ramp 會低估弛豫。T1 reset 須有真正 constant park row 走 `t4`，不把 filter tail 視為 constant hold。物理 adiabatic 條件與 native／local／retained-level 收斂另需驗證。DAC 取樣、flux 量化、其他路由與 DC readout settling 限制見 [Flux lines 指南](field-guide.md#flux-lines序列內磁通校準與濾波)。
 
 啟動腳本會執行 Python，只載入可信來源。修改腳本或 YAML 後須重啟 GUI。腳本失敗時，GUI 保留已完成操作並顯示腳本位置與錯誤，不自動改跑預設腳本。
 
-`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量由最大索引加一推導，不是綁定條數。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。這份佈局推導出 4 個 generator 與 3 個 readout。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
+`default.yaml` 的 circuit energies、couplings 與 resonator frequencies 採論文 Device A，其餘包含本機手動設定。它不是通用校準結果，也不保證截斷或 solver 收斂。Channel 數量、型別與時脈由獨立的 [profile.yaml](profile.yaml) 提供，不從模型接線推導。Caller 要確保物理模型 YAML 的綁定符合該板子。樣板使用 pulse readout gen0／ADC0、mixmux8 mux readout gen1／PFB ADC1 與 ADC2，以及 f1_charge gen2、f2_charge gen3。隨附的板子 YAML 明確設定 4 個 generator 與 3 個 readout，並指定 mux 型別。兩條 charge line 的主迴路係數為 0.1 GHz/gain，coupler 串擾為 0.01，對另一 fluxonium 為 0。這些係數是模擬假設。Entry 範本的 Q1/Q2 分別綁 gen2/gen3，既有 entry 不會自動更新。完整訊號路徑與接線表見 [欄位指南](field-guide.md)。更換樣品時可複製 startup 與 YAML，並調整 Notebook 的 YAML 路徑。
 
-[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
+[Notebook 範例](../../../notebook_md/single_qubit.md) 呼叫同一個公開 `ftf(...)` builder。成功回傳後，Notebook 負責關閉傳回的 device manager。Startup 在交付前登記 `on_close`。成功登記的 driver 由 GUI 關閉，環境 manager 在 runtime 只借用它們；callback 先移除這些借用，再關閉尚未交付的 driver。Startup 中途失敗仍保留 callback。完整組裝與數值限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 ## 啟用跨 acquisition 漂移
 
@@ -130,11 +133,11 @@ F1／F2 可選 `q_cap`、`xqp`、`aphi`；coupler 只有 `q_cap`、`aphi`，`q_i
 與當次損耗，coupler 的 `q_ind`／`xqp` 是 JSON `null`。
 關閉漂移不建立 truth log。寫檔失敗會讓 acquisition 報錯，不套用 routing telemetry 的 warning 政策。
 
-`FTFAcquisitionOptions` 從 `zcu_tools.experiment.ftf` 匯入，以 `acquisition=` 傳給 `ftf` 或 `FTFSource`。
+`FTFAcquisitionOptions` 從 `zcu_tools.simulators.ftf.environment` 匯入，以 `acquisition=` 傳給 `ftf` 或 `FTFSource`。
 `clock` 可注入環境專用時鐘，`truth_log` 可指定另一個 `Path`，相對路徑以 cwd 解析。
 `truth_log=None` 使用上面的預設位置。`private_replay` 另選絕對 archive root，省略則不保存 replay。
 檔案含模型真值，不進一般 Run／GUI／MCP metadata。呼叫者負責路徑與檔案保留期限。
-完整參數見 [acquisition 契約](../../../lib/zcu_tools/experiment/ftf/README.md#acquisition-clock-and-loss-drift)。
+完整參數見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)。
 
 ## 演化與重播
 
@@ -142,8 +145,8 @@ FTF 預設使用分段引擎的快速算法。GUI startup 明確傳 `workers=1, 
 
 預編譯會占用 CPU 與記憶體，只把編譯時間與其他工作重疊，不縮短總編譯成本。同一個 process 內啟用 warmup 的環境共用同一個 future。
 
-啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不保留正式引擎的數值 preparation。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md#startup-preparation)。
+啟用預編譯時，`env.warmup.status` 提供進度與錯誤。停用時 `env.warmup` 為 `None`。`env.wait_ready()` 等待完成；若要讓計時排除預編譯，先等 ready 再啟動計時。Acquire 也會自動等待，失敗則回到 on-demand 編譯。背景工作不抽樣、不切換正式 device bias，也不保留正式引擎的數值 preparation。結束 process 時會等當前編譯完成，不強制中止 compiler。完整介面見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#startup-preparation)。
 
 整個 evolve 期間 native BLAS 限為 1 個執行緒。重疊的 evolve 共用 process 層級的 reference count，第一個進入時設限，最後一個離開時還原。其他程式碼不要在 evolve 期間自行更改 threadpoolctl 限制。沒有演化工作、只有一條 timeline 或只有 1 個 worker 時，不開 joblib pool。模型與 caller-owned 完整 preparation 只保留在記憶體，Engine 的數值 preparation 限一次 evolve。不需要離線建庫或 GPU，也不保存 exact density records。
 
-從 `zcu_tools.experiment.ftf` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前 YAML 或較早的 rounds。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。
+從 `zcu_tools.simulators.ftf.environment` 匯入 `FTFAcquisitionOptions`，再用 `ftf(..., acquisition=FTFAcquisitionOptions(private_replay=absolute_directory))` 保存私有輸入。同一模組的 `replay_round(round_path, soccfg=recording_profile)` 在相同數值、RNG 與相依套件版本下重算一個已保存的 round，不讀取演化資料庫。Archive 保存當次 effective settings，`drift=None`，因此重播不依賴時鐘，也不再抽漂移。Model identity 保存在既有的 round snapshot；重播不需要目前物理 YAML 或較早的 rounds。Caller 必須提供錄製時使用的板子 profile，archive 不保存它，replay 也不驗證其一致性。私有檔案含模型真值，不放入一般 Run／GUI／MCP metadata。

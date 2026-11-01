@@ -2,9 +2,10 @@
 
 from dataclasses import replace
 
-from zcu_tools.cfg_model import FormNode, Hidden, Slot
+from zcu_tools.cfg_model import FormNode, Hidden, Slot, Template
 from zcu_tools.gui.form_adapter import FixedElements, Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import (
     READOUT_ELEMENTS,
     captured_mux_names,
@@ -13,7 +14,8 @@ from zcu_lab.v2.support.measure.mux_forms import (
     mux_relax_delay,
     mux_tone_initials,
 )
-from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_initial_values
+from zcu_lab.v2.support.measure.rabi_initial_values import len_rabi_length_stop
+from zcu_lab.v2.support.measure.seed_metadata import qub_probe_gain_seed_metadata
 
 from .core import MuxLenRabiCfg
 
@@ -31,21 +33,23 @@ def make_form(ctx: FormContext) -> Form[MuxLenRabiCfg]:
     participants = captured_mux_participants(ctx, names)
     tones: list[dict[str, FormNode]] = []
     for index, name in enumerate(names):
-        drive, stop = len_rabi_initial_values(
-            ctx.parameters,
-            qubit=name,
-            gain_path=("tones", index, "drive", "module", "gain"),
+        stop = len_rabi_length_stop(ctx.parameters, qubit=name)
+        drive = source(
+            ctx,
+            f"{name}.module.x180",
+            Template(
+                "qub_probe",
+                bindings={"qubit": name},
+                set={"gain": 1.0},
+                seed_metadata=qub_probe_gain_seed_metadata(
+                    ("tones", index, "drive", "module", "gain")
+                ),
+            ),
         )
-        # The helper always supplies a Template fallback.
-        fallback = drive.fallback
-        assert fallback is not None
         # Core requires const/flat_top and replaces each total duration.
         drive = replace(
             drive,
             set={**drive.set, "waveform.length": Hidden(0.0)},
-            fallback=replace(
-                fallback, set={**fallback.set, "waveform.length": Hidden(0.0)}
-            ),
         )
         tones.append(
             {"name": name, "drive": drive, "length": {"start": 0.03, "stop": stop}}

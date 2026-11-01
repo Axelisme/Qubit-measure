@@ -18,6 +18,8 @@ from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.plotting.plots import NonPresentingHost
 
+from tests.program._profiles import load_soccfg
+
 from ._engine_ports import ManualClock, RecordingBar, RecordingDevices
 
 
@@ -53,7 +55,7 @@ type Rig = tuple[w.Engine[int], w.RunPaths, RecordingDevices]
 def rig(tmp_path: Path) -> Iterator[Rig]:
     plots = w.WorkflowPlots(NonPresentingHost())
     devices = RecordingDevices()
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     engine = w.Engine(
         w.EnginePorts(
             plots,

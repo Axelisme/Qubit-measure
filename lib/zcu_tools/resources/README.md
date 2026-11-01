@@ -1,6 +1,6 @@
 # `zcu_tools.resources` experiment work resources
 
-**Last updated:** 2026-10-31，整數時基 replay
+**Last updated:** 2026-11-01，simulators package ownership
 
 **讀者：** framework-dev。實驗資源的 scope、讀寫與持久化 owner 導覽。
 
@@ -8,18 +8,7 @@
 
 - [`context/`](context/README.md) 管理 entry／point scoped typed ModuleLibrary。
 - `predictor_file.py` 擁有 `zcu.predictor` v2 JSON 的具名讀寫。`PredictorFile.params` 只含 simulate 的 nullable 能量／asymmetry，`PredictorFile.flux` 是 `PredictorFlux(offset, period, unit)`。`PredictorFlux.from_mapping` 解碼與檔案相同的 offset／period／unit 格式，`to_dict()` 回傳 detached typed JSON 欄位。RPC 與檔案共用此 decoder，不另建驗證。Flux 透過 `to_frame()` 複用 `analysis.flux.FluxFrame` 與 `DevicePeriod` 的驗證，不在 resources 重寫仿射數學。此 resources→analysis 依賴沿用 C8 分層與 C9 無循環 contract。`encode_predictor_document` 驗證並回傳 detached `PredictorDocument`，供 save、validate 與離線 migration baseline 共用 v2 表示，不讓 caller 序列化 frozen mappings。`validate_predictor_file` 與 save／upgrade 保留嚴格完整規則，不建數值模型。Load 忽略 envelope、params、flux 與 source 的未知欄位，只將已知參數交給 simulate。`PredictorFile.source` 缺失或無法解析時為 None，無時區時間也投影為 None；可解析的來源保留原文。Writer 要求明確的合法 source。完整性與物理約束由 `params.build_predictor()` 驗證。V1 只透過純函式 `upgrade_predictor_document` 轉為 v2，runtime 拒讀並列出升級命令。`predictor_upgrade.py` 擁有明確升級的逐檔預覽、備份及替換。格式與還原見 [Predictor v2](../../../docs/storage-format-history/predictor-v2.md)。它不讀 component、alias 或舊 `params.json`。
-- `simulation_replay.py` owns opt-in private FTF and single-fluxonium input JSON, content integrity,
-  atomic file I/O and acquire/round reference resolution. It retains detached
-  waveform samples and settings, not measured I/Q. Template arrays use explicit
-  JSON records of dtype, shape and flat values, with typed float64, int64 and bool
-  reconstruction. Private acquire and round files use version 2 and reject version 1.
-  The request clock uses explicit positive integer num/den fields in MHz. All
-  time arrays retain int64 ticks, including ADC and envelope periods. Numeric manifests stay opaque and are verified by their numeric
-  owner. Normal waveform assets and data.h5
-  policies do not change. This module does not import program or simulate.
-- [`six_fluxonium/`](six_fluxonium/README.md) reads six independent circuit materials with six local DC sources, one shared coil and fixed mux/pulse routes.
-- [`single_fluxonium/`](single_fluxonium/README.md) reads immutable single-qubit YAML with microwave, fast-flux and single-cavity routes. `simulation_schema.py` and `yaml.py` share neutral physical records and safe YAML decoding with FTF.
-- [`ftf/`](ftf/README.md) 讀取 immutable FTF YAML，擁有具名欄位、units、limits、接線與 noise PSD 的 field-path 診斷，不依賴 simulate、device 或 program。
+- `simulation_schema.py` and `yaml.py` own neutral physical records and safe YAML decoding. Model-specific YAML validation and private replay archives belong to [`simulators`](../simulators/README.md). Resources does not import those models. Neutral records retain off/identity defaults; receiver background period and pivot are required shape inputs.
 - [`qubit_params.py`](qubit_params.py) 直接管理 result scope 的 typed `params.json` handoff。公開讀寫先重新讀取 JSON，寫入採原子替換；方法與 section 規則見 [qubit_params.md](qubit_params.md)。
 - [`record_table/`](record_table/README.md) 管理條目的只追加 JSONL 樣本歷史、CSV 匯出與 opt-in v2 欄位協定。它也擁有 explicit record upgrade 的逐列分類、原 bytes 備份與原子替換，CLI 只呼叫該公開接縫。
 - [`waveform_assets.py`](waveform_assets.py) 是 qubit-scoped arbitrary waveform asset 的公開入口。每個 Database instance 持有固定 root，capture capability 固定原目錄但每次讀現在 bytes；沒有全域 repository 選擇器。core.waveform_format 負責 NPZ samples codec；內部 data、formula 與 NPZ 模組分別負責 payload／preview、formula 語意／rendering 與實體 I/O；格式、方法與約束見 [waveform_assets.md](waveform_assets.md)。

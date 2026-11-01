@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-01，readout generator end 與 ADC channel tails
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -11,6 +11,46 @@
 `acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
 `v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行 TimelineProgramV2 的受支援 instruction effects。
+
+## YAML compile profiles
+
+`build_soccfg(profile)` accepts a YAML-decoded mapping and returns a detached
+`QickConfig`. It constructs no hardware or acquisition source and reads no files
+or environment state. The caller owns YAML loading. Every input is required,
+including QICK software metadata and tProc revision; the builder never substitutes
+the installed version. Invalid or missing fields raise `ValueError` with dotted
+paths such as `generators.0.fs_mult`. Unknown fields are rejected, including
+redundant derived clocks, so a supplied `f_dds` cannot contradict the clock ratios.
+
+The complete ordinary and mixmux8/PFBv4 examples live in
+[`zcu_lab/simulation_envs/profiles/`](../../../zcu_lab/simulation_envs/profiles/).
+Tests own independent YAML fixtures under `tests/program/profiles/`.
+The root contains `board`, `sw_version`, `fw_timestamp`, `refclk_freq`,
+`extra_description`, `tprocs`, `generators`, `readouts`, `rf` and `mux`.
+`refclk_freq` and tProc clocks use MHz. `tprocs` preserves explicit QICK processor
+metadata, including memory sizes, pins and clocks. `rf` supplies `dac_power` and
+`clk_groups`; the builder supplies its per-converter entries.
+
+`generators` and `readouts` are ordered channel groups. Each group supplies a
+nonnegative `count`, its QICK capability fields and positive integer clock ratios.
+Groups expand into consecutive channels, with matching two-digit DAC/ADC names.
+Generator wave-output ports precede ordinary readout control ports. ADC readback
+inputs use their own channel namespace. `fs = refclk_freq * fs_mult / fs_div`.
+Generator DDS divides fs by `interpolation`; logical fabric divides fs by
+`fabric_div`, while RF fabric divides fs by `rf_fabric_div`. These separate
+fabric ratios preserve the existing compile profile. Ordinary readout DDS divides
+fs by `decimation`, and output divides DDS by `samps_per_clk`. Readout `coupling`
+is RF metadata. Other capability fields pass to QICK without clock overrides.
+
+`mux` is an explicit list, empty for an ordinary board. Each block selects one
+unused `gen_ch` and ordered unique `ro_chs`, and supplies `generator` and `readout`
+capabilities. Selected generators use the mux interpolation. PFB output divides
+ADC DDS by `pfb_nch / 2`, so `pfb_nch` must be positive and even. Output-side PFB
+DDS uses this output clock; input-side DDS retains the ADC DDS clock. Selected
+readouts lose tProc control and receive PFB output ports and trigger bits in list
+order. RF converter settings do not change when a logical channel becomes mux/PFB.
+These mappings describe virtual compile capabilities, not an attached board.
+
 
 ## Native acquisition
 
@@ -59,8 +99,17 @@ Timeline read labels use emit tags, falling back to module names for untagged
 emissions. Missing or ambiguous labels
 raise ValueError listing available labels. Explicit tags retain QICK's global
 compile-time uniqueness check and RuntimeError, including collisions with native
-timed macros. Any Repeat/Branch trigger on a selected ADC or a declared/actual
-read-count mismatch is rejected. Other ADCs may still use control flow.
+timed macros. Branch paths may share an untagged module name when each selected
+read keeps the same ADC-local index, ADC channel, frequency, integration window,
+phase and cfg classifier. Generator gain and waveform may differ: a zero-gain
+`PulseReadout("r1", cfg, gain=0.0)` retains its generator time slot and ADC trigger.
+Every path must have the same read count on each selected ADC. Missing labels or
+unequal counts, indices or ADC settings raise ValueError with case indices and
+the differing item. Triggers inside Repeat remain unsupported on selected ADCs.
+Other ADCs may still use control flow. After building a program with Branch
+readouts, call `prog.set_reads_per_shot(count)` with the per-shot count, then
+construct `shot_sums`, then acquire. QICK counts the source triggers across all
+cases; neither the processor nor its construction changes that declaration.
 `v2.split_sums(sums)` splits a final IQ axis into counts and complex conditional
 means. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.

@@ -3,6 +3,8 @@
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
+
 from .core import PowerCfg
 
 
@@ -18,9 +20,10 @@ def make_form(_ctx: FormContext) -> Form[PowerCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
             ),
-            "readout": Slot(
+            "readout": source(
+                _ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(0.001, 1.0, expts=101),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=201),

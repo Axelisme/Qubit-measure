@@ -4,11 +4,11 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.fastflux.distortion.freq.core import FreqCfg
+from zcu_lab.v2.support.measure.ctx_helpers import source
 
 
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     """Choose pulse sources from the fixed Open/Reset capture."""
-    del ctx  # Slot fallback resolution uses the Form environment.
     return Form(
         FreqCfg,
         tree={
@@ -24,9 +24,10 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 # Run supplies the spectroscopy frequency scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 0.05},
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "length": Range(0.0, 1.0, expts=101),
             "freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=101),

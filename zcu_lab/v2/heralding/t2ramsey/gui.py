@@ -31,6 +31,7 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import (
 from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import T2RamseyAnalyzeResult
 
 from .core import (
+    HeraldingT2RamseyAnalysis,
     HeraldingT2RamseyCfg,
     HeraldingT2RamseyExp,
     HeraldingT2RamseyResult,
@@ -47,7 +48,7 @@ def _T2Ramsey_analyze(
     req: AnalyzeRequest[T2RamseyRunResult, T2RamseyAnalyzeOptions], *, plots: Plots
 ) -> T2RamseyAnalyzeResult:
     params = req.analyze_params
-    analysis = HeraldingT2RamseyExp().analyze(
+    analysis: HeraldingT2RamseyAnalysis = HeraldingT2RamseyExp().analyze(
         req.run_result,
         req.analyze_params,
         plots=plots,

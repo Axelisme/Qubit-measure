@@ -1,6 +1,6 @@
 # Six-fluxonium settings guide
 
-**Last updated:** 2026-10-27 (UTC), routing-only residency allowance.
+**Last updated:** 2026-11-01，simulators package ownership
 
 **Readers:** operator, lab-author, framework-dev, agent. Read physical units, per-qubit parameters and approximation limits before changing this environment.
 
@@ -26,8 +26,10 @@ separate field, not a source from which the mux form infers ADCs.
 | Charge drive Q1 through Q6 | 1 through 6 | None |
 | Shared pulse readout | 13 | 6 |
 
-The top-level settings declare `mux_gen_ch: 0`, `pulse_gen_ch: 13` and
-`pulse_ro_ch: 6`. Top-level `dc_source` holds the shared device's name, unit,
+The example settings declare `mux_gen_ch: 0`, `pulse_gen_ch: 13` and
+`pulse_ro_ch: 6`. These IDs are caller-owned YAML values. The board profile
+must contain every configured channel. Each qubit's drive generator and mux
+ADC are unique; pulse and mux routes cannot overlap. Top-level `dc_source` holds the shared device's name, unit,
 limits, initial current and ramp step. Each qubit's `dc_bias` contains its local
 `source` settings and `offset`, `period`, `coil_offset`, `coil_period` in A.
 Each nested Q1 through Q6 value keeps `format`, `version`, `chip`, `drive_line`,
@@ -43,18 +45,18 @@ pulse wiring `ch: 13`, `ro_ch: 6`. `onetone/range_find` uses that pulse route.
 Each `qubits.Q1..Q6.readout.adc` receiver accepts its own `background`.
 The shared pulse ADC6 uses Q1's receiver background, as it does Q1's gain and noise.
 
-The optional receiver `background` object multiplies each carrier's microwave
+The required receiver `background` object multiplies each carrier's microwave
 I+iQ line response before receiver gain and phase. It uses the absolute incident
-frequency, not the ADC demodulation frequency. Omission or an empty object gives
-a flat unity background. Null is invalid.
+frequency, not the ADC demodulation frequency. Supply period and pivot even
+for zero depth and slope, which give unity. Null is invalid.
 
 | Field under `background` | Meaning and unit | Constraint and omitted value |
 | --- | --- | --- |
 | `ripple_depth` | Reflected standing-wave amplitude, dimensionless | Finite, 0 ≤ depth < 1; default 0 |
-| `ripple_period_mhz` | Standing-wave period, MHz | Finite and positive; default 1000 |
+| `ripple_period_mhz` | Standing-wave period, MHz | Required, finite and positive |
 | `ripple_phase_deg` | Standing-wave phase, degrees | Finite signed value; default 0 |
 | `slope_db_per_ghz` | Amplitude slope, dB/GHz | Finite signed value; default 0 |
-| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Finite signed value; default 0 |
+| `pivot_ghz` | Absolute frequency where the slope factor is unity, GHz | Required finite signed value |
 
 The complex ripple changes amplitude and phase. The full background need not be
 unity at the pivot. It stays fixed across rounds and does not change noise,
@@ -75,7 +77,8 @@ At 30 MHz and above, dispatch keeps the existing RWA/Floquet/Dyson/T6 order.
 ## Cache residency budgets
 
 Set `numerics.routing_cache_bytes` in the top-level `six_fluxonium.yaml`
-section, not in `qubits.Q1..Q6.numerics`. The default is 4194304 bytes, 4 MiB
+section, not in `qubits.Q1..Q6.numerics`. This input is required. The example uses
+4194304 bytes, 4 MiB
 across six sources. Each Engine receives one sixth, rounded down.
 The value is a nonnegative integer. Zero disables retention.
 At most five bytes remain unused. The cap excludes models, complete
@@ -86,7 +89,7 @@ residency are removed. Existing working YAML files must remove
 `prepare_cache_bytes`, `result_memo_bytes` and `adc_cache_bytes` before restart.
 The loader does not silently accept those retired fields.
 Single-source structure and complete preparations retain their own
-[lifetimes](../../../lib/zcu_tools/experiment/single_fluxonium/README.md#reuse-and-lifetime).
+[lifetimes](../../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime).
 The six sources remain independent and do not share receiver calibrations.
 
 The measurements below describe the earlier prepare/result/ADC budget design,

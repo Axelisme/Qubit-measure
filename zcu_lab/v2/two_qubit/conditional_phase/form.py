@@ -5,6 +5,7 @@ from typing import TypeVar
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
@@ -26,7 +27,11 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
     reset starts as None and can be authored explicitly.
     """
     roles = captured_roles(ctx)
-    readout = Slot("$mux.module.readout", fallback=Template("readout/mux:blank"))
+    readout = source(
+        ctx,
+        "$mux.module.readout",
+        Template("readout/mux:blank"),
+    )
     return Form(
         cfg_type,
         field_order=(

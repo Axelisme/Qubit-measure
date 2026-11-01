@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，驗收與 API owner 分層
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -352,10 +352,15 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### QICK 編譯 fixture
 
-`tests/program/v2/conftest.py` 從 program 公開入口提供 `make_mock_soccfg()`。
-它建立真實 QickConfig，不連硬體；TimelineBuilder 與手寫 program 走真實 QICK 編譯。
-Profile 的欄位、通道能力與限制由 [program owner](../lib/zcu_tools/program/v2/README.md#fixed-offline-profile)
-擁有，不在測試文件維護第二張數值表。測試依 builder 取得 profile，不綁固定時脈或 channel 數值。
+`tests/program/_profiles.py` 讀取 `tests/program/profiles/` 的獨立 YAML，交給
+公開 `program.build_soccfg`。`load_soccfg` 和 `load_mux_soccfg` 只覆寫 caller
+指定的 channel 數與 mux 接線；時脈、型別及 QICK metadata 留在 YAML。
+`profile_soccfg` 讀取具名模型的測試板子，不從模型 wiring 推導 channel 數。
+這些支援函式不建立硬體、IQ source 或隱式白噪音。
+
+`tests/program/v2/conftest.py` 提供 compile-only 的 `mock_soccfg` fixture。
+`TimelineBuilder.build()` 與手寫 `TimelineProgramV2` 都跑真實 QICK ASM。
+板子的輸入欄位與時脈推導見 [program README](../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
 
 ### Module declaration fixture
 
@@ -397,8 +402,8 @@ fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消
 
 ### Offline acquisition transports
 
-Compile-only cases use `make_mock_soccfg(n_gens, n_readouts)`. Simulation acquisition
-cases explicitly build `white_noise(...)` or a numeric `SimulationBinding` and use
+Compile-only cases use caller-owned YAML with `program.build_soccfg`. Simulation acquisition
+cases explicitly build `white_noise(soccfg, std_adc=..., seed=..., routes=...)` or a numeric `SimulationBinding` and use
 public program acquire/get_raw. Normal unbound pipeline tests use the deterministic
 transport in `tests/program/_acquisition_soc.py`. No fixture silently installs noise.
 Synthetic registered experiments exercise Window/RPC Run, Stop, failure and native Save
@@ -406,20 +411,20 @@ in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain iso
 
 ### FTF numeric and acquisition tests
 
-`tests/resources/test_ftf.py` verifies named YAML validation and dotted field
-errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
-`test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
-CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
+`tests/simulators/ftf/config/test_ftf.py` verifies named YAML validation and dotted field
+errors. `tests/simulators/ftf/physics/` owns fixed-coordinate circuits and model sources.
+Generic LC/Boltzmann/Gibbs references, CP dephasing and causal source tails stay in
+`tests/simulate/test_joint_baths.py` and `test_source_lines.py`. Independent evolution/ADC behavior stays in
 `tests/simulate/evolution/` and `test_adc.py`; model-event and multi-window
 sampling tests live in the corresponding numeric owner directories.
-`tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
+`tests/simulators/ftf/environment/test_ftf.py` covers explicit unit conversion, common carrier phase
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
-`ftf/test_projective_readout.py` covers public frontend mux heralding, retained
+`tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and elementwise terminal-only
 runtime parity against direct Engine/ADC composition. Cavity field continuation
-stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
-`ftf/test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
+stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
+`test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered

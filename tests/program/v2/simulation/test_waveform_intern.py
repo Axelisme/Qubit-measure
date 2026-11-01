@@ -17,6 +17,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.time_observations import envelope_times_us
 
@@ -35,7 +36,7 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
         )
     else:
         waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
-    env = white_noise(std_adc=0, seed=4, n_gens=2, routes=((0, 0), (1, 0)))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, seed=4, routes=((0, 0), (1, 0)))
     candidates = [
         PulseCfg(
             ch=1, nqz=1, freq=80, phase=37 * i, gain=-0.2 * (i + 1), waveform=waveform
@@ -115,7 +116,9 @@ def test_repeated_waveforms_preserve_samples_signed_gain_and_phase(kind, tmp_pat
 
 @pytest.mark.parametrize("difference", ["samples", "clock", "maxv"])
 def test_equal_names_do_not_merge_different_compiled_content(difference):
-    env = white_noise(std_adc=0, n_gens=3, routes=((0, 0), (1, 0), (2, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=3), std_adc=0, routes=((0, 0), (1, 0), (2, 0)), seed=None
+    )
     waveform = GaussWaveformCfg(length=0.1, sigma=0.02)
     prog = compile_modules(
         env.soccfg,

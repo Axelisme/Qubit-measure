@@ -26,7 +26,6 @@ from zcu_tools.gui.app.measure.services.form_contracts import (
 from zcu_tools.gui.app.measure.services.pane_commit import commit_run
 from zcu_tools.gui.app.measure.state import RunPaneState
 from zcu_tools.gui.remote.framing import MAX_LINE_BYTES
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -34,6 +33,7 @@ from tests.gui.app.measure._components import QubitSchema, ResonatorSchema
 from tests.gui.app.measure._load_support import historical_metadata
 from tests.gui.app.measure._record_support import require_target
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 
 from ._helpers import call as _raw_call
 from ._helpers import make_png, observe_run_inputs
@@ -76,7 +76,7 @@ pytestmark = pytest.mark.uses_wall_clock
 
 
 def _prepare_guarded_context(fx: _Fixture) -> None:
-    fx.state.set_context(replace(fx.state.session_env, soccfg=make_mock_soccfg()))
+    fx.state.set_context(replace(fx.state.session_env, soccfg=load_soccfg()))
     fx.state.version.bump("soc")
 
 

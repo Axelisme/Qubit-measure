@@ -1,10 +1,10 @@
 """Starting values for singleshot/ac_stark; sources are captured at Open/Reset."""
 
-from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
+from zcu_tools.cfg_model import Expr, Hidden, Range, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.singleshot.ac_stark.core import AcStarkCfg
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 
 def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
@@ -37,9 +37,10 @@ def make_form(ctx: FormContext) -> Form[AcStarkCfg]:
                     "post_delay": Expr("0.5 / $resonator.kappa"),
                 },
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain": Range(0.0, 0.22, expts=301),
             "freq": Range("$qubit.freq - 700.0", "$qubit.freq + 100.0", expts=801),

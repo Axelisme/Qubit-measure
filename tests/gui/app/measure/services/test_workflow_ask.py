@@ -19,6 +19,7 @@ from zcu_tools.resources.entry import ResultEntry
 
 from tests._filesystem import DIRECTORY_OPEN_ERROR
 from tests.gui.app.measure._workflow_ask import AskAuthor, Decision, OtherAnswer
+from tests.program._profiles import load_soccfg
 
 from ._workflow_harness import StartHarness
 
@@ -37,7 +38,7 @@ def asking(tmp_path):
     entry.new_point("source", description="synthetic")
     harness.services.context.install_entry(entry)
     harness.services.context.use_point(PointUseRequest("source"))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     harness.services.soc_connection.install_soc(board.soc, board.soccfg)
     author = AskAuthor()
     control = WorkflowControlFacet(harness.state, harness.services)

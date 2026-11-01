@@ -1,6 +1,6 @@
 # README - program/v2
 
-**Last updated:** 2026-11-01，generator-only readout completion、ADC overlap guards 與靜態 readout observation
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
 
@@ -48,7 +48,7 @@ dispatch jump-address tables remain supported.
 - **Mock Interfaces**: Use type-compatible fakes or an existing typed seam when passing test collaborators to functions. Do not add type suppressions or `cast()` to silence an incompatible interface.
 - **Program Emission Tests**: Unit tests that assert emitted program actions use a typed `ProgramTrace` adapter rather than loose `MagicMock` program objects. The trace records semantic program intents (readout declarations, triggers, pulses, loops, delays, register writes, and jumps) without acting as a second compiler or IR parser.
 - **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
-- **Offline acquisition**: `make_mock_soccfg(n_gens, n_readouts)` builds only a compile profile. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
+- **Offline acquisition**: `program.build_soccfg(profile)` builds a compile profile from caller-owned YAML. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
 - **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
 - **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. Pulse, PulseReadout and reset constructors also accept keyword-only scalar/sweep overrides on a detached effective cfg; `None` keeps the cfg value. Registry identity and lowering use that effective cfg. `set_param` remains supported and mutates the cfg on which it is called. See the [constructor parameter table](modules/README.md#constructor-overrides). Accepting `ro_length` sweeps does not add QICK ADC-window sweep support; both setter and constructor paths retain the existing compile error. [`tests/cfg_model/test_set_param_contract.py`](../../../../tests/cfg_model/test_set_param_contract.py) is the cross-family audit for this fail-fast rule.
 
@@ -56,28 +56,21 @@ dispatch jump-address tables remain supported.
 
 `GainSweep` annotates a `SweepCfg` whose start, stop and computed last point must be in [-1, 1]. Values are DAC full-scale fractions in a.u. The same validator runs on Form coordinate representations after their endpoint projection. For example, start=-1, stop=1.1, step=0.5 is accepted when the actual last point is 1.0. Range + Expts retains its stop, so stop=1.1 is rejected. Ordinary `SweepCfg` remains unit-independent.
 
-## Fixed offline profile
+## Caller-owned compile profiles
 
-`make_mock_soccfg(n_gens=2, n_readouts=1)` accepts nonnegative channel counts.
-It builds no hardware, acquisition source or noise fallback. The profile uses
-ZCU216-shaped metadata, tProc v2 at 430.08 MHz and the installed QICK assembly
-revision. Generators are `axis_signal_gen_v6`, with 32-bit DDS/phase,
-12288 MHz DDS, 384 MHz fabric, 16 envelope samples/clock, max gain word 32766
-and 65536 envelope samples. ADCs are `axis_readout_v2`, with 32-bit DDS,
-2457.6 MHz DDS, 307.2 MHz output and 8192-sample accumulated/decimated buffers.
-Generator `tproc_ch` and ADC `tproc_ctrl` occupy distinct wave-output ports.
-ADC `tproc_ch` indexes readback inputs, a separate namespace.
-Ordinary ADCs use distinct bits on their shared trigger output port.
-The ordinary profile does not offer mixers, mux channels or weighted readouts.
-`make_mux_mock_soccfg(n_gens, n_readouts, gen_ch=..., ro_chs=...)` separately
-selects one fixed mixmux8 generator and 1..8 unique static PFBv4 output routes.
-Its generator DDS is 1536 MHz and ADC output is 76.8 MHz. Other channels keep
-the ordinary profile. Neither helper permits arbitrary clock/firmware overrides. These are virtual
-compile capabilities, not a claim about an attached board. `pfb_channel(soccfg,
-ro_ch, frequency_mhz)` resolves an absolute physical frequency through QICK's
-public readout calculation; callers do not reproduce PFB folding or rounding.
-Clocks, DDS, memory limits and channel types are not override parameters. Explicit `(gen_ch, ro_ch)`
-wiring belongs to `SimulationSoc`; actually using an unwired channel fails.
+[`program.build_soccfg(profile)`](../README.md#yaml-compile-profiles) derives clocks
+from caller-owned YAML mappings. Every setting is required, including channel
+counts, channel types, clocks, memory limits and QICK metadata. The builder does
+not read the installed QICK version or construct hardware or acquisition sources.
+Tests own YAML under `tests/program/profiles/`; lab environments each own an
+adjacent `profile.yaml`. Board profiles remain separate from physical model YAML.
+
+`pfb_channel(soccfg, ro_ch, frequency_mhz)` resolves an absolute physical frequency
+through QICK's public readout calculation. It uses the supplied ADC's actual PFB
+clock and channelization, without duplicating folding or rounding in callers.
+Explicit `(gen_ch, ro_ch)` wiring belongs to `SimulationSoc`; using an unwired
+channel fails. White-noise environments also accept `routes="all"` to bind every
+generator to every ADC.
 
 See [simulation](simulation/README.md) for the shared numeric contract, trusted
 Python builder, ownership, seeded white noise and the supported minimal readout.
@@ -151,6 +144,9 @@ The cfg-based APIs delegate to these same word decoders.
   為 Mux collection 與 shot sums 提供 readout provenance、Trigger 順序及控制 scope。
   它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
   Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
+  `observe_readout_paths(prog)` 另提供 case-aware 的 `ReadoutPath`：包含 selector/case
+  與該路徑的 observations，同一 selector 的多次 Branch 共用 case index。
+  它保留 Repeat scope，含未宣告的空 case，不改既有 flatten traversal。
 - `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
 
 ## 原生寫法與具名 timeline
@@ -370,6 +366,14 @@ Branch 區塊內、case 外的 emit、fork、join、timeline_inc 等動作在 bu
 隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
 沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
 跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
+
+Case 內有 readout 時，作者與 Repeat 一樣，在 build 後以 `prog.set_reads_per_shot(n)`
+宣告每 shot 的讀數，再呼叫 `shot_sums` 和 acquire。QICK 預設會把各 case 的 source
+trigger 加總，不是每條實際路徑的讀數。`shot_sums` 不修改宣告，並逐路徑比對。
+互斥 case 的同名 untagged readout 可共用 label，但選中的 ADC、read index、freq、
+ro_length/window、phase 與 cfg classifier 必須一致。Gain、waveform 可以不同。
+R1 關閉使用 `PulseReadout("r1", cfg, gain=0.0)`，仍保留 generator 時槽與 ADC trigger。
+不一致會報 ValueError，訊息列出 case index 與不符項目。Repeat 內的 trigger 仍拒絕。
 
 `repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
 `timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。

@@ -26,7 +26,6 @@ from zcu_tools.gui.session.context_types import (
     PointUseRequest,
 )
 from zcu_tools.gui.session.ports import OperationConflictError
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry, component_registry
 
 from tests._lab import synthetic_lab
@@ -34,6 +33,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._components import QubitSchema
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 from tests.resources.entry.fakes import registry_state, restore_registry
 
 
@@ -79,7 +79,7 @@ def startup_app(qapp, tmp_path, monkeypatch):
     probe.connection_threads = []
     probe.driver = ClosingDevice(fast_mode=True)
     probe.driver.calls = probe.calls
-    probe.soccfg = make_mock_soccfg()
+    probe.soccfg = load_soccfg()
     monkeypatch.setitem(sys.modules, "startup_probe", probe)
     ctrl.setup_control.new_entry(EntryRequest("synthetic"))
     ctrl.setup_control.new_point(PointCreateRequest("first", "", CommandOrigin("gui")))
@@ -719,7 +719,7 @@ def test_startup_progress_and_run_lock_with_user_input(
     # Composition and the external synthetic source barrier are fixture setup.
     # Clicking the real Refresh button makes that source ready, independently
     # of the startup runner's own admission/progress logic.
-    soccfg = make_mock_soccfg()
+    soccfg = load_soccfg()
     ctrl.session_services.soc_connection.install_soc(soccfg, soccfg)
     ctrl.tab_control.new_tab("sample")
     window.show()

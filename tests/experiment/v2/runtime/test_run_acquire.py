@@ -31,6 +31,7 @@ from tests.experiment.v2.runtime._flow_fakes import (
     recording_pbar_factory,
 )
 from tests.program._acquisition_soc import make_chunk_acquisition
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -188,7 +189,7 @@ def test_single_adc_default_converter_preserves_all_signal_axes(
 @pytest.fixture
 def simulated_program() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
     """Borrow a seeded, zero-noise real program and close its environment after use."""
-    env = white_noise(std_adc=0, seed=11)
+    env = white_noise(load_soccfg(), std_adc=0, seed=11, routes=((0, 0),))
     readout = PulseReadoutCfg(
         gen_ch=0,
         nqz=1,

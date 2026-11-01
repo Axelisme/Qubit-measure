@@ -3,6 +3,7 @@
 from zcu_tools.cfg_model import FieldMeta, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
@@ -22,9 +23,10 @@ def make_form(_ctx: FormContext) -> Form[FreqCfg]:
                 # Run replaces probe frequency with the scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
-            "readout": Slot(
+            "readout": source(
+                _ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),

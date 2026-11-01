@@ -27,6 +27,7 @@ from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._progress_fakes import DirectProgressTransport
 from tests.gui._user_input import ComponentDriver
 from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.program._profiles import load_soccfg
 
 
 def toggle_tab_family(driver: ComponentDriver) -> None:
@@ -105,7 +106,7 @@ def host_window(
     )
     ctrl.setup_control.new_entry(EntryRequest("workflow-ui"))
     ctrl.setup_control.new_point(PointCreateRequest("source", "", CommandOrigin("gui")))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     ctrl.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     window = MainWindow(
         ctrl, templates=lambda: {}, dialog_presenter=RecordingDialogPresenter()

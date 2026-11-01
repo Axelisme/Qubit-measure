@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.twotone.reset.dual_tone.power.core import PowerCfg
 
 
@@ -25,9 +25,10 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
                     "pulse2_cfg.freq": Expr("$qubit.ext.reset_f2"),
                 },
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "gain1": Range(0.0, 1.0, expts=51),
             "gain2": Range(0.0, 1.0, expts=51),

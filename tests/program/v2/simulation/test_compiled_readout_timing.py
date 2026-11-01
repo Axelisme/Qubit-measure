@@ -12,6 +12,7 @@ from zcu_tools.program.v2.ir.operands import ImmValue, Register
 from zcu_tools.program.v2.modules import PulseReadout, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program.v2.simulation._compiled_support import program, request
 from tests.program.v2.simulation.time_observations import time_us, times_us
 
@@ -66,10 +67,10 @@ def test_register_data_triggers_keep_each_adc_lanes_actual_window():
     for point, ticks in enumerate((128, 0)):
         read = result.materialize_point(point).readouts[0]
         assert times_us(result.time_base, read.trigger_ticks) == pytest.approx(
-            (ticks / 430.08,)
+            (ticks / TPROC_MHZ,)
         )
-        assert read.samples == 61
-        assert (1 / time_us(result.time_base, read.sample_period_ticks)) == 307.2
+        assert read.samples == prog.us2cycles(0.2, ro_ch=0)
+        assert (1 / time_us(result.time_base, read.sample_period_ticks)) == RO_MHZ
         assert read.generator_channels == (0,)
         assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
 
@@ -154,7 +155,7 @@ def test_equal_config_inside_window_is_accepted(phase):
     assert read.phase_deg == (phase,)
 
 
-@pytest.mark.parametrize("update_time, expected", [(0, 200), (60 / 307.2, 100)])
+@pytest.mark.parametrize("update_time, expected", [(0, 200), (60 / RO_MHZ, 100)])
 def test_config_at_window_boundary_uses_closed_start_and_open_end(
     update_time, expected
 ):
@@ -165,7 +166,7 @@ def test_config_at_window_boundary_uses_closed_start_and_open_end(
         send_config(p, "changed", update_time, 90)
         p.pulse(0, "p", t=0)
 
-    prog, env = program(body, initialize, reps=1, readout_length=60 / 307.2)
+    prog, env = program(body, initialize, reps=1, readout_length=60 / RO_MHZ)
     read = request(prog, env).materialize_point(0).readouts[0]
     assert read.frequency_mhz == pytest.approx((expected,), abs=1e-5)
     assert read.phase_deg == ((90,) if update_time == 0 else (0,))
@@ -194,7 +195,7 @@ def test_runtime_config_start_uses_absolute_ticks_after_nonzero_origin(
             observed = request(prog, env)
             read = observed.materialize_point(0).readouts[0]
             assert times_us(observed.time_base, read.trigger_ticks) == pytest.approx(
-                (332 / 430.08,)
+                (332 / TPROC_MHZ,)
             )
             assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
     finally:
@@ -270,7 +271,12 @@ def test_pending_config_fifo_carries_into_later_rep_window():
 
 @pytest.mark.parametrize("second_gen", [0, 1])
 def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_gen):
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=1, routes=((0, 0), (1, 0)))
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=1),
+        std_adc=0,
+        routes=((0, 0), (1, 0)),
+        seed=None,
+    )
     try:
         cfg = PulseReadoutCfg(
             gen_ch=0,
@@ -296,7 +302,7 @@ def test_shared_adc_modules_keep_each_triggers_frequency_and_generator(second_ge
         read = request(prog, env).materialize_point(0).readouts[0]
         assert read.frequency_mhz == pytest.approx((100, 200), abs=1e-5)
         assert read.generator_channels == (0, second_gen)
-        assert read.samples == 61
+        assert read.samples == prog.us2cycles(0.2, ro_ch=0)
         assert len(read.trigger_ticks) == 2
     finally:
         env.devices.close_all_devices()

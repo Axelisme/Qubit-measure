@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-10-28 (UTC)，numeric drift owner
+**Last updated:** 2026-11-01，simulators package ownership
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與效能證據入口。
 
@@ -14,7 +14,7 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 log-OU transitions at caller-supplied seconds, using a caller-owned NumPy RNG.
 It does not read settings, clocks or files. Equal times consume no RNG. The
 first sample returns the reference value and sets the time origin.
-`experiment.single_fluxonium.drift.CoherenceDrift` composes loss streams and
+`simulators.single_fluxonium.environment.drift.CoherenceDrift` composes loss streams and
 owns acquisition settings and private truth I/O.
 
 ## Measured performance and reproduction
@@ -199,7 +199,7 @@ recomputes from archived inputs under matching numeric and RNG versions.
 
 ## FTF circuits and noise
 
-[`ftf`](ftf/README.md) builds the fixed-coordinate F1-SQUID-F2 joint model with
+[`ftf`](../simulators/ftf/physics/README.md) builds the fixed-coordinate F1-SQUID-F2 joint model with
 full charge couplings, native-before-projection n², directional multilevel baths
 and parent virtual readout transitions. `spectra` owns shared scalar/array loss spectra in angular GHz/ns/K;
 `baths` uses them for joint directional rates, while fluxonium coherence combines
@@ -207,7 +207,7 @@ both directions for equilibrium T1. Default Q models and caller-supplied Q,
 impedance and admittance options retain their existing definitions;
 `dephasing` owns both the shared Notebook pure-rate formulas and CP multilevel
 Markov dephasing. These tools do not read YAML, drivers or program Modules.
-`experiment.ftf` composes them for acquisition.
+`simulators.ftf.environment` composes them for acquisition.
 
 ## Flux source lines
 

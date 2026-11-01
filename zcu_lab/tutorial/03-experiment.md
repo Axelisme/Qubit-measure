@@ -85,21 +85,44 @@ frequency 點數改為 `101`。這些只是新表單的起始值，不代表硬�
   保留 freq／gain 的 `Hidden(0.0)`，因為 `run` 會用 sweep 座標覆寫它們。
 - `Slot("$resonator.module.readout")` 使用綁定 resonator 已選的 library module。
   Alias `resonator: $qubit.resonator` 讓讀出跟隨目前 qubit 的 resonator，不讀 qubit 上的舊 readout slot。
-  原範本仍用 if／else 選來源。新 leaf 可改成下例，fallback 的來源與 metadata 規則見[寫法慣例](../v2/experiment-authoring.md#slot-fallback-與分類-read-axis)。
+  複製後保留 `source(ctx, path, template)`，有來源就回傳 Slot，缺來源才用 Template。
+  來源錯誤、metadata 與共用 set 的規則見[來源選擇](../v2/experiment-authoring.md#來源選擇與分類-read-axis)。
 - `Slot("$qubit.module.reset")` 是選用的 reset 來源。`init_pulse` 繼續隱藏。
   不要為了開表單而建立假的 library reference。
 
+將複製表單的參數 `_ctx` 改名為 `ctx`，讓來源選擇使用這次的 capture。
+在 `form.py` 匯入下列名稱，把 readout 指派放進 `make_form(ctx)`。
+沿用其餘 tree 欄位，將 readout node 放在 `Form(..., tree={"readout": readout, ...})`：
+
 ```python
-from zcu_tools.cfg_model import Slot, Template
+from zcu_tools.cfg_model import FieldMeta, Template
+
+from zcu_lab.v2.support.measure.ctx_helpers import source
 
 
-readout = Slot(
+readout = source(
+    ctx,
     "$resonator.module.readout",
-    fallback=Template("readout", bindings={"resonator": "$resonator"}),
+    Template(
+        "readout",
+        bindings={"resonator": "$resonator"},
+        seed_metadata={
+            ("readout", "module", "gain"): FieldMeta(
+                description="Confirm readout gain before Run.",
+            ),
+        },
+    ),
 )
 ```
 
-把這個 node 放在 `Form(..., tree={"readout": readout, ...})` 的 readout 欄位。
+`source` 依固定 capture 的 `ctx.has(path)` 選擇，不複製來源 Slot。
+缺 capture、缺 key、未設定或懸空 slot、缺或未綁 alias 時，`ctx.has` 回 False。
+Helper 這時保留 Template 的 set 與 metadata，Form 只合併採用範本的 metadata。
+`Form.with_seed_metadata` 在同路徑優先。
+路徑語法錯誤與來源故障直接傳出，family 不相容仍由 Form 報錯。
+只用 Slot 而不給 Template 時，缺來源的 required 欄位保持 Invalid。
+Nullable 且預設 None 的欄位停用且有效。
+
 新增欄位時，先在 core cfg 定義型別與 FieldMeta，再在 tree 指定初值或顯示方式。
 本例依前節 cfg 的宣告順序顯示，不另寫 `field_order`。命名、排序與取數欄位的規則見[寫法慣例](../v2/experiment-authoring.md#cfg-名稱順序與取數欄位)。
 模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單，不再包 Modules／Sweep group。

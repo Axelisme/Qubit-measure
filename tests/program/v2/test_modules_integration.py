@@ -12,9 +12,13 @@ from typing import Literal
 import numpy as np
 import pytest
 from qick.asm_v2 import Label, QickParam, WriteReg
-from zcu_tools.program.v2 import SweepCfg, TimelineProgramV2, sweep2param
+from zcu_tools.program.v2 import (
+    SweepCfg,
+    TimelineBuilder,
+    TimelineProgramV2,
+    sweep2param,
+)
 from zcu_tools.program.v2.macro.loop import OpenInnerLoop
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.delay import Delay, DelayAuto, SoftDelay
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 from zcu_tools.program.v2.modules.pulse import Pulse, PulseCfg
@@ -35,6 +39,7 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 # ---------------------------------------------------------------------------
@@ -63,7 +68,7 @@ RO_LENGTH = 1.0  # µs
 
 
 def _make_prog(modules=None, sweep=None, n_gens=2, n_readouts=1, **cfg_kwargs):
-    soccfg = make_mock_soccfg(n_gens=n_gens, n_readouts=n_readouts)
+    soccfg = load_soccfg(n_gens=n_gens, n_readouts=n_readouts)
     return compile_modules(soccfg, modules=modules or [], sweep=sweep, **cfg_kwargs)
 
 
@@ -190,7 +195,7 @@ class TestPulseIntegration:
         pulse = Pulse("drive", _pulse_cfg(length=sweep2param("length", grid)))
         from zcu_tools.program.v2 import TimelineBuilder
 
-        builder = TimelineBuilder(make_mock_soccfg())
+        builder = TimelineBuilder(load_soccfg())
         builder.add_loop("length", grid.expts)
         builder.emit(pulse)
         builder.delay_by_timeline()
@@ -231,6 +236,43 @@ class TestPulseIntegration:
 
 
 class TestReadoutIntegration:
+    @pytest.mark.parametrize("runtime", [False, True])
+    def test_same_named_readouts_keep_program_owned_templates(self, runtime):
+        cfg = _readout_cfg()
+
+        def readout_module(gain):
+            return PulseReadout(
+                "r1",
+                cfg,
+                gain=gain,
+                gain_val="gain_word" if runtime else None,
+                ro_freq_val="ro_freq_word" if runtime else None,
+            )
+
+        first = readout_module(cfg.gain)
+        second = readout_module(0.0)
+
+        def build(modules):
+            builder = TimelineBuilder(load_soccfg())
+            builder.add_loop("choice", 2)
+            if runtime:
+                for name in ("gain_word", "ro_freq_word"):
+                    builder.emit(LoadWord(name, [0, 0], idx_reg="choice", val_reg=name))
+            with builder.branch(by="choice", align_timeline=True) as cases:
+                for index, module in enumerate(modules):
+                    with cases.case(index):
+                        builder.emit(module)
+            return builder.build()
+
+        prog = build([first, second])
+        names = (first.adc_name(prog), second.adc_name(prog))
+        assert names[0] != names[1]
+        assert all(name in prog.pulses for name in names)
+        other = build([second, first])
+        assert first.adc_name(other) != second.adc_name(other)
+        assert (first.adc_name(prog), second.adc_name(prog)) == names
+        assert prog.binprog is not None
+
     def test_pulse_readout_compiles(self):
         cfg = _readout_cfg()
         prog = _make_prog(modules=[PulseReadout("ro", cfg)])
@@ -271,7 +313,7 @@ class TestReadoutIntegration:
         assert not any(inst.get("CMD") == "WMEM_WR" for inst in prog.prog_list)
 
     def test_table_pulse_readout_prepares_next_wmem_after_standard_playback(self):
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        soccfg = load_soccfg(n_gens=1, n_readouts=1)
         freqs = [1000.0, 1010.0, 1020.0]
         freq_words, ro_freq_words = readout_freq_words(
             soccfg,
@@ -439,7 +481,7 @@ class TestDmemIntegration:
             def compile_datamem(self):
                 return np.asarray([[1, 2]], dtype=np.int32)
 
-        soccfg = make_mock_soccfg(n_gens=1, n_readouts=1)
+        soccfg = load_soccfg(n_gens=1, n_readouts=1)
 
         with pytest.raises(ValueError, match="dmem must be one-dimensional"):
             TwoDimensionalDmemProgram(soccfg)
@@ -447,7 +489,7 @@ class TestDmemIntegration:
 
 @pytest.mark.parametrize("mixer", [None, 500.0])
 def test_pulse_runtime_adc_identity_keeps_distinct_qick_definitions(mixer):
-    soccfg = make_mock_soccfg(n_gens=1, n_readouts=2)
+    soccfg = load_soccfg(n_gens=1, n_readouts=2)
     soccfg["gens"][0]["has_mixer"] = mixer is not None
     cfg = _pulse_cfg(freq=700.0)
     cfg.mixer_freq = mixer

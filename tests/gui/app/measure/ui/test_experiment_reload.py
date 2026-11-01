@@ -28,7 +28,6 @@ from zcu_tools.gui.session.context_types import (
     PointCreateRequest,
 )
 from zcu_tools.gui.session.types import SessionEnv
-from zcu_tools.program.v2 import make_mock_soccfg
 
 from tests.gui._dialog_fakes import RecordingDialogPresenter
 from tests.gui._user_input import ComponentDriver
@@ -38,6 +37,7 @@ from tests.gui.app.measure.remote._helpers import (
     recv_response,
     send,
 )
+from tests.program._profiles import load_soccfg
 
 
 @dataclass
@@ -109,9 +109,7 @@ def test_restored_valid_tab_reenables_run_without_an_extra_form_action(
     app.ctrl.setup_control.new_point(
         PointCreateRequest("point", "", CommandOrigin("gui"))
     )
-    app.ctrl.session_services.soc_connection.install_soc(
-        MagicMock(), make_mock_soccfg()
-    )
+    app.ctrl.session_services.soc_connection.install_soc(MagicMock(), load_soccfg())
     driver = ComponentDriver(app.window)
     driver.select_menu("New Tab ▾", ("demo",))
     driver.enter_text(object_name="form.input.knob", value="11")

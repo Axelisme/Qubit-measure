@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.computed_pulse import ComputedPulse
 from zcu_tools.program.v2.modules.dmem import LoadValue
 from zcu_tools.program.v2.modules.pulse import PulseCfg
@@ -14,6 +13,7 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 GEN_CH = 0
@@ -49,7 +49,7 @@ def _flat_top_pulse(total=0.2, raise_length=0.04, gain=GEN_GAIN, pre_delay=0.0):
 
 
 def _make_prog(modules):
-    soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
+    soccfg = load_soccfg(n_gens=2, n_readouts=1)
     return compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
 
 

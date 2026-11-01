@@ -109,6 +109,9 @@ Stage API、生成器、PNG 格式與環境清理責任見
 
 下列片段各自獨立，假設 caller 已填好具名物件。按改動選用，不串成固定流程：
 
+Run 的 caller-owned YAML、`white_noise` 參數與環境清理見
+[simulation environment](../lib/zcu_tools/experiment/README.md#explicit-simulation-environments)。
+
 ```python
 from zcu_tools.experiment.probe import analysis_stage, run_stage, save_stage
 

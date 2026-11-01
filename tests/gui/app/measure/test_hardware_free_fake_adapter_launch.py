@@ -30,7 +30,6 @@ from zcu_tools.gui.session.context_types import (
     EntryRequest,
     PointCreateRequest,
 )
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry.registry import component_registry
 
 from tests.gui._qt_waits import qt_until
@@ -44,6 +43,7 @@ from tests.gui.app.measure._synthetic import (
     SampleRun,
 )
 from tests.gui.app.measure._templates import TEMPLATES
+from tests.program._profiles import load_soccfg
 
 
 def LedgerAdapter_run(
@@ -86,7 +86,7 @@ def hw_fixture(qapp, tmp_path):
     registry = Registry(templates=TEMPLATES)
     registry.register("fake/freq", LedgerAdapter)
     state, bus = (
-        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=make_mock_soccfg())),
+        State(SessionEnv(parameters=None, soc=MagicMock(), soccfg=load_soccfg())),
         BaseEventBus(),
     )
     ctrl = Controller(

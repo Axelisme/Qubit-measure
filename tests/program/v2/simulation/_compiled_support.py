@@ -6,6 +6,8 @@ from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
+
 
 def program(
     body,
@@ -14,6 +16,7 @@ def program(
     reps=2,
     routes=((0, 0),),
     n_readouts=1,
+    soccfg: QickConfig | None = None,
     trigger_time: float | None = 0,
     config_time: float | None = 0,
     readout_length: float = 0.2,
@@ -22,7 +25,17 @@ def program(
     cleanup=None,
     stream_transform=None,
 ):
-    env = white_noise(std_adc=0, n_gens=2, n_readouts=n_readouts, routes=routes)
+    """Compile native callbacks on the supplied board or the ordinary test YAML.
+
+    An explicit soccfg must provide gen0/1 and every ADC declared by callbacks.
+    n_readouts selects the ordinary YAML's count only when soccfg is omitted.
+    """
+    env = white_noise(
+        load_soccfg(n_gens=2, n_readouts=n_readouts) if soccfg is None else soccfg,
+        std_adc=0,
+        routes=routes,
+        seed=None,
+    )
 
     class Program(TimelineProgramV2):
         @property

@@ -22,7 +22,15 @@ Measurement 顯示篩選後平均 IQ 的投影。跨 round 依通過數加權，
 
 ## Analyze 與 writeback
 
-Analyze 先排除非有限 time／IQ，再交普通 Echo owner。Owner 略去剩餘資料的第一點，再做 IQ rotation 與 decay 或 fringe fit。Fit method 的 decay 使用 exponential envelope；fringe 使用 decaying fringe，Fit phase 只控制 fringe 的 phase offset。零 detune 強制 decay。有效點不足時分析失敗，不改用另一套擬合。Pass fraction 是診斷，不是擬合權重。
+Analyze 取 herald-g 的 signal 條件平均 IQ，先排除非有限 time／IQ，再丟掉剩餘資料的第一點。接著做 IQ rotation，取實部擬合。本實驗直接依 Fit method 的 `fit_method` 呼叫擬合工具。選 decay 時用 `fit_decay` 擬合 exponential envelope；選 fringe 時用 `fit_decay_fringe` 擬合 decaying fringe。Fit phase offset 的 `fit_phase` 只控制 fringe 的 phase offset，開啟時自由擬合，關閉時固定為 0°。
+
+Fringe fit 優先讀取 source cfg 的 detune；cfg 為 None 時改讀 Result 的 `true_activate_detune`。此值為零時強制改用 decay。Fringe 缺少有限 detune，或 `fit_method` 不為 decay／fringe 時，分析拋出 ValueError。有效點不足時分析失敗，不改用另一套擬合。Pass fraction 是診斷，不是擬合權重。本實驗在 `fit` 圖畫出旋轉後的資料與擬合曲線，標題顯示壽命與標準誤，fringe fit 另顯示頻率與標準誤。
+
+Analyze 回傳 `HeraldingT2EchoAnalysis`：
+
+- `t2e`、`t2e_err` 是 Echo 衰減時間與標準誤，單位 us。
+- `detune`、`detune_err` 是觀測到的 fringe 頻率與標準誤，單位 MHz，包含施加的 phase ramp；decay fit 時兩者為 0。
+- 以上四個數值欄位皆不為 None。`fit_quality["fit"]` 保存無因次的殘差與相對誤差診斷。型別允許未提供診斷時 `fit_quality` 為 None，本實驗的 Analyze 每次成功都提供診斷。
 
 寫回與普通 Echo 相同：提出 `$qubit.t2e`，有固定 capture 與 device snapshot 時，也提出同一 qubit 的 bias record。描述標明 Heralded。T2e 必須為正且有限，error／T2e ≤ 0.5、R² ≥ 0.9、normalized RMS ≤ 0.1，才預設勾選；缺 metrics 或其他不符會顯示 review note。先看 fit 與提案，再明確 Apply；Analyze 不會自行寫回。
 

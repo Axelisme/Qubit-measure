@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 import yaml
 from zcu_tools.datafile import load
-from zcu_tools.experiment.ftf import ftf
 from zcu_tools.experiment.native_persistence import metadata_from_container
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter
@@ -23,14 +22,16 @@ from zcu_tools.gui.session.context_types import (
 from zcu_tools.program.v2.modules.pulse import PulseCfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
+from zcu_tools.simulators.ftf.environment import ftf
 
 from tests._lab import synthetic_lab
 from tests.experiment._saving_support import SavingResult
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._native_save_support import SavingAdapter
 from tests.gui.app.measure.remote._helpers import call, open_client
+from tests.program._profiles import profile_soccfg
 from tests.program._timeline import compile_modules
-from tests.resources._ftf_data import ftf_document
+from tests.simulators.ftf.config._data import ftf_document
 
 pytestmark = pytest.mark.sim
 
@@ -104,7 +105,9 @@ def ftf_window(qapp, tmp_path):
     ):
         raise AssertionError("registered FTF run needs actual Window/RPC owners")
     sock = None
-    env = ftf(tmp_path / "ftf.yaml", workers=1, warmup=False)
+    env = ftf(
+        tmp_path / "ftf.yaml", soccfg=profile_soccfg("ftf"), workers=1, warmup=False
+    )
     try:
         ctrl.session_services.soc_connection.install_soc(env.soc, env.soccfg)
         sock = open_client(remote.start())

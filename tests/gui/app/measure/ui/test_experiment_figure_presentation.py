@@ -43,6 +43,7 @@ from tests.gui.app.measure._native_save_support import (
     PostSummary,
 )
 from tests.gui.app.measure.ui._figure_presentation_support import gallery
+from tests.program._profiles import load_soccfg
 
 
 class StaticInteractive(InteractiveFrontend):
@@ -151,7 +152,7 @@ def presentation_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline presentation", CommandOrigin("gui"))
         )
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         app.controller.session_services.soc_connection.install_soc(
             board.soc, board.soccfg
         )
@@ -201,7 +202,7 @@ def layout_window(qapp, tmp_path: Path) -> Iterator[QWidget]:
         app.controller.setup_control.new_point(
             PointCreateRequest("p", "Offline layout", CommandOrigin("gui"))
         )
-        board = white_noise()
+        board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
         app.controller.session_services.soc_connection.install_soc(
             board.soc, board.soccfg
         )
