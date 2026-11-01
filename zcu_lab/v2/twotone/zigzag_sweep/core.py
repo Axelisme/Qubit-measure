@@ -180,8 +180,7 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
         @context.plots.on_plot_thread
         def update(data):
             real = zigzag_signal2real(data)
-            artists = heatmap.set(times.astype(np.float64), values, real)
-            return artists
+            return heatmap.set(times.astype(np.float64), values, real)
         
         fig.show()
         signals_buffer = SignalBuffer(

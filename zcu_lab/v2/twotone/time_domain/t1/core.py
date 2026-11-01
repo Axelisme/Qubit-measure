@@ -149,8 +149,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, t1_signal2real(data))
-            return artists
+            return viewer.set(lengths, t1_signal2real(data))
         
         fig.show()
         signals = SignalBuffer(
@@ -193,8 +192,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, t1_signal2real(data))
-            return artists
+            return viewer.set(lengths, t1_signal2real(data))
         
         fig.show()
         signals = SignalBuffer(

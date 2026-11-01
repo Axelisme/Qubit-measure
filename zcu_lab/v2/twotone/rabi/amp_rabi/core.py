@@ -140,8 +140,7 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(gains, rabi_signal2real(data))
-            return artists
+            return viewer.set(gains, rabi_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

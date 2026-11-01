@@ -1,12 +1,12 @@
 """Paired reference/interleaved RB with explicit rounds and seed uncertainty."""
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import FieldMeta
@@ -54,11 +54,25 @@ class IRBResult:
     """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
 
 
-def _label_arms(ax: Axes) -> None:
+def _live_plot(
+    plots: Plots, depths: NDArray[np.int64]
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Show paired arm means and return the owner-dispatched IQ update."""
+    fig, ax = plots.subplots(num='measurement')
+    ax.set(xlabel='Random Clifford depth', ylabel='Signal (a.u.)')
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.grid()
+    viewer = live_line(ax, num_lines=2)
     for line, label in zip(ax.lines, ("Reference", "Interleaved"), strict=True):
         line.set_label(label)
     ax.legend()
-
+    
+    @context.plots.on_plot_thread
+    def update(data):
+        return viewer.set(depths.astype(float), project_arm_means(data))
+    
+    fig.show()
+    return update
 
 class IRB_Exp(Experiment[IRBResult, IRBCfg]):
     """Acquire both arms with software switching and hardware depth/repetitions."""
@@ -102,19 +116,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
             ],
             dtype=np.int64,
         )
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Random Clifford depth', ylabel='Signal (a.u.)')
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        viewer = live_line(ax, num_lines=2)
-        _label_arms(ax)
-        
-        @context.plots.on_plot_thread
-        def update(data):
-            artists = viewer.set(depths.astype(float), project_arm_means(data))
-            return artists
-        
-        fig.show()
+        update = _live_plot(context.plots, depths)
         buffer = SignalBuffer(
             (run_cfg.rounds, len(seeds), 2, len(depths)),
             on_update=update,

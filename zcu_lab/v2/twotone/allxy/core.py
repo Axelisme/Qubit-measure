@@ -234,8 +234,7 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(np.arange(len(ALLXY_SEQUENCE), dtype=np.float64), allxy_signal2real(data))
-            return artists
+            return viewer.set(np.arange(len(ALLXY_SEQUENCE), dtype=np.float64), allxy_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

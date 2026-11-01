@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -240,6 +241,46 @@ def _prepare_delays(
     return windows, lengths
 
 
+def _live_plot(
+    plots: Plots, times: NDArray[np.int64]
+) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
+    """Show the normalized count/time map and its two most recent scan rows."""
+    fig, _ = plots.subplots(1, 2, num='measurement')
+    heat_ax, line_ax = fig.axes
+    heat_ax.set(xlabel='Number of Pi', ylabel='Time idxs')
+    line_ax.set_xlabel('Time idxs')
+    formatter = ScalarFormatter(useMathText=True)
+    formatter.set_powerlimits((-2, 2))
+    heat_ax.xaxis.set_major_formatter(formatter)
+    heat_ax.yaxis.set_major_formatter(formatter)
+    heatmap = live_heatmap(heat_ax, uniform=True)
+    line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    line_ax.grid()
+    lines = live_line(line_ax, num_lines=2)
+    for artist in line_ax.lines[:-1]:
+        artist.set(marker="None", alpha=0.3, color="red")
+    line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+    line_ax.legend()
+
+    @plots.on_plot_thread
+    def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
+        ys, real, snr = data
+        valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+        current = int(valid[-1]) if valid.size else -1
+        history = np.full((2, len(ys)), np.nan)
+        for offset in range(min(2, current + 1)):
+            history[-offset - 1] = real[current - offset]
+        artists = heatmap.set(times.astype(np.float64), ys, real)
+        artists = (*artists, *lines.set(ys, history))
+        title = f'snr = {snr:.1f}' if snr else None
+        if title is not None:
+            return (*artists, heat_ax.set_title(title))
+        return artists
+
+    fig.show()
+    return update
+
+
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[CPMG_Result, CPMG_Cfg]] = CPMG_GROUPED_AXES_SPEC
 
@@ -286,23 +327,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             nonlocal current_snr
             current_snr = snr
 
-        fig, _ = context.plots.subplots(1, 2, num='measurement')
-        heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel='Number of Pi', ylabel='Time idxs')
-        line_ax.set_xlabel('Time idxs')
-        formatter = ScalarFormatter(useMathText=True)
-        formatter.set_powerlimits((-2, 2))
-        heat_ax.xaxis.set_major_formatter(formatter)
-        heat_ax.yaxis.set_major_formatter(formatter)
-        heatmap = live_heatmap(heat_ax, uniform=True)
-        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        line_ax.grid()
-        lines = live_line(line_ax, num_lines=2)
-        for artist in line_ax.lines[:-1]:
-            artist.set(marker="None", alpha=0.3, color="red")
-        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
-        line_ax.legend()
-        fig.show()
+        update = _live_plot(context.plots, times)
         current_length_idx = 0
         signals_buffer = SignalBuffer(
             (len(times), len(length_idxs)),
@@ -310,20 +335,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
-            @context.plots.on_plot_thread
-            def update_viewer(data: NDArray[np.complex128]):
-                real = cpmg_signal2real(data)
-                valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
-                current = int(valid[-1]) if valid.size else -1
-                history = np.full((2, len(lengths[current_length_idx])), np.nan)
-                for offset in range(min(2, current + 1)):
-                    history[-offset - 1] = real[current - offset]
-                artists = heatmap.set(times.astype(np.float64), lengths[current_length_idx], real)
-                artists = (*artists, *lines.set(lengths[current_length_idx], history))
-                title = f'snr = {current_snr:.1f}' if current_snr else None
-                if title is not None:
-                    return (*artists, heat_ax.set_title(title))
-                return artists
+            def update_viewer(data: NDArray[np.complex128]) -> None:
+                update((lengths[current_length_idx], cpmg_signal2real(data), current_snr))
 
             # Scan pi-pulse counts on the host; sweep evolution time on the board.
             for idx, (time_value, step) in enumerate(sched.scan("count", times)):

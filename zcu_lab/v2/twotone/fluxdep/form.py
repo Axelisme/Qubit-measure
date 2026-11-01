@@ -11,7 +11,7 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 from .core import FreqFluxCfg
 
 
-def make_form(ctx: FormContext) -> Form[FreqFluxCfg]:
+def make_form(_ctx: FormContext) -> Form[FreqFluxCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqFluxCfg,

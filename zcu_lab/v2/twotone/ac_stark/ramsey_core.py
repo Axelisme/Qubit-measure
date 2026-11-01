@@ -152,9 +152,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
             history = np.full((2, len(lengths)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = heatmap.set(gains, lengths, real)
-            artists = (*artists, *lines.set(lengths, history))
-            return artists
+            return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
         
         fig.show()
         signals_buffer = SignalBuffer(

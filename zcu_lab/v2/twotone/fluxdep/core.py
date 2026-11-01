@@ -142,9 +142,7 @@ class FreqFluxExp(Experiment[FreqFluxResult, FreqFluxCfg]):
             history = np.full((2, len(freqs)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = heatmap.set(dev_values, freqs, real)
-            artists = (*artists, *lines.set(freqs, history))
-            return artists
+            return (*heatmap.set(dev_values, freqs, real), *lines.set(freqs, history))
         
         fig.show()
         signals_buffer = SignalBuffer(

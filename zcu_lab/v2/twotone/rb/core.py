@@ -138,8 +138,7 @@ class RB_Exp(Experiment[RB_Result, RBCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(depths.astype(np.float64), rb_signal2real(data))
-            return artists
+            return viewer.set(depths.astype(np.float64), rb_signal2real(data))
         
         fig.show()
 

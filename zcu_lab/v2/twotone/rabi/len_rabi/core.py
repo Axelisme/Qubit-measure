@@ -158,8 +158,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, rabi_signal2real(data))
-            return artists
+            return viewer.set(lengths, rabi_signal2real(data))
         
         fig.show()
         signals = SignalBuffer(
@@ -210,8 +209,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, rabi_signal2real(average_round(data)))
-            return artists
+            return viewer.set(lengths, rabi_signal2real(average_round(data)))
         
         fig.show()
         signals = SignalBuffer(

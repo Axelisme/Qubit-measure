@@ -153,8 +153,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, t2ramsey_signal2real(data))
-            return artists
+            return viewer.set(lengths, t2ramsey_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

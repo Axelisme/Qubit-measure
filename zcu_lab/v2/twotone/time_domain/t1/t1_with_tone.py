@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
+from pydantic.dataclasses import dataclass
 from matplotlib.ticker import MaxNLocator
 from typing import Annotated, ClassVar
 
@@ -57,7 +56,7 @@ class T1WithToneCfg(ConfigBase):
     ] = 1.0
 
 
-@validated_dataclass(frozen=True)
+@dataclass(frozen=True)
 class T1WithToneAnalyzeOptions:
     dual_exp: bool = False
 
@@ -104,8 +103,7 @@ class T1WithToneExp(Experiment[T1Result, T1WithToneCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, t1_signal2real(data))
-            return artists
+            return viewer.set(lengths, t1_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

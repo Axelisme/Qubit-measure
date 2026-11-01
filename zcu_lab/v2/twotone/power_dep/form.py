@@ -6,7 +6,7 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from .core import PowerCfg
 
 
-def make_form(ctx: FormContext) -> Form[PowerCfg]:
+def make_form(_ctx: FormContext) -> Form[PowerCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         PowerCfg,

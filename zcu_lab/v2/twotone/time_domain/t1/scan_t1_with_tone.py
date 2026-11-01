@@ -140,9 +140,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             history = np.full((5, len(lengths)), np.nan)
             for offset in range(min(5, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = heatmap.set(gains, lengths, real)
-            artists = (*artists, *lines.set(lengths, history))
-            return artists
+            return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
         
         fig.show()
         signals_buffer = SignalBuffer(

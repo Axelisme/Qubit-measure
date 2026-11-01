@@ -134,9 +134,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             history = np.full((2, len(freqs)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            artists = heatmap.set(gains, freqs, real)
-            artists = (*artists, *lines.set(freqs, history))
-            return artists
+            return (*heatmap.set(gains, freqs, real), *lines.set(freqs, history))
         
         fig.show()
         signals_buffer = SignalBuffer(

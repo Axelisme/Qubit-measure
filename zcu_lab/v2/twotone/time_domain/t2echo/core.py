@@ -156,8 +156,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(lengths, t2echo_signal2real(data))
-            return artists
+            return viewer.set(lengths, t2echo_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

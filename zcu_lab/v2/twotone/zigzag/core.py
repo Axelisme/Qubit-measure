@@ -100,8 +100,7 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(times.astype(np.float64), zigzag_signal2real(data))
-            return artists
+            return viewer.set(times.astype(np.float64), zigzag_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

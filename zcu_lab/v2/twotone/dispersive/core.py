@@ -182,8 +182,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(freqs, dispersive_signal2real(data))
-            return artists
+            return viewer.set(freqs, dispersive_signal2real(data))
         
         fig.show()
         signals_buffer = SignalBuffer(

@@ -181,8 +181,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         
         @context.plots.on_plot_thread
         def update(data):
-            artists = viewer.set(freqs, qubfreq_signal2real(data, model_type='lor'))
-            return artists
+            return viewer.set(freqs, qubfreq_signal2real(data, model_type='lor'))
         
         fig.show()
         signals_buffer = SignalBuffer(

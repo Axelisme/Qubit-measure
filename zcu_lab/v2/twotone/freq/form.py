@@ -9,7 +9,7 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 from zcu_lab.v2.twotone.freq.core import FreqCfg
 
 
-def make_form(ctx: FormContext) -> Form[FreqCfg]:
+def make_form(_ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqCfg,
