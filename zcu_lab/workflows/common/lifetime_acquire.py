@@ -11,7 +11,14 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.experiment.v2.utils.t1_sampling import materialize_nonuniform_t1_delays
-from zcu_tools.program.v2 import Delay, DelayAuto, LoadValue, Pulse, Readout, TimelineBuilder
+from zcu_tools.program.v2 import (
+    Delay,
+    DelayAuto,
+    LoadValue,
+    Pulse,
+    Readout,
+    TimelineBuilder,
+)
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.support import live_line
@@ -43,6 +50,7 @@ def run_t1(cfg: T1Cfg, *, context: RunContext, retry: int) -> T1Result:
     if cfg.sampling == "linear":
         return _run_t1_linear(cfg, context=context, retry=retry)
     return _run_t1_decay(cfg, context=context, retry=retry)
+
 
 def _run_t1_linear(cfg: T1Cfg, *, context: RunContext, retry: int) -> T1Result:
     lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
@@ -86,6 +94,7 @@ def _run_t1_linear(cfg: T1Cfg, *, context: RunContext, retry: int) -> T1Result:
             ),
         )
     return T1Result(times=lengths, signals=signals.array)
+
 
 def _run_t1_decay(cfg: T1Cfg, *, context: RunContext, retry: int) -> T1Result:
     table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
@@ -183,9 +192,7 @@ def run_t2echo(cfg: T2EchoCfg, *, context: RunContext, retry: int) -> T2EchoResu
         on_update=update,
     )
     with Schedule(signals_buffer, scope=context.scope) as sched:
-        builder = TimelineBuilder(
-            soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
-        )
+        builder = TimelineBuilder(soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay)
         length_sweep = cfg.delay
         length_param = builder.add_sweep("delay", length_sweep)
         detune_param = 360 * detune * length_param
@@ -228,4 +235,3 @@ def run_t2echo(cfg: T2EchoCfg, *, context: RunContext, retry: int) -> T2EchoResu
         signals=signals_buffer.array,
         true_activate_detune=true_detune,
     )
-

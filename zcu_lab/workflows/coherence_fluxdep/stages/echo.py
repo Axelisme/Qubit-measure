@@ -27,8 +27,8 @@ from zcu_lab.workflows.common.analysis import compare_decay_fit
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate
-from zcu_lab.workflows.common.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.lifetime_acquire import run_t2echo
+from zcu_lab.workflows.common.lifetime_models import LifetimeModelRecord
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 

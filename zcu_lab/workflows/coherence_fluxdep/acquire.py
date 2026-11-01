@@ -16,7 +16,6 @@ from zcu_tools.program.v2 import (
     Reset,
     TimelineBuilder,
 )
-
 from zcu_tools.utils.process import rotate2real
 
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Result
@@ -175,4 +174,3 @@ def run_ge(cfg: GE_Cfg, *, context: RunContext) -> GE_Result:
         signals=signals,
         shot_indices=np.arange(signals.shape[1], dtype=np.int64),
     )
-

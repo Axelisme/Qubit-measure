@@ -28,12 +28,12 @@ from zcu_lab.workflows.common.analysis import (
 from zcu_lab.workflows.common.calibration_results import StageStatus
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
 from zcu_lab.workflows.common.gates import Gate, gate
+from zcu_lab.workflows.common.lifetime_acquire import run_t1
 from zcu_lab.workflows.common.lifetime_models import (
     LifetimeComparison,
     LifetimeModelRecord,
     draw_lifetime_comparison,
 )
-from zcu_lab.workflows.common.lifetime_acquire import run_t1
 from zcu_lab.workflows.common.stages import NativeOutput, StageEnv, acquire_saved
 
 
