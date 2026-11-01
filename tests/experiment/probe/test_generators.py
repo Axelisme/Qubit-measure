@@ -27,6 +27,18 @@ def test_synthesize_forwards_native_model_call_and_preserves_model_shape(shape):
     assert_array_equal(xs, [[1.0, 2.0], [3.0, 4.0]])
 
 
+def test_synthesize_converts_tuple_model_output_to_two_branches():
+    xs = np.array([1.0, 2.0, 3.0])
+
+    def model(coordinates: NDArray[np.float64], split: float):
+        return coordinates + split, coordinates - split
+
+    actual = generators.synthesize(model, xs, [0.5], noise_std=0.0, seed=17)
+
+    assert actual.shape == (2, 3)
+    assert_array_equal(actual, [[1.5, 2.5, 3.5], [0.5, 1.5, 2.5]])
+
+
 @pytest.mark.parametrize("complex_output", [False, True])
 def test_synthesize_adds_independent_gaussian_noise_with_local_seed(complex_output):
     xs = np.arange(3.0)
