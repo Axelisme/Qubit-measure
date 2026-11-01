@@ -12,9 +12,9 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, Readout, Reset, TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
 
@@ -101,11 +101,10 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             program = builder.build()
 
             # Retain raw IQ; an interrupted acquisition leaves missing data.
-            try:
-                program.acquire(soc, progress=True, cancel_flag=sched.stop)
-            except StoppedPartialAcquireError:
-                sched.set_stop()
-            else:
+            shots = sched.run_acquire_shots(
+                program, soc, options=RunOptions(progress=True)
+            )
+            if shots is not None:
                 signals_buffer.set(raw_shots_to_signal(program))
         signals = signals_buffer.array
 
