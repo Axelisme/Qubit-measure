@@ -104,7 +104,7 @@ def drive_ratios(
     width2 = decay[i, j, None] ** 2 + inverse_time**2
     # Scalar complex products/abs retain rounding that vector ufuncs can change.
     strengths = np.fromiter(
-        (max(abs(a), abs(b)) for a, b in zip(plus[i, j], minus[i, j])),
+        (max(abs(a), abs(b)) for a, b in zip(plus[i, j], minus[i, j], strict=True)),
         dtype=np.float64,
         count=len(i),
     )
@@ -115,7 +115,7 @@ def drive_ratios(
         paths = np.fromiter(
             (
                 max(abs(plus[a, k] * plus[k, b]), abs(minus[a, k] * minus[k, b]))
-                for a, b in zip(i, j)
+                for a, b in zip(i, j, strict=True)
             ),
             dtype=np.float64,
             count=len(i),
@@ -125,7 +125,7 @@ def drive_ratios(
         )
     two_ratios = amplitude / np.sqrt((2 * frequency - gap) ** 2 + width2)
     # triu_indices follows the original i/j order; keep each maximum in order.
-    for one_ratio, two_ratio in zip(one_ratios, two_ratios):
+    for one_ratio, two_ratio in zip(one_ratios, two_ratios, strict=True):
         one = np.maximum(one, one_ratio)
         two = np.maximum(two, two_ratio)
     return one, two
