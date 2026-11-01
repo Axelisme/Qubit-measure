@@ -27,9 +27,6 @@ from zcu_lab.v2.support.singleshot.util import ge_signals_by_state, raw_shots_to
 from .analysis import GEConfusionResult, calc_confusion_matrix, plot_confusion_matrix
 
 
-def _default_prepared_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
-
 
 @dataclass(frozen=True)
 class GE_Result:
@@ -37,7 +34,6 @@ class GE_Result:
 
     signals: NDArray[np.complex128]
     shot_indices: NDArray[np.int64]
-    prepared_states: NDArray[np.int64]
 
 
 @pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
@@ -145,13 +141,13 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
                 "shot_indices", label="Shot Index", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
-                "prepared_states", label="Prepared State", unit="None", dtype=np.int64
+                values=(0, 1), label="Prepared State", unit="None", dtype=np.int64
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=GE_Result,
         cfg_type=GE_Cfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/ge",
     )
 
@@ -228,7 +224,6 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         return GE_Result(
             signals=signals,
             shot_indices=np.arange(signals.shape[1], dtype=np.int64),
-            prepared_states=_default_prepared_states(),
         )
 
     def analyze(
@@ -257,8 +252,7 @@ class GE_Exp(Experiment[GE_Result, GE_Cfg]):
         """
         # Acquisition order is always probe off/on; fit in physical g/e order.
         signals = ge_signals_by_state(source.result.signals, options.initial_state)
-        if options.backend not in ("pca", "center"):
-            raise ValueError(f"Unknown backend: {options.backend}")
+
         if "fit" in plots:
             raise ValueError("Figure already exists: fit")
         _, axes = plots.subplots(num="fit")

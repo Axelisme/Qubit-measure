@@ -30,9 +30,7 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
     tones: list[dict[str, FormNode]] = [
         {
             "name": name,
-            "drive": Slot(f"{name}.module.x90")
-            if ctx.has(f"{name}.module.x90")
-            else Template("pi2_pulse", bindings={"qubit": name}),
+            "drive": Slot(f"{name}.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": name})),
             "detune": 0.0,
         }
         for name in names

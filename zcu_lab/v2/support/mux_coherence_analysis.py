@@ -117,16 +117,16 @@ def fit_coherence_trace(
     """
     # Fit with the caller's numeric phase choice, never an experiment name.
     if fit_fringe:
-        t2, error, detune, detune_error, fitted, (params, covariance) = (
-            fit_decay_fringe(
-                trace.times,
-                real,
-                fixedparams=None if phase is None else [None, None, None, phase, None],
-            )
+        fit = fit_decay_fringe(
+            trace.times, real,
+            fixedparams=None if phase is None else [None, None, None, phase, None],
         )
+        detune, detune_error = fit.freq, fit.freq_err
     else:
-        t2, error, fitted, (params, covariance) = fit_decay(trace.times, real)
+        fit = fit_decay(trace.times, real)
         detune, detune_error = 0.0, 0.0
+    t2, error = fit.decay_time, fit.decay_time_err
+    fitted, params, covariance = fit.curve, fit.params, fit.cov
     if not np.all(np.isfinite((t2, error, detune, detune_error))):
         raise ValueError("Coherence fit returned nonfinite estimates")
 

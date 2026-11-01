@@ -34,7 +34,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     shot_sums,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg, circle_classifier
+from zcu_tools.program.v2.modules.readout import require_circle_classifiers
 from zcu_tools.progress_bar import make_pbar
 
 from zcu_lab.v2.support import live_heatmap, live_line
@@ -109,13 +109,6 @@ def _plot_transition_rates(
         ax.set_xlim(xs[0], xs[-1])
 
 
-def _default_initial_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
-
-
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
-
 
 def _require_positive_lengths(lengths: NDArray[np.float64]) -> None:
     invalid = lengths[~np.isfinite(lengths) | (lengths <= 0.0)]
@@ -137,10 +130,6 @@ class T1WithToneSweepResult:
     xs: NDArray[np.float64]
     lengths: NDArray[np.float64]
     counts: NDArray[np.float64]
-    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class T1WithToneSweepCfg(ConfigBase):
@@ -195,13 +184,13 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneSweepResult, T1WithToneSweepCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
             ),
             AxesSpec.Axis(
-                "initial_states", label="Initial State", unit="None", dtype=np.int64
+                values=(0, 1), label="Initial State", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis("xs", label="Sweep Value", unit="a.u.", dtype=np.float64),
         ),
@@ -209,7 +198,7 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         data_variable=DataVariable("counts"),
         result_type=T1WithToneSweepResult,
         cfg_type=T1WithToneSweepCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="singleshot/t1/t1_with_tone_sweep",
     )
 
@@ -276,20 +265,8 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         """
         # Copy the cfg and select the classifier before dispatching acquisition.
         cfg = deepcopy(cfg)
-        ro_ch = (
-            cfg.readout.ro_ch
-            if isinstance(cfg.readout, PulseReadoutCfg)
-            else cfg.readout.tones[0].ro_ch
-        )
-        classifier = circle_classifier(cfg.readout, ro_ch=ro_ch)
-        axis = Classify(
-            "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
-            classifier=classifier,
-        )
+        require_circle_classifiers(cfg.readout)
+        axis = Classify("readout")
         soc, soccfg = context.soc, context.soccfg
         sweep_name, xs = self._resolve_outer_sweep(cfg, soccfg)
         if cfg.sampling == "linear":

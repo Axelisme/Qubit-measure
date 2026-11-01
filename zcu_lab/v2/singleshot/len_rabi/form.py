@@ -22,9 +22,7 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
         tree={
             "reset": Slot("$qubit.module.reset"),
             "qub_pulse": qub_pulse,
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
             "length": Range(0.03, length_stop, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "shots": 1000,

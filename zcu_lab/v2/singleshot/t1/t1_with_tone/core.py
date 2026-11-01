@@ -34,17 +34,9 @@ from zcu_tools.program.v2 import (
     TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 
 from zcu_lab.v2.support import live_line
 
-
-def _default_initial_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
-
-
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
 
 
 def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -64,10 +56,6 @@ class T1WithToneResult:
 
     lengths: NDArray[np.float64]
     counts: NDArray[np.float64]
-    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class T1WithToneCfg(ConfigBase):
@@ -114,10 +102,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
-                "initial_states", label="Initial State", unit="None", dtype=np.int64
+                values=(0, 1), label="Initial State", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
@@ -127,7 +115,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         data_variable=DataVariable("counts"),
         result_type=T1WithToneResult,
         cfg_type=T1WithToneCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="singleshot/t1/t1_with_tone",
     )
 
@@ -197,10 +185,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             program = builder.build()
             axis = Classify(
                 "readout",
-                tone=0
-                if not isinstance(cfg.readout, PulseReadoutCfg)
-                and len(cfg.readout.tones) > 1
-                else None,
+
             )
             sched.run_acquire_summed(
                 program,
@@ -252,10 +237,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     program = programs[length_key]
                     axis = Classify(
                         "readout",
-                        tone=0
-                        if not isinstance(cfg.readout, PulseReadoutCfg)
-                        and len(cfg.readout.tones) > 1
-                        else None,
+
                     )
                     step.run_acquire_summed(
                         program,

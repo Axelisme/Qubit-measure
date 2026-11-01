@@ -81,10 +81,16 @@ class MuxGEPostAnalysis:
 
 def _failure_plot(plots: Plots, name: str, reason: str) -> None:
     if name not in plots:
-        _, ax = plots.subplots(name)
+        _, ax = plots.subplots(num=name)
         ax.text(0.02, 0.98, reason, transform=ax.transAxes, va="top", wrap=True)
     else:
-        plots[name].suptitle(reason, wrap=True)
+        figure = plots[name]
+
+        @plots.on_plot_thread
+        def update(message: str):
+            return (figure.suptitle(message, wrap=True),)
+
+        update(reason)
 
 
 def analyze_ge(
@@ -125,7 +131,7 @@ def analyze_ge(
     for row, (index, option) in enumerate(zip(indices, selected, strict=True)):
         name = f"fit_{index}"
         signals = ge_signals_by_state(source.result.signals[row], option.initial_state)
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         for cloud, label, color in zip(
             signals,
             ("g preparation", "e preparation"),
@@ -253,7 +259,7 @@ def _plot_confusion_matrix(
     """
     g_signals, e_signals = signals
     fig, _ = plots.subplots(
-        figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
     )
     g_iq_ax, initial_populations_ax, e_iq_ax, confusion_matrix_ax = fig.axes
 

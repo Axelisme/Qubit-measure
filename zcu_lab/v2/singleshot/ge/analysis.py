@@ -244,7 +244,7 @@ def plot_confusion_matrix(
     g_signals, e_signals = signals
     g_center, e_center = primary.g_center, primary.e_center
     fig, _ = plots.subplots(
-        figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
+        num=figure_name, nrows=2, ncols=2, figsize=(8, 8), layout="constrained"
     )
     ax1, ax4, ax2, ax3 = fig.axes
 

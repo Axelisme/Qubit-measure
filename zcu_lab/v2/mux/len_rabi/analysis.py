@@ -55,21 +55,21 @@ def analyze_length(
         finite = np.isfinite(signal)
         xs = result.coordinates[row, finite]
         signal = signal[finite]
-        fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
         ax.set(xlabel="Pulse length (us)", ylabel="Signal real (a.u.)")
         fig.suptitle(f"tone {index}")
         try:
             if len(xs) < 6:
                 raise ValueError("Len Rabi fit requires at least six acquired points")
             real = rabi_signal2real(signal)
-            pi, pierr, pi2, pi2err, freq, freqerr, fitted, (params, covariance) = (
-                fit_rabi(
-                    xs,
-                    real,
-                    decay=options.decay,
-                    init_phase=None if options.fit_phase else 0.0,
-                )
+            fit = fit_rabi(
+                xs, real, decay=options.decay,
+                init_phase=None if options.fit_phase else 0.0,
             )
+            pi, pierr = fit.pi_x, fit.pi_x_err
+            pi2, pi2err = fit.pi2_x, fit.pi2_x_err
+            freq, freqerr = fit.freq, fit.freq_err
+            fitted, params, covariance = fit.curve, fit.params, fit.cov
             if not np.all(np.isfinite((pi, pierr, pi2, pi2err, freq, freqerr))):
                 raise ValueError("Len Rabi fit returned nonfinite estimates")
             names = ("y0", "yscale", "freq", "phase") + (

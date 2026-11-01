@@ -39,9 +39,6 @@ from zcu_lab.v2.support import live_heatmap, live_line
 from zcu_lab.v2.support.resonance import get_resonance_freq
 
 
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
-
 
 @dataclass(frozen=True)
 class AcStarkResult:
@@ -49,7 +46,7 @@ class AcStarkResult:
 
     Gains are in a.u.; frequencies are in MHz.
 
-    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    The final state axis is [g,e,other], with fixed coordinates [0,1,2].
     Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
@@ -57,9 +54,6 @@ class AcStarkResult:
     gains: NDArray[np.float64]
     freqs: NDArray[np.float64]
     counts: NDArray[np.float64]
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class AcStarkCfg(ConfigBase):
@@ -116,7 +110,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
     AXES_SPEC: ClassVar[AxesSpec[AcStarkResult, AcStarkCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "freqs", label="Frequency", unit="Hz", scale=1e6, dtype=np.float64
@@ -129,7 +123,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         result_type=AcStarkResult,
         cfg_type=AcStarkCfg,
         data_variable=DataVariable("counts"),
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/ac_stark",
     )
 
@@ -161,10 +155,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
+
         )
 
         gain_sweep = cfg.gain

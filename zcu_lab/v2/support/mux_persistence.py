@@ -32,7 +32,7 @@ def mux_sweep_spec[T: ConfigBase](
     # Keep each tone's own coordinates on the same Point/Tone grid as its IQ.
     axes = (
         VariableAxisSpec.generated_arange("Point", "", dtype=np.int64),
-        VariableAxisSpec("Tone", "", field_name="tone_indices", dtype=np.int64),
+        VariableAxisSpec(label="Tone", unit="", field_name="tone_indices", dtype=np.int64),
     )
 
     def build(data: GroupedLoadData[T]) -> MuxSweepResult:

@@ -35,24 +35,18 @@ from zcu_tools.program.v2.modules.readout import (
 from zcu_lab.v2.support import live_line
 
 
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
-
 
 @dataclass(frozen=True)
 class FreqResult:
     """Rounded freqs in MHz and class counts (Nfreq, 3).
 
-    The final state axis is [g,e,other], labeled by population_states=[0,1,2].
+    The final state axis is [g,e,other], with fixed coordinates [0,1,2].
     Counts sum over shots and completed rounds, without normalization.
     Unmeasured points remain NaN after cancellation.
     """
 
     freqs: NDArray[np.float64]
     counts: NDArray[np.float64]
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class FreqCfg(ConfigBase):
@@ -90,7 +84,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
     AXES_SPEC: ClassVar[AxesSpec[FreqResult, FreqCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "freqs", label="Drive Freq", unit="Hz", scale=1e6, dtype=np.float64
@@ -100,7 +94,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         result_type=FreqResult,
         cfg_type=FreqCfg,
         data_variable=DataVariable("counts"),
-        cfg_schema_version="3.0",
+        cfg_schema_version="4.0",
         tag="singleshot/mist/freq",
     )
 
@@ -123,10 +117,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         require_circle_classifiers(cfg.readout)
         read_axis = Classify(
             "readout",
-            tone=0
-            if not isinstance(cfg.readout, PulseReadoutCfg)
-            and len(cfg.readout.tones) > 1
-            else None,
+
         )
 
         freqs = sweep2array(
