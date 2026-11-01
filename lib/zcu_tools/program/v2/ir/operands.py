@@ -184,15 +184,21 @@ class ImmValue(Operand):
 
 @dataclass(frozen=True)
 class Immediate(Operand):
-    """Immediate integer value: #N (for ALU ops, REG_WR imm, etc.)"""
+    """Immediate integer for ALU ops and REG_WR.
+
+    ``value`` is the integer payload. ``unsigned`` selects QICK's ``#uN``
+    encoding instead of signed ``#N``; the instruction determines its bit width.
+    """
 
     value: int
+    unsigned: bool = False
 
     def regs(self) -> frozenset[str]:
         return frozenset()
 
     def __str__(self) -> str:
-        return f"#{self.value}"
+        prefix = "#u" if self.unsigned else "#"
+        return f"{prefix}{self.value}"
 
 
 @dataclass(frozen=True)
@@ -340,7 +346,7 @@ def parse_immediate(val: Immediate | str | int | None) -> Immediate | None:
     if not val.startswith("#"):
         return None
     try:
-        return Immediate(value=_parse_prefixed_int(val))
+        return Immediate(value=_parse_prefixed_int(val), unsigned=val.startswith("#u"))
     except ValueError:
         return None
 

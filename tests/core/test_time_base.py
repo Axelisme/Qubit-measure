@@ -8,19 +8,20 @@ from zcu_tools.core import simulation
 
 
 @pytest.mark.parametrize(
-    ("clocks_mhz", "periods"),
+    ("clocks_mhz", "frequency", "periods"),
     [
-        ((430.08, 384.0, 307.2, 6144.0), (100, 112, 140, 7)),
-        ((430.08, 384.0, 76.8, 6144.0), (100, 112, 560, 7)),
+        ((430.08, 384.0, 307.2, 6144.0), Fraction(43008), (100, 112, 140, 7)),
+        ((430.08, 384.0, 76.8, 6144.0), Fraction(43008), (100, 112, 560, 7)),
+        ((430.08, 599.04, 307.2, 38.4), Fraction(419328, 5), (195, 140, 273, 2184)),
     ],
-    ids=["mock", "ftf"],
+    ids=["mock", "ftf", "hardware"],
 )
 def test_board_clocks_share_exact_integer_periods(
-    clocks_mhz: tuple[float, ...], periods: tuple[int, ...]
+    clocks_mhz: tuple[float, ...], frequency: Fraction, periods: tuple[int, ...]
 ) -> None:
     time_base = simulation.TimeBase.from_clocks(clocks_mhz)
 
-    assert time_base.ticks_per_us == Fraction(43008)
+    assert time_base.ticks_per_us == frequency
     assert tuple(time_base.period_ticks(clock) for clock in clocks_mhz) == periods
 
 
@@ -139,6 +140,37 @@ def test_clock_frequencies_must_be_positive_and_finite(clock: float) -> None:
 def test_unrepresentable_time_bases_fail_at_construction(frequency: Fraction) -> None:
     with pytest.raises(OverflowError):
         simulation.TimeBase(frequency)
+
+
+@pytest.mark.parametrize(
+    ("clocks_mhz", "lcm_mhz", "limit_reason"),
+    [
+        (
+            (430.0801001, 599.0401),
+            "25763522617191401/10000",
+            "not exact in float64",
+        ),
+        (
+            (430.0801, 599.0401, 307.2001, 38.4),
+            "15195948907225359974592/5",
+            "exceeds int64 range",
+        ),
+    ],
+    ids=["float64-exactness", "int64-range"],
+)
+def test_common_clock_overflow_reports_clocks_lcm_and_ratio_denominators(
+    clocks_mhz: tuple[float, ...], lcm_mhz: str, limit_reason: str
+) -> None:
+    with pytest.raises(OverflowError) as raised:
+        simulation.TimeBase.from_clocks(iter(clocks_mhz))
+
+    message = str(raised.value)
+    for clock in clocks_mhz:
+        assert repr(clock) in message
+    assert f"LCM={lcm_mhz} MHz" in message
+    assert "clock ratios" in message
+    assert "denominators" in message
+    assert limit_reason in message
 
 
 def test_common_clock_build_validates_input_and_intermediate_ranges() -> None:
