@@ -595,7 +595,9 @@ class ComponentDriver:
             if not isinstance(menu, QMenu):
                 raise LookupError("No visible popup menu")
             entries.extend(
-                MenuActionObservation(a.text(), a.isEnabled(), a.objectName())
+                MenuActionObservation(
+                    a.text(), a.isEnabled(), a.objectName(), a.shortcut().toString()
+                )
                 for a in menu.actions()
                 if a.isVisible() and not menu.actionGeometry(a).isEmpty()
             )
