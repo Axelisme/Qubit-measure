@@ -20,8 +20,14 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
         PowerCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "jpa_rf_dev": rf_source,
             "jpa_power": Range.around("$jpa.pump_power", 5.0, expts=101),
             "skew_penalty": 0.0,

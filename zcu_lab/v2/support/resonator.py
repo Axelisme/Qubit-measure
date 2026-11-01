@@ -5,13 +5,11 @@ from dataclasses import dataclass
 from numbers import Integral, Real
 from typing import Annotated, Literal
 
-from pydantic import Field
-
-from pydantic.dataclasses import dataclass as pydantic_dataclass
-
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     HangerModel,

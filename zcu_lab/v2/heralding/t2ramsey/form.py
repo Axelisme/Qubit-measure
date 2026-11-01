@@ -62,8 +62,18 @@ def make_form(ctx: FormContext) -> Form[HeraldingT2RamseyInput]:
         HeraldingT2RamseyInput,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi2_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"}, seed_metadata=pulse_readout_seed_metadata(gain=0.1))),
+            "pi2_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "delay": Range(0.0, "1.5 * $qubit.t2r", expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

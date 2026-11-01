@@ -19,8 +19,14 @@ def make_form(ctx: FormContext) -> Form[PhaseCfg]:
                 bindings={"qubit": "$qubit"},
                 set={"waveform.length": 1.0},
             ),
-            "pi2_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "pi2_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "length": Range(0.0, 1.0, expts=101),
             "phase": Range(-180.0, 180.0, expts=61),
             "readout_t": 2.0,

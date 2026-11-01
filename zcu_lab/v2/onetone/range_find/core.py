@@ -6,11 +6,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Annotated, ClassVar
 
-from pydantic import Field, field_validator
-
-from pydantic.dataclasses import dataclass as pydantic_dataclass
-
 import numpy as np
+from pydantic import Field, field_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.dips import DipFinderOptions, find_spectrum_dips
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -83,11 +81,15 @@ class RangeFindOptions:
     """
 
     resonators: Annotated[list[str], Field(strict=True)] = field(default_factory=list)
-    min_separation: Annotated[
-        float, Field(gt=0, strict=True, allow_inf_nan=False)
-    ] = DEFAULT_MIN_SEPARATION_MHZ
-    smoothing_sigma: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)] = 0.0
-    prominence_factor: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)] = 5.0
+    min_separation: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = (
+        DEFAULT_MIN_SEPARATION_MHZ
+    )
+    smoothing_sigma: Annotated[float, Field(ge=0, strict=True, allow_inf_nan=False)] = (
+        0.0
+    )
+    prominence_factor: Annotated[
+        float, Field(ge=0, strict=True, allow_inf_nan=False)
+    ] = 5.0
     max_fwhm: Annotated[float, Field(gt=0, strict=True, allow_inf_nan=False)] = 25.0
 
     @field_validator("resonators")

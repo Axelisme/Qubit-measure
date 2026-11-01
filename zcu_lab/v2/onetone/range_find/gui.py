@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, TypeAlias
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -80,12 +80,14 @@ class RangeFindParams:
             raise ValueError(
                 f'Resonators must be a JSON list such as ["R2", "R1"]: {error.msg}'
             ) from error
-        return RangeFindOptions(
-            resonators=decoded,
-            min_separation=self.min_separation,
-            smoothing_sigma=self.smoothing_sigma,
-            prominence_factor=self.prominence_factor,
-            max_fwhm=self.max_fwhm,
+        return TypeAdapter(RangeFindOptions).validate_python(
+            {
+                "resonators": decoded,
+                "min_separation": self.min_separation,
+                "smoothing_sigma": self.smoothing_sigma,
+                "prominence_factor": self.prominence_factor,
+                "max_fwhm": self.max_fwhm,
+            }
         )
 
 

@@ -25,7 +25,10 @@ def make_form(ctx: FormContext) -> Form[MistCfg]:
                 bindings={"resonator": "$resonator"},
                 set={"gain": Hidden(0.0)},
             ),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "flux_gain": Range(0.0, 0.1, expts=101),
             "mist_gain": Range(0.0, 0.1, expts=101),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5.0),

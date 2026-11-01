@@ -20,8 +20,14 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         FreqCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "pi_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "jpa_rf_dev": rf_source,
             "jpa_freq": Range(
                 "0.98 * $jpa.pump_freq", "1.02 * $jpa.pump_freq", expts=101

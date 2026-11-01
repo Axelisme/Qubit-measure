@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar, Self
-
-from pydantic import model_validator, Literal
-
-from pydantic.dataclasses import dataclass as pydantic_dataclass
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import model_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -63,7 +61,9 @@ class FluxDepAnalyzeOptions:
     @model_validator(mode="after")
     def require_flux_calibration(self) -> Self:
         """Require both calibration coordinates when showing the secondary axis."""
-        if self.secondary_xaxis and (self.flux_half is None or self.flux_period is None):
+        if self.secondary_xaxis and (
+            self.flux_half is None or self.flux_period is None
+        ):
             raise ValueError("Secondary flux axis requires flux_half and flux_period")
         return self
 
@@ -147,7 +147,9 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
         heat_ax.set(
-            xlabel="Flux device value", ylabel="Readout power (a.u.)", title="MIST over FLux"
+            xlabel="Flux device value",
+            ylabel="Readout power (a.u.)",
+            title="MIST over FLux",
         )
         line_ax.set(xlabel="Readout power (a.u.)", title="MIST over FLux")
         heatmap = live_heatmap(heat_ax)
