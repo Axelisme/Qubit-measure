@@ -10,7 +10,7 @@ from zcu_lab.v2.twotone.ro_optimize.power.core import PowerCfg
 
 
 def make_form(ctx: FormContext) -> Form[PowerCfg]:
-    """Build starting values and shape from the captured source availability."""
+    """Build from captured sources; wait starts at 0.01*T1, relax_delay at 5*T1."""
     readout = source(
         ctx,
         "$resonator.module.readout",
@@ -32,6 +32,7 @@ def make_form(ctx: FormContext) -> Form[PowerCfg]:
             ),
             "readout": readout,
             "gain": Range(0.001, 0.2, expts=101),
+            "wait": t1_initial_time(ctx.parameters, multiplier=0.01),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,
             "rounds": 10,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, TypeAlias
 
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
@@ -21,10 +21,10 @@ from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
 from zcu_lab.v2.twotone.ro_optimize.power.core import (
-    PowerAnalysis,
     PowerAnalyzeOptions,
     PowerCfg,
     PowerExp,
+    PowerQndAnalysis,
     PowerResult,
 )
 from zcu_lab.v2.twotone.ro_optimize.power.form import make_form
@@ -34,43 +34,38 @@ RoOptPowerRunResult: TypeAlias = RunRecord[PowerCfg, PowerResult]
 
 @dataclass
 class RoOptPowerAnalyzeParams:
-    smooth_method: Annotated[
-        Literal["wavelet", "gaussian"], ParamMeta(label="Smooth method")
-    ] = "wavelet"
-    smooth: Annotated[float, ParamMeta(label="Smooth strength", decimals=2)] = 1.0
-    penalty_ratio: Annotated[
-        float, ParamMeta(label="Power penalty ratio", decimals=2)
-    ] = 0.5
+    """Leave gain empty to inspect curves without proposing any writeback."""
+
+    gain: Annotated[
+        float | None, ParamMeta(label="Selected gain (a.u.)", decimals=4)
+    ] = None
 
 
 def _RoOptPower_analyze(
     req: AnalyzeRequest[RoOptPowerRunResult, RoOptPowerAnalyzeParams], *, plots: Plots
-) -> PowerAnalysis:
-    params = req.analyze_params
-    options = PowerAnalyzeOptions(
-        penalty_ratio=params.penalty_ratio,
-        smooth=params.smooth,
-        smooth_method=params.smooth_method,
-    )
+) -> PowerQndAnalysis:
+    options = PowerAnalyzeOptions(gain=req.analyze_params.gain)
     return PowerExp().analyze(req.run_result, options, plots=plots)
 
 
 def _RoOptPower_get_writeback_items(
-    req: WritebackRequest[RoOptPowerRunResult, PowerAnalysis],
+    req: WritebackRequest[RoOptPowerRunResult, PowerQndAnalysis],
 ) -> Sequence[WritebackItem]:
-    result = req.analyze_result
+    gain = req.analyze_result.gain
+    if gain is None:
+        return []
     items: list[WritebackItem] = [
         ParameterWriteback(
             target_name="$qubit.ext.best_ro_gain",
-            description="Optimal readout gain (a.u.)",
-            proposed_value=result.best_gain,
+            description="Human-selected QND readout gain (a.u.)",
+            proposed_value=gain,
         ),
     ]
     items.extend(
         readout_dpm_writeback_items(
             req.ctx,
             req.run_result.cfg,
-            proposed={"best_ro_gain": result.best_gain},
+            proposed={"best_ro_gain": gain},
         )
     )
     return items

@@ -20,8 +20,28 @@ class ProgramResourcesMixin(QickProgramV2):
 
     def _reset_resources(self) -> None:
         self._dmem_buffer: list[int] = []
+        self._template_names: set[str] = set()
         self._protected_gen_routes: dict[int, str] = {}
         self._protected_ro_routes: dict[int, str] = {}
+
+    def allocate_template_name(self, base: str) -> str:
+        """Reserve a program-local QICK pulse/config template name.
+
+        base is the preferred nonempty name. Return base if unused, otherwise
+        append _2, _3, etc., avoiding both reservations and registered pulses.
+        The reservation lasts until this program is recompiled. Call during
+        declaration, then register the template under the returned name.
+        Empty base raises ValueError. No hardware or other program is changed.
+        """
+        if not base:
+            raise ValueError("template base name must not be empty")
+        name = base
+        number = 2
+        while name in self._template_names or name in self.pulses:
+            name = f"{base}_{number}"
+            number += 1
+        self._template_names.add(name)
+        return name
 
     def protect_readout_routes(
         self, owner: str, gen_ch: int, ro_chs: Sequence[int]
