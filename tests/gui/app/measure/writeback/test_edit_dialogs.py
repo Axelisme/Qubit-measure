@@ -1,6 +1,7 @@
 """Writeback editing feedback through the ledger's public Qt surface."""
 
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -213,6 +214,8 @@ def test_module_leaf_changes_include_additions_removals_and_nested_fields():
 
 @pytest.fixture
 def module_editor(qapp, monkeypatch):
+    callback_errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *error: callback_errors.append(error))
     from zcu_tools.cfg_model import ConstWaveformCfg, PulseSpec
     from zcu_tools.gui.app.measure.writeback import ModuleWriteback
     from zcu_tools.gui.session.library_entry import ModuleEntryForm
@@ -258,8 +261,10 @@ def module_editor(qapp, monkeypatch):
     widget.populate([item], preview())
     widget.show()
     button(widget, "Edit").click()
+    assert not callback_errors, callback_errors
     dialog = next(d for d in widget.findChildren(QDialog) if d.isVisible())
     yield widget, dialog, item, ctrl, form, current, messages
+    assert not callback_errors, callback_errors
     dialog.close()
     widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
