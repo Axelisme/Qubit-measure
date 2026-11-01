@@ -20,7 +20,15 @@ Reps 是每點每 round 的 shots，Rounds 是軟體 rounds。Relax delay 是每
 
 Run 的 measurement 顯示通過 shot 的平均 IQ magnitude。跨 round 依通過數加權，不平均各 round 的平均值。沒有 shot 通過的點為 NaN，通過比例為 0；取消前未完成的點保留 NaN。
 
-Analyze 沿用普通 T1 的 IQ rotation 與單／雙 exponential fit。Skip leading points 先從原網格移除前幾點，之後再排除非有限 time/IQ，才做 rotation 與 fit。Pass fraction 不當作 fit weight。有效點不足時分析會失敗。Apply 只在操作員確認後寫回 `$qubit.t1`。
+Analyze 取 herald-g 的 signal 條件平均 IQ。Skip leading points 的 `skip` 先從原網格移除前幾點，之後排除非有限 time／IQ，再做 IQ rotation，取實部擬合。本實驗直接呼叫 `fit_decay` 做單 exponential fit；開啟 Dual exponential 的 `dual_exp` 時改用 `fit_dual_decay`。本實驗在 `fit` 圖畫出旋轉後的資料與擬合曲線，標題顯示壽命與標準誤。Pass fraction 不當作 fit weight。分析不需要 saved cfg，有效點不足時分析會失敗。
+
+Analyze 回傳 `HeraldingT1Analysis`：
+
+- `t1`、`t1_err` 是主要衰減時間與標準誤，單位 us，皆不為 None。
+- `t1b`、`t1b_err` 是第二個衰減時間與標準誤，單位 us；單 exponential fit 時兩者為 None。
+- `fit_quality["fit"]` 保存無因次的殘差與相對誤差診斷。型別允許未提供診斷時 `fit_quality` 為 None，本實驗的 Analyze 每次成功都提供診斷。
+
+Apply 只在操作員確認後寫回 `$qubit.t1`。
 
 ## Save 與載回
 

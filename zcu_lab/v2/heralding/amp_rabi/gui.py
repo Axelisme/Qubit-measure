@@ -23,7 +23,12 @@ from zcu_lab.v2.twotone.rabi.amp_rabi.core import (
 )
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI
 
-from .core import HeraldingAmpRabiCfg, HeraldingAmpRabiExp, HeraldingAmpRabiResult
+from .core import (
+    HeraldingAmpRabiAnalysis,
+    HeraldingAmpRabiCfg,
+    HeraldingAmpRabiExp,
+    HeraldingAmpRabiResult,
+)
 from .form import make_form
 
 
@@ -40,8 +45,8 @@ def analyze(
     ],
     *,
     plots: Plots,
-) -> AmpRabiAnalysis:
-    """Fit selected finite points with the ordinary amplitude-Rabi analysis owner."""
+) -> HeraldingAmpRabiAnalysis:
+    """Fit finite herald-g IQ and publish this experiment's calibration plot."""
     return HeraldingAmpRabiExp().analyze(
         req.run_result, req.analyze_params, plots=plots
     )
@@ -49,7 +54,7 @@ def analyze(
 
 def writeback(
     req: WritebackRequest[
-        RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult], AmpRabiAnalysis
+        RunRecord[HeraldingAmpRabiCfg, HeraldingAmpRabiResult], HeraldingAmpRabiAnalysis
     ],
 ) -> list[WritebackItem]:
     """Reuse ordinary Rabi's five proposals, with Heralded descriptions.
@@ -69,8 +74,16 @@ def writeback(
         ),
         metadata=source.metadata,
     )
+    analysis = req.analyze_result
+    ordinary_analysis = AmpRabiAnalysis(
+        pi_amp=analysis.pi_amp,
+        pi_amp_err=analysis.pi_amp_err,
+        pi2_amp=analysis.pi2_amp,
+        pi2_amp_err=analysis.pi2_amp_err,
+        fit_quality=analysis.fit_quality,
+    )
     items = AMP_RABI.get_writeback_items(
-        WritebackRequest(ordinary, req.analyze_result, req.ctx)
+        WritebackRequest(ordinary, ordinary_analysis, req.ctx)
     )
     return [replace(item, description=f"Heralded {item.description}") for item in items]
 

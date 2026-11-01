@@ -13,9 +13,14 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.time_domain.t1.core import T1Analysis, T1AnalyzeOptions
+from zcu_lab.v2.twotone.time_domain.t1.core import T1AnalyzeOptions
 
-from .core import HeraldingT1Cfg, HeraldingT1Exp, HeraldingT1Result
+from .core import (
+    HeraldingT1Analysis,
+    HeraldingT1Cfg,
+    HeraldingT1Exp,
+    HeraldingT1Result,
+)
 from .form import make_form
 
 
@@ -30,13 +35,15 @@ def analyze(
     req: AnalyzeRequest[RunRecord[HeraldingT1Cfg, HeraldingT1Result], T1AnalyzeOptions],
     *,
     plots: Plots,
-) -> T1Analysis:
+) -> HeraldingT1Analysis:
     """Fit the post-selected data with nonfinite points removed."""
     return HeraldingT1Exp().analyze(req.run_result, req.analyze_params, plots=plots)
 
 
 def writeback(
-    req: WritebackRequest[RunRecord[HeraldingT1Cfg, HeraldingT1Result], T1Analysis],
+    req: WritebackRequest[
+        RunRecord[HeraldingT1Cfg, HeraldingT1Result], HeraldingT1Analysis
+    ],
 ) -> list[ParameterWriteback]:
     """Propose T1 in us for the captured qubit; applying remains explicit."""
     return [
