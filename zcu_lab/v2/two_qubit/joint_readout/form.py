@@ -6,7 +6,6 @@ from zcu_tools.cfg_model import Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source
-
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles

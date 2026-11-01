@@ -1,14 +1,12 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
 from dataclasses import replace
-
 from typing import TypeVar
 
 from zcu_tools.cfg_model import Expr, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source
-
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
 
 from .._measure import captured_roles
