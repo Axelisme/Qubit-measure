@@ -20,7 +20,9 @@ def make_form(ctx: FormContext) -> Form[AutoOptCfg]:
             set={"freq": Hidden(0.0), "gain": Hidden(0.0)},
         ),
     )
-    readout = replace(readout, set={**readout.set, "freq": Hidden(0.0), "gain": Hidden(0.0)})
+    readout = replace(
+        readout, set={**readout.set, "freq": Hidden(0.0), "gain": Hidden(0.0)}
+    )
     return Form(
         AutoOptCfg,
         tree={

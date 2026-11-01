@@ -14,9 +14,7 @@ def make_form(ctx: FormContext) -> Form[RabiCheckCfg]:
     rabi_pulse = source(
         ctx,
         "$qubit.module.x180",
-        Template(
-            "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
-        ),
+        Template("pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}),
     )
     rabi_pulse = replace(rabi_pulse, set={**rabi_pulse.set, "gain": Hidden(0.0)})
     return Form(
