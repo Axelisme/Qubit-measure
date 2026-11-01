@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，Timeline mux collection 與具名時間操作
+**Last updated:** 2026-11-01，native module declaration、emission 與 cfg-free acquisition
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -10,27 +10,25 @@ roles and design boundaries.
 
 ## Purpose
 
-`Module` objects are declarations consumed by `TimelineProgramV2`, and semantic
-building blocks consumed by `ModularProgramV2`. On the native path, authors call
-`declare(module)` in `_initialize` and `emit(module, timeline=..., tag=...)` in
-`_body`. Each owner supplies resource declaration and native lowering. The legacy
-path still uses `init()` and time-ordered `run()`. The module layer should preserve experiment meaning
-without leaking hardware register choreography into experiment classes.
+`Module` objects are declarations consumed by `TimelineProgramV2`.
+Authors call `declare(module)` in `_initialize` and
+`emit(module, timeline=..., tag=...)` in `_body`.
+TimelineBuilder records the same operations and declares each emitted object once.
+Each module supplies resource declaration and native lowering.
 
 ## 原生寫法
 
-Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ScanWith、Branch、Join、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
+Pulse、Delay、SoftDelay、DelayAuto、PulseReadout、Reset 系列、LoadValue、LoadWord、ComputedPulse、TableLengthPulse、TablePulseReadout 與 MuxReadout 提供原生 lowering。
 每次 `emit` 建立一個 `timeline.ModuleEmission`，保存該次原生指令與 tag。
 Module 不是 QICK Macro，不能直接交給 `append_macro`。
 同一宣告物件可重複發射，也可宣告進不同的原生 program 或 builder。
 各 program 以 module 物件身分持有 pulse／waveform、runtime readout、table offset 與 loader 的宣告結果。
 重新 compile 只重建該 program 的資源，不覆寫其他 program 的宣告。
 `Pulse.pulse_name(prog)` 回傳指定 program 的 pulse 名稱，供原生 QICK 呼叫使用。
-舊 module 的 tag 與 block_mode 不控制新路徑。
-Legacy init／run 仍將狀態放在 module 上，不提供此跨 program 重用契約。
+Tag 屬於每次 emit，不存於 module constructor。
 
 Pulse 與 PulseReadout 以實際 waveform／ADC 事件的最大結束點，加一次 post-delay，再向上取整到 tProc cycle。
-Lowering 不用 `total_length` 重建時間，也不移動 reference。
+Lowering 直接使用實際事件結尾，不移動 reference。
 省略 timeline 時選 default。其他名字先在 `_body` 用 `fork("default", into="drive")` 宣告。
 同一 emission 內部事件共用起點，TwoPulseReset 的跨 channel 重疊不會被串成序列。
 同 channel 的提前發射則在編譯期報錯，即使改用另一條 timeline 也一樣。
@@ -49,28 +47,18 @@ DelayAuto 是唯一例外，未指定 timeline 時呼叫原生 delay_auto 或 de
 它保留 gens／ros 選取，移動 reference 並扣減全部 timeline 結尾。
 指定任何 timeline 名稱都在 emit 入口報錯，包含顯式 default。
 Register cycles 必須非負。尚未被 native 部分完整消耗的 timeline，須以已知 producer bounds 扣除實際推進量。
-Repeat 內也可直接呼叫原生 delay_reg_auto；branch case 與 Join/Reset 仍禁止推進 reference。
+Repeat 內也可直接呼叫原生 delay_reg_auto；branch case 與 Reset emission 仍禁止推進 reference。
 DelayAuto module 不接受 timeline 範圍，包括 Repeat 的預設 timeline。需要時直接呼叫原生操作。
 
 PulseReadout 的 runtime gain／generator frequency／ADC frequency words 沿用既有 consumer。
-時間 guard 不限制這些非時間 words。Legacy init／run／block 保留供舊 program 使用。
-未列出的 module 不因 legacy 可用就表示可直接 emit。
+時間 guard 不限制這些非時間 words。
 
-Module Branch 保留 selector 與 case 次序，lower 到 program 的 `case(index)`，None 是空 case。
-Lowering 把 emission 的 timeline 傳為 branch 母 timeline，每個 case 用自己的隱式 timeline 發射 children。
-Lowering 選擇 align_timeline=True，將各 case 結尾併回母 timeline，靜態取 max，runtime 取精確逐點 max。
-Branch 只改結尾、不推進 reference。Case 內的 native reference 操作在 build 時報錯。
-`repeat(...)` 使用累加 timeline，可以放在 case 內，也可以巢狀。Case 內的 Repeat body 同樣不得推進 reference。
-後續發射從該 timeline 的最大結尾開始，其他 timeline 不因這次結尾合併而延後。
-Module Join 為每個 sequence fork 一條 timeline，依作者順序 emit，最後 join 合併實際 end。
-它保留 sequence 及內部 Module 的作者次序，不重排。
-Join 與 TwoPulseReset／BathReset 的 child 不得推進 reference。
-Native delay／delay_auto、delay_by_timeline、register delay 與推進 reference 的 Repeat／ScanWith 在 build 時報錯，與 branch case 共用守衛及錯誤。
-普通 Branch 不推進 reference，可以放進 Join。
-原有 producer provenance 與翻譯後全流稽核照常執行。
-同 generator 的 physical-end、全部 case 與 Repeat backedge guards 繼續檢查，不加 padding 或 reference rewind。
-TableLengthPulse Join 保留獨立 generators、共用 index 與相同 table count，逐 index 合併 runtime maximum。
-`prog.join` 只合併既有 timeline ends，不發射 children。
+原生 `branch`、`repeat`、`fork` 與 `join` 由 program 與 builder 擁有。
+Branch case 只改 timeline 結尾，不推進 reference。Repeat 可巢狀，也可放在 case 內。
+平行序列先 fork 各 child timeline，依作者順序 emit，再 join 取得逐點最大結尾。
+`join` 只合併既有 timeline ends，不發射 children，也不重排序列。
+TwoPulseReset／BathReset 的 children 不得推進 reference。
+Producer provenance、同 generator physical-end、case 與 repeat backedge guards 照常執行，不加 padding 或 reference rewind。
 
 同一個宣告物件可在 body 重複使用。例如以下 `TimelineProgramV2` hooks 只累加等待結尾：
 
@@ -122,9 +110,9 @@ The standalone `*Cfg` names remain available to framework code and tests.
 
 `Readout(name, cfg)` and `Reset(name, cfg)` are factory classes. Their `__new__`
 returns the concrete module from `cfg.build(name)`, not an instance of the
-factory class. `Reset(name, None)` returns `None` (no reset). Module sequences
-in `ModularProgramV2`, `ProgramBuilder.add`, `Repeat`, `Branch`, `Join` and
-`ScanWith` skip `None` entries without emitting setup or timed operations.
+factory class. `Reset(name, None)` returns `None` (no reset).
+TimelineBuilder `emit(None)` performs no declaration or timed operation.
+Handwritten programs skip absent modules before calling declare or emit.
 
 ## Constructor overrides
 
@@ -165,11 +153,6 @@ caller-owned copy when deliberately updating cfg before constructing modules.
   `0..2^32-1` word range; storage maps those words onto the signed int32 dmem
   representation while preserving the hardware bit pattern. It is intentionally
   uncompressed because consumers care about the exact word loaded into a register.
-- `ScanWith` supports native `declare`/`emit`. Each occurrence creates its own
-  fixed Repeat counter, loads the scalar, then executes children in order.
-  Repeated emissions reuse the declared table and destination register.
-  Repeat-owned metadata and matching-writer audits certify the index bounds;
-  native lowering does not pass the legacy `range_hint`.
 - `LoadValue.lower_index` accepts the index for the current occurrence.
   `TimelineProgramV2.emission_name` allocates occurrence-local names only during
   lowering, so repeated or nested scans do not share a counter.
@@ -195,8 +178,7 @@ matrix and rejects unknown ADCs, missing classifiers and linear mode with an
 ADC-named ValueError. Its normalized raw ADC coordinates retain IQ offset.
 
 `v2.shot_sums(prog, axes)` resolves compiled read labels for `Classify` and `IQ`
-axes. Timeline labels use emit tags or untagged module names; modular labels
-use module names. Mux axes select the cfg tone position. Each Classify axis
+axes. Labels use emit tags or untagged module names. Mux axes select the cfg tone position. Each Classify axis
 snapshots its explicit or cfg classifier. Circle emits g/e/other, linear g/e,
 and centroid3 g/e/f. Circle requires a GE Post radius.
 The processor sums ordered shot-vector outer products across reps, and
@@ -211,7 +193,8 @@ the ADC itself, sends configuration at the module start, triggers at
 ADC window and generator playback including `post_delay`, with clock rounding.
 `PulseReadoutCfg.nominal_duration_us()` returns the scalar completion time without
 clock rounding or program initialization. It covers the later ADC/generator end
-for offline shot-time estimates; it does not replace runtime blocking timing.
+for offline shot-time estimates: `max(trig_offset + ro_length, pre_delay + waveform.length) + post_delay`.
+Post-delay is applied once after the later end. This does not replace runtime timing.
 
 `Pulse` takes optional runtime `ro_ch` for QICK frequency matching. That channel
 is not a cfg field. `PulseRegistry` includes it in hardware-definition identity,
@@ -226,8 +209,6 @@ ones, and authors own their consistency. Read gen_chs/ro_chs for declaration
 settings. Timeline modules do not protect routes automatically. Authors may
 explicitly call the inherited protect_readout_routes to prevent redeclaration.
 Static Mux does not switch runtime readout configurations.
-Legacy `ModularProgramV2.protect_readout_routes` protects successful declarations,
-including when nested; its unprotected routes retain QICK overwrite semantics.
 `collect_iq` selects one standard averaged read using that program's actual
 channel ordering and returns tone-ordered float64 I/Q. Timeline collection
 requires this exact module's compiled readout emission on the supplied program.
@@ -270,15 +251,6 @@ Centroid3 的第三類是 f，不是 circle 的 other。需要 Other 的 consume
   to prepare the next point. Its dedicated templates prevent a table update from
   mutating a pulse shared through `PulseRegistry`; the rotated tables restore the
   first point before the next outer repetition.
-
-## Legacy swept pulse blocking timing
-
-`Pulse` aligns a swept blocking duration with QICK's registered waveform
-segments. Generator-cycle quantization and per-loop truncation precede
-processor-clock rounding. Blocking start and each step round upward, so a
-following operation cannot begin before playback ends. Overrun can accumulate
-across points; it is not bounded to one processor tick for a whole sweep.
-Scalar and pre/post-delay timing keep their existing rules.
 
 ## Runtime Pulse Length
 
@@ -325,22 +297,16 @@ keep their existing contracts.
 
 ## Design Boundaries
 
-Legacy programs and composite Modules call `Module.emit(prog, t)` after `init`.
-It runs the existing `run` behavior inside `prog.source_scope(module.name)`.
-Each author-provided child emission gets its own nested diagnostic source, even
-when pulse registration shares a waveform or `PulseCfg`. Ending a child restores
-its parent source. Internal helpers run directly under their semantic owner's
-source. `ScanWith` keeps its loop and loader under the scan owner while authored
-children retain their own scopes. Anonymous `Join` scheduling keeps an empty
-source, and its table-pulse children retain their author names without separate
-blocking waits. These annotations add no machine instructions. The snapshot and
-optimizer-input distinction is defined in [IR compile snapshot](../ir/README.md#pre-optimization-compile-snapshot).
+Each `emit(module)` owns one diagnostic source and occurrence tag.
+Nested semantic module lowering retains its owner's source.
+These annotations add no machine instructions.
+The snapshot and optimizer-input distinction is defined in [IR compile snapshot](../ir/README.md#pre-optimization-compile-snapshot).
 
 - Keep scalar values and raw hardware words as distinct module contracts. Expanding
   `LoadValue` to uint32 would make arithmetic/scalar users ambiguous and weaken
   compression assumptions.
-- `ProgramResourcesMixin` owns the dmem buffer shared by `TimelineProgramV2`
-  and `ModularProgramV2`; modules append their table and keep only the returned offset.
+- `ProgramResourcesMixin` owns the program's dmem buffer. Modules append tables
+  and store declaration results on that program, keyed by module identity.
 - A module that loads a register does not by itself define how a later pulse,
   readout, or simulator interprets that register. Add explicit consuming module
   contracts for those cases instead of relying on name conventions.

@@ -697,18 +697,19 @@ def test_dc_only_single_source_acquires_without_a_fast_flux_route():
             "mixed",
             [
                 [972.5535136297327, -0.23690658344665044],
-                [972.5616134942782, -0.30040715262664125],
+                [972.5616134942782, -0.30040715262673],
             ],
         ),
-        ("active", [[972.5755645388051, -0.22000655695588697]]),
-        ("delayed", [[972.5752852698197, -0.18828188213495886]]),
-        ("distorted", [[972.5755645388051, -0.22000655695588697]]),
-        ("tail", [[972.5423259988822, -0.2611257285396458]]),
+        ("active", [[972.5750060008338, -0.1565572073141823]]),
+        ("delayed", [[972.5755645388051, -0.22000655695600715]]),
+        ("distorted", [[972.5752852698197, -0.18828188213509472]]),
+        ("tail", [[972.5755645388051, -0.22000655695600715]]),
     ],
 )
-def test_fixed_seed_acquire_preserves_flux_controls(case, expected):
-    # Known-good public acquire means, including ADC noise, from the unchanged
-    # planner. Exact equality protects this planning-only optimization.
+def test_fixed_seed_native_acquire_preserves_flux_controls(case, expected):
+    # Public native acquire means include ADC noise. Actual waveform ends ceil
+    # to processor ticks before the next pulse; they do not use cfg padding.
+    # Keep exact equality for these native quantized fixtures.
     values = physical_settings().model_dump(mode="json")
     if case == "active":
         values["flux_line"].update(delay_ns=0.0, tau_ns=0.0)

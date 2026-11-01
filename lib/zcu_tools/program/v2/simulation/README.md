@@ -105,8 +105,8 @@ mutable in the shot, even when later updates have equal values. Pending FIFO
 updates cannot carry across points/reps.
 This timing rule is a simulation model, not a sample-exact hardware claim.
 
-`SimulationAcquireMixin` calls this builder for both `TimelineProgramV2` and
-`ModularProgramV2`, passing the bound SoC's routes. Other SoC objects keep the
+`SimulationAcquireMixin` calls this builder for `TimelineProgramV2`,
+passing the bound SoC's routes. Other SoC objects keep the
 original QICK acquisition path.
 The core interpreter supports register ALU operations, Z/S flags, DMEM/WMEM and
 native sweep/reps shells, marked inner loops and register-selected branches.
@@ -140,7 +140,7 @@ which requires DDS phase state outside the current numeric event contract.
 Do not infer support for every control form or registered experiment from this builder.
 
 Simulation acquisition has one frontend. It reads the pre-optimization compiled
-stream through `build_compiled_request` for native and Modular programs.
+stream through `build_compiled_request` for native programs.
 There is no runtime frontend selector or fallback. Module lowering remains part
 of program construction; acquisition does not interpret the Module tree.
 
@@ -168,7 +168,7 @@ simulation implementation.
 Notebook callers import the same builder and use its returned objects:
 
 ```python
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import TimelineBuilder
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from noise_environment import build_environment
@@ -180,10 +180,9 @@ try:
         gen_ch=0, ro_ch=0, nqz=1, freq=100.0, gain=0.1,
         waveform=ConstWaveformCfg(length=0.1), ro_length=0.1,
     )
-    prog = ModularProgramV2(
-        env.soccfg, reps=4,
-        modules=[readout.build("readout")],
-    )
+    builder = TimelineBuilder(env.soccfg, reps=4)
+    builder.emit(readout.build("readout"))
+    prog = builder.build()
     averaged = prog.acquire(env.soc, rounds=2, progress=False)
     raw = prog.get_raw()
 finally:
@@ -245,7 +244,7 @@ Errors identify the instruction class, pre-optimization position and available
 loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
-LoadValue, LoadWord, Repeat, Branch, ScanWith, ComputedPulse, TableLengthPulse,
+LoadValue, LoadWord, native repeat/branch, ComputedPulse, TableLengthPulse,
 TablePulseReadout, Join and the existing reset wrappers. Join preserves compiled
 emission order. Its register effects follow the same shot-local and live-in rules
 as other instructions. Reset wrappers emit actual pulses only; they do not reset
@@ -304,7 +303,7 @@ acquisitions. Every preparation checks current DAC content, normalization, clock
 and flat-top duration; names and program identities are not cross-acquire keys.
 The budget includes keys, Python samples and containers. Eviction releases only
 pool references, so existing requests keep their immutable envelopes unchanged.
-Normal hardware compilation and the existing block_mode timing policy are unchanged.
+Normal hardware compilation and the native timeline timing policy are unchanged.
 
 - `AcquireRequest` fixes C-order `loop_dims`, `avg_level`, non-reps `point_dims`
   and `point_names`, `reps`, point templates, declared ADC order, trigger-order

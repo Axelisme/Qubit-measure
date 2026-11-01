@@ -209,7 +209,7 @@ MIST both 每點計兩個 preparation 結果；mux 每點按 participant 計 T1�
 `duration.mean_s/max_s` 先加總同一 point、同一 stage 的 operations 秒數，再算平均與最大值。只有有時間的 point 參與平均。
 Frequency 包含該點所有 delivered coarse／fine／widening scans，MIST 包含兩種 preparation。Mux 計一次共用 acquisition 時間，不乘 participant 數。
 只計 delivered Completed（含 partial），不包含拋錯的 operation；缺少時間就省略 duration。
-ProgramBuilder 的 acquire retry 與 data-driven early stop 只寫日誌，不在摘要聚合。
+Schedule acquisition 的 retry 與 data-driven early stop 只寫日誌，不在摘要聚合。
 完整 operation facts 留在 point 信封與 journal，不在此摘要重建。
 
 `qubits` 只在 overnight／overnight_mux 列出，各 qubit 的 t1／echo 記 accepted、mean_us、std_us。

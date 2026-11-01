@@ -35,7 +35,7 @@
 ## Pre-optimization compile snapshot
 
 `program.compiled_stream` returns a `CompiledStream` after successful compilation
-on both `ModularProgramV2` and `TimelineProgramV2`. Its `records` tuple preserves
+on `TimelineProgramV2`. Its `records` tuple preserves
 logical instructions, labels and metadata before the optimizer consumes them.
 Each `CompiledRecord.p_addr` is a pre-optimization program-memory word offset,
 not an optimized address. Metadata and labels can share positions.

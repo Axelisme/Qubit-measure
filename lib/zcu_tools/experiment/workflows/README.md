@@ -128,7 +128,7 @@ Merged 輸出依使用者 2026-10-25 裁定移除，見 [ADR-0062](../../../../d
 OperationFacts 保存 kind、iteration、attempt、started_at、finished_at、outcome、reason、stopped 與 name。
 Name 是作者傳給 call 的 operation label，未命名或舊記錄為 None。
 舊 journal 與 record 的 `acquisitions` key 在載入時忽略，不轉換或寫回。
-ProgramBuilder 的 acquire retry 與 data-driven early stop 由日誌記錄，不由 operation 推斷。
+Schedule acquisition 的 retry 與 data-driven early stop 由日誌記錄，不由 operation 推斷。
 Kind 是 call、setup_device 或 wait_until，run 僅保留供歷史讀取。Iteration 取自最近 iteration 物件的 birth sequence，沒有 iteration 時為零。
 Attempt 在該 iteration 中從一開始，每個 operation 增加一次，不隨 commit 重置。
 Stopped 是完成時 operation 自己的 bit，不推斷子孫的控制狀態或資料完整度。
@@ -157,4 +157,4 @@ Workflow 圖不得使用 operation/ 前綴。保存圖時從 Completed.value.res
 Progress bars 由 env 保留，execution owner 在 producer drain 後逐一嘗試 close，再發布終態。
 
 測試 owner 是 `tests/experiment/workflows/`，只用合成 workflow。
-Schedule 與 ProgramBuilder 見 [runtime](../v2/runtime/README.md)，GUI 組裝見 [measure README](../../gui/app/measure/README.md#workflow-hosting)。
+Schedule 與 run_acquire 見 [runtime](../v2/runtime/README.md)，GUI 組裝見 [measure README](../../gui/app/measure/README.md#workflow-hosting)。

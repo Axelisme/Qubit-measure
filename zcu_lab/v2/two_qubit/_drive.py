@@ -20,7 +20,7 @@ class DualLineCfg(ConfigBase):
     Frequency, gain, phase and delays must be finite scalars. Delays must be
     nonnegative and envelope duration positive.
     Runs apply typed Pulse overrides for hardware sweeps after validating this
-    scalar baseline; each run writes its own parallel Join sequence.
+    scalar baseline; each run writes its own parallel fork/emit/join sequence.
     No coupler AC line, persistent gate module kind or logical frame is implied.
     """
 

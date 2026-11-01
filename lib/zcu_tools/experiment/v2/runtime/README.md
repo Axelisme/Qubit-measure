@@ -1,12 +1,11 @@
 # `zcu_tools.experiment.v2.runtime` — experiment runtime
 
-**Last updated:** 2026-11-01，cfg-optional Schedule 與 root buffer 建立
+**Last updated:** 2026-11-01，cfg-free Schedule 與 native program acquisition
 
 **讀者：** framework-dev。Schedule、buffer、program acquire、停止與重試契約。
 
 `runtime/` 提供 experiment/v2 的 Python-like acquisition runtime。一般實驗用
-`SignalBuffer` / `Schedule` / `ProgramBuilder` 編排 host-side loop 與 program
-acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
+`SignalBuffer` 與 `Schedule` 編排 host-side loop 與 program acquire。`ResultTree` 提供 structured `BufferProtocol`，可交給同一個
 `Schedule` 編排 outer loop。
 
 ---
@@ -42,7 +41,7 @@ path，並觸發該 buffer 的 update hook。
 - `ResultNode` typed handle：`tree.at(i).child("task").child("field")` 可定位 result
   subtree，`set(value, flush=True)` 可直接寫入並觸發 update；若該 update 會送到
   subscriber，`ResultTree` 必須有 run env（caller 在建構時傳入），否則 fast-fail。
-- child-local buffer：caller 以 `state.child("raw_signals", cfg=cfg).buffer(...)`
+- child-local buffer：caller 以 `step.child("raw_signals").buffer(...)`
   建立 `SignalBuffer`，buffer 寫入時會回填 ResultTree leaf。
 - per-measurement subscription：plotter 訂閱 `tree.measurement_node(name)`，
   callback 收 `ResultUpdateEvent`，包含 `measurement_name`、`outer_index`、
@@ -58,37 +57,33 @@ path，並觸發該 buffer 的 update hook。
 
 `outcome.py` 擁有完成狀態值與 exception reason 格式化。`Schedule` 擁有狀態轉換、stop token 與 partial buffer 的生命週期。`RunStatus`、`ScheduleOutcome` 仍可從既有 runtime 與 schedule 入口匯入。
 
-`Schedule` 是 run 內的 scope，持有 typed env 與顯式 `Scope` child，並建立 host-side control flow。
-`init_cfg` 預設為 `None`。傳入 cfg 時仍 deepcopy，scan／repeat／child 保留既有 cfg 隔離。
-不使用 cfg 時，以 `Schedule(None, buffer, scope=...)` 接收預建的 root buffer，或在
-`with Schedule(scope=...) as sched` 內呼叫 `sched.buffer(shape, ...)` 建立並註冊 root `SignalBuffer`。
+`Schedule[T_Env]` 是 run 內的 scope，持有 typed env 與顯式 `Scope` child，並建立 host-side control flow。
+Schedule 與 step 都不接收或複製 cfg。作者直接讀取傳入 run 的 config。
+若需修改設定，先自行 deepcopy，避免修改 caller 的 config。
+以 `Schedule(buffer, scope=...)` 接收預建的 root buffer，或在
+`with Schedule(scope=...) as sched` 內呼叫 `sched.buffer(shape, ...)` 建立 root `SignalBuffer`。
 後者沿用 `SignalBuffer` 的 dtype、on_update 與 update_interval 參數；已有 root buffer 時 raise ValueError。
-兩種入口都可從 Schedule 或 step 呼叫 `run_acquire*`，取數不依賴 cfg。
 
 ```python
-signals_buffer = SignalBuffer(
-    (len(freqs),),
-    on_update=lambda data: viewer.update(freqs, signal2real(data)),
-)
-with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
-    freq_sweep = sched.cfg.freq
-    sched.cfg.readout.set_param("freq", sweep2param("freq", freq_sweep))
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
+from zcu_tools.program.v2 import Readout, TimelineBuilder
 
-    _ = (
-        sched.prog_builder(
-            soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay
-        )
-        .add_reset("reset", sched.cfg.reset)
-        .add_readout("readout", sched.cfg.readout)
-        .declare_sweep("freq", freq_sweep)
-        .build_and_acquire(rounds=sched.cfg.rounds)
+signals = SignalBuffer((len(freqs),), on_update=on_update)
+builder = TimelineBuilder(
+    context.soccfg, reps=config.reps, relax_delay=config.relax_delay,
+)
+freq = builder.add_sweep("freq", config.freq)
+builder.emit(Readout("readout", config.readout, freq=freq))
+prog = builder.build()
+
+with Schedule(signals, scope=context.scope) as sched:
+    sched.run_acquire(
+        prog, context.soc, rounds=config.rounds,
+        options=RunOptions(retry=config.acquire_retry),
     )
 ```
 
-- `Schedule` 在入口 deepcopy caller cfg。ProgramBuilder 不讀 cfg，作者明確傳入 program 控制參數。
-  `sched.prog_builder(...)` 與 `step.prog_builder(...)` 都收 `reps=1`、`initial_delay=1.0`、
-  `relax_delay=1.0`，delay 單位為 us。每次 build 隔離 modules 與 sweeps。
-- `Schedule` 的 env 也是泛型，使用 `with Schedule(cfg, buffer, env=RunEnv(...))`
+- `Schedule` 的 env 也是泛型，使用 `with Schedule(buffer, env=RunEnv(...), scope=context.scope)`
   可讓 `sched.env.xxx` / `step.env.xxx` 取得 linter 型別支援。env 只放穩定 run
   dependencies（例如 soc、soccfg、ModuleLibrary、predictor）；scan/repeat 的動態
   value/index 不寫入 env，而是由 `ScheduleStep.value` / `ScheduleStep.index` /
@@ -98,9 +93,9 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
   `StopSignal`，需要刷新 liveplot 時由 caller 呼叫相關 buffer 的 `trigger_update()`。
 - `ScheduleStep.path` 會累積巢狀 host loop index，所以預設 single-buffer acquire 可
   依 owner path 自動寫入對應 slot。
-- `with Schedule(cfg, result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
+- `with Schedule(result_buffer, scope=context.scope) as sched` 可編排任何實作 `BufferProtocol` 的 result
   tree；root result buffer 目前最多一個，多 root buffer 會 fast-fail。
-  `step.child("field", cfg=program_cfg).buffer(shape)` 會建立 child-local default
+  `step.child("field").buffer(shape)` 會建立 child-local default
   `SignalBuffer`，buffer 寫入時同步回 `result_buffer.data` 並觸發 update。
 - `ScheduleStep.value` 是 scan/repeat 的 control-flow coordinate；result tree 由
   `step.data` 讀取、`step.set_data(..., flush=True)` 寫入，需要 ndarray slot 時用
@@ -116,8 +111,7 @@ with Schedule(cfg, signals_buffer, scope=context.scope) as sched:
 
 `Schedule` 與 scan step 提供 `run_acquire(program, soc, ...)`、
 `run_acquire_summed(program, soc, processor=..., ...)` 與
-`run_acquire_decimated(program, soc, ...)`。三個方法不建立 program，也不經過
-`ProgramBuilder`。Caller 可傳入手寫或 builder 產生的 program，只需提供對應的同步
+`run_acquire_decimated(program, soc, ...)`。三個方法不建立 program。Caller 可傳入手寫或 TimelineBuilder 產生的 program，只需提供對應的同步
 acquire 方法。
 
 Run 會把轉換後的結果寫入目前 Schedule／step 的 slot，並觸發 live update。
@@ -134,40 +128,11 @@ Integrated 的預設 converter 只接受單一 ADC、每 shot 單一 read，並�
 
 `run_acquire.py` 的 mixin 只集中 Schedule 與 Step 的三個入口，不持有 scope、slot
 或 outcome。`acquisition.py` 的 `AcquisitionRunner` 集中 round hook、retry、stop、
-partial-result、overrun 與 progress；新入口與舊 builder 共用這份執行邏輯。
-`AcquireOptions`、同步 producer keyword 型別與 raw converters 也由該模組提供，舊匯入位置保留。
+partial-result、overrun 與 progress。
+`AcquireOptions`、同步 producer keyword 型別與 raw converters 也由該模組提供。
 
-### `ProgramBuilder`
-
-`program_builder.py` 擁有 QICK program 組裝與舊 acquire 入口：`ProgramBuilder`、
-`ModuleFacade` 與舊 producer 型別契約。`schedule.py` 保留 Schedule／Step、buffer／slot
-與 run lifecycle。共用 runner 透過 Schedule 的公開合作方法選擇 slot、記錄 outcome
-與處理 retry reset。Runtime package 入口仍匯出既有公開名稱。
-
-`acquire_cancel.py` 合成 acquire child 的取消與作者的 data stop condition。Data stop 是正常完成，不設 scope event，也不標記 partial。
-
-- `build()` 建立並回傳 program。
-- `run_program(program)` 執行 caller 傳入的 integrated-acquire program。
-- `build_and_acquire()` 是 `build()` 後立刻 `run_program(...)` 的 convenience。
-- Decimated trace 使用獨立方法：`run_program_decimated(program)` 與
-  `build_and_acquire_decimated()`。
-- `run_program_summed(program)` 要求單一 `processor` 與 `sums2signal_fn`。
-  Caller 先 build，再解析讀出 label。Converter 收累積與最終總和，不使用 IQ 預設轉換。
-  這條路徑沿用相同的 retry、progress 與 stop_condition，不提供 build-and-acquire shortcut。
-- 五個 build/run acquire 方法都收具名 `rounds=1`，同時控制 producer 與 rounds progress。
-  Retry 重用同一個 rounds 值。`reps` 與 `rounds` 必須為正整數，拒絕 bool。
-  Builder 不投影或覆寫 cfg；`program_cls` factory 接 soccfg 與具名控制參數、modules、sweep、編譯選項。
-- `set_raw2signal_fn(...)` 或 acquire 方法的 `raw2signal_fn=...` 可覆寫 raw
-  conversion；integrated acquire 預設使用 `default_raw2signal_fn`，decimated acquire
-  預設使用 `default_decimated_raw2signal_fn`。預設 converter 沿用上述 ADC／read 限制；
-  多 ADC 或 integrated 多 read 的作者須明確提供 `raw2signal_fn`。
-- `program_cls=` 是測試 seam；常規實驗不傳，預設使用 `ModularProgramV2`。
-- 五個 build/run acquire 方法共用 `options=AcquireOptions(...)`。省略時 retry=0、
-  progress=False、progress_label="rounds"、progress_leave=None、stop_condition=None。
-  `progress_label` 覆寫 rounds bar label；`progress_leave=None` 保留 root-vs-step 的
-  close/retain policy。`progress` 控制 native acquisition progress，不控制 rounds bar。
-
----
+`acquire_cancel.py` 合成 acquire child 的取消與作者的 data stop condition。
+Data stop 是正常完成，不設 scope event，也不標記 partial。
 
 ## Stop 與 Retry
 
@@ -175,18 +140,18 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   透過 `Schedule(..., scope=context.scope)` 傳入。Schedule 在進入 context 時建立 schedule child，退出時 release。每次 acquire attempt 建立 acquire child，結束時 release。取消 child 不停止父 scope，後續 acquire 或 operation 可繼續。
 - Child release 只解除父子關係，不上交停止、資料完整度或錯誤。已完成 child 從 active tree 移除，不隨 run 長度累積。
 - `Schedule.__exit__` 與 AcquisitionRunner 都不接住 `KeyboardInterrupt`。Scan/repeat body、producer 與 converter 的中斷原樣傳出，不 retry，也不轉成 interrupted outcome。已寫入的 buffer 資料保留，但 caller 必須自己決定是否攔截例外並回傳。Notebook 的 SIGINT 合作停止與時限由 [Notebook adapter](../../../notebook/README.md#共用實驗入口) 擁有。
-- `Schedule` 的 scan/repeat 會在 host step 前檢查 stop；`ProgramBuilder` 會把
+- `Schedule` 的 scan/repeat 會在 host step 前檢查 stop；`AcquisitionRunner` 會把
   composite `cancel_flag` 傳給 program acquire：它讀取 acquire child 的 external
   stop，但 `round_hook` 內的 data stop 只結束目前 program acquire，不改變 `Schedule.outcome`。
   `StopSignal` 對外提供 external cancel flag contract：`is_set()` / `set()`；
   `clear_stop()` 只清本 token 的 event，保留 reason，不清子孫。
-- `ProgramBuilder` 的 data-driven early stop 走 `AcquireOptions(stop_condition=...)`：internal
+- `AcquisitionRunner` 的 data-driven early stop 走 `RunOptions(stop_condition=...)`：internal
   round hook 先把 completed round 寫入 buffer，再執行 condition；命中時呼叫
   acquire-local `cancel_flag.set()`，保留該 completed round 並停止下一 round；`Schedule.outcome`
   仍是 `completed`。
-- Builder 每次 retry 寫一行 warning，包含原因、下一次 attempt number 與原始錯誤。
+- Runner 每次 retry 寫一行 warning，包含原因、下一次 attempt number 與原始錯誤。
   Shot 超量的原因是 `shot_overrun`，其他原因是 exception class name。
-- Data condition 讓 acquire 在設定 rounds 前正常結束時，Builder 寫一行 info，包含 stop value 與 completed rounds。
+- Data condition 讓 acquire 在設定 rounds 前正常結束時，Runner 寫一行 info，包含 stop value 與 completed rounds。
   條件可回 bool 或 `experiment.acquisition_facts.StopDecision`。有限 scalar 才記入日誌，未提供或非有限時記 None。
   External stop、failure 與最後一輪才命中都不記 early-stop info。
 - `Schedule.outcome` 記錄作者工具的 run 結果（資料保留不等於 operation 成功）：`completed`、`stopped` 或
@@ -202,15 +167,14 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
   Callback 在 acquire scope release、progress cleanup 後同步執行，早於 ndarray 返回。純 data stop、producer／converter／update 例外與 KeyboardInterrupt 不呼叫。
   Callback 自己的例外原樣傳出，不 retry、不改 Schedule outcome。停止觀察只存於該次呼叫，不污染重用 options 的下一次 acquire，也不交給前端。
   Acquire-only cancel 不改 Schedule outcome 或父 stop；作者可用 callback 記自己的分類，不能用父 stop 判斷 acquire 是否被取消。
-- `ProgramBuilder.build_and_acquire(..., options=AcquireOptions(retry=N))` /
-  `run_program(..., options=AcquireOptions(retry=N))` 是單次 program acquire retry。
+- `sched.run_acquire(program, soc, options=RunOptions(retry=N))` 設定單次 program acquire retry。
 - 所有 producer failure（包含 shot 超量 `AcquisitionContractError`）的額外重試次數都是 `options.retry`。
-  預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)` 或 `AcquireOptions(retry=1)`。
+  預設 `retry=0` 不重試。需要一次重試時明確傳入 `RunOptions(retry=1)`。
   耗盡後拋出最後一次 attempt 的同一例外。若失敗時 Schedule 本身也已停止，不再重試，但仍拋出 producer 例外，不當作正常 partial。
   每次從第一 round 重跑，producer 重建 raw buffers。超量 attempt 已發布的 slot 資料回復為本次 acquire 開始前的值，耗盡重試時也不保留該 attempt 的資料。
   Warning 保留 expected／received／chunk shots 與 round index。
 - Program 只建構一次。Retry 只重跑同一 program 的 acquire，不重做 build 或失敗的 conversion callback。
-  Build 前、每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
+  每次 acquire attempt 前與 failed attempt retry 前都重新檢查 `StopSignal`；
   合作停止的 `stopped` outcome 不會被 retry，也不會被 retry reset 清掉。`KeyboardInterrupt` 原樣向外傳播，不 retry，也不轉成 outcome。
 
 ---
@@ -220,11 +184,7 @@ partial-result、overrun 與 progress；新入口與舊 builder 共用這份執�
 `test_run_acquire.py` 經 Schedule 公開入口覆蓋三種 acquisition 的 simulator 路徑、
 slot/live update、converter、retry、data stop、取消、部分 round 與 callback 錯誤。
 `test_run_timeline.py` 以 deterministic transport 跑 emit program 的一般 QICK
-acquisition pipeline，不宣稱 legacy simulator 支援 emit 寫法。
-`tests/experiment/v2/runtime/test_program_builder.py` 覆蓋顯式 program 控制、Schedule cfg 隔離、
-modules／sweep 隔離，以及兩種 acquire 的 rounds、retry 與 progress。
-`test_program_acquire.py` 覆蓋 integrated／decimated acquire、program cache、progress 與 raw conversion；
-`test_program_retry.py` 覆蓋 retry、stop checker、failed attempt 後 stop 不再 retry 與 `ScheduleOutcome`。
+acquisition pipeline。
 `test_schedule.py` 覆蓋 typed env 與 host scan/repeat；`test_schedule_buffers.py` 覆蓋
 root buffer 註冊、child buffer 同步與 shape validation。`test_signal_buffer_flush.py` 覆蓋
 SignalBuffer 寫入通知、manual update 與 flush。

@@ -8,7 +8,7 @@
 
 ## Program 層定位
 
-`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，不經 `ModularProgramV2`。它保留原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。它與 `ModularProgramV2` 共用 dmem 配置及 readout route 保護。
+`acquisition.py` 擴充 QICK 的 `AcquireMixin`，負責 acquisition 的型別封裝、追蹤、提前停止與 round hook。`v2/base.py` 定義 v2 program 基底 `MyProgramV2`；它使用這些 acquisition mixin，但負責的是 v2 program 結構，兩者不是同一種 base。`v2/timeline.py` 的 `TimelineProgramV2` 繼承 `MyProgramV2`，提供原生作者 hooks，提供可選的具名 timeline，所有指令共用既有 IR 管線與 acquire 擴充。`ProgramResourcesMixin` 提供 dmem 配置及 readout route 保護。
 
 `v2.builder.TimelineBuilder` 記錄宣告、線性動作與巢狀 repeat／branch。`build()` 產生 `TimelineProgramV2`，不取數或依賴 experiment runtime。`SimulationSoc` acquisition 透過 compiled frontend 執行兩種 program 的受支援 instruction effects。
 
@@ -56,7 +56,7 @@ g/e/other; linear emits g/e; centroid3 emits g/e/f. Classification boundaries ma
 `v2.modules.readout.classification_processor`.
 
 Timeline read labels use emit tags, falling back to module names for untagged
-emissions. Legacy modular programs use module names. Missing or ambiguous labels
+emissions. Missing or ambiguous labels
 raise ValueError listing available labels. Explicit tags retain QICK's global
 compile-time uniqueness check and RuntimeError, including collisions with native
 timed macros. Any Repeat/Branch trigger on a selected ADC or a declared/actual
@@ -65,13 +65,12 @@ read-count mismatch is rejected. Other ADCs may still use control flow.
 means. Zero counts stay zero, and unmeasured NaN counts stay NaN.
 Both give NaN means without divide warnings.
 
-Build first, then resolve labels and acquire through
-`ProgramBuilder.run_program_summed(program, processor=...,
- sums2signal_fn=..., rounds=..., options=...)`. The required converter receives
-both cumulative and final sums. It owns any normalization and signal-slot shape.
-Retry, progress and stop-condition behavior follows `run_program`.
-There is no build-and-acquire summed shortcut because label resolution requires
-the compiled program.
+Build first, then resolve labels and call
+`sched.run_acquire_summed(program, soc, processor=..., rounds=...,
+options=RunOptions(converter=...))`.
+The optional converter receives both cumulative and final sums.
+It owns any normalization and signal-slot shape. Without a converter, sums are written unchanged.
+Retry, progress and stop conditions follow the other Schedule run methods.
 
 ## Shot time
 

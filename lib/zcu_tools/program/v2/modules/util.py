@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 from qick.asm_v2 import QickParam, QickProgramV2
-
-from ..utils import is_qick_param, param2str
 
 
 def get_fclk(prog: QickProgramV2, gen_ch: int | None = None, ro_ch: int | None = None):
@@ -40,95 +36,3 @@ def round_timestamp(
         cycles_t = int(round_fn(cycles_t))
 
     return cycles_t / fclk
-
-
-def calc_max_length(
-    length1: float | QickParam, length2: float | QickParam
-) -> float | QickParam:
-    if length1 > length2:
-        return length1
-    if length1 < length2:
-        return length2
-
-    # Equal lengths. For two plain floats this is genuinely unambiguous -- both
-    # operands are the same constant, so returning either is exactly correct and
-    # no warning is warranted. The "may not always be correct" caveat only applies
-    # when at least one operand is a sweepable QickParam: equality at this single
-    # evaluation does not imply equality across every loop iteration.
-    if not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
-        return length1
-
-    warnings.warn(
-        f"Detected overlap between {param2str(length1)} and {param2str(length2)}; "
-        "using the maximum length for calculation. "
-        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others.",
-        stacklevel=1,
-    )
-
-    if isinstance(length1, QickParam):
-        if not is_qick_param(length1):
-            raise TypeError(
-                f"unsupported QickParam implementation: {type(length1).__name__}"
-            )
-        length1 = length1.maxval()
-    if isinstance(length2, QickParam):
-        if not is_qick_param(length2):
-            raise TypeError(
-                f"unsupported QickParam implementation: {type(length2).__name__}"
-            )
-        length2 = length2.maxval()
-
-    return max(length1, length2)
-
-
-def merge_max_length(*args: float | QickParam) -> float | QickParam:
-    merge_list = list(args)
-
-    if len(merge_list) == 0:
-        raise ValueError("at least one length must be provided")
-
-    def try_reduce(
-        length1: float | QickParam, length2: float | QickParam
-    ) -> float | QickParam | None:
-        if length1 > length2:
-            return length1
-        if length1 < length2:
-            return length2
-        # Equal: collapse two equal plain floats unambiguously (see
-        # calc_max_length); keep both only when a QickParam makes the
-        # cross-iteration relationship ambiguous.
-        if not isinstance(length1, QickParam) and not isinstance(length2, QickParam):
-            return length1
-        return None
-
-    while True:
-        prev_num = len(merge_list)
-        i = 0
-        while i < len(merge_list):
-            j = i + 1
-            while j < len(merge_list):
-                result = try_reduce(merge_list[i], merge_list[j])
-                if result is not None:
-                    merge_list[i] = result
-                    merge_list.pop(j)
-                else:
-                    j += 1
-            i += 1
-
-        # no more reduction possible
-        if len(merge_list) == prev_num:
-            break
-
-    if len(merge_list) == 1:
-        return merge_list[0]
-
-    warnings.warn(
-        f"Detected multiple overlapping lengths: {[param2str(m) for m in merge_list]}. "
-        "Using the maximum length among them for calculation. "
-        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others.",
-        stacklevel=1,
-    )
-
-    merge_list = [m.maxval() if isinstance(m, QickParam) else m for m in merge_list]
-
-    return max(merge_list)

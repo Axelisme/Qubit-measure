@@ -213,7 +213,7 @@ The historical STIRAP numbers above retain their original 80/15 scope.
 
 ## Acquisition wall time
 
-Paired public legacy `ModularProgramV2.acquire` timings cover two single points
+Historical acquisition timings below predate TimelineBuilder. They cover two single points
 at both 80/15 and 80/20. Each condition has three cold and three warm samples.
 The table gives medians and minimum-to-maximum ranges, not standard deviations.
 

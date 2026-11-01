@@ -14,7 +14,7 @@ from zcu_tools.core.simulation import (
 )
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2.builder import TimelineBuilder
-from zcu_tools.program.v2.modules.readout import PulseReadout, PulseReadoutCfg
+from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.read_axes import IQ, Classify, shot_sums, split_sums
 from zcu_tools.program.v2.simulation import IntegratedRound

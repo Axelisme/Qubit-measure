@@ -174,7 +174,7 @@ Eligibility 與 Load 仍使用 key presence 或逐欄讀取，不提前驗證未
 
 `RunMetadata` 與 workflow operation 只記各自邊界的事實，不要求作者使用特定 acquisition 寫法。
 Native schema 不解讀舊文件的 `acquisitions` key。Load 不改原檔，record 保留該 key，重存時也保留。
-ProgramBuilder 的 retry 與 data-driven early stop 改由日誌提供診斷。
+Schedule acquisition 的 retry 與 data-driven early stop 改由日誌提供診斷。
 
 ## Cfg 與父層支援
 
@@ -202,4 +202,4 @@ Package root 保留公開 exports，只有存取對應名稱時才載入其 owne
 
 GUI 的 Library、Inspect 與 module writeback 共用 `gui.form` 與 `gui.form_adapter`，直接提交持久 Spec，不經 experiment 的第二套編輯樹。ModuleWriteback 的 proposal 是 ModuleSpec；experiment 仍只接收執行用 typed cfg。跨宿主契約見 ADR-0065、ADR-0008。
 
-- [v2](v2/README.md)：program/v2 的通用 runtime 與量化、SNR、tracker 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、ProgramBuilder 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。
+- [v2](v2/README.md)：program/v2 的通用 runtime 與量化、SNR、tracker 工具。[runtime](v2/runtime/README.md) 說明 Schedule、buffer、run_acquire 與 executor 的執行機制。具體實驗與前端附件由使用者套件提供，組合根注入 catalog，不由框架反向載入。

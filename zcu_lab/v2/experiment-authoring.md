@@ -28,7 +28,7 @@
 
 GUI adapter 的 module writeback 直接提出持久 ModuleSpec，由共用 Form 編輯，再交 Library owner 保存。Core 仍接收執行用 typed cfg，不依賴 GUI 表單或 draft。作者入口見 [measure authoring](measure-authoring.md)，跨宿主契約見 ADR-0065、ADR-0008。
 
-一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer`、`Schedule` 與 `ProgramBuilder` 編排 host loop 與 program acquire。Runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
+一般實驗以 [runtime](../../lib/zcu_tools/experiment/v2/runtime/README.md) 的 `SignalBuffer` 與 `Schedule` 編排 host loop，將 Timeline program 交給 `run_acquire*` 取數。Runtime 的 buffer、stop、retry 和 lifecycle 機制見其文件。
 
 ## 讓使用者只看一個檔案就能理解實驗
 
@@ -42,7 +42,7 @@ core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解
 mux/onetone 的逐 tone 數值計算、outcomes 與單 tone 失敗隔離由 core 擁有。
 gui.py 保留來源與 route prior 解析，以及 writeback。
 
-`core.py` 的 `run()` 直接列出 `Pulse`、`Delay`、`Join` 與 readout 的先後關係。
+`core.py` 的 `run()` 直接列出 pulse、delay、fork／join 與 readout 的先後關係。
 共用 helper 只做驗證、資料整形、平均等機械工作，不用 mode 或旗標切換不同實驗。
 兩個實驗可以共用平均工具，但各自在 `run()` 寫出自己的序列。
 
@@ -50,22 +50,16 @@ gui.py 保留來源與 route prior 解析，以及 writeback。
 所有參與 drive 同時起跑，最後共同 readout。以下是序列片段，省略準備與取資料：
 
 ```python
-builder = (
-    step.prog_builder(
-        context.soc, context.soccfg,
-        reps=step.cfg.reps, relax_delay=step.cfg.relax_delay,
-    )
-    .add_reset("reset", reset)
-    .add(
-        Join(
-            *[
-                Pulse(f"drive_{index}", pulse)
-                for index, pulse in zip(scan.indices, pulses, strict=True)
-            ]
-        ),
-        MuxReadout("readout", readout),
-    )
+builder = TimelineBuilder(
+    context.soccfg, reps=config.reps, relax_delay=config.relax_delay,
 )
+builder.emit(Reset("reset", reset))
+timelines = [f"drive_{index}" for index in scan.indices]
+builder.fork("default", into=timelines)
+for index, pulse, timeline in zip(scan.indices, pulses, timelines, strict=True):
+    builder.emit(Pulse(f"drive_{index}", pulse), timeline=timeline)
+builder.join(*timelines, into="default")
+builder.emit(MuxReadout("readout", readout))
 ```
 
 短 branch 等最長 branch 結束才 readout，不把短 pulse 的末端對齊到最長 pulse。
@@ -601,11 +595,11 @@ matrix的估計流程。
 
 1. 以 `sweep2array` 將 sweep 展成硬體格點。Device setup 使用 `context.devices`。
 2. 從 `live_line(context.plots, "measurement", ...)` 建立具名 viewer，其圖由本次 Plots 持有。Helper 從 `zcu_lab.v2.support` import。需要自訂 layout 時，明確建立 Figure／Axes，不使用 pyplot current state。
-3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 使用 runner-owned cfg 副本，透過 `ProgramBuilder` acquire 並寫回 buffer。
+3. `SignalBuffer` 的 on_update 將完整 buffer 交給 viewer。Schedule 不持有 cfg，透過 `run_acquire*` 取數並寫回 buffer。
 4. Schedule 接 `scope=context.scope`，將外部取消傳給 acquire。Experiment setup helper 接 `cancel_signal=context.scope.stop`，只在 helper 到 driver 的邊界轉成 Event；直接 acquire 的路徑也必須傳入 cancel flag。
 5. 回傳純 Result。同步分析接 `analyze(source, options, *, plots)`，數值直接回傳，圖向本次 Plots 發布。
 
-Schedule／ProgramBuilder 的 buffer、program cfg、retry 與 partial-result 規則見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
+Schedule 的 buffer、retry 與 partial-result 規則見 [runtime README](../../lib/zcu_tools/experiment/v2/runtime/README.md)。
 目前所有 Experiment 均走新 runtime 或直接 `SignalBuffer` path，包含 `lookback/core.py`、`onetone/*`、`twotone/*`、`singleshot/*`、`jpa/*`、`fastflux/*` 與 `mist/*`。
 
 `onetone/freq` 的 frequency sampling 有兩種 mode：`linear` 沿用 program-side
@@ -629,14 +623,16 @@ contract，但不重新採樣。Singleshot `t1_with_tone` 的 zero-length 點略
 dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem template，readout
 依每點真實 pulse 結束時間對齊，不把短 pulse 補到最長點。
 
-### sweep 參數 mutation 的歸屬：搬進 runner-owned cfg
+### Sweep 參數與 cfg 的歸屬
 
-新寫法以 module constructor keyword 傳入掃描值，不修改 caller cfg。以下 mutation 規則只適用仍使用 `set_param` 的既有程式。這些程式把 sweep 參數綁到 pulse（`xxx.set_param("freq"/"gain"/"length", ...)`）時，一律修改 runner-owned cfg，一般 Schedule 寫法改 `sched.cfg` 或 `step.cfg`。不要在 `run()` 頂層直接改 caller 傳入的 `cfg`。`sweep2array` 只讀 `cfg.*`（sweep 定義）與通道，不依賴 pulse param，所以 `set_param` 不需要提前到外層。
+以 module constructor keyword 傳入掃描值，不修改 caller cfg。
+Schedule 與 step 不接收 cfg；需要修改設定時，作者在 run 內明確 deepcopy。
+`sweep2array` 只讀 sweep 定義與通道，座標建立不依賴 pulse param mutation。
 
-只有兩類「副本外操作」是有意保留的：
+以下操作直接使用作者的 run inputs：
 
 - **device setup**：`set_*_in_dev_cfg(cfg.dev, ...)` + `setup_devices(cfg, context.devices, progress=True, cancel_signal=context.scope.stop)` 需要在掃描前先把硬體帶進度地初始化到起點，留在 `run()` body；`progress=True` 本身即通知，不另加 warn。
-- **Raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 直接將 `reps=cfg.shots` 與 `relax_delay=cfg.relax_delay` 交給 builder，acquire 明確使用 `rounds=1`。有宣告 initial_delay 的實驗同樣明傳。Lookback 固定 `reps=1`，`run_program_decimated(rounds=cfg.rounds)` 沿用可編輯的軟體平均次數。這些 runtime 固定值不出現在 Form。
+- **Raw-shot program 設定**：`singleshot/ge`、`singleshot/check`、`singleshot/len_rabi` 與 `mux/singleshot_ge` 的實驗 cfg 不含 reps／rounds。`run()` 直接將 `reps=cfg.shots` 與 `relax_delay=cfg.relax_delay` 交給 builder，acquire 明確使用 `rounds=1`。有宣告 initial_delay 的實驗同樣明傳。Lookback 固定 `reps=1`，`run_acquire_decimated(prog, context.soc, rounds=cfg.rounds)` 沿用可編輯的軟體平均次數。這些 runtime 固定值不出現在 Form。
 
 ---
 
@@ -647,11 +643,9 @@ dmem 載入 pulse length 與實際 duration；const/flat-top 共用單一 wmem t
 需要自訂 register 運算或 dmem 操作時，改寫 `TimelineProgramV2` 子類別。
 兩種寫法都把 program 交給 Schedule 或 scan step 的 `run_acquire*`。
 
-舊 `ProgramBuilder`、`sched.prog_builder(...)` 與 `AcquireOptions` 仍可並存。
-本節不要求遷移現有實驗。**目前 legacy simulator 不支援 emit 寫法**，
-承接 `acquire*` 介面不代表能在該 simulator 執行。
-編譯與 IR timing analysis 不需要取數，實際執行則需要相容的 acquisition backend。
-支援邊界見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
+SimulationSoc 從 compiled stream 建立 acquisition request。
+編譯與 IR timing analysis 不需要取數；離線取數須使用對應的 simulation environment。
+支援邊界見 [program simulation](../../lib/zcu_tools/program/v2/simulation/README.md)。
 
 `delay_by_timeline` 依每個掃描點的 runtime 結尾推進 reference，shell 收尾 WAIT 使用編譯期常數。
 已知合法掃描點間的剩餘時間差距大於 0 時編譯發 warning，超過 `relax_delay` 時 raise ValueError。
@@ -665,7 +659,7 @@ Scheduled timing analysis 不驗證 CPU 等待與跨 shot 實機排程。
 `config` 提供 `length: SweepCfg`、`pi_pulse: Pulse.Cfg`、`readout: Readout.Cfg`，
 以及 `reps`、`rounds`、`relax_delay`、`acquire_retry` 與 `earlystop_snr`。
 `on_update` 是本次實驗的 live plot callback，接收完整 signal array。
-直接讀取傳入的 `config`，不經 `sched.cfg` 或 `step.cfg` 取得設定。
+直接讀取傳入的 `config`。Schedule 與 step 只保存控制流程、env 與 buffer path。
 需要修改 pulse cfg 時，在 `run()` 開頭自行 deepcopy，不修改 caller 的 config。
 
 ```python
@@ -675,7 +669,7 @@ from zcu_tools.experiment.v2.utils.snr import snr_checker
 from zcu_tools.program.v2 import Pulse, Readout, TimelineBuilder
 
 signals = SignalBuffer((config.length.expts,), on_update=on_update)
-with Schedule(config, signals, scope=context.scope) as sched:
+with Schedule(signals, scope=context.scope) as sched:
     builder = TimelineBuilder(
         context.soccfg, reps=config.reps, relax_delay=config.relax_delay,
     )
@@ -699,17 +693,16 @@ with Schedule(config, signals, scope=context.scope) as sched:
 
 `add_sweep` 同時宣告 loop 並回傳 `QickParam`，所以獨立寫一行，不藏在 module 建構子中。
 多個 loop 依宣告順序由外到內。非均勻掃描用 `add_loop(name, count)` 加
-`LoadValue` 或 `ScanWith`，不要把不等距點轉成 `add_sweep`。
+`LoadValue`，不要把不等距點轉成 `add_sweep`。
 Builder 的 `emit`、`delay`、`delay_auto`、`timeline_inc`、
 `delay_by_timeline`、`pulse`、`trigger`、`fork`、`join`、`timeline`、`repeat` 與 `branch`
 沿用 program 層的同名 API。原生布林控制選項用 keyword，例如
 `builder.delay_auto(0.1, gens=False, ros=True)`。
 `build()` 後 builder 凍結，再記錄動作或再次 build 都會 raise ValueError。
 平行發射用 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
-Module `Join` 封裝相同的 fork／emit／join 操作，不重排 children。
-Join 與 TwoPulseReset／BathReset 的 child 若推進 reference，build 報錯。
-Native delay／delay_auto、delay_by_timeline、register delay 與推進 reference 的 Repeat／ScanWith 都受此限制。
-普通 Branch 只合併 timeline 結尾，可以放進 Join。
+TwoPulseReset／BathReset 的 child 與 branch case 不得推進 reference。
+原生 `repeat` 與 `branch` 直接寫在 builder body。
+`join` 只合併 timeline 結尾，不發射序列或改變 reference。
 
 ### 手寫 TimelineProgramV2
 
@@ -745,19 +738,18 @@ class T1Program(TimelineProgramV2):
 
 
 signals = SignalBuffer((config.length.expts,), on_update=on_update)
-with Schedule(config, signals, scope=context.scope) as sched:
-    prog = T1Program(context.soccfg, sched.cfg)
+with Schedule(signals, scope=context.scope) as sched:
+    prog = T1Program(context.soccfg, config)
 
     sched.run_acquire(
-        prog, context.soc, rounds=sched.cfg.rounds,
-        options=RunOptions(retry=sched.cfg.acquire_retry),
+        prog, context.soc, rounds=config.rounds,
+        options=RunOptions(retry=config.acquire_retry),
     )
 ```
 
 同一 module 物件可以傳給多個 `TimelineBuilder` 或原生 `TimelineProgramV2`。
 每個 program 依 module 物件身分保存宣告結果，重新 compile 時配置自己的資源。
 錄製或編譯後不要修改 module 或它的 cfg。不同掃描設定仍要建立不同 module。
-Legacy `ModularProgramV2` 仍在 module 上保存宣告狀態，不適用這個重用契約。
 同一 program 內可以多次 emit 同一物件，宣告只做一次，每次 emission 的時間與 tag 各自獨立。
 重複 readout 用不同 tag 區分，例如 `"herald"` 與 `"terminal"`。
 相同 ADC 或 register 不能由兩個不同物件重複占用，衝突會在編譯時指出兩個物件。
@@ -905,17 +897,17 @@ from zcu_tools.program.v2 import IQ, shot_sums
 processor = shot_sums(prog, [IQ("terminal")])
 sums = SignalBuffer((config.length.expts, 3), dtype=np.float64)
 
-with Schedule(config, sums, scope=context.scope) as sched:
+with Schedule(sums, scope=context.scope) as sched:
     sched.run_acquire_summed(
-        prog, context.soc, processor=processor, rounds=sched.cfg.rounds,
-        options=RunOptions(retry=sched.cfg.acquire_retry),
+        prog, context.soc, processor=processor, rounds=config.rounds,
+        options=RunOptions(retry=config.acquire_retry),
     )
 ```
 
 需要不同形狀或 conditional mean 時，用 `RunOptions(converter=...)` 明確轉換。
 `shot_sums`、分類軸與 `split_sums` 見 [program acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。
 Mux 多 ADC 的 run 也要提供符合 slot 形狀的 converter，不能沿用只取第一個 ADC 的預設。
-新 emit 路徑不支援 legacy `MuxReadout.collect_raw_iq`，不要用該方法作 converter。
+`MuxReadout.collect_raw_iq(prog)` 在 completed-round hook 讀取該 program 的 raw buffers，不把累積 averaged IQ 當作逐 shot IQ。
 
 Decimated 範例不使用 sweep。`trace_buffer` 由 caller 按這次 rounded readout window
 預先配置，形狀須符合 backend 的 repetitions 與 samples 軸，並可提供 `on_update`。
@@ -926,9 +918,9 @@ trace_builder = TimelineBuilder(context.soccfg, reps=1)
 trace_builder.emit(Readout("readout", config.readout))
 trace_prog = trace_builder.build()
 
-with Schedule(config, trace_buffer, scope=context.scope) as sched:
+with Schedule(trace_buffer, scope=context.scope) as sched:
     sched.run_acquire_decimated(
-        trace_prog, context.soc, rounds=sched.cfg.rounds,
+        trace_prog, context.soc, rounds=config.rounds,
         options=RunOptions(progress=True),
     )
 ```
@@ -941,7 +933,9 @@ Program 本身的 `acquire`、`acquire_summed` 與 `acquire_decimated` 只取數
 
 實驗 cfg 從 `zcu_tools.cfg_model` import `ConfigBase`。Module 與掃描欄位直接放在 cfg 頂層，不宣告 Modules／Sweep group。Form 的排序見[寫法慣例](#cfg-名稱順序與取數欄位)，模組保留 selector 與子表單，掃描保留 `SweepCfg` 子表單。`FieldMeta` 仍可宣告 label、unit 等顯示提示。Pulse 的 Advanced group 保留 NQZ、Phase、Pre-delay、Post-delay 與 Mixer freq 的既有摺疊。Tone lists 保留逐元素結構。只宣告實驗使用的 reps、rounds 與 relax_delay。Initial delay 只有實驗需要編輯或驗證時才宣告，其餘沿用 program 的 1.0 us 預設。
 
-Builder 不讀 cfg。作者明傳 `sched.prog_builder(soc, soccfg, reps=sched.cfg.reps, relax_delay=sched.cfg.relax_delay)`，再以 `build_and_acquire(rounds=sched.cfg.rounds)` 取資料。需要 initial_delay 時同樣明傳。Live helper 的新寫法與舊介面界線見[圖的建立、顯示與更新](#圖的建立顯示與更新)。
+TimelineBuilder 不讀 cfg。作者明傳 reps、relax_delay 與需要的 initial_delay。
+`builder.build()` 編譯 program；取數時明傳 `rounds=config.rounds` 給 Schedule 的 `run_acquire*`。
+Live helper 見[圖的建立、顯示與更新](#圖的建立顯示與更新)。
 
 平鋪 cfg 使用 `cfg_schema_version="3.0"`。Load 不轉換舊巢狀 cfg。舊 major 的資料仍載入，record.cfg 為 None，cfg_issue 說明原因，資料陣列與 metadata 不變。
 
@@ -954,7 +948,7 @@ Core import 實際使用的 module，型別選擇見[寫法慣例](#cfg-名稱�
 - 除了用來產生分類參數的 `singleshot/ge`、`mux/singleshot_ge`、`singleshot/qutrit_population`、`singleshot/amp_rabi`、`singleshot/len_rabi`、`singleshot/check`，實驗不保存逐 shot 資料。分類在取數時做，Result 存計數或總和，避免為事後分類保存整批 IQ。校準實驗仍保留逐 shot 分布，供分類參數的擬合與驗證使用。
 - **`raw` 格式**：QICK 回傳的 raw 一般是 `list[ndarray]`，第一個元素 shape 為 `(nro, ..., 2)`（IQ 兩個實數）。
 - **`default_raw2signal_fn`**：Schedule 路徑使用 `zcu_tools.experiment.v2.runtime.schedule` 的預設轉換：`raw[0][0].dot([1, 1j])`，取第 0 個 RO channel、該 channel 的第 0 次 readout，再把 IQ 轉成 complex。
-- **客製化 `raw2signal_fn`**：integrated acquire 用 `build_and_acquire(raw2signal_fn=...)` / `run_program(raw2signal_fn=...)`；decimated trace 用 `build_and_acquire_decimated(raw2signal_fn=...)` / `run_program_decimated(raw2signal_fn=...)`。`ProgramBuilder.set_raw2signal_fn(...)` 可設定同一個 builder 的預設轉換。
+- **自訂 raw conversion**：integrated 與 decimated acquire 都以 `RunOptions(converter=...)` 傳入轉換。Converter 收各輪累積與最終 raw，回傳符合 slot shape 的 ndarray。
 - **`signal2real` 函式**：每個 Exp 檔案會定義 local 的 `xxx_signal2real`（通常 `np.abs`），給 liveplot 用；analyze 階段可能換成 phase / real。
 - **scalar/array 邊界**：座標轉換工具（例如 value↔flux）可接受 scalar 或 ndarray；若後續 plotting/analysis 需要 indexing、min/max 或與另一個 sweep array 對齊，呼叫端在邊界用 `np.asarray(..., dtype=...)` 正規化成 ndarray，而不是用型別宣告假設回傳一定是 array。
 - **peak-picking smoothing**：ro-optimize 與 reset 這類以 SNR/map argmax 找最佳點的分析預設使用 `smooth_method="wavelet"`；`smooth_method="gaussian"` 保留為舊 Gaussian 對照。`smooth` 是通用強度：Gaussian 時是 sigma，wavelet 時是 threshold scale。ro-optimize length 的 `t0` 是 `SNR/sqrt(length + t0)` 的 duration-normalization term；`t0 > 0` 啟用短 readout bias，且較小的正值 bias 較強。`None` 與 `0.0` 都是純平滑 SNR argmax。
@@ -1008,14 +1002,14 @@ distinct depths 時分析明確失敗。
 
 ## 外部中斷支援（cancel_flag）
 
-Schedule 的 builder 與 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` 傳給 program。它觀察目前 acquire scope 的外部停止，包含 Schedule 祖先的停止請求。Data-driven early stop 只停止目前 acquire，不改 Schedule outcome。
+Schedule 的 `run_acquire*` 入口會把 acquire-local composite `cancel_flag` 傳給 program。它觀察目前 acquire scope 的外部停止，包含 Schedule 祖先的停止請求。Data-driven early stop 只停止目前 acquire，不改 Schedule outcome。
 
-取消 acquire 子層時，runner 保留 completed rounds，首輪前取消則保留 NaN。Schedule 自己未停止時，其 outcome 仍是 completed，下一次 acquire 可繼續。取消 Schedule 本身才記 stopped。作者需要知道本次 acquire 是否被取消時，傳 `AcquireOptions(on_stop=callback)` 或 `RunOptions(on_stop=callback)`。這個通知不交給前端，也不寫回 StopSignal。
+取消 acquire 子層時，runner 保留 completed rounds，首輪前取消則保留 NaN。Schedule 自己未停止時，其 outcome 仍是 completed，下一次 acquire 可繼續。取消 Schedule 本身才記 stopped。作者需要知道本次 acquire 是否被取消時，傳 `RunOptions(on_stop=callback)`。這個通知不交給前端，也不寫回 StopSignal。
 
 Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 retry、不轉 outcome；converter 與 update 錯誤也直接傳出。Schedule 的作者 outcome 保留 completed、stopped 或 failed，但不代表資料可用性。GUI 與 Notebook 只依 core 回傳或拋錯發布結果，不解析 buffer 或 outcome。
 
-- `AcquireOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。若使用 SNR early stop，將 `snr_checker(signals_buffer[step], threshold, signal2real_fn)` 傳給 `ProgramBuilder(...).build_and_acquire(options=AcquireOptions(stop_condition=...))`；runner 只在 completed round 寫入 buffer 後檢查，命中時呼叫 acquire-local `cancel_flag.set()`，保留目前 round 並讓 `Schedule.outcome` 維持 `completed`。
-- `singleshot/ge/core.py`、`singleshot/check/core.py` 的 raw-shot acquire path 不經 `ProgramBuilder.run_program(...)`，因此在實驗邊界直接傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
+- `RunOptions` 從 `zcu_tools.experiment.v2.runtime` 匯入。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(signals_buffer[step], threshold, signal2real_fn))`。Runner 寫入 completed round 後才檢查 condition，命中時只停止目前 acquire。
+- 直接呼叫 program 的 raw-shot acquire 時，明傳 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`，並把 first-round no-data stop 視為 stopped partial。
 
 ---
 
@@ -1024,9 +1018,9 @@ Producer 一般錯誤在 retry 耗盡後原樣傳出。KeyboardInterrupt 不 ret
 1. 定義 `XxxCfg(ConfigBase)`，頂層欄位與 module 型別依[寫法慣例](#cfg-名稱順序與取數欄位)宣告。平鋪、版本與 Advanced group 見[v2 cfg 組合慣例](#v2-cfg-組合慣例)。
 2. 繼承 `Experiment[T_Result, XxxCfg]`，需要 typed record 持久化時宣告 class-level `AXES_SPEC`。Single 與 grouped mapping 共用此入口。Result dataclass 只放資料，cfg 與歷史 metadata 由 RunRecord 持有。以 `restore_run(stored, spec=Exp.AXES_SPEC)` 還原已讀 native Container，以 `load_run_with_metadata(path, spec=...)` 讀檔。`save_run(record, path, spec=..., replace=False)` 寫 native，`save_labber(record, path, spec=...)` 另作 Labber 匯出，兩者不猜格式。基底只宣告 Run 與分析簽名，不提供存讀方法。GUI 的 tag、restore 與保存內容 hooks 預設使用同一宣告，見 [GUI contracts](gui-contracts.md#共用-lifecycle-hooks)。
 3. 實作 `run(cfg, *, context)`，沿用上方的 RunContext／Plots／Schedule 流程。同步分析另實作 `analyze(source, options, *, plots)`，互動分析由前端 helper 擁有。
-4. `ProgramBuilder.build_and_acquire()` / `run_program(...)` 自動注入 Schedule `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 走 builder 的 `options=AcquireOptions(stop_condition=snr_checker(...))`。
+4. Schedule 的 `run_acquire*` 自動注入 acquire-local `cancel_flag`；若直接呼叫 `program.acquire(...)`，必須明確傳入 `cancel_flag=sched.stop` 或 `cancel_flag=step.stop`。SNR early stop 使用 `RunOptions(stop_condition=snr_checker(...))`。
 5. 持久化由 `AXES_SPEC` 宣告。軸用 `AxesSpec.Axis`，signal 用 `AxesSpec.Z`。MHz 轉 Hz 寫 `scale=1e6`，us 轉 s 寫 `scale=1e-6`；原值保存時省略 scale，預設為 1.0。盤上是 SI 單位，記憶體內維持習慣單位。`AXES_SPEC.tag` 取有層次的 on-disk 名字，例如 `"twotone/rabi/len"`，axes 以 inner-first 排列。Native 保存與還原依同一 spec 換算；`save` 的 Labber 匯出不是 `load` 的逆操作。Typed cfg 不相容時 native restore 保留有效 data、回 cfg=None 與 cfg_issue，缺 cfg envelope 或壞資料仍拒絕。來源與失敗契約見 [experiment owner](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)。
-6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `ProgramBuilder.declare_sweep(...)`。host soft sweep 若需要重用每個點的 program，在 `run()` 裡維護 dict：cache miss 時 `builder.build()`，每次量測時 `builder.run_program(program)`。
+6. 如果有多個 sweep 軸，先區分 host loop 與 program loop：host loop 用 `sched.scan(...)` / `sched.repeat(...)`，program loop 用 `TimelineBuilder.add_sweep(...)` 或 `add_loop(...)`。Host soft sweep 若需重用每點 program，在 `run()` 裡維護 dict；cache miss 時建立新的 builder 並 build，每次量測時呼叫 `step.run_acquire(program, context.soc, ...)`。
 
 Singleshot GE/Rabi 的 radius 自動搜尋上限為 g/e 中心距離，手動分類可使用更大 radius。Raw IQ 投影 likelihood 不依賴 radius；derived confusion 與 population 使用圓內且最近中心的互斥區域。GE `consider_other` 僅控制 radius 選擇的 midpoint-other 懲罰模型，回傳校正矩陣維持 isolated-other row。
 

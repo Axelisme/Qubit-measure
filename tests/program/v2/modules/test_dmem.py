@@ -150,7 +150,7 @@ def test_uncompressed_scalar_lookup_reaches_legacy_register_consumer(padding):
 
 
 # ---------------------------------------------------------------------------
-# ScanWith
+# Table bounds
 # ---------------------------------------------------------------------------
 
 
