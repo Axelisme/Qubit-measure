@@ -6,7 +6,11 @@ from typing import TypeVar
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.plotting.plots import Plots
 
-from ..acquisition import capture_device_snapshot, capture_software_provenance, new_run_id
+from ..acquisition import (
+    capture_device_snapshot,
+    capture_software_provenance,
+    new_run_id,
+)
 from ..base import Experiment
 from ..context import RunContext
 from ..metadata import RunMetadata, RunSnapshot
