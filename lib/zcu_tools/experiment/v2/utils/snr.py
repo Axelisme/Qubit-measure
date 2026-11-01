@@ -103,7 +103,7 @@ def calc_snr(
 
 def snr_as_signal(
     raw: Sequence[MomentTracker],
-    ge_axis: int = 0,
+    ge_axis: int = 1,
     *,
     skew_penalty: float = DEFAULT_SKEW_PENALTY,
 ) -> NDArray[np.float64]:
@@ -118,7 +118,10 @@ def snr_as_signal(
     assert mean_d.shape[ge_axis] == 2, (
         f"Expected dim=2 along ge_axis, got shape {mean_d.shape} with ge_axis={ge_axis}"
     )
-    return calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty)
+    return np.squeeze(
+        calc_snr(mean_d, cov_d, m3_d, ge_axis=ge_axis, skew_penalty=skew_penalty),
+        axis=0,
+    )
 
 
 def snr_checker(
