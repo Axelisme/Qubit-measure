@@ -15,7 +15,9 @@ from .signals import StatisticsCopier, materialize_shots, pack_signals
 class SimulationSoc(QickConfig):
     """Bound offline SoC; no implicit noise mode and no driver ownership.
 
-    routes is a tuple of (generator, ADC) pairs. The fixed capability profile is
+    routes is a tuple of (generator, ADC) integer pairs. Other containers,
+    malformed pairs and non-integer channels raise TypeError at construction.
+    Out-of-range channels raise ValueError. The fixed capability profile is
     supplied by make_mock_soccfg; using an unbound route fails before acquisition.
     Getters retain the last completed realization, never execute or resample it.
     """
@@ -30,6 +32,13 @@ class SimulationSoc(QickConfig):
         *,
         routes: tuple[tuple[int, int], ...],
     ) -> None:
+        if not isinstance(routes, tuple) or any(
+            not isinstance(route, tuple)
+            or len(route) != 2
+            or any(not isinstance(channel, int) for channel in route)
+            for route in routes
+        ):
+            raise TypeError("routes must be a tuple of (int, int) generator/ADC pairs")
         super().__init__(soccfg.get_cfg())
         self.binding = binding
         self.routes = routes
