@@ -150,12 +150,13 @@ def analyze_len_rabi(result: LenRabiResult) -> RabiFit | Failed:
     fit = min(
         candidates,
         key=lambda candidate: (
-            float(np.mean(np.abs(observed - candidate[6])))
-            if np.all(np.isfinite(candidate[6]))
+            float(np.mean(np.abs(observed - candidate.curve)))
+            if np.all(np.isfinite(candidate.curve))
             else math.inf
         ),
     )
-    pi_length, error, pi2, pi2_error, _freq, _freq_error, fitted, _optimizer = fit
+    pi_length, error = fit.pi_x, fit.pi_x_err
+    pi2, pi2_error, fitted = fit.pi2_x, fit.pi2_x_err, fit.curve
     quality = compute_fit_quality(observed, fitted, {}, None)
     return RabiFit(
         float(pi_length),

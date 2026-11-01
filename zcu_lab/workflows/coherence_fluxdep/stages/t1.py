@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 from matplotlib.figure import Figure
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
@@ -13,7 +14,8 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.support import LinePlot, live_line
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.live import AttachedLine
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
@@ -150,26 +152,38 @@ def estimate_t1_time_s(
     )
 
 
-def _plot(plots: Plots) -> LinePlot:
+def _plot(plots: Plots) -> AttachedLine:
+    """Prepare the lower raw-I panel without clearing accepted history above."""
     if "t1" not in plots:
-        plots.subplots("t1", nrows=2)
+        plots.subplots(nrows=2, num="t1")
+    figure = plots["t1"]
+    # Retrieve the new handle from the synchronous owner callback.
+    line: AttachedLine | None = None
 
-    def rebuild(figure: Figure) -> None:
+    @plots.on_plot_thread
+    def rebuild(_payload: None) -> tuple[Figure]:
+        nonlocal line
         figure.set_layout_engine("constrained")
-        # Give this point its own handle, not the previous live template's axis.
+        # Each point gets a fresh axis and handle below the accepted history.
         figure.axes[1].remove()
-        figure.add_subplot(2, 1, 2)
+        ax = figure.add_subplot(2, 1, 2)
+        ax.set(xlabel="Time (us)", ylabel="Signal (raw I)")
+        line = live_line(ax)
+        return (figure,)
 
-    plots.draw("t1", rebuild)
-    return live_line(
-        plots, "t1", "Time (us)", "Signal (raw I)", axes=plots["t1"].axes[1]
-    )
-
+    rebuild(None)
+    figure.show()
+    if line is None:
+        raise RuntimeError("Decay plot handle was not initialized")
+    return line
 
 def _draw_fit(
     plots: Plots, fit: DecayFit, comparison: LifetimeComparison, reason: str | None
 ) -> None:
-    def overlay(figure: Figure) -> None:
+    figure = plots["t1"]
+
+    @plots.on_plot_thread
+    def overlay(_payload: None) -> tuple[Figure]:
         ax = figure.axes[1]
         ax.clear()
         ax.plot(fit.times, fit.observed, ".", label="observed")
@@ -184,7 +198,9 @@ def _draw_fit(
         )
         ax.legend()
 
-    plots.draw("t1", overlay)
+        return (figure,)
+
+    overlay(None)
 
 
 async def measure_t1(
@@ -227,7 +243,11 @@ async def measure_t1(
             file=acquisition.file,
             gain_clamped=gain_clamped,
         )
-    plot.update(acquisition.result.times, acquisition.result.signals.real)
+    @env.plots.on_plot_thread
+    def update_raw(data: tuple[NDArray[np.float64], NDArray[np.float64]]):
+        return plot.set(*data)
+
+    update_raw((acquisition.result.times, acquisition.result.signals.real))
     fit = analyze_t1(acquisition.result)
     if isinstance(fit, Failed):
         return T1Result(

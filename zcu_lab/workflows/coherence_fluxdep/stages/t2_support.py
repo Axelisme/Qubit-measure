@@ -8,7 +8,8 @@ from matplotlib.figure import Figure
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.support import LinePlot, live_line
+from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support.live import AttachedLine
 from zcu_lab.workflows.coherence_fluxdep.t2 import T2EchoTunables
 from zcu_lab.workflows.common.analysis import DecayFit, lifetime_rejection
 from zcu_lab.workflows.common.gates import Gate, gate
@@ -69,22 +70,30 @@ def relax_delay(settings: T2EchoTunables, t1_estimate_us: float) -> float:
     )
 
 
-def decay_plot(plots: Plots, kind: str) -> LinePlot:
+def decay_plot(plots: Plots, kind: str) -> AttachedLine:
     """Prepare the lower raw-I panel without clearing accepted history above."""
     if kind not in plots:
-        plots.subplots(kind, nrows=2)
+        plots.subplots(nrows=2, num=kind)
+    figure = plots[kind]
+    # Retrieve the new handle from the synchronous owner callback.
+    line: AttachedLine | None = None
 
-    def rebuild(figure: Figure) -> None:
+    @plots.on_plot_thread
+    def rebuild(_payload: None) -> tuple[Figure]:
+        nonlocal line
         figure.set_layout_engine("constrained")
-        # A new axis belongs to this point, not the previous live template.
+        # Each point gets a fresh axis and handle below the accepted history.
         figure.axes[1].remove()
-        figure.add_subplot(2, 1, 2)
+        ax = figure.add_subplot(2, 1, 2)
+        ax.set(xlabel="Time (us)", ylabel="Signal (raw I)")
+        line = live_line(ax)
+        return (figure,)
 
-    plots.draw(kind, rebuild)
-    return live_line(
-        plots, kind, "Time (us)", "Signal (raw I)", axes=plots[kind].axes[1]
-    )
-
+    rebuild(None)
+    figure.show()
+    if line is None:
+        raise RuntimeError("Decay plot handle was not initialized")
+    return line
 
 def draw_decay_fit(
     plots: Plots,
@@ -95,7 +104,10 @@ def draw_decay_fit(
 ) -> None:
     """Draw projected observations and both models, marking a rejected fit."""
 
-    def overlay(figure: Figure) -> None:
+    figure = plots[kind]
+
+    @plots.on_plot_thread
+    def overlay(_payload: None) -> tuple[Figure]:
         ax = figure.axes[1]
         ax.clear()
         ax.plot(fit.times, fit.observed, ".", label="observed")
@@ -110,7 +122,9 @@ def draw_decay_fit(
         )
         ax.legend()
 
-    plots.draw(kind, overlay)
+        return (figure,)
+
+    overlay(None)
 
 
 def t2_gates(fit: DecayFit, min_lifetime_points: int) -> tuple[Gate, ...]:

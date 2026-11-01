@@ -46,7 +46,8 @@ def analyze_t2echo(result: T2EchoResult) -> DecayFit | Failed:
     fit = fit_or_failed(lambda: fit_decay(times, observed))
     if isinstance(fit, Failed):
         return fit
-    lifetime, error, fitted, (parameters, covariance) = fit
+    lifetime, error = fit.decay_time, fit.decay_time_err
+    fitted, parameters, covariance = fit.curve, fit.params, fit.cov
     quality = compute_fit_quality(
         observed,
         fitted,
