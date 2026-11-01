@@ -165,7 +165,9 @@ class LoadValue(Module):
         if not self.values:
             raise ValueError(f"{self.name}: selected playback needs a nonempty table")
         if captured_index in (self.idx_reg, self.val_reg):
-            raise ValueError(f"{self.name}: selected capture must not alias lookup registers")
+            raise ValueError(
+                f"{self.name}: selected capture must not alias lookup registers"
+            )
         captured = (
             prog.add_reg(f"{self.name}_selected_index", allow_reuse=True)
             if captured_index is None

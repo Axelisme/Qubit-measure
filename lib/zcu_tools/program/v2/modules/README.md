@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-01，Timeline mux collection 與具名時間操作
+**Last updated:** 2026-11-01，Timeline mux collection、具名時間操作與 selected index 生命週期
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
