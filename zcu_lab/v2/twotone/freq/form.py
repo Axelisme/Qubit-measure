@@ -9,7 +9,7 @@ from zcu_lab.v2.support.measure.seed_metadata import (
 from zcu_lab.v2.twotone.freq.core import FreqCfg
 
 
-def make_form(ctx: FormContext) -> Form[FreqCfg]:
+def make_form(_ctx: FormContext) -> Form[FreqCfg]:
     """Build starting values and shape from the captured source availability."""
     return Form(
         FreqCfg,
@@ -22,9 +22,14 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
                 # Run replaces probe frequency with the scan.
                 set={"freq": Hidden(0.0), "gain": 0.1, "waveform.length": 1.0},
             ),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template(
+                    "readout",
+                    bindings={"resonator": "$resonator"},
+                    seed_metadata=pulse_readout_seed_metadata(gain=0.1),
+                ),
+            ),
             "freq": Range.around("$qubit.freq", "20 * $qubit.kappa", expts=301),
             "relax_delay": 1.0,
             "reps": 1000,
@@ -32,16 +37,11 @@ def make_form(ctx: FormContext) -> Form[FreqCfg]:
         },
     ).with_seed_metadata(
         {
-            **(
-                {}
-                if ctx.has("$resonator.module.readout")
-                else pulse_readout_seed_metadata(gain=0.1)
-            ),
             **{
                 ("qub_pulse", "module", "gain"): FieldMeta(
                     description="未校準的起始值，來源：固定常數。qub_probe Template gain 0.1 a.u. within [-1, 1]; operator confirmation required",
                     calibration="uncalibrated",
                 )
-            },
+            }
         }
     )

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
@@ -41,7 +44,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -97,7 +100,7 @@ class CPMG_Cfg(ConfigBase):
     earlystop_snr: Annotated[float | None, FieldMeta(label="Early-stop SNR")] = None
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class CPMGAnalyzeOptions:
     """Fringe fitting and optional reference coherence times in us."""
 
@@ -168,8 +171,10 @@ def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
 
 
 _CPMG_VARIABLE_AXES = (
-    VariableAxisSpec.generated_arange("Time Index", "a.u.", dtype=np.int64),
-    VariableAxisSpec("Number of Pi", "a.u.", field_name="ns", dtype=np.int64),
+    VariableAxisSpec.generated_arange(label="Time Index", unit="a.u.", dtype=np.int64),
+    VariableAxisSpec(
+        label="Number of Pi", unit="a.u.", field_name="ns", dtype=np.int64
+    ),
 )
 CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
     variables=(
@@ -238,6 +243,46 @@ def _prepare_delays(
     return windows, lengths
 
 
+def _live_plot(
+    plots: Plots, times: NDArray[np.int64]
+) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
+    """Show the normalized count/time map and its two most recent scan rows."""
+    fig, _ = plots.subplots(1, 2, num="measurement")
+    heat_ax, line_ax = fig.axes
+    heat_ax.set(xlabel="Number of Pi", ylabel="Time idxs")
+    line_ax.set_xlabel("Time idxs")
+    formatter = ScalarFormatter(useMathText=True)
+    formatter.set_powerlimits((-2, 2))
+    heat_ax.xaxis.set_major_formatter(formatter)
+    heat_ax.yaxis.set_major_formatter(formatter)
+    heatmap = live_heatmap(heat_ax, uniform=True)
+    line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    line_ax.grid()
+    lines = live_line(line_ax, num_lines=2)
+    for artist in line_ax.lines[:-1]:
+        artist.set(marker="None", alpha=0.3, color="red")
+    line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+    line_ax.legend()
+
+    @plots.on_plot_thread
+    def update(data: tuple[NDArray[np.float64], NDArray[np.float64], float]):
+        ys, real, snr = data
+        valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+        current = int(valid[-1]) if valid.size else -1
+        history = np.full((2, len(ys)), np.nan)
+        for offset in range(min(2, current + 1)):
+            history[-offset - 1] = real[current - offset]
+        artists = heatmap.set(times.astype(np.float64), ys, real)
+        artists = (*artists, *lines.set(ys, history))
+        title = f"snr = {snr:.1f}" if snr else None
+        if title is not None:
+            return (*artists, heat_ax.set_title(title))
+        return artists
+
+    fig.show()
+    return update
+
+
 class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
     AXES_SPEC: ClassVar[GroupedAxesSpec[CPMG_Result, CPMG_Cfg]] = CPMG_GROUPED_AXES_SPEC
 
@@ -284,14 +329,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             nonlocal current_snr
             current_snr = snr
 
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Number of Pi",
-            "Time idxs",
-            line_axis=1,
-            num_lines=2,
-        )
+        update = _live_plot(context.plots, times)
         current_length_idx = 0
         signals_buffer = SignalBuffer(
             (len(times), len(length_idxs)),
@@ -300,11 +338,8 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
-                viewer.update(
-                    times.astype(np.float64),
-                    lengths[current_length_idx],
-                    cpmg_signal2real(data),
-                    title=f"snr = {current_snr:.1f}" if current_snr else None,
+                update(
+                    (lengths[current_length_idx], cpmg_signal2real(data), current_snr)
                 )
 
             # Scan pi-pulse counts on the host; sweep evolution time on the board.
@@ -438,7 +473,7 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
         # Compare decay times across pulse counts without treating IQ as population.
-        fig, _ = plots.subplots("fit", nrows=1, ncols=2, figsize=(8, 3))
+        fig, _ = plots.subplots(num="fit", nrows=1, ncols=2, figsize=(8, 3))
         ax1, ax2 = fig.axes
 
         X = np.broadcast_to(times[None, :], norm_signals.T.shape)

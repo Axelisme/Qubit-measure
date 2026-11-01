@@ -86,11 +86,9 @@ def make_plugin(
     data = req.run_result.result
 
     def build(state: RangeFindState) -> RangeFindState:
-        plots.subplots("fit")
-        plots.draw(
-            "fit",
-            lambda figure: draw_range_find(figure, data.freqs, data.magnitude, state),
-        )
+        figure, _ = plots.subplots(num="fit")
+        draw_range_find(figure, data.freqs, data.magnitude, state)
+        figure.show()
         return state
 
     return RangeFindPlugin(

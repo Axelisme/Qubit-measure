@@ -100,6 +100,13 @@ Analyze 的例外交給作者，包含 fitting 的 AnalysisFailed；框架不辨
 
 Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室 component 轉換輸入。
 
+## 實驗繪圖
+
+實驗繪圖使用 `plots.subplots(num=...)` 建圖、`fig.show()` 顯示，
+顯示後透過 `@plots.on_plot_thread` 更新。可選的 `live_line(ax)`、`live_heatmap(ax)`
+與 `live_scatter(ax)` 只管理本地 artists，`set(...)` 回傳 changed artists。
+詳細寫法見 [v2 authoring](v2/experiment-authoring.md#圖的建立顯示與更新)。
+
 ## 實驗定義的離線驗收
 
 實驗定義改動，包含 live plot 與分析圖的畫面改動，依 [UI 驗證的實驗定義規則](../tests/README.md#實驗定義) 執行離線 probe。

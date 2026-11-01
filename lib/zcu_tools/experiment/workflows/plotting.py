@@ -27,7 +27,7 @@ class WorkflowPlots(Plots):
         """Register a workflow figure; reject the reserved operation/ prefix.
 
         All native FigureCollection ownership and name-conflict checks still
-        apply. The restriction also covers subplots and live factories.
+        apply. The restriction also covers subplots.
         """
         if name.startswith("operation/"):
             raise ValueError("Workflow figure names must not start with operation/")

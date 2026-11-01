@@ -3,11 +3,13 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     HangerModel,
@@ -19,7 +21,7 @@ from zcu_tools.analysis.fitting.resonance.hanger import HangerParams
 from zcu_tools.analysis.fitting.resonance.transmission import TransmissionParams
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class ResonanceOptions:
     """Shared model inputs, with MHz frequencies and inverse-MHz delays.
 
@@ -27,15 +29,19 @@ class ResonanceOptions:
     edelay fixes delay when supplied; edelay_branch_seed initializes its fit.
     The two background switches enable independent amplitude slope and phase
     curvature. edelay_max_search_radius bounds unseeded search, or None uses the
-    fitter default. Invalid model/numeric inputs raise ValueError during fitting.
+    fitter default. Invalid model/numeric inputs raise ValueError on construction.
     """
 
     model_type: Literal["hm", "t", "auto"] = "auto"
-    edelay: float | None = None
+    edelay: Annotated[float | None, Field(strict=True, allow_inf_nan=False)] = None
     fit_bg_amp_slope: bool = False
     fit_bg_phase_curvature: bool = False
-    edelay_branch_seed: float | None = None
-    edelay_max_search_radius: float | None = None
+    edelay_branch_seed: Annotated[
+        float | None, Field(strict=True, allow_inf_nan=False)
+    ] = None
+    edelay_max_search_radius: Annotated[
+        float | None, Field(gt=0, strict=True, allow_inf_nan=False)
+    ] = None
 
 
 @dataclass(frozen=True)
@@ -82,10 +88,8 @@ def fit_resonance(
         model = HangerModel()
     elif options.model_type == "t":
         model = TransmissionModel()
-    elif options.model_type == "auto":
-        model = get_proper_model(freqs, signals)
     else:
-        raise ValueError(f"Invalid model type: {options.model_type}")
+        model = get_proper_model(freqs, signals)
     # Keep each model's typed parameter/renderer pair together.
     if isinstance(model, HangerModel):
         params = model.fit(

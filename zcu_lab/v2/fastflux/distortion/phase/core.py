@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -105,12 +106,22 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         )
 
         # Keep one mean IQ value for each pair-start/projection-phase setting.
-        viewer = live_heatmap(context.plots, "measurement", "Time (us)", "Phase (deg)")
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Phase (deg)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+        viewer = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, phases, phase_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths), len(phases)),
-            on_update=lambda data: viewer.update(
-                lengths, phases, phase_signal2real(data)
-            ),
+            on_update=update,
         )
 
         with Schedule(signals_buffer, scope=context.scope) as sched:

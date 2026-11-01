@@ -8,7 +8,9 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.image import NonUniformImage
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
 from zcu_tools.experiment.context import RunContext
@@ -29,7 +31,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.process import rotate2real
 
-from zcu_lab.v2.support import live_heatmap_with_line
+from zcu_lab.v2.support import live_heatmap, live_line
 
 
 @dataclass(frozen=True)
@@ -41,7 +43,7 @@ class AcStarkRamseyResult:
     signals: NDArray[np.complex128]
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class AcStarkRamseyAnalyzeOptions:
     """FFT center in MHz (subtracted from the axis) and exclusive gain cutoff."""
 
@@ -129,22 +131,33 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, cfg.stark_pulse.ch)
 
-        viewer = live_heatmap_with_line(
-            context.plots,
-            "measurement",
-            "Stark Pulse Gain (a.u.)",
-            "Time (us)",
-            line_axis=1,
-            num_lines=2,
-            uniform=False,
-        )
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
+        heat_ax, line_ax = fig.axes
+        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Time (us)")
+        line_ax.set_xlabel("Time (us)")
+        heatmap = live_heatmap(heat_ax, uniform=False)
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
+        lines = live_line(line_ax, num_lines=2)
+        for artist in line_ax.lines[:-1]:
+            artist.set(marker="None", alpha=0.3, color="red")
+        line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
+
+        @context.plots.on_plot_thread
+        def update(data):
+            real = acstark_ramsey_signal2real(data)
+            valid = np.flatnonzero(~np.all(np.isnan(real), axis=1))
+            current = int(valid[-1]) if valid.size else -1
+            history = np.full((2, len(lengths)), np.nan)
+            for offset in range(min(2, current + 1)):
+                history[-offset - 1] = real[current - offset]
+            return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),
-            on_update=lambda data: viewer.update(
-                gains,
-                lengths,
-                acstark_ramsey_signal2real(data),
-            ),
+            on_update=update,
         )
 
         # At each Stark gain, sweep the Ramsey delay and its programmed phase.
@@ -224,7 +237,7 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
 
         gains2 = gains**2
 
-        fig, _ = plots.subplots("fit", nrows=2, ncols=1, sharex=True)
+        fig, _ = plots.subplots(num="fit", nrows=2, ncols=1, sharex=True)
         ax1, ax2 = fig.axes
 
         im1 = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")

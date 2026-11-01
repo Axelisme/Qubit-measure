@@ -39,7 +39,7 @@ class RecordingCore(Experiment[float, Cfg]):
         """Plot and return scale, then mutate the working cfg or inject failure."""
         self.contexts.append(context)
         result = config.scale
-        _, axes = context.plots.subplots("raw")
+        _, axes = context.plots.subplots(num="raw")
         axes.plot([0.0], [result])
         config.scale = 99.0
         if self.fail_run:
@@ -60,7 +60,7 @@ class RecordingCore(Experiment[float, Cfg]):
         if source.cfg is not None:
             source.cfg.scale = 42.0
         options.weights[0] = 99.0
-        _, axes = plots.subplots("fit")
+        _, axes = plots.subplots(num="fit")
         axes.plot([0.0], [analysis])
         if self.fail_analysis:
             raise ValueError("Analysis failed after creating a diagnostic figure")

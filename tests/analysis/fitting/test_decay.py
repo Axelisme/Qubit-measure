@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from zcu_tools.analysis import fitting
 from zcu_tools.analysis.fitting import compute_fit_quality, decay_time_bounds
 from zcu_tools.analysis.fitting.base import decaycos, dual_expfunc, expfunc
 from zcu_tools.analysis.fitting.decay import (
@@ -41,6 +42,50 @@ def test_decay_named_result_preserves_unpacking_and_quality(
     assert result.quality.r2 is not None and result.quality.r2 > 0.999
     assert error > 0.0
     assert_frozen_fields(result, ("decay_time", "params", "cov", "curve", "quality"))
+
+
+@pytest.mark.parametrize("fixed", ("free", "center", "sigma"))
+def test_gaussian_named_result_preserves_sigma_conversion_and_quality(
+    fixed: str,
+) -> None:
+    xs = np.linspace(0.0, 20.0, 160)
+    center = 0.0 if fixed == "center" else 2.0
+    ys = 0.2 + 0.8 * np.exp(-0.5 * ((xs - center) / 3.0) ** 2)
+    ys += np.random.default_rng(42).normal(0.0, 0.001, xs.size)
+    result = fitting.fit_gauss_decay(
+        xs,
+        ys,
+        fit_params=(0.2, 0.8, center, 3.0),
+        fixedparams=(
+            None,
+            None,
+            center if fixed == "center" else None,
+            3.0 if fixed == "sigma" else None,
+        ),
+    )
+    time, error, curve, (params, cov) = result
+
+    assert result.decay_time == time == pytest.approx(4.242640687, rel=0.01)
+    assert isinstance(result, fitting.GaussDecayFit)
+    assert result.decay_time_err == error == pytest.approx(np.sqrt(2 * cov[3, 3]))
+    assert result.curve is curve
+    assert result.params is params
+    assert result.cov is cov
+    np.testing.assert_allclose(params, (0.2, 0.8, center, 3.0), atol=0.02)
+    expected = compute_fit_quality(
+        ys,
+        curve,
+        dict(zip(("y0", "yscale", "center", "sigma"), params, strict=True)),
+        cov,
+        fixed_parameters=() if fixed == "free" else (fixed,),
+    )
+    assert result.quality == expected
+    assert result.quality.invalid == ()
+    assert result.quality.r2 is not None and result.quality.r2 > 0.999
+    assert (error == 0.0) if fixed == "sigma" else (error > 0.0)
+    assert_frozen_fields(
+        result, ("decay_time", "decay_time_err", "params", "cov", "curve", "quality")
+    )
 
 
 def test_fit_decay_recovers_T1():

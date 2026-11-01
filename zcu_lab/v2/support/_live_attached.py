@@ -1,5 +1,7 @@
 """Caller-thread artist tools, independent of presentation and plot lifetime."""
 
+from dataclasses import dataclass
+
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import PathCollection
@@ -13,7 +15,95 @@ from ._live_format import (
     NonUniformHeatmapFormat,
     ScatterFormat,
 )
-from ._live_handles import heatmap_data, line_data, scatter_data
+
+
+@dataclass
+class LineData:
+    xs: NDArray[np.float64]
+    signals: NDArray[np.float64]
+
+
+@dataclass
+class ScatterData:
+    xs: NDArray[np.float64]
+    ys: NDArray[np.float64]
+    colors: NDArray[np.float64]
+
+
+@dataclass
+class HeatmapData:
+    xs: NDArray[np.float64]
+    ys: NDArray[np.float64]
+    signals: NDArray[np.float64]
+
+
+def heatmap_data(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    signals: NDArray[np.float64],
+) -> HeatmapData:
+    """Validate real nonempty 1D axes and signals shaped (len(xs), len(ys)).
+
+    Return float64 arrays without changing the inputs. Invalid dimensions,
+    shape or complex data raises ValueError.
+    """
+    if any(np.iscomplexobj(data) for data in (xs, ys, signals)):
+        raise ValueError("Heatmap updates require real-valued data")
+    x_data, y_data, signal_data = (
+        np.asarray(data, dtype=np.float64) for data in (xs, ys, signals)
+    )
+    if x_data.ndim != 1 or y_data.ndim != 1 or not x_data.size or not y_data.size:
+        raise ValueError("Heatmap axes must be non-empty one-dimensional arrays")
+    if signal_data.shape != (x_data.size, y_data.size):
+        raise ValueError("Heatmap signals shape must match the x and y axes")
+    return HeatmapData(x_data, y_data, signal_data)
+
+
+def line_data(
+    xs: NDArray[np.float64],
+    signals: NDArray[np.float64],
+    num_lines: int,
+) -> LineData:
+    """Return validated float64 line data without mutating the input arrays.
+
+    xs is real 1D; signals has shape (num_lines, len(xs)). For num_lines=1,
+    signals may also be 1D. num_lines is the factory's positive line count.
+    Invalid dimensions, shape or complex data raises ValueError.
+    """
+    if np.iscomplexobj(xs) or np.iscomplexobj(signals):
+        raise ValueError("Line plot updates require real-valued data")
+    x_data = np.asarray(xs, dtype=np.float64)
+    y_data = np.asarray(signals, dtype=np.float64)
+    if y_data.ndim == 1:
+        y_data = y_data[None, :]
+    if x_data.ndim != 1 or y_data.ndim != 2 or y_data.shape != (num_lines, x_data.size):
+        raise ValueError("Line plot data must match the line count and x length")
+    return LineData(x_data, y_data)
+
+
+def scatter_data(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    colors: NDArray[np.float64],
+) -> ScatterData:
+    """Return float64 scatter data for nonempty real 1D xs, ys and colors.
+
+    All three arrays must have equal length. Colors are scalar coordinates.
+    Invalid dimensions, shape or complex data raises ValueError before mutation.
+    """
+    if any(np.iscomplexobj(data) for data in (xs, ys, colors)):
+        raise ValueError("Scatter updates require real-valued data")
+    x_data, y_data, color_data = (
+        np.asarray(data, dtype=np.float64) for data in (xs, ys, colors)
+    )
+    if (
+        x_data.ndim != 1
+        or x_data.size == 0
+        or y_data.shape != x_data.shape
+        or color_data.shape != x_data.shape
+    ):
+        raise ValueError("Scatter data must be nonempty vectors of equal length")
+    return ScatterData(x_data, y_data, color_data)
 
 
 class AttachedLine:
@@ -22,8 +112,8 @@ class AttachedLine:
     Construction adds artists without changing labels, title, ticks or grid.
     Construction and set run only on the caller thread, without copying for
     dispatch, refreshing or presenting. Use set inside @plots.on_plot_thread
-    after display. No axes-claim check is made, including against legacy tools;
-    authors coordinate shared artists, autoscale and color limits. This tool
+    after display. No axes-claim check is made. Authors coordinate shared
+    artists, autoscale and color limits. This tool
     does not bind a Plots lifetime. Removing its artists makes set raise
     RuntimeError. Matplotlib errors propagate without rolling back mutations.
     """
@@ -60,8 +150,8 @@ class AttachedHeatmap:
 
     Add only an image, preserving labels and title. Construction and set run
     on the caller thread without dispatch, refresh or presentation. Use set
-    inside @plots.on_plot_thread after display. No axes-claim check is made,
-    including against legacy tools. Authors coordinate shared artists,
+    inside @plots.on_plot_thread after display. No axes-claim check is made.
+    Authors coordinate shared artists,
     autoscale and color limits. This tool does not bind a Plots lifetime.
     Removing its image or axes makes set raise RuntimeError. Matplotlib errors
     propagate without rollback.
@@ -102,7 +192,7 @@ class AttachedHeatmap:
         mutation. Update spatial extent and color limits without changing
         labels or title, refreshing or dispatching.
         """
-        data = heatmap_data(xs, ys, signals, None)
+        data = heatmap_data(xs, ys, signals)
         self._format.update(self._axes, data.xs, data.ys, data.signals)
         image = self._format.im
         if image is None:
@@ -116,7 +206,7 @@ class AttachedScatter:
     Add only artists, preserving labels, title and grid settings. Construction
     and set run on the caller thread without dispatch, refresh or presentation.
     Use set inside @plots.on_plot_thread after display. No axes-claim check is
-    made, including against legacy tools. Authors coordinate shared artists,
+    made. Authors coordinate shared artists,
     autoscale and color limits. This tool does not bind a Plots lifetime.
     Removing its artists or axes makes set raise RuntimeError. Matplotlib
     errors propagate without rollback.

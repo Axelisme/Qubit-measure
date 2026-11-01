@@ -38,7 +38,7 @@ def FiguresAdapter_run(cfg, *, context):
 
 def FiguresAdapter_analyze(req, *, plots) -> None:
     assert req.analyze_params is None
-    _, ax = plots.subplots("fit")
+    _, ax = plots.subplots(num="fit")
     ax.plot([1, 2], [3, 4])
 
 
@@ -55,7 +55,7 @@ FiguresAdapter = Adapter(
 def PostFiguresAdapter_post_analyze(req, *, plots) -> None:
     assert req.analyze_result is None
     assert req.post_analyze_params is None
-    _, ax = plots.subplots("post")
+    _, ax = plots.subplots(num="post")
     ax.plot([1, 2], [4, 5])
 
 

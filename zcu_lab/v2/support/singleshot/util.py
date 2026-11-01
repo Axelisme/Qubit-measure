@@ -13,19 +13,17 @@ from zcu_tools.program.v2.modules.readout import (
 )
 
 
-def readout_confusion_matrix(cfg: ReadoutCfg | None) -> NDArray[np.float64] | None:
+def readout_confusion_matrix(cfg: PulseReadoutCfg | None) -> NDArray[np.float64] | None:
     """Read saved single-qubit circle correction, never point calibration.
 
     Missing historical cfg/classifier/matrix skips correction. Linear has no
-    other state and cannot correct a three-state population analysis. MuxReadout declares
-    ADCs in tone order; raw_population_signal reads its first result, so use
-    tones[0], not the lowest ADC number. Radius is only needed during acquisition.
+    other state and cannot correct a three-state population analysis.
+    Pulse readout supplies the single ADC's classifier. Radius is only needed
+    during acquisition.
     """
     if cfg is None:
         return None
-    classifier = (
-        cfg.classifier if isinstance(cfg, PulseReadoutCfg) else cfg.tones[0].classifier
-    )
+    classifier = cfg.classifier
     if classifier is None:
         return None
     if not isinstance(classifier, CircleClassifier):

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
     calc_lambdas,
     fit_dual_transition_rates,
@@ -24,6 +26,7 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
     Pulse,
+    PulseReadout,
     Readout,
     Reset,
     SweepCfg,
@@ -31,17 +34,8 @@ from zcu_tools.program.v2 import (
     TimelineProgramV2,
     shot_sums,
 )
-from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 
 from zcu_lab.v2.support import live_line
-
-
-def _default_initial_states() -> NDArray[np.int64]:
-    return np.array([0, 1], dtype=np.int64)
-
-
-def _default_population_states() -> NDArray[np.int64]:
-    return np.array([0, 1, 2], dtype=np.int64)
 
 
 def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -61,10 +55,6 @@ class T1WithToneResult:
 
     lengths: NDArray[np.float64]
     counts: NDArray[np.float64]
-    initial_states: NDArray[np.int64] = field(default_factory=_default_initial_states)
-    population_states: NDArray[np.int64] = field(
-        default_factory=_default_population_states
-    )
 
 
 class T1WithToneCfg(ConfigBase):
@@ -72,7 +62,7 @@ class T1WithToneCfg(ConfigBase):
     init_pulse: Annotated[Pulse.Cfg | None, FieldMeta(label="Init Pulse")] = None
     pi_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Pi Pulse")]
     probe_pulse: Annotated[Pulse.Cfg, FieldMeta(label="Probe Pulse")]
-    readout: Annotated[Readout.Cfg, FieldMeta(label="Readout")]
+    readout: Annotated[PulseReadout.Cfg, FieldMeta(label="Readout")]
     delay: Annotated[SweepCfg, FieldMeta(label="Delay", unit="us")]
     sampling: Literal["linear", "decay"] = "decay"
     reps: Annotated[
@@ -93,10 +83,10 @@ class T1WithToneCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class T1WithToneAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
-    skip: int = 0
+    skip: int = Field(default=0, ge=0)
 
 
 @dataclass(frozen=True)
@@ -111,10 +101,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
     AXES_SPEC: ClassVar[AxesSpec[T1WithToneResult, T1WithToneCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis(
-                "population_states", label="Population", unit="None", dtype=np.int64
+                values=(0, 1, 2), label="Population", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
-                "initial_states", label="Initial State", unit="None", dtype=np.int64
+                values=(0, 1), label="Initial State", unit="None", dtype=np.int64
             ),
             AxesSpec.Axis(
                 "lengths", label="Time", unit="s", scale=1e-6, dtype=np.float64
@@ -124,7 +114,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         data_variable=DataVariable("counts"),
         result_type=T1WithToneResult,
         cfg_type=T1WithToneCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="5.0",
         tag="singleshot/t1/t1_with_tone",
     )
 
@@ -194,10 +184,6 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             program = builder.build()
             axis = Classify(
                 "readout",
-                tone=0
-                if not isinstance(cfg.readout, PulseReadoutCfg)
-                and len(cfg.readout.tones) > 1
-                else None,
             )
             sched.run_acquire_summed(
                 program,
@@ -249,10 +235,6 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
                     program = programs[length_key]
                     axis = Classify(
                         "readout",
-                        tone=0
-                        if not isinstance(cfg.readout, PulseReadoutCfg)
-                        and len(cfg.readout.tones) > 1
-                        else None,
                     )
                     step.run_acquire_summed(
                         program,

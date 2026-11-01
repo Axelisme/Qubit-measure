@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -76,7 +79,7 @@ class FreqGainCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class FreqGainAnalyzeOptions:
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
@@ -137,16 +140,23 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         )
 
         # Retain one separation score per frequency/gain pair.
-        viewer = live_heatmap(
-            context.plots,
-            "measurement",
-            "Frequency (MHz)",
-            "Gain (a.u.)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Gain (a.u.)")
+        formatter = ScalarFormatter(useMathText=True)
+        formatter.set_powerlimits((-2, 2))
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+        heatmap = live_heatmap(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return heatmap.set(freqs, gains, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(freqs), len(gains)),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(freqs, gains, np.abs(data)),
+            on_update=update,
         )
 
         # Compare pulse-off/on branches while sweeping both readout knobs in hardware.
@@ -233,7 +243,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         max_gain = float(gains[max_gain_id])
         max_snr = float(snrs[max_freq_id, max_gain_id])
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.imshow(
             snrs.T,
