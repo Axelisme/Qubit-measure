@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from matplotlib.colors import to_rgba
 from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
+from pydantic import ValidationError
 from zcu_tools.analysis.fitting.singleshot import calc_population_pdf
 from zcu_tools.experiment.utils.single_shot import ge
 from zcu_tools.experiment.utils.single_shot.ge import singleshot_ge_analysis
@@ -16,6 +17,15 @@ from zcu_tools.experiment.utils.single_shot.ge.base import (
     hist,
 )
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"numbins": None}, {"length_ratio": "invalid"}, {"logscale": []}],
+)
+def test_fit_options_reject_invalid_types_at_construction(kwargs):
+    with pytest.raises(ValidationError):
+        GEFitOptions(**kwargs)
 
 
 @pytest.mark.parametrize("swap_rows", [False, True])

@@ -6,6 +6,7 @@ from typing import Annotated, ClassVar
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.singleshot import classify_result
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -50,7 +51,7 @@ class CheckCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True, config={"arbitrary_types_allowed": True})
 class CheckAnalyzeOptions:
     max_point: int = 5000
 

@@ -42,8 +42,6 @@ def analyze_frequency(
     """
     # Reject malformed axes before opening any per-qubit fit figures.
     validate_mux_result(result)
-    if options.model_type not in ("lor", "sinc"):
-        raise ValueError(f"Invalid frequency model: {options.model_type!r}")
 
     # Each qubit keeps its own frequency grid and can fail independently.
     outcomes: list[MuxFreqFit | MuxFitFailure] = []
@@ -52,7 +50,7 @@ def analyze_frequency(
         finite = np.isfinite(result.signals[row])
         xs = result.coordinates[row, finite]
         signal = result.signals[row, finite]
-        fig, ax = plots.subplots(f"fit_{index}", figsize=(8, 5))
+        fig, ax = plots.subplots(num=f"fit_{index}", figsize=(8, 5))
         ax.set(xlabel="Drive frequency (MHz)", ylabel="Signal (a.u.)")
         fig.suptitle(f"tone {index}")
 

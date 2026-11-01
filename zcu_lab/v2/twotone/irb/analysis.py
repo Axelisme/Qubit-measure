@@ -77,7 +77,8 @@ def _fit_pair(
     for arm in range(2):
         if np.ptp(means[arm]) <= 1e-12:
             raise ValueError("IRB decay has no measurable contrast")
-        tau, _, curve, (_, covariance) = fit_decay(depths, means[arm])
+        fit = fit_decay(depths, means[arm])
+        tau, curve, covariance = fit.decay_time, fit.curve, fit.cov
         p = float(np.exp(-1.0 / tau)) if tau > 0 else np.nan
         if not np.isfinite(p) or not 0 < p < 1 or not np.isfinite(covariance).all():
             raise ValueError("IRB decay fit is unidentifiable or non-decaying")

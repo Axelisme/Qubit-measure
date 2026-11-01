@@ -100,8 +100,9 @@ same indices cannot be detected. Use fresh plots for another analysis; duplicate
 `fit_i` or `post_i` names are rejected.
 Numerical failures retain the original exception as `GENumericalError.__cause__`.
 
-`MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`,
-int64 `prepared_states=[0,1]` and int64 `shot_indices=arange(shots)`.
+`MuxGEResult` contains complex128 `signals (K,2,shots)`, int64 `tone_indices (K,)`
+and int64 `shot_indices=arange(shots)`. The saved preparation axis has fixed
+values `[0,1]` for probe off/on, declared by `AXES_SPEC`.
 ADC channel numbers and duplicate labels do not reorder these axes.
 One round avoids dropping earlier raw rounds because the program retains only
 the last raw buffer. `MuxReadout.collect_raw_iq(prog, read_index=0)` selects the
