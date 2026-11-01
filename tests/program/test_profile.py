@@ -20,19 +20,17 @@ def profile(request):
 @pytest.mark.parametrize("profile", ["wiring"], indirect=True)
 def test_explicit_wiring_and_optional_connections_reach_qick(profile):
     cfg = program.build_soccfg(profile)
-    for source, output, fields in (
-        (profile["generators"][0], cfg["gens"][0], ("dac", "tproc_ch", "tmux_ch")),
-        *[
-            (source, output, ("adc", "tproc_ctrl", "tmux_ch", "trigger_type",
-                              "trigger_port", "trigger_bit", "tproc_ch", "b_phase"))
-            for source, output in zip(profile["readouts"], cfg["readouts"], strict=True)
-        ],
+    for section, output_section, fields in (
+        ("generators", "gens", ("dac", "tproc_ch", "tmux_ch")),
+        ("readouts", "readouts", ("adc", "tproc_ctrl", "tmux_ch", "trigger_type",
+                                    "trigger_port", "trigger_bit", "tproc_ch", "b_phase")),
     ):
-        for field in fields:
-            if source[field] is None:
-                assert field not in output
-            else:
-                assert output[field] == source[field]
+        for source, output in zip(profile[section], cfg[output_section], strict=True):
+            for field in fields:
+                if source[field] is None:
+                    assert field not in output
+                else:
+                    assert output[field] == source[field]
     assert set(cfg["rf"]["dacs"]) == {profile["generators"][0]["dac"]}
     assert set(cfg["rf"]["adcs"]) == {profile["readouts"][0]["adc"]}
     # Independent worked clocks: 200*9/2 = 900; 900/(3*5) = 60 MHz.
@@ -112,6 +110,28 @@ def test_mux_preserves_explicit_trigger_wiring_and_readout_phase_bits(profile):
         for field in ("trigger_type", "trigger_port", "trigger_bit", "b_phase"):
             assert output[field] == profile["readouts"][ch][field]
         assert "tproc_ctrl" not in output
+
+
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+@pytest.mark.parametrize("section,field", [
+    ("generators", "dac"), ("generators", "tproc_ch"), ("generators", "tmux_ch"),
+    ("readouts", "adc"), ("readouts", "tproc_ctrl"), ("readouts", "tmux_ch"),
+    ("readouts", "trigger_type"), ("readouts", "trigger_port"),
+    ("readouts", "trigger_bit"), ("readouts", "tproc_ch"), ("readouts", "b_phase"),
+])
+def test_wiring_fields_must_be_explicit_even_when_nullable(profile, section, field):
+    # The second readout supplies None for every nullable connection.
+    index = 1 if section == "readouts" else 0
+    del profile[section][index][field]
+    with pytest.raises(ValueError, match=rf"{section}\.{index}\.{field}"):
+        program.build_soccfg(profile)
+
+
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+def test_unknown_trigger_type_reports_the_readout_field(profile):
+    profile["readouts"][0]["trigger_type"] = "unknown"
+    with pytest.raises(ValueError, match=r"readouts\.0\.trigger_type"):
+        program.build_soccfg(profile)
 
 
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
