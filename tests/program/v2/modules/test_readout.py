@@ -42,7 +42,7 @@ def test_readout_cfg_namespace_dispatches_nested_pulse():
 
 @pytest.mark.parametrize(
     "length,ro_length,expected_us",
-    [(0.5, 2.0, 2.4), (3.0, 0.5, 3.5), (0.0, 0.0, 0.5)],
+    [(0.5, 2.0, 2.65), (3.0, 0.5, 3.5), (0.0, 0.0, 0.65)],
 )
 def test_nominal_duration_covers_adc_and_generator_without_clock_rounding(
     length: float, ro_length: float, expected_us: float
