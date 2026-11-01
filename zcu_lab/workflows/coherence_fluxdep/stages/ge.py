@@ -7,6 +7,7 @@ from zcu_tools.experiment.scope import Scope
 from zcu_tools.program import shot_time_s
 
 from zcu_lab.v2.singleshot.ge.core import GE_Cfg, GE_Exp
+from zcu_lab.workflows.coherence_fluxdep.acquire import run_ge
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
 from zcu_lab.workflows.coherence_fluxdep.singleshot import SingleshotTunables
 from zcu_lab.workflows.common.gain import GainClamp, clamp_gain
@@ -91,7 +92,7 @@ async def measure_ge(
     acquisition = await acquire_saved(
         scope,
         env,
-        GE_Exp().run,
+        run_ge,
         cfg,
         name="singleshot",
         output=NativeOutput(filename="singleshot-ge.h5", spec=GE_Exp.AXES_SPEC),

@@ -1,6 +1,7 @@
 """Measure Ramsey dephasing from current-point pulses and independent timing."""
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import numpy as np
@@ -80,7 +81,6 @@ def _cfg(
     return T2RamseyCfg(
         reps=settings.reps,
         rounds=settings.rounds,
-        acquire_retry=settings.acquire_retry,
         earlystop_snr=settings.earlystop_snr,
         relax_delay=relax_delay(settings, guess.t1_us),
         detune=settings.detune_ratio / sweep.step,
@@ -158,7 +158,7 @@ async def measure_ramsey(
     acquisition = await acquire_saved(
         scope,
         env,
-        run_t2ramsey,
+        partial(run_t2ramsey, retry=settings.acquire_retry),
         cfg,
         name="Ramsey",
         output=NativeOutput(filename="t2ramsey.h5", spec=T2RamseyExp.AXES_SPEC),
