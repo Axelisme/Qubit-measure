@@ -83,7 +83,7 @@ def test_resonator_recovers_complex_resonance(coupling_quality: float | None):
 
 
 def test_qubit_frequency_recovers_dip_center_and_linewidth():
-    xs = np.linspace(4995.0, 5005.0, 401)
+    xs = np.linspace(4950.0, 5050.0, 4001)
     ys = generators.generate_qubit_frequency(
         xs, generators.LorentzianParameters(1.0, 0.0, -0.8, 5000.4, 0.5), 0.001, 17
     )
