@@ -322,9 +322,7 @@ class TimelinePlacedTrigger(Trigger):
             offset = placement_time(prog, self.relative_t)
             self.event_end = EventEnd(
                 origin,
-                self.book.math.add(duration, offset)
-                if isinstance(duration, RuntimeEnd)
-                else offset + duration,
+                offset + duration,
                 static_cycles=_trigger_static_cycles(
                     prog, offset, self.get_time_param("width")
                 ),

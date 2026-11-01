@@ -73,7 +73,7 @@ class PulseReadoutCfg(AbsReadoutCfg):
     def nominal_duration_us(self) -> float:
         """Return scalar readout completion time in us without clock rounding.
 
-        Timing fields and waveform length must be finite nonnegative scalar us.
+        pre_delay, post_delay and waveform length are finite nonnegative scalar us.
         Return pre-delay + generator waveform length + post-delay once.
         ADC trigger and integration do not extend this duration. No program or
         hardware is needed, and this cfg is unchanged. This nominal estimate

@@ -71,6 +71,7 @@ class RepeatFrame:
     written_gens: set[int] = field(default_factory=set)
     written_ros: set[int] = field(default_factory=set)
     pulse_guards: dict[int, _PulseGuard] = field(default_factory=dict)
+    # (timeline, ADC channel, entry-relative start cycles, branch selector/index path).
     adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = (
         field(default_factory=list)
     )
@@ -332,8 +333,10 @@ class LoopTimelineFrame:
     entry is its incoming end; origin adds an opaque iteration-progress identity.
     initial_channels/native retain incoming physical tails and their provenance.
     entry_math initializes shot-local storage before the loop. pinned restores
-    register liveness at exit. starts records managed starts and branch paths
-    for the backedge proof, in relative integer cycles. advance is cumulative
+    register liveness at exit. starts records managed generator starts and branch
+    paths for the backedge proof, in relative integer cycles. adc_starts records
+    (timeline, ADC channel, start cycles, branch selector/index path) for the same
+    proof on independent ADC tails. advance is cumulative
     reference movement in cycles; debits retain its execution-position plans.
     written_channels distinguishes generated tails from untouched outer tails.
     body_math starts empty and retains the prepared RuntimeMath plans emitted
