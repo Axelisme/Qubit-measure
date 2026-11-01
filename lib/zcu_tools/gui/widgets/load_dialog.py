@@ -2,16 +2,16 @@
 
 Both analysis GUIs load an hdf5 spectrum behind a modal dialog that reads the file
 best-effort and shows a signal-amplitude preview so the user can judge the axis
-orientation (an axis-mapping dropdown swaps the preview's x/y). Only the *load*
+orientation (an axis-mapping button swaps the preview's x/y). Only the *load*
 applies the chosen ``transpose_axes`` flag, so State always stores the canonical
 (x=flux, y=freq) layout.
 
-This base owns the shared mechanics — the editable file row + Browse, the axis-mapping dropdown,
+This base owns the shared mechanics — the editable file row + Browse, the axis-mapping button,
 the best-effort read, the preview canvas + render, and OK-gated-until-a-file. App
 extras are added via these hooks:
 
 * ``_build_options(opt_row)`` — populate the option row (the subclass decides where
-  the shared ``self._axis_combo`` sits and adds any extra widgets, e.g. a Type
+  the shared ``self._axis_button`` sits and adds any extra widgets, e.g. a Type
   combo or an "Inherit from" combo).
 * ``result_request()`` (abstract) — build the app's own request object from the
   shared fields (``self._filepath`` / ``self._transpose``) plus the extra widgets.
@@ -33,7 +33,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from qtpy.QtGui import QCloseEvent
 from qtpy.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -107,10 +106,10 @@ class LoadDataDialog(QDialog):
         content.addLayout(file_row)
 
         # Subclasses place the shared mapping control alongside their own options.
-        self._axis_combo = QComboBox()
-        self._axis_combo.setObjectName("load.axes")
-        self._axis_combo.addItems(["X=Flux, Y=Frequency", "X=Frequency, Y=Flux"])
-        self._scope.connect(self._axis_combo.currentIndexChanged, self._on_axes_changed)
+        self._axis_button = QPushButton("Axis: X=Flux, Y=Frequency")
+        self._axis_button.setObjectName("load.axes")
+        self._axis_button.setCheckable(True)
+        self._scope.connect(self._axis_button.toggled, self._on_axes_changed)
         opt_row = QHBoxLayout()
         self._build_options(opt_row)
         content.addLayout(opt_row)
@@ -138,8 +137,11 @@ class LoadDataDialog(QDialog):
         root.addLayout(buttons)
 
     def _build_options(self, opt_row: QHBoxLayout) -> None:
-        """Populate the option row. Subclasses add ``self._axis_combo`` (and any
-        extra option widgets) in whatever order/layout the app wants."""
+        """Place ``self._axis_button`` and app options in the option row.
+
+        The checkable button shows the current X/Y mapping and swaps the preview
+        when clicked. Subclasses choose its position alongside their own options.
+        """
         raise NotImplementedError
 
     def _draw_preview_overlay(self, ax: Axes) -> None:
@@ -180,8 +182,11 @@ class LoadDataDialog(QDialog):
         self._scope.close()
         super().closeEvent(a0)
 
-    def _on_axes_changed(self, index: int) -> None:
-        self._transpose = index == 1
+    def _on_axes_changed(self, checked: bool) -> None:
+        self._transpose = checked
+        self._axis_button.setText(
+            "Axis: X=Frequency, Y=Flux" if checked else "Axis: X=Flux, Y=Frequency"
+        )
         self._render_preview()
 
     def _read_source(

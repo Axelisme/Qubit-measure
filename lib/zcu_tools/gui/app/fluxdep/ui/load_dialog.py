@@ -67,7 +67,7 @@ class LoadSpectrumDialog(NativeSpectrumDialog):
         self._type = QComboBox()
         self._type.addItems(["OneTone", "TwoTone"])
         row.addWidget(self._type)
-        row.addWidget(self._axis_combo)
+        row.addWidget(self._axis_button)
         row.addWidget(QLabel("Inherit from:"))
         self._inherit = QComboBox()
         self._inherit.addItem("(none)", userData=None)
