@@ -25,7 +25,9 @@ At every gain, the experiment acquires eight branches:
 | 6 | pi | on | I |
 | 7 | pi | on | pi |
 
-Each branch runs reset if enabled, preparation, R1, wait, middle pulse and R2 in that order. I omits the qubit pulse without inserting a pi-length delay. R1 off plays a zero-gain pulse of the same duration and still triggers the ADC. R2 always plays at the swept gain. The paired on/off branches therefore have the same pulse and ADC timing.
+Each branch runs reset if enabled, preparation, R1, wait, middle pulse and R2 in that order. Both preparation I and middle I play the configured qubit pulse at zero gain. Pi uses its configured gain. I and pi therefore occupy the same native slot, including the waveform and configured pre-delay and post-delay. R1 off also plays a zero-gain readout pulse and still triggers the ADC. R2 always plays at the swept gain.
+
+All eight branches have the same reset, preparation, R1, wait, middle and R2 positions. Their R1-to-R2 trigger interval is equal across I/pi and R1-on/off choices. The program emits the zero-gain pulses rather than estimating pulse durations and inserting delays.
 
 The live plot shows the magnitude of the R1 mean-IQ difference between preparation pi and I, using branches 6 and 2. It is a contrast in arbitrary ADC units, not SNR or fidelity.
 

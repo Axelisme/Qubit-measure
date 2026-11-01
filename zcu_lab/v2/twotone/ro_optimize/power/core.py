@@ -163,7 +163,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         the generator slot and ADC trigger. R2 always uses the swept gain.
         Wait begins at the R1 waveform end plus its configured post-delay,
         not the ADC window end. Readout timing must keep ADC windows disjoint.
-        Identity omits the pi pulse; it does not insert a pi-length delay.
+        Identity plays the same qubit pulse at zero gain, preserving its native
+        slot. All eight branches share reset, preparation, R1, wait, middle and
+        R2 positions, including the same R1-to-R2 trigger interval.
         Live shows the R1-on, middle-I preparation mean-IQ difference magnitude.
         cfg is not mutated. acquire_kwargs is forwarded to summed acquisition.
         """
@@ -196,18 +198,17 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             r1_off = PulseReadout("r1", cfg.readout, gain=0.0)
             r2 = PulseReadout("r2", cfg.readout, gain=gain)
             qub_pulse = Pulse("qub_pulse", cfg.qub_pulse)
+            identity = Pulse("qub_pulse", cfg.qub_pulse, gain=0.0)
             reset = Reset("reset", cfg.reset) if cfg.reset is not None else None
             with builder.branch(by="branch", align_timeline=True) as cases:
                 for index in range(8):
                     with cases.case(index):
                         if reset is not None:
                             builder.emit(reset)
-                        if index & 4:
-                            builder.emit(qub_pulse)
+                        builder.emit(qub_pulse if index & 4 else identity)
                         builder.emit(r1_on if index & 2 else r1_off)
                         builder.timeline_inc(cfg.wait)
-                        if index & 1:
-                            builder.emit(qub_pulse)
+                        builder.emit(qub_pulse if index & 1 else identity)
                         builder.emit(r2)
             prog = builder.build()
             prog.set_reads_per_shot(2)
