@@ -1,12 +1,12 @@
 """Candidate selection and isolated spectroscopy fits shared with workflows."""
 
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
-from pydantic import Field
 from typing import Annotated, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     PeakCandidate,
@@ -32,19 +32,27 @@ class FreqAnalyzeOptions:
     model_type: Annotated[Literal["lor", "sinc"], FieldMeta(label="Model type")] = "lor"
     plot_fit: Annotated[bool, FieldMeta(label="Plot fit")] = True
     expected_center_mhz: Annotated[
-        float | None, FieldMeta(label="Expected center", unit="MHz"), Field(allow_inf_nan=False)
+        float | None,
+        FieldMeta(label="Expected center", unit="MHz"),
+        Field(allow_inf_nan=False),
     ] = None
     min_prominence: Annotated[
         float, FieldMeta(label="Minimum prominence / signal range"), Field(ge=0, le=1)
     ] = 0.2
     min_snr: Annotated[
-        float, FieldMeta(label="Minimum height above median / noise sigma"), Field(ge=0, allow_inf_nan=False)
+        float,
+        FieldMeta(label="Minimum height above median / noise sigma"),
+        Field(ge=0, allow_inf_nan=False),
     ] = 5.0
     min_width_samples: Annotated[
-        float, FieldMeta(label="Minimum half-prominence width", unit="samples"), Field(ge=0, allow_inf_nan=False)
+        float,
+        FieldMeta(label="Minimum half-prominence width", unit="samples"),
+        Field(ge=0, allow_inf_nan=False),
     ] = 3.0
     min_distance_mhz: Annotated[
-        float, FieldMeta(label="Minimum peak separation", unit="MHz"), Field(ge=0, allow_inf_nan=False)
+        float,
+        FieldMeta(label="Minimum peak separation", unit="MHz"),
+        Field(ge=0, allow_inf_nan=False),
     ] = 0.0
 
 

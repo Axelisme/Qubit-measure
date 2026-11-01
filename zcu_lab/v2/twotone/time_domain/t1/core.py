@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator
 import zcu_tools.analysis.fitting as ft
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as validated_dataclass
@@ -140,17 +140,17 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
 
     def _run_linear(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         lengths = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Time (us)', ylabel='Amplitude')
-        ax.set_title('T1 relaxation')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set_title("T1 relaxation")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, t1_signal2real(data))
-        
+
         fig.show()
         signals = SignalBuffer(
             (len(lengths),),
@@ -184,16 +184,16 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
     def _run_decay(self, cfg: T1Cfg, *, context: RunContext) -> T1Result:
         table = materialize_nonuniform_t1_delays(cfg.delay, soccfg=context.soccfg)
         lengths = table.times_us
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Time (us)', ylabel='Amplitude')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, t1_signal2real(data))
-        
+
         fig.show()
         signals = SignalBuffer(
             (len(lengths),),

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -169,19 +169,19 @@ class ZigZagScanExp(Experiment[ZigZagScanResult, ZigZagScanCfg]):
             )
 
         # 2. Track mean IQ on the count-by-parameter grid.
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Times', ylabel=x_info['name'])
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Times", ylabel=x_info["name"])
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
         heatmap = live_heatmap(ax, uniform=True)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             real = zigzag_signal2real(data)
             return heatmap.set(times.astype(np.float64), values, real)
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(times), len(values)),

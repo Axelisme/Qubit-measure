@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
-from pydantic import Field
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator
 from matplotlib.image import NonUniformImage
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -162,10 +162,10 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             nonlocal current_snr
             current_snr = snr
 
-        fig, _ = context.plots.subplots(1, 2, num='measurement')
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel='Stark Pulse Gain (a.u.)', ylabel='Frequency (MHz)')
-        line_ax.set_xlabel('Frequency (MHz)')
+        heat_ax.set(xlabel="Stark Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
         heatmap = live_heatmap(heat_ax, uniform=False)
         line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         line_ax.grid()
@@ -174,7 +174,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
         line_ax.legend()
-        
+
         @context.plots.on_plot_thread
         def update(data):
             real = acstark_signal2real(data)
@@ -185,11 +185,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 history[-offset - 1] = real[current - offset]
             artists = heatmap.set(gains, freqs, real)
             artists = (*artists, *lines.set(freqs, history))
-            title = f'snr = {current_snr:.1f}' if current_snr else None
+            title = f"snr = {current_snr:.1f}" if current_snr else None
             if title is not None:
                 return (*artists, heat_ax.set_title(title))
             return artists
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),

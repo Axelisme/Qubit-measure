@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_rabi
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -150,16 +150,16 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
     def _run_for_flat(
         self, cfg: LenRabiCfg, lengths: NDArray[np.float64], *, context: RunContext
     ) -> LenRabiResult:
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Length (us)', ylabel='Signal')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, rabi_signal2real(data))
-        
+
         fig.show()
         signals = SignalBuffer(
             (len(lengths),),
@@ -201,16 +201,16 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             mean[mask] = np.nanmean(signals[:, mask], axis=0)
             return mean
 
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Length (us)', ylabel='Signal')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Length (us)", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, rabi_signal2real(average_round(data)))
-        
+
         fig.show()
         signals = SignalBuffer(
             (cfg.rounds, len(lengths)),

@@ -173,16 +173,16 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             cfg.freq, "freq", {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch}
         )
 
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Frequency (MHz)', ylabel='Amplitude')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(freqs, qubfreq_signal2real(data, model_type='lor'))
-        
+            return viewer.set(freqs, qubfreq_signal2real(data, model_type="lor"))
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(freqs),),

@@ -14,9 +14,18 @@ def make_form(ctx: FormContext) -> Form[AllXYCfg]:
         AllXYCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "X90_pulse": Slot("$qubit.module.x90", fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"})),
-            "X180_pulse": Slot("$qubit.module.x180", fallback=Template("pi_pulse", bindings={"qubit": "$qubit"})),
-            "readout": Slot("$resonator.module.readout", fallback=Template("readout", bindings={"resonator": "$resonator"})),
+            "X90_pulse": Slot(
+                "$qubit.module.x90",
+                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "X180_pulse": Slot(
+                "$qubit.module.x180",
+                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "I_pulse": Hidden(),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

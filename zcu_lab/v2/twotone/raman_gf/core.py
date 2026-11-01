@@ -173,7 +173,9 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     VariableAxisSpec.generated_arange(label="State", unit="None"),
                     VariableAxisSpec.generated_arange(label="Point", unit="None"),
                 ),
-                VariableZSpec("counts", label="Shot count", unit="None", dtype=np.float64),
+                VariableZSpec(
+                    "counts", label="Shot count", unit="None", dtype=np.float64
+                ),
             ),
             *(
                 VariableSpec(

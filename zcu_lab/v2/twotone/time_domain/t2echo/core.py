@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -147,17 +147,17 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         )
 
         # 2. Display the IQ projection while averaging the total-delay sweep.
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Time (us)', ylabel='Amplitude')
-        ax.set_title(f'T2 Echo (detune={true_detune:.3f}MHz)')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set_title(f"T2 Echo (detune={true_detune:.3f}MHz)")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, t2echo_signal2real(data))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),

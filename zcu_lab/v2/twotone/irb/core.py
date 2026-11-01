@@ -58,21 +58,22 @@ def _live_plot(
     plots: Plots, depths: NDArray[np.int64]
 ) -> Callable[[NDArray[np.complex128]], None]:
     """Show paired arm means and return the owner-dispatched IQ update."""
-    fig, ax = plots.subplots(num='measurement')
-    ax.set(xlabel='Random Clifford depth', ylabel='Signal (a.u.)')
+    fig, ax = plots.subplots(num="measurement")
+    ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
     ax.grid()
     viewer = live_line(ax, num_lines=2)
     for line, label in zip(ax.lines, ("Reference", "Interleaved"), strict=True):
         line.set_label(label)
     ax.legend()
-    
-    @context.plots.on_plot_thread
-    def update(data):
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
         return viewer.set(depths.astype(float), project_arm_means(data))
-    
+
     fig.show()
     return update
+
 
 class IRB_Exp(Experiment[IRBResult, IRBCfg]):
     """Acquire both arms with software switching and hardware depth/repetitions."""

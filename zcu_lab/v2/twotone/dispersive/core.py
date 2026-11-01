@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting.resonance import (
     HangerModel,
     find_edelay_branch,
@@ -140,7 +140,9 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
     AXES_SPEC: ClassVar[AxesSpec[DispersiveResult, DispersiveCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("freqs", label="Frequency", unit="Hz", scale=1e6),
-            AxesSpec.Axis(values=(0, 1), label="Amplitude", unit="None", dtype=np.int64),
+            AxesSpec.Axis(
+                values=(0, 1), label="Amplitude", unit="None", dtype=np.int64
+            ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
         result_type=DispersiveResult,
@@ -174,16 +176,16 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Frequency (MHz)', ylabel='Amplitude')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Frequency (MHz)", ylabel="Amplitude")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax, num_lines=2)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(freqs, dispersive_signal2real(data))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (2, len(freqs)),

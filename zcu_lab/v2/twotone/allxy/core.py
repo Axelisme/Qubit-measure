@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.ticker import MaxNLocator
 from matplotlib import rcParams
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
+from pydantic.dataclasses import dataclass as validated_dataclass
 from scipy.optimize import curve_fit
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
@@ -202,7 +202,9 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         axes=(
             AxesSpec.Axis(
                 values=tuple(range(len(ALLXY_SEQUENCE))),
-                label="Gate Pair Index", unit="", dtype=np.int64
+                label="Gate Pair Index",
+                unit="",
+                dtype=np.int64,
             ),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
@@ -225,17 +227,20 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
         cfg = deepcopy(cfg)
         soc, soccfg = context.soc, context.soccfg
 
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Gate', ylabel='Signal')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Gate", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
         _configure_allxy_axes(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
-            return viewer.set(np.arange(len(ALLXY_SEQUENCE), dtype=np.float64), allxy_signal2real(data))
-        
+            return viewer.set(
+                np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                allxy_signal2real(data),
+            )
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(ALLXY_SEQUENCE),),

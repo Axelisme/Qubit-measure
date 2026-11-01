@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from qick import QickConfig
 from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe
@@ -172,7 +172,9 @@ def _build_cpmg_result(data: GroupedLoadData[CPMG_Cfg]) -> CPMG_Result:
 
 _CPMG_VARIABLE_AXES = (
     VariableAxisSpec.generated_arange(label="Time Index", unit="a.u.", dtype=np.int64),
-    VariableAxisSpec(label="Number of Pi", unit="a.u.", field_name="ns", dtype=np.int64),
+    VariableAxisSpec(
+        label="Number of Pi", unit="a.u.", field_name="ns", dtype=np.int64
+    ),
 )
 CPMG_GROUPED_AXES_SPEC = GroupedAxesSpec(
     variables=(
@@ -245,10 +247,10 @@ def _live_plot(
     plots: Plots, times: NDArray[np.int64]
 ) -> Callable[[tuple[NDArray[np.float64], NDArray[np.float64], float]], None]:
     """Show the normalized count/time map and its two most recent scan rows."""
-    fig, _ = plots.subplots(1, 2, num='measurement')
+    fig, _ = plots.subplots(1, 2, num="measurement")
     heat_ax, line_ax = fig.axes
-    heat_ax.set(xlabel='Number of Pi', ylabel='Time idxs')
-    line_ax.set_xlabel('Time idxs')
+    heat_ax.set(xlabel="Number of Pi", ylabel="Time idxs")
+    line_ax.set_xlabel("Time idxs")
     formatter = ScalarFormatter(useMathText=True)
     formatter.set_powerlimits((-2, 2))
     heat_ax.xaxis.set_major_formatter(formatter)
@@ -272,7 +274,7 @@ def _live_plot(
             history[-offset - 1] = real[current - offset]
         artists = heatmap.set(times.astype(np.float64), ys, real)
         artists = (*artists, *lines.set(ys, history))
-        title = f'snr = {snr:.1f}' if snr else None
+        title = f"snr = {snr:.1f}" if snr else None
         if title is not None:
             return (*artists, heat_ax.set_title(title))
         return artists
@@ -336,7 +338,9 @@ class CPMG_Exp(Experiment[CPMG_Result, CPMG_Cfg]):
         with Schedule(signals_buffer, scope=context.scope) as sched:
 
             def update_viewer(data: NDArray[np.complex128]) -> None:
-                update((lengths[current_length_idx], cpmg_signal2real(data), current_snr))
+                update(
+                    (lengths[current_length_idx], cpmg_signal2real(data), current_snr)
+                )
 
             # Scan pi-pulse counts on the host; sweep evolution time on the board.
             for idx, (time_value, step) in enumerate(sched.scan("count", times)):

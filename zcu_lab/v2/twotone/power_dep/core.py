@@ -109,10 +109,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.qub_pulse.ch},
         )
 
-        fig, _ = context.plots.subplots(1, 2, num='measurement')
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel='Pulse Gain (a.u.)', ylabel='Frequency (MHz)')
-        line_ax.set_xlabel('Frequency (MHz)')
+        heat_ax.set(xlabel="Pulse Gain (a.u.)", ylabel="Frequency (MHz)")
+        line_ax.set_xlabel("Frequency (MHz)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
@@ -125,7 +125,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
         line_ax.legend()
-        
+
         @context.plots.on_plot_thread
         def update(data):
             real = gain_signal2real(data)
@@ -135,7 +135,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
             return (*heatmap.set(gains, freqs, real), *lines.set(freqs, history))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(freqs)),

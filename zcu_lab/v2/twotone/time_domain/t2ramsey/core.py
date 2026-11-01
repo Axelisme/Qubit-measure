@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from pydantic.dataclasses import dataclass as validated_dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -144,17 +144,17 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
 
         # 2. Display the IQ projection while averaging the delay sweep.
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Time (us)', ylabel='Real Signal')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Real Signal")
         ax.set_title(title)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(lengths, t2ramsey_signal2real(data))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),

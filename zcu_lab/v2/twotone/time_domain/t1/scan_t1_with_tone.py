@@ -115,10 +115,10 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             {"soccfg": soccfg, "gen_ch": cfg.test_pulse.ch},
         )
 
-        fig, _ = context.plots.subplots(1, 2, num='measurement')
+        fig, _ = context.plots.subplots(1, 2, num="measurement")
         heat_ax, line_ax = fig.axes
-        heat_ax.set(xlabel='gain', ylabel='Time (us)')
-        line_ax.set_xlabel('Time (us)')
+        heat_ax.set(xlabel="gain", ylabel="Time (us)")
+        line_ax.set_xlabel("Time (us)")
         formatter = ScalarFormatter(useMathText=True)
         formatter.set_powerlimits((-2, 2))
         heat_ax.xaxis.set_major_formatter(formatter)
@@ -131,7 +131,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
         line_ax.legend()
-        
+
         @context.plots.on_plot_thread
         def update(data):
             real = t1_signal2real(data)
@@ -141,7 +141,7 @@ class ScanT1WithToneExp(Experiment[ScanT1WithToneResult, ScanT1WithToneCfg]):
             for offset in range(min(5, current + 1)):
                 history[-offset - 1] = real[current - offset]
             return (*heatmap.set(gains, lengths, real), *lines.set(lengths, history))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(gains), len(lengths)),

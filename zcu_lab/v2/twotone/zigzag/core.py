@@ -92,16 +92,16 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         times = np.arange(0, cfg.n_times + 1)
 
-        fig, ax = context.plots.subplots(num='measurement')
-        ax.set(xlabel='Times', ylabel='Signal')
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Times", ylabel="Signal")
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.grid()
         viewer = live_line(ax)
-        
+
         @context.plots.on_plot_thread
         def update(data):
             return viewer.set(times.astype(np.float64), zigzag_signal2real(data))
-        
+
         fig.show()
         signals_buffer = SignalBuffer(
             (len(times),),

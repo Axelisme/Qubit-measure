@@ -174,10 +174,18 @@ class StirapExp(Experiment[StirapResult, StirapCfg]):
                 "counts",
                 (
                     VariableAxisSpec.generated_arange(label="State", unit="None"),
-                    VariableAxisSpec(label="Scan x (see cfg)", unit="None", field_name="x_values"),
-                    VariableAxisSpec(label="Stokes detuning (MHz)", unit="None", field_name="y_values"),
+                    VariableAxisSpec(
+                        label="Scan x (see cfg)", unit="None", field_name="x_values"
+                    ),
+                    VariableAxisSpec(
+                        label="Stokes detuning (MHz)",
+                        unit="None",
+                        field_name="y_values",
+                    ),
                 ),
-                VariableZSpec("counts", label="Shot count", unit="None", dtype=np.float64),
+                VariableZSpec(
+                    "counts", label="Shot count", unit="None", dtype=np.float64
+                ),
             ),
         ),
         result_type=StirapResult,
