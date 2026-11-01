@@ -198,9 +198,7 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
 
 @pytest.mark.parametrize("align_t1", [False, True])
 @pytest.mark.parametrize("max_relative_error", [1.0, 1e-12])
-def test_visible_decay_tail_identifies_joint_length_ratio(
-    align_t1, max_relative_error
-):
+def test_visible_decay_tail_identifies_joint_length_ratio(align_t1, max_relative_error):
     xs = np.linspace(-3.0, 3.0, 10001)
     quantiles = (np.arange(2000) + 0.5) / 2000
     ground_pdf = calc_population_pdf(xs, -1.0, 1.0, 0.25, 1.0, 0.0, 0.5, 0.4)
