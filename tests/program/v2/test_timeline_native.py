@@ -8,11 +8,12 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from tests.program._profiles import RO_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import generator_duration, readout_duration, tproc_ceil
 
+from .timing_support import shots as _shots
+
 PROFILE = load_soccfg(2, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
 ADC_TOUCH = tproc_ceil(PROFILE, readout_duration(PROFILE, 100 / RO_MHZ))
 
-from .timing_support import shots as _shots
 
 
 def _program(body, initialize=None):

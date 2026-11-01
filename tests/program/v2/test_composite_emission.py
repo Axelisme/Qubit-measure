@@ -31,11 +31,12 @@ from zcu_tools.program.v2.utils import readout_freq_words
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, runtime_cycles, tproc_ceil
 
+from tests.program.v2._mux_support import mux_soccfg, native_mux
+from tests.program.v2.timing_support import recompile, shots, waves
+
 PROFILE = load_soccfg()
 PRE = tproc_ceil(PROFILE, 0.01)
 RELAX = int(PROFILE.us2cycles(0.02))
-from tests.program.v2._mux_support import mux_soccfg, native_mux
-from tests.program.v2.timing_support import recompile, shots, waves
 
 
 def _program(

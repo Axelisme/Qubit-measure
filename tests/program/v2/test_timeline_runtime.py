@@ -1573,7 +1573,7 @@ def test_runtime_timeline_reuses_dead_cycle_storage_for_sequential_events():
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[40 + i * PULSE_END for i in range(12)]] * 3
-    assert [s.body_end_cycle - s.start_cycle for s in result] == [376] * 3
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [40 + 12 * PULSE_END] * 3
 
 
 def test_runtime_placement_rejects_same_channel_overlap_from_other_timeline():

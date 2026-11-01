@@ -19,14 +19,15 @@ from zcu_tools.program.v2.timeline import TimelineProgramV2
 from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 from tests.program._timing_expectations import generator_duration, native_sweep, readout_duration, tproc_ceil
 
+from tests.program.v2.timing_support import shots as _shots
+from tests.program.v2.timing_support import waves as _waves
+
 PROFILE = load_soccfg(3, 1)
 PULSE_END = tproc_ceil(PROFILE, generator_duration(PROFILE, 0.1))
 READ_PRE = tproc_ceil(PROFILE, 0.05)
 READ_TRIGGER = tproc_ceil(PROFILE, 0.1)
 READ_END = READ_PRE + tproc_ceil(PROFILE, generator_duration(PROFILE, 0.3, 1) + Fraction('0.02'))
 READ_SHELL = round(READ_TRIGGER + readout_duration(PROFILE, 0.4) * TPROC_MHZ)
-from tests.program.v2.timing_support import shots as _shots
-from tests.program.v2.timing_support import waves as _waves
 
 
 def _pulse(name="drive", *, ch=0, length: float | QickParam = 0.1, **kwargs):

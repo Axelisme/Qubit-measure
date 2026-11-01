@@ -183,7 +183,7 @@ def test_join_table_lengths_start_together_and_wait_for_each_points_longest_bran
     request = request_of(env)
     origin_cycles = tproc_ceil(env.soccfg, generator_duration(env.soccfg, 0.04, 1)) if preceding_pulse else 0
     origin = origin_cycles / TPROC_MHZ
-    first_ends = [ceil(runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=1)), 1) + Fraction('0.05') * Fraction(str(TPROC_MHZ))) for t in (0.1, 0.3)]
+    first_ends = [tproc_ceil(env.soccfg, 0.02) + ceil(runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=1)), 1) + Fraction('0.03') * Fraction(str(TPROC_MHZ))) for t in (0.1, 0.3)]
     second_ends = [ceil(runtime_cycles(env.soccfg, int(env.soccfg.us2cycles(t, gen_ch=2)), 2)) for t in (0.2, 0.1)]
     waits = [max(a, b) if branches == 2 else a for a, b in zip(first_ends, second_ends, strict=True)]
     for point, expected_wait in enumerate(waits):

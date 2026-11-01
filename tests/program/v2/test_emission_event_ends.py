@@ -786,14 +786,10 @@ def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
     memory = prog.compile_datamem()
     assert memory is not None
     assert len(memory) == 2045
-    # Native start rounds43.68 to44; native step truncates42.56 to42.
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        44,
-        86,
-        128,
-    ] * 2
+    ends = native_sweep(prog.soccfg, 43.68 / TPROC_MHZ, 128.8 / TPROC_MHZ, 3)
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == ends * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        end + RELAX for end in (44, 86, 128)
+        end + RELAX for end in ends
     ] * 2
 
 

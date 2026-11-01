@@ -612,7 +612,7 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
         [0, t, t + PULSE_END + 7, t + 2 * (PULSE_END + 7), LONG_END]
         for t in [20, 30, 40]
     ] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 6
+    assert [s.end_cycle - s.start_cycle for s in shots] == [LONG_END + PULSE_END] * 6
 
 
 def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
@@ -774,8 +774,8 @@ def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_na
     assert [_waves(s) for s in shots] == [
         [0, advance, advance + PULSE_END + 7, LONG_END, advance + 2 * (PULSE_END + 7)]
     ] * 4
-    assert [s.body_end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 4
-    assert [s.end_cycle - s.start_cycle for s in shots] == [140 + PULSE_END] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in shots] == [LONG_END + PULSE_END] * 4
+    assert [s.end_cycle - s.start_cycle for s in shots] == [LONG_END + PULSE_END] * 4
     prog.compile()
     assert _shots(prog) == shots
 
@@ -957,15 +957,16 @@ def test_repeat_preserves_trigger_cycles_and_adc_window_closure():
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
-    # Trigger width closes15; pulse ends43. ADC closes40 before the backedge.
+    # The named trigger contributes its offset and width, not the ADC tail.
+    iteration_end = 15 + PULSE_END
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (5, 1),
         (15, 0),
-        (48, 1),
-        (58, 0),
+        (iteration_end + 5, 1),
+        (iteration_end + 15, 0),
     ]
-    assert _waves(shot) == [15, 58]
-    assert (shot.body_end_cycle, shot.end_cycle) == (86, 86)
+    assert _waves(shot) == [15, iteration_end + 15]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * iteration_end,) * 2
 
 
 @pytest.mark.parametrize("inner_parent", ["default", "local"])
