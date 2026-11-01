@@ -5,7 +5,7 @@ from math import pi
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 from .core import CKP_Cfg
 
@@ -16,9 +16,10 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
         CKP_Cfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi_pulse": Slot(
+            "pi_pulse": source(
+                ctx,
                 "$qubit.module.x180",
-                fallback=Template("pi_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
             "res_pulse": Template(
                 "res_probe",
@@ -44,9 +45,10 @@ def make_form(ctx: FormContext) -> Form[CKP_Cfg]:
                     "post_delay": Expr(f"{3.1 / (2 * pi)} / $resonator.kappa"),
                 },
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+                Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "res_freq": Range.around(
                 "$resonator.freq", "1.5 * $resonator.kappa", expts=101

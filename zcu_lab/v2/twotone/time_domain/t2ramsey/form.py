@@ -7,7 +7,7 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg
 
-from zcu_lab.v2.support.measure.ctx_helpers import t1_initial_time
+from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 from zcu_lab.v2.support.measure.seed_metadata import (
     pulse_readout_seed_metadata,
 )
@@ -61,13 +61,15 @@ def make_form(ctx: FormContext) -> Form[T2RamseyInput]:
         T2RamseyInput,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "pi2_pulse": Slot(
+            "pi2_pulse": source(
+                ctx,
                 "$qubit.module.x90",
-                fallback=Template("pi2_pulse", bindings={"qubit": "$qubit"}),
+                Template("pi2_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "readout": Slot(
+            "readout": source(
+                ctx,
                 "$resonator.module.readout",
-                fallback=Template(
+                Template(
                     "readout",
                     bindings={"resonator": "$resonator"},
                     seed_metadata=pulse_readout_seed_metadata(gain=0.1),
