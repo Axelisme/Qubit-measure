@@ -340,7 +340,7 @@ def test_zero_filter_and_noise_and_omitted_optional_values_are_legal() -> None:
             )
             .replace("tau_ns: 2.0", "tau_ns: 0")
             .replace("[[1.0, 0.5], [0.5, 0.25]]", "[[0, 0], [0, 0]]")
-            .replace("  seed: 123\n", "")
+            .replace("  seed: 123\n", "  seed: null\n")
         )
     )
     assert _bound_flux(settings).distortion_terms == ()
