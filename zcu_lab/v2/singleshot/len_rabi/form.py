@@ -21,9 +21,7 @@ def make_form(ctx: FormContext) -> Form[LenRabiCfg]:
             "qub_probe",
             bindings={"qubit": "$qubit"},
             set={"gain": 1.0},
-            seed_metadata=qub_probe_gain_seed_metadata(
-                ("qub_pulse", "module", "gain")
-            ),
+            seed_metadata=qub_probe_gain_seed_metadata(("qub_pulse", "module", "gain")),
         ),
     )
     # This Run accepts only const/flat_top and replaces total pulse duration.

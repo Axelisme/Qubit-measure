@@ -23,9 +23,7 @@ def make_form(ctx: FormContext) -> Form[HeraldingLenRabiCfg]:
             "qub_probe",
             bindings={"qubit": "$qubit"},
             set={"gain": 1.0},
-            seed_metadata=qub_probe_gain_seed_metadata(
-                ("qub_pulse", "module", "gain")
-            ),
+            seed_metadata=qub_probe_gain_seed_metadata(("qub_pulse", "module", "gain")),
         ),
     )
     return Form(
