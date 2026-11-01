@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-01，program 測試慣例與 IR 行為 owner 分層
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -350,6 +350,12 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ## 兩層 Fixture 策略
 
+測試的 mock 或抽象基底型別過寬時，用 runtime assertion 收窄，例如
+`assert isinstance(item, RegWriteInst)`，不要用 `cast()` 隱藏不相容介面。
+替身使用型別相容的 fake 或既有 typed seam，不新增 suppression。
+故意回傳錯誤型別的負向案例，使用窄 helper／protocol 或在邊界做明確 runtime assertion，
+不為消除診斷把簽名放寬為 `Any`。
+
 ### QICK 編譯 fixture
 
 `tests/program/_profiles.py` 讀取 `tests/program/profiles/` 的獨立 YAML，交給
@@ -364,9 +370,13 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ### Module declaration fixture
 
-`tests/program/v2/modules/conftest.py` 提供 `ProgramTrace` recording stub，供 module 的 cfg parsing、
-constructor overrides 與 declaration calls 驗證，不觸發真實 QICK 編譯。
-需要編譯行為的案例使用前一節的 QICK fixture。
+`tests/program/v2/modules/conftest.py` 提供 typed `ProgramTrace` recording adapter，供 module 的 cfg parsing、
+constructor overrides、declaration calls 與 emission 意圖驗證，不觸發真實 QICK 編譯。
+它記錄 readout 宣告、trigger、pulse、loop、delay、register write 與 jump，不實作第二套 compiler 或 IR parser。
+驗證 program emission 時不用鬆散 `MagicMock` program。`MagicMock` 留給非 program 協作者、
+child-module spy hook 或刻意注入錯誤的案例。
+需要編譯行為的案例使用前一節的 QICK fixture；需要真實 acquire 行為時使用
+[offline acquisition transport](#offline-acquisition-transports)，`ProgramTrace` 不取代這項覆蓋。
 
 ### IR 結構測試（`tests/program/v2/ir/`）
 
@@ -576,6 +586,8 @@ Parallel body 用 fork／emit／join，經公開 compiled timing 檢查共同 or
 
 `auto_compress` 只在 `len(values) >= 30` 時啟動。  
 測試中用 64 個元素驗證壓縮路徑，3 個元素驗證非壓縮路徑。
+Lookup 回歸須涵蓋 [tProc shift-count 限制](../lib/zcu_tools/program/v2/README.md#打包的-data-memory-lookup)
+下的 register／data-memory 指令效果，僅看物理模擬事件不足以驗證擷取。
 
 ### IR pass 測試
 
@@ -593,31 +605,16 @@ Parallel body 用 fork／emit／join，經公開 compiled timing 檢查共同 or
 `BasicBlockNode.__post_init__` 拒絕在 `.insts` 中放 `JumpInst`。新增 pass 測試用有效的 block
 經 pipeline 檢查可觀察結果；不為 unreachable 的非法 block 繞過建構器測私有方法。
 
-### UnrollLoopPass — jump table 觸發條件
+### Dispatch 與最佳化 guard 驗收
 
-Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2` + `body_size > 0` 才觸發 jump table。測試中：body 用 NopInst（size=1），`pmem_budget=1024`（k_budget=1024），`cost_default=1, cost_jump_flush=40`，body_cost=1，scheduled_ticks=0，slack=-1 < 0 → k_timing=max_unroll_factor=32；k_final=min(32,1024)=32 → 觸發。
-
-### SimplifyDispatchPass — 回傳 BlockNode 而非 BasicBlockNode
-
-`SimplifyDispatchPass` 對 `IRDispatch(k==2)` 回傳 `BlockNode([cond_bb, fallthrough_bb])`，兩個分支均顯式 jump，不依賴 fall-through：
-
-- `cond_bb`：`JUMP target_labels[1] -if(NZ) -op(value_reg - #0)`（小 PMEM）；big-PMEM 用 `REG_WR s15 label + JUMP [s15]`
-- `fallthrough_bb`：`JUMP target_labels[0]`（小 PMEM，`BranchEliminationPass` 可消除）；big-PMEM 永遠保留
-
-經 pipeline 驗證時檢查兩個 branch 的目標，而不是依賴舊的 `BasicBlockNode` 回傳型別。
-
-### DmemDispatchPass — 小/大 pmem 路徑
-
-`DmemDispatchPass` 的 guard block 依 `needs_big_jump(pmem_capacity)` 分叉：
-- `pmem_capacity <= 2048`：guard 是 label-mode `JumpInst`（`label=LabelRef(last)`, `addr=None`）
-- `pmem_capacity > 2048`：guard 是 `RegWriteInst(dst=s15, src=LABEL)` + `JumpInst(addr=s15)`
-
-驗證小 pmem 路徑時提供 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))`，經 IR pipeline 觀察生成結果。
-
-### DeadWriteEliminationPass / ZeroDelayDCEPass — disable_opt guard
-
-`block.disable_opt=True` 應保留未優化的行為。以有效 `BasicBlockNode(..., disable_opt=True)`
-作 pipeline 輸入，比較產生的 IR，而非直接斷言 `_process_block` 的呼叫或回傳。
+Pass 行為由 [simulation 的 IR pass 速查](../lib/zcu_tools/program/v2/simulation/README.md#ir-pass-behavior)
+擁有。Register-driven unroll 案例要提供非空 body、可用 register 與足夠的時間／PMEM 預算。
+例如 `NopInst` body、`pmem_budget=1024`、`cost_default=1`、`cost_jump_flush=40`、
+`max_unroll_factor=32` 可覆蓋 jump-table 路徑。
+經 pipeline 驗證 dispatch 時檢查 branch 目標，不依賴舊的 `BasicBlockNode` 回傳型別。
+小 PMEM 案例明確傳 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))`。
+`disable_opt` 案例以有效 `BasicBlockNode(..., disable_opt=True)` 作 pipeline 輸入，
+比較產生的 IR，不直接斷言 `_process_block` 的呼叫或回傳。
 
 ---
 

@@ -1,538 +1,192 @@
-# README - program/v2
+# program/v2
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-01，公開 API 與文件 owner 分層
 
-**讀者：** lab-author、framework-dev、agent。原生 V2 program 寫法與 module、readout、acquisition 契約速查。
-
-## Timeline rounding
-
-Timeline event starts now ceil to tProc cycles instead of nearest rounding.
-Each operation quantizes its result once. Ceil uses
-`math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` to treat values
-near the nearest integer as that integer. This absorbs floating-point conversion
-noise even at large cycle counts. For example, 119/430.08 us remains 119 cycles.
-Near 2³¹ cycles, the relative tolerance can also absorb real fractional tails
-of up to about 0.002 cycle. Positive tails outside both tolerances round up.
-Static waveform and ADC lengths use rational clock conversion
-before the aggregate ceil. Author sweeps retain QICK
-native start rounding and truncated steps; they do not allocate pointwise time
-tables. Runtime cross-grid generator lengths use k=8 fixed-point upper conversion.
-The compiler chooses W to minimize canonical signed-digit terms, breaking ties
-with the smaller W. For every integer length up to 500 us, ceil(n*W/256) is never
-earlier than the physical end and is at most 1 us late. The same W applies beyond
-500 us, but the 1 us error bound does not. Each operation adds its post before the
-final ceil. Static lengths and integer-affine tProc lengths stay exact.
-
-Conversion uses shifts of at most 15 bits and addition/subtraction, without ARITH,
-DIV or time tables. A clock ratio of one needs no conversion instructions.
-The compiler rejects signed32 overflow in the product or any intermediate at build.
-The existing native length sweeps and selected waveform/length tables supply
-runtime lengths. Timeline length-register playback still requires selection
-metadata. This does not add an arbitrary author length-register or ADC length API.
-The conversion rule also gives W=359 for ratio7/5 and W=2872 for ratio56/5, but
-ADC/PFB runtime length consumers are not exposed by the current API.
-
-編譯期已知的換算 bias 使用字面值，零 span 不配置 sweep register。
-Runtime 結尾保留既有 register 加字面值偏移，固定長度的後續事件沿用這份 storage。
-只有需要獨立 register operand 的 consumer 才物化偏移。
-同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
-
-Known scalar and affine time getters return actual quantized values. Runtime-only
-and non-affine time getters raise RuntimeError. Author-declared data tables and IR
-dispatch jump-address tables remain supported.
-
-## Testing & Type Checking Conventions
-
-- **Type Narrowing**: When a mock or abstract base class type is too generic in tests (e.g., retrieving an item from an `IRNode.insts` list where you expect a `RegWriteInst`), use an explicit assertion (`assert isinstance(item, RegWriteInst)`) rather than `cast()`. This ensures Pyright can perform type narrowing safely while maintaining a runtime guarantee.
-- **Mock Overrides**: When testing edge cases that intentionally return unexpected types to trigger errors, prefer a narrow helper/protocol or an explicit runtime assertion at the boundary. Do not widen signatures to `Any` or use `cast()` just to silence the type checker unless there is a reviewed reason.
-- **Mock Interfaces**: Use type-compatible fakes or an existing typed seam when passing test collaborators to functions. Do not add type suppressions or `cast()` to silence an incompatible interface.
-- **Program Emission Tests**: Unit tests that assert emitted program actions use a typed `ProgramTrace` adapter rather than loose `MagicMock` program objects. The trace records semantic program intents (readout declarations, triggers, pulses, loops, delays, register writes, and jumps) without acting as a second compiler or IR parser.
-- **MagicMock Scope**: Keep `MagicMock` for non-program collaborators, child-module spy hooks, and deliberate error-injection tests. Do not use it as the default stand-in for a program object when the test is asserting emitted program behavior.
-- **Offline acquisition**: `program.build_soccfg(profile)` builds a compile profile from caller-owned YAML. Explicit environments use `SimulationSoc` and `SimulationBinding`; ordinary acquisition tests may inject a deterministic transport. `ProgramTrace` records emission and does not replace real acquire coverage.
-- **QICK External Types**: `QickParam` runtime objects expose methods/attributes (`is_sweep`, `minval`, `maxval`, `start`, `spans`, `to_array`) that can be missing from third-party stubs. Program code narrows through `program.v2.utils.is_qick_param()` / `QickParamLike` instead of local `cast()` calls, so every use has a runtime guard.
-- **Cfg Contracts**: `AbsModuleCfg` and `AbsWaveformCfg` are abstract contracts. Concrete cfg classes implement both `build()` and `set_param()`; unknown parameter names raise `ValueError` rather than being ignored. Pulse, PulseReadout and reset constructors also accept keyword-only scalar/sweep overrides on a detached effective cfg; `None` keeps the cfg value. Registry identity and lowering use that effective cfg. `set_param` remains supported and mutates the cfg on which it is called. See the [constructor parameter table](modules/README.md#constructor-overrides). Accepting `ro_length` sweeps does not add QICK ADC-window sweep support; both setter and constructor paths retain the existing compile error. [`tests/cfg_model/test_set_param_contract.py`](../../../../tests/cfg_model/test_set_param_contract.py) is the cross-family audit for this fail-fast rule.
-
-## Gain sweeps
-
-`GainSweep` annotates a `SweepCfg` whose start, stop and computed last point must be in [-1, 1]. Values are DAC full-scale fractions in a.u. The same validator runs on Form coordinate representations after their endpoint projection. For example, start=-1, stop=1.1, step=0.5 is accepted when the actual last point is 1.0. Range + Expts retains its stop, so stop=1.1 is rejected. Ordinary `SweepCfg` remains unit-independent.
-
-## Caller-owned compile profiles
-
-[`program.build_soccfg(profile)`](../README.md#yaml-compile-profiles) derives clocks
-from caller-owned YAML mappings. Every setting is required, including channel
-counts, channel types, clocks, memory limits and QICK metadata. The builder does
-not read the installed QICK version or construct hardware or acquisition sources.
-Tests own YAML under `tests/program/profiles/`; lab environments each own an
-adjacent `profile.yaml`. Board profiles remain separate from physical model YAML.
-
-`pfb_channel(soccfg, ro_ch, frequency_mhz)` resolves an absolute physical frequency
-through QICK's public readout calculation. It uses the supplied ADC's actual PFB
-clock and channelization, without duplicating folding or rounding in callers.
-Explicit `(gen_ch, ro_ch)` wiring belongs to `SimulationSoc`; using an unwired
-channel fails. White-noise environments also accept `routes="all"` to bind every
-generator to every ADC.
-
-See [simulation](simulation/README.md) for the shared numeric contract, trusted
-Python builder, ownership, seeded white noise and the supported minimal readout.
-
-## IR System & Hardware Alignment
-
-See the [tProc v2 ASM reference](../../../../docs/reference/tprocv2-asm-notes.md)
-for instructions, registers, timing and waveform memory limits.
-
-### Packed data-memory lookups
-
-tProc v2's ALU uses only the low four bits of a shift-count operand, including
-register operands. A single shift cannot extract slots beginning at bit 16 or
-higher. `LoadValue` retains full 32-bit packing and decomposes extraction into
-shifts of at most 15 bits. Lookup regression tests execute compiled register and
-data-memory operations using this hardware limit; semantic physical simulation
-alone does not validate the emitted extraction instructions.
-
-### Instruction Address Increment (`addr_inc`)
-
-In tProc v2, most instructions occupy 1 program memory word (`addr_inc=1`). However, some instructions are macros or expanded directives that occupy multiple words.
-
-- **WAIT**: Occupies **2** words (`addr_inc=2`). This is because it is a directive that expands to a comparison and a conditional jump in hardware.
-- **Labels & Jump Addresses**: When calculating label addresses (linking), we MUST account for `addr_inc`. If a `WAIT` instruction is at address `N`, the following instruction will be at `N+2`.
-
-### IR Hierarchical Structure
-
-The IR is divided into three layers to decouple high-level program structure from low-level hardware instructions:
-
-1. **Structural IR (`IRNode`)**: Represents high-level constructs like loops (`IRLoop`), branches (`IRBranch`), and dispatch tables (`IRDispatch`), as well as structural containers (`BlockNode`).
-2. **Basic Blocks (`BasicBlockNode`)**: A leaf `IRNode` representing a straight-line sequence of atomic instructions. It holds `labels` for entry points, `insts` for linear execution, and an optional terminal `branch` for control flow.
-3. **Linear Instructions (`Instruction`)**: Represents atomic hardware operations (e.g., `RegWriteInst`, `WaitInst`) or meta markers (`MetaInst`, `LabelInst`). **Note: `Instruction` does NOT inherit from `IRNode`.**
-
-### IR Pipeline & Linking
-
-- **`IRPipeLine`**: A U-shape single-pass optimizer (see `ir/README.md` for the full flow): lex → ChunkList opt → parse → IR-tree opt → unparse → strip structural meta → ChunkList opt → flatten. IR optimization is **optional** — the macro/module layer already emits runnable ASM, and `disable_all_opt` is a clean bypass.
-- **`IRLinker.link()`**: Takes a flattened instruction stream, assigns physical addresses (`P_ADDR`) to each instruction based on `addr_inc`, and resolves label addresses. **Note: `ADDR_INC` is used only during linking and is NOT emitted in the final dictionary to maintain QICK compatibility.**
-- **`IRLinker.unlink()`**: Reconstructs the logical instruction stream (including label markers and meta structural markers) from QICK's flattened `prog_list`.
-
-## Frequency word decoding
-
-The scalar, paired and array decoders in `utils` take `cfg=PulseReadoutCfg`.
-They borrow its generator/ADC channels, mixer frequency and Nyquist zone directly;
-they do not change the cfg or use its waveform, gain or readout-window settings.
-Encoding with `readout_freq_words` still takes those four explicit settings.
-`generator_frequencies_from_words` accepts an already-rounded physical mixer
-frequency and generator channel, without constructing a readout cfg.
-`readout_frequencies_from_words` accepts a declared ADC channel and an explicit,
-same-shaped physical reference array. It selects the nearest ADC-DDS image.
-The compiled request builder supplies references from actual output effects.
-The cfg-based APIs delegate to these same word decoders.
-
-## Architecture
-
-- `IRCompileMixin.optimize_asm()` runs the default IR pipeline (`make_default_pipeline`); the concrete pass set lives in `ir/passes/` and is documented in `ir/README.md`.
-- `Nop` is preserved as an explicit instruction and is not treated as dead-code noise.
-- `ir/passes/` is split by concern into sub-packages: `loop/`, `dataflow/`, `control_flow/`, `timeline/`, with a shared `base.py`.
-
-- `MyProgramV2`: Base class for experiments, wraps QICK's `AveragerProgramV2`.
-- `TimelineProgramV2`: Native program authoring with borrowed module declarations.
-- `TimelineBuilder`: Records declarations and body operations, then builds a compiled program.
-- Program 不持有 experiment cfg。建構時以具名參數傳 `reps=1`、
-  `initial_delay=1.0`、`relax_delay=1.0`，兩個 delay 的單位為 us。
-- `acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
-  `reps` 與 `rounds` 必須為正整數，bool 不算整數。無效值在編譯或 acquire admission 前 raise ValueError。
-- `acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
-  `shot_sums(prog, axes)` 在 compile 後以讀出 label 解析 `Classify` 與 `IQ` 軸。
-  讀出以 emit tag 或未標記 module 名稱識別。
-  外積總和與取消契約見 [program](../README.md#summed-acquisition)。
-- `readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，
-  為 Mux collection 與 shot sums 提供 readout provenance、Trigger 順序及控制 scope。
-  它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
-  Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
-  `observe_readout_paths(prog)` 另提供 case-aware 的 `ReadoutPath`：包含 selector/case
-  與該路徑的 observations，同一 selector 的多次 Branch 共用 case index。
-  它保留 Repeat scope，含未宣告的空 case，不改既有 flatten traversal。
-- `ir/`: Contains the Intermediate Representation for tProc v2 instructions, allowing for optimization passes and cross-module label resolution.
+**讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
 ## 原生寫法與具名 timeline
 
-`timeline.TimelineProgramV2` 繼承 `MyProgramV2` 加 `resources.ProgramResourcesMixin`。
-跨 owner 分工、設計理由與階段邊界見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)。
-作者在 `_initialize(cfg)` 宣告通道、pulse、readout config、module 與 loops。
-在 `_body(cfg)` 發射原生 QICK 操作或 `emit(module)`。
-建構子使用 `reps`、`initial_delay`、`relax_delay`。
-建構子沿用 `MyProgramV2` 的型別契約，不承接 `AveragerProgramV2` 的全部選項。
-`initial_delay` 的型別為 `float`，不接受 `None`。
-Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。
-全部輸出共用既有 IR compiler。Boundary metadata 可能改變指令排列，不要求新舊逐位相同。
+`TimelineProgramV2` 繼承 `MyProgramV2` 與 `ProgramResourcesMixin`，共用既有 IR compiler 與 acquisition 擴充。
 `TimelineBuilder` 從 package root 匯出，只記錄動作，`build()` 產生並編譯 `TimelineProgramV2`。
-建構子另收 `**program_kwargs`，在 `build()` 原樣轉交 `MyProgramV2` 的 QICK compilation options。
-例如 `reps_innermost=True` 將 reps 放在所有 top-level loop 內側。
-Compiler 在 build 時回報不支援或衝突的選項；取數選項仍傳給 Schedule 的 `run_acquire*`。
-它不接收 SoC，不取數，也不依賴 experiment runtime。
-Builder 依物件身分在第一次 emit 時記錄 module 宣告。
-同一 module 物件可跨 builder 與原生 program 重用，不要在錄製或編譯後修改它。
-每個 program 依 module 物件身分保存宣告結果，compile 時重新配置自己的資源。
-Pulse 在各 program 內按定義去重，同名不同 cfg 的 Pulse 使用不同 waveform 名稱。
-原生 QICK 呼叫需要 pulse 名稱時，用 `pulse.pulse_name(prog)` 取得該 program 的宣告結果。
-同一物件重複 emit 沿用宣告，build 後所有錄製與 build 呼叫都 raise ValueError。
-Builder 與 program 的 `add_sweep(name, spec)` 宣告一個 top-level loop，回傳均勻掃描的 QICK 參數。
-Builder 的原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
-Builder 的 `fork(source, into=...)` 與 `join(*sources, into=...)` 是普通記帳方法。
-`with builder.repeat(...)` 與 `with builder.branch(by=..., align_timeline=...)` 錄製巢狀動作。
-Branch 回傳公開的 `BuilderBranchCases` handle，用 `with branch.case(index):` 錄製指定 sweep 點的動作。
-Index 是 zero-based，可不按順序宣告。未宣告的點不發射動作，重複或超界 index 報錯。
-在 case 內仍呼叫原 builder 的 emit、timeline_inc 或其他不推進 reference 的 body 方法。
-關閉全部錄製 context 後才能 build，否則 raise ValueError，builder 仍可繼續錄製。
-Build 重播 program 的 context，沿用其 timeline 回饋、局部名字生命週期與錯誤訊息。
-`SimulationSoc` acquisition 由 compiled frontend 解讀 program 的最佳化前 stream。
-既有 acquire 擴充仍由共同基底提供。
+它不接收 SoC、不取數，也不依賴 experiment runtime。
 
-`TimelineProgramV2` 的 module 與原生直接 generator／ADC 宣告沿用 QICK 規則。
-後宣告覆蓋先宣告，由作者負責設定是否一致。
-需要宣告資訊時，直接讀 QICK 的 `gen_chs`／`ro_chs`。
-tProc readout 用各自具名 config 切換 freq、phase、outsel 與 generator 頻率匹配，每次 trigger 使用當次設定。
-原生 `add_readoutconfig` 保留 QICK 的 template 契約，不限制跨 template 的 mode、phrst 或 length。
-靜態 readout 不支援 runtime 切換。
-每 shot trigger 次數仍由 compiled 總數契約檢查，不按個別 module 的 emit 次數拒絕共用。
-Timeline module 不自動保護 route。作者明確呼叫繼承的 `protect_readout_routes` 後，該 route 不可重新宣告。
-不同 owner 重複 explicit protect 仍報錯，失敗不保留部分 protection。
-Register 名稱與地址仍歸屬到宣告物件，衝突訊息列出兩個 module 名稱與物件。
-明示 register 借用與 Pulse registry 的 template 共用規則不變。
-Body 以 `fork` 建立各 child timeline，依作者順序 `emit`，最後 `join` 合併結尾。
+| 入口 | 用途與限制 |
+| --- | --- |
+| `TimelineProgramV2(soccfg, reps=1, initial_delay=1.0, relax_delay=1.0)` | Program 不持有 experiment cfg。Delay 單位為 us，`initial_delay` 為 float，不接受 `None`。Shot 外殼為 `final_wait=0`、`final_delay=relax_delay`。 |
+| `_initialize(cfg)`／`_body(cfg)` | 前者宣告通道、pulse、readout、module 與 loops，後者發射原生 QICK 操作或 `emit(module)`。建構子不承接 `AveragerProgramV2` 的全部選項。 |
+| `TimelineBuilder(soccfg, ..., **program_kwargs)` | `build()` 原樣轉交 QICK compilation options，例如 `reps_innermost=True`。Compiler 在 build 時回報不支援或衝突的選項。取數選項不放這裡。 |
+| `declare(module)`／`emit(module, timeline=..., tag=...)` | 手寫 program 顯式宣告。Builder 第一次 emit 時記錄宣告。同一物件可跨 program 重用，錄製或編譯後不要修改它或其 cfg。每個 program 依物件身分保存自己的宣告結果。 |
+| `build()` | 所有錄製 context 關閉後才能呼叫，否則 raise ValueError 且仍可繼續錄製。成功後 builder 凍結，再錄製或 build 都 raise ValueError。 |
+| `add_sweep(name, spec)`／`add_loop(name, count)` | 前者宣告均勻掃描並回傳 QICK 參數，非均勻值表用後者配合 `LoadValue`。 |
+| `fork(source, into=...)`／`join(*sources, into=target)` | Fork 宣告新 timeline，join 將既有 target 與 sources 的結尾取逐點 max。兩者只記帳，不發射動作或推進 reference。 |
+| `with timeline(name)` | 只切換範圍內省略或傳入 `None` 的 timeline 預設名字，顯式名字優先，離開後還原。 |
+| `timeline_inc(t, *, timeline=..., range_hint=...)` | 只增加結尾。Scalar／QickParam 單位為 us，register 名稱代表非負 tProc cycles。Hint 是作者保證的整數 cycle 閉區間，不增加硬體檢查。 |
+| `delay_by_timeline(timeline=...)` | 將 reference 推進到所選結尾，全部 timeline 扣除實際推進量並 floor 0。原生 delay／delay_auto 仍推進 reference，不受 timeline 範圍影響。 |
+| `with repeat(name, n, *, timeline=None, range_hint=None)` | 逐圈累積結尾，入口與回邊不自動同步。`n` 為非負整數或既有 count register 名稱。固定次數不接受 hint。 |
+| `with branch(by=..., align_timeline=..., timeline=None) as cases` | 依 sweep 的 zero-based index 選 `with cases.case(index)`。未宣告點執行空 case，重複、非整數或超界 index 報錯。必填 bool `align_timeline` 選全部 case 的 max 或實際 case 結尾，兩者都不推進 reference。 |
+| `pulse.pulse_name(prog)` | 取得該 program 的 pulse 宣告名稱。Pulse 按定義去重，同名不同 cfg 使用不同 waveform 名稱。 |
+| `timing_layout`／`ir.analyze_timing` | 從 linked boundary metadata 觀察逐點事件、body_end 與含外殼的 shot_end。DMEM dispatch 另傳公開 `compile_datamem()` 給 `CompiledTimingInput.dmem`，caller 不重建 table。Resync 讀硬體 s11，analysis 明確拒絕。 |
 
-每條 timeline 只保存相對 reference 的結尾。
-Default 是普通 timeline，不是 reference。其他名字先在 `_body` 用 `fork(source, into=...)` 宣告。
-Source 必須存在，into 接受一個新名字或名字 list。未知來源、重名與未宣告使用都報錯。
-帶 timeline 的 pulse／trigger 在結尾加 t 發射，然後更新結尾。
-Trigger 的 named end 只含 trigger 寬度，ADC 視窗只更新該 ADC channel 的尾端。
-同 channel 的 pulse 提前開始時編譯報錯，不能用另一條 timeline 繞過。
-後一個 trigger 帶 timeline 時，同 ADC 視窗重疊或無法證明不重疊也在編譯期報錯。
-前一個 ADC 視窗不論來自原生或 timeline trigger 都算。錯誤列出 timeline、channel 與 overlap cycles。
-Config 是瞬時事件，結尾更新到發射時間 E+t，不加 config length 或其他 ADC window。
-未進入 timeline 範圍且未帶 timeline 的原生指令保留 QICK 行為。
-ADC 重疊檢查同樣只對帶 timeline 的後一個 trigger 生效，純原生 trigger 保留 QICK 的時間與重疊處理。
-原生 scalar／sweep trigger 的尾端證據使用實際量化起點加 ADC 視窗，不改其 timestamp 或 Trigger 展開指令。
-這份證據也用於 shell WAIT／slack。例如 requested 起點為 0.2 cycle、ADC 長 140 cycles 時，實際起點為 0，WAIT 為 140 cycles。
-原生 `t=None` 無法定位 ADC 起點，後一同 ADC 的 timeline trigger 因無法證明不重疊而報錯。
-此未知標記只用於重疊檢查，不捏造 shot closure 的 runtime 結尾。
+每條 timeline 保存相對 reference 的結尾，`default` 不是 reference。
+帶 timeline 的 pulse／trigger 在結尾加 t 發射。Readout 的作者結尾只含 generator waveform 與 pre/post delay，ADC 視窗留在 ADC channel，shot 收尾仍等待全部 ADC。
+未帶 timeline 且未進範圍的原生輸出保留 QICK 行為。
+Builder 原生布林控制選項只接受 keyword，其餘參數沿用同名 program 方法。
 
-`with builder.timeline(name)` 與 `with self.timeline(name)` 選擇範圍內的預設 timeline。
-省略 `timeline=` 或傳入 `None` 時，下列入口都使用此名字：
+Case 與 Repeat 只可使用母結構允許的 timeline 及局部 fork，局部名字離開後失效。
+Case 內不得經 owner 推進 reference，包含巢狀 Repeat。TwoPulseReset／BathReset 的 children 也有此限制。
+Raw `asm_inst` 或自訂 `Macro.translate` 不經 timeline 記帳與 reference 守衛，結果由作者負責。
+`DelayAuto` module 只在 timeline 範圍外且未指定 timeline 時包裝原生 delay_auto／delay_reg_auto；任何顯式或範圍選出的 timeline 都報錯。
 
-- `emit`、`pulse`、`trigger`。
-- `send_readoutconfig`、`send_readoutconfig_from_regs`。
-- `pulse_from_regs`、`pulse_by_reg`、`pulse_from_length_reg`。
-- `timeline_inc`、`delay_by_timeline` 與 `repeat` 的母 timeline。
+Generator／ADC 宣告沿用 QICK 的後宣告覆蓋規則，作者負責一致性，需要時讀 `gen_chs`／`ro_chs`。
+Timeline module 不自動保護 route，明確呼叫 `protect_readout_routes` 才啟用保護。
+不同 owner 重複保護報錯，失敗不保留部分 protection。Register 名稱與地址衝突會列出兩個 module。
 
-`pulse_by_reg` 與 `pulse_from_length_reg` 選到 timeline 時仍須提供配對的 `selection` metadata。
-範圍外省略 timeline 的原生輸出保留 QICK 時間行為，不改選 `"default"`。
-顯式名字優先，包含 `"default"`。巢狀範圍覆蓋外層，離開後還原。
-名字必須是 default 或已 fork 的 timeline，空範圍也會在編譯時驗證名字。
-範圍不 fork、不 join，也不移動 reference。
-`branch` 必填 keyword-only `by` 與 `align_timeline`。
-`timeline=None` 選目前範圍作為母 timeline，case 另建自己的預設名字。
-原生 `delay` 與 `delay_auto` 仍只推進 reference，不受範圍影響。
+完整操作範例見 [experiment authoring](../../../../zcu_lab/v2/experiment-authoring.md#timeline-program-與-schedule-取數)。
+跨 owner 與控制流契約見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md)，其中包含
+[timeline 與 reference](../../../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開)、
+[runtime 範圍證明](../../../../docs/adr/0083-program-macros-and-timelines.md#runtime-end-與範圍證明)、
+[branch／repeat 邊界](../../../../docs/adr/0083-program-macros-and-timelines.md#forkjoin-與-repeat-邊界) 與
+[收尾 WAIT／slack](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
+公開方法的參數與錯誤契約另見 [builder.py](builder.py) 與 [timeline](timeline/)。
 
-```python
-builder.fork("default", into="drive")
-with builder.timeline("drive"):
-    builder.emit(drive)
-    builder.timeline_inc(0.1)
-    builder.delay_by_timeline()
-    with builder.repeat("pairs", 2):
-        builder.emit(drive)
-        builder.delay_by_timeline()
-    builder.delay_by_timeline()
-builder.emit(drive)  # Uses default again.
-```
+Register 次數不能與 Repeat counter 的 `name` 相同。省略 count hint 只略過 generator 回邊的同 channel overlap 證明。
+ADC 回邊仍須證明下一圈不早於前一視窗結尾，重疊或無法證明時 raise ValueError。
+固定次數或 hint maximum 小於 2 時，兩項回邊檢查都跳過。
+`fixed_loop_indices` 提供固定 counter 名稱、點數與 writer metadata，counter 不加入 QICK top-level sweep metadata。
 
-`timeline_inc(t, timeline="drive")` 只將結尾加 t，不移動 reference。
-`delay_by_timeline(timeline="drive")` 才將 reference 移到該結尾，並扣減全部 timeline，最低為零。
-原生 delay／delay_auto／resync 也經公開 timestamp decrement 扣減全部結尾。
-可靜態決定的結尾保留 scalar／`QickParam`。跨零 floor、交叉 max 與 path-selected end 才物化成 runtime cycle register。
-Runtime 合流用 TEST 與條件 register 寫回，算術使用移位與加減。
-Runtime 事件直接寫 s14，沿 QICK preprocess 接縫把 `t_regs['t']` 設為 `s_out_time`。
-Pulse、ConfigReadout、Trigger 的 expand 仍由 QICK 負責，不另配事件時間 data register。
-同基準的後續事件使用 s14 差值增量。Native／raw 寫 s14 與 branch 合流會使記錄失效，下一個事件重新載入基準。
-原生 sweep 時間仍使用 QICK sweep register。IR 會刪除無條件、無 UF 且無其他效果的純 register 自我複製。
-End 限於 `0..2**31-1`，中間值也須符合 signed 32-bit range。
-每個 sweep／shot 重新建立所需狀態。`timeline_inc("duration", ...)` 讀取非負 tProc cycle register，仍不推進 reference。
-作者可用 `write_reg_op` 或 `read_dmem` 自行準備時間，不必先登記 producer bounds。
-`range_hint=(lo, hi)` 可選，單位是整數 tProc cycles，表示作者保證的非負閉區間，不增加硬體 range check。
-沒有已知 bounds 且沒有 hint 時，時間入口依作者的非負契約使用下界 0，上界仍未知。
-這個時間視圖保留原來源的捕獲 recipe，不改 signed 非時間資料，也不加硬體檢查。
-仍需要 max 時，編譯器在 runtime 計算，不證明該段同 channel 不重疊，溢位也由作者負責。
-原生常數、sweep 與 framework table／長度 producer 保留既有 bounds 證明與稽核。
-未知時間的 tag getter 明確 raise RuntimeError，不回傳配置指令時使用的暫存值或 bounds 上界。
+## 型別與 cfg 契約
 
-編譯器以軸 ID 對齊時間分量。同 loop 的 sweep、選表與定點換算共用 loop 名稱作 ID。
-已知分量是一維 numpy 陣列。只有範圍的分量是獨立未知軸的係數，常數使用大小為 1 的固定軸。
-作者 register 的每次寫入、量測結果選表與取整誤差各自獨立，range_hint 不建立 loop 相關性。
-加減先合併同軸分量並消去零項，再加總各軸的界。證明不建立多維網格。
-已知軸上逐點全等的分量移到 const 軸，原軸從變數中消失。
-靜態結尾因此成為常數時，後續事件用字面值時間，不配置結尾 register。
-Generator fabric 的逐操作 ceil 若留下逐點差異，該軸仍保留。
-同單一已知軸的非線性運算逐點計算。跨軸 ceil 與定點換算保留原式，另加有界取整誤差。
-跨軸 max/min 使用線性部分加有理係數的 Abs 項，允許負係數及巢狀 Abs。
-正規化合併同類項，消去零係數，並在已知符號時化簡 Abs。
-取界依共用軸分連通塊，在塊內分支定界並剪枝。每塊超過 20 個未定號 Abs 項時退回區間界。
-退回只影響證明，不改執行值，也不把保守 slack 當成實際差距來拒絕 relax_delay。
-不可變節點快取範圍，支配判斷以正規化相減式快取結果。
-Runtime 結尾、支配、重疊與 overflow 都從運算式取界，不另存結尾 min/max。
-所有 timeline 合流共用 N 路 max/min 的 runtime recipe planner。
-Planner 展平原 recipe 的同向候選，將捕獲進入點當作不透明變數。
-它以每個變數在 N 式中最常見的係數抽出公共部分 S，平手選絕對值較小的係數。
-相同變數餘項只留最大常數，min 則留最小常數。
-正規化差值的界剔除被任一候選支配的餘項。
-S 與每個剩餘項各算一次，再做 k−1 次實際選值，最後加回 S。
+`QickParam` runtime 物件提供 `is_sweep`、`minval`、`maxval`、`start`、`spans`、`to_array`，但第三方 stubs 可能未宣告。
+Program code 透過 `utils.is_qick_param()`／`QickParamLike` 做 runtime guard 與型別收窄，不各自使用 `cast()`。
 
-兩路 max 使用 `TEST x−y`、複製 x、`if(S)` 寫入 y，共 3 條指令。
-x 已可覆寫時省去複製，剩 2 條。k 路選值共用結果 register，成本為 `1+2(k−1)` 條。
-這個成本不包含候選求值與加回 S。Min 使用 `if(NS)`。
-Compiler 先用差值界證明 signed32 安全，證明不了時以 sign-corrected mask 選值，不依賴溢位後的 S。
-TEST 更新旗標後由硬體 hazard 單元等待，不插入 NOP，也不使用外部 F/NF。
-後續操作讀取捕獲的 register，不從 Abs 證明式重建 max 或重讀已覆寫的來源。
-編譯期分量與誤差不配置時間 DMEM。
+`AbsModuleCfg` 與 `AbsWaveformCfg` 是抽象契約。具體 cfg 實作 `build()` 與 `set_param()`，未知參數名稱 raise ValueError。
+Pulse、PulseReadout 與 reset 的 keyword-only scalar／sweep 覆寫使用 detached effective cfg，`None` 沿用原值。
+Registry identity 與 lowering 使用有效 cfg，`set_param()` 則修改接收呼叫的 cfg。
+接受 `ro_length` sweep 不代表 QICK ADC-window 支援 sweep，setter 與 constructor 都保留既有編譯錯誤。
+參數表見 [modules](modules/README.md#constructor-overrides)，跨家族 audit 見 [set_param contract](../../../../tests/cfg_model/test_set_param_contract.py)。
 
-Framework owner 用 `time_producer(register, CycleBounds(...), dependencies=...)` 登記自己的 lowering writes。
-Table owner 以 `dependency_ranges` 登記合法 index 範圍，mapping keys 自動納入稽核。
-只有時間 consumer 啟用這些前置條件。證明涵蓋全部已登記 writes，不能用 lookup 後的合法 index 覆蓋先前非法讀取。
-翻譯後稽核 source、依賴與 compiler 時間 storage 的全流寫入，錯誤指出 register 與 instruction 位置；無關 raw words 不受影響。
-原生 delay／delay_auto／wait_auto／resync 不增加 timeline keyword。
+`GainSweep` 標註的 `SweepCfg` 要求 start、stop 與實際最後一點在 [-1, 1]，單位為 DAC full-scale fraction，a.u.。
+Form 座標投影後使用相同驗證器。Start=-1、stop=1.1、step=0.5 的實際末點為 1.0，因此接受；Range + Expts 保留 stop=1.1，因此拒絕。
+一般 `SweepCfg` 不限制單位。
 
-Module 先明確 declare，每次 emit 建立獨立的 `ModuleEmission` 與 tag。
-Module 本身不是 QICK Macro，不能直接 append。
-Pulse／PulseReadout 的 emit 內部事件共用所選 timeline 的結尾作為起點。
-PulseReadout、TablePulseReadout 與 MuxReadout 的結尾只取 generator waveform end，加一次 post-delay，整段向上取整一次。
-ADC 視窗不 join 回作者 timeline，每個 shot 的收尾仍等待所有 ADC。
-`PulseReadoutCfg.nominal_duration_us()` 回傳 `pre_delay + waveform.length + post_delay`，不含 ADC 時間或時脈取整。
-Runtime 整數 cycle 起點也保留分數 event tail 到加 post-delay 後才取整，不先各自取整。
-Reset 保留每個 child 的 post-delay。BathReset 的 pi/2 等待 cavity end 加 post-delay 向上取整後才開始，最後也計入 qubit 尾段。
-這些 owner 不從 `total_length` 重建 duration。Scalar 與可精確表示的整數仿射 sweep 保留靜態時間。
-作者 sweep 使用 QICK 原生 start round 與逐圈 step 截斷，不配置逐點時間 table。
-Runtime 跨 generator 格點的長度使用 k=8 定點換算，aggregate 加 post 後再 ceil。
-作者明確宣告的值表與 waveform／length selection tables 保留。IR dispatch 的 jump-address table 也保留，不是逐點時間 table。
-ComputedPulse 與 TableLengthPulse 使用捕捉的任意 selector 選擇實際 playback，並保留相配的 post 到 aggregate 才取整。Flat-top 的全部 segment 地址由 playback owner 在最後準備步驟產生，時間 storage 的全流稽核也涵蓋這些衍生地址。
-未進入 timeline 範圍時，省略 timeline 選 default，但不移動 reference。
-以下是 `TimelineProgramV2` 子類別的 hooks。`drive_cfg` 是呼叫端提供、使用 channel 0 的 `Pulse.Cfg`。
-時間參數單位為 us，另一個 channel 1 的 native pulse 由原生 API 宣告。
+## 呼叫端 YAML 編譯設定
 
-```python
-from zcu_tools.program.v2.modules import Pulse
-from zcu_tools.program.v2.timeline import TimelineProgramV2
+[`program.build_soccfg(profile)`](../README.md#yaml-compile-profiles) 從 caller-owned YAML mapping 推導時脈。
+Channel 數、型別、時脈、記憶體限制與 QICK metadata 都必填，builder 不查已安裝 QICK 版本、不建立硬體或 acquisition source。
+Tests 自備 [`tests/program/profiles/`](../../../../tests/program/profiles/)；lab 環境擁有相鄰 `profile.yaml`，板子設定與物理模型 YAML 分開。
+欄位與數值由各 YAML 擁有，測試的 fixture 與替身慣例見 [tests README](../../../../tests/README.md#qick-編譯-fixture)。
 
+`pfb_channel(soccfg, ro_ch, frequency_mhz)` 透過 QICK 公開 readout 計算解析絕對物理頻率，使用該 ADC 的 PFB 時脈與 channelization。
+Caller 不另做 folding 或 rounding。明確的 `(gen_ch, ro_ch)` 接線屬於 `SimulationSoc`，使用未接線 channel 會失敗。
+白噪音環境另接受 `routes="all"`，將每個 generator 接到每個 ADC。
+Request、數值契約與環境組裝見 [simulation](simulation/README.md)，startup 與 YAML 入口見 [simulation environments](../../../../zcu_lab/simulation_envs/README.md)。
 
-def _initialize(self, cfg):
-    self.drive = Pulse("drive", drive_cfg)
-    self.declare(self.drive)
-    self.declare_gen(1, nqz=1)
-    self.add_pulse(1, "native", style="const", freq=1000,
-                   phase=0, gain=0.5, length=0.1)
+## 取數與 readout observation
 
-def _body(self, cfg):
-    self.emit(self.drive)
-    self.pulse(1, "native", t=0)  # Relative to the original reference.
-    self.delay_by_timeline()
-    self.pulse(1, "native", t=0)  # Relative to the drive end.
-    self.fork("default", into="drive")
-    self.emit(self.drive, timeline="drive")
-```
+`acquire(..., rounds=1)` 與 `acquire_decimated(..., rounds=1)` 接收軟體平均次數。
+`reps` 與 `rounds` 必須為正整數，bool 不算整數，無效值在編譯或 acquire admission 前 raise ValueError。
+`acquire_summed` 以單一 processor 處理所有 ADC 的正規化 IQ，跨 round 只加總。
+`shot_sums(prog, axes)` 在 compile 後以 emit tag 或未標記 module 名稱解析 `Classify` 與 `IQ` 軸。
+Branch readout 的 `set_reads_per_shot` 順序、逐路徑設定比對、Repeat trigger 限制、外積總和與取消契約見 [summed acquisition](../README.md#summed-acquisition)。
 
-DelayAuto 是唯一例外。在 timeline 範圍外省略 timeline 時，它包裝原生 delay_auto／delay_reg_auto，保留 gens／ros。
-任何 timeline 名稱都在 emit 入口報錯，包含顯式 default 與範圍選出的名字。
-在 timeline 範圍內需要推進 reference 時，直接呼叫原生 `delay_auto`。
-原生 delay_reg_auto 先消耗選定 native channels，再推進 register cycles。尚未消耗的 timeline 以已知 producer bounds 扣除實際推進量。
-若 native 部分已完整消耗全部 timeline，register 部分沿用原生的非負時間契約。
-PulseReadout 的 gain／frequency runtime words 不受這項時間限制排除。
+`readout_observation.observe_readouts(prog)` 由 program owner 解包 compiler wrappers，提供 readout provenance、Trigger 順序及控制 scope。
+它靜態訪問 branch 各路與 repeat body 一次，不是 runtime trace 或 linked instructions。
+`observe_readout_paths(prog)` 另回傳含 selector／case 與 observations 的 `ReadoutPath`，同 selector 的多次 Branch 共用 case index。
+它保留 Repeat scope 與未宣告的空 case，不改 flatten traversal。Consumer 保留 module identity、label、read-count 與取數驗證，不自行解析 wrappers。
 
-Join 用 `join(*sources, into=target)` 合併既有結尾，保留來源與較晚的原目標。
-它只記帳，不移 reference，也不要求每條 fork 都 join 回來。
-交叉或 runtime source 以逐點 maximum 合併，不把所有掃描點補成同一個長度。
+<a id="timeline-rounding"></a>
 
-`with self.branch(by="scan", align_timeline=True, timeline="drive") as branch:` 依 sweep selector 選 case。
-`timeline` 指定母 timeline，省略或傳入 None 時選目前範圍，範圍外選 default。
-`with branch.case(index) as name:` 取得隱式 case timeline 的名字 `"scan[index]"`。
-Case 從母 timeline 的結尾 fork，並以自己的名字屏蔽範圍預設。
-Case 內只能使用這條 timeline 與其局部 fork。使用母 timeline 或其他外部名字會在 build 時報錯。
-Index 是 `scan` 的 zero-based 點索引，可只宣告部分點，也可完全不宣告。
-未宣告的點執行空 case，不要求作者填入空動作。重複、非整數或超界 index 報 ValueError。
+## Timeline 取整
 
-`align_timeline` 是必填 keyword-only bool。每個 case 保留 branch 入口的 reference。
-True 將各 case 結尾 join 回母 timeline。全靜態時取靜態 max，有 runtime 值時取精確逐點 max。
-True 需要每個 case 的結尾都能從 branch 入口狀態算出，不執行未選 case 的動作。
-False 將母 timeline 設為實際執行 case 的結尾。其他外部 timeline 在兩種模式都不變。
-兩種都不推進 reference、不自動 delay_by_timeline，後續可在母 timeline 結尾繼續發射。
-未使用的外部 long pulse 可以橫跨 Branch。
-Case 內的 native delay、delay_auto 與 delay_by_timeline 在 build 時報錯，等待改用 timeline_inc。
-Case 內可使用 `repeat(...)`。它的 body 同樣不得推進 reference，包括巢狀 Repeat 內的操作。
-Repeat 內放 branch 仍合法，兩種 align_timeline 都使用上述規則。
-Branch 區塊內、case 外的 emit、fork、join、timeline_inc 等動作在 build 時報錯，無條件動作寫在 with 區塊前或後。
-隱式 case 名字與 case 內的 fork 名字在 case 結束後失效，即使其他 case 使用同名也一樣。
-沒有 join 的局部結尾直接丟棄，不合回祖先、不影響其他 timeline，也不報錯。
-跨 Branch 的 timeline 須在入口前宣告。Register 用量沒有保證，超限保留 QICK 原錯誤。
+每個操作將結果 ceil 到 tProc cycle 一次，事件起點也用 ceil，不用 nearest。
+`math.isclose(ticks, nearest, rel_tol=1e-12, abs_tol=1e-10)` 將接近整數的值視為該整數，吸收換算雜訊。
+例如 119/430.08 us 保持 119 cycles。在 2³¹ cycles 附近，相對容差也可能吸收約 0.002 cycle 的真實尾段，超出兩項容差的正尾段才向上取整。
+靜態 waveform 與 ADC 長度先作有理數時鐘換算，再將 post 加入 aggregate 後 ceil。
+作者 sweep 保留 QICK 原生 start rounding 與 step 截斷，不配置逐點時間表。
 
-Case 內有 readout 時，作者與 Repeat 一樣，在 build 後以 `prog.set_reads_per_shot(n)`
-宣告每 shot 的讀數，再呼叫 `shot_sums` 和 acquire。QICK 預設會把各 case 的 source
-trigger 加總，不是每條實際路徑的讀數。`shot_sums` 不修改宣告，並逐路徑比對。
-互斥 case 的同名 untagged readout 可共用 label，但選中的 ADC、read index、freq、
-ro_length/window、phase 與 cfg classifier 必須一致。Gain、waveform 可以不同。
-R1 關閉使用 `PulseReadout("r1", cfg, gain=0.0)`，仍保留 generator 時槽與 ADC trigger。
-不一致會報 ValueError，訊息列出 case index 與不符項目。Repeat 內的 trigger 仍拒絕。
+Runtime 跨格點 generator 長度使用 k=8 上界定點換算。
+Compiler 選 canonical signed-digit 項數最少的 W，平手取較小 W。
+500 us 內的合法整數長度滿足 `ceil(n*W/256)` 不早於物理結束且最多晚 1 us，超出 500 us 不沿用此誤差上限。
+每個操作加入自己的 post 後才做最後 ceil，靜態與整數仿射 tProc 長度保持精確。
+換算只用至多 15-bit shifts 與加減，不用 ARITH、DIV 或時間表。時脈比為 1 不發出換算指令。
+乘積或中間值 signed32 overflow 在 build 時拒絕。
 
-`repeat(name, n, *, timeline=None, range_hint=None)` 使用逐圈累積的 timeline。
-`timeline=None` 選目前範圍，範圍外選 default。範圍內以循環 timeline 屏蔽預設名字。
-只可使用母 timeline 與其局部 fork，離開後局部名字失效。
-Repeat 不在入口或回邊自動推進 reference。作者可在 body 明寫 `delay_by_timeline()`、原生 `delay`／`delay_auto` 或巢狀 Repeat。
-Branch case 內仍禁止任何經 owner 推進 reference 的操作，包括 Repeat body 裡的操作。
-`n=0` 保留母 timeline，不執行或宣告 body 內容，也不自行同步入口。
+現有 native length sweep 與 waveform／length selection table 提供 runtime 長度；timeline length-register playback 仍要求 selection metadata。
+這不新增任意作者 length register 或 ADC length API。Ratio 7/5 的 W=359，ratio 56/5 的 W=2872，但目前 API 未開放 ADC／PFB runtime length consumer。
+編譯期已知 bias 使用字面值，零 span 不配置 sweep register。Runtime 結尾保留既有 register 加字面值偏移，只有需要獨立 register operand 的 consumer 才物化。
+同步可拆成既有非負 register 與非負字面值的 reference advance，不改事件時間或使用 s14。
+Scalar／仿射時間 getter 回傳實際量化值；runtime-only 或非仿射時間 raise RuntimeError。
+作者資料表與 IR dispatch jump-address table 仍受支援。
 
-編譯器只按已錄製的 body 結構選 lowering，不分析定點，也不重播 preprocess。
-當 body 頂層最後一個操作是對循環 timeline 的 `delay_by_timeline()`，且入口結尾為常數 0，
-不攜帶循環尾端 register。固定圈長直接編成每圈的常數 `TIME inc_ref`。
-其他情況使用 s14 作循環時間指針，入口載入母 timeline 結尾，每圈推進到新的最晚結尾，離開時才捕獲尾端。
-簡單固定圈長 body 只留下事件與 s14 字面增量，不每圈搬運尾端 register。
-Native／raw 寫 s14、branch、巢狀 Repeat 或 reference 操作需要時，保留 shot-local 原點 snapshot 供恢復。
-中途 delay_by_timeline、只在巢狀區塊末尾 delay_by_timeline、同步其他 timeline 或沒有 delay_by_timeline 都走指針路徑。
-若 body 以循環 timeline 的 delay_by_timeline 結尾，但入口結尾不為常數 0，會發 UserWarning 提示先在循環前加 delay_by_timeline。
-編譯器不自行插入它。IR 依實際時間窗口決定展開份數，branch-address DMEM 成本維持原契約。
+## IR 與硬體對齊
 
-`n` 是非負整數或既有 count register 名字，不能與 counter 的 `name` 相同。
-Register 次數可提供作者保證的非負閉區間 `range_hint=(minimum, maximum)`，不增加硬體檢查。
-省略 hint 時使用實際 count，只跳過 generator 回邊的同 channel overlap 證明。
-ADC 回邊仍須證明下一圈的起點不早於前一個視窗結尾，重疊或無法證明時 raise ValueError。
-固定次數或 hint 的 maximum 小於 2 時，兩種回邊檢查都跳過。固定次數不接受 hint。
-每 shot／sweep 點重新初始化循環狀態，局部 counter 不加入 QICK top-level sweep metadata。
-Repeat owner 以公開 `fixed_loop_indices` 提供固定 counter 的名稱、點數與 writer metadata。
-Producer audit 仍只接受相符的初始化、回邊與重設寫入。
-累加器內事件的時間可能只在 runtime 可知，getter 會明確報 RuntimeError，不回上界。
-編譯期可知的累積結尾仍可讀取實際量化值。
+[tProc v2 ASM reference](../../../../docs/reference/tprocv2-asm-notes.md) 擁有指令、register、時序與 waveform memory 限制。
+IR 分層、pipeline、pass owner 與 linking 契約見 [IR README](ir/README.md)。
+`IRCompileMixin.optimize_asm()` 使用 `make_default_pipeline`，IR 最佳化可透過 `disable_all_opt` 完全繞過，module／macro 已發出可執行 ASM。
+`Nop` 保留為顯式指令，不當作 dead-code noise。
 
-外部 long pulse 可以橫跨 Repeat，但不能在 body 內使用其 timeline。
-沒有 reference 操作時，其他外部結尾不變。
-作者明寫 reference 操作時，外部結尾逐圈按實際推進量 debit，再做 floor 0。
-固定且可靜態表示的總推進量保留靜態記帳。Runtime 次數或路徑需要時，各圈把實際 debit 寫入 storage。
-Branch 各 case 的結尾不同時，各 case 把自己的結尾寫入 selected-end register。
-離開 Branch 或 Repeat 後，可直接在外部 timeline 放 pulse、trigger、config 或使用 timeline_inc。
-後續事件從實際 remaining end 開始，不採範圍上界，也不要求先 delay_by_timeline、join 或 fork。
-事件沿用 shot 收尾等 consumer 已需要的 storage，透過 s14 放置，不另配事件時間 register。
-沒有後續事件時，不為可能的 placement 預配 register。每 shot／sweep 點仍重設狀態，data register 上限仍為 16。
-時間計算不配置 DMEM。Branch dispatch 的 jump-address table 保留。
-原生 `delay_reg_auto` 可在 Repeat 內使用，仍須遵守其 producer bounds 與未消耗外部結尾的原生契約。
+`IRNode` 表達 loop、branch、dispatch 與 block 結構；`BasicBlockNode` 保存 labels、線性 insts 與可選末端 branch。
+原子 `Instruction` 不繼承 `IRNode`。`IRLinker.link()` 依 `addr_inc` 配置 `P_ADDR` 並解析 labels，最終 QICK dictionary 不輸出 `ADDR_INC`。
+`IRLinker.unlink()` 從 QICK `prog_list` 還原含 label 與結構 meta 的邏輯指令。
+一般指令佔 1 word；WAIT 展開為比較與條件跳躍，佔 2 words，後續地址為 N+2。
 
-以下 body 明寫入口與每圈同步。每圈先合併局部結尾，再移動 reference：
+### 打包的 data-memory lookup
 
-```python
-def _body(self, cfg):
-    self.delay_by_timeline()
-    with self.repeat("pair", 2):
-        self.fork("default", into="local")
-        self.emit(self.drive, timeline="local", tag="repeated")
-        self.timeline_inc(0.05, timeline="local")
-        self.join("local", into="default")
-        self.delay_by_timeline()
-    # Parent default is zero. The local name has expired.
-```
+tProc v2 ALU 只使用 shift count 的低四位，包含 register operand。單次 shift 無法取出 bit 16 以上的 slot。
+`LoadValue` 保持完整 32-bit packing，將擷取拆成至多 15-bit shifts。
+Lookup 驗收見 [tests](../../../../tests/README.md#loadvalue-壓縮閾值)，pass 驗收見 [IR pass 測試](../../../../tests/README.md#ir-pass-測試)。
+Pass 行為速查見 [simulation](simulation/README.md#ir-pass-behavior)。
 
-Register 次數可改寫成 `with self.repeat("pair", "n_pair", range_hint=(2, 4)):`。
-`n_pair` 須先準備，執行值必須符合作者保證的範圍。Register 超限保留 QICK 原錯誤。
+## 頻率 word 解碼
 
-以 `LoadValue` 宣告非均勻 scalar table，配合作者的 `repeat` 或 top-level sweep index 載入值。
-平行序列直接 fork 各 child timeline，依作者順序發射，再 join 回母 timeline。
-各序列從共同 origin 開始，join 只合併結尾，不發射動作。
-TwoPulseReset／BathReset 的 children 與 branch case 不得推進 reference。
-同 generator 的 physical-end 與全部 case、repeat backedge guards 保留，不加 padding 或 rewind。
+`utils` 的 scalar、paired 與 array decoder 接受 `cfg=PulseReadoutCfg`，只借用 generator／ADC channels、mixer frequency 與 Nyquist zone。
+它們不修改 cfg，也不使用 waveform、gain 或 readout window。`readout_freq_words` 編碼仍明確接收上述四項設定。
+`generator_frequencies_from_words` 接收已取整的物理 mixer 頻率與 generator channel，不建立 readout cfg。
+`readout_frequencies_from_words` 接收已宣告 ADC 與同 shape 的物理 reference array，選最近 ADC-DDS image。
+Compiled request builder 從實際輸出效果提供 references，cfg-based API 委派給相同 word decoder。
 
-守衛只涵蓋 timeline／module API 的 reference 操作。
-Raw `asm_inst` 或自訂 Macro.translate 推進 reference 時，不更新 timeline 記帳，也不受 Reset 或 case 守衛保護，結果由作者負責。
-它們不是已分析 instruction effects 的安全入口。
+## Macro 層
 
-Body 收尾先同步全部 timeline，再放 body_end marker，然後進 shot 外殼。
-ADC tail 沒有編譯期上界時，收尾同步也納入它的實際 runtime 結尾，取最大值推進 reference。
-無 hint 的作者時間 register 可作 readout 起點，之後可明寫 `delay_by_timeline`，不因未知 ADC tail 而 build 報錯。
-作者負責未知時間的重疊與溢位；編譯器不要求補 hint，也不假造上界。
-`delay_by_timeline` 保持每點 runtime maximum；shell WAIT 仍為常數，不使用 variable WAIT。
-已同步消耗的 ADC tail 剩餘量為 0。
-Program／timeline owner 保留已知 loop／table 的逐點來源關係與 native channel 結尾式子，供收尾 WAIT 計算使用。
-有限 ADC tail 保留既有常數上界與 slack 檢查，不因其他 ADC tail 未知而丟掉已知來源資訊。
-這些式子用於編譯期記帳；實際同步仍沿用 runtime register 計算，不是第二個 scheduler。
-能證明所有合法點的剩餘時間相同時，WAIT 精確且不警告。
-已知點的 `slack=max-min` 大於 0 時會 warning。
-已知 slack 超過 `relax_delay` 時 raise ValueError，等於時不拒絕；真正未知的 slack 只警告上界，不以該上界拒絕。
-來源相關性、精確 min／max 與未知值政策見 [ADR-0083](../../../../docs/adr/0083-program-macros-and-timelines.md#收尾-wait-與-slack-護欄)。
-每次 compile 重置宣告與結尾。公開 `timing_layout` 由真 boundary metadata 取得 linked addresses 與 loop 座標。
-將它與 prog_list／labels 交給 `ir.analyze_timing`，可觀察逐點事件、body_end 與含外殼的 shot_end。
-Register Repeat 的編譯結果可能包含 DMEM dispatch，分析時以 `CompiledTimingInput.dmem`
-傳入公開 `compile_datamem()` 的結果，不在 caller 重建 table。
-Resync 讀取硬體 s11，analysis 會明確拒絕，不宣稱其後精確時序。
+Runtime pulse／readout word macro 將單一 wmem template 載入 `r_wave`，修改欄位後直接送到 port，不將修改結果寫回 wmem。
+這讓播放時的更新保持原子性，固定 template 不隨掃描點改變。
+`TablePulseReadout` 的任意頻率掃描則播放一般 wmem template，透過 QICK loop exec-after hook 執行 dmem lookup 與 wmem patch。
+更新在 shot timing 後、loop test／jump 前，沿用原生 `QickParam` sweep 位置，不啟用 DDS phase reset。
 
-`resources.ProgramResourcesMixin` 集中 dmem 配置與 readout route 保護。
-TimelineProgramV2 使用它，傳輸時由 MyProgramV2 將 dmem 轉為 list[int]。
+`MetaMacro.regs: dict[str, str]` 將 info key 對應到 logical register 名稱、ASM address 或 QICK alias。
+`translate()` 透過 `IRCompileMixin.record_meta()` 複製 info 並解析 register，在目前 instruction address 記錄 metadata，不發出 ASM、不修改輸入。
+解析失敗不記錄 marker。此路徑不經 QICK `expand()`，info 中的 loop 名稱不會自動解析，必須放在 regs，否則 assembler 會報 `Source Data not Recognized`。
 
-## Macro Layer
+## ComputedPulse 與 DMEM lookup
 
-### Runtime and table-backed waveform updates
+新路徑在 `declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 捕捉 selector，由同次選擇決定 playback 與 post-delay。
+Program owner 保留 waveform 分數尾段，加入所選 post 後取整一次，不使用最大候選 duration。
+Address producer、捕捉 selector 與依賴接受全流寫入稽核。
 
-Runtime pulse/readout words use dedicated macros that load a single-wave wmem
-template into `r_wave`, patch selected fields, and send `r_wave` directly to the
-target port. They do not persist the patched bundle to wmem. This keeps runtime
-updates atomic at playback and leaves the fixed template stable across points.
+Legacy `ComputedPulse` 在 `init()` 收集候選 pulse 的起始 wmem index，以 `add_dmem(base_idxs)` 保存 table。
+`run()` 用 `val_reg + dmem_offset` 讀取該候選起始 index，再交給 `pulse_by_reg`。
+`PulseRegistry` 會去重，因此候選 index 不保證連續。Flat-top table 存第一個 ramp_up entry，`flat_top_pulse=True` 連讀 ramp_up／flat／ramp_down 三個 entry。
+`ProgramResourcesMixin` 擁有全程式共享的順序 dmem buffer，`add_dmem()` 回傳 slice 起點。
+`compile_datamem()` 維持 QICK 的 `np.int32` array contract。`MyProgramV2` 建立完整 binary program 後，將 remote SoC 的 dmem 轉成一維 built-in `list[int]`，保留 signed int32 與 two's-complement bit pattern。
 
-`TablePulseReadout` uses a different contract for arbitrary frequency sweeps: the
-body plays ordinary wmem-backed templates, while the program attaches dmem
-lookup + wmem patch macros to QICK's loop exec-after hook. The update therefore
-lands after the shot timing and before the loop test/jump, matching native
-`QickParam` sweep placement without enabling DDS phase reset.
+## Big-jump 閾值
 
-### `MetaMacro.regs` — Register Name Resolution
+`ir/hw_semantics.py::needs_big_jump(pmem_size)` 集中判斷 `pmem_size > 2048`。
+小 PMEM 用 label-mode JUMP，大 PMEM 用 `WriteLabel(s15) + JUMP ADDR=s15`。
+`macro/loop.py` 與 `ir/dispatch.py` 匯入同一函式。`UnpackIRBranchPass` 依 `PipeLineConfig.pmem_capacity` 使用相同閾值。
 
-`MetaMacro` accepts an optional `regs: dict[str, str]` field. Each entry maps an `info` key to a logical register name (e.g. a QICK loop name like `"reset_sel"`), an ASM address or a QICK alias. At `translate()` time, the macro passes its declaration to `IRCompileMixin.record_meta()`. The compiler copies `info`, resolves the register references through QICK and records the metadata at the current instruction address without emitting ASM. Resolved addresses overwrite matching `info` keys without mutating the inputs. Resolution errors propagate without recording a marker.
+## LoadValue 值表
 
-**Design constraint:** `MetaMacro.translate()` does not go through QICK's normal macro `expand()` path, so loop names stored in `info` are never resolved automatically.  Any caller that passes a loop name (or other logical register alias) as a register reference in `info` must use `regs` to trigger resolution — otherwise the IR layer receives an unrecognisable string and the assembler raises `Source Data not Recognized`.
+`LoadValue` 在 dmem 保存整數 lookup table，`auto_compress=True` 且值個數至少 30 時才考慮 bit packing。
+`values=[]` 只供上層確定不執行 lookup 的路徑，例如零次 loop。`init()` 依 `use_existed` 宣告 destination register，不配置 dmem 或補值；`run()` 不發指令並回傳傳入時間。這不支援 runtime 讀空表。
 
-**Usage pattern:**
+未壓縮值域為 `0..2**31-1`，避免 bit 31 使讀回的 register 值變負。
+Packed word 可設定 bit 31，超過 INT32_MAX 時以 `word -= 2**32` 存為負 int32，硬體 bit pattern 不變。
+Lowering 的 `SR` 加 `AND value_mask` 清除符號擴展，算術或邏輯 shift 都可還原正值。
+`bits_per_value` 圓整到 2 的冪次，`values_per_word = 32 // bits` 小於 2 時不壓縮。因此 max value > 65535 時不壓縮。
 
-```python
-prog.meta_macro(
-    type="BRANCH_START",
-    name=self.name,
-    regs={"compare_reg": self.compare_reg},  # resolved at translate time
-)
-```
+## ArbWaveform 參考時間軸
 
-## ComputedPulse — DMEM Lookup 機制
-
-新路徑在 `declare` 宣告候選 waveform 與 wmem-index table。每次 `emit` 先捕捉 selector，再由同次選擇決定 playback 與該候選的 post-delay。Program owner 保留原始 waveform 分數尾段，加入所選 post 後取整一次，不使用候選最大 duration。實際 address producer、捕捉的 selector 與其依賴都接受全流寫入稽核。
-
-Legacy `ComputedPulse` 在 `init()` 時收集每個候選 pulse 的起始 wmem index，透過 `prog.add_dmem(base_idxs)` 寫入 dmem table 並記錄 `dmem_offset`。`run()` 時透過 `read_dmem` 動態查找：
-
-```python
-addr_reg = val_reg + dmem_offset   # address of table[val_reg]
-wmem_reg = dmem[addr_reg]          # starting wmem index for this candidate
-pulse_by_reg(ch, wmem_reg, ...)
-```
-
-**dmem table 設計約束**：candidate waveform 的 wmem index 不保證連續，因為 `PulseRegistry` 會去重。dmem table 直接存儲每個候選的起始 index，無連續性假設。
-
-**flat_top**：table 中存的是每個 flat_top 候選的**第一個** wmem entry（ramp_up），`pulse_by_reg(flat_top_pulse=True)` 從此 index 自動連讀 3 個 entry（ramp_up / flat / ramp_down）。
-
-**dmem 共用**：`ProgramResourcesMixin` 擁有全程式共享的順序 buffer，`add_dmem()` 回傳的 `offset` 是 slice 起點，`compile_datamem()` 最後轉為 `np.int32` 陣列。
-
-**dmem 傳輸邊界**：`compile_datamem()` 維持 QICK 規定的 `np.int32` array contract；`MyProgramV2` 在完整 binary program 建立後，將送往 remote SoC 的 dmem 正規化為一維 built-in `list[int]`。跨 Python／NumPy 版本的傳輸使用 built-in 容器，保留 signed int32 與 two's-complement bit pattern。
-
-## Big-Jump Threshold
-
-Big-jump 判斷集中在 `ir/hw_semantics.py::needs_big_jump(pmem_size)` 回傳 `pmem_size > 2048`。小 pmem（≤ 2048）用 label-mode JUMP；大 pmem 用 `WriteLabel(s15) + JUMP ADDR=s15` 兩步。`macro/loop.py` 從 `ir.hw_semantics` import，確保閾值一致。`ir/dispatch.py` 也從 `hw_semantics` import 此函式（非定義處）。`UnpackIRBranchPass` 使用 `PipeLineConfig.pmem_capacity` 做相同判斷：`pmem_capacity > 2048` 時在 case 間插入 `RegWriteInst(dst=s15, src=SrcKeyword.LABEL)` + `JumpInst(addr=s15)`，否則直接插入 label-mode `JumpInst`。
-
-## LoadValue（dmem 值表）
-
-`LoadValue` 儲存整數 lookup table 於 dmem，支援可選的 bit-packing 壓縮（`auto_compress=True` 且值個數 ≥ 30）。
-
-**空表短路**：`values=[]` 僅用於上層已確定不會執行 lookup 的路徑（例如 loop 次數為 0）。`init()` 仍依 `use_existed` 宣告 destination register，讓編譯器能解析未執行路徑內的 consumer；它不配置 dmem，也不填入預設值。`run()` 不發出讀寫指令，並原樣回傳傳入時間。這不支援在執行期讀取空表。
-
-**值域限制：0 ≤ v ≤ 2³¹−1**（有號 32-bit 正數範圍）。此限制只針對**未壓縮**路徑——直接以 `read_dmem` 將 word 讀進 register，若 bit 31 被設定讀回為負數會造成語意錯誤。
-
-**壓縮路徑的 packed word 可合法設定 bit 31**：`_pack_values()` 在打包後若 word > INT32_MAX，以 two's complement 轉換（`word -= 2^32`）存成負的 int32，讓 `np.array(..., dtype=np.int32)` 不溢位。硬體 bit pattern 完全相同；lowering 的 `SR` + `AND value_mask` 提取路徑在 arithmetic 或 logical shift 模式下都能還原正確值（AND 會清掉 SR 帶上來的符號擴展位元）。
-
-**壓縮條件**：`bits_per_value` 圓整至 2 的冪次後，`values_per_word = 32 // bits`；若 `values_per_word < 2` 則不壓縮。max value > 65535（bits 圓整至 32）時 `values_per_word = 1`，不壓縮。
-
-## ArbWaveform reference time axis
-
-Native ArbWaveformCfg 保存邏輯 data key 與必填本機絕對 path。Length 是 path 指定 NPZ 的 time[-1]，不存另一個播放長度。ModuleCfgFactory.from_core 使用明示 context.assets.path_for 轉換 nested arb，成品不持有 provider。
-
-Program 與 sim 從 path 讀 bytes，交 core.waveform_format 解碼 samples，不查 global DB 或解讀 formula。ArbWaveform.make_iqdata 在完整 reference time axis 插值到硬體 timing，不伸縮或裁切。覆寫同 path 會改變之後的播放內容。
+`ArbWaveformCfg` 保存邏輯 data key 與必填本機絕對 path，length 是該 NPZ 的 `time[-1]`，不另存播放長度。
+`ModuleCfgFactory.from_core` 透過明示 `context.assets.path_for` 轉換 nested arb，成品不持有 provider。
+Program 與 sim 從 path 讀 bytes，交 `core.waveform_format` 解碼 samples，不查 global DB 或解讀 formula。
+`ArbWaveform.make_iqdata` 在完整 reference time axis 插值到硬體 timing，不伸縮或裁切。覆寫同 path 會改變之後播放內容。

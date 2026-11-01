@@ -678,9 +678,9 @@ Pulse 家族原有的 generator 與 template 共用規則不變。
 
 ### Timeline 範圍只切換預設名字
 
-Timeline、reference、`timeline_inc`、`delay_by_timeline` 與 branch／repeat 的控制流
-契約及範例由 [program 作者 API](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)
-擁有。跨模組分工見 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md)。
+Timeline、reference、`timeline_inc`、`delay_by_timeline` 與 branch／repeat 的公開入口見
+[program API 速查](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline)。
+範圍切換與控制流契約由 [ADR-0083](../../docs/adr/0083-program-macros-and-timelines.md#timeline-只存結尾與-reference-分開) 擁有。
 
 ### 用 run_acquire* 寫入與停止
 
