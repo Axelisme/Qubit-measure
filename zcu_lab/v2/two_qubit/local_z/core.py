@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -201,6 +202,8 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="CZ gate count", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

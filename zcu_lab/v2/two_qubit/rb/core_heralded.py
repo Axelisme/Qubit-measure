@@ -6,6 +6,7 @@ from typing import ClassVar
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality
 from zcu_tools.analysis.fitting.shared import SharedFitResult
@@ -169,6 +170,8 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Return to herald state")
         viewer = live_line(ax, num_lines=4)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

@@ -8,6 +8,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -261,6 +262,8 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         viewer = live_line(ax, num_lines=4 * len(config.gate_counts))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

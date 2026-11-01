@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -225,6 +226,8 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         title=f"Nominal preparation ({f1},{f2}) · DC {dc:g}",
                     )
                     viewers[d, f1, f2] = live_line(ax, num_lines=2)
+                    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+                    ax.grid(False)
                     fig.show()
 
         @context.plots.on_plot_thread

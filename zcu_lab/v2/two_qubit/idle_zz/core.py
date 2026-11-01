@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -258,6 +259,8 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Delay (us)", ylabel="Target ⟨σ⟩")
         viewer = live_line(ax, num_lines=len(dc_values) * 2)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

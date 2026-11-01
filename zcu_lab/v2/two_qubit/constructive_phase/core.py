@@ -5,6 +5,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.cfg_model import FieldMeta
@@ -149,6 +150,8 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -226,6 +229,8 @@ class ConstructivePhaseExp(Experiment[ConstructivePhaseResult, ConstructivePhase
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Drive duration (us)", ylabel="Terminal P00")
         viewer = live_line(ax, num_lines=len(coordinates))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

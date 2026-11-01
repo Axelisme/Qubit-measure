@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -125,6 +126,8 @@ class CZAmplitudeHeraldedExp(
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Common gain scale", ylabel="P(g,g) | herald (g,g)")
         viewer = live_line(ax)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread

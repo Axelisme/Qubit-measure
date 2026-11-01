@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.failure import AnalysisFailed
@@ -234,6 +235,8 @@ class RBExp(Experiment[RBResult, RBCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(xlabel="Random Clifford depth", ylabel="Joint00 survival")
         viewer = live_line(ax, num_lines=2)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
         fig.show()
 
         @context.plots.on_plot_thread
