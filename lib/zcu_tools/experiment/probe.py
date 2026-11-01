@@ -373,7 +373,9 @@ def main(argv: Sequence[str] | None = None) -> ProbeReport:
     parser.add_argument("--std-adc", type=float)
     parser.add_argument("--seed", type=int)
     args = parser.parse_args(argv)
-    if args.environment == "white_noise" and (args.std_adc is None or args.seed is None):
+    if args.environment == "white_noise" and (
+        args.std_adc is None or args.seed is None
+    ):
         parser.error("white_noise requires --std-adc and --seed")
     if args.environment == "single_fluxonium" and args.environment_config is None:
         parser.error("single_fluxonium requires --environment-config")
