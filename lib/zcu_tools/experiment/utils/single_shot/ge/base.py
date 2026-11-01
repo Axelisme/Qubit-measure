@@ -412,15 +412,16 @@ def fitting_ge_and_plot(
 
         _format_ge_fit_axes(axs, threshold, g_pdfs, e_pdfs, logscale=options.logscale)
 
-        if identifiable_length_ratio is None:
-            fig.suptitle("Readout length: not identifiable")
-        else:
-            length_title = (
-                f"{length_ratio:.1f}"
-                if options.align_t1
-                else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
-            )
-            fig.suptitle(f"Readout length = {length_title} " + r"$T_1$")
+        length_title = (
+            f"{length_ratio:.1f}"
+            if options.align_t1
+            else f"{l_ratio_g:.1f} / {l_ratio_e:.1f}"
+        )
+        fig.suptitle(
+            "Readout length: not identifiable"
+            if identifiable_length_ratio is None
+            else f"Readout length = {length_title} " + r"$T_1$"
+        )
         fig.tight_layout()
         fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
