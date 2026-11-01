@@ -6,7 +6,6 @@ from typing import Literal
 
 import numpy as np
 from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment.scope import Scope
 from zcu_tools.experiment.v2.utils.t1_sampling import t1_delay_axis
@@ -15,11 +14,10 @@ from zcu_tools.plotting.plots import Plots
 from zcu_tools.program import shot_time_s
 from zcu_tools.program.v2 import SweepCfg
 
-from zcu_lab.v2.support import live_line
-from zcu_lab.v2.support.live import AttachedLine
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
 from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
+from zcu_lab.workflows.coherence_fluxdep.stages.t2_support import decay_plot
 from zcu_lab.workflows.common.analysis import (
     DecayFit,
     analyze_t1,
@@ -153,34 +151,6 @@ def estimate_t1_time_s(
     )
 
 
-def _plot(plots: Plots) -> AttachedLine:
-    """Prepare the lower raw-I panel without clearing accepted history above."""
-    if "t1" not in plots:
-        plots.subplots(nrows=2, num="t1")
-    figure = plots["t1"]
-    # Retrieve the new handle from the synchronous owner callback.
-    line: AttachedLine | None = None
-
-    @plots.on_plot_thread
-    def rebuild(_payload: None) -> tuple[Figure]:
-        nonlocal line
-        figure.set_layout_engine("constrained")
-        # Each point gets a fresh axis and handle below the accepted history.
-        figure.axes[1].remove()
-        ax = figure.add_subplot(2, 1, 2)
-        ax.set(xlabel="Time (us)", ylabel="Signal (raw I)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
-        ax.grid()
-        line = live_line(ax)
-        return (figure,)
-
-    rebuild(None)
-    figure.show()
-    if line is None:
-        raise RuntimeError("Decay plot handle was not initialized")
-    return line
-
-
 def _draw_fit(
     plots: Plots, fit: DecayFit, comparison: LifetimeComparison, reason: str | None
 ) -> None:
@@ -231,7 +201,7 @@ async def measure_t1(
     first, followed by each failed numeric gate. No point record or history is modified.
     """
     cfg, gain_clamped = _cfg(pulses, settings, points=points, guess_us=guess_us)
-    plot = _plot(env.plots)
+    plot = decay_plot(env.plots, "t1")
     acquisition = await acquire_saved(
         scope,
         env,

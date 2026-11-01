@@ -7,7 +7,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
-    mux_readout_seed_metadata,
 )
 
 from .._measure import captured_roles
@@ -75,7 +74,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "frequency": Range(None, None, expts=25),
             "duration": Range(None, None, expts=101),
         },
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )
 
 
 def make_form(ctx: FormContext) -> Form[ChevronCfg]:

@@ -8,7 +8,6 @@ from zcu_lab.v2.support.measure.mux_forms import (
     captured_mux_names,
     captured_mux_participants,
     mux_readout_initial,
-    mux_readout_seed_metadata,
     mux_relax_delay,
     mux_tone_initials,
 )
@@ -56,4 +55,4 @@ def make_form(ctx: FormContext) -> Form[MuxT2RamseyCfg]:
             FixedElements(("tones",), "name", ("participants",)),
             READOUT_ELEMENTS,
         ),
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )
