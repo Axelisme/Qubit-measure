@@ -3,12 +3,24 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
-from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
+from zcu_tools.analysis.fitting import (
+    fit_decay,
+    fit_decay_fringe,
+    fit_qubit_freq,
+    fit_rabi,
+    fitlor,
+)
 from zcu_tools.analysis.fitting.anticross import fit_anticross
-from zcu_tools.analysis.fitting.multi_decay import TransitionRates, fit_dual_transition_rates
+from zcu_tools.analysis.fitting.multi_decay import (
+    TransitionRates,
+    fit_dual_transition_rates,
+)
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 from zcu_tools.analysis.fitting.singleshot import fit_singleshot
-from zcu_tools.analysis.fitting.singleshot_rabi import RabiPhysicalParams, fit_rabi_joint
+from zcu_tools.analysis.fitting.singleshot_rabi import (
+    RabiPhysicalParams,
+    fit_rabi_joint,
+)
 from zcu_tools.experiment.probe import generators
 
 
