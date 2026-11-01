@@ -20,7 +20,6 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
     WaitInst,
 )
-from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
 from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
@@ -46,32 +45,6 @@ def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
     return native, update_native
 
 
-def _assert_table_snapshot(
-    prog: TimelineProgramV2 | TimelineProgramV2, gen: list[int], adc: list[int]
-) -> None:
-    loop = next(
-        meta
-        for meta in _markers(prog.compiled_stream)
-        if meta.type == "LOOP_START" and meta.name == "scan"
-    )
-    tables = loop.info["tables"]
-    dmem = prog.compile_datamem()
-    if dmem is None:
-        pytest.fail("table hooks require compiled DMEM")
-    assert len(tables) == 2
-    pairs = []
-    for address, fields in tables.items():
-        assert set(fields) == {0}
-        offset = fields[0]
-        pairs.append(
-            (
-                int(prog.waves[address].freq) % 2**32,
-                [int(word) % 2**32 for word in dmem[offset : offset + 2]],
-            )
-        )
-    assert sorted(pairs) == sorted(
-        [(gen[0], [gen[1], gen[0]]), (adc[0], [adc[1], adc[0]])]
-    )
 
 
 def _invalidate_binary(prog: AbsQickProgram) -> None:
@@ -245,19 +218,6 @@ def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
     np.testing.assert_equal(prog.binprog, original.binprog)
 
 
-def _port_sources(snapshot: ir.CompiledStream) -> list[str]:
-    scopes: list[str] = []
-    sources: list[str] = []
-    for record in snapshot.records:
-        inst = record.instruction
-        if isinstance(inst, MetaInst) and inst.type == "SOURCE_START":
-            scopes.append(inst.name)
-        elif isinstance(inst, MetaInst) and inst.type == "SOURCE_END":
-            assert scopes.pop() == inst.name
-        elif isinstance(inst, PortWriteInst):
-            sources.append(scopes[-1])
-    assert not scopes
-    return sources
 
 
 def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():

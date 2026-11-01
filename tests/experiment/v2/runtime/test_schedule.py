@@ -9,7 +9,7 @@ from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 
 from tests.experiment.v2.runtime._flow_fakes import (
     FakeScalarProgram,
-    identity_array,
+    scalar_signal,
 )
 
 
@@ -28,7 +28,7 @@ def test_schedule_scan_targets_buffer_step_without_mutating_env():
             assert isinstance(step.index, int)
             program = FakeScalarProgram("soccfg", value=value, modules=[], sweep=None)
             step.run_acquire(
-                program, "soc", options=RunOptions(converter=identity_array)
+                program, "soc", options=RunOptions(converter=scalar_signal)
             )
 
         assert sched.env == {}
@@ -46,7 +46,7 @@ def test_schedule_repeat_targets_step_buffer_without_mutating_env():
             assert step.path == (index,)
             program = FakeScalarProgram("soccfg", value=index, modules=[], sweep=None)
             step.run_acquire(
-                program, "soc", options=RunOptions(converter=identity_array)
+                program, "soc", options=RunOptions(converter=scalar_signal)
             )
 
     assert np.allclose(signals_buffer.array, [0.0, 1.0, 2.0])
@@ -76,7 +76,7 @@ def test_schedule_nested_repeat_scan_targets_inner_step_buffer():
                     sweep=None,
                 )
                 step.run_acquire(
-                    program, "soc", options=RunOptions(converter=identity_array)
+                    program, "soc", options=RunOptions(converter=scalar_signal)
                 )
 
     assert np.allclose(

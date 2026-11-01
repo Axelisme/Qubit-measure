@@ -280,7 +280,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 ):
                     builder.emit(x180_f2)
                 builder.join("f1", "f2", into="default")
-                builder.fork("default", into=("probe_f1_time", "probe_f2_time"))
+                builder.fork("default", into=["probe_f1_time", "probe_f2_time"])
                 builder.emit(
                     Pulse("probe_f1", config.drive.f1, freq=frequency),
                     timeline="probe_f1_time",
@@ -289,7 +289,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     Pulse("probe_f2", config.drive.f2, freq=frequency),
                     timeline="probe_f2_time",
                 )
-                builder.join(*("probe_f1_time", "probe_f2_time"), into="default")
+                builder.join("probe_f1_time", "probe_f2_time", into="default")
                 if config.contrast:
                     builder.emit(Pulse("contrast_f1", config.x180_f1))
                     builder.emit(Pulse("contrast_f2", config.x180_f2))

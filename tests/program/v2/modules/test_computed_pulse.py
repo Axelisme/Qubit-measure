@@ -80,9 +80,7 @@ def test_dmem_lookup_emits_dmem_read_in_asm():
 
 
 def test_identical_candidates_dedup_table_points_to_same_index():
-    """Two identical pulse cfgs are deduped by PulseRegistry: both dmem table entries
-    point to the same wmem index.  Accepted behaviour: both 'candidates' execute
-    the same waveform, and the program still compiles correctly."""
+    """Identical candidates share one compiled waveform memory entry."""
     same_pulse = _const_pulse(gain=0.5)
     soccfg = make_mock_soccfg(n_gens=2, n_readouts=1)
 
@@ -90,8 +88,7 @@ def test_identical_candidates_dedup_table_points_to_same_index():
     prog = compile_modules(soccfg, modules=modules, sweep=[("idx_loop", 2)])
     assert prog.binprog is not None
 
-    assert prog.pulse_registry.count == 1
-    assert len(prog.pulses) == 1
+    assert len(prog.binprog["wmem"]) == 1
 
 
 # ---------------------------------------------------------------------------

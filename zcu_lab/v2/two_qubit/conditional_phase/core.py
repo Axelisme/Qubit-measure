@@ -313,7 +313,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
                 for gate_index in range(n):
                     builder.fork(
                         "default",
-                        into=(f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"),
+                        into=[f"drive_f1_{gate_index}", f"drive_f2_{gate_index}"],
                     )
                     builder.emit(drive[0], timeline=f"drive_f1_{gate_index}")
                     builder.emit(drive[1], timeline=f"drive_f2_{gate_index}")

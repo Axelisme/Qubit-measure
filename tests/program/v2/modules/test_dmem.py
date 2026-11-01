@@ -1,6 +1,4 @@
 from collections.abc import Callable
-from contextlib import contextmanager
-from unittest.mock import MagicMock
 
 import pytest
 from zcu_tools.program.v2 import TimelineProgramV2
@@ -109,17 +107,6 @@ def test_compiled_lookup_recovers_every_slot_with_hardware_shift_width(
     assert [_execute_lookup_body(program, i) for i in range(len(values))] == values
 
 
-def _make_dmem_prog(temp_regs=("r10", "r11")):
-    """Prog mock where acquire_temp_reg yields temp_regs as a context manager."""
-    prog = MagicMock()
-    prog.add_dmem.return_value = 0
-
-    @contextmanager
-    def _acq(n):
-        yield list(temp_regs[:n])
-
-    prog.acquire_temp_reg.side_effect = _acq
-    return prog
 
 
 def test_negative_values_rejected():

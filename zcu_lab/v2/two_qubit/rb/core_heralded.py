@@ -223,10 +223,10 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                             elif gate == TwoQubitGate.CZ:
                                 builder.fork(
                                     "default",
-                                    into=(
+                                    into=[
                                         f"gate_{index}_cz_f1_time",
                                         f"gate_{index}_cz_f2_time",
-                                    ),
+                                    ],
                                 )
                                 builder.emit(
                                     Pulse(f"gate_{index}_cz_f1", config.drive.f1),
@@ -237,10 +237,10 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                                     timeline=f"gate_{index}_cz_f2_time",
                                 )
                                 builder.join(
-                                    *(
+                                    
                                         f"gate_{index}_cz_f1_time",
                                         f"gate_{index}_cz_f2_time",
-                                    ),
+                                    ,
                                     into="default",
                                 )
                                 frames[0] = (

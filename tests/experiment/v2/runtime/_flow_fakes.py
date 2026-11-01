@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.v2.runtime.schedule import ScheduleStep
 from zcu_tools.program.acquisition import StoppedPartialAcquireError
@@ -14,9 +15,9 @@ from zcu_tools.progress_bar import BaseProgressBar
 from zcu_tools.progress_bar.base import ProgressTotal, ProgressValue
 
 
-def identity_array(raw: np.ndarray) -> np.ndarray:
-    """Return the acquired array unchanged, without copying or conversion."""
-    return raw
+def scalar_signal(raw: list[NDArray[np.float64]]) -> NDArray[np.float64]:
+    """Recover the scalar float signal from one ADC and one read."""
+    return np.asarray(raw[0][0, ..., 0])
 
 
 class FakeModule(Module):
@@ -214,8 +215,8 @@ class FakeScalarProgram:
 
     def acquire(
         self, *_args: Any, round_hook, cancel_flag, **_kwargs: Any
-    ) -> np.ndarray:
-        raw = np.array(self.value)
+    ) -> list[NDArray[np.float64]]:
+        raw = [np.array([[self.value, 0.0]], dtype=np.float64)]
         round_hook(1, raw, cancel_flag)
         return raw
 

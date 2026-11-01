@@ -280,10 +280,10 @@ class RBExp(Experiment[RBResult, RBCfg]):
                             elif gate == TwoQubitGate.CZ:
                                 builder.fork(
                                     "default",
-                                    into=(
+                                    into=[
                                         f"gate_{index}_cz_f1_time",
                                         f"gate_{index}_cz_f2_time",
-                                    ),
+                                    ],
                                 )
                                 builder.emit(
                                     Pulse(f"gate_{index}_cz_f1", config.drive.f1),
@@ -294,10 +294,10 @@ class RBExp(Experiment[RBResult, RBCfg]):
                                     timeline=f"gate_{index}_cz_f2_time",
                                 )
                                 builder.join(
-                                    *(
+                                    
                                         f"gate_{index}_cz_f1_time",
                                         f"gate_{index}_cz_f2_time",
-                                    ),
+                                    ,
                                     into="default",
                                 )
                                 frames[0] = (

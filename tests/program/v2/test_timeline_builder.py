@@ -489,7 +489,7 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     if heralded:
         builder.emit(readout, tag="herald")
     parallel_modules = list((v2.Pulse(f"prepare_{cfg.ch}", cfg) for cfg in preparation))
-    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    parallel_timelines = [f"{module.name}_time" for module in parallel_modules]
     builder.fork("default", into=parallel_timelines)
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
         builder.emit(module, timeline=timeline)
@@ -512,7 +512,7 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
             for ch in (2, 3)
         )
     )
-    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    parallel_timelines = [f"{module.name}_time" for module in parallel_modules]
     builder.fork("default", into=parallel_timelines)
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
         builder.emit(module, timeline=timeline)
@@ -520,7 +520,7 @@ def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     parallel_modules = list(
         (v2.Pulse(f"contrast_{cfg.ch}", cfg) for cfg in preparation)
     )
-    parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+    parallel_timelines = [f"{module.name}_time" for module in parallel_modules]
     builder.fork("default", into=parallel_timelines)
     for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
         builder.emit(module, timeline=timeline)
@@ -1096,7 +1096,7 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
                 for ch in (0, 1)
             )
         )
-        parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+        parallel_timelines = [f"{module.name}_time" for module in parallel_modules]
         builder.fork("default", into=parallel_timelines)
         for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
             builder.emit(module, timeline=timeline)
@@ -1143,7 +1143,7 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                 for ch in (0, 1)
             )
         )
-        parallel_timelines = tuple(f"{module.name}_time" for module in parallel_modules)
+        parallel_timelines = [f"{module.name}_time" for module in parallel_modules]
         builder.fork("default", into=parallel_timelines)
         for module, timeline in zip(parallel_modules, parallel_timelines, strict=True):
             builder.emit(module, timeline=timeline)
