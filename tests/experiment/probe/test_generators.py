@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose
-from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_rabi
+from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_rabi, fitlor
 from zcu_tools.experiment.probe import generators
 
 
@@ -47,3 +47,12 @@ def test_rabi_recovers_frequency_and_pulse_coordinate(decay_time: float | None):
     if decay_time is not None:
         expected.append(decay_time)
     assert_allclose(fit.params, expected, rtol=0.01, atol=0.002)
+
+
+def test_lorentzian_recovers_peak_and_sloped_background():
+    xs = np.linspace(-5, 5, 401)
+    ys = generators.generate_lorentzian(
+        xs, generators.LorentzianParameters(0.2, 0.01, 0.8, 0.4, 0.5), 0.001, 17
+    )
+    params, _ = fitlor(xs, ys)
+    assert_allclose(params, [0.2, 0.01, 0.8, 0.4, 0.5], atol=0.003)
