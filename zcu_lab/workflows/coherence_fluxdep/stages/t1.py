@@ -16,8 +16,8 @@ from zcu_tools.program.v2 import SweepCfg
 
 from zcu_lab.v2.twotone.time_domain.t1.core import T1Cfg, T1Exp
 from zcu_lab.workflows.coherence_fluxdep.pulses import CalibratedPulses
-from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.coherence_fluxdep.stages.t2_support import decay_plot
+from zcu_lab.workflows.coherence_fluxdep.t1 import T1Tunables
 from zcu_lab.workflows.common.analysis import (
     DecayFit,
     analyze_t1,
