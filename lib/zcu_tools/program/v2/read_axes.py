@@ -5,14 +5,14 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from qick.asm_v2 import Trigger
+from qick.asm_v2 import QickParam, Trigger
 
 from zcu_tools.cfg_model import ReadoutClassifier
 from zcu_tools.program.acquisition import ShotSumProcessor
 
 from .macro.readout import ReadoutEmission
 from .modules.readout import MuxReadout, PulseReadout, classification_processor
-from .readout_observation import observe_readouts
+from .readout_observation import ReadoutPath, observe_readout_paths
 from .timeline import TimelineProgramV2
 
 
@@ -20,7 +20,8 @@ from .timeline import TimelineProgramV2
 class IQ:
     """An unclassified read axis with vector (1, I, Q).
 
-    read names one compiled readout emission. tone is None for PulseReadout,
+    read names one logical compiled readout, present once on each Branch path.
+    tone is None for PulseReadout,
     or the zero-based cfg tone position for MuxReadout. Values use normalized
     ADC coordinates without IQ-offset subtraction.
     """
@@ -33,7 +34,8 @@ class IQ:
 class Classify:
     """A one-hot classified read axis, in g/e/other, g/e, or g/e/f order.
 
-    read names one compiled emission. tone is None for PulseReadout or a
+    read names one logical compiled readout, present once on each Branch path.
+    tone is None for PulseReadout or a
     zero-based MuxReadout cfg tone position. None also selects a mux's only tone;
     multi-tone mux requires an explicit position and lists available tones on error.
     classifier overrides that read's calibration; None selects its cfg calibration.
@@ -55,20 +57,35 @@ def shot_sums(
     in output-axis order; repeat a read for second moments. Empty axes raise
     ValueError before read-label resolution or acquisition. Timeline labels are
     emit tags, or module names when untagged.
-    Each label must identify one emission; missing/ambiguous labels raise
-    ValueError listing available labels. QICK rejects duplicate explicit tags
-    during compilation with RuntimeError, before this helper runs. Repeat/Branch
-    triggers on a selected ADC and declared/actual read-count mismatches raise
-    ValueError. Classify snapshots its override or cfg classifier; missing
+    Each label must identify one emission on every feasible Branch path.
+    Mutually exclusive untagged emissions may share a module name when their
+    selected ADC, read index, frequency (MHz), window (us), phase (degrees) and
+    cfg classifier agree. Generator gain and waveform may differ. Every path
+    must emit the declared number of reads on each selected ADC. After build,
+    authors must set_reads_per_shot to the per-path count, not the sum of cases.
+    Missing/ambiguous labels, unequal settings/indices/counts and Repeat triggers
+    on selected ADCs raise ValueError naming Branch cases when present.
+    QICK rejects duplicate explicit tags at compile time with RuntimeError.
+    Classify snapshots its override or cfg classifier; missing
     calibration, missing circle radius and invalid tone selection raise ValueError.
     The returned processor accepts ADC-keyed float64 arrays shaped
     (points, reps, reads, 2) and returns (points, *axes), summing outer products
-    over reps. It borrows inputs without mutation and rejects read-count changes.
+    over reps. IQ NaNs propagate through their moments. It borrows inputs without
+    mutation and rejects read-count changes; neither construction nor processing
+    modifies the program's declared reads_per_shot.
     """
     if not axes:
         raise ValueError("axes must contain at least one read")
-    labels, counts, unsupported = _collect_reads(prog)
-    resolved = [_resolve_axis(prog, axis, labels, counts, unsupported) for axis in axes]
+    paths = iter(observe_readout_paths(prog))
+    reference = next(paths)
+    labels, counts, unsupported = _collect_reads(prog, reference)
+    resolved = _resolve_path(prog, axes, reference, labels, counts, unsupported)
+    for path in paths:
+        other_labels, other_counts, other_unsupported = _collect_reads(prog, path)
+        _resolve_path(prog, axes, path, other_labels, other_counts, other_unsupported)
+        for axis in axes:
+            _check_path_read(axis, labels, other_labels, reference, path)
+    counts = {ch: counts[ch] for ch, _, _ in resolved}
 
     def process(iq: Mapping[int, NDArray[np.float64]]) -> NDArray[np.float64]:
         for ch, count in counts.items():
@@ -101,16 +118,86 @@ def shot_sums(
 
 
 type _LabelReads = dict[str, list[tuple[PulseReadout | MuxReadout, dict[int, int]]]]
+type _ResolvedAxis = tuple[
+    int, int, Callable[[NDArray[np.float64]], NDArray[np.float64]] | None
+]
+
+
+def _path_description(path: ReadoutPath) -> str:
+    return "Branch cases " + ", ".join(f"{name}[{index}]" for name, index in path.cases)
+
+
+def _resolve_path(
+    prog: TimelineProgramV2,
+    axes: Sequence[Classify | IQ],
+    path: ReadoutPath,
+    labels: _LabelReads,
+    counts: dict[int, int],
+    unsupported: dict[int, str],
+) -> list[_ResolvedAxis]:
+    try:
+        return [_resolve_axis(prog, axis, labels, counts, unsupported) for axis in axes]
+    except ValueError as error:
+        if not path.cases:
+            raise
+        raise ValueError(f"{_path_description(path)}: {error}") from error
+
+
+def _parameter_key(value: float | QickParam) -> tuple[float, dict[str, float]]:
+    return (value.start, value.spans) if isinstance(value, QickParam) else (value, {})
+
+
+def _adc_settings(
+    read: tuple[PulseReadout | MuxReadout, dict[int, int]], axis: Classify | IQ
+) -> dict[str, object]:
+    owner, indices = read
+    if isinstance(owner, PulseReadout):
+        return {
+            "ro_ch": owner.cfg.ro_ch,
+            "read index": indices[owner.cfg.ro_ch],
+            "freq": _parameter_key(owner.cfg.freq),
+            "ro_length/window": _parameter_key(owner.cfg.ro_length),
+            "phase": _parameter_key(owner.cfg.phase),
+            "classifier": owner.cfg.classifier,
+            "ro_freq_val": owner.ro_freq_val,
+        }
+    tone = owner.cfg.tones[0 if axis.tone is None else axis.tone]
+    return {
+        "ro_ch": tone.ro_ch,
+        "read index": indices[tone.ro_ch],
+        "freq": tone.freq,
+        "ro_length/window": owner.cfg.ro_length,
+        "phase": tone.phase,
+        "classifier": tone.classifier,
+    }
+
+
+def _check_path_read(
+    axis: Classify | IQ,
+    labels: _LabelReads,
+    other_labels: _LabelReads,
+    reference: ReadoutPath,
+    path: ReadoutPath,
+) -> None:
+    expected = _adc_settings(labels[axis.read][0], axis)
+    actual = _adc_settings(other_labels[axis.read][0], axis)
+    mismatches = [name for name, value in expected.items() if value != actual.get(name)]
+    if mismatches:
+        raise ValueError(
+            f"{_path_description(reference)} vs {_path_description(path)}: "
+            f"label {axis.read!r} differs in {', '.join(mismatches)}"
+        )
 
 
 def _collect_reads(
     prog: TimelineProgramV2,
+    path: ReadoutPath,
 ) -> tuple[_LabelReads, dict[int, int], dict[int, str]]:
-    """Resolve labels and trigger indices from static source readout observations."""
+    """Resolve labels and ADC-local trigger indices along one feasible source path."""
     counts = dict.fromkeys(prog.ro_chs, 0)
     labels: _LabelReads = {}
     unsupported: dict[int, str] = {}
-    for observation in observe_readouts(prog):
+    for observation in path.observations:
         macro = observation.source
         if isinstance(macro, ReadoutEmission) and isinstance(
             macro.owner, (PulseReadout, MuxReadout)

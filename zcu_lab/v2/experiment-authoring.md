@@ -482,7 +482,9 @@ Single-tone 的 Freq／Length 與 dual-tone 的 Freq／Length／Power 使用 exp
 
 ### Readout optimization records
 
-`twotone/ro_optimize` 的 Freq／FreqGain／Length／Power 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留既有 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳純最佳 frequency／gain／length，另發布 fit 圖。Smoothing、length duration normalization、power penalty 與 canonical axes 不變。Auto optimizer 使用下述 grouped record 契約。
+`twotone/ro_optimize` 的 Freq／FreqGain／Length 核心使用 explicit RunContext，回傳純 SNR Result。Run 保留 acquire kwargs forwarding 與 MomentTracker／g-e branch；Length 用 host scan，其餘用硬體 sweep。同步分析接 RunRecord、typed AnalyzeOptions 與 Plots，允許 cfg=None，回傳最佳 frequency／gain／length，另發布 fit 圖。這三個實驗的 smoothing、length duration normalization 與 axes 不變。Auto optimizer 使用下述 grouped record 契約。
+
+Power 改量兩次讀出的 QND 指標。每個 gain 執行製備 I／π、R1 開／零增益、中間 I／π 的八個分支，R1 與中間 pulse 間等待 wait。製備與中間的 I 都發射同一 qubit cfg 的零增益 `Pulse("qub_pulse", cfg.qub_pulse, gain=0.0)`，π 使用 cfg 增益。八個分支的 reset、製備、R1、等待、中間、R2 位置逐一相同，R1 到 R2 的 trigger 間隔也相同。不省略 I pulse，也不手算 nominal_duration 補延遲。R2 固定使用掃描 gain。Run 回傳 `PowerResult(gains, sums)`，float64 sums 形狀為 `(Ngain, 8, 3, 3, 3, 3)`，moment 軸依序是 R1、R1、R2、R2。Build 後先宣告每 shot 兩次讀出，再建立 `shot_sums` processor。Native tag 是 `twotone/ro_optimize/power_qnd`，cfg schema 從 `1.0` 起算，舊 SNR power native 被拒絕。Analyze 逐 gain 呼叫 `analysis.readout_metrics.readout_metrics`，回傳 `PowerQndAnalysis` 的指標陣列與 F_sep／QND-on Pareto 索引，不自動選點。只有 options.gain 非空才提出 gain writeback。操作與時序限制見 [Power guide](twotone/ro_optimize/power/guide.md)。
 
 ### JPA records
 
