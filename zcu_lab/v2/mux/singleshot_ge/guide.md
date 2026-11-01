@@ -214,8 +214,8 @@ typed YAML. Its optional `readout.mux` section binds a separate generator and
 field raises a field-path error at YAML loading.
 Use replay archives for backend `ftf-segment-v13`; archives from `ftf-segment-v12`
 and earlier backends are rejected. See
-[Readout and sampling](../../../../lib/zcu_tools/experiment/ftf/README.md#readout-and-sampling)
-and [Private replay](../../../../lib/zcu_tools/experiment/ftf/README.md#private-replay)
+[Readout and sampling](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#readout-and-sampling)
+and [Private replay](../../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)
 in the FTF README.
 Small truncations and short smoke runs demonstrate execution only.
 Establish convergence and calibrate pulses before using fitted values.
