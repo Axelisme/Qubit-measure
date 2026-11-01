@@ -17,6 +17,29 @@ def profile(request):
         return yaml.safe_load(stream)
 
 
+@pytest.mark.parametrize("profile", ["wiring"], indirect=True)
+def test_explicit_wiring_and_optional_connections_reach_qick(profile):
+    cfg = program.build_soccfg(profile)
+    for source, output, fields in (
+        (profile["generators"][0], cfg["gens"][0], ("dac", "tproc_ch", "tmux_ch")),
+        *[
+            (source, output, ("adc", "tproc_ctrl", "tmux_ch", "trigger_type",
+                              "trigger_port", "trigger_bit", "tproc_ch", "b_phase"))
+            for source, output in zip(profile["readouts"], cfg["readouts"], strict=True)
+        ],
+    ):
+        for field in fields:
+            if source[field] is None:
+                assert field not in output
+            else:
+                assert output[field] == source[field]
+    assert set(cfg["rf"]["dacs"]) == {profile["generators"][0]["dac"]}
+    assert set(cfg["rf"]["adcs"]) == {profile["readouts"][0]["adc"]}
+    # Independent worked clocks: 200*9/2 = 900; 900/(3*5) = 60 MHz.
+    assert cfg["rf"]["adcs"]["21"]["fs"] == 900.0
+    assert cfg["rf"]["adcs"]["21"]["f_fabric"] == 60.0
+
+
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_clocks_and_channel_groups_are_derived(profile):
     # This dedicated YAML is the worked example, not an ordinary board profile.
