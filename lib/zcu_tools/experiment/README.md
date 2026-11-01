@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，獨立離線階段、array-like 模型輸出與 grouped 逐 slice 比較
+**Last updated:** 2026-11-01，caller-owned board and model routing
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -44,28 +44,36 @@ Successful builder return transfers cleanup to the host. Read the
 [acquisition environment contract](../program/v2/simulation/README.md) before
 writing a builder or numeric source. Public Run metadata contains only the
 optional opaque `simulation_id`; private replay inputs remain on the binding.
-WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
+`white_noise(soccfg, *, std_adc, seed, routes)` requires a caller-built QICK
+profile, ADC sample standard deviation, seed and wiring. `routes` is a tuple of
+(generator, ADC) pairs or `"all"` for every generator × ADC pair. The environment
+does not infer board settings or select a profile file. WhiteNoise numeric code lives in `simulate.white_noise`. This composition root
 wraps its statistics and complete raw source in program's `IntegratedRound`.
 Decimated acquisition keeps per-execution `RoundSignals`. ADC and white_noise
 structurally satisfy program's `RawShots` without importing program. Processing
 or a getter requests shots from a separate retained identity. Direct means keep
 their existing moment calculation and RNG stream.
 
-[`ftf`](ftf/README.md) composes a named YAML sample, fixed V/A memory devices,
+The physical models live in [`simulators`](../simulators/README.md), above the framework.
+The `framework-no-simulators` import contract prevents framework packages from importing them.
+[`ftf`](../simulators/ftf/environment/README.md) composes a named YAML sample, fixed V/A memory devices,
 fixed-coordinate joint circuits, explicit evolution/population conversion and the
 single-receiver ADC. It uses the same bundle and acquisition contracts, without
 adding GUI physics or exposing state labels to ordinary Run metadata.
 
-[`single_fluxonium`](single_fluxonium/README.md) plans complete microwave/fast-flux
+[`single_fluxonium`](../simulators/single_fluxonium/environment/README.md) plans complete microwave/fast-flux
 timelines and assembles a one-source mock environment. Its source composes DC-basis
 population conversion, one-cavity ADC statistics, deferred raw shots and decimated
 traces. Hosts can call the optional `SimulationEnvironment.close_backend` after
 acquisition drains; device cleanup remains separate.
 
-[`six_fluxonium`](six_fluxonium/README.md) composes six independent single-cavity
+[`six_fluxonium`](../simulators/six_fluxonium/environment/README.md) composes six independent single-cavity
 sources with six local DC drivers and one shared coil. Each circuit uses the sum
-of its local and coil reduced flux. Mux gen0/ADC0..5 and pulse gen13/ADC6 use
-per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
+of its local and coil reduced flux. The caller's model YAML selects mux and
+pulse generator/ADC routes; gen0/ADC0..5 and gen13/ADC6 are the supplied YAML
+example, not fixed runtime channels. The independent board YAML owns channel
+counts, types and clocks; the caller must keep both YAML files consistent.
+Readout uses per-point nearest-bare-cavity routing. Sparse integrated histograms preserve
 marginal counts without building a joint model; raw shots retain physical ADC
 sources independently of backend lifetime.
 
@@ -106,9 +114,9 @@ reads. Integrated counts flatten the outcome and terminal-state axes. ADC CTMC
 jumps during herald affect IQ only, not later density evolution. This excludes
 MIST, IQ-clustered projection and data-dependent feedback for active reset.
 Pruning thresholds and diagnostics belong to the
-[single](single_fluxonium/README.md#complete-timelines),
-[six](six_fluxonium/README.md#routing-and-acquisition) and
-[FTF](ftf/README.md#cavity-drives) settings/runtime contracts.
+[single](../simulators/single_fluxonium/environment/README.md#complete-timelines),
+[six](../simulators/six_fluxonium/environment/README.md#routing-and-acquisition) and
+[FTF](../simulators/ftf/environment/README.md#cavity-drives) settings/runtime contracts.
 Templates without projective reads retain their existing raw, integrated and
 decimated outputs.
 

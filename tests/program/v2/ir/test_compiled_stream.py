@@ -20,8 +20,9 @@ from zcu_tools.program.v2.ir.instructions import (
     RegWriteInst,
     WaitInst,
 )
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
@@ -37,7 +38,7 @@ def _program(path: str) -> tuple[MyProgramV2, Callable[[], None]]:
             self.delay(t=0.1)
             self.close_inner_loop("inner", "counter", self.loop_count)
 
-    native = NativeProgram(make_mock_soccfg())
+    native = NativeProgram(load_soccfg())
 
     def update_native() -> None:
         native.loop_count = 4
@@ -205,13 +206,13 @@ def test_timeline_native_loop_annotations_keep_waveform_and_register_sweeps():
         def close_loop(self):
             QickProgramV2.close_loop(self)
 
-    prog = NativeSweep(make_mock_soccfg(), reps=2)
+    prog = NativeSweep(load_soccfg(), reps=2)
     assert [
         (meta.name, meta.info["n"])
         for meta in _markers(prog.compiled_stream)
         if meta.type == "LOOP_START"
     ] == [("reps", 2), ("scan", 3), ("inner", 2)]
-    original = UnmarkedNativeSweep(make_mock_soccfg(), reps=2)
+    original = UnmarkedNativeSweep(load_soccfg(), reps=2)
     assert prog.prog_list == original.prog_list
     np.testing.assert_equal(prog.binprog, original.binprog)
 
@@ -231,7 +232,7 @@ def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():
             self.pulse(0, "shared", t=0.2, tag="tagged")
             self.pulse(0, "shared", t=0.3)
 
-    prog = NativePulses(make_mock_soccfg())
+    prog = NativePulses(load_soccfg())
     saved = prog.compiled_stream
     assert [
         (meta.type, meta.name)
@@ -253,7 +254,7 @@ def test_native_pulse_sources_use_call_ordinals_and_rebuild_stably():
             self.append_macro(NativePulse(ch=ch, name=name, t=t, tag=tag))
 
     # Source annotations preserve the native pulse machine instructions.
-    np.testing.assert_equal(prog.binprog, UnmarkedPulses(make_mock_soccfg()).binprog)
+    np.testing.assert_equal(prog.binprog, UnmarkedPulses(load_soccfg()).binprog)
     original = deepcopy(prog.binprog)
     _invalidate_binary(prog)
     prog.compile()
@@ -269,7 +270,7 @@ def test_snapshot_positions_keep_labels_boundaries_and_two_word_wait():
             self.label("after_wait")
             self.nop()
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     records = prog.compiled_stream.records
     labels = {
         inst.name.name: record.p_addr

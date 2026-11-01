@@ -189,14 +189,20 @@ Module 建構時可用 keyword 覆寫數值或 sweep，不修改呼叫端 cfg。
 `None` 表示沿用 cfg。以下例子在 builder 上建立頻率 sweep，再交給 Pulse：
 
 ```python
-from zcu_tools.program.v2 import SweepCfg, TimelineBuilder, make_mock_soccfg
+from pathlib import Path
+
+import yaml
+from zcu_tools.program import build_soccfg
+from zcu_tools.program.v2 import SweepCfg, TimelineBuilder
 from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse
 
 pulse_cfg = Pulse.Cfg(
     ch=0, nqz=1, freq=100.0, gain=0.2,
     waveform=ConstWaveformCfg(length=0.1),
 )
-builder = TimelineBuilder(make_mock_soccfg())
+profile_path = Path("zcu_lab/simulation_envs/profiles/ordinary.yaml")
+soccfg = build_soccfg(yaml.safe_load(profile_path.read_text()))
+builder = TimelineBuilder(soccfg)
 freq = builder.add_sweep("freq", SweepCfg(start=100.0, stop=102.0, step=1.0, expts=3))
 builder.emit(Pulse("probe", pulse_cfg, freq=freq))
 program = builder.build()

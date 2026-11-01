@@ -51,13 +51,13 @@ from zcu_tools.mcp.measure.assembly import build_measure_tools
 from zcu_tools.mcp.measure.recipe_api import RecipeDeclaration
 from zcu_tools.mcp.measure.session import MeasureMcpSession
 from zcu_tools.mcp.measure.tool_context import MeasureToolContext
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.resources.entry import ResultEntry
 from zcu_tools.resources.waveform_assets import ArbWaveformDatabase
 
 from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._form_fakes import form_sources
 from tests.gui.app.measure._synthetic import SampleAdapter, register_all
+from tests.program._profiles import load_soccfg
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def make_ctx(root: Path) -> SessionEnv:
         SessionEnv(
             parameters=None,
             soc=MagicMock(),
-            soccfg=make_mock_soccfg(),
+            soccfg=load_soccfg(),
         )
     )
     context = ContextService(state, EventBus(), bind_assets=ArbWaveformDatabase.info_at)
@@ -188,9 +188,7 @@ class Fixture:
                 PointCreateRequest(active_label or "ctx001", "", CommandOrigin("gui"))
             )
             self.state.set_context(
-                replace(
-                    self.state.session_env, soc=MagicMock(), soccfg=make_mock_soccfg()
-                )
+                replace(self.state.session_env, soc=MagicMock(), soccfg=load_soccfg())
             )
         if opts is None:
             opts = ControlOptions(port=0)

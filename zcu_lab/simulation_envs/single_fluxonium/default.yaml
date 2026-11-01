@@ -72,6 +72,7 @@ readout:
 
 numerics:
   # Midpoint full-Hamiltonian steps per carrier period below 30 MHz.
+  projection_prune_floor: 1.0e-9
   slow_envelope_segments_per_period: 20
   truncation:
     native_cutoff: 40 # Harmonic-oscillator dimension.

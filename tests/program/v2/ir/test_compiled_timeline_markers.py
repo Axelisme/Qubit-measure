@@ -4,10 +4,11 @@ import pytest
 from qick.qick_asm import AbsQickProgram
 from zcu_tools.program.v2.ir.instructions import MetaInst, WaitInst
 from zcu_tools.program.v2.ir.io_instructions import PortWriteInst
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import Pulse, PulseCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 def _invalidate_binary(prog: AbsQickProgram) -> None:
@@ -32,7 +33,7 @@ def test_shared_pulse_resources_keep_each_emission_source_on_waveform_outputs():
             self.emit(second, tag="second_occurrence")
             self.emit(first, tag="third_occurrence")
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     assert first.pulse_name(prog) == second.pulse_name(prog)
     sources = []
     active = []
@@ -76,7 +77,7 @@ def test_nested_repeats_keep_outer_scan_shot_and_register_count_structure():
                     self.delay_by_timeline()
                 self.delay_by_timeline()
 
-    prog = Program(make_mock_soccfg(), reps=2)
+    prog = Program(load_soccfg(), reps=2)
     starts = {}
     structure = []
     for record in prog.compiled_stream.records:
@@ -124,7 +125,7 @@ def test_timeline_branch_preserves_order_compare_register_and_body_shell_boundar
                     self.timeline_inc(0.2)
             self.wait(t=0.3)
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0.4)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0.4)
     markers = [
         inst
         for record in prog.compiled_stream.records
@@ -170,7 +171,7 @@ def test_native_pulse_tag_and_call_order_sources_reset_only_on_actual_compile(ti
             self.pulse(0, "native", t="auto", tag="tagged", timeline=timeline)
             self.pulse(0, "native", t="auto", timeline=timeline)
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     saved = prog.compiled_stream
     prog.compile()
     assert prog.compiled_stream is saved

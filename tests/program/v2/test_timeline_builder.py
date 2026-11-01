@@ -6,6 +6,8 @@ retired; changes to the common compiler must preserve parity, not old ASM bytes.
 """
 
 from collections.abc import Callable, Sequence
+from fractions import Fraction
+from math import ceil
 
 import numpy as np
 import pytest
@@ -14,7 +16,6 @@ from qick.asm_v2 import QickParam, QickSweep1D
 from zcu_tools.cfg_model import MuxReadoutTone
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program import v2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg, make_mux_mock_soccfg
 from zcu_tools.program.v2.modules.readout import (
     MuxReadoutCfg,
     PulseReadout,
@@ -26,6 +27,14 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_mux_soccfg, load_soccfg
+from tests.program._timing_expectations import (
+    generator_duration,
+    native_sweep,
+    readout_duration,
+    runtime_cycles,
+    tproc_ceil,
+)
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
 
@@ -35,9 +44,7 @@ from tests.program.v2.timing_support import recompile, shots, waves
 def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
     hint, tail_sync
 ):
-    builder = v2.TimelineBuilder(
-        v2.make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0
-    )
+    builder = v2.TimelineBuilder(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
     builder.add_loop("depth", 2)
     builder.emit(v2.LoadValue("load_count", [0, 2], "depth", "count"))
     builder.delay_by_timeline()
@@ -58,13 +65,20 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
             builder.delay_by_timeline()
     prog = builder.build()
 
-    # The two waveforms quantize to 15/31 generator clocks, then 17/35
-    # tProc cycles. The zero-count point must not inherit the previous shot.
+    # Zero-count points must not inherit the previous shot's selected waveform.
+    durations = [generator_duration(prog.soccfg, t, 1) for t in (0.04, 0.08)]
+    ends = [
+        ceil(runtime_cycles(prog.soccfg, int(prog.us2cycles(t, gen_ch=1)), 1))
+        for t in (0.04, 0.08)
+    ]
     result = shots(prog)
-    assert [waves(shot) for shot in result] == [[], [0, 17]] * 2
-    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [0, 52] * 2
+    assert [waves(shot) for shot in result] == [[], [0, ends[0]]] * 2
+    assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
+        0,
+        sum(ends),
+    ] * 2
 
-    env = white_noise(std_adc=0, n_gens=2, routes=((1, 0),))
+    env = white_noise(load_soccfg(n_gens=2), std_adc=0, routes=((1, 0),), seed=None)
     try:
         request = build_compiled_request(
             prog, "integrated", env.soc.binding, 0, routes=env.soc.routes
@@ -74,10 +88,10 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
         assert [event.gain for event in events] == pytest.approx([0.1, 0.2], abs=1e-4)
         assert [
             time_us(request.time_base, event.start_ticks) for event in events
-        ] == pytest.approx([0, 17 / 430.08])
+        ] == pytest.approx([0, ends[0] / TPROC_MHZ])
         assert [
             time_us(request.time_base, event.duration_ticks) for event in events
-        ] == pytest.approx([15 / 384, 31 / 384])
+        ] == pytest.approx([float(duration) for duration in durations])
     finally:
         env.devices.close_all_devices()
 
@@ -114,13 +128,13 @@ def test_named_time_operations_keep_end_and_reference_separate(
     mock_soccfg, frontend, operation
 ):
     pulse = _pulse("drive")
-    gap = v2.Delay("gap", 100 / 430.08)
+    gap = v2.Delay("gap", 100 / TPROC_MHZ)
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         program.emit(pulse)
         program.fork("default", into="work")
         if operation == "timeline_inc":
-            program.timeline_inc(100 / 430.08, timeline="work")
+            program.timeline_inc(100 / TPROC_MHZ, timeline="work")
             program.emit(pulse, timeline="work", tag="after")
         else:
             program.emit(gap, timeline="work")
@@ -129,10 +143,13 @@ def test_named_time_operations_keep_end_and_reference_separate(
 
     prog = _compile_scoped(mock_soccfg, frontend, body, (pulse, gap))
     (shot,) = shots(prog)
-    assert waves(shot) == [0, 143]
-    assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
-    expected_offset = 143 if operation == "timeline_inc" else 0
-    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(expected_offset)
+    pulse_end = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
+    assert waves(shot) == [0, pulse_end + 100]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * pulse_end + 100,) * 2
+    expected_offset = pulse_end + 100 if operation == "timeline_inc" else 0
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(
+        expected_offset
+    )
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])
@@ -141,14 +158,16 @@ def test_builder_repeat_keeps_author_reference_advances(mock_soccfg, sync_at_end
     drive = _pulse("drive")
     with builder.repeat("r", 2):
         builder.emit(drive)
-        builder.timeline_inc(5 / 430.08)
+        builder.timeline_inc(5 / TPROC_MHZ)
         if sync_at_end:
             builder.delay_by_timeline()
     builder.emit(drive)
     prog = builder.build()
     (shot,) = shots(prog)
-    assert waves(shot) == [0, 48, 96]
-    assert (shot.body_end_cycle, shot.end_cycle) == (139, 139)
+    pulse_end = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
+    step = pulse_end + 5
+    assert waves(shot) == [0, step, 2 * step]
+    assert (shot.body_end_cycle, shot.end_cycle) == (2 * step + pulse_end,) * 2
     if sync_at_end:
         assert len(prog.reg_dict) == 2
     else:
@@ -166,12 +185,14 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
         builder.repeat("r", 2),
     ):
         builder.emit(drive)
-        builder.timeline_inc(5 / 430.08)
+        builder.timeline_inc(5 / TPROC_MHZ)
     builder.emit(drive)
     prog = builder.build()
-    assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
+    step = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1)) + 5
+    expected = [[0, step, 2 * step], [2 * step if align else 0]] * 2
+    assert [waves(s) for s in shots(prog)] == expected
     prog.compile()
-    assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
+    assert [waves(s) for s in shots(prog)] == expected
 
 
 def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(
@@ -181,25 +202,24 @@ def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(
     builder.add_loop("scan", 3)
     drive = _pulse("drive")
     builder.fork("default", into="external")
-    builder.timeline_inc(100 / 430.08, timeline="external")
+    builder.timeline_inc(100 / TPROC_MHZ, timeline="external")
     builder.emit(drive)
     builder.delay_by_timeline()
     with builder.repeat("r", "scan", range_hint=(0, 2)):
-        builder.timeline_inc(15 / 430.08)
+        builder.timeline_inc(15 / TPROC_MHZ)
         builder.delay_by_timeline()
     with builder.branch(by="scan", align_timeline=False, timeline="external") as branch:
         with branch.case(0):
-            builder.timeline_inc(5 / 430.08)
+            builder.timeline_inc(5 / TPROC_MHZ)
         with branch.case(2):
-            builder.timeline_inc(15 / 430.08)
+            builder.timeline_inc(15 / TPROC_MHZ)
     builder.emit(drive, timeline="external")
 
     prog = builder.build()
     assert [waves(shot) for shot in shots(prog)] == [[0, 105], [0, 100], [0, 115]] * 2
+    pulse_end = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(prog)] == [
-        148,
-        143,
-        158,
+        start + pulse_end for start in (105, 100, 115)
     ] * 2
 
 
@@ -263,9 +283,10 @@ def test_sparse_indexed_cases_match_native_and_leave_missing_points_empty(
     expected = Native(mock_soccfg, initial_delay=0, relax_delay=0)
     assert actual.prog_list == expected.prog_list
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
-    assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, 43]]
+    pulse_end = tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
+    assert [waves(shot) for shot in shots(actual)] == [[], [0], [], [0, pulse_end]]
     assert [shot.body_end_cycle - shot.start_cycle for shot in shots(actual)] == (
-        [86, 86, 86, 86] if align_timeline else [0, 43, 0, 86]
+        [2 * pulse_end] * 4 if align_timeline else [0, pulse_end, 0, 2 * pulse_end]
     )
     actual.compile()
     np.testing.assert_array_equal(actual.binprog["pmem"], expected.binprog["pmem"])
@@ -333,7 +354,7 @@ def test_branch_rejects_reference_advances_at_build(
 def test_sparse_preparations_after_reset_and_herald_compile_on_forked_timelines(
     heralded, reset
 ):
-    soccfg = make_mux_mock_soccfg(3, 2, gen_ch=0, ro_chs=(0, 1))
+    soccfg = load_mux_soccfg(3, 2, gen_ch=0, ro_chs=(0, 1))
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=1)
     builder.add_loop("prepared_f1", 2)  # 0 = g, 1 = e (outer)
     builder.add_loop("prepared_f2", 2)  # 0 = g, 1 = e (inner)
@@ -430,24 +451,21 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
     for index in range(20):
         name = f"offset_{index}"
         builder.fork("default", into=name)
-        builder.timeline_inc((index + 1) / 430.08, timeline=name)
+        builder.timeline_inc((index + 1) / TPROC_MHZ, timeline=name)
     prog = builder.build()
 
     assert len(prog.reg_dict) <= 16
     result = shots(prog)
     assert [waves(shot) for shot in result] == [[0]] * 6
-    # Native lengths are 38, 76, 114 fabric cycles. The k=8 upper
-    # conversion gives 43, 86, 128 tProc cycles, plus the largest offset.
+    lengths = native_sweep(mock_soccfg, 0.1, 0.3, 3, gen_ch=0)
     assert [shot.body_end_cycle - shot.start_cycle for shot in result] == [
-        63,
-        106,
-        148,
+        ceil(runtime_cycles(mock_soccfg, n)) + 20 for n in lengths
     ] * 2
 
 
 def _unsynchronized_dual_drive_builder(heralded: bool) -> v2.TimelineBuilder:
     """Record three parallel groups and mux readout without a reference advance."""
-    soccfg = make_mux_mock_soccfg(4, 3, gen_ch=1, ro_chs=(1, 2))
+    soccfg = load_mux_soccfg(4, 3, gen_ch=1, ro_chs=(1, 2))
     builder = v2.TimelineBuilder(soccfg, reps=4096, initial_delay=1, relax_delay=1)
     frequency = builder.add_sweep(
         "frequency",
@@ -541,10 +559,11 @@ def test_unsynchronized_dual_drive_groups_and_mux_fit_sixteen_registers(heralded
 @pytest.mark.parametrize("family", ["pulse", "table", "mux"])
 def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     soccfg = (
-        make_mux_mock_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
+        load_mux_soccfg(2, 2, gen_ch=0, ro_chs=(0, 1))
         if family == "mux"
-        else make_mock_soccfg(2, 1)
+        else load_soccfg(2, 1)
     )
+    tproc_mhz = soccfg["tprocs"][0]["f_time"]
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
     readout: v2.Module
     if family == "mux":
@@ -553,8 +572,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             nqz=1,
             mixer_freq=1000,
             length=0.125,
-            pre_delay=3 / 430.08,
-            post_delay=5 / 430.08,
+            pre_delay=3 / tproc_mhz,
+            post_delay=5 / tproc_mhz,
             ro_length=1.0,
             trig_offset=0.5,
             tones=[
@@ -568,8 +587,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             freq=100,
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.125),
-            pre_delay=3 / 430.08,
-            post_delay=5 / 430.08,
+            pre_delay=3 / tproc_mhz,
+            post_delay=5 / tproc_mhz,
             ro_ch=0,
             ro_length=1.0,
             trig_offset=0.5,
@@ -592,10 +611,16 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
     builder.emit(_pulse("next_drive"))
     prog = builder.build()
     result = shots(prog)
-    # 48 generator clocks last53.76 cycles. ceil(3+53.76+5)=62.
-    # Trigger starts216, well after the next drive; it never extends readout end.
+    generator_end = 3 + tproc_ceil(
+        soccfg,
+        generator_duration(soccfg, 0.125) + Fraction(5) / Fraction(str(tproc_mhz)),
+    )
+    trigger = tproc_ceil(soccfg, 0.5)
+    # The late ADC trigger never extends the readout's named end.
     assert [waves(shot) for shot in result] == (
-        [[3, 62]] if family == "mux" else [[0, 3, 62]] * len(result)
+        [[3, generator_end]]
+        if family == "mux"
+        else [[0, 3, generator_end]] * len(result)
     )
     assert all(
         [
@@ -603,12 +628,12 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             for e in shot.events
             if e.kind == "data" and e.value
         ]
-        == [216]
+        == [trigger]
         for shot in result
     )
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     wait_cycles = int(str(wait["TIME"]).removeprefix("@"))
-    adc_end = 648 if family == "mux" else 646
+    adc_end = trigger + tproc_ceil(soccfg, readout_duration(soccfg, 1.0))
     assert all(
         shot.body_end_cycle - shot.start_cycle + wait_cycles >= adc_end
         for shot in result
@@ -1065,7 +1090,7 @@ def test_duplicate_builder_axes_raise_at_recording(mock_soccfg, first, second):
 
 
 def test_mux_objects_share_resources_despite_different_emission_timing():
-    soccfg = make_mux_mock_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
+    soccfg = load_mux_soccfg(1, 1, gen_ch=0, ro_chs=(0,))
     cfg = MuxReadoutCfg(
         gen_ch=0,
         nqz=1,
@@ -1094,7 +1119,7 @@ def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder.emit(_readout("second", post_delay=0.1))
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
-    assert prog.ro_chs[0]["length"] == 61
+    assert prog.ro_chs[0]["length"] == prog.us2cycles(0.2, ro_ch=0)
     assert prog.ro_chs[0]["trigs"] == 2
     # Each read emits one ADC configuration and one generator waveform.
     assert len(waves(shots(prog)[0])) == 4
@@ -1155,9 +1180,10 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+        "duration",
+        v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9),
     )
-    for name, length in (("prepare", 77 / 384), ("drive", duration)):
+    for name, length in (("prepare", 77 / GEN_MHZ), ("drive", duration)):
         parallel_modules = list(
             (
                 v2.Pulse(
@@ -1168,7 +1194,7 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
                         freq=100,
                         gain=0.5,
                         waveform=ConstWaveformCfg(length=0.1),
-                        post_delay=4.3 / 430.08,
+                        post_delay=4.3 / TPROC_MHZ,
                     ),
                     length=length,
                     freq=frequency,
@@ -1194,12 +1220,13 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+        "duration",
+        v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9),
     )
     for name, length in (
-        ("prepare", 77 / 384),
+        ("prepare", 77 / GEN_MHZ),
         ("drive", duration),
-        ("contrast", 77 / 384),
+        ("contrast", 77 / GEN_MHZ),
     ):
         parallel_modules = list(
             (
@@ -1215,7 +1242,7 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                             4.3
                             + (extra_post_cycles if name == "drive" and ch == 1 else 0)
                         )
-                        / 430.08,
+                        / TPROC_MHZ,
                     ),
                     length=length,
                     freq=frequency,
@@ -1229,15 +1256,22 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
             builder.emit(module, timeline=timeline)
         builder.join(*parallel_timelines, into="default")
     prog = builder.build()
-    # The swept fabric length uses k=8 upper conversion: 430.08/384=28/25,
-    # W=287. Each aggregate ceils (n*287 + ceil(4.3*256))/256 once.
-    # These literal ends include the permitted upper-conversion error, rather
-    # than the old exact-grid table, and keep both channels' physical coverage.
+    lengths = native_sweep(mock_soccfg, 71 / GEN_MHZ, 639 / GEN_MHZ, 9, gen_ch=0)
+    # k=8 rounds the fractional post upward to its representable subcycle grid.
+    post = Fraction(ceil(Fraction("4.3") * 256), 256)
     drive_ends = [
-        end + extra_post_cycles for end in [84, 164, 244, 323, 403, 482, 562, 642, 721]
+        ceil(runtime_cycles(mock_soccfg, n) + post) + extra_post_cycles for n in lengths
     ]
-    expected_waves = [[0, 0, 91, 91, 91 + end, 91 + end] for end in drive_ends]
-    expected_ends = [182 + end for end in drive_ends]
+    fixed_end = tproc_ceil(
+        mock_soccfg,
+        generator_duration(mock_soccfg, 77 / GEN_MHZ)
+        + Fraction("4.3") / Fraction(str(TPROC_MHZ)),
+    )
+    expected_waves = [
+        [0, 0, fixed_end, fixed_end, fixed_end + end, fixed_end + end]
+        for end in drive_ends
+    ]
+    expected_ends = [2 * fixed_end + end for end in drive_ends]
     for _ in range(2):
         scheduled = shots(prog)
         assert [waves(shot) for shot in scheduled] == expected_waves * 6
@@ -1472,7 +1506,7 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
         program.fork("default", into="parent")
-        program.timeline_inc(10 / 430.08, timeline="parent")
+        program.timeline_inc(10 / TPROC_MHZ, timeline="parent")
         with (
             program.timeline("parent" if not explicit_parent else "default"),
             program.branch(
@@ -1483,7 +1517,7 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
             cases.case(1) as name,
         ):
             names.append(name)
-            program.timeline_inc(20 / 430.08)
+            program.timeline_inc(20 / TPROC_MHZ)
             program.emit(pulse)
         program.emit(pulse, timeline="parent")
 
@@ -1491,8 +1525,11 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
         mock_soccfg, frontend, body, modules=(pulse,), loops=(("scan", 3),)
     )
     assert names == ["scan[1]"]
+    case_end = 30 + tproc_ceil(mock_soccfg, generator_duration(mock_soccfg, 0.1, 1))
     assert [waves(shot) for shot in shots(prog)] == (
-        [[73], [30, 73], [73]] if align_timeline else [[10], [30, 73], [10]]
+        [[case_end], [30, case_end], [case_end]]
+        if align_timeline
+        else [[10], [30, case_end], [10]]
     )
 
 
@@ -1539,14 +1576,14 @@ def test_branch_case_local_forks_and_nested_parent_merge_without_leaking_names(
             cases.case(1) as case,
         ):
             program.fork(case, into="local")
-            program.timeline_inc(10 / 430.08, timeline="local")
+            program.timeline_inc(10 / TPROC_MHZ, timeline="local")
             with (
                 program.branch(
                     by="inner", align_timeline=True, timeline="local"
                 ) as nested,
                 nested.case(0),
             ):
-                program.timeline_inc(20 / 430.08)
+                program.timeline_inc(20 / TPROC_MHZ)
             program.join("local", into=case)
         # Both implicit and explicit local names expire, allowing fresh forks.
         program.fork("default", into=["scan[1]", "inner[0]", "local"])

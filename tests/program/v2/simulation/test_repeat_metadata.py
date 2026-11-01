@@ -17,13 +17,15 @@ from zcu_tools.program.v2.modules.waveform import (
 )
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 
+from tests.program._profiles import load_soccfg
+from tests.program._timing_expectations import generator_duration
 from tests.program.v2.simulation.time_observations import time_us
 
 
 @pytest.fixture
 def environment():
     env = white_noise(
-        std_adc=0, seed=4, n_gens=2, n_readouts=2, routes=((0, 0), (1, 1))
+        load_soccfg(n_gens=2, n_readouts=2), std_adc=0, seed=4, routes=((0, 0), (1, 1))
     )
     yield env
     env.devices.close_all_devices()
@@ -186,7 +188,13 @@ def test_repeated_request_preserves_numeric_controls(environment, case):
                 if case != "computed_flat_top":
                     assert time_us(
                         request.time_base, event.duration_ticks
-                    ) == pytest.approx(0.055 if inner == 0 else 0.1, abs=0.003)
+                    ) == pytest.approx(
+                        float(
+                            generator_duration(
+                                environment.soccfg, 0.055 if inner == 0 else 0.1, 1
+                            )
+                        )
+                    )
             if case == "computed_tables":
                 second = [
                     event

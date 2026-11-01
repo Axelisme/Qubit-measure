@@ -30,6 +30,7 @@ from tests.gui._qt_waits import qt_until
 from tests.gui.app.measure._operation_plots import attachment as plot_attachment
 from tests.gui.app.measure._workflow_ask import AskAuthor, Decision
 from tests.mcp.measure._support import make_client
+from tests.program._profiles import load_soccfg
 
 from ._form_rpc import FormRpc, ImmediateScheduler
 
@@ -71,7 +72,7 @@ def workflow_rpc(qapp, tmp_path):
     entry.new_point("source", description="synthetic")
     controller.session_services.context.install_entry(entry)
     controller.session_services.context.use_point(PointUseRequest("source"))
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     controller.session_services.soc_connection.install_soc(board.soc, board.soccfg)
     facet = controller.workflow_control()
     facet.configure(

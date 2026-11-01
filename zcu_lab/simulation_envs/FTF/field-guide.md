@@ -2,9 +2,9 @@
 
 **讀者：** lab-author、framework-dev、agent。依 YAML 欄位、單位與模型限制設定 FTF 環境並對照 entry 接線。
 
-**Last updated:** 2026-10-28，flux pulse 路由、量化與 ramp 弛豫近似
+**Last updated:** 2026-11-01，獨立板子與物理接線
 
-本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [resources.ftf](../../../lib/zcu_tools/resources/ftf/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md)。
+本指南對照 [default.yaml](default.yaml) 與 [entry-template.yaml](entry-template.yaml)。啟動方式見 [環境 README](README.md)。所有可接受的 YAML 欄位都列在下文；欄位驗證由 [simulators.ftf.config](../../../lib/zcu_tools/simulators/ftf/config/README.md) 負責，實際組裝與演化限制見 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md)。
 
 樣板的 circuit energies、couplings 與 resonator frequencies 採用《FTF Architecture for Quantum Computing》第 5 章 Table 5.1 的 Device A。DC、微波、接收器與數值設定包含本機手動調整值，不能當作其他晶片的校準結果。樣板可執行，不代表截斷已收斂或模型適用於所有工作點。
 
@@ -33,7 +33,7 @@
 
 `DriveLine.operator: flux` 使用固定 DC 工作點的一階線性算符，限於小訊號。序列內改變磁通的 pulse 使用獨立的 `flux_lines`，不沿用這個線性算符。省略 `flux_lines` 時，DC bias、靜態磁通掃描、charge drive、小訊號 flux drive 與 readout 設定不變。使用未綁定的 generator 仍會失敗。
 
-`chip` 的 flux-noise 與 flux-line loss 參數只描述物理雜訊與耗散，不建立 pulse 控制線。`flux_lines` 宣告從 generator gain 到各迴路 reduced flux 的轉換與濾波。數值接線與演化限制由 [FTF 契約](../../../lib/zcu_tools/experiment/ftf/README.md) 說明。
+`chip` 的 flux-noise 與 flux-line loss 參數只描述物理雜訊與耗散，不建立 pulse 控制線。`flux_lines` 宣告從 generator gain 到各迴路 reduced flux 的轉換與濾波。數值接線與演化限制由 [FTF 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md) 說明。
 
 ## 文件結構與共通規則
 
@@ -69,7 +69,7 @@ numerics: # Basis sizes, solver accuracy and root RNG seed.
 | `drive_lines` | 名稱到 charge/flux drive line 的 map | 可省略或填 `{}`，都停用 drive 控制；不可填 `null` |
 | `flux_lines` | 選填的 `f1`、`coupler`、`f2` fast-flux routes | 省略或 `{}` 不宣告 pulsed flux；各迴路可省略或 `null`；頂層不可填 `null` |
 | `readout` | `drive`、`resonators`、`adc` 與可選 `mux` | 必填，pulse drive／ADC object 與兩個 resonator 皆必填；mux 段另含 generator、刻度與 receiver list |
-| `numerics` | `truncation`、`solver` 與可選 `seed` | 必填 |
+| `numerics` | `truncation`、`solver`、`seed` 與 `projection_weight_floor` | 必填 |
 
 `dc_bias.sources` 與 `drive_lines` 的 map key 是非空字串名稱。前者成為 live device 名稱，後者識別微波線，兩類名稱不可重複。`f1_bias`、`coupler_bias`、`f2_bias`、`f1_charge`、`f2_charge` 是樣板選用的名稱，不是新增的 YAML 欄位。
 
@@ -168,8 +168,8 @@ Coupler 的 `q_ind`、`xqp` 為 JSON `null`。關閉漂移不寫真值 log；寫
 若要改 log 位置或保存 private replay，使用 `ftf(..., acquisition=FTFAcquisitionOptions(...))`，
 不在 YAML 或 entry 加路徑。Replay 保存當次有效設定，`drift=None`，重播不依賴時鐘或原 YAML。
 真值與 replay 檔案不進一般 Run／GUI／MCP metadata，路徑與保留期限由呼叫者管理。
-參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/experiment/ftf/README.md#acquisition-clock-and-loss-drift)
-及 [private replay](../../../lib/zcu_tools/experiment/ftf/README.md#private-replay)。
+參數與 replay 格式見 [acquisition 契約](../../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)
+及 [private replay](../../../lib/zcu_tools/simulators/ftf/environment/README.md#private-replay)。
 
 ## Design：設計初猜
 
@@ -307,7 +307,7 @@ Hamiltonian 支援時變 flux，但只在每 round DC 選定的 retained 子空�
 引擎不認證物理 adiabatic 條件，短 ramp 也不是該條件成立的證據。
 終端 readout 仍固定使用 snapshot DC 模型，即使 flux tail 尚未回 DC 也不改變。
 需要 DC 讀出時，須在 readout 前留足返程 settling。
-兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/experiment/ftf/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
+兩態 reset 的 hold curve 與 sudden 對照見 [reset 範例及限制](../../../lib/zcu_tools/simulators/ftf/environment/README.md#reset-interpretation)，不是正式裝置 fidelity 認證。
 [固定 DC flux benchmark](../../../docs/discussions/2026-10-28-ftf-fixed-dc-flux-benchmark.md) 的結論為「未認證，僅界限」。
 M16 只是最大成功執行尺寸，不是收斂 reference。M24 首點與 M32 reference 在 phase/gauge quadrature 失敗，其餘五個 M24 候選未執行。
 這些結果不能認證 excursion 幅度可用區或裝置 reset fidelity。
@@ -376,7 +376,7 @@ Carrier、envelope 與 phase 由 program 提供。`input_per_gain` 是物理入�
 | `kappa_external_mhz` | 與共用 readout line 的 external linewidth | kappa_external/(2*pi)，MHz，有限數，≥ 0 | 必填 |
 | `kappa_internal_mhz` | Internal loss linewidth | kappa_internal/(2*pi)，MHz，有限數，≥ 0 | 必填 |
 | `mismatch_phase_rad` | 此 resonator 散射項相對直通項的相位 | radians，有限 signed 數 | 省略為 0；不接受 `null` 或非有限值 |
-| `thermal_occupation` | 殘餘 thermal photon occupation nth | 無因次，有限數，≥ 0 | 省略或 `null` 時，以共通 temperature 與 bare frequency 計算 Bose occupation；明寫 0 才停用此 occupation |
+| `thermal_occupation` | 殘餘 thermal photon occupation nth | 無因次，有限數，≥ 0 | 必填；`null` 時，以共通 temperature 與 bare frequency 計算 Bose occupation；明寫 0 才停用此 occupation |
 
 每個 resonator 的 external + internal linewidth 都必須 > 0，且兩個 resonator 至少一個的 external linewidth > 0。轉成 photon decay rate 時使用 `2*pi*kappa_mhz/1000`，單位 1/ns；不要把 angular decay rate 直接填進 MHz 欄位。
 
@@ -416,12 +416,12 @@ readout:
 | `ro_ch` | ADC readout index | 無單位，整數 ≥ 0 | 必填 |
 | `gain` | 場到 ADC sample 的轉換 | ADC sample units / sqrt(photons/ns)，有限 signed 數，可為 0 | 必填，不縮放另加的 noise |
 | `time_of_flight_ns` | 總讀取線延遲，同時決定波形抵達時間與 electronic-delay phase | ns，有限數，≥ 0 | 省略為 0；不接受 `null`、負數或非有限值 |
-| `background` | 固定的頻率相依複數 transmission 背景 | 下列五欄的 object | 可省略，省略或 `{}` 為平背景；不接受 `null` |
+| `background` | 固定的頻率相依複數 transmission 背景 | 下列五欄的 object | 必填 period 與 pivot，零 depth／slope 為平背景；不接受 `null` |
 | `background.ripple_depth` | 駐波反射振幅 | 無單位，有限數，0 ≤ depth < 1 | 省略為 0 |
-| `background.ripple_period_mhz` | 駐波頻率週期 | MHz，有限正數 | 省略為 1000 |
+| `background.ripple_period_mhz` | 駐波頻率週期 | MHz，有限正數 | 必填 |
 | `background.ripple_phase_deg` | 駐波相位 | degree，有限 signed 數 | 省略為 0 |
 | `background.slope_db_per_ghz` | 振幅背景斜率 | dB/GHz，有限 signed 數 | 省略為 0 |
-| `background.pivot_ghz` | 斜率因子為 1 的絕對頻率 | GHz，有限 signed 數 | 省略為 0 |
+| `background.pivot_ghz` | 斜率因子為 1 的絕對頻率 | GHz，有限 signed 數 | 必填 |
 | `phase_deg` | 額外的 receiver phase | degree，有限 signed 數 | 省略為 0；不接受 `null` |
 | `offset_adc` | 每個 sample 的 I、Q offset | ADC sample units，有限二元素 `[I, Q]` | 省略為 `[0, 0]`；不接受 `null` |
 | `noise_psd_adc2_ns` | Two-sided white receiver noise spectral density | ADC²*ns，有限、對稱、positive-semidefinite 的 2×2 matrix，順序為 I、Q | 必填；零矩陣與 singular matrix 合法，不能省略代表無 noise |
@@ -466,23 +466,18 @@ Cov(sample) = noise_psd_adc2_ns / dt_ns
 | `solver.atol` | DOP853 absolute local error tolerance | Solver state 的數值尺度，有限數，> 0 | 必填 |
 | `solver.max_step_ns` | 積分最大步長 | ns，有限數，> 0 | 必填 |
 | `solver.bath_segment_ns` | 固定 bath 更新區間 | ns，有限數，> 0 | 必填；實際取最近的 2 ns，halfway ties to even，至少一個 2 ns tick |
-| `seed` | Root RNG seed | 無單位，整數 ≥ 0 | 可省略或 `null`；環境啟動時產生一次 root seed，不是每 round 重新產生 |
+| `projection_weight_floor` | Projective outcome pruning threshold | 無因次，有限數，0 ≤ floor < 1 | 必填，0 關閉剪枝 |
+| `seed` | Root RNG seed | 無單位，整數 ≥ 0 | 必填；`null` 在環境啟動時產生一次 root seed，不是每 round 重新產生 |
 
 FTF 預設走分段引擎的快速算法，不是所有演化都逐步執行 DOP853。這些 solver 欄位控制需要數值積分的路徑，無法代替截斷或物理模型的適用性檢查。調小 tolerance、縮短 step 或 bath segment 之後，仍須比較輸出確認精度。明寫 seed 有助於固定抽樣身份；跨 dependency 或 RNG 版本不保證相同結果。
 
 ## Generator、ADC 與 entry 接線對照
 
-所有 channel index 都從 0 開始。數量不是綁定條數，而是最大索引加一：
+所有 channel index 都從 0 開始。獨立的 [profile.yaml](profile.yaml) 擁有 generator／ADC 數量、時脈、DDS、firmware channel type 與 memory limits。Caller 以 `program.build_soccfg` 建立板子，再用 required `soccfg=` 交給 `ftf`。Runtime 不從模型接線的最大索引或綁定條數建立板子。
 
-```text
-generator_count = max(pulse generator, all drive-line generators,
-                      mux generator if configured) + 1
-readout_count = max(pulse ADC, all mux receivers if configured) + 1
-```
+`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line。共用線上的兩個元件共用同一個綁定，不是再綁兩次。模型 YAML 擁有這些物理接線與校準，caller 要讓索引與所需型別符合獨立板子 YAML。索引通過模型 schema 不代表任意 pulse 都符合該板子的能力。
 
-`gen_ch` 與 `ro_ch` 屬於不同索引空間，可以同為 0。每個 generator 只能綁一條 charge、flux 或 readout line；共用線上的兩個元件共用同一個綁定，不是再綁兩次。Clock、DDS、firmware channel type 與 memory limits 使用固定 mock QICK capability profile，YAML 不提供 `channels` 或改 profile 的欄位。索引通過 schema 不代表任意 pulse 都符合該 profile。
-
-樣板使用 pulse gen0、mux gen1、f1_charge gen2、f2_charge gen3，推導出 4 個 generator。Pulse ADC0 加上 mux ADC1 與 ADC2，推導出 3 個 readout。這是樣板接線，不是 engine 的固定通道上限；schema 接受非負整數索引，runtime 依最大索引建立 mock SoC。使用未綁定 generator 仍按既有行為拒絕。
+樣板使用 pulse gen0、mux gen1、f1_charge gen2、f2_charge gen3，以及 pulse ADC0 與 mux ADC1、ADC2。隨附板子 YAML 明確提供 4 個 generator 與 3 個 readout，gen1 與 ADC1、ADC2 為 mux 型別。這是 caller 的範例設定，不是 engine 的固定通道上限。更換接線時也要核對板子 YAML，不能只改模型 YAML。使用未綁定 generator 仍按既有行為拒絕。
 
 [Entry 範本](entry-template.yaml) 的具體對照如下，entry 路徑以 `components` 下的元件為起點。
 

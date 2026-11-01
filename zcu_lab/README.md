@@ -123,9 +123,13 @@ Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室
 `record`、`options` 與 `output_dir: Path`，按需要採用，不是要一起執行的固定流程。
 API 與具名回傳型別見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
 
-驗證 run 時，先建立明確接線的 `SimulationEnvironment`。
-可直接呼叫 `white_noise(...)`，或依 [single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md)
-建立物理模擬環境。Generator／ADC 數目、每條 route 與 seed 都由腳本明填，不照抄其他實驗的接線。
+驗證 run 時，先從 caller 的獨立板子 YAML 讀取 mapping，交給 `zcu_tools.program.build_soccfg` 建立 `soccfg`。
+板子 YAML 的欄位與範例見 [program](../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
+再呼叫 `white_noise(soccfg, std_adc=..., seed=..., routes=...)`，或依
+[single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md) 建立物理模擬環境並明傳 `soccfg`。
+White noise 的 `std_adc`、`seed` 與 `routes` 全部必填。
+`routes` 可列出 `(generator, ADC)` 配對，或用 `"all"` 連接每個 generator 與每個 ADC。
+Generator／ADC 數目與型別由 YAML 指定，不從接線推導，也不照抄其他實驗的設定。
 Caller 在成功與失敗路徑都要清理自己建立的環境：
 
 ```python

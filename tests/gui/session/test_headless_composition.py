@@ -12,6 +12,7 @@ from zcu_tools.gui.session.adapters.manual_owner_scheduler import ManualOwnerSch
 from zcu_tools.gui.session.ports import ProgressEvent
 
 from tests.gui._lifecycle_waits import manual_until
+from tests.program._profiles import load_soccfg
 
 
 class OwnerProgressTransport:
@@ -191,7 +192,7 @@ def test_session_core_connects_and_cancels_on_owner_thread(  # noqa: PLR0915
     import zcu_tools.qick_remote as remote
     from zcu_tools.experiment.simulation import white_noise
 
-    env = white_noise()
+    env = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     monkeypatch.setattr(
         remote, "make_soc_proxy", lambda ip, port: (env.soc, env.soccfg)
     )

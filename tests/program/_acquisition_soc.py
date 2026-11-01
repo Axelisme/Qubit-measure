@@ -3,10 +3,10 @@
 import numpy as np
 from qick import QickConfig
 from zcu_tools.program.v2 import TimelineProgramV2
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -68,7 +68,7 @@ class AcquisitionSoc(QickConfig):
 
 
 def make_acquisition_soc():
-    cfg = make_mock_soccfg()
+    cfg = load_soccfg()
     return AcquisitionSoc(cfg.get_cfg()), cfg
 
 

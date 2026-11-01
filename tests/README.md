@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，獨立階段的實驗驗收
+**Last updated:** 2026-11-01，獨立階段的實驗驗收、caller 自備板子 profile 與 simulators 測試 owner
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -416,36 +416,17 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ## 兩層 Fixture 策略
 
-### Level 1 — `make_mock_soccfg()`（實作在 `lib/zcu_tools/program/v2/mocksoc.py`，由 `tests/program/v2/conftest.py` 匯入）
+### Level 1 — caller-owned YAML compile profiles
 
-用真實 `QickConfig` 從純 dict 建構，不需要任何硬體。  
-`TimelineBuilder.build()` 與手寫 `TimelineProgramV2` 的 compile／initialize／body 都跑真實 QICK ASM。
+`tests/program/_profiles.py` 讀取 `tests/program/profiles/` 的獨立 YAML，交給
+公開 `program.build_soccfg`。`load_soccfg` 和 `load_mux_soccfg` 只覆寫 caller
+指定的 channel 數與 mux 接線；時脈、型別及 QICK metadata 留在 YAML。
+`profile_soccfg` 讀取具名模型的測試板子，不從模型 wiring 推導 channel 數。
+這些支援函式不建立硬體、IQ source 或隱式白噪音。
 
-**Gen 規格**（`axis_signal_gen_v6`，HAS_MIXER=False）：
-
-- `fs=12288.0 MHz`（245.76 × 50），`f_dds=12288.0`，`b_dds=32`，`b_phase=32`
-- `fs_mult=50`，`fs_div=1`，`fdds_div=1`，`samps_per_clk=16`
-- `has_mixer=False`，`maxv=32766`，`maxv_scale=1.0`
-- nqz=1 有效頻率範圍：0–6144 MHz（f_dds 拉高到 12288 給 6 GHz 級 readout 充足 headroom，免折疊）
-
-**Readout 規格**（`axis_readout_v2`）：
-
-- `fs=2457.6 MHz`（245.76 × 10），`f_dds=2457.6`，`b_dds=32`
-- `fs_mult=10`，`fs_div=1`，`fdds_div=1`，`decimation=1`
-- `f_output=307.2 MHz`（fs / (decimation × DOWNSAMPLING=8)）
-- 有效頻率範圍：0–1228.8 MHz
-
-**為什麼不用 `axis_sg_int4_v1`？**  
-這個 gen 是 `HAS_MIXER=True`，`declare_gen()` 會強制要求 `mixer_freq`，  
-但 `Pulse.declare()` 只在 `cfg.mixer_freq is not None` 時才傳 `mixer_freq`，
-導致 `RuntimeError: generator N has a digital mixer, but no mixer_freq was defined`。
-
-**哪些欄位必須手動補齊？**  
-`QickConfig.__init__` 不計算任何欄位，欄位由 FPGA firmware driver 設定，  
-所以 mock dict 必須包含：`has_mixer`、`maxv`、`maxv_scale`、`b_phase`、  
-`fs_mult`、`fs_div`、`fdds_div`、`interpolation`（gen）；  
-`fs_mult`、`fs_div`、`fdds_div`、`decimation`、`has_outsel`（readout）。  
-缺少任何一個就會在 `declare_gen` / `add_readoutconfig` / `freq2reg` 時 `KeyError`。
+`tests/program/v2/conftest.py` 提供 compile-only 的 `mock_soccfg` fixture。
+`TimelineBuilder.build()` 與手寫 `TimelineProgramV2` 都跑真實 QICK ASM。
+板子的輸入欄位與時脈推導見 [program README](../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
 
 ### Level 2 — `MagicMock` (`tests/program/v2/modules/conftest.py`)
 
@@ -486,8 +467,8 @@ fast-fail、以及 `setup_devices(..., cancel_signal=...)` 的顯式協作取消
 
 ### Offline acquisition transports
 
-Compile-only cases use `make_mock_soccfg(n_gens, n_readouts)`. Simulation acquisition
-cases explicitly build `white_noise(...)` or a numeric `SimulationBinding` and use
+Compile-only cases use caller-owned YAML with `program.build_soccfg`. Simulation acquisition
+cases explicitly build `white_noise(soccfg, std_adc=..., seed=..., routes=...)` or a numeric `SimulationBinding` and use
 public program acquire/get_raw. Normal unbound pipeline tests use the deterministic
 transport in `tests/program/_acquisition_soc.py`. No fixture silently installs noise.
 Synthetic registered experiments exercise Window/RPC Run, Stop, failure and native Save
@@ -495,20 +476,20 @@ in `tests/gui/app/measure/test_simulation_run.py`. All offline caches remain iso
 
 ### FTF numeric and acquisition tests
 
-`tests/resources/test_ftf.py` verifies named YAML validation and dotted field
-errors. `tests/simulate/test_ftf_model.py`, `test_joint_baths.py` and
-`test_source_lines.py` own fixed-coordinate circuits, LC/Boltzmann/Gibbs references,
-CP dephasing and causal source tails. Independent evolution/ADC behavior stays in
+`tests/simulators/ftf/config/test_ftf.py` verifies named YAML validation and dotted field
+errors. `tests/simulators/ftf/physics/` owns fixed-coordinate circuits and model sources.
+Generic LC/Boltzmann/Gibbs references, CP dephasing and causal source tails stay in
+`tests/simulate/test_joint_baths.py` and `test_source_lines.py`. Independent evolution/ADC behavior stays in
 `tests/simulate/evolution/` and `test_adc.py`; model-event and multi-window
 sampling tests live in the corresponding numeric owner directories.
-`tests/experiment/test_ftf.py` covers explicit unit conversion, common carrier phase
+`tests/simulators/ftf/environment/test_ftf.py` covers explicit unit conversion, common carrier phase
 and public acquire/decimated composition. `test_ftf_templates.py` covers DC readout
 and the template engine contract.
-`ftf/test_projective_readout.py` covers public frontend mux heralding, retained
+`tests/simulators/ftf/environment/test_projective_readout.py` covers public frontend mux heralding, retained
 outcome histories, pruning, partial ADC observations and elementwise terminal-only
 runtime parity against direct Engine/ADC composition. Cavity field continuation
-stays in `ftf/test_cavity_continuation.py`; acquisition-frozen losses stay in
-`ftf/test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
+stays in the same directory's `test_cavity_continuation.py`; acquisition-frozen losses stay in
+`test_drift.py`. Repeated frontend readouts use `builder.repeat(...)` and the public
 `set_reads_per_shot` count, since QICK counts the trigger macro once.
 The former TLS engine/frontend and tests serving only that implementation are
 retired. Framework Window/RPC tests continue to use synthetic registered

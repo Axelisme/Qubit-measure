@@ -14,6 +14,7 @@ from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
 
@@ -54,7 +55,7 @@ def program(env: SimulationEnvironment) -> TimelineProgramV2:
 
 @pytest.fixture
 def acquisition() -> Iterator[tuple[SimulationEnvironment, TimelineProgramV2]]:
-    env = white_noise(std_adc=3, seed=123456)
+    env = white_noise(load_soccfg(), std_adc=3, seed=123456, routes=((0, 0),))
     prog = program(env)
     try:
         yield env, prog
@@ -138,7 +139,7 @@ def test_acquire_preserves_bind_errors_sampling_identity_and_bitwise_output(
     acquisition, monkeypatch: pytest.MonkeyPatch, invalid: str
 ):
     env, prog = acquisition
-    replay_env = white_noise(std_adc=3, seed=123456)
+    replay_env = white_noise(load_soccfg(), std_adc=3, seed=123456, routes=((0, 0),))
     replay = program(replay_env)
     callable = QickCallable(inspect.signature(AcquireMixin.acquire))
 

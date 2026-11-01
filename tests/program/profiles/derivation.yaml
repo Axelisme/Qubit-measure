@@ -1,0 +1,78 @@
+# Small, independent inputs for hand-calculated builder derivation tests.
+board: ZCU216
+sw_version: 0.2.436
+fw_timestamp: '2025-01-01'
+refclk_freq: 200.0
+extra_description: []
+tprocs:
+  - type: qick_processor
+    revision: 27
+    f_time: 100.0
+    f_core: 100.0
+    pmem_size: 128
+    wmem_size: 128
+    dmem_size: 128
+    dreg_qty: 16
+    output_pins: []
+    start_pin: none
+    stop_pin: none
+generators:
+  - count: 2
+    type: axis_signal_gen_v6
+    fs_mult: 12
+    fs_div: 3
+    interpolation: 2
+    fabric_div: 4
+    rf_fabric_div: 8
+    samps_per_clk: 2
+    b_dds: 32
+    b_phase: 32
+    maxlen: 128
+    complex_env: true
+    has_dds: true
+    has_mixer: false
+    maxv: 1024
+    maxv_scale: 1.0
+readouts:
+  - count: 5
+    type: axis_readout_v2
+    ro_type: axis_readout_v2
+    fs_mult: 9
+    fs_div: 2
+    decimation: 3
+    samps_per_clk: 5
+    b_dds: 32
+    buf_maxlen: 128
+    avg_maxlen: 128
+    avgbuf_type: axis_avg_buffer
+    avgbuf_version: v2
+    has_edge_counter: false
+    has_weights: false
+    has_outsel: true
+    iq_offset: 0.0
+    trigger_type: dport
+    trigger_port: 0
+    coupling: AC
+rf:
+  dac_power: VOP
+  clk_groups: []
+mux:
+  - gen_ch: 1
+    ro_chs: [4, 1]
+    generator:
+      type: axis_sg_mixmux8_v1
+      has_mixer: true
+      n_tones: 8
+      has_gain: true
+      has_phase: true
+      interpolation: 8
+    readout:
+      type: axis_pfb_readout_v4
+      ro_type: axis_pfb_readout_v4
+      ro_fullpath: formula_pfb
+      pfb_nout: 8
+      pfb_nch: 64
+      pfb_ch_offset: 32
+      pfb_dds_on_output: true
+      has_outsel: false
+      b_phase: 32

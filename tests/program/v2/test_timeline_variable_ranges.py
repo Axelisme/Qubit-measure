@@ -1,18 +1,22 @@
 """Correlated timeline bounds through public compile and linked timing."""
 
+from math import ceil
+
 import pytest
 from qick import QickConfig
 from qick.asm_v2 import Macro, QickSweep1D
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
+
+from tests.program._profiles import TPROC_MHZ, load_soccfg
+from tests.program._timing_expectations import native_sweep, runtime_cycles
 
 from .timing_support import shots, waves
 
 
 def v6_profile() -> QickConfig:
     """Use a clock-consistent v6 generator with tProc/fabric ratio 28/39."""
-    cfg = make_mock_soccfg(1, 1).get_cfg()
+    cfg = load_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
         clock.update(fs=9584.64, fs_mult=39, fs_div=1, interpolation=1, f_fabric=599.04)
     cfg["gens"][0]["f_dds"] = 9584.64
@@ -20,9 +24,11 @@ def v6_profile() -> QickConfig:
 
 
 def test_complementary_tproc_pulses_leave_a_literal_constant_end():
-    cfg = make_mock_soccfg(1, 1).get_cfg()
+    cfg = load_soccfg(1, 1).get_cfg()
     for clock in (cfg["gens"][0], cfg["rf"]["dacs"]["00"]):
-        clock.update(fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=430.08)
+        clock.update(
+            fs=6881.28, fs_mult=28, fs_div=1, interpolation=4, f_fabric=TPROC_MHZ
+        )
     cfg["gens"][0].update(
         type="axis_sg_int4_v1",
         has_mixer=True,
@@ -47,14 +53,16 @@ def test_complementary_tproc_pulses_leave_a_literal_constant_end():
             self.pulse(0, "after", timeline="default", tag="after")
 
     prog = Program(QickConfig(cfg), reps=2, initial_delay=0, relax_delay=0)
-    # Native QICK steps are +/-430 ticks. Rounded starts sum to 4301.
+    forward = native_sweep(prog.soccfg, 1, 9, 9, gen_ch=0)
+    backward = native_sweep(prog.soccfg, 9, 1, 9, gen_ch=0)
+    constant_end = forward[0] + backward[0]
     assert [waves(s) for s in shots(prog)] == [
-        [0, 430 + 430 * i, 4301] for _ in range(2) for i in range(9)
+        [0, a, a + b] for _ in range(2) for a, b in zip(forward, backward, strict=True)
     ]
-    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(4301)
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(constant_end)
     assert not any(name.startswith("_timeline_end_") for name in prog.reg_dict)
     assert any(
-        inst.get("CMD") == "WPORT_WR" and inst.get("TIME") == "@4301"
+        inst.get("CMD") == "WPORT_WR" and inst.get("TIME") == f"@{constant_end}"
         for inst in prog.prog_list
     )
 
@@ -75,19 +83,17 @@ def test_complementary_fabric_pulses_keep_pointwise_ceil_differences():
             self.pulse(0, "complement", timeline="default")
             self.pulse(0, "after", timeline="default", tag="after")
 
-    prog = Program(make_mock_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
-    # At 384 MHz the k=8 upper conversion is 287/256. Separate ceils
-    # of complementary lengths alternate between 4306 and 4305, not one end.
+    prog = Program(load_soccfg(1, 1), reps=2, initial_delay=0, relax_delay=0)
+    # Each complementary operation ceils separately; the sum need not be constant.
+    forward = native_sweep(prog.soccfg, 1, 9, 9, gen_ch=0)
+    backward = native_sweep(prog.soccfg, 9, 1, 9, gen_ch=0)
     expected = [
-        [0, 431, 4306],
-        [0, 861, 4305],
-        [0, 1292, 4306],
-        [0, 1722, 4305],
-        [0, 2153, 4306],
-        [0, 2583, 4305],
-        [0, 3014, 4306],
-        [0, 3444, 4305],
-        [0, 3875, 4306],
+        [
+            0,
+            ceil(runtime_cycles(prog.soccfg, a)),
+            ceil(runtime_cycles(prog.soccfg, a)) + ceil(runtime_cycles(prog.soccfg, b)),
+        ]
+        for a, b in zip(forward, backward, strict=True)
     ]
     assert [waves(s) for s in shots(prog)] == expected * 2
     with pytest.raises(RuntimeError, match="non-affine"):
@@ -114,7 +120,7 @@ def test_same_loop_fabric_end_is_dominated_without_runtime_maximum():
         def _body(self, cfg):
             self.fork("default", into="pulse")
             self.pulse(0, "p", timeline="pulse")
-            self.timeline_inc(QickSweep1D("i", 80 / 430.08, 374 / 430.08))
+            self.timeline_inc(QickSweep1D("i", 80 / TPROC_MHZ, 374 / TPROC_MHZ))
             self.join("pulse", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
@@ -132,12 +138,12 @@ def test_three_way_join_prunes_partial_dominance_and_reconstructs_shared_length_
             self.add_loop("case", 3)
 
         def _body(self, cfg):
-            length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
-            other = QickSweep1D("j", 0, 80 / 430.08)
-            self.timeline_inc(7 / 430.08)
+            length = QickSweep1D("i", 60 / TPROC_MHZ, 256 / TPROC_MHZ)
+            other = QickSweep1D("j", 0, 80 / TPROC_MHZ)
+            self.timeline_inc(7 / TPROC_MHZ)
             with self.branch(by="case", align_timeline=True) as branch:
                 with branch.case(0):
-                    self.timeline_inc(length + 40 / 430.08)
+                    self.timeline_inc(length + 40 / TPROC_MHZ)
                 with branch.case(1):
                     self.timeline_inc(length + other)
                 with branch.case(2):
@@ -169,16 +175,16 @@ def test_join_eliminates_every_provably_dominated_candidate(extra):
             self.add_loop("case", 3 if extra else 2)
 
         def _body(self, cfg):
-            length = QickSweep1D("i", 60 / 430.08, 256 / 430.08)
-            self.timeline_inc(7 / 430.08)
+            length = QickSweep1D("i", 60 / TPROC_MHZ, 256 / TPROC_MHZ)
+            self.timeline_inc(7 / TPROC_MHZ)
             with self.branch(by="case", align_timeline=True) as branch:
                 with branch.case(0):
-                    self.timeline_inc(length + 50 / 430.08)
+                    self.timeline_inc(length + 50 / TPROC_MHZ)
                 with branch.case(1):
                     self.timeline_inc(2 * length)
                 if extra:
                     with branch.case(2):
-                        self.timeline_inc(length + 10 / 430.08)
+                        self.timeline_inc(length + 10 / TPROC_MHZ)
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
@@ -198,16 +204,16 @@ def test_join_compares_negative_residuals_with_a_proven_signed32_difference():
             self.add_loop("case", 5)
 
         def _body(self, cfg):
-            left = QickSweep1D("i", 0, 500_000_000 / 430.08)
-            right = QickSweep1D("j", 0, 500_000_000 / 430.08)
+            left = QickSweep1D("i", 0, 500_000_000 / TPROC_MHZ)
+            right = QickSweep1D("j", 0, 500_000_000 / TPROC_MHZ)
             with self.branch(by="case", align_timeline=True) as branch:
                 for index, duration in enumerate(
                     [
                         2 * left,
                         2 * right,
                         left + right,
-                        left + right + 1 / 430.08,
-                        left + right + 2 / 430.08,
+                        left + right + 1 / TPROC_MHZ,
+                        left + right + 2 / TPROC_MHZ,
                     ]
                 ):
                     with branch.case(index):
@@ -251,7 +257,7 @@ def test_author_register_does_not_inherit_loop_correlation(hint):
             self.fork("default", into="other")
             self.timeline_inc("duration", range_hint=hint, tag="author")
             self.timeline_inc(
-                QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
+                QickSweep1D("i", 72 / TPROC_MHZ, 121 / TPROC_MHZ), timeline="other"
             )
             self.join("other", into="default")
 
@@ -286,7 +292,7 @@ def test_measurement_selected_table_is_independent_of_loop_time():
             self.fork("default", into="other")
             self.timeline_inc("selected", tag="selected")
             self.timeline_inc(
-                QickSweep1D("i", 72 / 430.08, 121 / 430.08), timeline="other"
+                QickSweep1D("i", 72 / TPROC_MHZ, 121 / TPROC_MHZ), timeline="other"
             )
             self.join("other", into="default")
 
@@ -322,21 +328,13 @@ def test_two_loop_fabric_conversion_keeps_linear_part_for_dominance():
             self.fork("default", into="pulse")
             self.pulse(0, "p", timeline="pulse")
             self.timeline_inc(
-                QickSweep1D("i", 80 / 430.08, 92 / 430.08)
-                + QickSweep1D("j", 0, 12 / 430.08)
+                QickSweep1D("i", 80 / TPROC_MHZ, 92 / TPROC_MHZ)
+                + QickSweep1D("j", 0, 12 / TPROC_MHZ)
             )
             self.join("pulse", into="default")
 
     prog = Program(v6_profile(), initial_delay=0, relax_delay=0)
     assert not any("ABS" in str(inst.get("OP", "")) for inst in prog.prog_list)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
-        80,
-        86,
-        92,
-        86,
-        92,
-        98,
-        92,
-        98,
-        104,
+        80 + 6 * i + 6 * j for i in range(3) for j in range(3)
     ]

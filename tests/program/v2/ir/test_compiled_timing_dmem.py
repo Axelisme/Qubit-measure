@@ -9,8 +9,9 @@ import pytest
 from qick.asm_v2 import AsmInst
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.macro.loop import CloseInnerLoop, OpenInnerLoop
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ, load_soccfg
 
 
 class DispatchProgram(TimelineProgramV2):
@@ -25,7 +26,7 @@ class DispatchProgram(TimelineProgramV2):
             freq=100,
             phase=0,
             gain=0.1,
-            length=5 / 384,
+            length=5 / GEN_MHZ,
         )
         self.add_reg("count")
         self.add_reg("counter")
@@ -34,16 +35,16 @@ class DispatchProgram(TimelineProgramV2):
     def _body(self, cfg):
         self.append_macro(OpenInnerLoop("inner", "counter", "count", range_hint=(2, 4)))
         self.pulse(ch=0, name="p", t=0)
-        self.delay(15 / 430.08)
+        self.delay(15 / TPROC_MHZ)
         self.append_macro(CloseInnerLoop("inner", "counter", "count"))
 
 
 def test_native_compiler_dispatch_uses_public_dmem_without_mutating_it():
     prog = DispatchProgram(
-        make_mock_soccfg(),
+        load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
-        relax_delay=7 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=7 / TPROC_MHZ,
     )
     layout = prog.timing_layout
     dmem = prog.compile_datamem()
@@ -73,7 +74,7 @@ def test_native_dispatch_range_edges_and_transported_words(count, cycles, end):
         pass
 
     Program.count = count
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     result = ir.analyze_timing(
         ir.CompiledTimingInput(
             prog.prog_list, prog.labels, prog.timing_layout, prog.binprog["dmem"]
@@ -96,7 +97,7 @@ def compile_memory(
             for instruction in instructions:
                 self.append_macro(AsmInst(inst=instruction, addr_inc=1))
 
-    prog = Program(make_mock_soccfg(), initial_delay=0, relax_delay=0)
+    prog = Program(load_soccfg(), initial_delay=0, relax_delay=0)
     return ir.CompiledTimingInput(
         prog.prog_list,
         prog.labels,

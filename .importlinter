@@ -17,6 +17,31 @@ root_packages =
     scripts
 include_external_packages = True
 
+# Physical model policy stays above every framework package.
+[importlinter:contract:framework-no-simulators]
+name = Framework packages do not depend on physical simulator models
+type = forbidden
+source_modules =
+    zcu_tools.analysis
+    zcu_tools.cfg_model
+    zcu_tools.core
+    zcu_tools.datafile
+    zcu_tools.device
+    zcu_tools.experiment
+    zcu_tools.format_version
+    zcu_tools.gui
+    zcu_tools.mcp
+    zcu_tools.notebook
+    zcu_tools.plotting
+    zcu_tools.program
+    zcu_tools.progress_bar
+    zcu_tools.qick_remote
+    zcu_tools.resources
+    zcu_tools.simulate
+    zcu_tools.utils
+forbidden_modules =
+    zcu_tools.simulators
+
 [importlinter:contract:library-no-script-entrypoints]
 name = C21: library implementations do not depend on script entrypoints
 type = forbidden

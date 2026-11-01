@@ -3,9 +3,10 @@
 import pytest
 from qick.asm_v2 import Macro, WriteReg
 from zcu_tools.program.v2 import ir
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules import LoadValue
 from zcu_tools.program.v2.timeline import TimelineProgramV2
+
+from tests.program._profiles import load_soccfg
 
 
 class UnregisteredIndexWrite(Macro):
@@ -50,7 +51,7 @@ def branch_program(
             if unregistered == "after":
                 self.append_macro(UnregisteredIndexWrite())
 
-    return Program(make_mock_soccfg(), reps=2, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(), reps=2, initial_delay=0, relax_delay=0)
 
 
 def test_branch_results_keep_both_valid_input_proofs_with_distinct_indices():

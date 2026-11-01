@@ -2,10 +2,14 @@
 
 **Readers:** operator, lab-author. Start an offline single-fluxonium environment and supply a one-point twotone input.
 
-**Last updated:** 2026-10-27, fixed multiplicative readout background.
+**Last updated:** 2026-11-01，simulators package ownership
 
 This environment has one fluxonium, one DC source, one microwave line,
 one fast-flux line and one readout cavity. It has no coupler, second qubit or mux.
+The startup loads adjacent `profile.yaml` with `program.build_soccfg` and passes
+it as required `soccfg=`. The board has three generators and one ADC. Board clocks and channel types stay separate
+from the physical settings.
+
 `default.yaml` is the tracked physical-settings template. Each user edits
 `single_fluxonium.yaml`, an untracked working copy beside the startup script.
 `entry-template.yaml` contains working components, wiring and aliases. Neither
@@ -112,12 +116,12 @@ readout pulse without an ADC trigger raises ValueError before evolution.
 The environment does not model its Stark shift, cavity memory or backaction.
 Each projective read splits the state into DC energy-basis outcomes. ADC CTMC
 jumps during that read change its IQ only, not later evolution. See
-[Complete timelines](../../../lib/zcu_tools/experiment/single_fluxonium/README.md#complete-timelines)
+[Complete timelines](../../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#complete-timelines)
 for trigger binding and layout rules, and [field-guide.md](field-guide.md) for
 basis, bath and line assumptions.
 
 Notebook authors can pass an absolute `private_replay` directory to
-`zcu_tools.experiment.single_fluxonium.single_fluxonium`. The resource owner saves
+`zcu_tools.simulators.single_fluxonium.environment.single_fluxonium`. The resource owner saves
 one immutable round reference and detached input content. Call the package's
 `replay_round(path)` to recompute that round. These archives contain model truth,
 not measured IQ, and belong outside ordinary GUI/RPC metadata.

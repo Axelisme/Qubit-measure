@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-10-31, integer timing across frontend, physical consumers and replay
+**Last updated:** 2026-11-01，caller-owned compile profiles
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -150,13 +150,16 @@ An environment file is trusted Python, not a sandbox or a configuration DSL.
 For example, save this as `noise_environment.py`:
 
 ```python
+from pathlib import Path
+
+import yaml
 from zcu_tools.experiment.simulation import white_noise
+from zcu_tools.program import build_soccfg
 
 
 def build_environment():
-    return white_noise(
-        std_adc=1.0, seed=27, n_gens=2, n_readouts=1, routes=((0, 0),)
-    )
+    profile = yaml.safe_load(Path(__file__).with_name("profile.yaml").read_text())
+    return white_noise(build_soccfg(profile), std_adc=1.0, seed=27, routes="all")
 ```
 
 The caller imports the builder and owns the returned environment. GUI startup
@@ -275,8 +278,8 @@ MuxReadout lowers the real compiled mixmux tones into simultaneous EventSlots
 on one generator, with one static PFB ADC slot per declared tone. DDS, gain,
 phase and demodulation rounding come from QICK's compiled parameters. Tone order
 is ADC declaration order; channels are not sorted. The fixed mux compile profile
-is opt-in through `make_mux_mock_soccfg`, with 1..8 explicit ADC routes. The
-ordinary `make_mock_soccfg` defaults and clocks do not change. Numeric environments
+comes from caller-owned YAML through `program.build_soccfg`, with 1..8 explicit
+ADC routes per mux block. Numeric environments
 must separately bind every requested route and supply any physical mux response.
 
 `ReadoutWindow` keeps ADC sample counts and integer sample periods independent
@@ -358,7 +361,7 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   clipping. QICK divides integrated sums by readout length and averages only at
   its existing levels. Decimated acquisition averages software rounds, not reps.
 
-`white_noise(std_adc=1.0, seed=None, ...)` explicitly selects independent,
+`white_noise(soccfg, *, std_adc, seed, routes)` requires every input. It selects independent,
 zero-mean Gaussian I/Q per channel/sample. `std_adc` is finite, nonnegative and
 measured per ADC sample. Integrated sums use standard deviation
 `std_adc * sqrt(samples)`. Compact totals include receiver variance and reps/12

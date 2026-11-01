@@ -14,6 +14,8 @@ from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.experiment.workflows import Engine, EnginePorts, Live, WorkflowEnv
 
+from tests.program._profiles import load_soccfg
+
 from ._engine_fakes import Cfg, Plan, Point, Rig, Tunables, completed
 
 
@@ -131,7 +133,7 @@ def test_snapshot_read_failure_fails_before_callback_and_save(rig: Rig) -> None:
 def test_env_run_distinguishes_missing_devices_from_empty_port(
     rig: Rig, missing: bool
 ) -> None:
-    board = white_noise()
+    board = white_noise(load_soccfg(), std_adc=1.0, seed=None, routes=((0, 0),))
     rig.engine = Engine(
         EnginePorts(
             rig.plots,

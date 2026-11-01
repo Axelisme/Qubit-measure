@@ -27,8 +27,10 @@ For the GUI, use `uv run --directory . --no-sync -- python -m apps.measure --scr
 import os
 from pathlib import Path
 
+import yaml
+from zcu_tools.program import build_soccfg
 from zcu_tools.device.fake import FakeDevice
-from zcu_tools.experiment.ftf import ftf
+from zcu_tools.simulators.ftf.environment import ftf
 from zcu_tools.experiment.stop_signal import StopSignal
 from zcu_tools.experiment.utils.device import set_flux
 from zcu_tools.notebook import NotebookAdapter
@@ -40,6 +42,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 settings_path = Path("zcu_lab/simulation_envs/FTF/ftf.yaml").resolve()
 env = ftf(
     settings_path,
+    soccfg=build_soccfg(yaml.safe_load(Path("zcu_lab/simulation_envs/FTF/profile.yaml").read_text())),
     workers=max(1, (os.cpu_count() or 1) - 2),
     warmup=True,
 )
@@ -94,7 +97,7 @@ last_round_raw = program.get_raw()
 decimated_iq = program.acquire_decimated(env.soc, rounds=2, progress=False)
 ```
 
-Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `experiment.ftf.plan_template`, `Engine.evolve` and `populations` to inspect numeric states, outside the operator calibration path.
+Use I/Q and ordinary analysis to find working points. Normal GUI/MCP metadata exposes only the environment's public capabilities and opaque provenance ID. It does not expose populations, state labels or a calibrated working point. Environment authors may separately call `simulators.ftf.environment.plan_template`, `Engine.evolve` and `populations` to inspect numeric states, outside the operator calibration path.
 
 The YAML example supplies native/local/global dimensions and solver tolerances explicitly. Check larger fixed parent spaces, thermal-state coverage and segment refinement for your sample. This model uses weak dispersive readout, Markov/secular baths and exponential echo-characteristic dephasing. It does not guarantee arbitrary truncations or reproduce a full 1/f Ramsey/echo envelope.
 

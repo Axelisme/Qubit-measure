@@ -16,11 +16,12 @@ from zcu_tools.plotting.plots import Plots
 
 from tests.experiment._probe_support import ProbeExperiment
 from tests.experiment._saving_support import SavingCfg, SavingResult
+from tests.program._profiles import load_soccfg
 
 
 @pytest.fixture
 def environment():
-    supplied = white_noise(seed=17)
+    supplied = white_noise(load_soccfg(), std_adc=1.0, seed=17, routes=((0, 0),))
     try:
         with matplotlib.rc_context():
             yield supplied

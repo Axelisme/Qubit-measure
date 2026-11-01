@@ -5,9 +5,9 @@ from collections.abc import Mapping, Sequence
 import pytest
 from qick.asm_v2 import AsmInst, Macro, WriteReg
 from zcu_tools.program.v2.macro.dmem import DmemLookup, sweep_table_index
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import recompile, shots
 
 
@@ -54,7 +54,7 @@ def indexed_program(axes: Sequence[Mapping[str, int]]) -> TimelineProgramV2:
         def _body(self, cfg):
             self.append_macro(IndexedReads(axes, self.offset))
 
-    return Program(make_mock_soccfg(0, 0), reps=2, initial_delay=0, relax_delay=0)
+    return Program(load_soccfg(0, 0), reps=2, initial_delay=0, relax_delay=0)
 
 
 @pytest.mark.parametrize("mixed", [False, True])
@@ -120,4 +120,4 @@ def test_invalid_native_index_hit_still_rejects_axes_counts_and_overflow(
             self.append_macro(InvalidCachedIndex(axes))
 
     with pytest.raises(ValueError, match=message):
-        Program(make_mock_soccfg(0, 0), initial_delay=0, relax_delay=0)
+        Program(load_soccfg(0, 0), initial_delay=0, relax_delay=0)

@@ -10,9 +10,9 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
-from zcu_tools.program.v2.mocksoc import make_mock_soccfg
 from zcu_tools.program.v2.modules.dmem import LoadValue, LoadWord
 
+from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 
 
@@ -98,7 +98,7 @@ def test_compiled_lookup_recovers_every_slot_with_hardware_shift_width(
     modules = [LoadValue("padding", [31, 17, 9], "idx", "unused")] if padding else []
     modules.append(lookup)
     program = compile_modules(
-        make_mock_soccfg(),
+        load_soccfg(),
         modules,
         sweep=[("idx", len(values))],
         reps=1,
@@ -139,7 +139,7 @@ def test_uncompressed_scalar_lookup_reaches_legacy_register_consumer(padding):
     modules = [LoadValue("padding", [31, 17, 9], "idx", "unused")] if padding else []
     modules.append(LoadValue("lookup", values, "idx", "value"))
     program = compile_modules(
-        make_mock_soccfg(), modules, sweep=[("idx", len(values))], reps=1
+        load_soccfg(), modules, sweep=[("idx", len(values))], reps=1
     )
     assert [_execute_lookup_body(program, index) for index in range(3)] == values
 
