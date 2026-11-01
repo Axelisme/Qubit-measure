@@ -149,6 +149,35 @@ class ProducerBounds:
             for name in set().union(*paths)
         }
 
+    def enter_selection_loop(self) -> dict[str, SelectionProvenance]:
+        """Retain loop-entry nodes that later acquire the possible backedge."""
+        self.selection_at_position = {
+            name: SelectionProvenance(
+                incoming=[self.selection_at_position.get(name, SelectionProvenance())]
+            )
+            for name in self.selection_writers
+        }
+        return self.selection_at_position.copy()
+
+    def exit_selection_loop(
+        self,
+        entry: dict[str, SelectionProvenance],
+        minimum: int,
+        maximum: int | None,
+    ) -> None:
+        """Connect repeated iterations and preserve the possibly skipped path.
+
+        Consumers already retain entry nodes, so this closes their proof without
+        replaying preprocess or invalidating a fresh body-local lookup.
+        """
+        if maximum is None or maximum > 1:
+            for name, node in entry.items():
+                node.incoming.append(
+                    self.selection_at_position.get(name, SelectionProvenance())
+                )
+        if minimum == 0:
+            self.merge_selections([entry, self.selection_at_position])
+
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
         # Subclasses can replace translate/expand, so their src is not a proof.

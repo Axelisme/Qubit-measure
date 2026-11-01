@@ -1158,6 +1158,56 @@ def test_selected_playback_rejects_relation_missing_on_repeat_skipped_path():
         _selection_flow_program(body)
 
 
+@pytest.mark.parametrize("count, reload_each_time", [(1, False), (2, True)])
+def test_selected_playback_allows_single_iteration_or_fresh_repeat_lookup(
+    count, reload_each_time
+):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.repeat("again", count):
+            current = loader.lower_selected(prog) if reload_each_time else initial
+            _play_selected_length(prog, current, (39, 89))
+            current = other.lower_selected(prog)
+            _play_selected_length(prog, current, (89, 39))
+            prog.delay_by_timeline()
+
+    result = shots(_selection_flow_program(body))
+    expected = [144 * i + offset for i in range(count) for offset in (0, 44)]
+    assert [waves(shot) for shot in result] == [expected] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [144 * count] * 4
+
+
+@pytest.mark.parametrize("declare_case", [False, True])
+def test_selected_playback_preserves_deferred_capture_across_empty_branch(declare_case):
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        prog.write_reg("index", 1)  # The loader-owned capture must still select39.
+        with prog.branch(by="path", align_timeline=True) as branch:
+            if declare_case:
+                with branch.case(0):
+                    pass
+        _play_selected_length(prog, initial, (39, 89))
+
+    result = shots(_selection_flow_program(body))
+    assert [waves(shot) for shot in result] == [[0]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [44] * 4
+
+
+def test_selected_playback_uses_entry_relation_in_sibling_branch_case():
+    def body(prog, loader, other):
+        initial = loader.lower_selected(prog)
+        with prog.branch(by="path", align_timeline=False) as branch:
+            with branch.case(0) as timeline:
+                current = other.lower_selected(prog)
+                _play_selected_length(prog, current, (89, 39), timeline)
+            with branch.case(1) as timeline:
+                _play_selected_length(prog, initial, (39, 89), timeline)
+
+    result = shots(_selection_flow_program(body))
+    assert [waves(shot) for shot in result] == [[0]] * 4
+    assert [s.body_end_cycle - s.start_cycle for s in result] == [100, 44] * 2
+
+
 def _selection_program(selection: Module) -> TimelineProgramV2:
     return _program(make_mock_soccfg(1, 0), [selection], lambda p: p.emit(selection))
 

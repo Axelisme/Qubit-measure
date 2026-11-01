@@ -713,6 +713,7 @@ class RepeatLoweringEnter(Macro):
 
     def preprocess(self, prog) -> None:
         self.defined = prog._time_bounds.defined.copy()
+        self.selections = prog._time_bounds.enter_selection_loop()
         if self.counter is not None:
             maximum = self.maximum
             # Only a certified count supplies an implicit finite index range.
@@ -818,6 +819,7 @@ class RepeatLoweringExit(Macro):
         self.entry = entry
         self.iterations = iterations
         self.minimum = minimum
+        self.maximum = maximum
         self.accumulator = LoopTimelineExit(
             entry.accumulator, iterations, minimum, maximum
         )
@@ -838,6 +840,9 @@ class RepeatLoweringExit(Macro):
             self.accumulator.preprocess(prog)
         if self.minimum == 0:
             prog._time_bounds.defined.intersection_update(self.entry.defined)
+        prog._time_bounds.exit_selection_loop(
+            self.entry.selections, self.minimum, self.maximum
+        )
 
     def translate(self, prog) -> None:
         pass
