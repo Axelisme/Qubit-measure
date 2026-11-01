@@ -98,7 +98,9 @@ def test_native_unique_preselection_and_ambiguous_manual_selection(qapp, tmp_pat
         driver.screenshot(tmp_path / "before-native.png")
         driver.choose_file("Browse…", unique, evidence=tmp_path / "unique-chooser.png")
         driver.screenshot(tmp_path / "unique.png")
-        assert driver.observe(object_name="load.axes").text == "Axis: X=Flux, Y=Frequency"
+        assert (
+            driver.observe(object_name="load.axes").text == "Axis: X=Flux, Y=Frequency"
+        )
         assert driver.observe(object_name="load.axes").checked is False
         assert not driver.observe(object_name="load.axes").enabled
         assert driver.observe(object_name="native_variable").text == "signal"

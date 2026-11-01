@@ -86,14 +86,20 @@ def test_transpose_toggle_flips_request(
         driver.press_key(Qt.Key.Key_Tab)
         driver.screenshot(tmp_path / "original.png")
         original = driver.plots().axes[0]
-        assert (original.xlabel, original.ylabel) == ("Device value (flux)", "Frequency")
+        assert (original.xlabel, original.ylabel) == (
+            "Device value (flux)",
+            "Frequency",
+        )
         assert driver.observe("Axis: X=Flux, Y=Frequency").checked is False
 
         driver.click("Axis: X=Flux, Y=Frequency")
         driver.screenshot(tmp_path / "transposed.png")
         assert driver.observe("Axis: X=Frequency, Y=Flux").checked is True
         transposed = driver.plots().axes[0]
-        assert (transposed.xlabel, transposed.ylabel) == ("Frequency", "Device value (flux)")
+        assert (transposed.xlabel, transposed.ylabel) == (
+            "Frequency",
+            "Device value (flux)",
+        )
         assert transposed.xlim == pytest.approx(original.ylim)
         assert transposed.ylim == pytest.approx(original.xlim)
 
