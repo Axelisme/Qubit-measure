@@ -91,9 +91,10 @@ def test_three_wave_users_can_share_a_port_with_distinct_tmux(profile):
 
 
 @pytest.mark.parametrize("profile", ["derivation"], indirect=True)
-def test_mux_rejects_a_readout_with_tproc_control(profile):
+@pytest.mark.parametrize("control_port", [19, 0])
+def test_mux_rejects_a_readout_with_tproc_control(profile, control_port):
     ch = profile["mux"][0]["ro_chs"][0]
-    profile["readouts"][ch]["tproc_ctrl"] = 19
+    profile["readouts"][ch]["tproc_ctrl"] = control_port
     with pytest.raises(ValueError, match=r"mux\.0\.ro_chs"):
         program.build_soccfg(profile)
 

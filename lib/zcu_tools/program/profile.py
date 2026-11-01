@@ -224,6 +224,8 @@ def _apply_mux(
             raise ValueError(
                 f"{path}.ro_chs: requires unique unused in-range ADCs within pfb_nout"
             )
+        if any(profile.readouts[ch].tproc_ctrl is not None for ch in mux.ro_chs):
+            raise ValueError(f"{path}.ro_chs: mux readouts require tproc_ctrl: null")
         used_gens.add(mux.gen_ch)
         used_readouts.update(mux.ro_chs)
         gen = gens[mux.gen_ch]
@@ -280,10 +282,10 @@ def build_soccfg(profile: Mapping[str, object]) -> QickConfig:
     or environment state are read. Input and output share no mutable values.
     """
     settings = _Profile.model_validate(profile)
-    _validate_wave_ports(settings)
     gens, dacs = _generators(settings)
     readouts, adcs = _readouts(settings)
     _apply_mux(settings, gens, readouts)
+    _validate_wave_ports(settings)
     cfg = settings.model_dump(exclude={"generators", "readouts", "rf", "mux"})
     cfg.update(
         gens=gens,
