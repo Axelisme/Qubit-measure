@@ -41,6 +41,26 @@ def test_header_window_counts_only_body_lines(prefix: str, body_line: int) -> No
     assert check_sources({"guide.md": source}) == expected
 
 
+@pytest.mark.parametrize("path", ["lib/zcu_tools/example/README.md", "tests/tools/README.md", "tests/README.md"])
+@pytest.mark.parametrize("date_line", ["", "**Last updated:** yesterday", "**Last updated:** 2026-1-01"])
+def test_module_readme_requires_iso_date(path: str, date_line: str) -> None:
+    source = "# Module\n\n" + date_line + "\n\n**Readers:** framework-dev. Maintain this module.\n"
+    assert check_sources({path: source}) == (
+        Violation(path, "missing or malformed **Last updated:** YYYY-MM-DD"),
+    )
+
+
+def test_module_date_can_include_a_topic_and_live_after_header() -> None:
+    source = "**Readers:** framework-dev. Maintain this module.\n" + "\n" * 9
+    source += "**Last updated:** 2026-11-01, reader checks\n"
+    assert check_sources({"lib/example/README.md": source}) == ()
+
+
+def test_non_module_readme_does_not_require_date() -> None:
+    source = "**Readers:** agent. Read this guide.\n"
+    assert check_sources({"tools/README.md": source, "README.md": source}) == ()
+
+
 def test_front_matter_declaration_does_not_count_as_body() -> None:
     source = "---\n**Readers:** agent. Metadata only.\n---\n# Guide\n"
     assert check_sources({"guide.md": source}) == (
