@@ -24,12 +24,13 @@ def run_mist(cfg: PowerDepCfg, *, context: RunContext, retry: int) -> PowerDepRe
     Supply native PowerDepCfg: init_pulse is the calibrated pi pulse for excited
     preparation, or None for ground. probe_pulse is the fixed disturbance.
     Native optional reset retains its meaning. gain SweepCfg is fixed by plan.
-    Return actual rounded gains and complex IQ with partial data on stop.
-    context supplies SoC, plots and the cancellation token. retry is the number
-    of retries after a transient acquisition failure, from workflow settings.
-    Schedule records acquisition failures
-    on the token; other errors propagate. No fitting, device setup or saving
-    occurs, and cfg remains unchanged.
+    Return actual rounded gains and complex IQ. Cooperative cancellation returns
+    partial data. context supplies SoC, plots and the cancellation token. retry
+    is the number of retries after a transient acquisition failure, from workflow
+    settings. Producer errors propagate unchanged after retry is exhausted.
+    Converter and update errors propagate without retry. The cancellation token
+    does not store errors. No fitting, device setup or saving occurs, and cfg
+    remains unchanged.
     """
     cfg = deepcopy(cfg)
     soc, soccfg = context.soc, context.soccfg

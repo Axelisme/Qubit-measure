@@ -42,9 +42,11 @@ def run_t2ramsey(
     microseconds. context supplies SoC, plots and the cancellation token.
     retry is the workflow's transient acquisition retry count.
     The second pi/2 phase advances by 360*detune*delay. Return rounded delays,
-    complex IQ and actual activated detune in MHz, retaining partial data on
-    stop. Schedule records acquisition failures on the token; other errors
-    propagate. No setup, fit or save occurs, and cfg remains unchanged.
+    complex IQ and actual activated detune in MHz. Cooperative cancellation
+    returns partial data. Producer errors propagate unchanged after retry is
+    exhausted. Converter and update errors propagate without retry. The
+    cancellation token does not store errors. No setup, fit or save occurs,
+    and cfg remains unchanged.
     """
     cfg = deepcopy(cfg)
     soc, soccfg = context.soc, context.soccfg

@@ -2,8 +2,10 @@
 
 Each runner borrows context's SoC, plots and cancellation scope, copies the native
 cfg and returns core-compatible Result data without fitting or saving. retry is
-the workflow's transient acquisition retry count. Schedule retains partial data
-on stop and records acquisition failures on its token; other errors propagate.
+the workflow's transient acquisition retry count. Cooperative cancellation returns
+partial data. Producer errors propagate unchanged after retry is exhausted.
+Converter and update errors propagate without retry. The cancellation token does
+not store errors.
 """
 
 from copy import deepcopy
