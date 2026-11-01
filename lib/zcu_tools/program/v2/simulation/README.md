@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-02，compiled frontend 與 IR pass 行為速查
+**Last updated:** 2026-11-02，tmux wave 分派與 tport trigger
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -93,8 +93,23 @@ resolve the ADC word to the same frequency image. No carrier or conflicting imag
 raise before a request is returned. Static-config ADCs use the full frequency from
 the shared QICK `calc_ro_freq` adapter and do not require an overlapping carrier
 for this image resolution.
-Runtime readout WPORT commands are instantaneous config updates. Each port's FIFO
-uses the maximum of the command timestamp and its previous effective time, without
+Wave writes dispatch by `(port, tmux_ch)` across the program's declared generators
+and tProc-controlled readouts. For a port with tmux selectors, conf bits 8–15
+select the registered user with `(conf >> 8) & 0xFF`. Active lanes must select the same user;
+lane-dependent selectors or an unregistered port/selector raise `ValueError`.
+A user without `tmux_ch` owns its port alone and ignores these bits for dispatch.
+Duplicate keys and mixing users with and without selectors on one port raise
+`ambiguous wave output port`. Mux tone masks still use conf bits 0–7.
+
+`DPORT_WR` triggers only declared `dport` readouts whose port and mask bit match.
+`TRIG set` triggers each declared `tport` readout on its port. `TRIG clr` records
+no read. Both trigger paths use `machine.ref` plus explicit TIME or register
+`s14`, and feed the same read registration and per-shot trigger-count checks.
+Lane-dependent trigger ports raise `ValueError`.
+
+Runtime readout WPORT commands are instantaneous config updates.
+Each readout channel's FIFO uses the maximum of the command timestamp and its
+previous effective time, without
 wave duration or pipeline delays. Each read uses the last update effective at its
 window start. A different frequency or phase inside the open window raises before
 request construction; an equal update is accepted. Missing start-time config also

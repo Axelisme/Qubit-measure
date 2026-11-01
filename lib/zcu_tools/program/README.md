@@ -1,6 +1,6 @@
 # `zcu_tools.program` — QICK integration
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-02，逐 channel 接線與共用 port 檢查
 
 **讀者：** framework-dev。QICK 整合、程式建構與 acquisition 依賴速查。
 
@@ -31,11 +31,25 @@ The root contains `board`, `sw_version`, `fw_timestamp`, `refclk_freq`,
 metadata, including memory sizes, pins and clocks. `rf` supplies `dac_power` and
 `clk_groups`; the builder supplies its per-converter entries.
 
-`generators` and `readouts` are ordered channel groups. Each group supplies a
-nonnegative `count`, its QICK capability fields and positive integer clock ratios.
-Groups expand into consecutive channels, with matching two-digit DAC/ADC names.
-Generator wave-output ports precede ordinary readout control ports. ADC readback
-inputs use their own channel namespace. `fs = refclk_freq * fs_mult / fs_div`.
+Each item in `generators` or `readouts` defines one channel, in QICK channel
+order. Items supply their QICK capability fields and positive integer clock ratios.
+The caller writes each channel's wiring; the builder does not infer connections
+from channel order.
+
+| Item | Required wiring fields | Meaning |
+| --- | --- | --- |
+| Generator | `dac`, `tproc_ch`, `tmux_ch` | Two-digit DAC name, nonnegative wave-output port, nonnegative tmux selector or `null` |
+| Readout | `adc`, `tproc_ctrl`, `tmux_ch` | Two-digit ADC name, nonnegative control wave-output port or `null`, nonnegative tmux selector or `null` |
+| Readout | `trigger_type`, `trigger_port`, `trigger_bit` | `dport` or `tport`, nonnegative trigger port and bit |
+| Readout | `tproc_ch`, `b_phase` | Readback input at least -1, positive phase bit width or `null` |
+
+Nullable fields must still appear in YAML. `null` means that connection or
+capability is absent, so the builder omits its key from the QICK channel entry.
+`tproc_ctrl: null` describes a readout without tProc control, as used by PFB.
+`tmux_ch: null` describes an unshared wave port without a selector.
+Readback `tproc_ch: -1` means no readback input; the output keeps the -1 value.
+
+`fs = refclk_freq * fs_mult / fs_div`.
 Generator DDS divides fs by `interpolation`; logical fabric divides fs by
 `fabric_div`, while RF fabric divides fs by `rf_fabric_div`. These separate
 fabric ratios preserve the existing compile profile. Ordinary readout DDS divides
@@ -47,9 +61,23 @@ unused `gen_ch` and ordered unique `ro_chs`, and supplies `generator` and `reado
 capabilities. Selected generators use the mux interpolation. PFB output divides
 ADC DDS by `pfb_nch / 2`, so `pfb_nch` must be positive and even. Output-side PFB
 DDS uses this output clock; input-side DDS retains the ADC DDS clock. Selected
-readouts lose tProc control and receive PFB output ports and trigger bits in list
-order. RF converter settings do not change when a logical channel becomes mux/PFB.
+readouts must already have `tproc_ctrl: null`, or the builder raises `ValueError`
+at `mux.N.ro_chs`. The builder assigns `pfb_port` in `ro_chs` order. It preserves
+each readout's explicit trigger wiring and `b_phase`; `mux.readout` supplies no
+`b_phase`. RF converter settings do not change when a logical channel becomes mux/PFB.
 These mappings describe virtual compile capabilities, not an attached board.
+
+The builder checks converter and wave-port consistency before returning:
+
+- Each generator must have a unique `dac`.
+- Readouts sharing an `adc` must derive identical RF entries for `fs`, `fs_mult`,
+  `fs_div`, `decimation`, `f_fabric` and `coupling`. The builder creates one
+  `rf.adcs` entry per ADC name, and one `rf.dacs` entry per DAC name.
+- Generator `tproc_ch` and non-null readout `tproc_ctrl` share one wave-output
+  namespace. A port has either one user with `tmux_ch: null` or users with
+  distinct non-null selectors. Mixing null and non-null selectors is invalid.
+
+A conflict raises `ValueError` at the later user's dotted field path.
 
 
 ## Native acquisition

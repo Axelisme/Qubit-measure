@@ -1,6 +1,6 @@
 # Six independent fluxonium cavities
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-02，caller-owned board 與 YAML 路由核對
 
 **Readers:** framework-dev, lab-author, agent. Build and acquire six independent cavities through the normal simulation SoC.
 
