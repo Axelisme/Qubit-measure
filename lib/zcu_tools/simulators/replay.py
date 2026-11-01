@@ -212,7 +212,7 @@ class _RequestJSON(_NumericJSON):
     """Template acquire wire layout with typed per-point arrays."""
 
     time_base: _ReplayTimeBase
-    relax_delay_ticks: int = 0
+    relax_delay_ticks: int
     mode: AcquisitionMode
     loop_dims: tuple[int, ...]
     avg_level: int
@@ -222,7 +222,7 @@ class _RequestJSON(_NumericJSON):
     rng_version: str
     point_dims: tuple[int, ...] = ()
     point_names: tuple[str, ...] = ()
-    reps: int = 1
+    reps: int
     templates: tuple[_TemplateJSON, ...] = ()
     charge_requirements: tuple[ChargeDriveRequirement, ...] = ()
 
