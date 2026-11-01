@@ -281,13 +281,15 @@ def test_nested_control_rejects_trigger_with_innermost_scope(inner):
                 builder.emit(ro)
                 builder.timeline_inc(1.0)
     else:
-        with (
-            builder.repeat("reads", 2),
-            builder.branch(by="choice", align_timeline=True) as cases,
-            cases.case(1),
-        ):
-            builder.emit(ro)
-            builder.timeline_inc(1.0)
+        with builder.repeat("reads", 2):
+            with (
+                builder.branch(by="choice", align_timeline=True) as cases,
+                cases.case(1),
+            ):
+                builder.emit(ro)
+                builder.timeline_inc(1.0)
+            # Clear each iteration before reentering the conditional read.
+            builder.delay_by_timeline()
     prog = builder.build()
     with pytest.raises(ValueError, match=rf"ADC 0.*{inner}"):
         v2.shot_sums(prog, [v2.IQ("selected")])
