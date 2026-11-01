@@ -393,7 +393,9 @@ def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     _, widget, _, _ = module_widget
     driver, evidence = invalid_shared_module_ui
     driver.screenshot(evidence / "01-invalid-ledger.png")
-    assert "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    assert (
+        "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    )
     driver.click("Edit")
     editor = ComponentDriver(_find_open_dialog("Edit module —"))
     editor.resize_window(700, 700)
@@ -409,7 +411,9 @@ def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
     editor.click("Cancel")
     driver.screenshot(evidence / "04-cancelled.png")
     assert not driver.dialogs()
-    assert "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    assert (
+        "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    )
     driver.click("Edit")
     editor = ComponentDriver(_find_open_dialog("Edit module —"))
     editor.resize_window(700, 700)
