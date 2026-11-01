@@ -245,10 +245,11 @@ loop, case and source context.
 
 Supported controls are Pulse, PulseReadout, MuxReadout, Delay, SoftDelay, DelayAuto,
 LoadValue, LoadWord, native repeat/branch, ComputedPulse, TableLengthPulse,
-TablePulseReadout, Join and the existing reset wrappers. Join preserves compiled
-emission order. Its register effects follow the same shot-local and live-in rules
-as other instructions. Reset wrappers emit actual pulses only; they do not reset
-a quantum state. LoadValue compression does not affect semantic values.
+TablePulseReadout and the existing reset wrappers. Parallel sequences use native
+fork/join and preserve compiled emission order. Their register effects follow the
+same shot-local and live-in rules as other instructions. Reset wrappers emit
+actual pulses only; they do not reset a quantum state. LoadValue compression
+does not affect semantic values.
 LoadWord preserves uint32 words; each compiled consumer applies its operand semantics.
 
 The frontend predecodes the compiled stream once over a NumPy grid of non-reps
@@ -338,7 +339,7 @@ Normal hardware compilation and the native timeline timing policy are unchanged.
   add without normalization. Compact totals do not determine these sums.
   Herald and terminal reads retain paired outcome histories. Read-axis labels
   and classifiers follow the [program contract](../../README.md#summed-acquisition).
-  Round hooks and the builder converter receive accumulated sums, not averages.
+  Round hooks and the Schedule converter receive accumulated sums, not averages.
   Threshold, trackers and `get_raw()` materialize deterministic
   int64 shots from the retained last-round source. The environment owns signal,
   noise, rounding and loop layout. Every source call returns fresh arrays with
