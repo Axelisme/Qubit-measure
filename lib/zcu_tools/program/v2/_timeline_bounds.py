@@ -1,7 +1,7 @@
 """Producer-owned cycle bounds and emission-time write provenance."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Integral
 
 from qick.asm_v2 import CloseLoop, Macro, OpenLoop, QickParam, TimedMacro, WriteReg
@@ -51,6 +51,36 @@ class FixedLoopIndex:
         return CycleBounds(0, self.count - 1)
 
 
+@dataclass(eq=False)
+class SelectionProvenance:
+    """Reaching table relations for one register at a control-flow position.
+
+    selection is the exact loader relation at a leaf; None is an unknown write
+    or uninitialized entry. incoming joins predecessor states at Branch/Repeat
+    boundaries. Repeat adds its backedge after preparing the body, so consumers
+    retain nodes rather than deciding validity from linear preprocessing order.
+    This graph is proof metadata only; it allocates no runtime storage.
+    """
+
+    selection: TableSelection | None = None
+    incoming: list["SelectionProvenance"] = field(default_factory=list)
+
+    def matches(self, expected: TableSelection) -> bool:
+        """Return whether every reaching definition has the expected mapping."""
+        pending = [self]
+        seen: set[SelectionProvenance] = set()
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            if current.incoming:
+                pending.extend(current.incoming)
+            elif current.selection != expected:
+                return False
+        return True
+
+
 class ProducerBounds:
     """Track known producers and reject unregistered writes to timing dependencies.
 
@@ -77,8 +107,10 @@ class ProducerBounds:
             str, list[tuple[TableSelection, tuple[Macro, ...]]]
         ] = {}
         self.selected: dict[str, list[TableSelection]] = {}
-        self.selection_at_position: dict[str, TableSelection] = {}
-        self.stale_selection_consumers: dict[int, str] = {}
+        self.selection_at_position: dict[str, SelectionProvenance] = {}
+        self.selection_consumers: dict[
+            int, list[tuple[str, TableSelection, SelectionProvenance]]
+        ] = {}
         self.signed_sources: set[str] = set()
         self.author_writes: set[str] = set()
         self.framework_sources: set[str] = set()
@@ -102,16 +134,20 @@ class ProducerBounds:
         """
         for name in (selection.register, selection.selector):
             self.source(prog, name)
-            current = self.selection_at_position.get(name)
-            if current is None or (
-                current.table is not selection.table
-                or current.register != selection.register
-                or current.selector != selection.selector
-            ):
-                # Report at the translated consumer, retaining instruction
-                # diagnostics and the earlier whole-stream writer audit.
-                self.stale_selection_consumers[id(prog._time_origin)] = name
+            current = self.selection_at_position.get(name, SelectionProvenance())
+            self.selection_consumers.setdefault(id(prog._time_origin), []).append(
+                (name, selection, current)
+            )
             self.selected.setdefault(name, []).append(selection)
+
+    def merge_selections(self, paths: list[dict[str, SelectionProvenance]]) -> None:
+        """Join all executable paths, including unchanged empty Branch cases."""
+        self.selection_at_position = {
+            name: SelectionProvenance(
+                incoming=[path.get(name, SelectionProvenance()) for path in paths]
+            )
+            for name in set().union(*paths)
+        }
 
     def observe(self, macro: Macro) -> None:
         """Register the bounds and write identity of a native constant producer."""
@@ -346,10 +382,11 @@ class ProducerBounds:
 
     def _audit_selection_consumer(self, origin: Macro | None, address: int) -> None:
         """Reject a playback that reads a relation overwritten before its use."""
-        if name := self.stale_selection_consumers.get(id(origin)):
-            raise ValueError(
-                f"{name}: overwritten selected playback selection at instruction {address}"
-            )
+        for name, expected, current in self.selection_consumers.get(id(origin), ()):
+            if not current.matches(expected):
+                raise ValueError(
+                    f"{name}: overwritten selected playback selection at instruction {address}"
+                )
 
     def audit(self, prog) -> None:
         """Audit every translated write, including unreachable alternate paths.
