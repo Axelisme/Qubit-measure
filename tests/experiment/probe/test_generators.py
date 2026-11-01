@@ -101,3 +101,34 @@ def test_synthesize_leaves_parameters_output_and_exceptions_to_model():
     with pytest.raises(RuntimeError) as caught:
         generators.synthesize(broken_model, xs, [-1.0], noise_std=0.0, seed=17)
     assert caught.value is failure
+
+
+def test_sample_iq_shots_draws_centers_from_population_with_local_seed():
+    populations = np.array([0.0, 1.0, 0.2, 0.8, 0.5])
+    state = np.random.get_state()
+    samples = generators.sample_iq_shots(
+        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
+        width=0.0, shots=30000, seed=17,
+    )
+    repeated = generators.sample_iq_shots(
+        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
+        width=0.0, shots=30000, seed=17,
+    )
+    different = generators.sample_iq_shots(
+        populations, g_center=-2.0 + 1j, e_center=3.0 - 1j,
+        width=0.0, shots=30000, seed=18,
+    )
+    assert samples.shape == (5, 30000)
+    assert samples.dtype == np.complex128
+    assert_array_equal(samples, repeated)
+    assert not np.array_equal(samples, different)
+    assert np.all((samples == -2.0 + 1j) | (samples == 3.0 - 1j))
+    assert_array_equal(samples[0], np.full(30000, -2.0 + 1j))
+    assert_array_equal(samples[1], np.full(30000, 3.0 - 1j))
+    assert_allclose(np.mean(samples == 3.0 - 1j, axis=1), populations, atol=0.007)
+    assert abs(np.corrcoef((samples[2:4] == 3.0 - 1j).astype(float))[0, 1]) < 0.02
+    after = np.random.get_state()
+    assert state[0] == after[0]
+    assert_array_equal(state[1], after[1])
+    assert state[2:] == after[2:]
+    assert_array_equal(populations, [0.0, 1.0, 0.2, 0.8, 0.5])
