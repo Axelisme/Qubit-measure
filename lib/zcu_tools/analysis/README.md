@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
