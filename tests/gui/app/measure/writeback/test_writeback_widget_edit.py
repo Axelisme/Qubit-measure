@@ -359,6 +359,64 @@ def module_ui(module_widget, tmp_path, request):
     return driver, evidence
 
 
+@pytest.fixture
+def invalid_shared_module_ui(module_widget, module_ui):
+    """Seed ordinary invalid remote input through the public Form owner seam."""
+    ctrl, widget, tab_id, pane = module_widget
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    form.state.write({("gain",): {"expr": "missing.value"}}, form.env)
+    snapshot = ctrl.tab_control.get_tab_snapshot(tab_id).analysis
+    assert snapshot is not None
+    widget.refresh_module_validity(snapshot.writeback_items)
+    return module_ui
+
+
+@pytest.mark.parametrize("module_widget", ["analysis"], indirect=True)
+def test_invalid_shared_module_can_cancel_reopen_repair_and_retire(
+    module_widget, invalid_shared_module_ui
+):
+    _, widget, _, _ = module_widget
+    driver, evidence = invalid_shared_module_ui
+    driver.screenshot(evidence / "01-invalid-ledger.png")
+    assert "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "02-open-invalid.png")
+    assert not editor.observe("Save").enabled
+    assert "gain" in editor.observe(object_name="writebackEditError").text
+    assert editor.text_input(object_name="form.input.gain").text == "missing.value"
+    editor.enter_text(object_name="form.input.gain", value="0.25")
+    editor.screenshot(evidence / "03-local-repair.png")
+    assert editor.observe("Save").enabled
+    editor.click("Cancel")
+    driver.screenshot(evidence / "04-cancelled.png")
+    assert not driver.dialogs()
+    assert "Invalid configuration" in driver.observe(object_name="writebackProposed").text
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "05-reopened-invalid.png")
+    assert editor.text_input(object_name="form.input.gain").text == "missing.value"
+    assert not editor.observe("Save").enabled
+    editor.enter_text(object_name="form.input.gain", value="0.3")
+    editor.screenshot(evidence / "06-repaired.png")
+    assert editor.observe("Save").enabled
+    editor.click("Save")
+    driver.screenshot(evidence / "07-saved.png")
+    assert not driver.dialogs()
+    assert "0.3" in driver.observe(object_name="writebackProposed").tooltip
+    driver.click("Edit")
+    editor = ComponentDriver(_find_open_dialog("Edit module —"))
+    editor.resize_window(700, 700)
+    editor.screenshot(evidence / "08-reopened-saved.png")
+    assert editor.text_input(object_name="form.input.gain").text == "0.3"
+    # Public owner teardown is not a user gesture; observe its effect via the driver.
+    widget.detach()
+    driver.screenshot(evidence / "09-detached.png")
+    assert not driver.dialogs()
+
+
 def test_module_cancel_then_save_updates_only_saved_ledger(module_ui):
     driver, evidence = module_ui
     original = driver.observe(object_name="writebackProposed")
