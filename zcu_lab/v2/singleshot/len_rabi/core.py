@@ -18,10 +18,10 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
@@ -173,10 +173,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
                 builder.emit(Pulse("qub_pulse", cfg.qub_pulse, length=length))
                 builder.emit(Readout("readout", cfg.readout))
                 program = builder.build()
-                try:
-                    program.acquire(soc, progress=True, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
+                shots = step.run_acquire_shots(
+                    program, soc, options=RunOptions(progress=True)
+                )
+                if shots is None:
                     break
 
                 # Write a full shot cloud only after this point finishes.
@@ -191,7 +191,6 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         # Completed rows survive cancellation; unacquired lengths remain NaN.
         signals = buffer.array
-        update_view(signals)
 
         return LenRabiResult(
             lengths=lengths,

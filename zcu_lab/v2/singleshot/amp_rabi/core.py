@@ -18,10 +18,10 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.acquisition import StoppedPartialAcquireError
 from zcu_tools.program.v2 import GainSweep, Pulse, Readout, Reset, TimelineBuilder
 
 from zcu_lab.v2.singleshot.plot_rabi import RabiJointPlotOptions, plot_rabi_joint
@@ -215,10 +215,10 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
             # Store each completed round separately so every shot survives.
             for _, step in sched.repeat("round", rounds):
-                try:
-                    program.acquire(soc, progress=False, cancel_flag=step.stop)
-                except StoppedPartialAcquireError:
-                    step.set_stop()
+                shots = step.run_acquire_shots(
+                    program, soc, options=RunOptions(progress=False)
+                )
+                if shots is None:
                     break
                 raw = raw_shots_to_signal(program)
                 if raw.shape != (cfg.reps, gains.size):
@@ -228,7 +228,6 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 buffer[step].set(raw.T)
 
         # Join round/shot axes only; unacquired rounds remain NaN.
-        update_view(buffer.array)
         return AmpRabiResult(
             gains,
             np.arange(rounds * cfg.reps, dtype=np.int64),
