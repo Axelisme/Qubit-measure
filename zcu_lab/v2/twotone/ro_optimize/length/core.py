@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -58,9 +59,9 @@ class LengthCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class LengthAnalyzeOptions:
-    t0: float | None = None
+    t0: Annotated[float | None, Field(ge=0)] = None
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
     wavelet: str = "sym4"
@@ -177,13 +178,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         options controls smoothing and t0 (us). None or zero selects pure SNR;
         positive t0 maximizes SNR/sqrt(length + t0), favoring shorter windows
-        more strongly for smaller t0. Negative t0 raises ValueError.
+        more strongly for smaller t0. Options reject negative t0 at construction.
         NaN scores become zero before smoothing. Return best_length in us
         and publish fit. source.cfg may be None.
         """
         result = source.result
-        if options.t0 is not None and options.t0 < 0.0:
-            raise ValueError("t0 duration normalization must be non-negative")
 
         lengths, signals = result.lengths, result.signals
 
