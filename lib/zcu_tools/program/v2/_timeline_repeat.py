@@ -144,6 +144,10 @@ class LoopTimelineExit(Macro):
         result_expression = add_time(time_expression(prog, frame.entry), total)
         self._check_backedge(prog, frame, duration)
         if book.loop_timelines:
+            book.loop_timelines[-1].adc_starts.extend(
+                (timeline, ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
+                for timeline, ch, start, path in frame.adc_starts
+            )
             for ch, start, path in frame.starts:
                 book.loop_timelines[-1].starts.append(
                     (ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
@@ -317,6 +321,10 @@ class LoopTimelineExit(Macro):
             outer.starts.extend(
                 (ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
                 for ch, start, path in frame.starts
+            )
+            outer.adc_starts.extend(
+                (timeline, ch, substitute_time(start, {frame.progress: TimeVariable()}), path)
+                for timeline, ch, start, path in frame.adc_starts
             )
         for outer in book.repeats:
             outer.expression_advance = add_time(outer.expression_advance, extra_advance)
@@ -533,10 +541,18 @@ class LoopTimelineExit(Macro):
         *,
         next_entry: TimeExpression | None = None,
     ) -> None:
-        if self.maximum is None or self.maximum < 2:
+        if self.maximum is not None and self.maximum < 2:
             return
         book = self.entry.book
-        for ch, start, path in frame.starts:
+        starts = [
+            (True, "repeat", ch, start, path)
+            for ch, start, path in frame.starts
+            if self.maximum is not None
+        ] + [
+            (False, timeline, ch, start, path)
+            for timeline, ch, start, path in frame.adc_starts
+        ]
+        for generator, timeline, ch, start, path in starts:
             next_start = (
                 add_time(start, duration)
                 if next_entry is None
@@ -552,7 +568,7 @@ class LoopTimelineExit(Macro):
             )
             gap = add_time(
                 next_start,
-                scale_time(book.native_expression(prog, ch, generator=True), -1),
+                scale_time(book.native_expression(prog, ch, generator=generator), -1),
             )
             gap = substitute_time(
                 gap, {f.progress: TimeVariable() for f in [*book.loop_timelines, frame]}
@@ -565,7 +581,15 @@ class LoopTimelineExit(Macro):
                         for i in range(prog.loop_dict[selector])
                     ),
                 )
-            if not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
+            if not generator:
+                lower, _ = difference_limits(gap, TimeVariable())
+                if lower is None or lower < 0:
+                    detail = "unknown overlap cycles" if lower is None else f"{-lower} cycles"
+                    raise ValueError(
+                        f"{timeline}: channel {ch} ADC overlap across repeat backedge; "
+                        f"{detail}; cannot prove runtime start >= previous end"
+                    )
+            elif not unbounded_time(gap) and projected_expression_bounds(gap).minimum < 0:
                 raise ValueError(
                     f"repeat: channel {ch} pulse overlap across backedge; use timeline_inc"
                 )

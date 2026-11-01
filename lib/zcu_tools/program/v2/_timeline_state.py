@@ -353,6 +353,9 @@ class LoopTimelineFrame:
     starts: list[tuple[int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
         default_factory=list
     )
+    adc_starts: list[tuple[str, int, TimeExpression, tuple[tuple[str, int], ...]]] = field(
+        default_factory=list
+    )
     advance: TimeExpression = field(default_factory=TimeVariable)
     debits: list[tuple[RuntimeMath, Time]] = field(default_factory=list)
     written_channels: set[tuple[bool, int]] = field(default_factory=set)
@@ -625,6 +628,10 @@ class TimelineBook:
                 else f"{-lower} cycles; cannot prove start >= previous end"
             )
             raise ValueError(f"{timeline}: channel {channel} ADC overlap; {detail}")
+        if self.loop_timelines:
+            self.loop_timelines[-1].adc_starts.append(
+                (timeline, channel, expression, tuple(self.case_path))
+            )
 
     def require_reference_advance(self) -> None:
         """Reject reference operations inside branch cases or guarded lowering."""
