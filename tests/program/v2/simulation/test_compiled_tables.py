@@ -19,6 +19,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation._compiled_support import request
 from tests.program.v2.simulation.time_observations import time_us, times_us
@@ -66,7 +67,7 @@ def test_shared_readout_cfg_keeps_each_semantic_source():
     cfg = receiver()
     # ADC length is 31/307.2 us = 43.4 tProc cycles; generator ends at 43.
     prog, env = module_program(
-        [cfg.build("herald"), Delay("adc_gap", 1 / 430.08), cfg.build("terminal")]
+        [cfg.build("herald"), Delay("adc_gap", 1 / TPROC_MHZ), cfg.build("terminal")]
     )
     observed = request(prog, env)
     point = observed.materialize_point(0)
@@ -86,13 +87,13 @@ def test_native_shared_pulse_cfg_keeps_each_semantic_source_and_playback():
     assert [event.gen_ch for event in point.events] == [1, 1, 0]
     first, second, _ = point.events
     for event in (first, second):
-        assert time_us(observed.time_base, event.duration_ticks) == 38 / 384
+        assert time_us(observed.time_base, event.duration_ticks) == 38 / GEN_MHZ
         assert event.frequency_mhz == pytest.approx(80, abs=1e-5)
         assert event.gain == pytest.approx(0.2, abs=1e-4)
     assert [
         time_us(observed.time_base, first.start_ticks),
         time_us(observed.time_base, second.start_ticks),
-    ] == [0, 43 / 430.08]
+    ] == [0, 43 / TPROC_MHZ]
     assert len(times_us(observed.time_base, point.readouts[0].trigger_ticks)) == 1
 
 
@@ -114,7 +115,7 @@ def test_loadvalue_selects_compiled_waveform_from_declared_table(compressed):
         event = result.materialize_point(index).events[0]
         assert event.gain == pytest.approx(-0.4 if index % 2 == 0 else 0.2, abs=1e-4)
         assert time_us(result.time_base, event.duration_ticks) == pytest.approx(
-            (115 if index % 2 == 0 else 38) / 384
+            (115 if index % 2 == 0 else 38) / GEN_MHZ
         )
 
 
@@ -129,10 +130,10 @@ def test_tablelength_places_next_emission_after_each_selected_quantized_length()
         events = result.materialize_point(index).events
         assert events[0].source == "length"
         assert time_us(result.time_base, events[0].duration_ticks) == pytest.approx(
-            duration / 384
+            duration / GEN_MHZ
         )
         assert time_us(result.time_base, events[1].start_ticks) == pytest.approx(
-            end / 430.08
+            end / TPROC_MHZ
         )
 
 
@@ -158,7 +159,7 @@ def test_loadword_preserves_uint32_patterns_for_pulse_and_adc_consumers():
         point = result.materialize_point(index)
         assert point.events[0].source == "readout"
         assert point.events[0].frequency_mhz == pytest.approx(frequency, abs=1e-4)
-        assert point.events[0].gain == pytest.approx(gain / 32766)
+        assert point.events[0].gain == pytest.approx(gain / GEN_MAXV)
         assert point.readouts[0].frequency_mhz == pytest.approx((frequency,), abs=1e-4)
 
 
@@ -258,9 +259,9 @@ def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
     assert [e.gen_ch for e in events[:-1]] == [ch for ch, _ in expected]
     assert [
         time_us(observed.time_base, e.start_ticks) for e in events[:-1]
-    ] == pytest.approx([t / 430.08 for _, t in expected])
+    ] == pytest.approx([t / TPROC_MHZ for _, t in expected])
     assert time_us(observed.time_base, events[-1].start_ticks) == pytest.approx(
-        readout_start / 430.08
+        readout_start / TPROC_MHZ
     )
 
 
@@ -268,8 +269,8 @@ def test_native_reset_forms_expand_physical_pulses_and_paired_post_delays(kind):
 def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emissions(
     nested,
 ):
-    short = drive(25 / 384).build("short")
-    long = drive(50 / 384, ch=2).build("long")
+    short = drive(25 / GEN_MHZ).build("short")
+    long = drive(50 / GEN_MHZ, ch=2).build("long")
     readout = receiver().build("readout")
 
     def choose(p):
@@ -307,10 +308,10 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
         assert [e.source for e in point.events] == sources
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
-        ] == pytest.approx([t / 430.08 for t in times])
+        ] == pytest.approx([t / TPROC_MHZ for t in times])
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
-        ) == pytest.approx((times[-1] / 430.08,))
+        ) == pytest.approx((times[-1] / TPROC_MHZ,))
     prog.compile()
     rebuilt = request(prog, env)
     assert [rebuilt.materialize_point(i) for i in range(3)] == [
@@ -319,8 +320,8 @@ def test_native_module_branch_preserves_case_order_empty_paths_and_repeated_emis
 
 
 def test_program_join_only_merges_runtime_ends():
-    left = drive(38 / 384).build("left")
-    right = drive(77 / 384, ch=2).build("right")
+    left = drive(38 / GEN_MHZ).build("left")
+    right = drive(77 / GEN_MHZ, ch=2).build("right")
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
     readout = receiver().build("readout")
 
@@ -352,18 +353,18 @@ def test_program_join_only_merges_runtime_ends():
         ]
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
-        ] == pytest.approx([(start + t) / 430.08 for t in [0, 43, 0, 87, 130, 87, 174]])
+        ] == pytest.approx([(start + t) / TPROC_MHZ for t in [0, 43, 0, 87, 130, 87, 174]])
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
-        ) == pytest.approx(((start + 174) / 430.08,))
+        ) == pytest.approx(((start + 174) / TPROC_MHZ,))
 
 
 def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emissions():
     left = TableLengthPulse(
-        "left", drive(), lengths=[25 / 384, 50 / 384, 75 / 384], idx_reg="scan"
+        "left", drive(), lengths=[25 / GEN_MHZ, 50 / GEN_MHZ, 75 / GEN_MHZ], idx_reg="scan"
     )
     right = TableLengthPulse(
-        "right", drive(ch=2), lengths=[75 / 384, 50 / 384, 25 / 384], idx_reg="scan"
+        "right", drive(ch=2), lengths=[75 / GEN_MHZ, 50 / GEN_MHZ, 25 / GEN_MHZ], idx_reg="scan"
     )
     origin = LoadValue("origin", [7, 20, 10], "scan", "origin_cycles")
     readout = receiver().build("readout")
@@ -392,11 +393,11 @@ def test_parallel_table_lengths_keep_crossing_maxima_across_repeated_runtime_emi
         assert [
             time_us(result.time_base, e.start_ticks) for e in point.events
         ] == pytest.approx(
-            [(origin_cycle + t) / 430.08 for t in [0, 0, maximum, maximum, 2 * maximum]]
+            [(origin_cycle + t) / TPROC_MHZ for t in [0, 0, maximum, maximum, 2 * maximum]]
         )
         assert [
             time_us(result.time_base, e.duration_ticks) for e in point.events[:2]
-        ] == pytest.approx([(25 + 25 * index) / 384, (75 - 25 * index) / 384])
+        ] == pytest.approx([(25 + 25 * index) / GEN_MHZ, (75 - 25 * index) / GEN_MHZ])
         assert times_us(
             result.time_base, point.readouts[0].trigger_ticks
-        ) == pytest.approx(((origin_cycle + 2 * maximum) / 430.08,))
+        ) == pytest.approx(((origin_cycle + 2 * maximum) / TPROC_MHZ,))

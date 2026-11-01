@@ -11,6 +11,7 @@ from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation import SimulationSoc
 
+from tests.program._profiles import TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -179,7 +180,7 @@ def test_swept_trigger_uses_start_and_truncated_loop_step_not_pointwise_rounding
             request.materialize_point(p)
             for p in range(int(np.prod(request.point_dims)))
         )
-    ] == pytest.approx([0, 1 / 430.08, 2 / 430.08])
+    ] == pytest.approx([0, 1 / TPROC_MHZ, 2 / TPROC_MHZ])
 
 
 def test_join_emits_interleaved_read_order_and_companion_raw_from_same_realization():

@@ -295,7 +295,8 @@ def test_all_sources_preflight_second_adc_template_layout_before_any_evolution(
         trigger_ticks=np.column_stack(
             (
                 second.trigger_ticks[:, 0],
-                second.trigger_ticks[:, 0] + 3 * request.time_base.period_ticks(384.0),
+                second.trigger_ticks[:, 0]
+                + 3 * request.time_base.period_ticks(env.soccfg["gens"][0]["f_fabric"]),
             )
         ),
     )

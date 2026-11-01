@@ -5,6 +5,7 @@ from qick.asm_v2 import QickSweep1D, Trigger
 from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 
 from .timing_support import shots as _shots
@@ -52,8 +53,8 @@ def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
 ):
     def body(prog):
         prog.fork("default", into="other")
-        prog.timeline_inc(200 / 430.08)
-        prog.timeline_inc(220 / 430.08, timeline="other")
+        prog.timeline_inc(200 / TPROC_MHZ)
+        prog.timeline_inc(220 / TPROC_MHZ, timeline="other")
         prog.pulse(0, "pulse")
         prog.trigger([0])
         prog.delay_auto(gens=gens, ros=ros)
@@ -63,8 +64,8 @@ def test_native_auto_keeps_channel_selection_and_decrements_all_ends(
 
     prog = _program(body)
     assert prog.get_time_param("native", "t") == 0
-    assert prog.get_time_param("default", "t") * 430.08 == pytest.approx(200 - advance)
-    assert prog.get_time_param("other", "t") * 430.08 == pytest.approx(220 - advance)
+    assert prog.get_time_param("default", "t") * TPROC_MHZ == pytest.approx(200 - advance)
+    assert prog.get_time_param("other", "t") * TPROC_MHZ == pytest.approx(220 - advance)
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [
         0,
         advance,
@@ -87,8 +88,8 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.trigger([0], t=1)
-        prog.timeline_inc(10 / 430.08, timeline=timeline)
-        prog.send_readoutconfig(0, "config", t=offset / 430.08, timeline=timeline)
+        prog.timeline_inc(10 / TPROC_MHZ, timeline=timeline)
+        prog.send_readoutconfig(0, "config", t=offset / TPROC_MHZ, timeline=timeline)
         prog.pulse(0, "pulse", timeline=timeline)
 
     shot = _shot(_program(body, initialize))
@@ -107,7 +108,7 @@ def test_timeline_config_advances_to_its_instant_not_adc_window_or_length(
 def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
     def body(prog):
         prog.pulse(0, "pulse")
-        prog.timeline_inc(delay / 430.08)
+        prog.timeline_inc(delay / TPROC_MHZ)
         prog.pulse(0, "pulse", t="auto", timeline="default")
 
     shot = _shot(_program(body))
@@ -116,7 +117,7 @@ def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
 
 def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
     def body(prog):
-        prog.timeline_inc(10 / 430.08)
+        prog.timeline_inc(10 / TPROC_MHZ)
         prog.trigger([0], timeline="default")
         prog.wait_auto(tag="wait")
         prog.pulse(0, "pulse", timeline="default")
@@ -124,7 +125,7 @@ def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
     prog = _program(body)
     # Native ADC window is123/307.2 us =172.2 tProc cycles.
     # The named end is20 (trigger width only); native ADC wait still rounds to182.
-    assert prog.get_time_param("wait", "t") * 430.08 == pytest.approx(182)
+    assert prog.get_time_param("wait", "t") * TPROC_MHZ == pytest.approx(182)
     shot = _shot(prog)
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (10, 1),
@@ -138,18 +139,18 @@ def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
 def test_fractional_event_start_and_trigger_width_ceil_once():
     def body(prog):
         prog.send_readoutconfig(
-            0, "ro", t=0.2 / 430.08, timeline="default", tag="config"
+            0, "ro", t=0.2 / TPROC_MHZ, timeline="default", tag="config"
         )
         prog.trigger(
-            [0], t=0.2 / 430.08, width=0.2 / 430.08, timeline="default", tag="edge"
+            [0], t=0.2 / TPROC_MHZ, width=0.2 / TPROC_MHZ, timeline="default", tag="edge"
         )
         prog.delay_by_timeline()
         prog.pulse(0, "pulse", timeline="default", tag="after")
 
     prog = _program(body)
-    assert prog.get_time_param("config", "t") * 430.08 == pytest.approx(1)
-    assert prog.get_time_param("edge", "t") * 430.08 == pytest.approx(2)
-    assert prog.get_time_param("edge", "width") * 430.08 == pytest.approx(1)
+    assert prog.get_time_param("config", "t") * TPROC_MHZ == pytest.approx(1)
+    assert prog.get_time_param("edge", "t") * TPROC_MHZ == pytest.approx(2)
+    assert prog.get_time_param("edge", "width") * TPROC_MHZ == pytest.approx(1)
     assert [e.cycle for e in _shot(prog).events if e.kind == "wave"] == [1, 3]
 
 
@@ -171,7 +172,7 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
     operation, ticks, rounded
 ):
     def body(prog):
-        value = ticks / 430.08
+        value = ticks / TPROC_MHZ
         if operation == "pulse":
             prog.pulse(0, "pulse", t=value, timeline="default", tag="event")
         elif operation == "config":
@@ -186,11 +187,11 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
 
     prog = _program(body)
     start = 2 * rounded if operation == "delay" else rounded
-    assert prog.get_time_param("event", "t") * 430.08 == pytest.approx(
+    assert prog.get_time_param("event", "t") * TPROC_MHZ == pytest.approx(
         start, rel=0, abs=1e-8
     )
     if operation == "trigger":
-        assert prog.get_time_param("event", "width") * 430.08 == pytest.approx(
+        assert prog.get_time_param("event", "width") * TPROC_MHZ == pytest.approx(
             rounded, rel=0, abs=1e-8
         )
     # The mock waveform lasts 42.56 ticks; its ADC window lasts 172.2 ticks.
@@ -209,7 +210,7 @@ def test_scalar_ceil_preserves_grid_roundtrip_and_tails_outside_noise(
 
 def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     def body(prog):
-        value = QickSweep1D("scan", 0.2 / 430.08, 3.8 / 430.08)
+        value = QickSweep1D("scan", 0.2 / TPROC_MHZ, 3.8 / TPROC_MHZ)
         prog.trigger([0], t=value, width=value, timeline="default", tag="edge")
         prog.delay_by_timeline()
         prog.pulse(0, "pulse", timeline="default", tag="after")
@@ -217,15 +218,15 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
     # Width sweep leaves0..3 cycles of ADC slack; this synthetic fixture allows it.
     def initialize(prog):
         prog.add_loop("scan", 4)
-        prog.relax_delay = 3 / 430.08
+        prog.relax_delay = 3 / TPROC_MHZ
 
     prog = _program(body, initialize)
-    assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx(
+    assert prog.get_time_param("edge", "t", as_array=True) * TPROC_MHZ == pytest.approx(
         [0, 1, 2, 3]
     )
     assert prog.get_time_param(
         "edge", "width", as_array=True
-    ) * 430.08 == pytest.approx([0, 1, 2, 3])
+    ) * TPROC_MHZ == pytest.approx([0, 1, 2, 3])
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "wave"]
         for s in _shots(prog)
@@ -236,7 +237,7 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
 @pytest.mark.parametrize("placement", ["static", "sweep", "runtime"])
 def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
         prog.add_loop("scan", 2)
 
     def body(prog):
@@ -244,10 +245,10 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
         prog.trigger([0], timeline="default")
         if placement == "sweep":
             prog.timeline_inc(
-                QickSweep1D("scan", 100 / 430.08, 180 / 430.08), timeline="next_read"
+                QickSweep1D("scan", 100 / TPROC_MHZ, 180 / TPROC_MHZ), timeline="next_read"
             )
         else:
-            prog.timeline_inc(100 / 430.08, timeline="next_read")
+            prog.timeline_inc(100 / TPROC_MHZ, timeline="next_read")
             if placement == "runtime":
                 prog.timeline_inc("scan", timeline="next_read")
         prog.trigger([0], timeline="next_read")
@@ -270,12 +271,12 @@ def test_same_adc_overlap_fails_at_build_with_channel_and_cycles(placement):
 )
 def test_adc_overlap_is_rejected_across_control_flow(control):
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
         prog.add_loop("scan", 2)
 
     def trigger(prog, timeline: str | None = "default"):
         prog.trigger([0], timeline=timeline)
-        prog.timeline_inc(90 / 430.08, timeline=timeline)
+        prog.timeline_inc(90 / TPROC_MHZ, timeline=timeline)
 
     def body(prog):
         if control in {"repeat", "repeat_sync"}:
@@ -320,16 +321,16 @@ def test_native_trigger_keeps_native_time_and_overlap_behavior(previous):
 @pytest.mark.parametrize("swept", [False, True])
 def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
         prog.add_loop("scan", 2)
 
     def body(prog):
         start = (
-            QickSweep1D("scan", 0.2 / 430.08, 1.2 / 430.08) if swept else 0.2 / 430.08
+            QickSweep1D("scan", 0.2 / TPROC_MHZ, 1.2 / TPROC_MHZ) if swept else 0.2 / TPROC_MHZ
         )
-        prog.trigger([0], t=start, width=10 / 430.08)
+        prog.trigger([0], t=start, width=10 / TPROC_MHZ)
         next_start = (
-            QickSweep1D("scan", 140 / 430.08, 141 / 430.08) if swept else 140 / 430.08
+            QickSweep1D("scan", 140 / TPROC_MHZ, 141 / TPROC_MHZ) if swept else 140 / TPROC_MHZ
         )
         prog.timeline_inc(next_start)
         prog.trigger([0], timeline="default")
@@ -347,10 +348,10 @@ def test_quantized_native_adc_tail_allows_touching_named_trigger(swept):
 
 def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
 
     def native(prog):
-        prog.trigger([0], t=0.2 / 430.08, width=10 / 430.08)
+        prog.trigger([0], t=0.2 / TPROC_MHZ, width=10 / TPROC_MHZ)
 
     def qick(prog):
         prog.append_macro(
@@ -358,8 +359,8 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
                 ros=[0],
                 tts=None,
                 pins=None,
-                t=0.2 / 430.08,
-                width=10 / 430.08,
+                t=0.2 / TPROC_MHZ,
+                width=10 / TPROC_MHZ,
                 ddr4=False,
                 mr=False,
                 tag=None,
@@ -379,21 +380,21 @@ def test_native_fractional_trigger_retains_qick_outputs_and_waits_actual_adc():
 def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
     def initialize(prog):
         prog.add_loop("scan", 2)
-        prog.relax_delay = 200 / 430.08
+        prog.relax_delay = 200 / TPROC_MHZ
 
     def body(prog):
         prog.write_reg("s_out_time", 0)
         prog.trigger([0], t=None)
         if control == "branch":
             with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
-                prog.timeline_inc(200 / 430.08)
+                prog.timeline_inc(200 / TPROC_MHZ)
                 prog.trigger([0])
         elif control == "repeat":
             with prog.repeat("reads", 2):
-                prog.timeline_inc(200 / 430.08)
+                prog.timeline_inc(200 / TPROC_MHZ)
                 prog.trigger([0])
         else:
-            prog.timeline_inc(200 / 430.08)
+            prog.timeline_inc(200 / TPROC_MHZ)
             prog.trigger([0], timeline="default")
 
     with pytest.raises(
@@ -405,13 +406,13 @@ def test_unlocatable_native_adc_window_rejects_later_named_trigger(control):
 
 def test_known_native_adc_window_replaces_unlocatable_predecessor():
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
 
     def body(prog):
         prog.write_reg("s_out_time", 0)
         prog.trigger([0], t=None)
         prog.trigger([0], t=0)
-        prog.timeline_inc(140 / 430.08)
+        prog.timeline_inc(140 / TPROC_MHZ)
         prog.trigger([0], timeline="default")
 
     prog = _program(body, initialize)
@@ -425,7 +426,7 @@ def test_known_native_adc_window_replaces_unlocatable_predecessor():
 def test_native_adc_tail_is_checked_before_a_named_trigger():
     def body(prog):
         prog.trigger([0], t=0)
-        prog.timeline_inc(100 / 430.08)
+        prog.timeline_inc(100 / TPROC_MHZ)
         prog.trigger([0], timeline="default")
 
     with pytest.raises(ValueError, match=r"default.*channel 0.*ADC overlap.*73 cycles"):
@@ -437,12 +438,12 @@ def test_native_adc_tail_is_checked_before_a_named_trigger():
 )
 def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
     def initialize(prog):
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
         prog.add_loop("scan", 2)
 
     def one_read(prog):
         prog.trigger([0], timeline="default")
-        prog.timeline_inc(130 / 430.08)
+        prog.timeline_inc(130 / TPROC_MHZ)
 
     def body(prog):
         if placement in {"repeat", "repeat_sync"}:
@@ -453,7 +454,7 @@ def test_adc_windows_allow_touching_edges_and_shot_still_waits(placement):
         else:
             one_read(prog)
             if placement == "sweep":
-                prog.timeline_inc(QickSweep1D("scan", 0, 40 / 430.08))
+                prog.timeline_inc(QickSweep1D("scan", 0, 40 / TPROC_MHZ))
             elif placement == "runtime":
                 prog.timeline_inc("scan")
             prog.trigger([0], timeline="default")
@@ -489,15 +490,15 @@ def test_timeline_trigger_rejects_implicit_output_time_at_entry():
 def test_resync_compiles_and_statically_decrements_every_timeline():
     def body(prog):
         prog.fork("default", into="other")
-        prog.timeline_inc(40 / 430.08)
-        prog.timeline_inc(70 / 430.08, timeline="other")
-        prog.resync(10 / 430.08)
+        prog.timeline_inc(40 / TPROC_MHZ)
+        prog.timeline_inc(70 / TPROC_MHZ, timeline="other")
+        prog.resync(10 / TPROC_MHZ)
         prog.pulse(0, "pulse", timeline="default", tag="default")
         prog.pulse(1, "p1", timeline="other", tag="other")
 
     prog = _program(body)
-    assert prog.get_time_param("default", "t") * 430.08 == pytest.approx(30)
-    assert prog.get_time_param("other", "t") * 430.08 == pytest.approx(60)
+    assert prog.get_time_param("default", "t") * TPROC_MHZ == pytest.approx(30)
+    assert prog.get_time_param("other", "t") * TPROC_MHZ == pytest.approx(60)
     with pytest.raises(ValueError, match="s11.*s_usr_time"):
         _shot(prog)
 
@@ -511,8 +512,8 @@ def test_swept_floor_proves_sign_including_zero(start, stop, expected):
         prog.add_loop("scan", 2)
 
     def body(prog):
-        prog.timeline_inc(QickSweep1D("scan", start / 430.08, stop / 430.08))
-        prog.delay(10 / 430.08)
+        prog.timeline_inc(QickSweep1D("scan", start / TPROC_MHZ, stop / TPROC_MHZ))
+        prog.delay(10 / TPROC_MHZ)
         prog.pulse(0, "pulse", timeline="default")
 
     prog = _program(body, initialize)
@@ -531,9 +532,9 @@ def test_crossing_swept_floor_preserves_each_point():
     def body(prog):
         prog.fork("default", into="drive")
         prog.timeline_inc(
-            QickSweep1D("scan", 9 / 430.08, 11 / 430.08), timeline="drive"
+            QickSweep1D("scan", 9 / TPROC_MHZ, 11 / TPROC_MHZ), timeline="drive"
         )
-        prog.delay(10 / 430.08)
+        prog.delay(10 / TPROC_MHZ)
 
     result = _shots(_program(body, initialize))
     assert [s.body_end_cycle - s.start_cycle for s in result] == [10, 11]
@@ -545,8 +546,8 @@ def test_crossing_swept_auto_maximum_places_at_each_points_later_end():
 
     def body(prog):
         prog.fork("default", into="drive")
-        prog.pulse(0, "pulse", t=QickSweep1D("scan", 0, 100 / 430.08))
-        prog.timeline_inc(QickSweep1D("scan", 100 / 430.08, 0), timeline="drive")
+        prog.pulse(0, "pulse", t=QickSweep1D("scan", 0, 100 / TPROC_MHZ))
+        prog.timeline_inc(QickSweep1D("scan", 100 / TPROC_MHZ, 0), timeline="drive")
         prog.pulse(0, "pulse", t="auto", timeline="drive")
 
     result = _shots(_program(body, initialize))
@@ -568,9 +569,9 @@ def test_crossing_body_maximum_closes_at_each_points_latest_end():
 
     def body(prog):
         prog.fork("default", into="other")
-        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
+        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 30 / TPROC_MHZ))
         prog.timeline_inc(
-            QickSweep1D("scan", 30 / 430.08, 10 / 430.08), timeline="other"
+            QickSweep1D("scan", 30 / TPROC_MHZ, 10 / TPROC_MHZ), timeline="other"
         )
 
     result = _shots(_program(body, initialize))

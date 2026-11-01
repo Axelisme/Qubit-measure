@@ -114,25 +114,30 @@ def test_mux_channel_passband_uses_supplied_adc_clock():
         Path(__file__).parents[2] / "program" / "profiles" / "ftf.yaml"
     ).open() as stream:
         profile = yaml.safe_load(stream)
-    # Doubling the ADC clock widens its PFB channel: these carriers now share it.
-    profile["readouts"][0]["fs_mult"] = 20
-    soccfg = build_soccfg(profile)
+    original = build_soccfg(profile)
+    adc = original["readouts"][4]
+    spacing = adc["fs"] / (adc["decimation"] * adc["pfb_nch"])
+    # Start at an exact channel center. The companion is outside its half-width.
+    carrier_mhz = 2 * adc["fs"]
+    companion_mhz = carrier_mhz + 0.75 * spacing
+    profile["readouts"][0]["fs_mult"] *= 2
+    wider = build_soccfg(profile)
     base = mux_template()
-    companion = replace(base.events[1], frequency_mhz=np.full(2, 6009.601))
-    plan = ftf_module.plan_template(
-        settings(),
-        snapshot(),
-        replace(base, events=(base.events[0], companion), readouts=base.readouts[:1]),
-        soccfg=soccfg,
-        readout=configuration(),
-        time_base=TIME_BASE,
-    )
-    assert tuple(
-        p.frequency_ghz for p in plan.readouts[0].batch.events[0][0].pulses
-    ) == (
-        6.0,
-        6.009601,
-    )
+    carrier = replace(base.events[0], frequency_mhz=np.full(2, carrier_mhz))
+    companion = replace(base.events[1], frequency_mhz=np.full(2, companion_mhz))
+    window = replace(base.readouts[0], frequency_mhz=np.full((2, 1), carrier_mhz))
+    content = replace(base, events=(carrier, companion), readouts=(window,))
+    for soccfg, expected_mhz in (
+        (original, (carrier_mhz,)),
+        (wider, (carrier_mhz, companion_mhz)),
+    ):
+        plan = ftf_module.plan_template(
+            settings(), snapshot(), content, soccfg=soccfg,
+            readout=configuration(), time_base=TIME_BASE,
+        )
+        assert tuple(
+            p.frequency_ghz for p in plan.readouts[0].batch.events[0][0].pulses
+        ) == pytest.approx(np.asarray(expected_mhz) / 1000)
 
 
 def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
@@ -162,20 +167,28 @@ def test_mux_planning_selects_each_adc_channel_and_keeps_independent_grid():
 
 
 @pytest.mark.parametrize(
-    ("carrier_mhz", "companion_mhz", "retained"),
+    ("carrier_mhz", "companion_mhz"),
     [
-        (6000.0, 6009.599, 2),
-        (6000.0, 6009.6, 2),
-        (6000.0, 6009.601, 1),
-        (6000.0, 6080.0, 1),
-        (7190.0, 7195.0, 2),
-        (7190.0, 7080.0, 1),
-        (2450.0, 2458.0, 2),
+        (6000.0, 6009.599),
+        (6000.0, 6009.6),
+        (6000.0, 6009.601),
+        (6000.0, 6080.0),
+        (7190.0, 7195.0),
+        (7190.0, 7080.0),
+        (2450.0, 2458.0),
     ],
 )
 def test_mux_channel_passband_keeps_only_in_channel_carriers(
-    carrier_mhz, companion_mhz, retained
+    carrier_mhz, companion_mhz
 ):
+    soccfg = profile_soccfg("ftf")
+    adc = soccfg["readouts"][4]
+    channels = []
+    for frequency in (carrier_mhz, companion_mhz):
+        registers = soccfg.calc_ro_regs(adc, phase=0.0, sel="product")
+        soccfg.calc_ro_freq(adc, {"freq": frequency, "gen_ch": None}, registers, True, 0.0)
+        channels.append(registers["pfb_ch"])
+    retained = 1 + (channels[0] == channels[1])
     base = mux_template()
     carrier = replace(base.events[0], frequency_mhz=np.full(2, carrier_mhz))
     companion = replace(base.events[1], frequency_mhz=np.full(2, companion_mhz))
@@ -184,7 +197,7 @@ def test_mux_channel_passband_keeps_only_in_channel_carriers(
         settings(),
         snapshot(),
         replace(base, events=(carrier, companion), readouts=(window,)),
-        soccfg=profile_soccfg("ftf"),
+        soccfg=soccfg,
         readout=configuration(),
         time_base=TIME_BASE,
     )

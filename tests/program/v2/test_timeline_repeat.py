@@ -8,6 +8,7 @@ from qick.asm_v2 import Macro, Pulse, QickSweep1D, WriteReg
 from zcu_tools.program.v2.macro.wmem import PulseFromRegs
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
@@ -30,7 +31,7 @@ def _program(
                     freq=1000,
                     phase=0,
                     gain=0.5,
-                    length=25 / 384,
+                    length=25 / GEN_MHZ,
                 )  # 25 generator ticks = 28 tProc ticks.
             if initialize is not None:
                 initialize(self)
@@ -61,7 +62,7 @@ def _register_initialize(prog: TimelineProgramV2, value: int = 3):
         freq=1000,
         phase=0,
         gain=0.5,
-        length=5 / 384,
+        length=5 / GEN_MHZ,
     )  # Five generator ticks take 5.6 tProc cycles, ceiled to six.
 
 
@@ -160,7 +161,7 @@ def test_register_repeat_uses_output_pointer_and_real_scheduling_window():
     def body(prog):
         with prog.repeat("r", "count", range_hint=(1, 10)):
             prog.pulse(0, "p0")
-            prog.timeline_inc(12 / 430.08)
+            prog.timeline_inc(12 / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="default")
 
     prog = _program(body, _register_initialize, reps=2)
@@ -189,18 +190,18 @@ def test_external_timeline_places_at_actual_end_after_runtime_control(
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         with prog.repeat("r", "count", range_hint=hint):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
         if branch_after:
             with prog.branch(
                 by="scan", align_timeline=False, timeline="external"
             ) as branch:
                 with branch.case(0):
-                    prog.timeline_inc(5 / 430.08)
+                    prog.timeline_inc(5 / TPROC_MHZ)
                 with branch.case(2):
-                    prog.timeline_inc(15 / 430.08)
+                    prog.timeline_inc(15 / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="external")
 
     result = _shots(_program(body, initialize, reps=2))
@@ -221,18 +222,18 @@ def test_external_placement_reuses_runtime_control_storage(branch_after):
     def build(place):
         def body(prog):
             prog.fork("default", into="external")
-            prog.timeline_inc(100 / 430.08, timeline="external")
+            prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
             with prog.repeat("r", "count", range_hint=(0, 8)):
-                prog.timeline_inc(15 / 430.08)
+                prog.timeline_inc(15 / TPROC_MHZ)
                 prog.delay_by_timeline()
             if branch_after:
                 with prog.branch(
                     by="scan", align_timeline=False, timeline="external"
                 ) as branch:
                     with branch.case(0):
-                        prog.timeline_inc(5 / 430.08)
+                        prog.timeline_inc(5 / TPROC_MHZ)
                     with branch.case(2):
-                        prog.timeline_inc(15 / 430.08)
+                        prog.timeline_inc(15 / TPROC_MHZ)
             if place:
                 prog.pulse(1, "p1", timeline="external")
 
@@ -256,14 +257,14 @@ def test_repeat_fixed_point_matches_explicit_native_reference_loop():
     def body(prog):
         with prog.repeat("r", 2):
             prog.pulse(0, "p0")
-            prog.timeline_inc(7 / 430.08)
+            prog.timeline_inc(7 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.pulse(1, "p1", timeline="default")
 
     def native_body(prog):
         prog.open_loop(2, name="r")
         prog.pulse(0, "p0", timeline="default")
-        prog.timeline_inc(7 / 430.08)
+        prog.timeline_inc(7 / TPROC_MHZ)
         prog.delay_by_timeline()
         prog.close_loop()
         prog.pulse(1, "p1", timeline="default")
@@ -297,7 +298,7 @@ def test_repeat_nonfixed_tail_preserves_explicit_reference_position(sync_in_midd
             prog.pulse(0, "p0")
             if sync_in_middle:
                 prog.delay_by_timeline()
-            prog.timeline_inc(7 / 430.08)
+            prog.timeline_inc(7 / TPROC_MHZ)
         # A native output exposes reference, not the accumulated timeline end.
         prog.pulse(1, "p1")
 
@@ -333,7 +334,7 @@ def test_repeat_nested_or_other_timeline_sync_keeps_variable_tail(shape):
 
 def test_repeat_nonzero_entry_warns_without_inserting_reference_advance():
     def body(prog):
-        prog.timeline_inc(7 / 430.08)
+        prog.timeline_inc(7 / TPROC_MHZ)
         with prog.repeat("r", 2):
             # Direct native macro exposes the first entry reference.
             prog.append_macro(Pulse(ch=1, name="p1", t=0))
@@ -359,11 +360,11 @@ def test_variable_reference_repeat_resets_count_and_external_debit_each_shot(
     def body(prog):
         prog.write_reg("count", actual)
         prog.fork("default", into="external")
-        prog.timeline_inc(140 / 430.08, timeline="external")
+        prog.timeline_inc(140 / TPROC_MHZ, timeline="external")
         with prog.repeat("r", "count", range_hint=hint):
             prog.pulse(0, "p0")
             prog.delay_by_timeline()
-            prog.timeline_inc(7 / 430.08)
+            prog.timeline_inc(7 / TPROC_MHZ)
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
 
@@ -382,7 +383,7 @@ def test_repeat_allows_explicit_reference_owner_advances_outside_case(operation)
             if operation == "delay_by_timeline":
                 prog.delay_by_timeline()
             elif operation == "delay":
-                prog.delay(28 / 430.08)
+                prog.delay(28 / TPROC_MHZ)
             else:
                 prog.delay_auto()
         prog.pulse(1, "p1")
@@ -404,9 +405,9 @@ def test_case_rejects_reference_owner_advances_through_repeat(operation, nested)
             cases.case(0),
             prog.repeat("r", 2) if nested else nullcontext(),
         ):
-            prog.timeline_inc(28 / 430.08)
+            prog.timeline_inc(28 / TPROC_MHZ)
             if operation == "delay":
-                prog.delay(28 / 430.08)
+                prog.delay(28 / TPROC_MHZ)
             else:
                 getattr(prog, operation)()
 
@@ -447,7 +448,7 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
         prog.add_loop("scan", 2)
 
     def body(prog):
-        prog.timeline_inc(14 / 430.08)
+        prog.timeline_inc(14 / TPROC_MHZ)
         with prog.branch(by="scan", align_timeline=align) as cases:
             with (
                 cases.case(0),
@@ -456,7 +457,7 @@ def test_variable_repeat_nested_in_case_preserves_path_times_and_shot_reset(
             ):
                 prog.pulse(0, "p0")
             with cases.case(1):
-                prog.timeline_inc(28 / 430.08)
+                prog.timeline_inc(28 / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize, reps=2))
@@ -484,7 +485,7 @@ def test_variable_repeat_proves_same_channel_and_backedge_overlap(overlap):
                 prog.pulse(0, "p0", timeline="local")
             else:
                 # Raw native timing can leave a tail beyond the managed end.
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):
         _program(body)
@@ -498,9 +499,9 @@ def test_aligned_case_reconstructs_variable_repeat_with_pulse_and_delay():
         with prog.branch(by="scan", align_timeline=True) as cases:
             with cases.case(0), prog.repeat("r", 2):
                 prog.pulse(0, "p0")
-                prog.timeline_inc(5 / 430.08)
+                prog.timeline_inc(5 / TPROC_MHZ)
             with cases.case(1):
-                prog.timeline_inc(10 / 430.08)
+                prog.timeline_inc(10 / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize))
@@ -521,7 +522,7 @@ def test_branch_inside_variable_repeat_retains_iteration_origin(align):
             for index in range(2):
                 with cases.case(index):
                     prog.pulse(0, "p0")
-                    prog.timeline_inc((5 + 5 * index) / 430.08)
+                    prog.timeline_inc((5 + 5 * index) / TPROC_MHZ)
         prog.pulse(1, "p1", timeline="default")
 
     shots = _shots(_program(body, initialize))
@@ -538,7 +539,7 @@ def test_outer_reference_repeat_protects_inner_variable_repeat_backedge(safe):
             with prog.repeat("inner", 2):
                 prog.pulse(0, "p0")
             if not safe:
-                prog.append_macro(Pulse(ch=0, name="p0", t=112 / 430.08))
+                prog.append_macro(Pulse(ch=0, name="p0", t=112 / TPROC_MHZ))
             prog.delay_by_timeline()
 
     if not safe:
@@ -555,21 +556,21 @@ def test_repeat_preserves_swept_parent_and_cross_loop_long_pulse(sync_at_end):
     def initialize(prog):
         prog.add_loop("scan", 3)
         prog.add_pulse(
-            1, "flux", style="const", freq=1000, phase=0, gain=0.5, length=125 / 384
+            1, "flux", style="const", freq=1000, phase=0, gain=0.5, length=125 / GEN_MHZ
         )
 
     def body(prog):
         prog.fork("default", into=["drive", "external"])
         prog.pulse(1, "flux", timeline="external")
         prog.timeline_inc(
-            QickSweep1D("scan", 20 / 430.08, 40 / 430.08), timeline="drive"
+            QickSweep1D("scan", 20 / TPROC_MHZ, 40 / TPROC_MHZ), timeline="drive"
         )
         with prog.timeline("drive"):
             if sync_at_end:
                 prog.delay_by_timeline()
             with prog.repeat("r", 2):
                 prog.pulse(0, "p0", timeline="drive")
-                prog.timeline_inc(7 / 430.08)
+                prog.timeline_inc(7 / TPROC_MHZ)
                 if sync_at_end:
                     prog.delay_by_timeline()
             prog.pulse(0, "p0", timeline="drive")
@@ -590,9 +591,9 @@ def test_zero_entry_synchronized_repeat_accepts_unbounded_selected_start():
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
-            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)
+            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / GEN_MHZ)
         ),
-        lengths=[7 / 384, 11 / 384],
+        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
         idx_reg="scan",
     )
 
@@ -625,7 +626,7 @@ def test_unbounded_external_timeline_survives_synchronized_repeat(actual):
         prog.write_reg_op("duration", "scan", "+", 100)
         prog.timeline_inc("duration", timeline="external")
         with prog.repeat("r", "count", range_hint=(0, 3)):
-            prog.timeline_inc(10 / 430.08)
+            prog.timeline_inc(10 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.pulse(1, "p1", timeline="external")
 
@@ -640,9 +641,9 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
-            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / 384)
+            ch=0, nqz=1, freq=1000, gain=0.5, waveform=ConstWaveformCfg(length=7 / GEN_MHZ)
         ),
-        lengths=[7 / 384, 11 / 384],
+        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
         idx_reg="scan",
     )
 
@@ -660,7 +661,7 @@ def test_variable_repeat_selected_cross_grid_lengths_and_runtime_getters():
     assert [_waves(s) for s in _shots(prog)] == [[0, 8, 16], [0, 13, 26]]
     with pytest.raises(RuntimeError, match="runtime-only"):
         prog.get_time_param("inside", "t", as_array=True)
-    assert prog.get_time_param("after", "t", as_array=True) * 430.08 == pytest.approx(
+    assert prog.get_time_param("after", "t", as_array=True) * TPROC_MHZ == pytest.approx(
         [16, 26]
     )
 
@@ -676,7 +677,7 @@ def test_repeat_synchronizes_parent_before_first_iteration_and_closes_each_itera
         prog.delay_by_timeline(timeline=parent)
         with prog.repeat("repeat", 2, timeline=parent):
             prog.pulse(0, "p0", timeline=parent)
-            prog.timeline_inc(7 / 430.08, timeline=parent)
+            prog.timeline_inc(7 / TPROC_MHZ, timeline=parent)
             prog.delay_by_timeline(timeline=parent)
         prog.pulse(0, "p0", timeline=parent)
 
@@ -698,18 +699,18 @@ def test_fixed_repeat_rebases_long_external_pulse_and_reuses_parent_and_local_na
             freq=1000,
             phase=0,
             gain=0.5,
-            length=125 / 384,
+            length=125 / GEN_MHZ,
         )  # 125 generator ticks = 140 tProc ticks.
 
     def body(prog):
         prog.fork("default", into="flux")
         prog.pulse(1, "flux", timeline="flux")
-        prog.timeline_inc(advance / 430.08)
+        prog.timeline_inc(advance / TPROC_MHZ)
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
             prog.fork("default", into=["a", "b"])
             prog.pulse(0, "p0", timeline="a")
-            prog.timeline_inc(7 / 430.08, timeline="a")
+            prog.timeline_inc(7 / TPROC_MHZ, timeline="a")
             prog.join("a", "b", into="default")
             prog.join("a", "b", into="default")
             prog.delay_by_timeline()
@@ -734,7 +735,7 @@ def test_nested_repeat_syncs_chosen_parent_and_expires_inner_locals(inner_parent
         prog.delay_by_timeline()
         with prog.repeat("outer", 2):
             prog.fork("default", into="local")
-            prog.timeline_inc(10 / 430.08, timeline=inner_parent)
+            prog.timeline_inc(10 / TPROC_MHZ, timeline=inner_parent)
             prog.delay_by_timeline(timeline=inner_parent)
             with prog.repeat("inner", 2, timeline=inner_parent):
                 prog.fork(inner_parent, into="inner_local")
@@ -797,10 +798,10 @@ def test_fixed_repeat_swept_duration_debits_outer_end_at_each_scan_point():
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
-            prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+            prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
             prog.pulse(0, "p0", timeline="default")
             prog.delay_by_timeline()
         prog.pulse(1, "p1", timeline="external")
@@ -821,10 +822,10 @@ def test_fixed_repeat_preserves_crossing_external_floor():
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(30 / 430.08, timeline="external")
+        prog.timeline_inc(30 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
-            prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+            prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
             prog.delay_by_timeline()
 
     result = _shots(_program(body, initialize))
@@ -893,12 +894,12 @@ def test_repeat_register_count_cannot_alias_its_counter():
 
 def test_repeat_preserves_trigger_cycles_and_adc_window_closure():
     def initialize(prog):
-        prog.declare_readout(0, length=25 / 307.2)
+        prog.declare_readout(0, length=25 / RO_MHZ)
 
     def body(prog):
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
-            prog.trigger([0], t=5 / 430.08, width=10 / 430.08, timeline="default")
+            prog.trigger([0], t=5 / TPROC_MHZ, width=10 / TPROC_MHZ, timeline="default")
             prog.pulse(0, "p0", timeline="default")
             prog.delay_by_timeline()
 
@@ -941,11 +942,11 @@ def test_unhinted_register_repeat_preserves_actual_external_end(actual):
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count"):
             prog.pulse(0, "short", timeline="default")
-            prog.timeline_inc(9 / 430.08)
+            prog.timeline_inc(9 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
@@ -960,11 +961,11 @@ def test_unhinted_register_repeat_preserves_actual_external_end(actual):
 def test_register_repeat_wait_consumers_use_actual_remaining_end(consumer):
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
             prog.pulse(0, "short", timeline="default")
-            prog.timeline_inc(9 / 430.08)
+            prog.timeline_inc(9 / TPROC_MHZ)
             prog.delay_by_timeline()
         if consumer == "join":
             prog.join("external", into="default")
@@ -1000,10 +1001,10 @@ def test_register_repeat_external_source_allows_placement_after_deriving_point(
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
         if derive == "join":
             prog.join("external", into="default")
@@ -1032,10 +1033,10 @@ def _readout_register_initialize(prog: TimelineProgramV2):
 
 def _repeat_with_external_wait(prog: TimelineProgramV2):
     prog.fork("default", into="external")
-    prog.timeline_inc(100 / 430.08, timeline="external")
+    prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
     prog.delay_by_timeline()
     with prog.repeat("r", "count", range_hint=(2, 4)):
-        prog.timeline_inc(15 / 430.08)
+        prog.timeline_inc(15 / TPROC_MHZ)
         prog.delay_by_timeline()
 
 
@@ -1044,10 +1045,10 @@ def _send_config(
 ):
     if runtime_words:
         prog.send_readoutconfig_from_regs(
-            0, "ro", freq_reg="count", t=offset / 430.08, timeline=timeline
+            0, "ro", freq_reg="count", t=offset / TPROC_MHZ, timeline=timeline
         )
     else:
-        prog.send_readoutconfig(0, "ro", t=offset / 430.08, timeline=timeline)
+        prog.send_readoutconfig(0, "ro", t=offset / TPROC_MHZ, timeline=timeline)
 
 
 @pytest.mark.parametrize("runtime_words", [False, True])
@@ -1063,7 +1064,7 @@ def test_register_repeat_external_source_allows_config_placement(
         elif transition == "fork":
             prog.fork("external", into="derived")
         elif transition == "partial-native":
-            prog.delay(20 / 430.08)
+            prog.delay(20 / TPROC_MHZ)
         _send_config(prog, runtime_words, offset, "external")
 
     (shot,) = _shots(_program(body, _readout_register_initialize))
@@ -1089,7 +1090,7 @@ def test_register_repeat_ordinary_schedule_point_allows_config_placement(
         elif transition == "delay_by_timeline":
             prog.delay_by_timeline(timeline="external")
         else:
-            prog.delay(70 / 430.08)
+            prog.delay(70 / TPROC_MHZ)
         _send_config(prog, runtime_words, offset, target)
         prog.pulse(1, "p1", timeline=target)
 
@@ -1123,11 +1124,11 @@ def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(0, 4)):
             prog.pulse(0, "short", timeline="default")
-            prog.timeline_inc(9 / 430.08)
+            prog.timeline_inc(9 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.pulse(0, "p0", timeline="default")
 
@@ -1141,12 +1142,12 @@ def test_register_repeat_zero_minimum_preserves_parent_scheduling(actual):
 def test_partial_native_advance_preserves_actual_external_placement(advance):
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
-        prog.delay(advance / 430.08)
+        prog.delay(advance / TPROC_MHZ)
         prog.timeline_inc(0, timeline="external")
         prog.pulse(1, "p1", timeline="external")
 
@@ -1160,15 +1161,15 @@ def test_partial_native_advance_preserves_actual_external_placement(advance):
 def test_consuming_full_bound_restores_original_timeline_for_placement(consumer):
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
         if consumer == "delay_by_timeline":
             prog.delay_by_timeline(timeline="external")
         elif consumer == "native":
-            prog.delay(70 / 430.08)
+            prog.delay(70 / TPROC_MHZ)
         else:
             prog.delay_by_timeline(timeline="external")
             with prog.repeat("after", 2, timeline="external"):
@@ -1197,7 +1198,7 @@ def test_native_register_advance_consumes_wait_bound_before_restoring_placement(
             freq=1000,
             phase=0,
             gain=0.5,
-            length=125 / 384,
+            length=125 / GEN_MHZ,
         )  # 140 tProc cycles.
 
     def body(prog):
@@ -1206,7 +1207,7 @@ def test_native_register_advance_consumes_wait_bound_before_restoring_placement(
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
             prog.pulse(0, "short", timeline="default")
-            prog.timeline_inc(9 / 430.08)
+            prog.timeline_inc(9 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.delay_reg_auto("count")
         prog.pulse(1, "p1", timeline="external")
@@ -1224,10 +1225,10 @@ def test_register_repeat_swept_duration_proves_latest_wait_at_each_point():
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
-            prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+            prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
             prog.delay_by_timeline()
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
@@ -1248,13 +1249,13 @@ def test_register_repeat_clamps_crossing_wait_bound_or_partial_consumption(
 
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc((100 if consume_after else 30) / 430.08, timeline="external")
+        prog.timeline_inc((100 if consume_after else 30) / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(2, 4)):
-            prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+            prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
             prog.delay_by_timeline()
         if consume_after:
-            prog.delay(75 / 430.08)
+            prog.delay(75 / TPROC_MHZ)
 
     result = _shots(_program(body, initialize))
     expected = [105, 120, 135] if consume_after else [30, 45, 60]
@@ -1269,11 +1270,11 @@ def test_register_count_updates_and_resets_across_scan_and_shots():
     def body(prog):
         prog.write_reg_op("count", "scan", "+", 1)
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "count", range_hint=(1, 3)):
             prog.pulse(0, "short", timeline="default")
-            prog.timeline_inc(9 / 430.08)
+            prog.timeline_inc(9 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
@@ -1293,7 +1294,7 @@ def test_nested_register_repeat_preserves_minimum_advance_for_outer_wait_bound(
 ):
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat(
             "outer",
@@ -1308,7 +1309,7 @@ def test_nested_register_repeat_preserves_minimum_advance_for_outer_wait_bound(
                 timeline="local",
                 range_hint=None if register_outer else (2, 4),
             ):
-                prog.timeline_inc(15 / 430.08, timeline="local")
+                prog.timeline_inc(15 / TPROC_MHZ, timeline="local")
                 prog.delay_by_timeline(timeline="local")
             prog.join("local", into="default")
             prog.delay_by_timeline()
@@ -1328,7 +1329,7 @@ def test_native_pulse_tail_after_last_repeat_iteration_is_not_debited_again():
             prog.append_macro(
                 Pulse(ch=0, name="p0", t=0)
             )  # Native events do not advance default.
-            prog.timeline_inc(10 / 430.08)
+            prog.timeline_inc(10 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body))
@@ -1346,7 +1347,7 @@ def test_repeat_allows_native_register_reference_advance(tail_sync, external_end
         with prog.time_producer("count", CycleBounds(3, 3)):
             prog.write_reg("count", 3)
         prog.fork("default", into="external")
-        prog.timeline_inc(external_end / 430.08, timeline="external")
+        prog.timeline_inc(external_end / TPROC_MHZ, timeline="external")
         with prog.repeat("r", 2):
             prog.pulse(0, "p0")
             prog.delay_reg_auto("count")
@@ -1367,7 +1368,7 @@ def test_wrong_repeat_pulse_offset_is_detected_by_independent_timing_oracle():
     def body(prog):
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
-            prog.pulse(0, "p0", t=1 / 430.08, timeline="default")
+            prog.pulse(0, "p0", t=1 / TPROC_MHZ, timeline="default")
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body))
@@ -1383,7 +1384,7 @@ def test_nested_native_pulse_tails_survive_both_repeat_boundaries():
             prog.delay_by_timeline()
             with prog.repeat("inner", 2):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(10 / 430.08)
+                prog.timeline_inc(10 / TPROC_MHZ)
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
@@ -1407,10 +1408,10 @@ def test_repeat_rejects_managed_pulse_overlap_across_backedge(
         with prog.repeat("r", count, range_hint=hint):
             if native_prefix:
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(28 / 430.08)
+                prog.timeline_inc(28 / TPROC_MHZ)
             prog.pulse(0, "p0", timeline="default")
             prog.append_macro(
-                Pulse(ch=0, name="p0", t=(56 if native_prefix else 28) / 430.08)
+                Pulse(ch=0, name="p0", t=(56 if native_prefix else 28) / TPROC_MHZ)
             )
             prog.delay_by_timeline()
 
@@ -1426,7 +1427,7 @@ def test_nested_repeat_rejects_managed_pulse_overlap_at_either_backedge(outer, i
             prog.delay_by_timeline()
             with prog.repeat("inner", inner):
                 prog.pulse(0, "p0", timeline="default")
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
@@ -1443,7 +1444,7 @@ def test_repeat_without_backedge_allows_native_tail_after_managed_pulse(count, h
         prog.delay_by_timeline()
         with prog.repeat("r", count, range_hint=hint):
             prog.pulse(0, "p0", timeline="default")
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
@@ -1462,8 +1463,8 @@ def test_repeat_allows_managed_pulse_touching_previous_native_tail(register):
             "r", "count" if register else 2, range_hint=(0, 2) if register else None
         ):
             prog.pulse(0, "p0", timeline="default")
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
-            prog.timeline_inc(28 / 430.08)
+            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
+            prog.timeline_inc(28 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     (shot,) = _shots(_program(body, initialize))
@@ -1482,7 +1483,7 @@ def test_nested_register_range_preserves_legal_interior_counts(actual):
             prog.delay_by_timeline()
             with prog.repeat("inner", "count", range_hint=(0, 4)):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(28 / 430.08)
+                prog.timeline_inc(28 / TPROC_MHZ)
                 prog.pulse(0, "p0", timeline="default")
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
@@ -1510,15 +1511,15 @@ def test_repeat_guard_proves_swept_native_prefix_at_every_scan_point(register, s
                 range_hint=(1, 3) if register else None,
             ):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(QickSweep1D("scan", 28 / 430.08, 38 / 430.08))
+                prog.timeline_inc(QickSweep1D("scan", 28 / TPROC_MHZ, 38 / TPROC_MHZ))
                 prog.pulse(0, "p0", timeline="default")
                 prog.append_macro(
                     Pulse(
-                        ch=0, name="p0", t=QickSweep1D("scan", 56 / 430.08, 66 / 430.08)
+                        ch=0, name="p0", t=QickSweep1D("scan", 56 / TPROC_MHZ, 66 / TPROC_MHZ)
                     )
                 )
                 if safe:
-                    prog.timeline_inc(28 / 430.08)
+                    prog.timeline_inc(28 / TPROC_MHZ)
                 prog.delay_by_timeline()
             prog.delay_by_timeline()
 
@@ -1554,9 +1555,9 @@ def test_nested_native_sweep_can_cross_timestamp_floor_without_losing_managed_gu
                 range_hint=(1, 3) if register else None,
             ):
                 prog.append_macro(Pulse(ch=0, name="p0", t=0))
-                prog.timeline_inc(QickSweep1D("scan", 20 / 430.08, 40 / 430.08))
+                prog.timeline_inc(QickSweep1D("scan", 20 / TPROC_MHZ, 40 / TPROC_MHZ))
                 prog.delay_by_timeline()
-            prog.pulse(0, "p0", t=30 / 430.08, timeline="default")
+            prog.pulse(0, "p0", t=30 / TPROC_MHZ, timeline="default")
             prog.delay_by_timeline()
 
     shots = _shots(_program(body, initialize))
@@ -1577,10 +1578,10 @@ def test_repeat_guard_observes_native_pulse_entrypoints(native):
         with prog.repeat("r", 2):
             prog.pulse(0, "p0", timeline="default")
             if native == "macro":
-                prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+                prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
             elif native == "runtime-words":
                 prog.append_macro(
-                    PulseFromRegs(ch=0, name="p0", gain_reg="count", t=28 / 430.08)
+                    PulseFromRegs(ch=0, name="p0", gain_reg="count", t=28 / TPROC_MHZ)
                 )
             else:
                 prog.append_macro(Pulse(ch=0, name="p0", t="auto"))
@@ -1602,7 +1603,7 @@ def test_repeat_guard_protects_module_emission_after_native_tail():
             nqz=1,
             freq=1000,
             gain=0.5,
-            waveform=ConstWaveformCfg(length=25 / 384),
+            waveform=ConstWaveformCfg(length=25 / GEN_MHZ),
         ),
     )
 
@@ -1613,7 +1614,7 @@ def test_repeat_guard_protects_module_emission_after_native_tail():
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
             prog.emit(pulse)
-            prog.append_macro(Pulse(ch=0, name="p0", t=28 / 430.08))
+            prog.append_macro(Pulse(ch=0, name="p0", t=28 / TPROC_MHZ))
             prog.delay_by_timeline()
 
     with pytest.raises(ValueError, match="channel 0.*overlap"):

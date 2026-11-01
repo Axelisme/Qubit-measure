@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from zcu_tools.core.simulation import TimeBase
 from zcu_tools.experiment.ftf import (
     FTFMuxReadoutConfig,
     FTFReadoutConfig,
@@ -12,7 +13,6 @@ from zcu_tools.experiment.ftf import (
 )
 from zcu_tools.simulate.adc import ConditionalReadout, ReadoutModel, Receiver
 
-from tests.core._simulation import TIME_BASE, tick_array, ticks
 from tests.experiment._ftf_templates import settings, snapshot, template
 from tests.program._profiles import load_mux_soccfg
 
@@ -27,16 +27,21 @@ def isolated_carrier_plan(
 ):
     """Use flat carriers; None gives every carrier a nonzero incident gain."""
     base = template()
-    start = np.array([0, 92 * TIME_BASE.period_ticks(430.08)], dtype=np.int64)
+    soccfg = load_mux_soccfg(3, 3, gen_ch=1, ro_chs=(1, 2))
+    tproc_mhz = soccfg["tprocs"][0]["f_time"]
+    adc_mhz = soccfg["readouts"][1]["f_output"]
+    # Include the 1 ns physical input grid as well as the actual board clocks.
+    time_base = TimeBase.from_clocks((1000.0, tproc_mhz, adc_mhz))
+    start = np.array([0, 92 * time_base.period_ticks(tproc_mhz)], dtype=np.int64)
     pulses = tuple(
         replace(
             base.events[0],
             gen_ch=1,
             start_ticks=start,
-            duration_ticks=tick_array(np.full(2, 1.0)),
+            duration_ticks=np.full(2, time_base.ticks(1.0), dtype=np.int64),
             frequency_mhz=np.full(2, frequency),
             phase_deg=np.full(2, 23.0),
-            phase_reference_ticks=ticks(phase_reference_us),
+            phase_reference_ticks=time_base.ticks(phase_reference_us),
             gain=np.full(
                 2, 0.2 if addressed_tone is None or tone == addressed_tone else 0.0
             ),
@@ -49,11 +54,11 @@ def isolated_carrier_plan(
             base.readouts[0],
             channel=tone + 1,
             generator_channels=np.ones((2, 1), dtype=np.int64),
-            trigger_ticks=(start + 68750)[:, None],  # 22 tProc cycles.
+            trigger_ticks=(start + 22 * time_base.period_ticks(tproc_mhz))[:, None],
             frequency_mhz=np.full((2, 1), frequency),
             phase_deg=np.full((2, 1), 11.0),
             samples=69,
-            sample_period_ticks=TIME_BASE.period_ticks(76.8),
+            sample_period_ticks=time_base.period_ticks(adc_mhz),
         )
         for tone, frequency in enumerate(frequencies)
     )
@@ -75,10 +80,11 @@ def isolated_carrier_plan(
     return plan_template(
         settings(),
         snapshot(),
-        replace(base, events=pulses, readouts=windows),
-        soccfg=load_mux_soccfg(3, 3, gen_ch=1, ro_chs=(1, 2)),
+        replace(base, events=pulses, readouts=windows,
+                duration_ticks=np.full(2, time_base.ticks(4.0), dtype=np.int64)),
+        soccfg=soccfg,
         readout=config,
-        time_base=TIME_BASE,
+        time_base=time_base,
     )
 
 

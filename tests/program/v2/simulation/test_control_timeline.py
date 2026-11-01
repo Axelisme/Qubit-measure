@@ -26,6 +26,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -230,7 +231,7 @@ def test_loadword_uint32_frequency_and_signed_gain_are_decoded_only_by_readout()
             request.materialize_point(p).events
             for p in range(int(np.prod(request.point_dims)))
         )
-    ] == pytest.approx([3276 / 32766, -6552 / 32766])
+    ] == pytest.approx([3276 / GEN_MAXV, -6552 / GEN_MAXV])
     assert [
         t.readouts[0].frequency_mhz[0]
         for t in (
@@ -345,15 +346,15 @@ def test_two_pulse_reset_swept_lengths_use_machine_blocking_end():
             assert [
                 time_us(request.time_base, event.duration_ticks)
                 for event in timeline.events[:2]
-            ] == pytest.approx([([19, 38, 57][point] / 384)] * 2)
+            ] == pytest.approx([([19, 38, 57][point] / GEN_MHZ)] * 2)
             assert time_us(
                 request.time_base, timeline.events[-1].start_ticks
-            ) == pytest.approx([40, 62, 83][point] / 430.08)
+            ) == pytest.approx([40, 62, 83][point] / TPROC_MHZ)
             assert times_us(
                 request.time_base, timeline.readouts[0].trigger_ticks
-            ) == pytest.approx(([48, 70, 91][point] / 430.08,))
+            ) == pytest.approx(([48, 70, 91][point] / TPROC_MHZ,))
             assert time_us(request.time_base, timeline.duration_ticks) == pytest.approx(
-                [135, 157, 178][point] / 430.08
+                [135, 157, 178][point] / TPROC_MHZ
             )
     finally:
         env.devices.close_all_devices()

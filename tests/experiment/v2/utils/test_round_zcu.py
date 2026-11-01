@@ -20,22 +20,17 @@ from tests.program._timeline import compile_modules
 
 @pytest.fixture
 def soccfg() -> QickConfig:
-    return QickConfig(
-        {
-            "tprocs": [{"f_time": 430.08}],
-            "gens": [{"f_fabric": 430.08}],
-            "readouts": [{"f_output": 307.2}],
-        }
-    )
+    return load_soccfg(n_gens=1, n_readouts=1)
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_time_sweep_matches_signed_qick_clock_grid(
     soccfg: QickConfig, reverse: bool
 ) -> None:
-    start, stop = (3413.0 / 430.08, 13.0 / 430.08) if reverse else (0.03, 8.03)
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    start, stop = (3413.2 * cycle, 13.2 * cycle) if reverse else (13.2 * cycle, 3413.2 * cycle)
     sweep = make_sweep(start, stop, expts=201)
-    expected = (13 + 17 * np.arange(201)) / 430.08
+    expected = (13 + 17 * np.arange(201)) * cycle
     if reverse:
         expected = expected[::-1]
 
@@ -46,35 +41,40 @@ def test_time_sweep_matches_signed_qick_clock_grid(
 
 
 def test_scalar_time_rounds_to_nearest_generator_cycle(soccfg: QickConfig) -> None:
-    assert round_zcu_time(0.03, soccfg, gen_ch=0) == pytest.approx(13.0 / 430.08)
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    assert round_zcu_time(13.2 * cycle, soccfg, gen_ch=0) == pytest.approx(13 * cycle)
 
 
 def test_single_point_time_sweep_uses_scalar_rounding(soccfg: QickConfig) -> None:
-    sweep = make_sweep(0.03, 0.03, expts=1)
+    cycle = 1 / soccfg["tprocs"][0]["f_time"]
+    sweep = make_sweep(13.2 * cycle, 13.2 * cycle, expts=1)
     np.testing.assert_allclose(
-        sweep2array(sweep, "time", {"soccfg": soccfg}), [13.0 / 430.08]
+        sweep2array(sweep, "time", {"soccfg": soccfg}), [13 * cycle]
     )
 
 
-@pytest.mark.parametrize("stop", [0.031, 0.033])
+@pytest.mark.parametrize("span_cycles", [0.5, 1.5])
 def test_time_sweep_rejects_collapsed_hardware_steps(
-    soccfg: QickConfig, stop: float
+    soccfg: QickConfig, span_cycles: float
 ) -> None:
-    sweep = make_sweep(0.03, stop, expts=10)
+    cycle = 1 / soccfg["tprocs"][0]["f_time"]
+    sweep = make_sweep(13 * cycle, (13 + span_cycles) * cycle, expts=10)
     with pytest.raises(ValueError, match="step"):
         sweep2array(sweep, "time", {"soccfg": soccfg})
 
 
 def test_time_sweep_scales_before_hardware_rounding(soccfg: QickConfig) -> None:
-    sweep = make_sweep(0.03, 0.23, expts=5)
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    sweep = make_sweep(13.2 * cycle, (13.2 + 4 * 21.6) * cycle, expts=5)
     actual = sweep2array(sweep, "time", {"soccfg": soccfg, "gen_ch": 0, "scaler": 2.0})
-    np.testing.assert_allclose(actual, (26 + 43 * np.arange(5)) / (2 * 430.08))
+    np.testing.assert_allclose(actual, (26 + 43 * np.arange(5)) * cycle / 2)
 
 
 def test_time_sweep_uses_selected_readout_clock(soccfg: QickConfig) -> None:
-    sweep = make_sweep(0.03, 0.23, expts=5)
+    cycle = 1 / soccfg["readouts"][0]["f_output"]
+    sweep = make_sweep(9.2 * cycle, (9.2 + 4 * 15.4) * cycle, expts=5)
     actual = sweep2array(sweep, "time", {"soccfg": soccfg, "ro_ch": 0})
-    np.testing.assert_allclose(actual, (9 + 15 * np.arange(5)) / 307.2)
+    np.testing.assert_allclose(actual, (9 + 15 * np.arange(5)) * cycle)
 
 
 @pytest.mark.parametrize("scaler", [0.0, np.nan])
@@ -166,9 +166,10 @@ def test_frequency_sweep_rejects_collapsed_steps():
 def test_vectorized_time_rounds_each_point_on_generator_clock(
     soccfg: QickConfig,
 ) -> None:
-    actual = round_zcu_time(np.asarray([-0.03, 0.0, 0.03]), soccfg, gen_ch=0)
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    actual = round_zcu_time(np.asarray([-13.2, 0.0, 13.2]) * cycle, soccfg, gen_ch=0)
 
-    np.testing.assert_allclose(actual, [-13.0 / 430.08, 0.0, 13.0 / 430.08])
+    np.testing.assert_allclose(actual, np.asarray([-13, 0, 13]) * cycle)
     assert actual.shape == (3,)
 
 
@@ -277,13 +278,14 @@ def test_gain_rejects_invalid_scaler(scaler) -> None:
 
 
 def test_custom_time_sweep_quantizes_each_array_point(soccfg: QickConfig) -> None:
-    requested = np.asarray([-0.03, 0.0, 0.03])
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    requested = np.asarray([-13.2, 0.0, 13.2]) * cycle
 
     actual = sweep2array(
         requested, "time", {"soccfg": soccfg, "gen_ch": 0}, allow_array=True
     )
 
-    np.testing.assert_allclose(actual, [-13.0 / 430.08, 0.0, 13.0 / 430.08])
+    np.testing.assert_allclose(actual, np.asarray([-13, 0, 13]) * cycle)
     assert actual.shape == requested.shape
 
 
@@ -292,10 +294,12 @@ def test_apply_round_dispatches_identity_and_time(soccfg: QickConfig) -> None:
 
     assert apply_round(requested, "none", {}) is requested
     assert apply_round(0.03, "none", {}) == 0.03
+    cycle = 1 / soccfg["gens"][0]["f_fabric"]
+    rounded = round(0.03 / cycle) * cycle
     assert apply_round(0.03, "time", {"soccfg": soccfg, "gen_ch": 0}) == pytest.approx(
-        13.0 / 430.08
+        rounded
     )
     np.testing.assert_allclose(
         apply_round(requested, "time", {"soccfg": soccfg, "gen_ch": 0}),
-        [-13.0 / 430.08, 0.0, 13.0 / 430.08],
+        [-rounded, 0.0, rounded],
     )

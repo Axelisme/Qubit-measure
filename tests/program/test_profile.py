@@ -17,17 +17,15 @@ def profile(request):
         return yaml.safe_load(stream)
 
 
-@pytest.mark.parametrize("profile", ["ordinary"], indirect=True)
+@pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_independent_clocks_and_channel_groups_are_derived(profile):
-    profile["refclk_freq"] = 200.0
+    # This dedicated YAML is the worked example, not an ordinary board profile.
+    profile["mux"] = []
     gen = profile["generators"][0]
-    gen.update(fs_mult=12, fs_div=3, interpolation=2, fabric_div=4, rf_fabric_div=8)
     other = deepcopy(gen)
     other.update(count=1, fs_mult=18)
     profile["generators"].append(other)
-    profile["readouts"][0].update(
-        count=2, fs_mult=9, fs_div=2, decimation=3, samps_per_clk=5
-    )
+    profile["readouts"][0]["count"] = 2
     cfg = program.build_soccfg(profile)
     assert [g["f_dds"] for g in cfg["gens"]] == [400.0, 400.0, 600.0]
     assert [g["f_fabric"] for g in cfg["gens"]] == [200.0, 200.0, 300.0]
@@ -45,11 +43,9 @@ def test_independent_clocks_and_channel_groups_are_derived(profile):
     assert cfg["rf"]["adcs"]["01"]["f_fabric"] == 60.0
 
 
-@pytest.mark.parametrize("profile", ["mux"], indirect=True)
+@pytest.mark.parametrize("profile", ["derivation"], indirect=True)
 def test_mux_clocks_follow_refclk_and_channelization(profile):
-    profile["refclk_freq"] = 200.0
-    profile["generators"][0].update(fs_mult=12, fs_div=3)
-    profile["readouts"][0].update(fs_mult=9, fs_div=2, decimation=3)
+    # 200*12/3/8 = 100 MHz; 200*9/2/3/(64/2) = 9.375 MHz.
     cfg = program.build_soccfg(profile)
     assert cfg["gens"][1]["f_dds"] == 100.0
     assert cfg["gens"][1]["fdds_div"] == 24
@@ -110,7 +106,9 @@ def test_pfb_channelization_requires_an_integer_clock_divider(profile, channels)
 
 @pytest.mark.parametrize("profile", ["mux"], indirect=True)
 def test_mux_generator_outside_profile_reports_path(profile):
-    profile["mux"][0]["gen_ch"] = 2
+    profile["mux"][0]["gen_ch"] = sum(
+        group["count"] for group in profile["generators"]
+    )
     with pytest.raises(ValueError, match=r"mux\.0\.gen_ch"):
         program.build_soccfg(profile)
 

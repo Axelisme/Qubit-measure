@@ -11,6 +11,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.macro.loop import CloseInnerLoop, OpenInnerLoop
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 
 
@@ -26,7 +27,7 @@ class DispatchProgram(TimelineProgramV2):
             freq=100,
             phase=0,
             gain=0.1,
-            length=5 / 384,
+            length=5 / GEN_MHZ,
         )
         self.add_reg("count")
         self.add_reg("counter")
@@ -35,7 +36,7 @@ class DispatchProgram(TimelineProgramV2):
     def _body(self, cfg):
         self.append_macro(OpenInnerLoop("inner", "counter", "count", range_hint=(2, 4)))
         self.pulse(ch=0, name="p", t=0)
-        self.delay(15 / 430.08)
+        self.delay(15 / TPROC_MHZ)
         self.append_macro(CloseInnerLoop("inner", "counter", "count"))
 
 
@@ -43,8 +44,8 @@ def test_native_compiler_dispatch_uses_public_dmem_without_mutating_it():
     prog = DispatchProgram(
         load_soccfg(),
         reps=2,
-        initial_delay=20 / 430.08,
-        relax_delay=7 / 430.08,
+        initial_delay=20 / TPROC_MHZ,
+        relax_delay=7 / TPROC_MHZ,
     )
     layout = prog.timing_layout
     dmem = prog.compile_datamem()

@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import numpy as np
-from zcu_tools.core.simulation import AcquireRequest, RoundRequest, RoundSignals
+from zcu_tools.core.simulation import AcquireRequest, RoundRequest, RoundSignals, TimeBase
 from zcu_tools.experiment.single_fluxonium.runtime import (
     SingleFluxoniumSource,
     single_fluxonium,
@@ -82,8 +82,17 @@ def test_extra_declared_clock_preserves_original_channel_physical_iq_bits():
     try:
         original, a = simulate(False)
         expanded, b = simulate(True)
-        assert original.time_base.ticks_per_us == 43008
-        assert expanded.time_base.ticks_per_us == 172032
+        gen, extra = env.soccfg["gens"][:2]
+        expected_base = TimeBase.from_clocks(
+            (env.soccfg["tprocs"][0]["f_time"], gen["f_fabric"],
+             gen["f_fabric"] * gen["samps_per_clk"],
+             env.soccfg["readouts"][0]["f_output"])
+        )
+        assert original.time_base == expected_base
+        assert expanded.time_base == TimeBase.from_clocks(
+            (float(expected_base.ticks_per_us), extra["f_fabric"],
+             extra["f_fabric"] * extra["samps_per_clk"])
+        )
         assert {event.gen_ch for event in expanded.templates[0].events} == {0}
         assert np.linalg.norm(a) > 0
         np.testing.assert_array_equal(a.view(np.uint64), b.view(np.uint64))

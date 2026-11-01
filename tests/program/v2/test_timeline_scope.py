@@ -7,6 +7,7 @@ import pytest
 from zcu_tools.program import v2
 from zcu_tools.program.v2._timeline_selected import PlaybackChoice, SelectedPlayback
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots, waves
 
@@ -35,7 +36,7 @@ class _TimedOperation(v2.Module):
     def declare(self, prog: v2.TimelineProgramV2) -> None:
         prog.declare_gen(0, nqz=1)
         prog.add_pulse(
-            0, "p", style="const", freq=100, phase=0, gain=0.5, length=39 / 384
+            0, "p", style="const", freq=100, phase=0, gain=0.5, length=39 / GEN_MHZ
         )
         prog.declare_readout(0, length=0.2)
         prog.add_readoutconfig(0, "ro", freq=100)
@@ -50,7 +51,7 @@ class _TimedOperation(v2.Module):
         """Leave timeline selection to the timed API, not module.emit."""
         prog.write_reg("index", 0)
         prog.write_reg("runtime_word", 1000)
-        t = 10 / 430.08
+        t = 10 / TPROC_MHZ
         if self.operation == "send_readoutconfig":
             prog.send_readoutconfig(0, "ro", t=t, **self.placement)
         elif self.operation == "send_readoutconfig_from_regs":
@@ -91,9 +92,9 @@ def _compile_operation(frontend: str, operation: str, context: str):
 
     def body(prog: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         prog.fork("default", into=["outer", "inner"])
-        prog.timeline_inc(100 / 430.08, timeline="outer")
-        prog.timeline_inc(200 / 430.08, timeline="inner")
-        prog.timeline_inc(300 / 430.08, timeline="default")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="outer")
+        prog.timeline_inc(200 / TPROC_MHZ, timeline="inner")
+        prog.timeline_inc(300 / TPROC_MHZ, timeline="default")
         scope = nullcontext() if context == "outside" else prog.timeline("outer")
         with scope:
             if context == "restored":

@@ -25,6 +25,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots, waves
 
@@ -52,7 +53,7 @@ def _program(
     body: Callable[[TimelineProgramV2], None],
     initialize: Callable[[TimelineProgramV2], None] | None = None,
     *,
-    fabric_clock: float = 384,
+    fabric_clock: float = GEN_MHZ,
 ) -> TimelineProgramV2:
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
@@ -93,7 +94,7 @@ def test_pulse_ceil_covers_actual_playback_plus_post_once(post, spacing, timelin
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
         2 * spacing + 9
     ] * 2
-    assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(spacing + 5)
+    assert prog.get_time_param("second", "t") * TPROC_MHZ == pytest.approx(spacing + 5)
     prog.compile()
     assert shots(prog) == result
 
@@ -105,7 +106,7 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
     origin, swept_trigger, offset, post
 ):
     trigger = (
-        QickSweep1D("scan", offset, offset + 2 / 430.08) if swept_trigger else offset
+        QickSweep1D("scan", offset, offset + 2 / TPROC_MHZ) if swept_trigger else offset
     )
     readout = PulseReadout(
         "read",
@@ -114,11 +115,11 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
             nqz=1,
             freq=1000,
             gain=0.5,
-            waveform=ConstWaveformCfg(length=10 / 384),
+            waveform=ConstWaveformCfg(length=10 / GEN_MHZ),
             pre_delay=0,
             post_delay=post,
             ro_ch=0,
-            ro_length=13 / 307.2,
+            ro_length=13 / RO_MHZ,
             trig_offset=trigger,
         ),
     )
@@ -199,7 +200,7 @@ def test_fractional_delay_from_register_origin_rounds_up_without_reference_advan
 def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
     kind, swept_post
 ):
-    post = QickSweep1D("scan", 0.0005, 0.0005 + 4 / 430.08) if swept_post else 0.0005
+    post = QickSweep1D("scan", 0.0005, 0.0005 + 4 / TPROC_MHZ) if swept_post else 0.0005
     if kind == "pulse":
         owner = Pulse("drive", _pulse_cfg(post=post))
     else:
@@ -254,10 +255,10 @@ def test_runtime_origin_keeps_fractional_event_tail_until_post_is_added(
 
 @pytest.mark.parametrize("swept_post", [False, True])
 def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
-    post = QickSweep1D("scan", 0.0005, 0.0005 + 4 / 430.08) if swept_post else 0.0005
+    post = QickSweep1D("scan", 0.0005, 0.0005 + 4 / TPROC_MHZ) if swept_post else 0.0005
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 89 / 384), post=post),
+        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 89 / GEN_MHZ), post=post),
     )
 
     def body(prog):
@@ -283,7 +284,7 @@ def test_affine_waveform_and_post_sweeps_ceil_complete_end(swept_post):
 @pytest.mark.parametrize("post_ticks, end", [(5e-11, 28), (2e-10, 29)])
 def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
     pulse = Pulse(
-        "precise", _pulse_cfg(length=25 / 384, pre=0, post=post_ticks / 430.08)
+        "precise", _pulse_cfg(length=25 / GEN_MHZ, pre=0, post=post_ticks / TPROC_MHZ)
     )
     prog = _program([pulse], lambda p: p.emit(pulse))
     # Exact 28-tick playback plus post: only the tail outside tolerance adds a tick.
@@ -293,9 +294,9 @@ def test_scalar_static_cross_grid_ceil_applies_noise_tolerance(post_ticks, end):
 def test_runtime_cross_grid_length_sweep_ceil_without_implicit_time_table():
     pulse = Pulse(
         "cross_grid",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0),
+        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0),
     )
-    tail = Pulse("tail", _pulse_cfg(1, length=10 / 384, pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=10 / GEN_MHZ, pre=0, post=0))
 
     def body(prog):
         prog.emit(pulse)
@@ -318,7 +319,7 @@ def _signed_power_cost(value: int) -> int:
 
 
 @pytest.mark.parametrize(
-    "clock, weight", [(384, 287), (307.2, 359), (38.4, 2872), (430.08, 256)]
+    "clock, weight", [(GEN_MHZ, 287), (RO_MHZ, 359), (38.4, 2872), (TPROC_MHZ, 256)]
 )
 def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
     clock, weight
@@ -339,22 +340,22 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
     starts = [waves(shot)[1] for shot in shots(prog)]
     assert starts == [(n * weight + 255) // 256 for n in (256, 257, 258)] * 2
     observed = starts[0]  # At n=256 the public end reveals the multiplier exactly.
-    ratio = Fraction("430.08") / Fraction(str(clock))
+    ratio = Fraction(str(TPROC_MHZ)) / Fraction(str(clock))
     counts = np.arange(int(500 * clock) + 1, dtype=np.int64)
     physical_numerator = counts * ratio.numerator
     scheduled = (counts * observed + 255) // 256
     error_numerator = scheduled * ratio.denominator - physical_numerator
     assert np.all(error_numerator >= 0)
-    assert np.all(error_numerator <= 430.08 * ratio.denominator)
+    assert np.all(error_numerator <= TPROC_MHZ * ratio.denominator)
     admissible = []
     for candidate in range(
         ceil(256 * ratio),
-        int(256 * (ratio + Fraction("430.08") / int(500 * clock))) + 2,
+        int(256 * (ratio + Fraction(str(TPROC_MHZ)) / int(500 * clock))) + 2,
     ):
         error = (
             (counts * candidate + 255) // 256
         ) * ratio.denominator - physical_numerator
-        if np.all(error >= 0) and np.all(error <= 430.08 * ratio.denominator):
+        if np.all(error >= 0) and np.all(error <= TPROC_MHZ * ratio.denominator):
             admissible.append(candidate)
     assert observed == min(admissible, key=lambda w: (_signed_power_cost(w), w))
     shifts = [
@@ -364,16 +365,16 @@ def test_runtime_conversion_uses_minimum_csd_upper_weight_with_500us_budget(
         and any(shift in op for shift in ("SL", "SR", "ASR"))
     ]
     assert all(int(op.split("#")[-1]) <= 15 for op in shifts)
-    if clock == 430.08:
+    if clock == TPROC_MHZ:
         assert shifts == []
 
 
 def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
     pulse = Pulse(
         "wide",
-        _pulse_cfg(length=QickSweep1D("scan", 3 / 384, 65535 / 384), pre=0, post=0),
+        _pulse_cfg(length=QickSweep1D("scan", 3 / GEN_MHZ, 65535 / GEN_MHZ), pre=0, post=0),
     )
-    tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=3 / GEN_MHZ, pre=0, post=0))
 
     def body(prog):
         prog.emit(pulse)
@@ -389,10 +390,10 @@ def test_runtime_length_sweep_keeps_correlated_nonnegative_product_bounds():
 def test_branch_merge_preserves_runtime_cross_grid_length_producer(align):
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 77 / 384), pre=0, post=0),
+        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 77 / GEN_MHZ), pre=0, post=0),
     )
-    other = Pulse("other", _pulse_cfg(length=35 / 384, pre=0, post=0))
-    tail = Pulse("tail", _pulse_cfg(1, length=3 / 384, pre=0, post=0))
+    other = Pulse("other", _pulse_cfg(length=35 / GEN_MHZ, pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=3 / GEN_MHZ, pre=0, post=0))
 
     def body(prog):
         with prog.branch(by="scan", align_timeline=align) as cases:
@@ -430,12 +431,12 @@ def test_selected_waveform_with_native_length_sweep_tracks_selected_end():
         val_reg="selected",
         pulses=[
             _pulse_cfg(
-                length=QickSweep1D("scan", n / 384, (n + 76) / 384), pre=0, post=0
+                length=QickSweep1D("scan", n / GEN_MHZ, (n + 76) / GEN_MHZ), pre=0, post=0
             )
             for n in (39, 40)
         ],
     )
-    tail = Pulse("tail", _pulse_cfg(1, length=10 / 384, pre=0, post=0))
+    tail = Pulse("tail", _pulse_cfg(1, length=10 / GEN_MHZ, pre=0, post=0))
 
     def initialize(prog):
         prog.add_loop("choice", 2)
@@ -471,7 +472,7 @@ def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
     prog = _program([pulse, tail], body, lambda prog: prog.add_loop("scan", 3))
     # QICK resolves 39,77,115 generator clocks. At clock ratio28/25,
     # W=287 gives ceil(n*287/256)=44,87,129, not affine44,87,130.
-    assert prog.get_pulse_param("drive", "total_length", as_array=True) * 384 == (
+    assert prog.get_pulse_param("drive", "total_length", as_array=True) * GEN_MHZ == (
         pytest.approx([39, 77, 115])
     )
     result = shots(prog)
@@ -492,8 +493,8 @@ def test_nonaffine_sweep_ceil_uses_exact_registered_playback_at_each_point():
 def test_nonaffine_post_and_repeated_emissions_keep_exact_same_channel_spacing(
     descending, swept_post
 ):
-    start, stop = (115 / 384, 39 / 384) if descending else (39 / 384, 115 / 384)
-    post = QickSweep1D("scan", 0.0002, 0.0002 + 0.1 / 430.08) if swept_post else 0.0002
+    start, stop = (115 / GEN_MHZ, 39 / GEN_MHZ) if descending else (39 / GEN_MHZ, 115 / GEN_MHZ)
+    post = QickSweep1D("scan", 0.0002, 0.0002 + 0.1 / TPROC_MHZ) if swept_post else 0.0002
     pulse = Pulse(
         "drive", _pulse_cfg(length=QickSweep1D("scan", start, stop), pre=0, post=post)
     )
@@ -521,7 +522,7 @@ def test_multi_axis_nonaffine_sweep_reenters_nested_repeat_at_the_same_point():
     pulse = Pulse(
         "drive",
         _pulse_cfg(
-            length=39 / 384 + QickSpan("scan", 76 / 384) + QickSpan("fine", 2 / 384),
+            length=39 / GEN_MHZ + QickSpan("scan", 76 / GEN_MHZ) + QickSpan("fine", 2 / GEN_MHZ),
             pre=0,
             post=0,
         ),
@@ -571,7 +572,7 @@ def test_readout_post_follows_generator_without_waiting_for_adc(
             gain=0.5,
             waveform=ConstWaveformCfg(length=length),
             pre_delay=0.01,
-            post_delay=QickSweep1D("scan", 0.0005, 0.0005 + 4 / 430.08)
+            post_delay=QickSweep1D("scan", 0.0005, 0.0005 + 4 / TPROC_MHZ)
             if swept_post
             else 0.0005,
             ro_ch=0,
@@ -616,7 +617,7 @@ def test_readout_post_follows_generator_without_waiting_for_adc(
 def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_padding():
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0),
+        _pulse_cfg(length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0),
     )
     tail = Pulse("tail", _pulse_cfg(2, pre=0, post=0))
     loader = LoadValue("other", [60, 20, 100], "scan", "other_end")
@@ -626,7 +627,7 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
         prog.emit(pulse, timeline="drive")
         prog.emit(loader)
         prog.timeline_inc("other_end", timeline="other")
-        prog.delay(50 / 430.08)
+        prog.delay(50 / TPROC_MHZ)
         prog.join("drive", "other", into="default")
         prog.emit(tail)
 
@@ -645,13 +646,13 @@ def test_nonaffine_reference_debit_and_runtime_max_use_selected_point_not_paddin
 def test_nonaffine_boundary_does_not_certify_a_negative_same_channel_offset():
     pulse = Pulse(
         "drive",
-        _pulse_cfg(length=QickSweep1D("scan", 25 / 384, 75 / 384), pre=0, post=0),
+        _pulse_cfg(length=QickSweep1D("scan", 25 / GEN_MHZ, 75 / GEN_MHZ), pre=0, post=0),
         pulse_id="drive",
     )
 
     def body(prog):
         prog.emit(pulse)
-        prog.pulse(0, "drive", t=-1 / 430.08, timeline="default")
+        prog.pulse(0, "drive", t=-1 / TPROC_MHZ, timeline="default")
 
     # At the first point,28-1 starts before actual playback ends at28.
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
@@ -673,7 +674,7 @@ def test_native_sweep_delay_preserves_author_declared_dmem_capacity():
     prog = _program(
         [],
         lambda prog: prog.timeline_inc(
-            QickSweep1D("scan", 43.68 / 430.08, 128.8 / 430.08)
+            QickSweep1D("scan", 43.68 / TPROC_MHZ, 128.8 / TPROC_MHZ)
         ),
         initialize,
     )
@@ -698,7 +699,7 @@ def test_readout_length_sweep_adds_post_to_generator_without_adc_padding():
             nqz=1,
             freq=1000,
             gain=0.5,
-            waveform=ConstWaveformCfg(length=QickSweep1D("scan", 40 / 384, 116 / 384)),
+            waveform=ConstWaveformCfg(length=QickSweep1D("scan", 40 / GEN_MHZ, 116 / GEN_MHZ)),
             pre_delay=0,
             post_delay=0.0002,
             ro_ch=0,
@@ -729,16 +730,16 @@ def test_readout_length_sweep_adds_post_to_generator_without_adc_padding():
 @pytest.mark.parametrize("kind", ["two", "bath"])
 def test_nonaffine_composite_aggregate_and_dependent_placement(kind):
     cavity = _pulse_cfg(
-        length=QickSweep1D("scan", 39 / 384, 115 / 384), pre=0, post=0.0002
+        length=QickSweep1D("scan", 39 / GEN_MHZ, 115 / GEN_MHZ), pre=0, post=0.0002
     )
-    qubit = _pulse_cfg(1, length=77 / 384, pre=0, post=0.0002)
+    qubit = _pulse_cfg(1, length=77 / GEN_MHZ, pre=0, post=0.0002)
     reset = (
         TwoPulseResetCfg(pulse1_cfg=cavity, pulse2_cfg=qubit)
         if kind == "two"
         else BathResetCfg(
             cavity_tone_cfg=cavity,
             qubit_tone_cfg=qubit,
-            pi2_cfg=_pulse_cfg(0, length=20 / 384, pre=0, post=0.0002),
+            pi2_cfg=_pulse_cfg(0, length=20 / GEN_MHZ, pre=0, post=0.0002),
         )
     ).build("reset")
 

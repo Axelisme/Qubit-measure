@@ -13,10 +13,10 @@ from zcu_tools.core.simulation import (
     ReadoutWindow,
     RoundRequest,
     RoundSignals,
+    TimeBase,
 )
 from zcu_tools.experiment.simulation import white_noise
 
-from tests.core._simulation import TIME_BASE, tick_tuple
 from tests.program._profiles import load_soccfg
 
 if TYPE_CHECKING:
@@ -37,6 +37,9 @@ def integrated(result: IntegratedRound | RoundSignals) -> IntegratedRound:
 def test_white_noise_returns_deferred_full_raw_with_independent_round_totals():
     environment = white_noise(load_soccfg(), std_adc=3, seed=17, routes=((0, 0),))
     try:
+        time_base = TimeBase.from_clocks(
+            (1000.0, environment.soccfg["readouts"][0]["f_output"])
+        )
         request = AcquireRequest(
             mode="integrated",
             loop_dims=(2, 1200, 3),
@@ -44,13 +47,15 @@ def test_white_noise_returns_deferred_full_raw_with_independent_round_totals():
             reps=1200,
             readouts=(
                 ReadoutWindow(
-                    0, 0, 8, TIME_BASE.period_ticks(307.2), tick_tuple((0.0, 0.1))
+                    0, 0, 8,
+                    time_base.period_ticks(environment.soccfg["readouts"][0]["f_output"]),
+                    (0, time_base.ticks(0.1)),
                 ),
             ),
             root_seed=17,
             sequence=0,
             rng_version=environment.soc.binding.rng_version,
-            time_base=TIME_BASE,
+            time_base=time_base,
         )
         round_request = RoundRequest(
             request, environment.soc.binding.capture_snapshot(), 0

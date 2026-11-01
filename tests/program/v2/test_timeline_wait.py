@@ -21,6 +21,7 @@ from zcu_tools.program.v2.modules.readout import MuxReadoutCfg, PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.timeline import CycleBounds, TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_mux_soccfg, load_soccfg
 
 from .timing_support import shots, waves
@@ -40,9 +41,9 @@ def t1_program(
             nqz=1,
             mixer_freq=1000,
             length=0.1,
-            ro_length=55 / 76.8,
-            trig_offset=12 / 430.08,
-            post_delay=10 / 430.08,
+            ro_length=55 / soccfg["readouts"][0]["f_output"],
+            trig_offset=12 / TPROC_MHZ,
+            post_delay=10 / TPROC_MHZ,
             tones=[
                 MuxReadoutTone(ro_ch=ch, freq=1000 + 80 * ch, gain=0.1) for ch in (0, 1)
             ],
@@ -56,9 +57,9 @@ def t1_program(
             freq=100,
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.1),
-            ro_length=127 / 307.2,
-            trig_offset=12 / 430.08,
-            post_delay=10 / 430.08,
+            ro_length=127 / RO_MHZ,
+            trig_offset=12 / TPROC_MHZ,
+            post_delay=10 / TPROC_MHZ,
         ).build("read")
 
     loader = LoadValue("delays", [43, 300, 3484], "delay", "delay_cycles")
@@ -72,7 +73,7 @@ def t1_program(
                 self.declare(native_gap)
             self.declare_gen(1, nqz=1)
             self.add_pulse(
-                1, "pi", style="const", freq=1000, phase=0, gain=0.5, length=25 / 384
+                1, "pi", style="const", freq=1000, phase=0, gain=0.5, length=25 / GEN_MHZ
             )
             self.declare(readout)
 
@@ -83,9 +84,9 @@ def t1_program(
                 self.emit(native_gap)
             else:
                 gap = (
-                    QickSweep1D("delay", 43 / 430.08, 3484 / 430.08)
+                    QickSweep1D("delay", 43 / TPROC_MHZ, 3484 / TPROC_MHZ)
                     if delay_kind == "uniform"
-                    else 43 / 430.08
+                    else 43 / TPROC_MHZ
                 )
                 if sequence == "echo":
                     self.timeline_inc(gap / 2)
@@ -110,17 +111,17 @@ def shell_wait(prog: TimelineProgramV2) -> int:
 def test_fractional_native_adc_tail_never_rounds_below_physical_end():
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
-            self.declare_readout(0, length=51 / 307.2)
+            self.declare_readout(0, length=51 / RO_MHZ)
 
         def _body(self, cfg):
-            self.trigger(ros=[0], t=0, width=1 / 430.08)
-            self.timeline_inc(42 / 430.08)
+            self.trigger(ros=[0], t=0, width=1 / TPROC_MHZ)
+            self.timeline_inc(42 / TPROC_MHZ)
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
     (shot,) = shots(prog)
     assert shot.body_end_cycle - shot.start_cycle == 42
     # Independent ADC-clock oracle: 51 samples end at 71.4 tProc cycles.
-    physical_tail = 51 / 307.2 * 430.08 - 42
+    physical_tail = 51 / RO_MHZ * TPROC_MHZ - 42
     assert shell_wait(prog) >= physical_tail
     assert shell_wait(prog) == math.ceil(physical_tail) == 30
 
@@ -134,28 +135,28 @@ def test_loadword_overwrite_keeps_exact_table_tail_and_relax_guard(relax_cycles)
             self.add_loop("index", 2)
             self.add_reg("duration")
             self.declare(loader)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.write_reg("duration", 20)
             self.emit(loader)
-            self.trigger(ros=[0], t=0, width=1 / 430.08)
+            self.trigger(ros=[0], t=0, width=1 / TPROC_MHZ)
             self.timeline_inc("duration")
 
     if relax_cycles < 10:
         with pytest.raises(
             ValueError, match=r"WAIT.*duration.*slack=10 cycles.*relax=9 cycles"
         ):
-            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / TPROC_MHZ)
     else:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08)
+            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ)
         result = shots(prog)
         body = [shot.body_end_cycle - shot.start_cycle for shot in result]
         assert body == [10, 20]
         # Independent ADC length: 50 samples at 307.2 MHz = 70 tProc cycles.
-        tails = [50 / 307.2 * 430.08 - end for end in body]
+        tails = [50 / RO_MHZ * TPROC_MHZ - end for end in body]
         assert tails == pytest.approx([60, 50])
         messages = [str(warning.message) for warning in caught]
         assert shell_wait(prog) == math.ceil(max(tails)) == 60, messages
@@ -178,14 +179,14 @@ def test_two_sweep_reference_debits_keep_each_axis_correlated():
             self.add_loop("origin_axis", 3)
             self.add_loop("advance_axis", 3)
             self.declare(loader)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.emit(loader)
             self.timeline_inc("origin_cycles")
-            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.timeline_inc(79 / 430.08)
-            self.delay(QickSweep1D("advance_axis", 10 / 430.08, 30 / 430.08))
+            self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
+            self.timeline_inc(79 / TPROC_MHZ)
+            self.delay(QickSweep1D("advance_axis", 10 / TPROC_MHZ, 30 / TPROC_MHZ))
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=1)
     # Each ADC ends 70 cycles after origin; body closes ten cycles later.
@@ -252,9 +253,9 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
         freq=100,
         gain=0.1,
         waveform=ConstWaveformCfg(length=0.1),
-        ro_length=127 / 307.2,
-        trig_offset=12 / 430.08,
-        post_delay=10 / 430.08,
+        ro_length=127 / RO_MHZ,
+        trig_offset=12 / TPROC_MHZ,
+        post_delay=10 / TPROC_MHZ,
     ).build("read")
 
     class Program(TimelineProgramV2):
@@ -262,13 +263,13 @@ def test_overlapping_pulses_swept_start_keeps_exact_wait_after_all_timeline_sync
             self.start = self.add_sweep(
                 "start",
                 SweepCfg(
-                    start=28 / 430.08,
-                    stop=84 / 430.08,
-                    step=28 / 430.08,
+                    start=28 / TPROC_MHZ,
+                    stop=84 / TPROC_MHZ,
+                    step=28 / TPROC_MHZ,
                     expts=3,
                 ),
             )
-            for ch, length in ((0, 100 / 384), (1, 50 / 384)):
+            for ch, length in ((0, 100 / GEN_MHZ), (1, 50 / GEN_MHZ)):
                 self.declare_gen(ch, nqz=1)
                 self.add_pulse(
                     ch,
@@ -328,21 +329,21 @@ def variable_tail_program(
             self.add_loop("origin_axis", 3)
             self.add_loop("post_axis", 3)
             self.declare(origin)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.emit(origin)
             self.timeline_inc("origin_cycles")
-            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.timeline_inc(69 / 430.08)  # Explicitly reach the ADC end before post.
+            self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
+            self.timeline_inc(69 / TPROC_MHZ)  # Explicitly reach the ADC end before post.
             self.timeline_inc(
                 QickSweep1D(
-                    "post_axis", -tail_cycles[0] / 430.08, -tail_cycles[1] / 430.08
+                    "post_axis", -tail_cycles[0] / TPROC_MHZ, -tail_cycles[1] / TPROC_MHZ
                 )
             )
 
     return Program(
-        load_soccfg(0, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+        load_soccfg(0, 1), initial_delay=0, relax_delay=relax_cycles / TPROC_MHZ
     )
 
 
@@ -398,7 +399,7 @@ def opposing_tail_program(
             self.declare(left)
             self.declare(right)
             for ch in (0, 1):
-                self.declare_readout(ch, length=50 / 307.2)
+                self.declare_readout(ch, length=50 / RO_MHZ)
             if feedback:
                 self.add_reg("feedback_cycles")
 
@@ -410,15 +411,15 @@ def opposing_tail_program(
             ):
                 self.emit(loader)
                 self.timeline_inc(register, timeline=timeline)
-                self.trigger(ros=[ro], width=1 / 430.08, timeline=timeline)
-                self.timeline_inc(-200 / 430.08, timeline=timeline)
+                self.trigger(ros=[ro], width=1 / TPROC_MHZ, timeline=timeline)
+                self.timeline_inc(-200 / TPROC_MHZ, timeline=timeline)
             if feedback:
                 with self.time_producer("feedback_cycles", CycleBounds(0, 31)):
                     self.write_reg_op("feedback_cycles", "s11", "AND", 31)
                 self.timeline_inc("feedback_cycles")
 
     return Program(
-        load_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / 430.08
+        load_soccfg(0, 2), initial_delay=0, relax_delay=relax_cycles / TPROC_MHZ
     )
 
 
@@ -452,18 +453,18 @@ def test_shell_bound_does_not_replace_native_swept_final_reference_advance():
         def _initialize(self, cfg):
             self.add_loop("axis", 3)
             for ch in (0, 1):
-                self.declare_readout(ch, length=50 / 307.2)
+                self.declare_readout(ch, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.trigger(
-                ros=[0], t=QickSweep1D("axis", 0, 100 / 430.08), width=1 / 430.08
+                ros=[0], t=QickSweep1D("axis", 0, 100 / TPROC_MHZ), width=1 / TPROC_MHZ
             )
             self.trigger(
-                ros=[1], t=QickSweep1D("axis", 100 / 430.08, 0), width=1 / 430.08
+                ros=[1], t=QickSweep1D("axis", 100 / TPROC_MHZ, 0), width=1 / TPROC_MHZ
             )
 
     with pytest.warns(UserWarning, match=r"WAIT.*axis.*slack=50 cycles"):
-        prog = Program(load_soccfg(0, 2), initial_delay=0, relax_delay=100 / 430.08)
+        prog = Program(load_soccfg(0, 2), initial_delay=0, relax_delay=100 / TPROC_MHZ)
     assert shell_wait(prog) == 170
     assert [s.end_cycle - s.start_cycle for s in shots(prog)] == [270, 220, 270]
 
@@ -477,23 +478,23 @@ def test_table_derived_repeat_count_keeps_exact_wait_slack():
             self.add_loop("axis", 3)
             self.declare(origin)
             self.declare(count)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.emit(origin)
             self.emit(count)
             self.timeline_inc("origin_cycles")
-            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-            self.timeline_inc(-200 / 430.08)
+            self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
+            self.timeline_inc(-200 / TPROC_MHZ)
             self.delay_by_timeline()
             with self.repeat("repeat", "count_cycles", range_hint=(1, 3)):
-                self.timeline_inc(10 / 430.08)
+                self.timeline_inc(10 / TPROC_MHZ)
                 self.delay_by_timeline()
 
     with pytest.warns(
         UserWarning, match=r"WAIT.*count_cycles.*slack=20 cycles"
     ) as caught:
-        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / TPROC_MHZ)
     assert all("not actual" not in str(w.message) for w in caught)
     assert shell_wait(prog) == 100
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [10, 30, 20]
@@ -508,12 +509,12 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
             self.add_loop("scan", 2)
             self.declare(counts)
             self.add_reg("duration")
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.emit(counts)
             self.write_reg("duration", 10)
-            self.trigger(ros=[0], width=1 / 430.08)
+            self.trigger(ros=[0], width=1 / TPROC_MHZ)
             self.delay_by_timeline()
             with self.repeat("inner", "count_cycles", range_hint=(0, 1)):
                 self.write_reg("duration", 20)
@@ -524,12 +525,12 @@ def test_zero_count_repeat_preserves_entry_source_and_exact_wait_guard(relax_cyc
         with pytest.raises(
             ValueError, match=r"WAIT.*count_cycles.*slack=10 cycles.*relax=9 cycles"
         ):
-            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / 430.08)
+            Program(load_soccfg(0, 1), initial_delay=0, relax_delay=9 / TPROC_MHZ)
     else:
         with pytest.warns(
             UserWarning, match=r"WAIT.*count_cycles.*slack=10 cycles"
         ) as caught:
-            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / 430.08)
+            prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=10 / TPROC_MHZ)
         assert all("upper bound" not in str(item.message) for item in caught)
         body = [s.body_end_cycle - s.start_cycle for s in shots(prog)]
         assert body == [10, 20]
@@ -549,10 +550,10 @@ def test_fixed_repeat_table_advance_sums_legal_iterations_before_wait_projection
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(delays)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
-            self.trigger(ros=[0], width=1 / 430.08)
+            self.trigger(ros=[0], width=1 / TPROC_MHZ)
             self.delay_by_timeline()
             with self.repeat("inner", 2):
                 self.emit(delays)
@@ -575,16 +576,16 @@ def test_fixed_repeat_readout_keeps_only_the_last_iteration_adc_tail():
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
             self.declare(delays)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.delay_by_timeline()
             with self.repeat("inner", 2):
                 self.emit(delays)
-                self.timeline_inc(60 / 430.08)
-                self.trigger(ros=[0], width=1 / 430.08, timeline="default")
-                self.timeline_inc(69 / 430.08)  # Preserve a nonoverlapping ADC cadence.
-                self.timeline_inc(-40 / 430.08)
+                self.timeline_inc(60 / TPROC_MHZ)
+                self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
+                self.timeline_inc(69 / TPROC_MHZ)  # Preserve a nonoverlapping ADC cadence.
+                self.timeline_inc(-40 / TPROC_MHZ)
                 self.timeline_inc("delay_cycles")
                 self.delay_by_timeline()
 
@@ -601,23 +602,23 @@ def test_native_scalar_adc_retains_table_reference_debit(branch):
         def _initialize(self, cfg):
             self.add_loop("scan", 2)
             self.declare(delays)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
-            self.trigger(ros=[0], t=60 / 430.08, width=1 / 430.08)
+            self.trigger(ros=[0], t=60 / TPROC_MHZ, width=1 / TPROC_MHZ)
             self.emit(delays)
             if branch:
                 with self.branch(by="scan", align_timeline=False) as cases:
                     for case in range(2):
                         with cases.case(case):
                             self.timeline_inc("delay_cycles")
-                            self.timeline_inc(case * 5 / 430.08)
+                            self.timeline_inc(case * 5 / TPROC_MHZ)
             else:
                 self.timeline_inc("delay_cycles")
 
     slack = 15 if branch else 10
     with pytest.warns(UserWarning, match=rf"slack={slack} cycles"):
-        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=slack / 430.08)
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=slack / TPROC_MHZ)
     assert shell_wait(prog) == 30
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [
         100,
@@ -636,7 +637,7 @@ def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
                 nqz=1,
                 freq=100,
                 gain=0.1,
-                waveform=ConstWaveformCfg(length=length / 307.2),
+                waveform=ConstWaveformCfg(length=length / RO_MHZ),
             )
             for length in (50, 100)
         ],
@@ -647,18 +648,18 @@ def test_selected_playback_keeps_known_selector_in_exact_relax_guard():
             self.add_loop("scan", 2)
             self.declare(selector)
             self.declare(playback)
-            self.declare_readout(0, length=150 / 307.2)
+            self.declare_readout(0, length=150 / RO_MHZ)
 
         def _body(self, cfg):
-            self.trigger(ros=[0], width=1 / 430.08)
+            self.trigger(ros=[0], width=1 / TPROC_MHZ)
             self.emit(selector)
             self.emit(playback)
 
     # Native waveform rounding gives aggregate ends 71 and 140 cycles.
     with pytest.raises(ValueError, match=r"selected.*slack=69 cycles.*relax=68 cycles"):
-        Program(load_soccfg(1, 1), initial_delay=0, relax_delay=68 / 430.08)
+        Program(load_soccfg(1, 1), initial_delay=0, relax_delay=68 / TPROC_MHZ)
     with pytest.warns(UserWarning, match=r"selected.*slack=69 cycles"):
-        prog = Program(load_soccfg(1, 1), initial_delay=0, relax_delay=69 / 430.08)
+        prog = Program(load_soccfg(1, 1), initial_delay=0, relax_delay=69 / TPROC_MHZ)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [71, 140]
     assert shell_wait(prog) == 139
 
@@ -675,16 +676,16 @@ def test_crossing_body_maximum_retains_positive_adc_remainder():
             self.add_loop("right_axis", 3)
             self.declare(left)
             self.declare(right)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
             self.fork("default", into="other")
             self.emit(left)
             self.emit(right)
             self.timeline_inc("left_cycles")
-            self.trigger(ros=[0], width=1 / 430.08, timeline="default")
+            self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline="default")
             # Author advances to40 cycles after origin, leaving a30-cycle ADC tail.
-            self.timeline_inc(39 / 430.08)
+            self.timeline_inc(39 / TPROC_MHZ)
             self.timeline_inc("right_cycles", timeline="other")
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=1)
@@ -707,14 +708,14 @@ def test_same_axis_maximum_keeps_constant_tail_after_cross_axis_join():
         def _initialize(self, cfg):
             self.add_loop("i", 2)
             self.add_loop("j", 2)
-            self.declare_readout(0, length=50 / 307.2)
+            self.declare_readout(0, length=50 / RO_MHZ)
 
         def _body(self, cfg):
-            self.trigger(ros=[0], t=0, width=1 / 430.08)
+            self.trigger(ros=[0], t=0, width=1 / TPROC_MHZ)
             self.fork("default", into=["right", "extra"])
-            self.timeline_inc(QickSweep1D("i", 0, 40 / 430.08))
-            self.timeline_inc(QickSweep1D("i", 40 / 430.08, 0), timeline="right")
-            self.timeline_inc(QickSweep1D("j", 0, 10 / 430.08), timeline="extra")
+            self.timeline_inc(QickSweep1D("i", 0, 40 / TPROC_MHZ))
+            self.timeline_inc(QickSweep1D("i", 40 / TPROC_MHZ, 0), timeline="right")
+            self.timeline_inc(QickSweep1D("j", 0, 10 / TPROC_MHZ), timeline="extra")
             self.join("right", "extra", into="default")
 
     prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=0)
@@ -793,7 +794,7 @@ class MixedWaitProgram(TimelineProgramV2):
     def __init__(self, recipe: WaitRecipe, *, relax_cycles: int = 1000):
         self.recipe = recipe
         super().__init__(
-            load_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+            load_soccfg(2, 1), initial_delay=0, relax_delay=relax_cycles / TPROC_MHZ
         )
 
     def _initialize(self, cfg):
@@ -802,9 +803,9 @@ class MixedWaitProgram(TimelineProgramV2):
             self.add_sweep(
                 f"axis{axis}",
                 SweepCfg(
-                    start=step / 430.08,
-                    stop=3 * step / 430.08,
-                    step=step / 430.08,
+                    start=step / TPROC_MHZ,
+                    stop=3 * step / TPROC_MHZ,
+                    step=step / TPROC_MHZ,
                     expts=3,
                 ),
             )
@@ -812,7 +813,7 @@ class MixedWaitProgram(TimelineProgramV2):
         ]
         self.counts = LoadValue("counts", recipe.counts, "axis0", "count_cycles")
         self.declare(self.counts)
-        self.declare_readout(0, length=recipe.adc_samples / 307.2)
+        self.declare_readout(0, length=recipe.adc_samples / RO_MHZ)
         for ch, samples in enumerate(recipe.pulse_samples):
             self.declare_gen(ch, nqz=1)
             self.add_pulse(
@@ -822,15 +823,15 @@ class MixedWaitProgram(TimelineProgramV2):
                 freq=100,
                 phase=0,
                 gain=0.1,
-                length=samples / 384,
+                length=samples / GEN_MHZ,
             )
 
     def read(self, timeline="default"):
         """Schedule one ADC, then leave the requested tail beyond body end."""
-        self.trigger(ros=[0], width=1 / 430.08, timeline=timeline)
+        self.trigger(ros=[0], width=1 / TPROC_MHZ, timeline=timeline)
         adc_cycles = (self.recipe.adc_samples * 7 + 4) // 5
-        self.timeline_inc((adc_cycles - 1) / 430.08)
-        self.timeline_inc(-self.recipe.tail / 430.08)
+        self.timeline_inc((adc_cycles - 1) / TPROC_MHZ)
+        self.timeline_inc(-self.recipe.tail / TPROC_MHZ)
 
     def emit_controls(self):
         """Emit the recipe's budgeted unequal Branch and fixed/runtime Repeats."""
@@ -841,21 +842,21 @@ class MixedWaitProgram(TimelineProgramV2):
                     with branch.case(index) as case:
                         if recipe.read_at == "branch":
                             self.read(timeline=case)
-                        self.timeline_inc(delay / 430.08)
+                        self.timeline_inc(delay / TPROC_MHZ)
         if len(self.gaps) == 1 or recipe.read_at not in ("branch", "before"):
             self.delay_by_timeline()
             with self.repeat("fixed", recipe.fixed_count):
                 if recipe.read_at == "fixed":
-                    self.timeline_inc(recipe.tail / 430.08)
+                    self.timeline_inc(recipe.tail / TPROC_MHZ)
                     self.read()
-                self.timeline_inc(recipe.loop_delay / 430.08)
+                self.timeline_inc(recipe.loop_delay / TPROC_MHZ)
                 self.delay_by_timeline()
             self.delay_by_timeline()
             with self.repeat("runtime", "count_cycles", range_hint=(0, 3)):
                 if recipe.read_at == "runtime":
-                    self.timeline_inc(recipe.tail / 430.08)
+                    self.timeline_inc(recipe.tail / TPROC_MHZ)
                     self.read()
-                self.timeline_inc(recipe.loop_delay / 430.08)
+                self.timeline_inc(recipe.loop_delay / TPROC_MHZ)
                 self.delay_by_timeline()
 
     def _body(self, cfg):
@@ -941,16 +942,16 @@ class SweptLengthWaitProgram(TimelineProgramV2):
         self.samples = samples
         self.post_tenths = post_tenths
         super().__init__(
-            load_soccfg(1, 1), initial_delay=0, relax_delay=relax_cycles / 430.08
+            load_soccfg(1, 1), initial_delay=0, relax_delay=relax_cycles / TPROC_MHZ
         )
 
     def _initialize(self, cfg):
         length = self.add_sweep(
             "length",
             SweepCfg(
-                start=self.samples / 384,
-                stop=(self.samples + 9) / 384,
-                step=1 / 384,
+                start=self.samples / GEN_MHZ,
+                stop=(self.samples + 9) / GEN_MHZ,
+                step=1 / GEN_MHZ,
                 expts=10,
             ),
         )
@@ -960,13 +961,13 @@ class SweptLengthWaitProgram(TimelineProgramV2):
             freq=100,
             gain=0.1,
             waveform=ConstWaveformCfg(length=length),
-            post_delay=self.post_tenths / (10 * 430.08),
+            post_delay=self.post_tenths / (10 * TPROC_MHZ),
         ).build("drive")
         self.declare(self.drive)
-        self.declare_readout(0, length=100 / 307.2)
+        self.declare_readout(0, length=100 / RO_MHZ)
 
     def _body(self, cfg):
-        self.trigger(ros=[0], width=1 / 430.08)
+        self.trigger(ros=[0], width=1 / TPROC_MHZ)
         self.emit(self.drive)
 
 

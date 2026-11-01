@@ -25,6 +25,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_mux_soccfg, load_soccfg
 from tests.program.v2.simulation.time_observations import time_us
 from tests.program.v2.timing_support import recompile, shots, waves
@@ -72,10 +73,10 @@ def test_register_repeat_table_selector_is_ready_for_same_iteration_playback(
         assert [event.gain for event in events] == pytest.approx([0.1, 0.2], abs=1e-4)
         assert [
             time_us(request.time_base, event.start_ticks) for event in events
-        ] == pytest.approx([0, 17 / 430.08])
+        ] == pytest.approx([0, 17 / TPROC_MHZ])
         assert [
             time_us(request.time_base, event.duration_ticks) for event in events
-        ] == pytest.approx([15 / 384, 31 / 384])
+        ] == pytest.approx([15 / GEN_MHZ, 31 / GEN_MHZ])
     finally:
         env.devices.close_all_devices()
 
@@ -112,13 +113,13 @@ def test_named_time_operations_keep_end_and_reference_separate(
     mock_soccfg, frontend, operation
 ):
     pulse = _pulse("drive")
-    gap = v2.Delay("gap", 100 / 430.08)
+    gap = v2.Delay("gap", 100 / TPROC_MHZ)
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2) -> None:
         program.emit(pulse)
         program.fork("default", into="work")
         if operation == "timeline_inc":
-            program.timeline_inc(100 / 430.08, timeline="work")
+            program.timeline_inc(100 / TPROC_MHZ, timeline="work")
             program.emit(pulse, timeline="work", tag="after")
         else:
             program.emit(gap, timeline="work")
@@ -130,7 +131,7 @@ def test_named_time_operations_keep_end_and_reference_separate(
     assert waves(shot) == [0, 143]
     assert (shot.body_end_cycle, shot.end_cycle) == (186, 186)
     expected_offset = 143 if operation == "timeline_inc" else 0
-    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(expected_offset)
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(expected_offset)
 
 
 @pytest.mark.parametrize("sync_at_end", [False, True])
@@ -139,7 +140,7 @@ def test_builder_repeat_keeps_author_reference_advances(mock_soccfg, sync_at_end
     drive = _pulse("drive")
     with builder.repeat("r", 2):
         builder.emit(drive)
-        builder.timeline_inc(5 / 430.08)
+        builder.timeline_inc(5 / TPROC_MHZ)
         if sync_at_end:
             builder.delay_by_timeline()
     builder.emit(drive)
@@ -164,7 +165,7 @@ def test_builder_replays_variable_repeat_inside_case(mock_soccfg, align):
         builder.repeat("r", 2),
     ):
         builder.emit(drive)
-        builder.timeline_inc(5 / 430.08)
+        builder.timeline_inc(5 / TPROC_MHZ)
     builder.emit(drive)
     prog = builder.build()
     assert [waves(s) for s in shots(prog)] == [[0, 48, 96], [96 if align else 0]] * 2
@@ -179,17 +180,17 @@ def test_builder_places_on_external_timeline_after_runtime_repeat_and_branch(
     builder.add_loop("scan", 3)
     drive = _pulse("drive")
     builder.fork("default", into="external")
-    builder.timeline_inc(100 / 430.08, timeline="external")
+    builder.timeline_inc(100 / TPROC_MHZ, timeline="external")
     builder.emit(drive)
     builder.delay_by_timeline()
     with builder.repeat("r", "scan", range_hint=(0, 2)):
-        builder.timeline_inc(15 / 430.08)
+        builder.timeline_inc(15 / TPROC_MHZ)
         builder.delay_by_timeline()
     with builder.branch(by="scan", align_timeline=False, timeline="external") as branch:
         with branch.case(0):
-            builder.timeline_inc(5 / 430.08)
+            builder.timeline_inc(5 / TPROC_MHZ)
         with branch.case(2):
-            builder.timeline_inc(15 / 430.08)
+            builder.timeline_inc(15 / TPROC_MHZ)
     builder.emit(drive, timeline="external")
 
     prog = builder.build()
@@ -428,7 +429,7 @@ def test_constant_offsets_of_shared_runtime_end_fit_native_registers(mock_soccfg
     for index in range(20):
         name = f"offset_{index}"
         builder.fork("default", into=name)
-        builder.timeline_inc((index + 1) / 430.08, timeline=name)
+        builder.timeline_inc((index + 1) / TPROC_MHZ, timeline=name)
     prog = builder.build()
 
     assert len(prog.reg_dict) <= 16
@@ -551,8 +552,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             nqz=1,
             mixer_freq=1000,
             length=0.125,
-            pre_delay=3 / 430.08,
-            post_delay=5 / 430.08,
+            pre_delay=3 / TPROC_MHZ,
+            post_delay=5 / TPROC_MHZ,
             ro_length=1.0,
             trig_offset=0.5,
             tones=[
@@ -566,8 +567,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             freq=100,
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.125),
-            pre_delay=3 / 430.08,
-            post_delay=5 / 430.08,
+            pre_delay=3 / TPROC_MHZ,
+            post_delay=5 / TPROC_MHZ,
             ro_ch=0,
             ro_length=1.0,
             trig_offset=0.5,
@@ -1092,7 +1093,7 @@ def test_distinct_readout_objects_share_identical_adc_declaration(mock_soccfg):
     builder.emit(_readout("second", post_delay=0.1))
     prog = builder.build()
     assert list(prog.ro_chs) == [0]
-    assert prog.ro_chs[0]["length"] == 61
+    assert prog.ro_chs[0]["length"] == prog.us2cycles(0.2, ro_ch=0)
     assert prog.ro_chs[0]["trigs"] == 2
     # Each read emits one ADC configuration and one generator waveform.
     assert len(waves(shots(prog)[0])) == 4
@@ -1153,9 +1154,9 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+        "duration", v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9)
     )
-    for name, length in (("prepare", 77 / 384), ("drive", duration)):
+    for name, length in (("prepare", 77 / GEN_MHZ), ("drive", duration)):
         parallel_modules = list(
             (
                 v2.Pulse(
@@ -1166,7 +1167,7 @@ def test_parallel_swept_pulses_compile_without_materializing_dominated_ends(
                         freq=100,
                         gain=0.5,
                         waveform=ConstWaveformCfg(length=0.1),
-                        post_delay=4.3 / 430.08,
+                        post_delay=4.3 / TPROC_MHZ,
                     ),
                     length=length,
                     freq=frequency,
@@ -1192,12 +1193,12 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
         "frequency", v2.SweepCfg(start=100, stop=102, step=1, expts=3)
     )
     duration = builder.add_sweep(
-        "duration", v2.SweepCfg(start=71 / 384, stop=639 / 384, step=71 / 384, expts=9)
+        "duration", v2.SweepCfg(start=71 / GEN_MHZ, stop=639 / GEN_MHZ, step=71 / GEN_MHZ, expts=9)
     )
     for name, length in (
-        ("prepare", 77 / 384),
+        ("prepare", 77 / GEN_MHZ),
         ("drive", duration),
-        ("contrast", 77 / 384),
+        ("contrast", 77 / GEN_MHZ),
     ):
         parallel_modules = list(
             (
@@ -1213,7 +1214,7 @@ def test_parallel_swept_groups_fit_native_registers_and_keep_pointwise_timing(
                             4.3
                             + (extra_post_cycles if name == "drive" and ch == 1 else 0)
                         )
-                        / 430.08,
+                        / TPROC_MHZ,
                     ),
                     length=length,
                     freq=frequency,
@@ -1470,7 +1471,7 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
 
     def body(program: v2.TimelineBuilder | v2.TimelineProgramV2):
         program.fork("default", into="parent")
-        program.timeline_inc(10 / 430.08, timeline="parent")
+        program.timeline_inc(10 / TPROC_MHZ, timeline="parent")
         with (
             program.timeline("parent" if not explicit_parent else "default"),
             program.branch(
@@ -1481,7 +1482,7 @@ def test_branch_case_timeline_forks_parent_and_merges_selected_or_aligned_end(
             cases.case(1) as name,
         ):
             names.append(name)
-            program.timeline_inc(20 / 430.08)
+            program.timeline_inc(20 / TPROC_MHZ)
             program.emit(pulse)
         program.emit(pulse, timeline="parent")
 
@@ -1537,14 +1538,14 @@ def test_branch_case_local_forks_and_nested_parent_merge_without_leaking_names(
             cases.case(1) as case,
         ):
             program.fork(case, into="local")
-            program.timeline_inc(10 / 430.08, timeline="local")
+            program.timeline_inc(10 / TPROC_MHZ, timeline="local")
             with (
                 program.branch(
                     by="inner", align_timeline=True, timeline="local"
                 ) as nested,
                 nested.case(0),
             ):
-                program.timeline_inc(20 / 430.08)
+                program.timeline_inc(20 / TPROC_MHZ)
             program.join("local", into=case)
         # Both implicit and explicit local names expire, allowing fresh forks.
         program.fork("default", into=["scan[1]", "inner[0]", "local"])

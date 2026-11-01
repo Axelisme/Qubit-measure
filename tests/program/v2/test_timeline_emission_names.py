@@ -8,6 +8,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.modules import Module
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import TPROC_MHZ
 from tests.program._profiles import load_soccfg
 
 
@@ -117,7 +118,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
         names.append(name)
         prog.delay_by_timeline()
         with prog.repeat(name, 2):
-            prog.timeline_inc(1 / 430.08)
+            prog.timeline_inc(1 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     module = LoweringModule("loop_owner", lower)
@@ -127,7 +128,7 @@ def test_generated_loop_name_collision_with_explicit_native_name_is_rejected(
         if native_loop == "repeat":
             prog.delay_by_timeline()
             with prog.repeat(names[0], 1):
-                prog.timeline_inc(1 / 430.08)
+                prog.timeline_inc(1 / TPROC_MHZ)
                 prog.delay_by_timeline()
         else:
             prog.open_loop(1, name=names[0])

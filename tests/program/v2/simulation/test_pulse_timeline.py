@@ -16,6 +16,7 @@ from zcu_tools.program.v2.modules.waveform import (
     GaussWaveformCfg,
 )
 
+from tests.program._profiles import GEN_MAXV, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.simulation.support import request_of
 from tests.program.v2.simulation.time_observations import (
@@ -85,16 +86,16 @@ def test_parallel_pulses_retain_envelopes_phase_and_separate_adc_duration(wavefo
     assert drive_end - time_us(request.time_base, drive.start_ticks) == pytest.approx(
         0.25, abs=0.006
     )
-    assert drive.gain == pytest.approx(-0.4, abs=1 / 32766)
+    assert drive.gain == pytest.approx(-0.4, abs=1 / GEN_MAXV)
     assert drive.phase_deg == pytest.approx(37, abs=1e-5)
     assert (
         time_us(request.time_base, drive.phase_reference_ticks)
         == time_us(request.time_base, receiver.phase_reference_ticks)
         == 0
     )
-    origin = math.ceil(0.5 * 430.08) / 430.08
-    offset = math.ceil(0.1 * 430.08) / 430.08
-    trigger = origin + round((offset + 0.02) * 430.08) / 430.08
+    origin = math.ceil(0.5 * TPROC_MHZ) / TPROC_MHZ
+    offset = math.ceil(0.1 * TPROC_MHZ) / TPROC_MHZ
+    trigger = origin + round((offset + 0.02) * TPROC_MHZ) / TPROC_MHZ
     assert times_us(
         request.time_base, request.materialize_point(0).readouts[0].trigger_ticks
     )[0] == pytest.approx(trigger)

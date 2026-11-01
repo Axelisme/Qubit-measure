@@ -2,27 +2,30 @@ from __future__ import annotations
 
 import pytest
 from qick import QickConfig
-from qick.qick_asm import get_version
 from zcu_tools.program import describe_soc
 
 from tests.program._profiles import load_soccfg
 
 
 def test_describe_soc_sections_and_counts() -> None:
-    text = describe_soc(load_soccfg(n_gens=2, n_readouts=1))
+    cfg = load_soccfg(n_gens=2, n_readouts=1)
+    text = describe_soc(cfg)
 
-    assert "QICK running on ZCU216" in text
-    assert f"software version {get_version()}" in text
-    assert "Firmware built 2025-01-01" in text  # mock fw_timestamp
-    assert "Generators (2)" in text
-    assert "Readouts (1)" in text
-    # one header row + one row per channel for each table
-    assert text.count("axis_signal_gen_v6") == 2
-    assert text.count("axis_readout_v2") == 1
+    assert f"QICK running on {cfg['board']}" in text
+    assert f"software version {cfg['sw_version']}" in text
+    assert f"Firmware built {cfg['fw_timestamp']}" in text
+    for key, label in (("gens", "Generators"), ("readouts", "Readouts")):
+        channels = cfg[key]
+        assert f"{label} ({len(channels)})" in text
+        for channel_type in {channel["type"] for channel in channels}:
+            assert text.count(channel_type) == sum(
+                channel["type"] == channel_type for channel in channels
+            )
 
 
 def test_describe_soc_columns_present() -> None:
-    text = describe_soc(load_soccfg(n_gens=2, n_readouts=1))
+    cfg = load_soccfg(n_gens=2, n_readouts=1)
+    text = describe_soc(cfg)
 
     # ZCU216 port labels: dac "00"->"0_228", "01"->"1_228"; adc "00"->"0_224"
     assert "0_228" in text
@@ -30,13 +33,15 @@ def test_describe_soc_columns_present() -> None:
     assert "0_224" in text
 
     # sample rates (Msps) from rf.dacs / rf.adcs
-    assert "12288.000" in text  # generator fs
-    assert "2457.600" in text  # readout fs
+    gen, ro = cfg["gens"][0], cfg["readouts"][0]
+    assert f"{cfg['rf']['dacs'][gen['dac']]['fs']:.3f}" in text
+    assert f"{cfg['rf']['adcs'][ro['adc']]['fs']:.3f}" in text
 
-    # max lengths in samples + us
-    # gen: 65536 / (16 * 384.0) = 10.667 us ; readout: 8192 / 307.2 = 26.667 us
-    assert "65536 smp (10.667 us)" in text
-    assert "8192 smp (26.667 us)" in text
+    # One sample spans 1/(fabric * samples_per_clock) us on the generator.
+    gen_us = gen["maxlen"] / (gen["samps_per_clk"] * gen["f_fabric"])
+    ro_us = ro["buf_maxlen"] / ro["f_output"]
+    assert f"{gen['maxlen']} smp ({gen_us:.3f} us)" in text
+    assert f"{ro['buf_maxlen']} smp ({ro_us:.3f} us)" in text
 
 
 def test_describe_soc_rejects_non_zcu216() -> None:
@@ -48,12 +53,13 @@ def test_describe_soc_rejects_non_zcu216() -> None:
 
 def test_describe_soc_handles_gen_without_envelope() -> None:
     cfg = load_soccfg(n_gens=1, n_readouts=1)
-    del cfg["gens"][0]["maxlen"]
+    gen = cfg["gens"][0]
+    del gen["maxlen"]
     text = describe_soc(cfg)
 
-    # generator row still renders, with "-" for the missing envelope length
-    assert "axis_signal_gen_v6" in text
-    assert "65536 smp" not in text
+    # The generator row still renders a missing envelope as "-".
+    row = next(line for line in text.splitlines() if gen["type"] in line)
+    assert row.split()[-1] == "-"
 
 
 def test_describe_soc_accepts_qickconfig_from_dict() -> None:
@@ -87,20 +93,22 @@ def test_describe_soc_handles_gen_without_envelope_or_clocks() -> None:
 
     text = describe_soc(cfg)
 
-    assert "Generators (1)" in text
-    assert "Readouts (1)" in text
+    assert f"Generators ({len(cfg['gens'])})" in text
+    assert f"Readouts ({len(cfg['readouts'])})" in text
     assert "max pulse len" in text
     assert "buf maxlen" in text
     gen_row = next(line for line in text.splitlines() if "axis_sg_int4_v1" in line)
     ro_row = next(line for line in text.splitlines() if "axis_readout_v3" in line)
-    assert gen_row.split() == ["0", "axis_sg_int4_v1", "1_230", "8192.000", "-"]
+    assert gen_row.split() == [
+        "0", "axis_sg_int4_v1", "1_230", f"{cfg['rf']['dacs'][gen['dac']]['fs']:.3f}", "-"
+    ]
     assert ro_row.split() == [
         "0",
         "axis_readout_v3",
         "2_225",
-        "1536.000",
-        "4096",
+        f"{cfg['rf']['adcs'][ro['adc']]['fs']:.3f}",
+        str(ro["buf_maxlen"]),
         "smp",
-        "(21.333",
+        f"({ro['buf_maxlen'] / ro['f_output']:.3f}",
         "us)",
     ]

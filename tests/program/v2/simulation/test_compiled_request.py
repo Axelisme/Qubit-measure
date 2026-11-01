@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from qick.asm_v2 import QickRawParam, QickSweep1D
-from zcu_tools.core.simulation import ChargeDriveRequirement
+from zcu_tools.core.simulation import ChargeDriveRequirement, TimeBase
 from zcu_tools.experiment.simulation import white_noise
 from zcu_tools.program.v2.ir import CompiledRecord, CompiledStream
 from zcu_tools.program.v2.ir.instructions import MetaInst
@@ -14,6 +14,7 @@ from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 from zcu_tools.program.v2.simulation.compiled import build_compiled_request
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import GEN_MAXV, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
@@ -35,15 +36,15 @@ def test_author_dmem_time_materializes_pulse_and_readout_at_runtime_origin():
         p.timeline_inc("duration")
         p.fork("default", into="read")
         p.pulse(0, "p", timeline="default", tag="drive")
-        p.trigger([0], timeline="read", width=1 / 430.08)
+        p.trigger([0], timeline="read", width=1 / TPROC_MHZ)
 
     prog, env = program(body, initialize, trigger_time=None, reps=1)
     point = request(prog, env).materialize_point(0)
     assert time_us(point.time_base, point.events[0].start_ticks) == pytest.approx(
-        40 / 430.08
+        40 / TPROC_MHZ
     )
     assert times_us(point.time_base, point.readouts[0].trigger_ticks) == pytest.approx(
-        (40 / 430.08,)
+        (40 / TPROC_MHZ,)
     )
 
 
@@ -54,8 +55,18 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert result.loop_dims == (2,)
     assert result.point_dims == ()
     assert result.sequence == 7
-    assert result.time_base.ticks_per_us == 43008
-    assert result.relax_delay_ticks == 4300
+    gen = env.soccfg["gens"][0]
+    ro = env.soccfg["readouts"][0]
+    expected_base = TimeBase.from_clocks(
+        (prog.tproccfg["f_time"], gen["f_fabric"],
+         gen["f_fabric"] * gen["samps_per_clk"], ro["f_output"])
+    )
+    assert result.time_base == expected_base
+    assert result.relax_delay_ticks == (
+        prog.us2cycles(0.1) * expected_base.period_ticks(prog.tproccfg["f_time"])
+    )
+    sample_period_ticks = expected_base.period_ticks(ro["f_output"])
+    gain_step = 1 / (gen["maxv"] * gen["maxv_scale"])
     template = result.templates[0]
     assert template.events[0].start_ticks.dtype == np.int64
     assert template.events[0].start_ticks.shape == (1,)
@@ -63,7 +74,7 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert template.duration_ticks.dtype == np.int64
     assert template.readouts[0].trigger_ticks.dtype == np.int64
     assert template.readouts[0].trigger_ticks.shape == (1, 1)
-    assert template.readouts[0].sample_period_ticks == 140
+    assert template.readouts[0].sample_period_ticks == sample_period_ticks
     assert point.time_base == result.time_base
     (event,) = point.events
     assert event.source == "drive"
@@ -72,12 +83,12 @@ def test_native_pulse_request_has_detached_numeric_event_and_adc_slots():
     assert event.phase_reference_ticks == 0
     assert event.frequency_mhz == pytest.approx(100, abs=1e-5)
     assert event.phase_deg == pytest.approx(30, abs=1e-5)
-    assert event.gain == pytest.approx(-0.25, abs=1 / 32766)
+    assert event.gain == pytest.approx(-0.25, abs=gain_step)
     (read,) = point.readouts
     assert read.gen_ch == 0
-    assert read.samples == 61
+    assert read.samples == prog.us2cycles(0.2, ro_ch=0)
     assert read.trigger_ticks == (0,)
-    assert read.sample_period_ticks == 140
+    assert read.sample_period_ticks == sample_period_ticks
     assert read.frequency_mhz == pytest.approx((100,), abs=1e-5)
     assert env.soc.binding.last_request is None
 
@@ -92,12 +103,24 @@ def test_extra_declared_clock_preserves_original_channel_physical_time_bits():
 
     try:
         original, expanded = build(False), build(True)
-        assert original.time_base.ticks_per_us == 43008
-        assert expanded.time_base.ticks_per_us == 172032
+        gen, extra = env.soccfg["gens"][:2]
+        expected_base = TimeBase.from_clocks(
+            (env.soccfg["tprocs"][0]["f_time"], gen["f_fabric"],
+             gen["f_fabric"] * gen["samps_per_clk"],
+             env.soccfg["readouts"][0]["f_output"])
+        )
+        assert original.time_base == expected_base
+        assert expanded.time_base == TimeBase.from_clocks(
+            (float(expected_base.ticks_per_us), extra["f_fabric"],
+             extra["f_fabric"] * extra["samps_per_clk"])
+        )
         a, b = original.templates[0], expanded.templates[0]
         (event_a,), (event_b,) = a.events, b.events
         assert event_a.gen_ch == event_b.gen_ch == 0
-        assert event_a.start_ticks.tolist() == [4300]
+        assert event_a.start_ticks.tolist() == [
+            round(0.1 * env.soccfg["tprocs"][0]["f_time"])
+            * expected_base.period_ticks(env.soccfg["tprocs"][0]["f_time"])
+        ]
         for left, right in (
             (event_a.start_ticks, event_b.start_ticks),
             (
@@ -208,10 +231,10 @@ def test_native_sweep_shell_preserves_two_axes_wave_and_register_updates():
         [80, 90, 100, 180, 190, 200], abs=1e-5
     )
     assert [e.gain for e in events] == pytest.approx(
-        np.tile([3276, 6552, 9828], 2) / 32766
+        np.tile(prog.get_pulse_param("swept", "gain", as_array=True), 2)
     )
     assert [time_us(result.time_base, e.start_ticks) for e in events] == pytest.approx(
-        np.tile([0, 8, 16], 2) / 430.08
+        np.tile([0, 8, 16], 2) / prog.tproccfg["f_time"]
     )
 
 
@@ -298,7 +321,7 @@ def test_core_modules_keep_shared_cfg_sources_and_delay_effects():
     assert [e.source for e in events[:2]] == ["one", "two"]
     assert [
         time_us(result.time_base, e.start_ticks) for e in events[:2]
-    ] == pytest.approx([44 / 430.08, 131 / 430.08])
+    ] == pytest.approx([44 / TPROC_MHZ, 131 / TPROC_MHZ])
     assert len(events) == 3
     assert result.materialize_point(0).readouts[0].generator_channels == (0,)
 
@@ -401,7 +424,7 @@ def test_dmem_store_initializes_an_unallocated_word_and_read_updates_pulse():
 
     prog, env = program(body, reps=1)
     result = request(prog, env)
-    assert result.materialize_point(0).events[-1].gain == pytest.approx(1234 / 32766)
+    assert result.materialize_point(0).events[-1].gain == pytest.approx(1234 / GEN_MAXV)
 
 
 def test_reps_varying_pulse_rejects_carried_register_and_memory_context():
@@ -469,7 +492,9 @@ def test_flag_alu_uses_prewrite_operands_and_conditions_are_per_lane(condition, 
     result = request(prog, env)
     assert [
         result.materialize_point(i).events[0].gain for i in range(3)
-    ] == pytest.approx(np.asarray(gains) / 32766)
+    ] == pytest.approx(
+        np.asarray(gains) / (env.soccfg["gens"][0]["maxv"] * env.soccfg["gens"][0]["maxv_scale"])
+    )
 
 
 def test_conditionally_uninitialized_register_is_not_zero_filled_on_other_lanes():
@@ -548,10 +573,10 @@ def test_wave_memory_and_output_coupled_effects_use_prewrite_words(opcode):
     prog, env = program(body, reps=1)
     observed = request(prog, env)
     events = observed.materialize_point(0).events
-    assert [event.gain for event in events] == pytest.approx([100 / 32766] * 2)
+    assert [event.gain for event in events] == pytest.approx([100 / GEN_MAXV] * 2)
     assert [
         time_us(observed.time_base, event.start_ticks) for event in events
-    ] == pytest.approx([0, 43 / 430.08])
+    ] == pytest.approx([0, 43 / TPROC_MHZ])
 
 
 def test_wmem_store_initializes_a_new_address_for_native_port_playback():
@@ -571,7 +596,7 @@ def test_wmem_store_initializes_a_new_address_for_native_port_playback():
 
     prog, env = program(body, reps=1)
     assert request(prog, env).materialize_point(0).events[0].gain == pytest.approx(
-        777 / 32766
+        777 / GEN_MAXV
     )
 
 
@@ -645,7 +670,7 @@ def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
             freq=3000,
             phase=0,
             gain=0.1,
-            length=7 / 430.08,
+            length=7 / TPROC_MHZ,
         )
         p.add_pulse(
             1 if multiple_routes else 0,
@@ -654,7 +679,7 @@ def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
             freq=100,
             phase=0,
             gain=0.1,
-            length=14 / 430.08,
+            length=14 / TPROC_MHZ,
         )
 
     def body(p):
@@ -664,14 +689,14 @@ def test_touching_window_endpoints_do_not_supply_routes_or_carrier_images(
                 (14, 1 if multiple_routes else 0, "inside"),
             ]
         ):
-            p.pulse(channel, name, t=tick / 430.08)
+            p.pulse(channel, name, t=tick / TPROC_MHZ)
 
     prog, env = program(
         body,
         initialize,
         reps=1,
-        readout_length=10 / 307.2,
-        trigger_time=14 / 430.08,
+        readout_length=10 / RO_MHZ,
+        trigger_time=14 / TPROC_MHZ,
         routes=((0, 0), (1, 0)) if multiple_routes else ((0, 0),),
     )
     read = request(prog, env).materialize_point(0).readouts[0]
@@ -738,7 +763,7 @@ def test_ordinary_adc_triggers_are_distinct_output_effects():
     reads = result.materialize_point(0).readouts
     assert times_us(result.time_base, reads[0].trigger_ticks) == (0,)
     assert times_us(result.time_base, reads[1].trigger_ticks) == pytest.approx(
-        (43 / 430.08,)
+        (43 / TPROC_MHZ,)
     )
 
 
@@ -888,7 +913,7 @@ def test_dmem_lane_addresses_and_simultaneous_side_writes_use_prewrite_sources(s
     for point in range(3):
         assert [
             e.gain for e in result.materialize_point(point).events
-        ] == pytest.approx(np.array([stored[point], point - 1, stored[point]]) / 32766)
+        ] == pytest.approx(np.array([stored[point], point - 1, stored[point]]) / GEN_MAXV)
 
 
 def test_dmem_live_in_is_rejected_across_points():
@@ -991,7 +1016,7 @@ def test_register_selected_wmem_addresses_and_side_writes_sample_prewrite_words(
     for point in range(3):
         assert [
             e.gain for e in result.materialize_point(point).events
-        ] == pytest.approx(np.array([101 + point, 100 + point, 100 + point]) / 32766)
+        ] == pytest.approx(np.array([101 + point, 100 + point, 100 + point]) / GEN_MAXV)
 
 
 def test_unused_register_live_in_is_rejected_across_reps():

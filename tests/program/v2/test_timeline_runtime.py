@@ -16,6 +16,7 @@ from zcu_tools.program.v2 import ir
 from zcu_tools.program.v2.modules import LoadValue, LoadWord
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 
 from .timing_support import recompile, shots, waves
@@ -40,7 +41,7 @@ def program(
                     freq=1000,
                     phase=0,
                     gain=0.5,
-                    length=25 / 384,
+                    length=25 / GEN_MHZ,
                 )  # 25 fabric cycles = 28 tProc cycles.
             self.append_macro(AllocateTime())
             if initialize is not None:
@@ -54,8 +55,8 @@ def program(
 
 def test_crossing_floor_places_at_pointwise_remaining_end_and_resets_each_shot():
     def body(prog):
-        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
-        prog.delay(20 / 430.08)
+        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 30 / TPROC_MHZ))
+        prog.delay(20 / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     prog = program(body, reps=2)
@@ -70,8 +71,8 @@ def test_crossing_floor_places_at_pointwise_remaining_end_and_resets_each_shot()
 def test_crossing_join_uses_three_instruction_flag_selection():
     def body(prog):
         prog.fork("default", into="other")
-        prog.timeline_inc(QickSweep1D("scan", 20 / 430.08, 180 / 430.08))
-        prog.timeline_inc(100 / 430.08, timeline="other")
+        prog.timeline_inc(QickSweep1D("scan", 20 / TPROC_MHZ, 180 / TPROC_MHZ))
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="other")
         prog.join("other", into="default")
 
     prog = program(body, points=41)
@@ -110,10 +111,10 @@ def test_k_way_join_has_one_copy_and_two_instructions_per_comparison(candidate_c
         def _body(self, cfg):
             names = [f"side{axis}" for axis in range(candidate_count - 1)]
             self.fork("default", into=names)
-            self.timeline_inc(100 / 430.08)
+            self.timeline_inc(100 / TPROC_MHZ)
             for axis, name in enumerate(names):
                 self.timeline_inc(
-                    QickSweep1D(f"i{axis}", 20 / 430.08, 180 / 430.08),
+                    QickSweep1D(f"i{axis}", 20 / TPROC_MHZ, 180 / TPROC_MHZ),
                     timeline=name,
                 )
             self.join(*names, into="default")
@@ -153,14 +154,14 @@ def test_branch_join_extracts_unbounded_author_source_with_nonuniform_coefficien
         with prog.branch(by="scan", align_timeline=True) as branch:
             with branch.case(0):
                 prog.timeline_inc("duration")
-                prog.timeline_inc(10 / 430.08)
+                prog.timeline_inc(10 / TPROC_MHZ)
             with branch.case(1):
                 prog.timeline_inc("duration")
-                prog.timeline_inc(20 / 430.08)
+                prog.timeline_inc(20 / TPROC_MHZ)
             with branch.case(2):
                 prog.timeline_inc("duration")
                 prog.timeline_inc("duration")
-                prog.timeline_inc(5 / 430.08)
+                prog.timeline_inc(5 / TPROC_MHZ)
 
     prog = program(body)
     assert [s.body_end_cycle - s.start_cycle for s in shots(prog)] == [30, 57, 89]
@@ -181,8 +182,8 @@ def rebased_runtime_end_program():
     def body(prog):
         prog.emit(loader)
         prog.fork("default", into=["a", "b", "c"])
-        prog.timeline_inc(QickSweep1D("scan", 20 / 430.08, 180 / 430.08), timeline="a")
-        prog.timeline_inc(QickSweep1D("scan", 180 / 430.08, 20 / 430.08), timeline="b")
+        prog.timeline_inc(QickSweep1D("scan", 20 / TPROC_MHZ, 180 / TPROC_MHZ), timeline="a")
+        prog.timeline_inc(QickSweep1D("scan", 180 / TPROC_MHZ, 20 / TPROC_MHZ), timeline="b")
         prog.timeline_inc("c_duration", timeline="c")
         prog.join("a", "b", into="default")
         prog.delay_by_timeline(timeline="default")
@@ -215,7 +216,7 @@ def test_runtime_events_load_s14_then_increment_for_shared_origin():
         prog.timeline_inc("duration")
         prog.fork("default", into="other")
         prog.pulse(0, "p0", timeline="default")
-        prog.pulse(1, "p1", t=40 / 430.08, timeline="other")
+        prog.pulse(1, "p1", t=40 / TPROC_MHZ, timeline="other")
 
     prog = program(body)
     assert [waves(s) for s in shots(prog)] == [[100, 140]] * 3
@@ -231,7 +232,7 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
     from zcu_tools.program.v2.modules import PulseCfg, TableLengthPulse
     from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg
 
-    offset = QickSweep1D("scan", 7 / 430.08, 8 / 430.08) if swept_offset else 7 / 430.08
+    offset = QickSweep1D("scan", 7 / TPROC_MHZ, 8 / TPROC_MHZ) if swept_offset else 7 / TPROC_MHZ
     drive = TableLengthPulse(
         "selected",
         PulseCfg(
@@ -240,9 +241,9 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
             freq=1000,
             gain=0.5,
             pre_delay=offset,
-            waveform=ConstWaveformCfg(length=7 / 384),
+            waveform=ConstWaveformCfg(length=7 / GEN_MHZ),
         ),
-        lengths=[7 / 384, 11 / 384],
+        lengths=[7 / GEN_MHZ, 11 / GEN_MHZ],
         idx_reg="scan",
     )
 
@@ -253,7 +254,7 @@ def test_selected_events_share_output_time_and_increment_nonzero_offsets(swept_o
         prog.write_reg_op("duration", "scan", "+", 100)
         prog.timeline_inc("duration")
         prog.fork("default", into="other")
-        prog.timeline_inc(40 / 430.08, timeline="other")
+        prog.timeline_inc(40 / TPROC_MHZ, timeline="other")
         prog.emit(drive)
         prog.emit(drive, timeline="other")
 
@@ -277,7 +278,7 @@ def test_runtime_event_restores_output_time_after_clobber(clobber):
             prog.append_macro(WriteReg(dst="s_out_time", src=7))
         else:
             prog.asm_inst({"CMD": "REG_WR", "DST": "s14", "SRC": "imm", "LIT": "#7"})
-        prog.pulse(0, "p0", t=40 / 430.08, timeline="other")
+        prog.pulse(0, "p0", t=40 / TPROC_MHZ, timeline="other")
 
     result = shots(program(body, reps=2))
     assert [waves(shot) for shot in result] == [[100, 140]] * 6
@@ -290,7 +291,7 @@ def test_runtime_event_restores_output_time_after_branch_merge():
         with prog.branch(by="scan", align_timeline=True) as branch:
             for index in range(3):
                 with branch.case(index):
-                    prog.pulse(0, "p0", t=index * 40 / 430.08)
+                    prog.pulse(0, "p0", t=index * 40 / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body, reps=2))
@@ -320,7 +321,7 @@ def test_author_calculated_register_delay_joins_at_actual_runtime_maximum(produc
             prog.read_dmem("duration", 0)
         prog.fork("default", into="other")
         prog.timeline_inc("duration")
-        prog.timeline_inc(11 / 430.08, timeline="other")
+        prog.timeline_inc(11 / TPROC_MHZ, timeline="other")
         prog.join("other", into="default")
         prog.pulse(0, "p0", timeline="default")
 
@@ -378,7 +379,7 @@ def test_runtime_only_tag_time_getter_never_returns_preprocessing_metadata(
 ):
     def initialize(prog):
         prog.add_dmem([40])
-        prog.declare_readout(0, length=4 / 307.2)
+        prog.declare_readout(0, length=4 / RO_MHZ)
         prog.add_readoutconfig(0, "ro", freq=100)
 
     def body(prog):
@@ -406,12 +407,12 @@ def test_known_affine_register_getter_returns_actual_time_without_rescheduling()
 
     prog = program(body, initialize=lambda p: p.declare(loader))
     before = shots(prog)
-    assert prog.get_time_param("end", "t", as_array=True) * 430.08 == pytest.approx(
+    assert prog.get_time_param("end", "t", as_array=True) * TPROC_MHZ == pytest.approx(
         [5, 10, 15]
     )
     value = prog.get_time_param("end", "t")
     assert isinstance(value, QickParam)
-    assert value.to_array({"scan": 3}) * 430.08 == pytest.approx([5, 10, 15])
+    assert value.to_array({"scan": 3}) * TPROC_MHZ == pytest.approx([5, 10, 15])
     assert shots(prog) == before
 
 
@@ -436,7 +437,7 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
 ):
     def initialize(prog):
         prog.add_dmem([40])
-        prog.declare_readout(0, length=4 / 307.2)
+        prog.declare_readout(0, length=4 / RO_MHZ)
 
     def body(prog):
         prog.read_dmem("duration", 0)
@@ -446,7 +447,7 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
         ):
             prog.fork(case_timeline, into="local")
             prog.timeline_inc("duration", timeline="local")
-            prog.trigger([0], width=1 / 430.08, timeline="local")
+            prog.trigger([0], width=1 / TPROC_MHZ, timeline="local")
             if synchronize:
                 prog.join("local", into=case_timeline)
 
@@ -465,7 +466,7 @@ def test_unknown_branch_local_adc_tail_closes_at_runtime_with_constant_shell_wai
 @pytest.mark.parametrize("synchronize", [False, True])
 def test_unknown_adc_tail_uses_actual_maximum_after_optional_sync(synchronize):
     def initialize(prog):
-        prog.declare_readout(0, length=4 / 307.2)
+        prog.declare_readout(0, length=4 / RO_MHZ)
 
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 40)
@@ -474,8 +475,8 @@ def test_unknown_adc_tail_uses_actual_maximum_after_optional_sync(synchronize):
                 with branch.case(index) as case_timeline:
                     prog.fork(case_timeline, into="local")
                     prog.timeline_inc("duration", timeline="local")
-                    prog.trigger([0], width=1 / 430.08, timeline="local")
-        prog.timeline_inc(47 / 430.08)
+                    prog.trigger([0], width=1 / TPROC_MHZ, timeline="local")
+        prog.timeline_inc(47 / TPROC_MHZ)
         if synchronize:
             prog.delay_by_timeline()
 
@@ -498,7 +499,7 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
             self.add_loop("scan", 1)
             self.add_reg("duration")
             self.add_dmem([40])
-            self.declare_readout(0, length=4 / 307.2)
+            self.declare_readout(0, length=4 / RO_MHZ)
 
         def _body(self, cfg):
             self.read_dmem("duration", 0)
@@ -508,10 +509,10 @@ def test_hinted_branch_local_adc_tail_uses_constant_shell_wait_bound():
             ):
                 self.fork(case_timeline, into="local")
                 self.timeline_inc("duration", timeline="local", range_hint=(30, 50))
-                self.trigger([0], width=1 / 430.08, timeline="local")
+                self.trigger([0], width=1 / TPROC_MHZ, timeline="local")
 
     with pytest.warns(UserWarning, match="WAIT.*duration.*slack=20 cycles"):
-        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / 430.08)
+        prog = Program(load_soccfg(0, 1), initial_delay=0, relax_delay=20 / TPROC_MHZ)
     (wait,) = [inst for inst in prog.prog_list if inst["CMD"] == "WAIT"]
     # The hinted latest origin is 50; four ADC samples take 5.6 tProc cycles.
     assert wait["TIME"] == "@56"
@@ -527,7 +528,7 @@ def test_author_register_duration_in_repeat_debits_actual_iteration_advances(cou
     def body(prog):
         prog.read_dmem("duration", 0)
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", count):
             prog.timeline_inc("duration")
@@ -553,7 +554,7 @@ def test_branch_register_time_can_be_captured_from_author_entry_state(align):
             for index in range(3):
                 with branch.case(index):
                     prog.timeline_inc("duration")
-                    prog.timeline_inc(index / 430.08)
+                    prog.timeline_inc(index / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     expected = [42] * 3 if align else [40, 41, 42]
@@ -585,7 +586,7 @@ def test_static_managed_pulse_after_unknown_segment_restores_native_auto_tail():
         prog.fork("default", into="fixed")
         prog.timeline_inc("duration")
         prog.pulse(0, "p0", timeline="default")
-        prog.timeline_inc(100 / 430.08, timeline="fixed")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="fixed")
         prog.pulse(0, "p0", timeline="fixed")
         prog.pulse(0, "p0", t="auto")
 
@@ -598,10 +599,10 @@ def test_register_repeat_debits_external_end_by_actual_count_and_resets():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.join("external", into="default")
         prog.pulse(0, "p0", timeline="default")
@@ -616,11 +617,11 @@ def test_runtime_maximum_preserves_actual_end_after_author_bounded_repeat():
     def body(prog):
         prog.write_reg_op("duration", "scan", "+", 1)
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(15 / 430.08)
+            prog.timeline_inc(15 / TPROC_MHZ)
             prog.delay_by_timeline()
-        prog.timeline_inc(80 / 430.08)
+        prog.timeline_inc(80 / TPROC_MHZ)
         prog.join("external", into="default")
         prog.pulse(0, "p0", timeline="default")
 
@@ -662,7 +663,7 @@ def test_runtime_join_uses_pointwise_maximum_and_preserves_later_target():
         prog.emit(right)
         prog.timeline_inc("left_time", timeline="left")
         prog.timeline_inc("right_time", timeline="right")
-        prog.timeline_inc(25 / 430.08)
+        prog.timeline_inc(25 / TPROC_MHZ)
         prog.join("left", "right", into="default")
         prog.pulse(0, "p0", timeline="default")
 
@@ -722,7 +723,7 @@ def test_runtime_maximum_keeps_captured_values_after_source_register_overwrite()
 def test_unknown_runtime_adc_start_must_prove_previous_window_is_complete():
     def initialize(prog):
         prog.add_dmem([200])
-        prog.declare_readout(0, length=100 / 307.2)
+        prog.declare_readout(0, length=100 / RO_MHZ)
 
     def body(prog):
         prog.fork("default", into="next_read")
@@ -737,13 +738,13 @@ def test_unknown_runtime_adc_start_must_prove_previous_window_is_complete():
 
 def test_native_trigger_replaces_prior_runtime_adc_tail_for_shot_closure():
     def initialize(prog):
-        prog.declare_readout(0, length=4 / 307.2)
+        prog.declare_readout(0, length=4 / RO_MHZ)
 
     def body(prog):
         prog.write_reg("duration", 40)
         prog.timeline_inc("duration")
-        prog.trigger([0], width=1 / 430.08, timeline="default")
-        prog.trigger([0], t=100 / 430.08, width=1 / 430.08)
+        prog.trigger([0], width=1 / TPROC_MHZ, timeline="default")
+        prog.trigger([0], t=100 / TPROC_MHZ, width=1 / TPROC_MHZ)
 
     prog = program(body, initialize=initialize)
     result = shots(prog)
@@ -757,14 +758,14 @@ def test_native_trigger_replaces_prior_runtime_adc_tail_for_shot_closure():
 
 def test_runtime_config_and_trigger_use_register_origin_and_close_adc_window():
     def initialize(prog):
-        prog.declare_readout(0, length=4 / 307.2)
+        prog.declare_readout(0, length=4 / RO_MHZ)
         prog.add_readoutconfig(0, "ro", freq=100)
 
     def body(prog):
         prog.write_reg("duration", 40)
         prog.timeline_inc("duration")
-        prog.send_readoutconfig(0, "ro", t=3 / 430.08, timeline="default")
-        prog.trigger(ros=[0], t=2 / 430.08, width=3 / 430.08, timeline="default")
+        prog.send_readoutconfig(0, "ro", t=3 / TPROC_MHZ, timeline="default")
+        prog.trigger(ros=[0], t=2 / TPROC_MHZ, width=3 / TPROC_MHZ, timeline="default")
         prog.pulse(1, "p1", t=0)
 
     result = shots(program(body, initialize=initialize))
@@ -799,7 +800,7 @@ def test_auto_pulse_uses_actual_runtime_channel_end_not_its_upper_bound(managed)
 def test_native_register_reference_advance_preserves_unconsumed_end():
     def body(prog):
         prog.write_reg("duration", 15)
-        prog.timeline_inc(40 / 430.08)
+        prog.timeline_inc(40 / TPROC_MHZ)
         prog.delay_reg_auto("duration")
         prog.pulse(1, "p1", t=0)
         prog.pulse(0, "p0", timeline="default")
@@ -816,14 +817,14 @@ def test_static_branch_joins_case_maximum_and_allows_next_placement(
 ):
     def body(prog):
         prog.fork("default", into="untouched")
-        prog.timeline_inc(7 / 430.08, timeline="untouched")
+        prog.timeline_inc(7 / TPROC_MHZ, timeline="untouched")
 
         def selected():
             with prog.branch(by="scan", align_timeline=align_timeline) as branch:
                 with branch.case(0):
-                    prog.timeline_inc(10 / 430.08)
+                    prog.timeline_inc(10 / TPROC_MHZ)
                 with branch.case(2):
-                    prog.timeline_inc(30 / 430.08)
+                    prog.timeline_inc(30 / TPROC_MHZ)
             prog.pulse(0, "p0", timeline="default")
 
         if inside_repeat:
@@ -858,17 +859,17 @@ def test_branch_local_forks_are_discarded_unless_explicitly_joined(
 ):
     def body(prog):
         prog.fork("default", into=["p", "q", "untouched"])
-        prog.timeline_inc(9 / 430.08, timeline="untouched")
+        prog.timeline_inc(9 / TPROC_MHZ, timeline="untouched")
         with (
             prog.branch(by="scan", align_timeline=align_timeline) as branch,
             branch.case(1) as case,
         ):
             prog.fork(case, into=["p", "q"])
-            prog.timeline_inc(20 / 430.08, timeline="p")
-            prog.timeline_inc(40 / 430.08, timeline="q")
+            prog.timeline_inc(20 / TPROC_MHZ, timeline="p")
+            prog.timeline_inc(40 / TPROC_MHZ, timeline="q")
             prog.fork("p", into="local")
             prog.fork("local", into="leaf")
-            prog.timeline_inc(80 / 430.08, timeline="leaf")
+            prog.timeline_inc(80 / TPROC_MHZ, timeline="leaf")
             if explicit_join:
                 prog.join("leaf", into="q")
                 prog.join("local", into="q")
@@ -876,7 +877,7 @@ def test_branch_local_forks_are_discarded_unless_explicitly_joined(
         prog.pulse(0, "p0", timeline="default")
         prog.pulse(1, "p1", timeline="q")
         prog.delay_by_timeline(timeline="untouched")
-        prog.pulse(0, "p0", t=200 / 430.08)
+        prog.pulse(0, "p0", t=200 / TPROC_MHZ)
 
     result = shots(program(body))
     # Local p/q merge into the case; leaf affects it only with an explicit join.
@@ -902,7 +903,7 @@ def test_runtime_branch_joins_pointwise_without_advancing_reference(
                     prog.emit(loader)
                     prog.timeline_inc("loaded")
                 with branch.case(1):
-                    prog.timeline_inc(25 / 430.08)
+                    prog.timeline_inc(25 / TPROC_MHZ)
             prog.pulse(0, "p0", timeline="default")
             # Unmanaged output must still see the incoming reference.
             prog.append_macro(Pulse(ch=1, name="p1", t=0))
@@ -934,7 +935,7 @@ def test_aligned_branch_reconstructs_case_local_nonaffine_author_table():
                 prog.emit(loader)
                 prog.timeline_inc("loaded")
             with branch.case(1):
-                prog.timeline_inc(25 / 430.08)
+                prog.timeline_inc(25 / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     prog = program(body, initialize=lambda p: p.declare(loader))
@@ -951,11 +952,11 @@ def test_aligned_branch_reconstructs_case_local_nonaffine_author_table():
 def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
                 with branch.case(i):
-                    prog.timeline_inc((10 + 10 * i) / 430.08)
+                    prog.timeline_inc((10 + 10 * i) / TPROC_MHZ)
                     prog.pulse(0, "p0")
         prog.join("external", into="default")
         prog.pulse(1, "p1", timeline="default")
@@ -968,13 +969,13 @@ def test_sweep_branch_preserves_path_advance_and_runtime_external_end():
 
 def test_aligned_branch_reconstructs_integer_max_without_timing_tables():
     def body(prog):
-        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 30 / 430.08))
-        prog.delay(20 / 430.08)
+        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 30 / TPROC_MHZ))
+        prog.delay(20 / TPROC_MHZ)
         with prog.branch(by="scan", align_timeline=True) as branch:
             with branch.case(0):
-                prog.timeline_inc(QickSweep1D("scan", 5 / 430.08, 35 / 430.08))
+                prog.timeline_inc(QickSweep1D("scan", 5 / TPROC_MHZ, 35 / TPROC_MHZ))
             with branch.case(1):
-                prog.timeline_inc(25 / 430.08)
+                prog.timeline_inc(25 / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     prog = program(body)
@@ -994,9 +995,9 @@ def test_branch_fork_names_are_case_local_and_only_local_case_is_closed():
                 with branch.case(i) as case:
                     if i == 1:
                         prog.fork(case, into="local")
-                        prog.timeline_inc(20 / 430.08, timeline="local")
+                        prog.timeline_inc(20 / TPROC_MHZ, timeline="local")
                     else:
-                        prog.timeline_inc((10 if i == 0 else 30) / 430.08)
+                        prog.timeline_inc((10 if i == 0 else 30) / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="default")
 
     result = shots(program(body))
@@ -1034,7 +1035,7 @@ def test_repeat_branch_debits_actual_paths_and_preserves_long_pulse_tail(
             with prog.branch(by="scan", align_timeline=True) as branch:
                 for i in range(3):
                     with branch.case(i):
-                        prog.timeline_inc((5 + 5 * i) / 430.08)
+                        prog.timeline_inc((5 + 5 * i) / TPROC_MHZ)
             prog.delay_by_timeline()
 
     result = shots(program(body, reps=2))
@@ -1066,13 +1067,13 @@ def test_register_timeline_time_inside_repeat_preserves_legal_pulse_backedge():
 def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     def body(prog):
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", 2):
             with prog.branch(by="scan", align_timeline=True) as branch:
                 for index in range(3):
                     with branch.case(index):
-                        prog.timeline_inc(QickSweep1D("scan", 10 / 430.08, 20 / 430.08))
+                        prog.timeline_inc(QickSweep1D("scan", 10 / TPROC_MHZ, 20 / TPROC_MHZ))
             prog.delay_by_timeline()
         prog.timeline_inc(0, timeline="external", tag="remaining")
         prog.pulse(0, "p0", timeline="external")
@@ -1081,7 +1082,7 @@ def test_repeat_identical_swept_branch_paths_keep_static_pointwise_advance():
     # Every path has the same affine advance10/15/20. Two iterations leave
     # static remainders80/70/60; get_time_param remains available for this end.
     remaining = prog.get_time_param("remaining", "t", as_array=True)
-    assert remaining * 430.08 == pytest.approx([80, 70, 60])
+    assert remaining * TPROC_MHZ == pytest.approx([80, 70, 60])
     assert [waves(s) for s in shots(prog)] == [[100]] * 3
 
 
@@ -1096,9 +1097,9 @@ def test_repeat_branch_guard_checks_each_case_and_backedge_without_padding(overl
                         prog.fork(case, into="raw")
                         prog.pulse(0, "p0")
                         if i == 2:
-                            prog.pulse(0, "p0", t=35 / 430.08, timeline="raw")
+                            prog.pulse(0, "p0", t=35 / TPROC_MHZ, timeline="raw")
                             if not overlap:
-                                prog.timeline_inc(35 / 430.08)
+                                prog.timeline_inc(35 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     if overlap:
@@ -1119,7 +1120,7 @@ def test_long_pulse_crosses_register_repeat_without_conservative_shell_padding()
         prog.pulse(1, "p1", timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(5 / 430.08)
+            prog.timeline_inc(5 / TPROC_MHZ)
             prog.delay_by_timeline()
 
     result = shots(program(body))
@@ -1135,7 +1136,7 @@ def test_long_pulse_crosses_branch_without_conservative_shell_padding():
         with prog.branch(by="scan", align_timeline=True) as branch:
             for i in range(3):
                 with branch.case(i):
-                    prog.timeline_inc((5 + 5 * i) / 430.08)
+                    prog.timeline_inc((5 + 5 * i) / TPROC_MHZ)
 
     result = shots(program(body))
     assert [waves(s) for s in result] == [[0]] * 3
@@ -1225,7 +1226,7 @@ def test_custom_native_subclass_writes_do_not_restrict_non_time_words(custom_wri
         if custom_writer == "write":
             # QICK signed immediate -1 preserves the raw 0xffffffff word.
             prog.append_macro(CustomWrite(dst="duration", src=1, value=-1))
-        prog.timeline_inc(10 / 430.08)
+        prog.timeline_inc(10 / TPROC_MHZ)
         if custom_writer == "close":
             prog.append_macro(CustomCloseLoop(dst="duration"))
         else:
@@ -1239,7 +1240,7 @@ def test_custom_native_subclass_repeat_count_keeps_author_range_hint():
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.delay_by_timeline()
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(10 / 430.08)
+            prog.timeline_inc(10 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.pulse(0, "p0", timeline="default")
 
@@ -1257,10 +1258,10 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(
     def body(prog):
         prog.append_macro(CustomWrite(dst="duration", src=1, value=3))
         prog.fork("default", into="external")
-        prog.timeline_inc(external_cycles / 430.08, timeline="external")
+        prog.timeline_inc(external_cycles / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(1 / 430.08)
+            prog.timeline_inc(1 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.fork("external", into="working")
         if overwrite_before_branch:
@@ -1269,10 +1270,10 @@ def test_branch_uses_captured_runtime_entry_after_register_repeat(
             by="scan", align_timeline=align_timeline, timeline="working"
         ) as branch:
             with branch.case(0):
-                prog.timeline_inc(5 / 430.08)
+                prog.timeline_inc(5 / TPROC_MHZ)
                 prog.append_macro(CustomWrite(dst="duration", src=1, value=1))
             with branch.case(2):
-                prog.timeline_inc(15 / 430.08)
+                prog.timeline_inc(15 / TPROC_MHZ)
         prog.pulse(0, "p0", timeline="working")
 
     result = shots(program(body))
@@ -1332,10 +1333,10 @@ def test_external_source_and_derived_target_allow_register_delay():
     def body(prog):
         prog.write_reg("duration", 1)
         prog.fork("default", into="external")
-        prog.timeline_inc(100 / 430.08, timeline="external")
+        prog.timeline_inc(100 / TPROC_MHZ, timeline="external")
         prog.delay_by_timeline()
         with prog.repeat("r", "duration", range_hint=(1, 3)):
-            prog.timeline_inc(10 / 430.08)
+            prog.timeline_inc(10 / TPROC_MHZ)
             prog.delay_by_timeline()
         prog.fork("external", into="derived")
         prog.timeline_inc("duration", timeline="derived")
@@ -1378,7 +1379,7 @@ def test_time_producer_must_be_initialized_on_every_branch_path():
 def test_sweep_time_rejects_overflow_on_native_backedge_before_reset():
     def body(prog):
         prog.timeline_inc(
-            QickParam(start=(2**31 - 11) / 430.08, spans={"scan": 10 / 430.08})
+            QickParam(start=(2**31 - 11) / TPROC_MHZ, spans={"scan": 10 / TPROC_MHZ})
         )
 
     # All consumed endpoints fit, but QICK increments the final sweep value
@@ -1390,7 +1391,7 @@ def test_sweep_time_rejects_overflow_on_native_backedge_before_reset():
 @pytest.mark.parametrize("pulse_end", [False, True])
 def test_static_timeline_end_rejects_signed_cycle_overflow(pulse_end):
     def body(prog):
-        prog.timeline_inc((2**31 - 1 if pulse_end else 2**31) / 430.08)
+        prog.timeline_inc((2**31 - 1 if pulse_end else 2**31) / TPROC_MHZ)
         if pulse_end:
             prog.pulse(0, "p0", timeline="default")
 
@@ -1470,7 +1471,7 @@ def test_time_lookup_index_proof_covers_all_writes_and_lookup_execution(
 def test_runtime_delay_rejects_possible_sum_overflow():
     def body(prog):
         prog.write_reg("duration", 2**31 - 1)
-        prog.timeline_inc(1 / 430.08)
+        prog.timeline_inc(1 / TPROC_MHZ)
         prog.timeline_inc("duration")
 
     with pytest.raises(ValueError, match="overflow"):
@@ -1504,7 +1505,7 @@ def test_runtime_maximum_accepts_signed_limit_without_doubling_overflow():
 def test_unrelated_translate_writer_does_not_restrict_non_time_registers():
     def body(prog):
         prog.append_macro(OverwriteTime())
-        prog.timeline_inc(10 / 430.08)
+        prog.timeline_inc(10 / TPROC_MHZ)
 
     assert [s.body_end_cycle - s.start_cycle for s in shots(program(body))] == [10] * 3
 

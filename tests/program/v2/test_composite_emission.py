@@ -26,6 +26,7 @@ from zcu_tools.program.v2.modules.waveform import (
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 from zcu_tools.program.v2.utils import readout_freq_words
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2._mux_support import mux_soccfg, native_mux
 from tests.program.v2.timing_support import recompile, shots, waves
@@ -175,8 +176,8 @@ def test_integer_candidate_selection_uses_only_author_waveform_table():
         "selected_integer",
         val_reg="selector",
         pulses=[
-            _pulse_cfg(25 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
-            _pulse_cfg(50 / 384).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+            _pulse_cfg(25 / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0}),
+            _pulse_cfg(50 / GEN_MHZ).model_copy(update={"pre_delay": 0, "post_delay": 0}),
         ],
     )
     prog = _program(
@@ -198,7 +199,7 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
     pulse = ComputedPulse(
         "selected",
         val_reg="selector",
-        pulses=[_pulse_cfg(39 / 384), _pulse_cfg(89 / 384)],
+        pulses=[_pulse_cfg(39 / GEN_MHZ), _pulse_cfg(89 / GEN_MHZ)],
     )
 
     def body(prog):
@@ -221,7 +222,7 @@ def test_computed_pulse_end_follows_selected_waveform_without_maximum_padding():
 
 
 def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
-    first = _pulse_cfg(39 / 384)
+    first = _pulse_cfg(39 / GEN_MHZ)
     second = first.model_copy(update={"post_delay": 0.001})
     pulse = ComputedPulse("selected_post", val_reg="selector", pulses=[first, second])
     prog = _program(
@@ -240,8 +241,8 @@ def test_computed_pulse_uses_selected_fractional_post_not_first_or_maximum():
 def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
     pulse = TableLengthPulse(
         "length_table",
-        _pulse_cfg(39 / 384),
-        lengths=[39 / 384, 64 / 384, 89 / 384],
+        _pulse_cfg(39 / GEN_MHZ),
+        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
         idx_reg="index",
     )
 
@@ -269,12 +270,12 @@ def test_table_length_uses_actual_playback_end_and_counts_pre_post_once():
 
 
 def _runtime_selected(kind: str, *, pre_delay: float = 0.01) -> Module:
-    first = _pulse_cfg(39 / 384).model_copy(update={"pre_delay": pre_delay})
-    second = _pulse_cfg(89 / 384).model_copy(update={"pre_delay": pre_delay})
+    first = _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
+    second = _pulse_cfg(89 / GEN_MHZ).model_copy(update={"pre_delay": pre_delay})
     if kind == "computed":
         return ComputedPulse("selected", val_reg="index", pulses=[first, second])
     return TableLengthPulse(
-        "selected", first, lengths=[39 / 384, 89 / 384], idx_reg="index"
+        "selected", first, lengths=[39 / GEN_MHZ, 89 / GEN_MHZ], idx_reg="index"
     )
 
 
@@ -377,7 +378,7 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
 
     def body(prog):
         if negative_pre:
-            prog.timeline_inc(100 / 430.08, timeline="default")
+            prog.timeline_inc(100 / TPROC_MHZ, timeline="default")
             prog.emit(pulse)
             prog.emit(pulse)
         else:
@@ -391,13 +392,13 @@ def test_selected_channel_overlap_cannot_borrow_coverage(kind, negative_pre):
 
 def _negative_selected(kind: str, cycles: tuple[int, int] = (39, 64)) -> Module:
     candidates = [
-        _pulse_cfg(n / 384).model_copy(update={"post_delay": -60 / 430.08})
+        _pulse_cfg(n / GEN_MHZ).model_copy(update={"post_delay": -60 / TPROC_MHZ})
         for n in cycles
     ]
     if kind == "computed":
         return ComputedPulse("negative", val_reg="index", pulses=candidates)
     return TableLengthPulse(
-        "negative", candidates[0], lengths=[n / 384 for n in cycles], idx_reg="index"
+        "negative", candidates[0], lengths=[n / GEN_MHZ for n in cycles], idx_reg="index"
     )
 
 
@@ -414,7 +415,7 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / TPROC_MHZ, timeline="default")
         prog.emit(pulse)
 
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
@@ -428,7 +429,7 @@ def test_selected_negative_post_rounds_signed_offset_without_clamping_origin(
 @pytest.mark.parametrize("wait", [False, True])
 def test_selected_negative_post_retains_physical_channel_end(kind, wait):
     pulse = _negative_selected(kind, (39, 39))
-    following = Pulse("following", _pulse_cfg(39 / 384))
+    following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -439,7 +440,7 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
         prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
         if wait:
-            prog.timeline_inc(60 / 430.08, timeline="default")
+            prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
     if not wait:
@@ -454,7 +455,7 @@ def test_selected_negative_post_retains_physical_channel_end(kind, wait):
 @pytest.mark.parametrize("kind", ["computed", "table"])
 def test_selected_negative_post_native_auto_alignment_uses_exact_physical_end(kind):
     pulse = _negative_selected(kind)
-    following = Pulse("following", _pulse_cfg(39 / 384))
+    following = Pulse("following", _pulse_cfg(39 / GEN_MHZ))
 
     def initialize(prog):
         prog.add_loop("index", 2)
@@ -482,7 +483,7 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -491,10 +492,10 @@ def test_selected_negative_post_direct_advances_recover_only_proven_physical_bou
 
     def body(prog):
         prog.write_reg("origin", 100)
-        prog.timeline_inc("origin" if runtime else 100 / 430.08, timeline="default")
+        prog.timeline_inc("origin" if runtime else 100 / TPROC_MHZ, timeline="default")
         prog.emit(pulse)
         for cycles in advances:
-            prog.timeline_inc(cycles / 430.08, timeline="default")
+            prog.timeline_inc(cycles / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
     if sum(advances) < 60:
@@ -514,7 +515,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -525,7 +526,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
         prog.write_reg("origin", 100)
         prog.timeline_inc("origin", timeline="default")
         prog.emit(pulse)
-        prog.timeline_inc(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.fork("default", into="stale")
         if delay_by_timeline:
             prog.delay_by_timeline()
@@ -540,7 +541,7 @@ def test_deferred_coverage_does_not_cover_a_later_emission_or_reused_register(
 def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -555,7 +556,7 @@ def test_deferred_coverage_branch_does_not_hide_underpaid_path(kind):
         with prog.branch(by="path", align_timeline=False) as branch:
             for index, amount in enumerate((60, 59)):
                 with branch.case(index):
-                    prog.timeline_inc(amount / 430.08)
+                    prog.timeline_inc(amount / TPROC_MHZ)
         prog.emit(following)
 
     with pytest.raises(ValueError, match="channel 0 pulse overlap"):
@@ -569,7 +570,7 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
 ):
     pulse = _negative_selected(kind)
     following = Pulse(
-        "following", _pulse_cfg(39 / 384).model_copy(update={"pre_delay": 0.0})
+        "following", _pulse_cfg(39 / GEN_MHZ).model_copy(update={"pre_delay": 0.0})
     )
 
     def initialize(prog):
@@ -588,7 +589,7 @@ def test_deferred_coverage_through_runtime_maximum_does_not_pad_short_selection(
         prog.fork("default", into="other")
         prog.emit(pulse)
         prog.join("other", into="default")
-        prog.timeline_inc(60 / 430.08, timeline="default")
+        prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
         prog.emit(following)
 
     prog = _program(load_soccfg(1, 0), [pulse, following], body, initialize)
@@ -607,17 +608,17 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
     selected = [
         TableLengthPulse(
             f"selected_{ch}",
-            _pulse_cfg(39 / 384).model_copy(
-                update={"ch": ch, "post_delay": post / 430.08}
+            _pulse_cfg(39 / GEN_MHZ).model_copy(
+                update={"ch": ch, "post_delay": post / TPROC_MHZ}
             ),
-            lengths=[39 / 384, 64 / 384],
+            lengths=[39 / GEN_MHZ, 64 / GEN_MHZ],
             idx_reg="index",
         )
         for ch in (0, 1)
     ]
     following = Pulse(
         "following",
-        _pulse_cfg(39 / 384).model_copy(update={"ch": following_ch, "pre_delay": 0.0}),
+        _pulse_cfg(39 / GEN_MHZ).model_copy(update={"ch": following_ch, "pre_delay": 0.0}),
     )
 
     def initialize(prog):
@@ -632,7 +633,7 @@ def test_equal_runtime_maximum_preserves_both_physical_boundaries(
         prog.emit(selected[1], timeline="other")
         source, target = ("default", "other") if reverse else ("other", "default")
         prog.join(source, into=target)
-        prog.timeline_inc(advance / 430.08, timeline=target)
+        prog.timeline_inc(advance / TPROC_MHZ, timeline=target)
         prog.emit(following, timeline=target)
 
     def build():
@@ -670,7 +671,7 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
             prog.write_reg("origin", 100)
             prog.timeline_inc("origin", timeline="default")
             prog.emit(pulse)
-            prog.timeline_inc(60 / 430.08, timeline="default")
+            prog.timeline_inc(60 / TPROC_MHZ, timeline="default")
             prog.delay_by_timeline()
 
     prog = _program(load_soccfg(1, 0), [pulse], body, initialize)
@@ -683,11 +684,11 @@ def test_deferred_coverage_repeat_backedge_and_next_shot_reload_selection(kind):
 
 def _flat_selected(kind: str) -> Module:
     def cfg(cycles):
-        return _pulse_cfg((cycles + 16) / 384).model_copy(
+        return _pulse_cfg((cycles + 16) / GEN_MHZ).model_copy(
             update={
                 "waveform": FlatTopWaveformCfg(
-                    length=(cycles + 16) / 384,
-                    raise_waveform=GaussWaveformCfg(length=16 / 384, sigma=4 / 384),
+                    length=(cycles + 16) / GEN_MHZ,
+                    raise_waveform=GaussWaveformCfg(length=16 / GEN_MHZ, sigma=4 / GEN_MHZ),
                 )
             }
         )
@@ -695,7 +696,7 @@ def _flat_selected(kind: str) -> Module:
     if kind == "computed":
         return ComputedPulse("flat", val_reg="index", pulses=[cfg(39), cfg(89)])
     return TableLengthPulse(
-        "flat", cfg(39), lengths=[55 / 384, 105 / 384], idx_reg="index"
+        "flat", cfg(39), lengths=[55 / GEN_MHZ, 105 / GEN_MHZ], idx_reg="index"
     )
 
 
@@ -732,14 +733,14 @@ def test_flat_selected_runtime_origin_repeat_backedge_and_shot_reset(kind):
 def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin():
     left = TableLengthPulse(
         "left",
-        _pulse_cfg(39 / 384),
-        lengths=[39 / 384, 64 / 384, 89 / 384],
+        _pulse_cfg(39 / GEN_MHZ),
+        lengths=[39 / GEN_MHZ, 64 / GEN_MHZ, 89 / GEN_MHZ],
         idx_reg="index",
     )
     right = TableLengthPulse(
         "right",
-        _pulse_cfg(39 / 384, ch=1),
-        lengths=[89 / 384, 64 / 384, 39 / 384],
+        _pulse_cfg(39 / GEN_MHZ, ch=1),
+        lengths=[89 / GEN_MHZ, 64 / GEN_MHZ, 39 / GEN_MHZ],
         idx_reg="index",
     )
 
@@ -765,10 +766,10 @@ def test_selected_parallel_join_keeps_crossing_pointwise_ends_and_runtime_origin
 
 @pytest.mark.parametrize("constant_second", [False, True])
 def test_arbitrary_selected_posts_keep_independent_native_sweep_grid(constant_second):
-    first = _pulse_cfg(39 / 384).model_copy(
+    first = _pulse_cfg(39 / GEN_MHZ).model_copy(
         update={"post_delay": QickSweep1D("post", 0.0005, 0.0015)}
     )
-    second = _pulse_cfg(39 / 384).model_copy(
+    second = _pulse_cfg(39 / GEN_MHZ).model_copy(
         update={
             "post_delay": 0.0015
             if constant_second
@@ -909,7 +910,7 @@ def test_selected_actual_playback_words_match_independent_generator_lengths(kind
 @pytest.mark.parametrize("flat", [False, True])
 def test_native_address_playback_keeps_deferred_register_resolution(flat):
     pulse = (
-        _flat_selected("computed") if flat else Pulse("native", _pulse_cfg(39 / 384))
+        _flat_selected("computed") if flat else Pulse("native", _pulse_cfg(39 / GEN_MHZ))
     )
 
     def body(prog):
@@ -1016,7 +1017,7 @@ def test_flat_top_actual_segment_address_producers_are_preserved_or_reject_overw
 
 
 def _selected_length_with_change(change: str) -> TimelineProgramV2:
-    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
     loader = LoadValue("lengths", [39, 89], idx_reg="index", val_reg="length")
     other = LoadValue(
         "other", [89, 39], idx_reg="index", val_reg="length", use_existed=True
@@ -1068,7 +1069,7 @@ def _selected_length_with_change(change: str) -> TimelineProgramV2:
 
 
 def _selection_flow_program(body, *, path_count=2):
-    template = Pulse("template", _pulse_cfg(39 / 384), pulse_id="template")
+    template = Pulse("template", _pulse_cfg(39 / GEN_MHZ), pulse_id="template")
     loader = LoadValue("a", [39, 89], idx_reg="index", val_reg="length")
     other = LoadValue(
         "b", [89, 39], idx_reg="index", val_reg="length", use_existed=True
@@ -1242,8 +1243,8 @@ def test_repeated_computed_playback_preserves_selected_ends_within_register_budg
     builder = TimelineBuilder(load_soccfg(1, 0), reps=2, initial_delay=0, relax_delay=0)
     builder.add_loop("index", 2)
     choices = [
-        _pulse_cfg(cycles / 384).model_copy(
-            update={"pre_delay": 0, "post_delay": 1 / 430.08}
+        _pulse_cfg(cycles / GEN_MHZ).model_copy(
+            update={"pre_delay": 0, "post_delay": 1 / TPROC_MHZ}
         )
         for cycles in (39, 89)
     ]
@@ -1271,8 +1272,8 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         "first",
         val_reg="a_index",
         pulses=[
-            _pulse_cfg(n / 384).model_copy(
-                update={"pre_delay": 0, "post_delay": -10 / 430.08}
+            _pulse_cfg(n / GEN_MHZ).model_copy(
+                update={"pre_delay": 0, "post_delay": -10 / TPROC_MHZ}
             )
             for n in (39, 89)
         ],
@@ -1281,7 +1282,7 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         "other",
         val_reg="b_index",
         pulses=[
-            _pulse_cfg(n / 384, ch=1).model_copy(
+            _pulse_cfg(n / GEN_MHZ, ch=1).model_copy(
                 update={"pre_delay": 0, "post_delay": 0}
             )
             for n in (20, 40, 60)
@@ -1302,10 +1303,10 @@ def test_distinct_computed_selections_keep_captured_join_and_coverage_debt():
         prog.emit(change_a)
         # The first end and its physical coverage survive another table's
         # capture and a later author-selector change. Pay its negative-post debt.
-        prog.timeline_inc(10 / 430.08, timeline="saved")
+        prog.timeline_inc(10 / TPROC_MHZ, timeline="saved")
         prog.join("saved", into="default")
         prog.emit(first)
-        prog.timeline_inc(10 / 430.08)
+        prog.timeline_inc(10 / TPROC_MHZ)
 
     prog = _program(
         load_soccfg(2, 0),

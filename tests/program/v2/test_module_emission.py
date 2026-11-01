@@ -15,6 +15,7 @@ from zcu_tools.program.v2.modules.reset import (
 from zcu_tools.program.v2.modules.waveform import ConstWaveformCfg, CosineWaveformCfg
 from zcu_tools.program.v2.timeline import TimelineProgramV2
 
+from tests.program._profiles import GEN_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program.v2.timing_support import shots as _shots
 from tests.program.v2.timing_support import waves as _waves
@@ -121,8 +122,8 @@ def test_reused_scalar_pulse_has_independent_tags_and_common_end(
     # With pre/post: ceil(5+42.56+.02*430.08)=57, without them ceil42.56=43.
     assert [_waves(s) for s in _shots(prog)] == [events] * 2
     assert [s.body_end_cycle - s.start_cycle for s in _shots(prog)] == [duration] * 2
-    assert prog.get_time_param("first", "t") * 430.08 == pytest.approx(events[0])
-    assert prog.get_time_param("second", "t") * 430.08 == pytest.approx(events[1])
+    assert prog.get_time_param("first", "t") * TPROC_MHZ == pytest.approx(events[0])
+    assert prog.get_time_param("second", "t") * TPROC_MHZ == pytest.approx(events[1])
     expected = _shots(prog)
     prog.compile()
     assert _shots(prog) == expected
@@ -133,7 +134,7 @@ def test_joined_emissions_preserve_parallel_origins_and_event_end(swept):
     a = _pulse("a")
     # 25 generator clocks per step is exactly28 tProc cycles.
     b = _pulse(
-        "b", ch=1, length=QickSweep1D("scan", 77 / 384, 127 / 384) if swept else 0.2
+        "b", ch=1, length=QickSweep1D("scan", 77 / GEN_MHZ, 127 / GEN_MHZ) if swept else 0.2
     )
     tail = _pulse("tail", ch=2)
 
@@ -172,7 +173,7 @@ def test_repeat_emissions_keep_independent_tags_and_actual_end_spacing():
     assert [_waves(s) for s in shots] == [[0, 43, 86, 129]] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [172] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [172] * 2
-    assert prog.get_time_param("inside", "t") * 430.08 == pytest.approx(0)
+    assert prog.get_time_param("inside", "t") * TPROC_MHZ == pytest.approx(0)
 
 
 @pytest.mark.parametrize("delay_by_timeline", [False, True])
@@ -349,7 +350,7 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
     def body(prog):
         if timeline is not None:
             prog.fork("default", into=timeline)
-        prog.timeline_inc(10 / 430.08, timeline=timeline or "default")
+        prog.timeline_inc(10 / TPROC_MHZ, timeline=timeline or "default")
         prog.emit(reset, timeline=timeline)
         prog.emit(readout, timeline=timeline)
 
@@ -497,14 +498,14 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
 
     def body(prog):
         prog.fork("default", into="other")
-        prog.timeline_inc(40 / 430.08)
-        prog.timeline_inc(60 / 430.08, timeline="other")
+        prog.timeline_inc(40 / TPROC_MHZ)
+        prog.timeline_inc(60 / TPROC_MHZ, timeline="other")
         prog.pulse(0, pulse.pulse_name(prog))
         if consumer == "native":
             prog.delay_reg_auto("wait_cycles")
         else:
             prog.emit(auto)
-        prog.pulse(0, pulse.pulse_name(prog), t=1 / 430.08, timeline="default")
+        prog.pulse(0, pulse.pulse_name(prog), t=1 / TPROC_MHZ, timeline="default")
         prog.pulse(1, "native", timeline="other")
 
     def initialize(prog):
@@ -524,7 +525,7 @@ def test_known_register_delay_auto_uses_static_proof_then_register_cycles(consum
 
 @pytest.mark.parametrize("timeline", ["default", "other"])
 @pytest.mark.parametrize(
-    "end", [90 / 430.08, QickSweep1D("scan", 60 / 430.08, 90 / 430.08)]
+    "end", [90 / TPROC_MHZ, QickSweep1D("scan", 60 / TPROC_MHZ, 90 / TPROC_MHZ)]
 )
 def test_runtime_guard_rejects_unknown_custom_time_producer(timeline, end):
     pulse = _pulse(length=0.2)
@@ -626,16 +627,16 @@ def test_runtime_guard_accepts_swept_end_equal_to_static_at_last_point(timeline)
         if timeline != "default":
             prog.fork("default", into=timeline)
         prog.timeline_inc(
-            QickSweep1D("scan", 60 / 430.08, 86 / 430.08), timeline=timeline
+            QickSweep1D("scan", 60 / TPROC_MHZ, 86 / TPROC_MHZ), timeline=timeline
         )
         prog.pulse(0, pulse.pulse_name(prog))
         prog.delay_reg_auto("wait_cycles")
         prog.pulse(
-            0, pulse.pulse_name(prog), t=1 / 430.08, timeline=timeline, tag="after"
+            0, pulse.pulse_name(prog), t=1 / TPROC_MHZ, timeline=timeline, tag="after"
         )
 
     prog = _program([pulse], body, initialize)
-    assert prog.get_time_param("after", "t") * 430.08 == pytest.approx(1)
+    assert prog.get_time_param("after", "t") * TPROC_MHZ == pytest.approx(1)
     assert [_waves(s) for s in _shots(prog)] == [[0, 187]] * 4
 
 

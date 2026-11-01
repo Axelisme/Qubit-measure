@@ -79,6 +79,9 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     soc = environment.soc
     first = envelope(prog, soc, 0)
     assert envelope(prog, soc, 1) is first
+    old_request = build_compiled_request(
+        prog, "integrated", soc.binding, 1, routes=soc.routes
+    )
     old_times, old_values = first.sample_period_ticks, first.values
     table = prog.envelopes[1]["envs"]
     assert isinstance(table, dict)
@@ -91,12 +94,14 @@ def test_new_preparation_checks_current_compiled_content(environment, difference
     changed = envelope(prog, soc, 2)
     assert changed is not first
     if difference == "clock":
-        # Doubling the common frequency preserves period ticks, but halves us.
+        # The same samples now occupy half their original physical period.
         changed_request = build_compiled_request(
             prog, "integrated", soc.binding, 2, routes=soc.routes
         )
-        assert changed_request.time_base.ticks_per_us == 86016
-        assert changed.sample_period_ticks == first.sample_period_ticks == 7
+        assert changed_request.time_base.ticks_per_us % old_request.time_base.ticks_per_us == 0
+        assert changed_request.time_base.ns(changed.sample_period_ticks) == (
+            old_request.time_base.ns(first.sample_period_ticks) / 2
+        )
         assert changed.values == first.values
     else:
         assert changed != first

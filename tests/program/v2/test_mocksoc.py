@@ -5,20 +5,11 @@ from tests.program._profiles import load_mux_soccfg
 
 
 @pytest.mark.parametrize(
-    ("frequency_mhz", "expected"),
-    [
-        (6000.0, 60),
-        (6009.599, 60),
-        (6009.6, 60),
-        (6009.601, 61),
-        (6080.0, 62),
-        (7190.0, 37),
-        (2450.0, 32),
-        (2458.0, 32),
-    ],
+    "frequency_mhz",
+    [6000.0, 6009.599, 6009.6, 6009.601, 6080.0, 7190.0, 2450.0, 2458.0],
 )
 def test_pfb_channel_matches_qick_physical_frequency_assignment(
-    frequency_mhz: float, expected: int
+    frequency_mhz: float,
 ):
     cfg = load_mux_soccfg(2, 5, gen_ch=1, ro_chs=(4, 1))
     rocfg = cfg["readouts"][4]
@@ -26,7 +17,7 @@ def test_pfb_channel_matches_qick_physical_frequency_assignment(
     cfg.calc_ro_freq(
         rocfg, {"freq": frequency_mhz, "gen_ch": None}, registers, True, 0.0
     )
-    assert pfb_channel(cfg, 4, frequency_mhz) == registers["pfb_ch"] == expected
+    assert pfb_channel(cfg, 4, frequency_mhz) == registers["pfb_ch"]
 
 
 @pytest.mark.parametrize("ro_ch", [-1, 1, 2, True])

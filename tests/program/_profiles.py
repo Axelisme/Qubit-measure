@@ -24,6 +24,15 @@ def load_soccfg(n_gens: int | None = None, n_readouts: int | None = None) -> Qic
     return build_soccfg(profile)
 
 
+# Cycle-count scenarios use the same caller-owned YAML as their compiled programs.
+_ordinary = load_soccfg()
+TPROC_MHZ = _ordinary["tprocs"][0]["f_time"]
+GEN_MHZ = _ordinary["gens"][0]["f_fabric"]
+RO_MHZ = _ordinary["readouts"][0]["f_output"]
+GEN_SAMPLE_MHZ = GEN_MHZ * _ordinary["gens"][0]["samps_per_clk"]
+GEN_MAXV = _ordinary["gens"][0]["maxv"]
+
+
 def load_mux_soccfg(
     n_gens: int, n_readouts: int, *, gen_ch: int, ro_chs: tuple[int, ...]
 ) -> QickConfig:

@@ -12,6 +12,7 @@ from zcu_tools.program.v2.modules.pulse import Pulse
 from zcu_tools.program.v2.modules.readout import PulseReadoutCfg
 from zcu_tools.program.v2.modules.waveform import ArbWaveformCfg, ConstWaveformCfg
 
+from tests.program._profiles import GEN_MAXV, GEN_MHZ, GEN_SAMPLE_MHZ, RO_MHZ, TPROC_MHZ
 from tests.program._profiles import load_soccfg
 from tests.program._timeline import compile_modules
 from tests.program.v2.simulation.support import raw_of, request_of
@@ -30,7 +31,7 @@ def readout(name="readout", *, channel=0, samples=31, waveform=None):
         freq=100,
         gain=0.4,
         waveform=waveform or ConstWaveformCfg(length=0.1),
-        ro_length=samples / 307.2,
+        ro_length=samples / RO_MHZ,
     ).build(name)
 
 
@@ -72,15 +73,15 @@ def test_arb_preserves_signed_complex_scale_sample_axis_and_detached_ownership(
     assert envelope is not None
     values = np.asarray(envelope.values, dtype=np.complex128)
     assert envelope_times_us(observed.time_base, envelope)[0] == 0
-    assert envelope_times_us(observed.time_base, envelope)[1] == pytest.approx(1 / 6144)
-    assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(38 / 384)
-    assert values.real.min() == pytest.approx(-0.2, abs=1 / 32766)
+    assert envelope_times_us(observed.time_base, envelope)[1] == pytest.approx(1 / GEN_SAMPLE_MHZ)
+    assert time_us(observed.time_base, event.duration_ticks) == pytest.approx(38 / GEN_MHZ)
+    assert values.real.min() == pytest.approx(-0.2, abs=1 / GEN_MAXV)
     assert np.max(np.abs(values)) < 0.23  # never normalize this to a unit peak
-    assert values[0].imag == pytest.approx(0.1, abs=1 / 32766)
+    assert values[0].imag == pytest.approx(0.1, abs=1 / GEN_MAXV)
     assert np.interp(
         0.025, envelope_times_us(observed.time_base, envelope), values.real
     ) == pytest.approx(-0.05, abs=0.003)
-    assert event.gain == pytest.approx(0.4, abs=1 / 32766)
+    assert event.gain == pytest.approx(0.4, abs=1 / GEN_MAXV)
     # Changing the asset after preparation does not mutate the detached request.
     np.savez(path, time=[0, 0.05, 0.1], idata=[0, 0, 0], qdata=[0, 0, 0])
     assert envelope.values[0].real < 0
@@ -96,7 +97,7 @@ def test_adc_read_windows_retain_each_generator_association():
     second = second.cfg.build("second")
     # ADC length is 31/307.2 us = 43.4 tProc cycles; generator ends at 43.
     prog = compile_modules(
-        env.soccfg, modules=[readout("first"), Delay("adc_gap", 1 / 430.08), second]
+        env.soccfg, modules=[readout("first"), Delay("adc_gap", 1 / TPROC_MHZ), second]
     )
     prog.acquire(env.soc, progress=False)
     window = request_of(env).materialize_point(0).readouts[0]
