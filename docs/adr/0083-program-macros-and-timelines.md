@@ -120,14 +120,20 @@ Branch 的 case 另以自己的 timeline 屏蔽預設，不能藉外層 scope �
 
 一般 emission 先取所選 timeline 的結尾作為內部事件的共同起點。
 完成後採規則 b，不從 `total_length` 重建 duration，也不把 composite 內原本重疊的事件串接。
-單一 post-delay owner 取實際 waveform／ADC event end 的最大值，加一次 post-delay，再對完整結尾向上取整到 tProc cycle。
+單一 post-delay owner 取實際 generator waveform 結尾，加一次 post-delay，再對完整結尾向上取整到 tProc cycle。
+Readout 的 ADC 視窗只記在該 ADC channel 自己的尾端，不延長也不 join 回作者 timeline。
+`PulseReadoutCfg.nominal_duration_us`＝pre_delay＋generator waveform 長度＋post_delay。
 分數尾段保留到 aggregate 收尾，不先各自取整。
 Reset 保留各 child 的 post-delay，不新增 composite post。
 BathReset 的 pi/2 在 cavity end 加 post-delay 向上取整後開始，最後合併 qubit 與 pi/2 的實際結尾。
 Delay 與 SoftDelay 都只加結尾，不推進 reference。
-帶 timeline 的 pulse／trigger 在 E+t 發射，結尾更新到事件結束點。
+帶 timeline 的 pulse／trigger 在 E+t 發射，pulse 結尾更新到 generator 結束，trigger 結尾只含 trigger 寬度。
 兩種 readout config 是瞬時事件，結尾更新到 E+t，不加 config length 或其他 ADC window。
 同 generator 可證明的 pulse 重疊在編譯期報錯，另一條 timeline 不能豁免此檢查。
+後一個 trigger 帶 timeline 時，必須證明起點不早於同 ADC 前一視窗結尾。重疊或無法證明時在編譯期報錯。
+純原生的後一個 trigger 保留 QICK 行為。每個 shot 收尾仍等待全部 ADC。
+2026-11-01，使用者裁定：「18b請用gen的就好，adc讓其在獨立timeline不join，因為adc目前不影響後續pulse」。
+對編譯期報錯方式，使用者同日回答：「B」。
 
 `timeline_inc(t, timeline=X)` 只加 X 的結尾，`delay_by_timeline(timeline=X)` 才將 reference 推到 X 的結尾。
 Reference 推進 d 後，全部 timeline 包含 default 一起變成 `max(0, E-d)`。
@@ -414,5 +420,8 @@ IR analysis 是編譯結果分析，不是物理模擬 frontend，不產生模�
 
 作者必須明確同步 timeline 與原生 reference，不能以未同步的原生 pulse 代替序列發射。
 Runtime timeline 承接無法靜態精確表示的時間。已知來源保留 bounds、provenance 與可證明重疊的拒絕，無 hint 作者時間的未知段由作者負責合法性。
-Data register 上限仍為 16，不保證任意序列都能編譯。實驗仍保留 drive Join 後的明確同步。
+Data register 上限仍為 16，不保證任意序列都能編譯。
+register-economy 後，chevron／constructive_phase 四個實驗的硬體與 host 路徑共八處 drive Join 後同步已刪除。
+原 cfg 仍可編譯，公開 compiled 事件時間與刪除前逐點相同。
+2026-11-01，使用者裁定：「13沒影響就移除多餘的同步」。
 原生寫法與公開 API 範例由 [program README](../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline) 維護，module 宣告與 owner 邊界見 [modules README](../../lib/zcu_tools/program/v2/modules/README.md#原生寫法)。
