@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from qick.tprocv2_assembler import Assembler
 from zcu_tools.program.v2.ir.factory import IRLexer, IRParser
 from zcu_tools.program.v2.ir.instructions import (
     JumpInst,
@@ -12,6 +13,7 @@ from zcu_tools.program.v2.ir.instructions import (
     TestInst,
 )
 from zcu_tools.program.v2.ir.labels import Label
+from zcu_tools.program.v2.ir.linker import IRLinker
 from zcu_tools.program.v2.ir.node import BasicBlockNode, BlockNode, IRLoop
 from zcu_tools.program.v2.ir.operands import (
     AluExpr,
@@ -20,6 +22,36 @@ from zcu_tools.program.v2.ir.operands import (
     Register,
     SrcKeyword,
 )
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "#u0",
+        "#u2147483647",
+        "#u2147483648",
+        "#u4294967295",
+        "#-2147483648",
+        "#-1",
+        "#0",
+        "#2147483647",
+    ],
+)
+def test_register_literal_roundtrip_preserves_spelling_and_machine_bits(literal: str):
+    source: dict[str, Any] = {
+        "CMD": "REG_WR",
+        "DST": "r1",
+        "SRC": "imm",
+        "LIT": literal,
+        "P_ADDR": 1,
+        "LINE": 1,
+    }
+    expected_binary = Assembler.list2bin([source])
+    linker = IRLinker()
+    restored, labels, _, _ = linker.link(linker.unlink([source], {}, []))
+
+    assert Assembler.list2bin(restored, labels) == expected_binary
+    assert restored[0]["LIT"] == literal
 
 
 @pytest.mark.parametrize("pmem_size", [512, 4096])

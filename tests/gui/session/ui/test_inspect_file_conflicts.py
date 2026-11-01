@@ -223,6 +223,7 @@ def test_inactive_entry_reload_refreshes_clean_views(conflict_ui) -> None:
     )
     assert not ui.observe(object_name=error_name).text
     assert _entry_value(ui, document) == accepted
+    assert not ui.observe(object_name=f"inspect.{document}.sync.message").visible
 
 
 @pytest.mark.parametrize(
