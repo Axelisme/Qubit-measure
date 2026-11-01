@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Annotated, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, StrictInt, model_validator
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
@@ -332,7 +334,9 @@ def run_flux_scan(
     return result
 
 
-def _make_flux_update(plots: Plots, result: MuxFluxResult, flux_unit: str):
+def _make_flux_update(
+    plots: Plots, result: MuxFluxResult, flux_unit: str
+) -> Callable[[NDArray[np.complex128]], None]:
     """Create per-tone magnitude maps and ten scan-history lines.
 
     Return a plot-thread updater accepting the complete tone-major IQ array.
@@ -346,11 +350,14 @@ def _make_flux_update(plots: Plots, result: MuxFluxResult, flux_unit: str):
         heat_ax, line_ax = fig.axes
         heat_ax.set(xlabel=f"DC value ({flux_unit})", ylabel="Frequency (MHz)")
         line_ax.set_xlabel("Frequency (MHz)")
+        line_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        line_ax.grid()
         heatmaps.append(live_heatmap(heat_ax, uniform=False))
         lines.append(live_line(line_ax, num_lines=10))
         for artist in line_ax.lines[:-1]:
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(label="current line", marker=".", color="C0")
+        line_ax.legend()
         figures.append(fig)
 
     @plots.on_plot_thread
