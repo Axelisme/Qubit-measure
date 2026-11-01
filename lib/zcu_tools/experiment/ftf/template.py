@@ -21,7 +21,7 @@ from zcu_tools.experiment.readout_plan import (
     map_readout_events,
     readout_contents,
 )
-from zcu_tools.program.v2.mocksoc import make_mux_mock_soccfg, pfb_channel
+from zcu_tools.program.v2.mocksoc import pfb_channel
 from zcu_tools.resources.ftf import FTFSettings
 from zcu_tools.simulate.adc import (
     ReadoutBatch,
@@ -337,19 +337,15 @@ def _projective_contents(
 
 
 def _mux_channel_contents(
-    content: ReadoutMapping, path: _ReadoutPath, channel: int
+    content: ReadoutMapping, soccfg: QickConfig, channel: int
 ) -> ReadoutMapping:
-    """Select incident carriers using the fixed compile profile's PFB channels."""
-    channels = tuple(receiver.ro_ch for receiver in path.receivers)
-    profile = make_mux_mock_soccfg(
-        path.gen_ch + 1, max(channels) + 1, gen_ch=path.gen_ch, ro_chs=channels
-    )
+    """Select incident carriers using the acquisition board's PFB channels."""
     selected = []
     for events in content.events:
         row = []
         for event in events:
             addressed = {
-                pfb_channel(profile, channel, grid.demodulation_frequency_ghz * 1000)
+                pfb_channel(soccfg, channel, grid.demodulation_frequency_ghz * 1000)
                 for grid in event.grids
             }
             if len(addressed) > 1:
@@ -361,7 +357,7 @@ def _mux_channel_contents(
                 pulse
                 for pulse in event.pulses
                 if not addressed
-                or pfb_channel(profile, channel, pulse.frequency_ghz * 1000)
+                or pfb_channel(soccfg, channel, pulse.frequency_ghz * 1000)
                 in addressed
             )
             row.append(replace(event, pulses=pulses))
@@ -405,7 +401,8 @@ def plan_template(
     Event generators select pulse or mux capabilities. Using both configured
     readout generators in one template raises ValueError naming both channels.
     Readout windows must belong to that path's receivers and generator.
-    Mux retains only carriers in each ADC's fixed-profile PFB channel, including
+    soccfg is the acquisition's QICK config, built from caller-owned board YAML.
+    Mux retains only carriers in each ADC's actual-profile PFB channel, including
     same-channel superposition. Each logical event selects independently. Grids
     in one event spanning different PFB channels raise ValueError. An addressed
     single carrier is unchanged; off-channel carriers are excluded even alone.
@@ -475,7 +472,7 @@ def plan_template(
     readouts = []
     for window, content in zip(template.readouts, event_contents, strict=True):
         if path.multiplexed:
-            content = _mux_channel_contents(content, path, window.channel)
+            content = _mux_channel_contents(content, soccfg, window.channel)
         adc = receivers[window.channel]
         dt = time_base.ns(window.sample_period_ticks)
         receiver = Receiver(
