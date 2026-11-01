@@ -260,5 +260,7 @@ def test_host_gain_axis_matches_compiled_words_with_frequency_sweep() -> None:
         )
         words.append(round(compiled_gain * soccfg.get_maxv(1)))
 
-    np.testing.assert_array_equal(words, [3276, 6552, 9828, 13104])
+    # The input is a uniform 0.1..0.4 gain grid. Truncate start and step words.
+    word_step = int(0.1 * soccfg.get_maxv(1))
+    np.testing.assert_array_equal(words, word_step * np.arange(1, 5))
     np.testing.assert_allclose(gains * soccfg.get_maxv(1), words, rtol=0, atol=2e-12)
