@@ -310,7 +310,8 @@ ADC demodulation keeps its absolute-time grid. An isolated addressed carrier's
 conditional IQ center is therefore invariant under a common pulse/grid time
 shift. Mux ADCs select incident carriers by the supplied board's PFB channel
 before demodulation. The profile determines Nyquist folding, channel spacing and
-offset; its PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz passband.
+offset. The example board's PFBv4 channels are 38.4 MHz apart with a ±19.2 MHz
+passband; changing independent ADC clocks in YAML changes this selection.
 Different-channel carriers are excluded, including when only one carrier is
 incident. If an observed event has no in-channel carrier, planning retains its
 grids with empty pulses. Acquisition emits receiver background offset and noise

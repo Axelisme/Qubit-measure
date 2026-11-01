@@ -337,7 +337,7 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     if isinstance(result, IntegratedRound):
         for ch, raw in result.raw.materialize(request.reps, request.avg_level).items():
             np.testing.assert_array_equal(raw, expected[ch])
-    replayed = replay.replay_round(paths[0], soccfg=profile_soccfg("ftf"))
+    replayed = replay.replay_round(paths[0])
     actual = (
         replayed.raw.materialize(request.reps, request.avg_level)
         if isinstance(replayed, IntegratedRound)
@@ -359,7 +359,7 @@ def test_round_replay_and_raw_outlive_source(tmp_path: Path, mode):
     )
     path = save_replay(tmp_path / "obsolete", incompatible, saved.round.snapshot, 2)
     with pytest.raises(ValueError, match="version mismatch"):
-        replay.replay_round(path, soccfg=profile_soccfg("ftf"))
+        replay.replay_round(path)
 
 
 def named_drive_settings():
@@ -577,7 +577,10 @@ def test_replay_rejects_other_backend_settings_before_numeric_work(
     )
     path = save_replay(tmp_path, fixed, EnvironmentSnapshot("wrong", "wrong"), 0)
     try:
-        replay.replay_round(path, soccfg=profile_soccfg("ftf"))
+        if target == "single":
+            single_replay.replay_round(path)
+        else:
+            ftf_replay.replay_round(path, soccfg=profile_soccfg("ftf"))
     except AttributeError:
         pytest.fail(
             f"{target} replay must reject other-backend settings with ValueError before numeric work"
@@ -622,7 +625,7 @@ def test_changed_settings_refresh_snapshot_identity_and_replay_inputs(tmp_path: 
     finally:
         source.close()
         env.devices.close_all_devices()
-    replayed = expect_integrated(replay_round(archived, soccfg=profile_soccfg("ftf")))
+    replayed = expect_integrated(replay_round(archived))
     np.testing.assert_array_equal(
         replayed.statistics.channels[0].sums, result.statistics.channels[0].sums
     )
