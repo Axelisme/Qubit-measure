@@ -1,6 +1,6 @@
 # `zcu_tools.plotting` — 圖管理與 owner 更新
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。具名原生圖、owner 更新與診斷圖的分工。
 
@@ -10,7 +10,6 @@
 `subplots(2, 2, num="fit")` 接受 Matplotlib 的列數、欄數、sharing 與 layout 參數，
 回傳原生 Figure／Axes，保留 scalar／array shape。`num` 是集合內唯一的字串名字，
 重複名字 raise ValueError。省略時依序取下一個未使用的 `figure_N`。
-第一個位置參數為字串的 `subplots("fit", ...)` 保留為遷移相容寫法。
 建圖使用 Agg canvas，不登記 pyplot manager 或切換全域 backend。
 
 ## 預設外觀
@@ -41,16 +40,6 @@ Qt canvas 交換及 Notebook ipympl manager 替換後，show 仍走同一個 ope
 NonPresentingHost 的 show 在 operation 尚未 finish 時不做事。
 這條路徑不使用 `plt.show()`。未 show 的圖仍在 `finish(present=True)` 時呈現。
 
-`Plots.create_live(name, initialize, ...)` 在 owner 建圖或接上既有 axes，呼叫作者的
-initializer，成功後立即呈現。Initializer 收到 host、figure、claimed axes 與 active
-checker，可回傳自己的 handle。既有 axes 必須屬於具名圖且尚未被其他 live initializer
-使用。名稱衝突、外部、移除、重複或數量錯誤的 axes 都會被拒絕。
-初始化失敗不呈現新圖，不回滾 callback 已做的修改。
-
-`draw(name, callback)` 在 owner 自由修改具名 Figure，成功後首次呈現並 refresh。
-後續 draw 共用同一 presentation。Callback 失敗直接傳遞，不呈現、不 refresh，也不回滾。
-Caller 不得保留 active artists 供 worker 直接修改。Callback 可以清除 axes 或重建 layout，
-既有作者 handle 如何處理被移除的 artists，由該 callback 的契約決定。
 `save(name, path, *, figsize=(6.4, 4.8), dpi=100)` 在 owner 以固定輸出尺寸保存，
 不沿用 GUI canvas 大小，預設 PNG 為 640×480。多面板由 caller 明列較大的 figsize。
 保存時沿用既有 layout engine，沒有 engine 時套 tight layout。保存成功或失敗都還原
@@ -73,34 +62,21 @@ Lab 的 `live_line(ax)`、`live_heatmap(ax)` 與 `live_scatter(ax)` 是可選的
 它們的 `set(...)` 回傳 changed artists，可直接在裝飾後的本體中回傳。
 它們不切執行緒、不 refresh、不 present，也不檢查 axes 佔用。
 
-## 舊通用即時更新
-
-從 `zcu_tools.plotting` import `LiveUpdate[T]`。在 create_live initializer 中，
-以其 host、figure、active checker 與接受 T 的繪圖 callback 建立 handle。
-`handle.update(data)` 先 deepcopy 資料，再同步在 host owner 執行 callback，成功後 refresh。
-Payload 可包含巢狀 NumPy arrays 或容器，但必須支援 deepcopy。
-自訂 deepcopy 必須保留資料隔離。Copy、callback 與 host 例外直接傳回 caller。
-Callback 失敗不 refresh，已修改的 artists 不回滾。
-
-`update(data, refresh=False)` 允許批次更新，之後用 `handle.refresh()` 或
-`plots.refresh(name)` 刷新整圖。Handle 在 dispatch 前及 owner 執行前都檢查 lifetime，
-finish／release 後拒絕更新與 refresh。Lib 不驗證 payload 的圖格式或實驗語意。
-
 ## 完成與保留
 
 Caller 先停止 producer，再呼叫 `finish()`。Finish 固定 membership、最後 refresh live
-圖，並呈現尚未 draw 的一般圖。失敗時可用 `finish(present=False)` 保留診斷圖而不呈現。
+圖，並呈現尚未 show 的一般圖。失敗時可用 `finish(present=False)` 保留診斷圖而不呈現。
 回傳的 `NamedFigures` 只有具名 Mapping 介面，保留原生圖及登記 owner。
 Presentation owner 另持有 Plots，透過 `release()` 釋放呈現，不銷毀保留的圖。
 Release 逐圖嘗試，彙整失敗；失敗的項目可以重試。
 Finish 後的 `fig.show()` 一律 raise RuntimeError，release 前後相同。
 Release 還原帶框架 manager 的 Agg canvas，並解除 manager 對舊 Plots 的參照。
 另一 host 可以經自己的 `present(figure)` 呈現保留的圖，但不恢復已結束 operation 的 show。
-`fork()` 建立同 host 的獨立通用 Plots，不共享名稱、handle 或 finish／release。
+`fork()` 建立同 host 的獨立通用 Plots，不共享名稱、更新或 finish／release。
 
 ## 格式與診斷圖的 owner
 
-四個 live 工具及其線圖、熱圖、非均勻熱圖、scatter 格式由
+三個 live 工具及其線圖、熱圖、非均勻熱圖、scatter 格式由
 [lab 支援套件](../../../zcu_lab/v2/README.md#即時圖工具) 擁有。
 Singleshot 分類圖與 joint-fit 診斷圖分別在 lab 的 `singleshot/plot.py` 與
 `singleshot/plot_rabi.py`。實驗作者可以直接修改這些工具。

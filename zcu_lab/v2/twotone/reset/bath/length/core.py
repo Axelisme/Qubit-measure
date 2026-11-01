@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -29,17 +28,12 @@ from zcu_tools.program.v2 import (
 from zcu_lab.v2.support import live_line
 
 
-def _default_phase_values() -> NDArray[np.float64]:
-    return np.array([0.0, 90.0, 180.0, 270.0], dtype=np.float64)
-
-
 @dataclass(frozen=True)
 class LengthResult:
     """Qubit-tone lengths in us and mean IQ (length, absolute pi/2 phase in degrees)."""
 
     lengths: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    phases: NDArray[np.float64] = dataclass_field(default_factory=_default_phase_values)
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -78,7 +72,12 @@ class LengthCfg(ConfigBase):
 class LengthExp(Experiment[LengthResult, LengthCfg]):
     AXES_SPEC: ClassVar[AxesSpec[LengthResult, LengthCfg]] = AxesSpec(
         axes=(
-            AxesSpec.Axis("phases", label="Pi2 Phase", unit="deg", dtype=np.float64),
+            AxesSpec.Axis(
+                values=(0.0, 90.0, 180.0, 270.0),
+                label="Pi2 Phase",
+                unit="deg",
+                dtype=np.float64,
+            ),
             AxesSpec.Axis(
                 "lengths", label="Length", unit="s", scale=1e-6, dtype=np.float64
             ),
@@ -184,7 +183,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         return LengthResult(
             lengths=lengths,
             signals=signals,
-            phases=_default_phase_values(),
         )
 
     def analyze(
@@ -206,7 +204,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         real_signals = bathreset_signal2real(signals)
 
-        _, ax = plots.subplots("fit")
+        _, ax = plots.subplots(num="fit")
 
         ax.plot(lens, real_signals, marker=".")
         ax.set_xlabel("Length (us)")

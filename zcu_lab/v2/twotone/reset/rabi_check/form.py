@@ -13,17 +13,21 @@ def make_form(ctx: FormContext) -> Form[RabiCheckCfg]:
         RabiCheckCfg,
         tree={
             "reset": Slot("$qubit.module.reset"),
-            "rabi_pulse": Slot("$qubit.module.x180", set={"gain": Hidden(0.0)})
-            if ctx.has("$qubit.module.x180")
-            else Template(
-                "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
+            "rabi_pulse": Slot(
+                "$qubit.module.x180",
+                set={"gain": Hidden(0.0)},
+                fallback=Template(
+                    "pi_pulse", bindings={"qubit": "$qubit"}, set={"gain": Hidden(0.0)}
+                ),
             ),
-            "tested_reset": Slot("$qubit.module.reset")
-            if ctx.has("$qubit.module.reset")
-            else Template("reset", bindings={"qubit": "$qubit"}),
-            "readout": Slot("$resonator.module.readout")
-            if ctx.has("$resonator.module.readout")
-            else Template("readout", bindings={"resonator": "$resonator"}),
+            "tested_reset": Slot(
+                "$qubit.module.reset",
+                fallback=Template("reset", bindings={"qubit": "$qubit"}),
+            ),
+            "readout": Slot(
+                "$resonator.module.readout",
+                fallback=Template("readout", bindings={"resonator": "$resonator"}),
+            ),
             "gain": Range(0.0, 1.0, expts=51),
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

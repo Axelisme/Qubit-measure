@@ -5,6 +5,8 @@ from itertools import product
 from typing import ClassVar
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.experiment import (
     Experiment,
@@ -62,8 +64,6 @@ class ConditionalPhaseHeraldedResult:
     Unmeasured points remain NaN; completed rounds survive cancellation.
     """
 
-    spectator_states: NDArray[np.int64]
-    quadratures: NDArray[np.int64]
     gate_counts: NDArray[np.int64]
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
@@ -75,8 +75,6 @@ def restore_result(
     """Restore 81-class sums; reject legacy raw-IQ files without sums."""
     sums = data.variable("sums")
     return ConditionalPhaseHeraldedResult(
-        spectator_states=sums.axes[7].astype(np.int64),
-        quadratures=sums.axes[6].astype(np.int64),
         gate_counts=sums.axes[5].astype(np.int64),
         frequencies=sums.axes[4].astype(np.float64),
         sums=sums.z.astype(np.float64),
@@ -115,30 +113,33 @@ class ConditionalPhaseHeraldedExp(
             VariableSpec(
                 variable="sums",
                 axes=(
-                    VariableAxisSpec.generated_arange("terminal_f2", ""),
-                    VariableAxisSpec.generated_arange("terminal_f1", ""),
-                    VariableAxisSpec.generated_arange("herald_f2", ""),
-                    VariableAxisSpec.generated_arange("herald_f1", ""),
+                    VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_f1", unit=""),
                     VariableAxisSpec(
-                        "Common CZ frequency",
-                        "Hz",
+                        label="Common CZ frequency",
+                        unit="Hz",
                         field_name="frequencies",
                         dtype=np.float64,
                         scale=1e6,
                     ),
                     VariableAxisSpec(
-                        "CZ gate count", "", field_name="gate_counts", dtype=np.int64
-                    ),
-                    VariableAxisSpec(
-                        "Projection X or Y",
-                        "",
-                        field_name="quadratures",
+                        label="CZ gate count",
+                        unit="",
+                        field_name="gate_counts",
                         dtype=np.int64,
                     ),
                     VariableAxisSpec(
-                        "Spectator I or Xπ",
-                        "",
-                        field_name="spectator_states",
+                        label="Projection X or Y",
+                        unit="",
+                        values=(0, 1),
+                        dtype=np.int64,
+                    ),
+                    VariableAxisSpec(
+                        label="Spectator I or Xπ",
+                        unit="",
+                        values=(0, 1),
                         dtype=np.int64,
                     ),
                 ),
@@ -167,18 +168,18 @@ class ConditionalPhaseHeraldedExp(
         """
         validate_classifiers(config.readout, config.roles)
         frequencies = sweep2array(config.frequency)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Common CZ frequency (MHz)",
-            "Target sigma | herald (g,g)",
-            num_lines=4 * len(config.gate_counts),
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma | herald (g,g)")
+        viewer = live_line(ax, num_lines=4 * len(config.gate_counts))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
             counts = terminal_counts(np.moveaxis(sums, 0, 2), ("g", "g"))
             values = sigma(counts, config.target)
-            viewer.update(frequencies, values.reshape(-1, len(frequencies)))
+            return viewer.set(frequencies, values.reshape(-1, len(frequencies)))
 
         buffer = SignalBuffer(
             (len(config.gate_counts), 2, 2, len(frequencies), 3, 3, 3, 3),
@@ -252,8 +253,6 @@ class ConditionalPhaseHeraldedExp(
                 )
         buffer.trigger_update(flush=True)
         return ConditionalPhaseHeraldedResult(
-            np.arange(2, dtype=np.int64),
-            np.arange(2, dtype=np.int64),
             np.array(config.gate_counts, dtype=np.int64),
             frequencies,
             np.moveaxis(buffer.array, 0, 2),
@@ -276,13 +275,8 @@ class ConditionalPhaseHeraldedExp(
             data.frequencies, frequencies, rtol=8 * np.finfo(float).eps, atol=0
         ):
             raise ValueError("Conditional phase frequency axis must match saved cfg")
-        for actual, expected in (
-            (data.spectator_states, np.arange(2)),
-            (data.quadratures, np.arange(2)),
-            (data.gate_counts, np.array(cfg.gate_counts)),
-        ):
-            if not np.array_equal(actual, expected):
-                raise ValueError("Conditional phase count axes must match saved cfg")
+        if not np.array_equal(data.gate_counts, np.array(cfg.gate_counts)):
+            raise ValueError("Conditional phase count axes must match saved cfg")
         if data.sums.shape != (
             2,
             2,
@@ -363,7 +357,7 @@ class ConditionalPhaseHeraldedExp(
         )
 
         fig, _ = plots.subplots(
-            "phase", nrows=3, figsize=(11, 11), layout="constrained"
+            num="phase", nrows=3, figsize=(11, 11), layout="constrained"
         )
         fig.suptitle(
             f"{cfg.target.upper()} · shared slopes by actual spectator; gg vs ee"
@@ -411,7 +405,7 @@ class ConditionalPhaseHeraldedExp(
         ):
             ax.set(xlabel="Common CZ frequency (MHz)", ylabel=label)
             ax.legend(fontsize="x-small", ncols=3)
-        fig, axes = plots.subplots("slopes", figsize=(10, 5))
+        fig, axes = plots.subplots(num="slopes", figsize=(10, 5))
         for (name, fit), (b, state) in product(
             (("joint", fitted), ("gg-only", gg_fitted)), enumerate(("g", "e"))
         ):
@@ -424,7 +418,7 @@ class ConditionalPhaseHeraldedExp(
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Phase slope (deg/gate)")
         axes.legend()
-        fig, axes = plots.subplots("quadratures", figsize=(11, 6))
+        fig, axes = plots.subplots(num="quadratures", figsize=(11, 6))
         for (herald, values), (b, state), (q, projection), (j, n) in product(
             (("gg", gg_stats.values), ("ee sign-corrected", (-ee_stats.values))),
             enumerate(("g", "e")),
@@ -439,7 +433,7 @@ class ConditionalPhaseHeraldedExp(
             )
         axes.set(xlabel="Common CZ frequency (MHz)", ylabel="Target sigma")
         axes.legend(fontsize="x-small", ncols=4)
-        fig, axes = plots.subplots("herald", figsize=(12, 5))
+        fig, axes = plots.subplots(num="herald", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(herald_matrix.reshape(-1, 9)),
             vmin=0,

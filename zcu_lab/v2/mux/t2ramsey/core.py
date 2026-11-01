@@ -367,7 +367,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             trace = prepare_coherence_trace(
                 int(raw_index), source.result.times, source.result.signals[row], skip=0
             )
-            fig, ax = plots.subplots(f"fit_{trace.index}", figsize=(8, 5))
+            fig, ax = plots.subplots(num=f"fit_{trace.index}", figsize=(8, 5))
             ax.set(xlabel="Requested delay (us)", ylabel="Signal real (a.u.)")
             fig.suptitle(f"ramsey tone {trace.index}")
             try:

@@ -270,7 +270,7 @@ def declare_panes(
     """Publish finished pane resources through the same State terminal commands."""
     plots = Plots(NonPresentingHost())
     for name in names:
-        _, axes = plots.subplots(name)
+        _, axes = plots.subplots(num=name)
         axes.plot([0, 1], [1, 2])
     plots.finish(present=False)
     commit_analysis(

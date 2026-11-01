@@ -168,7 +168,7 @@ class AxesSpec(Generic[T_Result, T_Config]):
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class VariableAxisSpec:
     """Declare one inner-first axis for a grouped Data Variable.
 
@@ -195,9 +195,9 @@ class VariableAxisSpec:
     @classmethod
     def generated_arange(
         cls,
+        *,
         label: str,
         unit: str,
-        *,
         dtype: type = np.int64,
     ) -> VariableAxisSpec:
         """Declare indices 0..N-1 with the given persisted label/unit and dtype."""
@@ -230,12 +230,12 @@ class VariableZSpec:
     """
 
     field_name: str
-    label: str
-    unit: str
-    scale: float = IDENTITY
-    dtype: type = np.float64
-    index: int | None = None
-    index_axis: int = -1
+    label: str = field(kw_only=True)
+    unit: str = field(kw_only=True)
+    scale: float = field(default=IDENTITY, kw_only=True)
+    dtype: type = field(default=np.float64, kw_only=True)
+    index: int | None = field(default=None, kw_only=True)
+    index_axis: int = field(default=-1, kw_only=True)
 
     def __post_init__(self) -> None:
         if not self.field_name:

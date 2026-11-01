@@ -67,7 +67,7 @@ def opaque_run(
 def opaque_analyze(
     req: AnalyzeRequest[RunRecord[SavingCfg, OpaqueRun], PaneParams], *, plots: Plots
 ) -> PaneSummary:
-    _, axes = plots.subplots("fit")
+    _, axes = plots.subplots(num="fit")
     axes.plot(req.run_result.result.frequency, req.run_result.result.signal.real)
     return PaneSummary(17.0)
 

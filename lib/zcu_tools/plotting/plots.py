@@ -10,7 +10,6 @@ from typing import Protocol, TypeVar
 
 from matplotlib import rc_context
 from matplotlib.artist import Artist
-from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
@@ -66,8 +65,7 @@ class Plots(FigureCollection):
     unique num names, without presenting. Figure.show presents once through the
     host, even after a canvas swap. It raises RuntimeError after finish, including
     after release. Release drops the manager's reference to this operation.
-    Legacy live factories and the first successful draw present immediately.
-    Finishing fixes membership and stops typed updates; it does not declare
+    Finishing fixes membership and stops owner updates; it does not declare
     analysis success. Release presentation separately
     after finishing. Neither finish nor release destroys retained Figure objects.
     """
@@ -76,7 +74,6 @@ class Plots(FigureCollection):
         super().__init__()
         self._host = host
         self._live: list[Figure] = []
-        self._live_axes: set[Axes] = set()
         self._finished = False
         self._finished_figures: NamedFigures | None = None
         self._released: set[Figure] = set()
@@ -96,7 +93,7 @@ class Plots(FigureCollection):
     def fork(self) -> Plots:
         """Return an empty independent producer using this same presentation host.
 
-        Membership, Figure ownership, typed handles, finish and release are not
+        Membership, Figure ownership, updates, finish and release are not
         shared. The caller owns the new producer's lifecycle. Always return a
         plain Plots, even when this producer has a frontend-specific subtype.
         """
@@ -107,64 +104,10 @@ class Plots(FigureCollection):
         if self._finished:
             raise RuntimeError("Plot operation has finished")
 
-    def _resolve_axes(
-        self, name: str, axes: tuple[Axes, ...] | None, count: int
-    ) -> tuple[Figure, tuple[Axes, ...]]:
-        if axes is None:
-            figure, _ = self.subplots(name, ncols=count, squeeze=False)
-            resolved = tuple(figure.axes)
-        else:
-            figure = self[name]
-            resolved = axes
-        if len(resolved) != count or len(set(resolved)) != count:
-            raise ValueError("Live plot requires distinct axes of the expected count")
-        if any(ax.figure is not figure or ax not in figure.axes for ax in resolved):
-            raise ValueError("Live axes must belong to the named figure")
-        if any(ax in self._live_axes for ax in resolved):
-            raise ValueError("Axes already belong to a live plot")
-        self._live_axes.intersection_update(
-            ax for current in self.values() for ax in current.axes
-        )
-        self._live_axes.update(resolved)
-        return figure, resolved
-
     def _present_live(self, figure: Figure) -> None:
         if figure not in self._live:
             self._host.present(figure)
             self._live.append(figure)
-
-    def create_live(
-        self,
-        name: str,
-        initialize: Callable[
-            [PlotHost, Figure, tuple[Axes, ...], Callable[[], None]], _T
-        ],
-        *,
-        axes: tuple[Axes, ...] | None = None,
-        count: int = 1,
-    ) -> _T:
-        """Initialize a live figure on its owner and return the callback's handle.
-
-        Without axes, create a unique named figure with count columns. Otherwise
-        claim count distinct, unused axes of self[name]. Conflicts raise
-        ValueError; an unknown existing name raises KeyError. A finished
-        collection raises RuntimeError. The callback receives the host, figure,
-        claimed axes and an active-lifetime checker for its update handle.
-        It may return a handle that retains artists for owner-managed updates,
-        but workers must not mutate those artists directly.
-        Present only after initialization succeeds, once per figure. Callback
-        and host errors propagate without presentation or rollback.
-        """
-        self.ensure_active()
-
-        def create() -> _T:
-            self.ensure_active()
-            figure, resolved = self._resolve_axes(name, axes, count)
-            handle = initialize(self._host, figure, resolved, self.ensure_active)
-            self._present_live(figure)
-            return handle
-
-        return self._host.call(create)
 
     def on_plot_thread(
         self, callback: Callable[[_T], Iterable[Artist] | None]
@@ -213,33 +156,6 @@ class Plots(FigureCollection):
 
         return push
 
-    def draw(self, name: str, callback: Callable[[Figure], None]) -> None:
-        """Draw on an existing named figure, then refresh on the host owner.
-
-        Execution is synchronous on the host owner thread and blocks the calling
-        worker thread until callback, presentation and refresh return.
-        The first successful draw presents the figure and makes it live; later
-        draws refresh the same presentation. Untouched general figures still
-        wait until finish to present. With a GUI host it
-        occupies the GUI thread; heavy drawing can freeze the interface.
-        The callback may freely modify axes shared with caller-defined live
-        tools, but must not retain artists for later worker-side mutation.
-        Calling cla() removes their artists; those tools decide how subsequent
-        updates handle removed artists. Callback exceptions propagate without
-        rollback, presentation or refresh. Unknown names raise KeyError;
-        finished plots raise RuntimeError. Host errors also propagate.
-        """
-        self.ensure_active()
-        figure = self[name]
-
-        def draw_frame() -> None:
-            self.ensure_active()
-            callback(figure)
-            self._present_live(figure)
-            self._host.refresh(figure)
-
-        self._host.call(draw_frame)
-
     def save(
         self,
         name: str,
@@ -254,7 +170,7 @@ class Plots(FigureCollection):
         worker thread until saving completes. With a GUI host it occupies the
         GUI thread; expensive rendering can freeze the interface. This method
         invokes no callback and does not refresh. Saving does not restore
-        artists removed by an earlier draw callback.
+        artists removed by an earlier owner callback.
         figsize gives positive finite output dimensions in inches; dpi is the
         positive finite output resolution. Defaults produce a 640 x 480 PNG,
         independently of display size and savefig.bbox settings.
@@ -311,19 +227,6 @@ class Plots(FigureCollection):
                         axis.set_in_layout(in_layout)
 
         self._host.call(save_figure)
-
-    def refresh(self, name: str) -> None:
-        """Refresh a complete live frame after a batch of typed updates."""
-        self.ensure_active()
-        figure = self[name]
-        if figure not in self._live:
-            raise ValueError("Figure is not live")
-
-        def refresh_frame() -> None:
-            self.ensure_active()
-            self._host.refresh(figure)
-
-        self._host.call(refresh_frame)
 
     def finish(self, *, present: bool = True) -> NamedFigures:
         if self._finished_figures is not None:

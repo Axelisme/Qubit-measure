@@ -7,7 +7,6 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
-    mux_readout_seed_metadata,
 )
 
 from .._measure import captured_roles
@@ -29,18 +28,21 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
         slot = f"$coupler.module.cz_{role}"
         drive[role] = (
             # Run replaces both line frequencies with the common scan coordinate.
-            Slot(slot, copy=True, set={"freq": Hidden(0.0)})
-            if ctx.has(slot)
-            else Template(
-                "pulse:blank",
-                set={
-                    "ch": Expr(f"${role}.wiring.ch"),
-                    "nqz": None,
-                    "freq": Hidden(0.0),
-                    "gain": None,
-                    "waveform.style": "cosine",
-                    "waveform.length": None,
-                },
+            Slot(
+                slot,
+                copy=True,
+                set={"freq": Hidden(0.0)},
+                fallback=Template(
+                    "pulse:blank",
+                    set={
+                        "ch": Expr(f"${role}.wiring.ch"),
+                        "nqz": None,
+                        "freq": Hidden(0.0),
+                        "gain": None,
+                        "waveform.style": "cosine",
+                        "waveform.length": None,
+                    },
+                ),
             )
         )
     readout = mux_readout_initial(ctx)
@@ -72,7 +74,7 @@ def scan_form(ctx: FormContext, cfg_type: type[T_Cfg]) -> Form[T_Cfg]:
             "frequency": Range(None, None, expts=25),
             "duration": Range(None, None, expts=101),
         },
-    ).with_seed_metadata(mux_readout_seed_metadata(readout))
+    )
 
 
 def make_form(ctx: FormContext) -> Form[ChevronCfg]:

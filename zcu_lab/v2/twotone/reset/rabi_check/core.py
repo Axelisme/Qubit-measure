@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -31,9 +31,6 @@ from zcu_lab.v2.twotone.reset.rabi_check.fit import RabiCheckFit, fit_reset_rabi
 class RabiCheckResult:
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
-    reset_states: NDArray[np.int64] = field(
-        default_factory=lambda: np.array([0, 1, 2], dtype=np.int64)
-    )
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -76,7 +73,7 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
     AXES_SPEC: ClassVar[AxesSpec[RabiCheckResult, RabiCheckCfg]] = AxesSpec(
         axes=(
             AxesSpec.Axis("gains", label="Amplitude", unit="a.u.", dtype=np.float64),
-            AxesSpec.Axis("reset_states", label="Reset", unit="None", dtype=np.int64),
+            AxesSpec.Axis(values=(0, 1, 2), label="Reset", unit="None", dtype=np.int64),
         ),
         z=AxesSpec.Z("signals", label="Signal", unit="a.u.", dtype=np.complex128),
         result_type=RabiCheckResult,
@@ -157,14 +154,12 @@ class RabiCheckExp(Experiment[RabiCheckResult, RabiCheckCfg]):
         gains, signals = result.gains, result.signals
         if gains.ndim != 1 or signals.shape != (3, gains.size):
             raise ValueError("Reset-check signals must have shape (3, number of gains)")
-        if not np.array_equal(result.reset_states, [0, 1, 2]):
-            raise ValueError("Reset-check branch order must be [0, 1, 2]")
         if np.any(np.isinf(signals)):
             raise ValueError("Reset-check signals must not contain infinities")
         real_signals = reset_rabi_signal2real(signals)
         fit = fit_reset_rabi(gains, real_signals)
         fig, _ = plots.subplots(
-            "fit",
+            num="fit",
             nrows=2,
             ncols=1,
             sharex=True,

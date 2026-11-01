@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，simulators package ownership
+**Last updated:** 2026-11-01，獨立階段的實驗驗收、caller 自備板子 profile 與 simulators 測試 owner
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -69,25 +69,43 @@ Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精�
 
 ### 實驗定義
 
-對變更影響的 Experiment，以符合其 Cfg 型別的完整 cfg 與明確接線的離線模擬環境，呼叫公開的
-[`probe.probe` 或 `probe.main`](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
-Probe 執行公開 `run` → native `save_run` → 讀回並 `restore_run` → 以讀回的 RunRecord 呼叫 `analyze`，
-並輸出 live／analysis PNG。實驗須提供 `AXES_SPEC`，分析需要的 options 由呼叫端明填。
-命令範例與環境參數見 [zcu_lab 驗收說明](../zcu_lab/README.md#實驗定義的離線驗收)。
+在 task scratch 寫 Python probe 檔，import 受影響的 Experiment 與它自己的 Cfg／Result 型別。
+以型別化物件填寫完整 cfg 與分析 options，不用 GUI Form 自動組 cfg，也不手寫 JSON cfg。
+先對腳本跑 Pyright 與 Ruff，兩者通過後才執行。
+命令與腳本片段見 [zcu_lab 驗收說明](../zcu_lab/README.md#實驗定義的離線驗收)，
+API 契約見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
 
-Agent 在 review-done 前完成下列檢查，將證據留在各 task scratch，不新增個別實驗的 durable tests：
+依本次改動分別呼叫公開階段，不要求每次串成完整流程：
 
-1. 保存精確重跑命令、cfg、options、環境設定、exit status、報告與錯誤輸出。使用 Python API 時，另保存 scratch 腳本。
-2. 檢查 `report.failed_stage` 與 `report.exception` 都是 `None`，且 `report.roundtrip_equal is True`。
-   核對 `fields`／`restored_fields` 的 shape、dtype 與預期資料形狀，並記錄 `analysis_summary` 的判讀。
-   階段失敗時記錄階段與原始例外；不要以殘留的 native 檔或 PNG 當作本次成功證據。
-3. 親自開啟 `report.png_paths` 的每張 PNG，逐張記錄路徑、預期畫面與實際判讀。
-   核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。只有檔案存在或數值報告通過不算看圖驗收。
-   預期有圖卻未產生時，記錄為驗收缺口。
+- `run_stage(experiment, cfg, environment)` 接 caller 明確接線的 `SimulationEnvironment`。
+  它驗證 Result 的 shape／dtype 符合 `AXES_SPEC` 並更新 live 圖，回傳 record、秒數與 PNG bytes，不存檔或分析。
+- `save_stage(record, spec, directory)` 接執行結果或用實驗 Result 型別直接構造的 `RunRecord`。
+  它寫入 `directory/data.h5`、讀回並逐欄比較，回傳還原的 record、路徑、`roundtrip_equal` 與 `cfg_issue`。
+- `analysis_stage(experiment, record, options)` 接明確來源，不需要先 run 或 save。
+  可用 `probe.generators.synthesize` 配 fitting 公開模型，或用 `sample_iq_shots` 抽 raw IQ。
+  Caller 將陣列填入實驗自己的 Result，再組成 RunRecord。
+  它回傳 analyze 的實際結果與 PNG bytes，不轉成文字摘要。
 
-直接呼叫 `probe()` 的 caller 擁有環境生命週期，須在 `finally` 清理 backend 與 devices，失敗時也一樣。
-`main(argv)`／`python -m` 入口建立並清理自己的環境。Probe 不重設 caller 的 seed、不改接線，也不連硬體。
+Run 與 analysis 的 `pngs` 都是 `dict[str, bytes]`。
+Key 是 `live-` 或 `analysis-` 加 URL-escaped 圖名與 `.png`。
+階段不寫圖片，caller 自己保存 bytes 並看圖。
+
+Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不新增個別實驗的 durable tests：
+
+1. 保存 Python 腳本、靜態檢查及執行的精確命令與 exit status。
+   腳本保留 cfg、Result、options、環境接線與 seed；執行紀錄保留選用階段、回傳結果與錯誤輸出。
+2. 核對 run record 的 shape／dtype 與預期資料形狀。驗證存檔時確認 `roundtrip_equal is True`，
+   並判讀 `cfg_issue`。驗證分析時記錄實際 analysis 結果的判讀。
+   階段會傳出原始例外，失敗時記錄階段與 traceback，不以殘留檔案當本次成功證據。
+3. 將選用階段的每張 PNG 保存到 scratch，親自開啟並逐張記錄路徑、預期畫面與實際判讀。
+   核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
+   只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
+
+Caller 擁有環境生命週期，須在 `finally` 清理 backend 與 devices，失敗時也一樣。
+階段不重設 caller 的 seed、不改接線，也不建立硬體連線。
 離線驗收不代表實機校準或物理模型已獲驗證。
+框架的 stage 測試用最小合成實驗，兩個生成機制用合成模型與 population 測試。
+測試不 import `zcu_lab`，不逐家族驗證 fitting 回復真值。
 
 ## 搬遷驗收
 
@@ -502,8 +520,8 @@ absence assertions 或獨立程序匯入結果作測試。框架案例使用 syn
 `tests/gui/form_adapter/` 擁有推導與持久範本契約。舊 builder、Seed wrapper 與角色表的專用測試退休。
 Singleshot Rabi 數值由 `tests/analysis/fitting/test_singleshot_rabi.py` 驗證。
 畫圖工具歸 lab，直接審閱其格式；框架測試不 import lab。
-`tests/plotting/test_live_update.py` 驗證通用 handle 的資料隔離、owner callback、refresh
-及 finish／release 拒絕。Frontend 與 workflow 測試使用合成繪圖 callback，不固定 lab 格式。Notebook flux picker 使用 caller 提供的
+`tests/plotting/test_live_update.py` 驗證 `@plots.on_plot_thread` 的資料隔離、owner callback、
+已呈現根圖的 refresh 及 finish／release 拒絕。Frontend 與 workflow 測試使用合成繪圖 callback，不固定 lab 格式。Notebook flux picker 使用 caller 提供的
 `FluxPickInputs`，由 `tests/notebook/test_flux_dep.py` 驗證。
 
 `tests/gui/app/measure/adapter/` 驗證 Adapter／Analysis／Interactive／PostAnalysis 值、options 生成、

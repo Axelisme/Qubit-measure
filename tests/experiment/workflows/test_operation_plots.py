@@ -1,5 +1,6 @@
 """env.run isolates core plotting lifetimes without clearing workflow trends."""
 
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,7 +13,6 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.run_core import run_core
 from zcu_tools.experiment.script_host import CallContext
 from zcu_tools.experiment.workflows import Completed, Live, OperationFacts, WorkflowEnv
-from zcu_tools.plotting import LiveUpdate
 from zcu_tools.plotting.plots import NonPresentingHost, Plots
 
 from tests._plotting import TraceData, create_trace
@@ -33,7 +33,7 @@ def test_call_injects_resources_and_finishes_its_operation_plots(
 ) -> None:
     host = Presentation()
     rig = Rig(tmp_path, native=True, plot_host=host)
-    handles: list[LiveUpdate[TraceData]] = []
+    handles: list[Callable[[TraceData], None]] = []
 
     def operation(ctx: CallContext) -> int:
         plots = getattr(ctx, "plots", None)
@@ -52,7 +52,7 @@ def test_call_injects_resources_and_finishes_its_operation_plots(
         assert outcome.facts.name == "measurement"
         assert outcome.facts.stopped is False
         with pytest.raises(RuntimeError, match="finished"):
-            handles[0].update((np.array([0.0]), np.array([1.0])))
+            handles[0]((np.array([0.0]), np.array([1.0])))
 
     try:
         rig.start(script)
@@ -98,7 +98,7 @@ def test_release_failure_records_stopped_attempt_at_actual_finish(
 
     def present(ctx: CallContext) -> None:
         assert ctx.plots is not None
-        ctx.plots.subplots("measurement")
+        ctx.plots.subplots(num="measurement")
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
         iterations = env.iterations()
@@ -145,7 +145,7 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
     def acquire(cfg: Cfg, *, context: RunContext) -> int:
         attempts.append(context.plots)
         viewer = create_trace(context.plots, "measurement", "Delay", "Signal")
-        viewer.update((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
+        viewer((np.array([0.0, 1.0]), np.array([1.0, 2.0])))
         return cfg.value
 
     async def script(env: WorkflowEnv[int], plan: Plan, tun: Live[Tunables]) -> None:
@@ -156,7 +156,7 @@ def test_consecutive_core_operations_keep_workflow_plots_across_commits(
             for index in range(2):
                 outcome = completed(await run_core(iteration, acquire, Cfg(value=7)))
                 delivered.append(outcome.value.result)
-                trend.update((np.array([0.0]), np.array([float(index)])))
+                trend((np.array([0.0]), np.array([float(index)])))
                 iteration.commit(Point(value=index))
                 iteration = next(iterations)
         finally:
@@ -185,7 +185,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
     tmp_path: Path, outcome: str
 ) -> None:
     rig = Rig(tmp_path, native=True)
-    handles: list[LiveUpdate[TraceData]] = []
+    handles: list[Callable[[TraceData], None]] = []
     attempts: list[Plots] = []
     delivered: list[Completed[RunRecord[Cfg, int]]] = []
     errors: list[str] = []
@@ -207,7 +207,7 @@ def test_operation_finishes_before_return_or_failure_delivery(
                 errors.append(str(error))
             # The old producer is no longer allowed to update even before run ends.
             with pytest.raises(RuntimeError, match="finished"):
-                handles[0].update((np.array([0.0]), np.array([1.0])))
+                handles[0]((np.array([0.0]), np.array([1.0])))
             create_trace(env.plots, "trend", "x", "y")
         finally:
             iterations.close()
@@ -237,11 +237,11 @@ def test_workflow_registration_rejects_operation_namespace(
                 env.plots.adopt("operation/measurement", Figure())
         elif registration == "subplots":
             with pytest.raises(ValueError, match="operation/"):
-                env.plots.subplots("operation/measurement")
+                env.plots.subplots(num="operation/measurement")
         else:
             with pytest.raises(ValueError, match="operation/"):
                 create_trace(env.plots, "operation/measurement", "x", "y")
-        env.plots.subplots("trend")
+        env.plots.subplots(num="trend")
 
     try:
         rig.start(script)

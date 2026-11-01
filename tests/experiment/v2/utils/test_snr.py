@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -75,18 +73,78 @@ def test_negative_skew_penalty_is_rejected() -> None:
         calc_snr(mean, cov, m3, skew_penalty=-0.1)
 
 
-def test_snr_as_signal_broadcasts_sweep_axis() -> None:
-    separations = np.array([1.0, 2.0, 4.0], dtype=np.float64)
-    moments = [_moments(separation=float(sep)) for sep in separations]
-    mean = np.stack([item[0] for item in moments], axis=0)
-    cov = np.stack([item[1] for item in moments], axis=0)
-    m3 = np.stack([item[2] for item in moments], axis=0)
-    raw = [MagicMock(spec=MomentTracker, mean=mean, covariance=cov, third_moment=m3)]
+def _readout_tracker(
+    separations: NDArray[np.float64], *, ge_axis: int = 1
+) -> MomentTracker:
+    # Four symmetric shots give I variance 2/3 for g, 8/3 for e, and zero skew.
+    shots = np.array([[-1.0, 0.0], [1.0, 0.0], [0.0, -1.0], [0.0, 1.0]])
+    ground = np.broadcast_to(shots, separations.shape + shots.shape)
+    excited = 2.0 * ground + separations[..., None, None] * np.array([1.0, 0.0])
+    states = np.stack([ground, excited], axis=0)
+    tracker = MomentTracker()
+    tracker.update(np.moveaxis(states[None, ...], 1, ge_axis))
+    return tracker
 
-    out = snr_as_signal(raw, ge_axis=1)
 
-    assert out.shape == (3,)
-    assert out == pytest.approx(separations)
+@pytest.mark.parametrize("sweep_shape", [(), (1,), (3,), (1, 3), (2, 3)])
+@pytest.mark.parametrize("skew_penalty", [0.0, 0.5])
+@pytest.mark.parametrize("use_default_axis", [False, True])
+def test_snr_as_signal_returns_only_sweep_axes(
+    sweep_shape: tuple[int, ...], skew_penalty: float, use_default_axis: bool
+) -> None:
+    separations = np.arange(1.0, np.prod(sweep_shape) + 1.0).reshape(sweep_shape)
+    tracker = _readout_tracker(separations)
+
+    if use_default_axis:
+        out = snr_as_signal([tracker], skew_penalty=skew_penalty)
+    else:
+        out = snr_as_signal([tracker], ge_axis=1, skew_penalty=skew_penalty)
+
+    assert out.shape == sweep_shape
+    assert out.dtype == np.dtype(np.float64)
+    expected = separations / np.sqrt(5.0 / 3.0)
+    expected /= 1.0 + skew_penalty * np.log(0.5) ** 2
+    np.testing.assert_allclose(out, expected)
+    previous = calc_snr(
+        tracker.mean,
+        tracker.covariance,
+        tracker.third_moment,
+        ge_axis=1,
+        skew_penalty=skew_penalty,
+    )
+    np.testing.assert_array_equal(out, previous[0])
+
+
+@pytest.mark.parametrize(
+    ("leading_shape", "ge_axis", "message"),
+    [
+        ((0, 2), 1, "readout"),
+        ((2, 2), 1, "readout"),
+        ((1, 2), 0, "ge_axis"),
+        ((1, 2), -3, "ge_axis"),
+        ((1, 2), -1, "ge_axis"),
+        ((1, 2), 3, "ge_axis"),
+        ((1, 3), 1, "state"),
+    ],
+)
+def test_snr_as_signal_rejects_invalid_readout_or_state_axis(
+    leading_shape: tuple[int, ...], ge_axis: int, message: str
+) -> None:
+    tracker = MomentTracker()
+    tracker.update(np.zeros(leading_shape + (4, 2)))
+
+    with pytest.raises(ValueError, match=message):
+        snr_as_signal([tracker], ge_axis=ge_axis)
+
+
+@pytest.mark.parametrize("ge_axis", [2, -2])
+def test_snr_as_signal_accepts_an_explicit_nondefault_state_axis(ge_axis: int) -> None:
+    tracker = _readout_tracker(np.array([1.0, 2.0, 4.0]))
+    transposed = _readout_tracker(np.array([1.0, 2.0, 4.0]), ge_axis=2)
+
+    np.testing.assert_array_equal(
+        snr_as_signal([transposed], ge_axis=ge_axis), snr_as_signal([tracker])
+    )
 
 
 def test_shape_mismatch_penalty_is_gradual_and_monotone() -> None:

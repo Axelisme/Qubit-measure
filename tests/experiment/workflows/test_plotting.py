@@ -24,7 +24,7 @@ def test_engine_reuses_plots_across_commits_and_saves_figure(tmp_path: Path) -> 
                 seen.append(env.plots)
 
                 def acquire(ctx: CallContext, index: int = index) -> int:
-                    viewer.update((np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index))
+                    viewer((np.array([0.0, 1.0]), np.array([1.0, 3.0]) + index))
                     return index
 
                 result = completed(await iteration.call(acquire))
@@ -63,7 +63,7 @@ def test_projection_error_is_not_a_recoverable_acquire_failure(tmp_path: Path) -
             viewer = create_trace(env.plots, "trace", "x", "y")
 
             def project(ctx: CallContext) -> None:
-                viewer.update((np.array([0.0]), np.array([2.0])))
+                viewer((np.array([0.0]), np.array([2.0])))
                 raise cause
 
             delivered.append(await iteration.call(project))

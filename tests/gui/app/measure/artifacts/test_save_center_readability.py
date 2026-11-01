@@ -284,7 +284,7 @@ def test_paths_keep_recorded_names_after_switching_entry(
 
     session, ctrl, window, tab_id, center = saving_view
     plots = Plots(NonPresentingHost())
-    plots.subplots("fit")
+    plots.subplots(num="fit")
     plots.finish(present=False)
     commit_analysis(
         session.state,

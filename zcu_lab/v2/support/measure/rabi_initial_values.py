@@ -5,21 +5,36 @@ from __future__ import annotations
 from math import isfinite
 from typing import TYPE_CHECKING
 
-from zcu_tools.cfg_model import ArbWaveformCfg, PulseSpec, Slot, Template, WaveformSpec
+from zcu_tools.cfg_model import (
+    ArbWaveformCfg,
+    FieldMeta,
+    PulseSpec,
+    Slot,
+    Template,
+    WaveformSpec,
+)
 
 if TYPE_CHECKING:
     from zcu_tools.gui.session.parameters import ParameterContext
 
 
 def len_rabi_initial_values(
-    parameters: ParameterContext | None, *, qubit: str = "$qubit"
-) -> tuple[Slot | Template, float | None]:
+    parameters: ParameterContext | None,
+    *,
+    qubit: str = "$qubit",
+    gain_path: tuple[str | int, ...] = ("qub_pulse", "module", "gain"),
+) -> tuple[Slot, float | None]:
     """Return the Length Rabi pulse source and sweep stop in microseconds.
 
+    Every successful return contains a Slot with a Template fallback.
     parameters is the fixed Open/Reset capture, or None. qubit is a direct
     component name or captured alias (default $qubit). A missing/null x180
-    slot selects a fresh qub_probe Template with editable gain 1.0 and stop
-    1.0 us. An existing x180 selects its Slot without changing its gain.
+    slot uses the Slot's fresh qub_probe Template fallback with editable gain
+    1.0 and stop 1.0 us. gain_path is the root-relative canonical Form path
+    for that fallback gain's uncalibrated hint, including module wrappers and
+    list indexes. It defaults to qub_pulse.module.gain; mux callers supply
+    ("tones", index, "drive", "module", "gain") for each original tone index.
+    An existing x180 selects its Slot without changing its gain or metadata.
     Read pi_len from its persistent waveform, following a waveform library key
     without materializing the pulse. A finite positive non-bool pi_len gives
     stop=4*pi_len; an invalid stored pi_len gives None for a required blank.
@@ -30,17 +45,31 @@ def len_rabi_initial_values(
     or dangling references, source and library errors propagate unchanged.
     A non-pulse x180 raises TypeError. Nothing is refreshed or written back.
     """
+    source = Slot(
+        f"{qubit}.module.x180",
+        fallback=Template(
+            "qub_probe",
+            bindings={"qubit": qubit},
+            set={"gain": 1.0},
+            seed_metadata={
+                gain_path: FieldMeta(
+                    description="未校準的起始值，來源：固定常數。qub_probe Template gain 1.0 a.u. within [-1, 1]; operator confirmation required",
+                    calibration="uncalibrated",
+                )
+            },
+        ),
+    )
     if parameters is None:
-        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
+        return source, 1.0
     pulse = _x180_spec(parameters, qubit)
     if pulse is None:
-        return Template("qub_probe", bindings={"qubit": qubit}, set={"gain": 1.0}), 1.0
+        return source, 1.0
     waveform = _waveform_spec(parameters, pulse)
     if isinstance(waveform, ArbWaveformCfg):
-        return Slot(f"{qubit}.module.x180"), 1.0
+        return source, 1.0
     pi_len = _valid_pi_len(waveform)
     stop = None if pi_len is None else 4 * pi_len
-    return Slot(f"{qubit}.module.x180"), stop
+    return source, stop
 
 
 def amp_rabi_initial_pulse(

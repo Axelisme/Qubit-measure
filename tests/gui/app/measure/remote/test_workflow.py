@@ -3,7 +3,6 @@
 import base64
 
 import pytest
-from matplotlib.figure import Figure
 from pydantic import BaseModel, ConfigDict, create_model
 from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.experiment.simulation import white_noise
@@ -49,12 +48,9 @@ class Native(BaseModel):
 
 @workflow("synthetic", "Synthetic RPC forms, plots and records")
 async def script(env: WorkflowEnv[None], plan: Native, tun: Live[Native]) -> None:
-    env.plots.subplots("trend")
-
-    def draw(figure: Figure) -> None:
-        figure.axes[0].plot([0, 1], [plan.value, tun.current.value])
-
-    env.plots.draw("trend", draw)
+    figure, axes = env.plots.subplots(num="trend")
+    axes.plot([0, 1], [plan.value, tun.current.value])
+    figure.show()
     await env.wait_until(env.started_at)
     env.commit(Native(value=tun.current.value))
 

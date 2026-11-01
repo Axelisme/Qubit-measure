@@ -975,7 +975,7 @@ def test_interactive_success_restores_committed_figure_in_analysis_pane(
     tab = _tab(window, tab_id)
     widget = _Interactive()
     plots = Plots(NonPresentingHost())
-    committed_figure, _axes = plots.subplots("fit")
+    committed_figure, _axes = plots.subplots(num="fit")
     plots.finish(present=False)
     commit_analysis(
         session.state,

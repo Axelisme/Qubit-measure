@@ -1,11 +1,12 @@
 """Paired reference/interleaved RB with explicit rounds and seed uncertainty."""
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
 
 import numpy as np
-from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.cfg_model import FieldMeta
@@ -47,18 +48,31 @@ class IRBResult:
     """Zero-based host pass IDs."""
     sub_seeds: NDArray[np.int64]
     """Independent RNG seeds, paired across arms and reused across rounds."""
-    arms: NDArray[np.int64]
-    """Fixed order [0, 1]: reference, interleaved."""
     depths: NDArray[np.int64]
     """Number of random Cliffords; interleaved also inserts this many targets."""
     signals: NDArray[np.complex128]
     """Repetition-averaged IQ, shape (round, seed, arm, depth)."""
 
 
-def _label_arms(ax: Axes) -> None:
+def _live_plot(
+    plots: Plots, depths: NDArray[np.int64]
+) -> Callable[[NDArray[np.complex128]], None]:
+    """Show paired arm means and return the owner-dispatched IQ update."""
+    fig, ax = plots.subplots(num="measurement")
+    ax.set(xlabel="Random Clifford depth", ylabel="Signal (a.u.)")
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.grid()
+    viewer = live_line(ax, num_lines=2)
     for line, label in zip(ax.lines, ("Reference", "Interleaved"), strict=True):
         line.set_label(label)
     ax.legend()
+
+    @plots.on_plot_thread
+    def update(data: NDArray[np.complex128]):
+        return viewer.set(depths.astype(float), project_arm_means(data))
+
+    fig.show()
+    return update
 
 
 class IRB_Exp(Experiment[IRBResult, IRBCfg]):
@@ -68,7 +82,7 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         axes=(
             AxesSpec.Axis("depths", label="Depth", unit="a.u.", dtype=np.int64),
             AxesSpec.Axis(
-                "arms",
+                values=(0, 1),
                 label="Arm (0=reference, 1=interleaved)",
                 unit="",
                 dtype=np.int64,
@@ -103,19 +117,10 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
             ],
             dtype=np.int64,
         )
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Random Clifford depth",
-            "Signal (a.u.)",
-            num_lines=2,
-            configure_axes=_label_arms,
-        )
+        update = _live_plot(context.plots, depths)
         buffer = SignalBuffer(
             (run_cfg.rounds, len(seeds), 2, len(depths)),
-            on_update=lambda data: viewer.update(
-                depths.astype(float), project_arm_means(data)
-            ),
+            on_update=update,
         )
         cache: dict[tuple[int, int], TimelineProgramV2] = {}
         program_cfg = run_cfg.with_updates(rounds=1)
@@ -253,7 +258,6 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         return IRBResult(
             rounds=np.arange(run_cfg.rounds, dtype=np.int64),
             sub_seeds=seeds,
-            arms=np.array([0, 1], dtype=np.int64),
             depths=depths,
             signals=buffer.array,
         )
@@ -268,11 +272,9 @@ class IRB_Exp(Experiment[IRBResult, IRBCfg]):
         """Fit paired complete IQ, publishing both decays and seed-bootstrap CI."""
         del options
         result = source.result
-        if not np.array_equal(result.arms, [0, 1]):
-            raise ValueError("IRB arm axis must be [0=reference, 1=interleaved]")
         analysis = analyze_irb(result.depths, result.signals)
         target = source.cfg.target_gate if source.cfg is not None else "target"
-        fig, ax = plots.subplots("fit", figsize=(9, 6))
+        fig, ax = plots.subplots(num="fit", figsize=(9, 6))
         for arm, label in enumerate(("Reference", f"Interleaved {target}")):
             (line,) = ax.plot(
                 result.depths, analysis.mean_signals[arm], "o", label=label

@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as validated_dataclass
 from zcu_tools.analysis.fitting import (
     FitQuality,
     compute_fit_quality,
@@ -87,7 +89,7 @@ class T2EchoCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@validated_dataclass(frozen=True)
 class T2EchoAnalyzeOptions:
     fit_method: Annotated[Literal["fringe", "decay"], FieldMeta(label="Fit method")] = (
         "decay"
@@ -145,16 +147,21 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         )
 
         # 2. Display the IQ projection while averaging the total-delay sweep.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Time (us)",
-            "Amplitude",
-            title=f"T2 Echo (detune={true_detune:.3f}MHz)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Time (us)", ylabel="Amplitude")
+        ax.set_title(f"T2 Echo (detune={true_detune:.3f}MHz)")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid()
+        viewer = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data):
+            return viewer.set(lengths, t2echo_signal2real(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),
-            on_update=lambda data: viewer.update(lengths, t2echo_signal2real(data)),
+            on_update=update,
         )
         with Schedule(signals_buffer, scope=context.scope) as sched:
             builder = TimelineBuilder(
@@ -286,7 +293,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
             pCov,
         )
 
-        fig, ax = plots.subplots("fit", figsize=config.figsize)
+        fig, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
         ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)

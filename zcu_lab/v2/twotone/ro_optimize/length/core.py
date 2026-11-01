@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar
 
 import numpy as np
+from matplotlib.artist import Artist
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, config
 from zcu_tools.experiment.context import RunContext
@@ -58,9 +61,9 @@ class LengthCfg(ConfigBase):
     ] = 1.0
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class LengthAnalyzeOptions:
-    t0: float | None = None
+    t0: Annotated[float | None, Field(ge=0)] = None
     smooth: float = 1.0
     smooth_method: SmoothMethod = "wavelet"
     wavelet: str = "sym4"
@@ -114,16 +117,21 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         )
 
         # Display the score for each integration window, not averaged state IQ.
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Readout Length (us)",
-            "SNR",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Readout Length (us)", ylabel="SNR")
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        line = live_line(ax)
+
+        @context.plots.on_plot_thread
+        def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
+            return line.set(lengths, np.abs(data))
+
+        fig.show()
         signals_buffer = SignalBuffer(
             (len(lengths),),
             dtype=np.float64,
-            on_update=lambda data: viewer.update(lengths, np.abs(data)),
+            on_update=update,
         )
 
         # Rebuild per window; hold RF duration fixed while comparing pulse-off/on.
@@ -177,13 +185,11 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
 
         options controls smoothing and t0 (us). None or zero selects pure SNR;
         positive t0 maximizes SNR/sqrt(length + t0), favoring shorter windows
-        more strongly for smaller t0. Negative t0 raises ValueError.
+        more strongly for smaller t0. Options reject negative t0 at construction.
         NaN scores become zero before smoothing. Return best_length in us
         and publish fit. source.cfg may be None.
         """
         result = source.result
-        if options.t0 is not None and options.t0 < 0.0:
-            raise ValueError("t0 duration normalization must be non-negative")
 
         lengths, signals = result.lengths, result.signals
 
@@ -211,7 +217,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
-        _, ax = plots.subplots("fit", figsize=config.figsize)
+        _, ax = plots.subplots(num="fit", figsize=config.figsize)
 
         ax.plot(lengths, snrs)
         ax.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")

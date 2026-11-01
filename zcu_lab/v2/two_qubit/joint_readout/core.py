@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
@@ -111,8 +113,6 @@ class JointReadoutResult:
     requests and reason text, not errors or data completeness.
     """
 
-    prepared_f1: NDArray[np.int64]
-    prepared_f2: NDArray[np.int64]
     sums: NDArray[np.float64]
 
 
@@ -136,11 +136,7 @@ def restore_result(data: GroupedLoadData[JointReadoutCfg]) -> JointReadoutResult
         raise ValueError(
             "Joint readout requires two preparation axes and sums (2,2,3,3)"
         )
-    return JointReadoutResult(
-        prepared_f1=sums.axes[3].astype(np.int64),
-        prepared_f2=sums.axes[2].astype(np.int64),
-        sums=sums.z.astype(np.float64),
-    )
+    return JointReadoutResult(sums=sums.z.astype(np.float64))
 
 
 class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
@@ -152,18 +148,18 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 VariableSpec(
                     variable="sums",
                     axes=(
-                        VariableAxisSpec.generated_arange("terminal_f2", ""),
-                        VariableAxisSpec.generated_arange("terminal_f1", ""),
+                        VariableAxisSpec.generated_arange(label="terminal_f2", unit=""),
+                        VariableAxisSpec.generated_arange(label="terminal_f1", unit=""),
                         VariableAxisSpec(
-                            "Prepared F2 (0=g, 1=e)",
-                            "",
-                            field_name="prepared_f2",
+                            label="Prepared F2 (0=g, 1=e)",
+                            unit="",
+                            values=(0, 1),
                             dtype=np.int64,
                         ),
                         VariableAxisSpec(
-                            "Prepared F1 (0=g, 1=e)",
-                            "",
-                            field_name="prepared_f1",
+                            label="Prepared F1 (0=g, 1=e)",
+                            unit="",
+                            values=(0, 1),
                             dtype=np.int64,
                         ),
                     ),
@@ -193,15 +189,16 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """
 
         validate_classifiers(config.readout, config.roles)
-        viewer = live_line(
-            context.plots,
-            "measurement",
-            "Nominal preparation (gg, ge, eg, ee)",
-            "Terminal P(g,g)",
-        )
+        fig, ax = context.plots.subplots(num="measurement")
+        ax.set(xlabel="Nominal preparation (gg, ge, eg, ee)", ylabel="Terminal P(g,g)")
+        viewer = live_line(ax)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax.grid(False)
+        fig.show()
 
-        def update_view(sums: NDArray[np.float64]) -> None:
-            viewer.update(
+        @context.plots.on_plot_thread
+        def update_view(sums: NDArray[np.float64]) -> tuple[Line2D, ...]:
+            return viewer.set(
                 np.arange(4, dtype=np.float64),
                 joint_probabilities(sums)[..., 0, 0].reshape(4),
             )
@@ -250,11 +247,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                 rounds=config.rounds,
                 options=RunOptions(),
             )
-        return JointReadoutResult(
-            prepared_f1=np.arange(2, dtype=np.int64),
-            prepared_f2=np.arange(2, dtype=np.int64),
-            sums=buffer.array,
-        )
+        return JointReadoutResult(sums=buffer.array)
 
     def analyze(
         self,
@@ -266,21 +259,14 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         """Normalize counts to a 4×9 matrix, including g/e/other for both roles."""
         del options
         result = source.result
-        if (
-            not np.array_equal(result.prepared_f1, np.arange(2))
-            or not np.array_equal(result.prepared_f2, np.arange(2))
-            or result.sums.shape != (2, 2, 3, 3)
-        ):
-            raise ValueError(
-                "Joint readout requires prepared_f1/prepared_f2 [0,1] "
-                "and sums (2,2,3,3)"
-            )
+        if result.sums.shape != (2, 2, 3, 3):
+            raise ValueError("Joint readout requires sums (2,2,3,3)")
         answer = JointReadoutAnalysis(
             counts=result.sums.reshape(4, 9),
             matrix=joint_probabilities(result.sums).reshape(4, 9),
             acquired_shots=result.sums.sum(axis=(-2, -1)).reshape(4),
         )
-        fig, axes = plots.subplots("matrix", figsize=(12, 5))
+        fig, axes = plots.subplots(num="matrix", figsize=(12, 5))
         image = axes.imshow(
             np.ma.masked_invalid(answer.matrix), vmin=0, vmax=1, cmap="Blues"
         )
