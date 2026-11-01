@@ -609,14 +609,14 @@ class RuntimeMath(TimedMacro):
         self.prog = prog
         self.operations: list[Macro] = []
         self.floors: dict[tuple[int, int], tuple[Time, Time, Time]] = {}
-        # Incoming ends are checked dynamically by allocate(). They may die
-        # while nested emissions prepare; inheriting them would pin stale
-        # snapshots for the entire enclosing emission. Only plan-local storage
-        # must survive until this math's deferred operations have run.
-        self.claimed: set[str] = set()
+        # Incoming operands remain readable through this plan's native source
+        # translation, even if preprocessing removes them from the live book.
+        # Nested plans inherit only reserved temporaries, not the enclosing
+        # emission's stale entry ends. Their own entry operands are live now.
+        self.claimed = set(prog._timeline_live_registers())
         previous = prog._timeline_book.math if prog._timeline_book.preparing else None
-        if previous is not None:
-            self.claimed.update(previous.claimed)
+        self.reserved = set() if previous is None else previous.reserved.copy()
+        self.claimed.update(self.reserved)
 
     def event_time(self, base: RuntimeEnd, offset: float | QickParam) -> RuntimeEnd:
         """Place a runtime event in s14 without allocating event-time storage.
@@ -1180,6 +1180,7 @@ class RuntimeMath(TimedMacro):
         for candidate in candidates:
             if isinstance(candidate, RuntimeEnd) and candidate.register != register:
                 self.claimed.discard(candidate.register)
+                self.reserved.discard(candidate.register)
         return RuntimeEnd(
             register,
             lower,
@@ -1283,12 +1284,14 @@ class RuntimeMath(TimedMacro):
         for register in self.prog._timeline_register_pool:
             if register not in self.claimed and register not in live:
                 self.claimed.add(register)
+                self.reserved.add(register)
                 return register
         register = self.prog.add_reg(
             f"_timeline_end_{len(self.prog._timeline_register_pool)}"
         )
         self.prog._timeline_register_pool.append(register)
         self.claimed.add(register)
+        self.reserved.add(register)
         return register
 
     def scratch(self, index: int) -> str:
