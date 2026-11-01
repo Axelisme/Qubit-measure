@@ -76,6 +76,8 @@ def _frontend(qapp, *, env: _DeferredEnv | None = None):
         return True
 
     widget = FluxPickFrontend(plugin, session, env, on_finish, on_cancel)
+    # Keep pointer coordinates precise when the control panel takes its size hint.
+    widget.resize(1100, 700)
     widget.show()
     qapp.processEvents()
     canvas = widget.findChild(FigureCanvasQTAgg)
