@@ -20,7 +20,16 @@ Pass fraction is the herald-g count divided by the total class count on the actu
 
 ## Analyze and review writeback
 
-Open Analysis and choose Fit decay envelope and Fit phase offset, then Analyze. Nonfinite lengths and complex IQ are removed before the ordinary length-Rabi fit. Pass fraction is a diagnostic, not an extra fit weight. Too few finite points or a failed fit does not supply a usable calibration.
+Open Analysis and choose Fit decay envelope, `decay`, and Fit phase offset, `fit_phase`, then Analyze. Analyze takes the herald-g conditional mean IQ, removes points with nonfinite length or IQ, rotates IQ onto its signal axis and takes the real part. This experiment calls `fit_rabi`. Fit decay envelope enables a decaying oscillation envelope; disabling it fits a nondecaying oscillation. Fit phase offset allows free phase; disabling it fixes phase at 0°. Pass fraction is a diagnostic, not an extra fit weight. Analysis does not require saved cfg. All-NaN data raise `ValueError("All data are NaN!")`; other invalid or insufficient traces propagate errors.
+
+This experiment draws the `fit` plot with rotated IQ, the fitted curve, pi/pi2 markers and uncertainty spans. The title shows the fitted oscillation frequency and its uncertainty in MHz.
+
+Analyze returns `HeraldingLenRabiAnalysis`:
+
+- `pi_len` and `pi_len_err` give the fitted pi duration and its standard uncertainty in us.
+- `pi2_len` and `pi2_len_err` give the fitted pi/2 duration and its standard uncertainty in us.
+- `rabi_f` and `rabi_f_err` give the fitted oscillation frequency and its standard uncertainty in MHz.
+- None of these six numeric fields is None. `fit_quality["fit"]` contains dimensionless residual and relative-error diagnostics. The type allows `fit_quality=None` when diagnostics are not supplied; this experiment's Analyze always supplies them on success.
 
 Inspect the oscillation, fitted pi/pi2 markers, uncertainties and fit quality. Writeback proposes the same targets as ordinary length Rabi, with every description marked Heralded:
 

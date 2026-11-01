@@ -24,9 +24,15 @@ Run 的 measurement 顯示通過 shot 的平均 IQ 投影。取數層跨 round �
 
 ## Analyze 與寫回
 
-Analyze 先排除非有限 delay/IQ，再交普通 Ramsey 的 IQ rotation 與 decay/fringe fitting。通過比例 不當作 fit weight。有效資料不足或無法擬合時分析會失敗。
+Analyze 取 herald-g 的 signal 條件平均 IQ，先排除非有限 delay／IQ，再做 IQ rotation，取實部擬合。本實驗直接依 Fit fringe 的 `fit_fringe` 選擇擬合工具。開啟時用 `fit_decay_fringe` 擬合 decaying fringe，關閉時用 `fit_decay` 擬合純 exponential decay。通過比例不當作 fit weight。分析不需要 saved cfg，有效資料不足或無法擬合時分析會失敗。
 
-Fit fringe 預設開啟。Fit phase offset 預設開啟，允許自由 fringe phase；關閉時由近零 delay 的訊號選固定 0°／180°。要做純 decay，可將 Detune ratio 設為 0 並關閉 Fit fringe。
+Fit fringe 預設開啟。Fit phase offset 的 `fit_phase` 預設開啟，允許自由 fringe phase。關閉時，若最靠近零 delay 的實部訊號高於全曲線最大值與最小值的中點，就固定 phase 為 0°，否則固定為 180°。此選項不影響純 decay。要量純 decay，可將 Detune ratio 設為 0 並關閉 Fit fringe；零 detune 不會自動關閉 Fit fringe。本實驗在 `fit` 圖畫出旋轉後的資料與擬合曲線，標題顯示壽命與標準誤，fringe fit 另顯示頻率與標準誤。
+
+Analyze 回傳 `HeraldingT2RamseyAnalysis`：
+
+- `t2r`、`t2r_err` 是 Ramsey 衰減時間與標準誤，單位 us。
+- `detune`、`detune_err` 是觀測到的 fringe 頻率與標準誤，單位 MHz，包含施加的 phase ramp；純 decay 時兩者為 0。
+- 以上四個數值欄位皆不為 None。`fit_quality["fit"]` 保存無因次的殘差與相對誤差診斷。型別允許未提供診斷時 `fit_quality` 為 None，本實驗的 Analyze 每次成功都提供診斷。
 
 寫回目標與普通 Ramsey 相同，說明標為 Heralded：
 - `$qubit.t2r` 保存 fitted coherence time，單位 us。
