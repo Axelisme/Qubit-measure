@@ -4,10 +4,11 @@ import numpy as np
 import pytest
 from zcu_tools.cfg_model import Centroid3Classifier, CircleClassifier, LinearClassifier
 from zcu_tools.program import v2
-from zcu_tools.program.v2.modules import ConstWaveformCfg, PulseReadout
+from zcu_tools.program.v2.modules import ConstWaveformCfg, Pulse, PulseReadout
 
 from tests.program._timeline import compile_modules
 from tests.program.v2._mux_support import mux_soccfg, native_mux
+from tests.program.v2.timing_support import shots
 
 
 def readout(name="readout", classifier=None, ch=0):
@@ -115,6 +116,51 @@ def test_classified_sums_keep_boundary_rules_and_detached_cfg(
     np.testing.assert_array_equal(result, expected)
     assert result.dtype == np.float64
     np.testing.assert_array_equal(iq, original)
+
+
+def test_branch_cases_share_read_labels_with_zero_gain_first_read():
+    r1_on = readout("r1")
+    r1_off = PulseReadout("r1", r1_on.cfg, gain=0.0)
+    r2 = readout("r2")
+    drive = Pulse(
+        "drive",
+        Pulse.Cfg(
+            ch=1, nqz=1, freq=100.0, gain=0.2,
+            waveform=ConstWaveformCfg(length=0.2),
+        ),
+    )
+    builder = v2.TimelineBuilder(v2.make_mock_soccfg(), reps=2)
+    builder.add_loop("branch", 8)
+    with builder.branch(by="branch", align_timeline=True) as cases:
+        for index in range(8):
+            with cases.case(index):
+                if index // 4:
+                    builder.emit(drive)
+                builder.emit(r1_on if index & 2 else r1_off)
+                builder.timeline_inc(1.2)
+                if index & 1:
+                    builder.emit(drive)
+                builder.emit(r2)
+    prog = builder.build()
+    prog.set_reads_per_shot(2)
+    process = v2.shot_sums(
+        prog, [v2.IQ("r1"), v2.IQ("r1"), v2.IQ("r2"), v2.IQ("r2")]
+    )
+    iq = np.tile(np.array([[[[2.0, 3.0], [5.0, 7.0]]]]), (8, 2, 1, 1))
+    result = process({0: iq})
+    assert result.shape == (8, 3, 3, 3, 3)
+    np.testing.assert_array_equal(result[:, 0, 0, 0, 0], 2)
+    np.testing.assert_array_equal(result[:, 1, 1, 0, 0], 8)
+    np.testing.assert_array_equal(result[:, 0, 0, 2, 2], 98)
+    np.testing.assert_array_equal(result[:, 1, 0, 2, 0], 28)
+    starts = [
+        [e.cycle - shot.start_cycle for e in shot.events if e.kind == "data" and e.value]
+        for shot in shots(prog)
+    ]
+    assert all(len(times) == 2 for times in starts)
+    for off in (0, 1, 4, 5):
+        assert starts[off] == starts[off + 2]
+    assert prog.ro_chs[0]["trigs"] == 2
 
 
 @pytest.mark.parametrize("timeline", [True])
