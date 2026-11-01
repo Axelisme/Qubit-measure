@@ -265,7 +265,7 @@ def module_editor(qapp, monkeypatch):
     dialog = next(d for d in widget.findChildren(QDialog) if d.isVisible())
     yield widget, dialog, item, ctrl, form, current, messages
     assert not callback_errors, callback_errors
-    dialog.close()
+    widget.detach()
     widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
