@@ -37,6 +37,10 @@ class _ClockGroup(_Settings):
     samps_per_clk: _PositiveInt
     b_dds: _PositiveInt
 
+    def sample_rate(self, refclk: float) -> float:
+        """Return this group's RF sample rate in MHz for the given reference."""
+        return refclk * self.fs_mult / self.fs_div
+
 
 class _Generator(_ClockGroup):
     interpolation: _PositiveInt
@@ -113,11 +117,13 @@ class _Profile(_Settings):
     mux: list[_Mux]
 
 
-def _generators(profile: _Profile) -> tuple[list[dict], dict[str, dict]]:
-    gens = []
-    dacs = {}
+def _generators(
+    profile: _Profile,
+) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+    gens: list[dict[str, object]] = []
+    dacs: dict[str, dict[str, object]] = {}
     for group in profile.generators:
-        fs = profile.refclk_freq * group.fs_mult / group.fs_div
+        fs = group.sample_rate(profile.refclk_freq)
         for _ in range(group.count):
             ch = len(gens)
             dac = f"{ch:02d}"
@@ -143,11 +149,13 @@ def _generators(profile: _Profile) -> tuple[list[dict], dict[str, dict]]:
     return gens, dacs
 
 
-def _readouts(profile: _Profile, n_gens: int) -> tuple[list[dict], dict[str, dict]]:
-    readouts = []
-    adcs = {}
+def _readouts(
+    profile: _Profile, n_gens: int,
+) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+    readouts: list[dict[str, object]] = []
+    adcs: dict[str, dict[str, object]] = {}
     for group in profile.readouts:
-        fs = profile.refclk_freq * group.fs_mult / group.fs_div
+        fs = group.sample_rate(profile.refclk_freq)
         f_output = fs / (group.decimation * group.samps_per_clk)
         for _ in range(group.count):
             ch = len(readouts)
@@ -175,7 +183,11 @@ def _readouts(profile: _Profile, n_gens: int) -> tuple[list[dict], dict[str, dic
     return readouts, adcs
 
 
-def _apply_mux(profile: _Profile, gens: list[dict], readouts: list[dict]) -> None:
+def _apply_mux(
+    profile: _Profile, gens: list[dict[str, object]], readouts: list[dict[str, object]],
+) -> None:
+    gen_groups = [group for group in profile.generators for _ in range(group.count)]
+    ro_groups = [group for group in profile.readouts for _ in range(group.count)]
     used_gens: set[int] = set()
     used_readouts: set[int] = set()
     for index, mux in enumerate(profile.mux):
@@ -191,23 +203,26 @@ def _apply_mux(profile: _Profile, gens: list[dict], readouts: list[dict]) -> Non
         used_gens.add(mux.gen_ch)
         used_readouts.update(mux.ro_chs)
         gen = gens[mux.gen_ch]
+        gen_group = gen_groups[mux.gen_ch]
         gen.update(mux.generator.model_dump())
         gen.update(
-            f_dds=gen["fs"] / mux.generator.interpolation,
-            fdds_div=gen["fs_div"] * mux.generator.interpolation,
+            f_dds=gen_group.sample_rate(profile.refclk_freq) / mux.generator.interpolation,
+            fdds_div=gen_group.fs_div * mux.generator.interpolation,
         )
         for port, ch in enumerate(mux.ro_chs):
             ro = readouts[ch]
             ro.pop("tproc_ctrl")
             ro.update(mux.readout.model_dump())
-            output_div = ro["decimation"] * (mux.readout.pfb_nch // 2)
-            dds_div = output_div if mux.readout.pfb_dds_on_output else ro["decimation"]
+            ro_group = ro_groups[ch]
+            fs = ro_group.sample_rate(profile.refclk_freq)
+            output_div = ro_group.decimation * (mux.readout.pfb_nch // 2)
+            dds_div = output_div if mux.readout.pfb_dds_on_output else ro_group.decimation
             ro.update(
                 pfb_port=port,
                 trigger_bit=port,
-                f_output=ro["fs"] / output_div,
-                f_dds=ro["fs"] / dds_div,
-                fdds_div=ro["fs_div"] * dds_div,
+                f_output=fs / output_div,
+                f_dds=fs / dds_div,
+                fdds_div=ro_group.fs_div * dds_div,
             )
 
 

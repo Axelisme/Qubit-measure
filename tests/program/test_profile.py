@@ -78,7 +78,7 @@ def test_mux_clocks_follow_refclk_and_channelization(profile):
 def test_missing_fields_report_their_profile_path(profile):
     del profile["generators"][0]["fs_mult"]
     del profile["tprocs"][0]["f_core"]
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(ValueError, match="Field required") as failure:
         program.build_soccfg(profile)
     assert "generators.0.fs_mult" in str(failure.value)
     assert "tprocs.0.f_core" in str(failure.value)
