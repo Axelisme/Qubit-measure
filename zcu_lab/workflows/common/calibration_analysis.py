@@ -7,17 +7,23 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import (
     FitQuality,
     PeakCandidate,
     compute_fit_quality,
+    detect_peaks,
+    fit_qubit_freq,
+    fitlor,
+    lorfunc,
     fit_rabi,
 )
 from zcu_tools.experiment.workflows import Failed
 
-from zcu_lab.v2.twotone.freq.analysis import FreqAnalyzeOptions, fit_spectrum
-from zcu_lab.v2.twotone.freq.core import FreqResult, qubfreq_signal2real
-from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult, rabi_signal2real
+from zcu_lab.v2.twotone.freq.core import FreqResult
+from zcu_lab.v2.twotone.rabi.len_rabi.core import LenRabiResult
+from zcu_lab.workflows.common.calibration_acquire import qubfreq_signal2real, rabi_signal2real
+from zcu_lab.workflows.common.calibration_tunables import CalibrationTunables
 from zcu_lab.workflows.common.analysis import fit_or_failed, validate_fit_trace
 
 
@@ -73,48 +79,135 @@ class RabiFit:
 
 def analyze_qubit_freq(
     result: FreqResult,
-    options: FreqAnalyzeOptions | None = None,
+    tun: CalibrationTunables,
     *,
+    expected_center_mhz: float | None = None,
     peaks: tuple[PeakCandidate, ...] | None = None,
     isolate_peaks: bool = True,
 ) -> FrequencyFit | Failed:
-    """Fit the spectroscopy trace to estimate the qubit resonance and linewidth.
+    """Fit a Lorentzian to native MHz coordinates and complex128 IQ.
 
-    result uses MHz coordinates and complex128 signals of matching shape.
-    Reuse the native background-removal/magnitude projection, detect all peaks,
-    then fit the nearest expected or strongest candidate between neighbours.
-    peaks may supply precomputed candidates on that projection. isolate_peaks=False
-    retains single-mode whole-window fitting. Return FWHM/errors and local curves.
-    Do not mutate result or acquire, plot, save, or apply an acceptance threshold.
-    Return Failed(reason) for nonfinite measured IQ or the expected fit
-    failures documented by fit_or_failed. Structural/configuration errors and
-    unexpected projection/fitter errors propagate; no samples are replaced.
+    tun supplies peak prominence, separation, SNR and observable width limits.
+    Select the candidate nearest expected_center_mhz, or the strongest if None.
+    peaks may reuse candidates detected with those limits. isolate_peaks fits
+    between neighbouring peak midpoints; False fits the whole window.
+    Return MHz center/FWHM/errors and same-coordinate projected fit curves.
+    Nonfinite IQ, no isolated candidate, fewer than six isolated samples and
+    expected fitter failures return Failed(reason). Invalid structure and
+    unexpected errors propagate. Do not mutate, acquire, plot, save or accept.
     """
     failure = validate_fit_trace(result.freqs, result.signals)
     if failure is not None:
         return failure
-    options = options if options is not None else FreqAnalyzeOptions()
-    observed = qubfreq_signal2real(result.signals)
-    fit = fit_or_failed(
-        lambda: fit_spectrum(
-            result.freqs, observed, options, peaks=peaks, isolate_peaks=isolate_peaks
-        )
+    return fit_or_failed(
+        lambda: _fit_frequency(result, tun, expected_center_mhz, peaks, isolate_peaks)
     )
-    if isinstance(fit, Failed):
-        return fit
-    quality = compute_fit_quality(fit.observed, fit.fitted, {}, None)
+
+
+def _fit_frequency(
+    result: FreqResult,
+    tun: CalibrationTunables,
+    expected_center_mhz: float | None,
+    peaks: tuple[PeakCandidate, ...] | None,
+    isolate_peaks: bool,
+) -> FrequencyFit:
+    freqs = result.freqs
+    observed = qubfreq_signal2real(result.signals)
+    if peaks is None:
+        peaks = tuple(
+            detect_peaks(
+                freqs,
+                observed,
+                min_prominence=tun.peak_min_prominence,
+                min_distance=tun.peak_min_distance_mhz,
+                min_snr=tun.peak_min_snr,
+                min_width_samples=tun.peak_min_width_samples,
+            )
+        )
+    selected = (
+        min(peaks, key=lambda peak: abs(peak.center - expected_center_mhz))
+        if peaks and expected_center_mhz is not None
+        else next(iter(peaks), None)
+    )
+    if isolate_peaks:
+        if selected is None:
+            raise AnalysisFailed(_no_candidate_message(freqs, observed, tun))
+        lower = max(
+            (peak.center for peak in peaks if peak.center < selected.center),
+            default=-np.inf,
+        )
+        upper = min(
+            (peak.center for peak in peaks if peak.center > selected.center),
+            default=np.inf,
+        )
+        mask = (freqs >= (lower + selected.center) / 2) & (
+            freqs <= (upper + selected.center) / 2
+        )
+        freqs, observed = freqs[mask], observed[mask]
+        if freqs.size < 6:
+            raise AnalysisFailed("Fewer than six samples around selected peak")
+    if isolate_peaks and selected is not None:
+        # A broad peak can occupy most of the isolated window. Its median is
+        # then signal, not background; seed the detected positive peak explicitly.
+        baseline = float(np.min(observed))
+        parameters, covariance = fitlor(
+            freqs,
+            observed,
+            fitparams=[
+                baseline,
+                0.0,
+                selected.height - baseline,
+                selected.center,
+                selected.width / 2,
+            ],
+            fixedparams=[None, 0.0, None, None, None],
+        )
+        errors = np.sqrt(np.diag(covariance))
+        frequency, error = parameters[3], errors[3]
+        width, width_error = 2 * parameters[4], 2 * errors[4]
+        fitted = lorfunc(freqs, *parameters)
+    else:
+        frequency, error, width, width_error, fitted, _ = fit_qubit_freq(
+            freqs, observed, "lor"
+        )
     return FrequencyFit(
-        fit.freq,
-        fit.freq_err,
-        fit.fwhm,
-        fit.fwhm_err,
-        fit.observed,
-        fit.fitted,
-        quality,
-        fit.freqs,
-        fit.peaks,
-        fit.selected_peak,
+        float(frequency),
+        float(error),
+        float(width),
+        float(width_error),
+        observed,
+        fitted,
+        compute_fit_quality(observed, fitted, {}, None),
+        freqs,
+        peaks,
+        selected,
         result,
+    )
+
+
+def _no_candidate_message(
+    freqs: NDArray[np.float64],
+    observed: NDArray[np.float64],
+    tun: CalibrationTunables,
+) -> str:
+    # Detect on sample indices to report observable widths even on uneven grids.
+    # Peak separation cannot reject every candidate; omit it for this diagnostic.
+    narrow_peaks = detect_peaks(
+        np.arange(freqs.size, dtype=np.float64),
+        observed,
+        min_prominence=tun.peak_min_prominence,
+        min_snr=tun.peak_min_snr,
+        min_width_samples=0,
+    )
+    if not narrow_peaks:
+        return "No candidate peaks pass the prominence and SNR thresholds"
+    details = "; ".join(
+        f"{freqs[int(peak.center)]:.6g} MHz (observable width {peak.width:.3g} samples)"
+        for peak in narrow_peaks
+    )
+    return (
+        "Candidate peaks pass the prominence and SNR thresholds but fail "
+        f"min_width_samples={tun.peak_min_width_samples:g} samples: {details}"
     )
 
 
