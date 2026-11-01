@@ -545,6 +545,7 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
         if family == "mux"
         else load_soccfg(2, 1)
     )
+    tproc_mhz = soccfg["tprocs"][0]["f_time"]
     builder = v2.TimelineBuilder(soccfg, initial_delay=0, relax_delay=0)
     readout: v2.Module
     if family == "mux":
@@ -553,8 +554,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             nqz=1,
             mixer_freq=1000,
             length=0.125,
-            pre_delay=3 / TPROC_MHZ,
-            post_delay=5 / TPROC_MHZ,
+            pre_delay=3 / tproc_mhz,
+            post_delay=5 / tproc_mhz,
             ro_length=1.0,
             trig_offset=0.5,
             tones=[
@@ -568,8 +569,8 @@ def test_readout_families_finish_at_generator_plus_post_before_late_adc(family):
             freq=100,
             gain=0.1,
             waveform=ConstWaveformCfg(length=0.125),
-            pre_delay=3 / TPROC_MHZ,
-            post_delay=5 / TPROC_MHZ,
+            pre_delay=3 / tproc_mhz,
+            post_delay=5 / tproc_mhz,
             ro_ch=0,
             ro_length=1.0,
             trig_offset=0.5,
