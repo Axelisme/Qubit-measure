@@ -92,6 +92,27 @@ def test_numeric_edit_keeps_the_child_waveform_key(session: LibrarySession) -> N
     assert written.gain == 0.5
 
 
+@pytest.mark.parametrize("kind,name,path,value", [
+    ("module", PULSE, ("gain",), 0.5),
+    ("waveform", WAVEFORM, ("length",), 3.0),
+])
+def test_detached_copy_edits_do_not_change_original_input(
+    session: LibrarySession, kind, name, path, value
+) -> None:
+    entry = open_library_entry(_seed(session), kind, name, arb_names=())
+    original = entry.state.input
+    copy = entry.detached_copy()
+    assert copy.parameters is entry.parameters
+    assert copy.env is entry.env
+    assert copy.state.input == original
+    assert copy.state.base == original
+    copy.state.write({path: value}, copy.env)
+    assert copy.state.input != original
+    assert entry.state.input == original
+    entry.state.install_input(copy.state.input)
+    assert entry.state.input == copy.state.input
+
+
 def test_expression_stores_the_number_from_the_open_capture(
     session: LibrarySession,
 ) -> None:
