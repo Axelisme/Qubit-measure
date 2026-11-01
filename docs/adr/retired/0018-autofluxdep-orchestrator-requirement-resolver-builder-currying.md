@@ -4,7 +4,7 @@ status: retired
 
 # 0018 — autofluxdep 的 orchestrator 是純需求解析器；三介面（requires/provides/produce）+ Builder 柯里化統一 Node 與 Service
 
-**狀態：** retired（2026-10-09）。autofluxdep 已於 04799f2f2 移除。以下保留移除前的設計記錄，不是現行契約。原狀態為 accepted（2026-06-05），並於 2026-09-27 部分取代 §3 的 predictor 校正與載入敘述。
+2026-10-09。autofluxdep 已於 04799f2f2 移除。以下保留移除前的設計記錄，不是現行契約。原狀態為 accepted（2026-06-05），並於 2026-09-27 部分取代 §3 的 predictor 校正與載入敘述。
 **關聯：** autofluxdep-gui 的 grilling 設計（見 `lib/zcu_tools/gui/app/autofluxdep/README.md`）。承 autofluxdep 的「Node 不是 Task、用宣告式依賴取代 cfg_maker walrus 鏈」基調。
 
 ## 背景

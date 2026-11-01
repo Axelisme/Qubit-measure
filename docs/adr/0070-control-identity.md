@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0070 — GUI 與 agent 的控制身份
+# 0070 — GUI 與 agent 的控制身份
 
 ## 問題與選擇
 

@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Single-tone sideband-reset frequency sweep: drives the tested pulse-reset tone and sweeps its frequency, fitting the qubit response (Lorentzian) to find the reset sideband frequency and its linewidth. Runs on real hardware. Typically run after an init pulse excites the qubit, to locate the f01+f12 (`$resonator.freq` - `$qubit.freq`) sideband at which the reset pulse dumps the excitation.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-01
 
 ## Parameter sources
 
@@ -17,6 +17,8 @@ Tested reset starts as an editable copy of the reset template. Optional initiali
 ## Typical writeback
 
 Proposes fitted frequency and FWHM to `$qubit.ext.reset_f` and `$qubit.ext.reset_fwhm`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_10` from the tested reset, replacing only its frequency with this analysis. All other tested fields remain. An optional `$qubit.module.reset` row selects that saved reset module.
+
+The proposal uses only this Run's tested reset and captured parameters, not current aliases, ext values or an older library module. Missing saved cfg or parameter capture leaves only the scalar proposals. Source and Apply errors still propagate. Applying the library rows without the optional reset-slot row leaves the selected reset unchanged.
 
 ## Recommended
 

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-01，caller-owned compile profiles
+**Last updated:** 2026-11-02，compiled frontend 與 IR pass 行為速查
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -139,10 +139,18 @@ when that envelope sample is exactly zero. Phase reset would affect later comman
 which requires DDS phase state outside the current numeric event contract.
 Do not infer support for every control form or registered experiment from this builder.
 
-Simulation acquisition has one frontend. It reads the pre-optimization compiled
-stream through `build_compiled_request` for native programs.
-There is no runtime frontend selector or fallback. Module lowering remains part
-of program construction; acquisition does not interpret the Module tree.
+Simulation acquisition has one frontend. `build_compiled_request` reads the
+pre-optimization compiled stream, including supported instruction effects from
+native calls and Module lowering. This does not imply support for every native
+operation. There is no runtime frontend selector or fallback. Module lowering
+remains part of program construction; acquisition does not interpret the Module tree.
+
+## IR pass behavior
+
+The hardware compiler optimizes IR after capturing the stream consumed by
+simulation. These pass rules describe compiler output, not a second simulation
+frontend. Pass conditions, compiler output and optimization guards are documented
+in the [IR pass reference](../../../../../docs/reference/ir-pass-behavior.md).
 
 ## Build and own an environment
 

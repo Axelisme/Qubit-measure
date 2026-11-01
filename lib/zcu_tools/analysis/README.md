@@ -25,6 +25,34 @@ FWHM 使用半 prominence 的插值寬度，至少為谷兩側頻率步進的平
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
 分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。
 
+## Singleshot 初態與 joint fit
+
+`analysis.fitting.singleshot_rabi` 以共同 PCA 軸與固定 histogram bins，joint-fit raw IQ
+的 readout-transition 分布及 Rabi population。Likelihood、backend validity 與候選選擇
+由 [fitting](fitting/README.md#fitting-helpers) 擁有。數值選項與參數形狀見
+[singleshot_rabi](fitting/singleshot_rabi.py)。
+
+模型為 `p_inf + (p_e0 - p_inf) * exp(-t/t_r) * cos(omega*t + phase)`。
+不啟用 decay 時包絡為 1，`t_r=None`。`initial_populations`／`p_e0` 是 pulse 前的狀態，
+`zero_length_populations` 是模型在零座標的外推值。Phase 非零時兩者不同。
+Phase 以 radians 保存。Caller 可在圖上轉成 degrees。
+
+`initial_state` 選 ground 或 excited，描述 pulse 前的主要狀態，不保證純態，
+也不以第一個非零掃描點代替初態。Rabi 將 pulse 前 excited population 限制在所選半區間，
+對 pooled histogram 的兩個方向分別擬合，依有效性及 likelihood 選候選。
+`max_calls` 限制每個方向的 Migrad budget，兩個方向都會評估。
+自由 phase 限制在所選初態方向的 [-π/2, π/2]，baseline 同時限制振幅方向，
+使非負座標的 population 維持 [0, 1]。這個 offset 不辨識跨半週期的未知 rotation。
+Population、centers 與 confusion matrix 保持物理 g/e 順序。
+
+GE 的 acquired rows 是 probe off/on。分析按 initial_state 映射主要 g/e 順序，不改持久資料。
+Confusion diagnostic 使用各自 refined 的 preparation populations，不以第一列推定第二列。
+兩組 refinement 從 joint fit 的同一組 seeds 出發，避免分析順序影響結果。
+
+Optimizer 不收斂時不以 initial guess 當校準。實驗 caller 只有在 backend valid、
+centers／radius／confusion matrix 有限時才提出校準。
+實驗的 acquisition、圖形與 writeback 仍由各 leaf 擁有，不由數值分析決定。
+
 ## Readout QND 指標
 
 `readout_metrics.readout_metrics(sums)` 分析單一 gain 點的

@@ -2,11 +2,11 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [datafile](../../../lib/zcu_tools/datafile/README.md) 與 [experiment](../../../lib/zcu_tools/experiment/README.md)。以下保留歷史正文。
+> 2026-09-27。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [datafile](../../../lib/zcu_tools/datafile/README.md) 與 [experiment](../../../lib/zcu_tools/experiment/README.md)。以下保留歷史正文。
 
-# 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset
+# 0027 — 實驗資料持久化：labber_io 原生 axes-list + per-experiment axes-spec + grouped experiment dataset
 
-**狀態：** retired。Experiment data 使用 labber_io 原生 axes-list、typed axes spec 與 canonical single-file／grouped `.hdf5` save/load；experiment 與 GUI loader 不轉換 legacy artifacts。先前提供的離線 converter、CLI 與暫時 GUI fallback 已於 2026-09-26 退休。
+Experiment data 使用 labber_io 原生 axes-list、typed axes spec 與 canonical single-file／grouped `.hdf5` save/load；experiment 與 GUI loader 不轉換 legacy artifacts。先前提供的離線 converter、CLI 與暫時 GUI fallback 已於 2026-09-26 退休。
 **關聯：** 與 [[0015]] 劃清（PersistenceCaretaker 是 GUI app-state 的 Memento 單檔持久化，與此**實驗量測資料**的 HDF5 round-trip 不同層、不同關注點）；save 動作位於實驗 run path 尾端，故與 runner / run-driver 設計相鄰。
 
 **領域語言：** 本 ADR 使用 `docs/CONTEXT.md` 定義的 Experiment Result、Experiment Data File、Dataset Role、Grouped Experiment Dataset 與 Legacy Measurement Artifact。

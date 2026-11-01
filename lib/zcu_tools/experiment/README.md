@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-01，caller-owned board and model routing
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -122,9 +122,8 @@ decimated outputs.
 
 ## Offline experiment probe
 
-`probe` 是 Python 工具庫。Caller 在 task scratch 寫 Python 檔，用實驗自己的 Cfg／Result
-型別組物件，先過 Pyright 與 Ruff，再依需要呼叫以下階段。
-操作與看圖驗收見 [tests](../../../tests/README.md#實驗定義)，
+`probe` 是可獨立呼叫階段的 Python package，不提供 CLI 或全流程 wrapper。
+操作、靜態檢查與看圖驗收見 [tests](../../../tests/README.md#實驗定義)，
 腳本片段與命令見 [lab 驗收說明](../../../zcu_lab/README.md#實驗定義的離線驗收)。
 
 | API | 輸入與效果 | 回傳 |
@@ -132,6 +131,9 @@ decimated outputs.
 | `probe.run_stage(experiment, cfg, environment)` | 借用 caller 的 SimulationEnvironment 執行公開 run，驗 Result shape／dtype 與 AXES_SPEC，更新 live 圖。不存檔或分析。 | RunStageResult 的 record、elapsed_seconds 與 pngs。 |
 | `probe.save_stage(record, spec, directory)` | 寫 directory/data.h5，再 native restore 並逐欄比較。不執行 run 或 analyze。 | SaveStageResult 的還原 record、native_path、roundtrip_equal 與 cfg_issue。 |
 | `probe.analysis_stage(experiment, record, options)` | 對明確來源呼叫公開 analyze。不執行 run 或存檔。 | AnalysisStageResult 的 analysis 與 pngs，analysis 保留實際回傳物件。 |
+
+`run_save` 擁有 run／save 與回傳型別，`analysis` 擁有 analysis 與回傳型別；
+package root 按選用名稱 lazy re-export 這些 API 與 `compare_roundtrip`。
 
 Save 與 analysis 可直接接 caller 構造的 RunRecord，無須先呼叫 run。
 分析 options 沿用 experiment.analyze 的簽名，caller 明填。各階段傳出原始例外。
@@ -159,7 +161,7 @@ Population 是一維有限的 [0,1] 機率，可空。Width 有限且非負，�
 Shots 是非負整數，不接受 bool，零 shots 回零欄。GE 用 `[0,1]`，對稱錯置用 `[p,1-p]`，
 population 曲線也用同一函式。兩個機制都只使用本地 RNG。
 Caller 用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 save 或 analysis。
-工具與框架測試不 import `zcu_lab`，測試用最小合成模型、population 與實驗。
+框架測試的合成輸入與 lab 驗收邊界見 [tests](../../../tests/README.md#實驗定義)。
 
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
 Shape 與 dtype 必須相同。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。

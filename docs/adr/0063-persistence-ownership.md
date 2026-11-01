@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Persistence：保存權威與資料契約
+# 0063 — Persistence：保存權威與資料契約
 
 **Last updated:** 2026-11-01
 

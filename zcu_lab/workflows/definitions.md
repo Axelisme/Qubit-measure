@@ -297,4 +297,4 @@ MIST 圖為 `mist/<mode>/gain` 與 `mist/<mode>/vs_flux`。gain-<mode>.png 從 R
 GUI forms、measure headless owner、固定 capture、U7 與 S4 分工見 [forms](forms.md)。
 行為比對使用 measure GUI 的 workflow tabs 與離線來源，不另用 agent 專用模擬腳本。模擬仍須使用隔離的 project 與保存目的地，不連接硬體。
 
-Framework 測試使用合成 workflow：`tests/experiment/workflows/` 驗通用 Engine，`tests/gui/app/measure/services/`、`tests/gui/app/measure/remote/` 與 `tests/mcp/measure/` 驗宿主、RPC 與 MCP 接縫。不測本套件的科學流程或預設值，刪掉 `zcu_lab/` 後整套 pytest 仍須通過。
+Lab 定義的測試邊界與驗收方式遵循 [ADR-0072](../../docs/adr/0072-module-boundaries.md#分層)。

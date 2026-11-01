@@ -2,9 +2,9 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；autofluxdep 已移除，原設計見 [退役 ADR-0018](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)。以下保留歷史正文。
+> 2026-09-27。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；autofluxdep 已移除，原設計見 [退役 ADR-0018](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)。以下保留歷史正文。
 
-# ADR-0040 — autofluxdep run result artifact
+# 0040 — autofluxdep run result artifact
 
 關聯 [[0062]]（autofluxdep resolver 與 executor workflow collection 的邊界）、[[0027]]（一般 experiment data persistence）。
 

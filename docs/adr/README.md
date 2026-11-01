@@ -6,70 +6,66 @@
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
 
+有編號的正文標題使用 `NNNN — 標題`，無編號的草稿與退役提案保留原標題。狀態只記在 YAML front matter；日期有原文來源才填，不用入庫日期代替裁決日。
+
 ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立對應 contract，並在本文寫出 contract ID。沒有 contract 的依賴規則只能靠判斷維持，視為 ADR 未完成。
 
 ## Module Boundaries
 
-- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：各 package 的定位、實驗計算歸 core 與 GUI 接線規則、workflow 壽命比較與 adapter edelay 政策、各實驗獨立分析與畫圖、local flux reset 由 lab 組裝既有能力、五層、實驗定義的離線 probe 驗收與框架測試邊界、單一 lab 描述與各入口最小 Protocol、logging-before-construction、analysis selection 與兩個 module-only MCP 例外、使用者元件子模組與模擬環境定位、workflow 自有取數 helper 的放置、charge admission 的 caller／program／environment 分工與硬體隔離、mux PFB channel 查詢歸 program 與 FTF carrier selection 的分工、穩定工具與有狀態模組的分類、分析 app 的 entry/component owner 與 native 光譜選擇、analysis 的 native 投影、device snapshot 標量解讀、模擬損耗漂移的 simulate／resources／experiment 分工、manifold 衰減模與 t1_curve 分析診斷的分工、core 共用 waveform 格式、cfg_model 契約、library 容器版本政策、依 kind 宣告的 component wiring、lab mux group 的具名 coil 來源與 active selection 邊界、債務清單。分層、無循環與 core 只依賴 utils 由 .importlinter C8–C13／C19 檢查，C15 保護使用者 core 的 GUI independence，C16 禁止 framework 反向 import 使用者套件；離線遷移專用程式只放 `migrations/`。剩餘債務以 `ignore_imports` 記帳。
+- [0072 — 模組定位與依賴邊界](0072-module-boundaries.md)：Package 定位、依賴方向與跨模組 owner，依賴契約由 `.importlinter` 檢查。
 
 ## Concurrency / Lifecycle
 
-- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：domain admission／tab busy、啟動時 hardware exclusion、lease／handle、runner 共用 async／同步／跨 callback lease 的生命週期、event-origin scope、GUI core 正常回傳 finished／拋錯 failed 與 BackgroundError owner delivery、shutdown 與 device disconnect 的跨 owner 責任，SaveService 單一擁有保存前置檢查；measure close 已有 caller drain／逾時留窗；其餘未落實目標見 [Operation draft](draft/operation-lifecycle-boundaries.md)。
-- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：typed Permit proof 已由 0066 的 checks／RunInputs 取代，保留 guard 與 lease 的責任分界。
-- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：owner resource counters 與 RPC off-main handler 的局部契約仍有效；Remote 權限由 0070 的 holder 取代版本 guard，operation handle 分界由 0066 承接。
-- [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：scheduler port、State owner guard、completion facts 與 gate presence 的局部契約仍有效；operation owner-loop 規則由 0066 承接。
+- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：Domain guard 與 lease 的責任分界，typed Permit proof 由 [[0066]] 接替。
+- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：資源版本表與 RPC off-main handler，handle 模型由 [[0066]] 接替。
+- [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：Owner scheduler、State guard、completion facts 與 gate presence。
+- [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：Operation admission、lease、取消、完成、shutdown 與 disconnect 的責任分界。
 
 ## GUI Service Architecture
 
-- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：driver 記錄兩項活動狀態、DeviceManager 具名快照、GUI 定時讀取與標記、單 driver 單名稱及 closing driver 登記拒絕，以及獨立於 acquisition snapshot 的 run 後 cache 讀回。
-- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：shared session 的 EMPTY／GLOBAL／POINT 與作用中文件組、Inspect entry 範圍、獨立 SoC dialog 與窄 control ports、腳本保存權威、動態 SoC／device 交接、明確儀器 adapter catalog 與專屬面板、interactive 與單層 undo、domain facts 與前端反應、Artifact／Writeback 子模組、pane 提交與退役清理、具名 draft 與 explicit plotting；Qt-free PredictorTrial 與 predictor editors／curves 的責任劃分、ExperimentFigureArea 的具體控件 owner；measure workflow 多 tab、單 toggle、Ask sub-tab 與 headless facet／pane 分工；歷史開 tab 的 factory 失敗隔離與 Load 失敗清理，以及 Results browser 的保存 cfg 唯讀檢視例外。
-- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：launcher／runtime／composition、可信 startup(ctx) 的 default／custom／clean 選擇、背景執行、on_close 與預設腳本的 session 保存責任；保存 point=None 時成功開 entry 即可恢復 tabs，指定 point 失敗不回退 global。
+- [0064 — GUI process startup 與 app composition](0064-process-startup.md)：Launcher、runtime、composition 與 startup／on_close 的資源和 session 交接。
+- [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：Shared session、應用核心、前端反應與各 GUI pane 的 owner。
+- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：Driver 活動狀態、DeviceManager 快照與 run 後 cache 讀回。
 
 ## Cfg / Value Model
 
-- [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用、待實作的中立 converter／scoped command、原子安裝、草稿還原、一般 tagged-model union 的同名同型別 raw 繼承、普通 select 與明確數值換算 command 的區別、具名固定 list／原始索引 participants、非 participant tone 的 None 初值與一般 nullable 編輯、無 participants 的固定槽位，以及 indexed remote、逐元素 recipe 與 native tunables 的完整 model 提交邊界。
-
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 擁有 generator／ADC、waveform 與 classifier 配置；分類與 correction 只取 run cfg，三態 reference Apply 到 readout library；單一 processor 同時接收所有 ADC，Classify／IQ 軸的逐 shot 外積求總和，框架只累加 round，Result 保存總和；emit tag 識別讀出，未標記時使用 module 名稱；herald 條件平均與通過比例由總和衍生，舊格式明確拒絕；原生 QICK projection 由 caller 明確選用，caller 準備參數並負責校準適用性。
-
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、lab 單一 source factory 與 Template 自有 metadata、Refresh 保留 seed 快照／Reset 重算、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。
-- [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、中立完整 ModuleSpec proposal builder 的精確欄位比對與 child key 保留，以及 Apply 當下選作用中文件組、nullable destination 與 selected Apply 的成功前綴。
-- [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、內部 ValueRef／resolve_value_ref、Form expression 與固定 capture；舊 token／tagged wire 已退休。
+- [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 與 writeback draft 的宿主所有權及 Apply 提交邊界。
+- [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、resolve-once 與固定 capture。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、adapter input 與實驗 record 的邊界。
+- [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用但尚未完成實作的 Form converter、scoped command 與固定元素設計。
 
 ## Remote / Transport
 
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：L0 至 L3 定位、共享狀態交接、跨 Primary／Post 的 current-draft writeback 提交、recipe 推導 owner、共用 async host 的 CallResult 與可缺省資源、Scope.call 與 lib run_core 的 await 邊界、顯式 Scope、活子層下的 root kind selector 與歧義、live_paths 跨 process 投影、workflow Stop owner acknowledgement、operation 自己的 stopped 位元、GUI／recipe 前端 stop_requested 與同 Run facts、根 ScriptCancelled、Analyze 黑箱與作者例外處理。Workflow 的三層分工與 live tunables 生效點見 0062。
-- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：measure／fluxdep 的單一 holder、固定連線身份、GUI 編輯停用、共用對話框由宿主決定唯讀、明確收回與 ref-free cfg acceptance。
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch 和 app policy 分界、launch-only startup 選擇、script-origin device 錯誤呈現、事件與錯誤投影、measure 固定工具及 live catalog、依 Info 欄位判斷的 value patch 單位要求、穩定名稱寫回、analysis-only JSON 投影，以及 Fluxdep pipeline／interactive 控制、measure workflow 固定工具、同一 headless owner／operation、Ask waiting 與 async host answer 接合契約。尚未實作的 GUI 收合見 [draft](draft/remote-event-coalescing.md)。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份與控制權交接。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。
 
 ## Persistence
 
-- [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Offset＋signed periods、flux_dev 預設儀器、量測 period／offset 分項 writeback 與 app period-only export、逐列分析缺值、analysis 擁有仿射換算與 provider 注入、simulate／physical_fit 只收 reduced φ、runtime v3 與保留 v1→v2→v3 升級鏈。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：保存權威、Container 讀寫、Run metadata、library 與 component 升級邊界。
+- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器與獨立 API。
+- [0081 — Global 與 point 資料以磁碟為真相](0081-point-data-disk-sync.md)：Global／point 以磁碟為真相、write-through、watcher 與 revision 樂觀鎖。
+- [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Component offset／signed periods、flux_dev 與明確 v1→v2→v3 升級鏈。
 
-- [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：容器只認 `vars`（陣列加具名軸）、`docs`（有限 JSON）、`groups`（opaque 子樹保真）三種表示法與根屬性 format／format_version／producer／kind；cfg、metadata、analysis 只是生產者命名慣例；API save／load／read_doc／inspect；datafile 不 import 其他 package，由 datafile-standalone contract 檢查；save/load 共用含 ContainerAttrs 的 Container，只接受 zcu.container major 3。
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：區分各保存對象的 owner、完整性、失敗與引用邊界，以及 alias 工作焦點的有序名稱清單。讀取只驗當次需要的檔案與欄位，alias 原錯由固定 capture 的 consumer 回報；native 清單只解碼顯示欄位。Container 3.0 的實驗文件由 experiment 擁有，保留未知歷史時間與完成狀態；datafile 只讀 Container major 3，同 major 保真寫回不降 minor。data.h5 擁有 cfg 正本，Results browser 唯讀檢視不改變 Load 不回填的邊界；ledger acquired 只記事實且讀取忽略未知欄位；Entry 以 Result 名稱歸屬，不使用 UUID；Database 首次 Save 才建立且改名不搬舊輸出。Run 保存參數環境快照，Load 不查 live point；Run／Load 預覽與 Save 共用 layout planner，以目前 roots 與記錄名稱生成輸出；RunRecord 持有中性 metadata，native schema 與 reader 分離，Save 在 I/O 前完整驗證並保留額外與已廢棄 key；metadata 欄位讀取失敗只隔離預覽。寫回到 Apply 當下作用中的 global／point 文件組，ledger 與 record 可保存 point=null；無 point 的圖副本放 entry figures。Owner 內部分開按需讀取與完整寫入驗證，point availability 不預驗 leaf／component，也不作為其他讀取的前置條件。Run／圖片與 Labber 使用 caller save_stem 的原樣結果，預設帶 dotted 前端名稱、roles 與完整 run_id；Labber comment 帶 point／roles snapshot；雙側 workflow root 保留完整 run_id；experiment.artifacts 編排固定項目與失敗，datafile 擁有格式；library 讀取略過無效 Spec 並公開原因，不改檔、不查模組來源。 Component 文件另有 caller 註冊的 schema_version policy，runtime 只讀目前版本，resources 提供明確執行的通用升級鏈與四類工具共用的外部備份定位，lab 提供完整分類與純函式步驟。
-- [0081 — Global 與 point 資料以磁碟為真相](0081-point-data-disk-sync.md)：Global／point 整組切換，作用中三檔對外回報、POINT 另監看 entry 三檔；參數、library、aliases 以檔案為權威，write-through、單一批次 watcher 重載、各檔 revision 樂觀鎖、holder 門檻、agent 直接讀寫檔案加 `context.reload`，measure 固定工具不提供特化讀寫，`entry.info`／`context.reload` 經 `rpc_call` 存取。Point availability 只判參數文件可讀與 owner 文件結構，局部壞值使用時才報錯，不改 UI／remote 不可用列呈現。Aliases revision 是 observed bytes SHA-256，不保證內容有效，壞內容的原錯保留到使用時；狀態 accepted。
+## Experiment runtime / Readout / Workflows
 
-## Experiment runtime／Workflows
-
-- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：program-owned module 宣告與每次 emission、QICK 原生通道覆寫與 register 衝突、constructor keyword、TimelineBuilder／Schedule 分工、具名 scope 與逐操作 ceil、可選 hint 的作者時間、軸分量與 Abs 證明、runtime max／min 與 s14 事件時間、Branch 母／case timeline、累積 Repeat 與實際 remaining end、fork／join lowering 與 reference 守衛、常數 WAIT 及 slack 護欄。TimelineProgramV2 使用不可變 compiled snapshot 與單一 simulation frontend，採獨立 shot 與 effect-based admission。2026-11-01 裁定全面 Timeline；全部實驗已遷移，舊 program／builder／module lifecycle 與 control module 已移除。
-- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：單一 async workflow、一 run 一 operation、Scope.call 能力／lib run_core 轉接／workflow 組合的三層分工、每個 operation 單次呼叫、Ask waiting、live tunables、呼叫前 device snapshot 存入 RunRecord.metadata、作者明選 completion、root 緊急停止、例外直接傳出、operation 自己的 stopped 位元與 completed／raised facts、歷史 discarded 讀取、作者自存 commit 目錄。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：無跨次狀態的實驗核心、core 黑箱與作者 partial 語意、停止請求與 Notebook 首次 SIGINT／10秒期限、RunRecord／AnalysisRecord、共用 from_stored 與資料優先 nullable cfg、Notebook native load 與 Labber 匯出、GUI opaque result、具名原生圖及 RunContext／CfgEnv。
-
+- [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、heralding 與 QICK projection。
+- [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、compiled snapshot 與全面 Timeline 遷移。
 
 ## Analysis / Simulation / Waveform
 
-- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：TimeBase 擁有有理數公共頻率、格點與範圍檢查、scalar／array 的單次正確捨入；採用整數 request 與 replay 升版，第二階段物理建模留待後議。TimeBase、整數 request、compiled frontend、整數 round pacing、physical consumer 與 replay v2 已實作，並驗證異質 clock 額外宣告時原 channel IQ bits 不變。
-
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：對外只用 package root，內部允許實質耦合；dispatch 擁有分類、builder 與 frame 決策，kernel 擁有數值 certificate 與 apply，共用數值由單一模組擁有。所有模擬器納入每次 acquisition 固定、預設關閉的損耗漂移；Engine preparation 限一次 evolve，single 跨損耗保留結構並重建 rates，FTF 漂移時重建完整 facts，routing facts 與 acquire-local CavityAverageCache 各有獨立 lifetime。Program 擁有 RawShots 介面，環境生成完整 raw，core 保持純資料。依賴方向沿用 C8、C9、C12、C19。
-
-- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：energy/h=GHz、physical ns、標準 loss parameters 與 spectral-rate 換算；pair lifetime 與 manifold model T1 的區別、T1／pointwise Q 與 Purcell 的實作契約、獨立物理驗證及歷史 2π 修改證據。
+- [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱與數值 preparation 壽命。
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request、compiled frontend 與 replay v2。
 
 局部分析／預測契約見 [fluxdep](../../lib/zcu_tools/analysis/fluxdep/README.md)、[fitting](../../lib/zcu_tools/analysis/fitting/README.md) 與 [prediction](../../lib/zcu_tools/simulate/fluxonium/README.md)；waveform 資產契約見 [repository 參考](../../lib/zcu_tools/resources/waveform_assets.md)。
 
 ## Plotting
 
-具名圖與通用 owner 更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)。原生更新用 `@plots.on_plot_thread`，只 refresh 已呈現的根圖。Live 工具與格式歸 lab，新 helper 在 caller thread 回傳 changed artists，邊界見 [[0072]]；GUI 的 worker／Qt 繪圖責任見 [[0067]]。
+圖形操作與更新契約見 [plotting README](../../lib/zcu_tools/plotting/README.md)，跨模組 owner 分界見 [[0072]]、[[0067]]。
 
 ## Agents
 
@@ -77,76 +73,74 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Draft
 
-- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：已交付明確環境、white_noise、共用 compiled frontend、FTF 快速分段引擎與重算式單 round 重播。Program 的 compiler snapshot 與 frontend owner 契約見 [[0083]]，舊 Module-tree simulation frontend 已移除。離線 U 表與持久 exact records 已移除。Engine 只保留 routing facts，數值 preparation 限一次 evolve，routing 預算不是 process RAM 上限。可信 startup 腳本組裝並交付資源，GUI 不載入 environment；FTF 從 template 建 entry／point 並用具名 YAML 調參。現行 backend 為 `ftf-segment-v6`，支援 pulse／mux readout。F1／F2 與 conditional Ramsey 的歷史證據不代表現行版本的精度或效能。
-
+- [模擬環境、FTF preset 與參數檔](draft/simulation-environments.md)：模擬環境與 FTF preset 的草稿及歷史驗證範圍，compiler owner 見 [[0083]]。
 - [GUI 事件收合](draft/remote-event-coalescing.md)：GUI 訂閱端依 payload type 與 tab 的 per-tick 收合尚未落實；cfg 表單 snapshot 收合已實作。
 - [Operation 關閉與 disconnect](draft/operation-lifecycle-boundaries.md)：shutdown 期限、無 handle 背景工作與 GUI device/factory owner 的未落實目標。
 
 ## Retired
 
-- [0009 — Spec/Value fluent + LiteralSpec lock](retired/0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
-- [0010 — Complete value tree](retired/0010-value-tree-complete-none-for-empty.md)：已被 [[0065]] 的 Form input／result 取代，保留歷史設計。
-- [0011 — Finished-cfg validation](retired/0011-cfgschema-validate-boundary.md)：已被 [[0065]]、[[0073]] 的 Form result 與 adapter 邊界取代。
-- [0012 — Context-free measure definition](retired/0012-cfgbuilder-value-layer-fluent-assembly.md)：舊 definition／seed 契約，由 [[0073]] 取代。
-- [0045 — Shared GUI cfg core](retired/0045-shared-gui-cfg-core-ownership.md)：已被 [[0065]]、[[0073]] 的 Form owner 分工取代。
-- [0046 — Shared cfg lowering ports](retired/0046-shared-cfg-lowering-ports.md)：已被 [[0065]]、[[0073]] 的 Form 轉換與持久 Spec 提交取代。
-- [0050 — Canonical cfg binding paths](retired/0050-canonical-cfg-binding-paths.md)：已被 [[0065]] 的 Form model-field paths 與 batch 契約取代。
-- [0051 — Program cfg shape catalog](retired/0051-canonical-program-cfg-shape-catalog.md)：已被 [[0065]]、[[0073]] 的持久 Spec 與生成器取代。
-- [0077 — Numerical candidates、plan ownership 與 checked replay](retired/0077-numerical-plans-and-replay.md)：superseded。實驗 planner 與 checked plan replay 已移除，現行分工由 [[0078]] 接替；正文保留歷史設計。
+退役正文保留歷史設計；現行規則見各條目的 owner ADR 或 module README。
 
-- [Pydantic 表單、輸入與宿主提交](retired/pydantic-form-tool.md)：superseded，穩定邊界併入 0065／0062，持久 Spec 與推導由 0008／0073 承接；原稿留存歷史。
-
-- [量測成果 Artifact、設定快照與讀回](retired/artifact-persistence.md)：superseded，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
-
-- [Cfg 編輯接縫與使用邊界](retired/cfg-editing-boundaries.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。
-- [Cfg 資源公開契約與同步發布](retired/cfg-resource-contract.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。
-
-- [具名 workflows 與可丟棄的步驟執行](retired/workflows-engine.md)：retired，保留期 0 候選草稿，workflow 執行契約由 0062 接替。
-- [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md) 與 [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已於 04799f2f2 移除。
-
-以下舊篇保留原號與正文；現行 GUI 決策見 0067，Operation 見 0066，Remote／Transport 見 0068，Persistence 見 0063，workflow 見 0062，process startup 見 0064。已被取代的 Cfg 來源篇與 0077 均收錄於本節，歷史正文保存在 `retired/`。
-
-- [0013 — Remote adapter second view](retired/0013-remote-adapter-as-second-view.md)、[0014 — Shared GUI transport](retired/0014-gui-shared-transport-layer.md)、[0047 — Expected errors](retired/0047-typed-expected-error-taxonomy.md)、[0049 — Lazy push](retired/0049-subscriber-aware-lazy-push.md)、[0052 — Event attribution](retired/0052-event-meta-and-frontend-attribution.md)、[0059 — MCP RPC catalog](retired/0059-measure-mcp-rpc-channel.md)、[0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 0068 接替；0052 未落實的 GUI 收合見 draft。
+- [0003 — Shutdown coordinator](retired/0003-shutdown-coordinator-and-registry-cancel.md)：取消與 shutdown 跨 owner 分界由 0066 承接；自動逾時關窗敘述不再是核准的共用預設。
 - [0004 — Service dependency three questions](retired/0004-service-dependency-three-questions.md)：依賴語意與方向由 0067 接替。
 - [0005 — Service roles](retired/0005-service-roles-ddd-hexagonal.md)：前端與 owner 角色由 0067 接替。
 - [0006 — Single ml/md write authority](retired/0006-single-ml-md-write-authority.md)：寫入權威由 0067 接替；cfg lowering 見 0065 與 measure README。
 - [0007 — Device state lives in State](retired/0007-device-state-to-state-ssot.md)：device 與 persistence 分工由 0067、0063 接替。
+- [0009 — Spec/Value fluent + LiteralSpec lock](retired/0009-spec-value-fluent-and-literal-lock.md)：已被 [[0065]]、[[0073]] 的 Form／持久 Spec 取代，保留歷史設計。
+- [0010 — Complete value tree](retired/0010-value-tree-complete-none-for-empty.md)：已被 [[0065]] 的 Form input／result 取代，保留歷史設計。
+- [0011 — Finished-cfg validation](retired/0011-cfgschema-validate-boundary.md)：已被 [[0065]]、[[0073]] 的 Form result 與 adapter 邊界取代。
+- [0012 — Context-free measure definition](retired/0012-cfgbuilder-value-layer-fluent-assembly.md)：舊 definition／seed 契約，由 [[0073]] 取代。
+- [0013 — Remote adapter second view](retired/0013-remote-adapter-as-second-view.md)：跨模組邊界由 [[0068]] 接替。
+- [0014 — Shared GUI transport](retired/0014-gui-shared-transport-layer.md)：跨模組邊界由 [[0068]] 接替。
+- [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
+- [0016 — notebook liveplot auto close](retired/0016-notebook-liveplot-auto-close-default.md)：notebook liveplot 預設 auto-close，不依賴 ipympl 私有協議。
 - [0017 — Worker-thread plotting](retired/0017-worker-thread-plotting.md)：前端繪圖邊界由 0067 接替，機制見 gui plotting README。
+- [0018 — Autofluxdep resolver builder](retired/0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)：autofluxdep 已移除，不再提供 orchestrator 與 predictor 載入流程。
+- [0019 — Operation facets](retired/0019-operation-facets-and-execution-strategy.md)：facets 與 execution 分界由 0066 承接，局部策略見 session／app README。
 - [0020 — Shared session core](retired/0020-session-core-shared-layer.md)：共用／app-local 邊界由 0067 接替，局部契約見 session README。
 - [0021 — Event ownership domain modules](retired/0021-event-ownership-domain-modules.md)：domain 事件與前端投影由 0067 接替。
-- [0036 — Adapter capability contract](retired/0036-adapter-capability-contract-validated-at-import.md)：跨 owner 規則由 0067 接替，精確 hook 見 experiment adapter README。
-- [0048 — Domain event facts and View reactions](retired/0048-domain-event-facts-and-view-reactions.md)：事件與反應由 0067 接替，pane matrix 見 measure README。
-- [0061 — Measure interactive plugin session](retired/0061-measure-interactive-plugin-session.md)：session ownership 由 0067 接替，互動細節見 measure README。
-- [0003 — Shutdown coordinator](retired/0003-shutdown-coordinator-and-registry-cancel.md)：取消與 shutdown 跨 owner 分界由 0066 承接；自動逾時關窗敘述不再是核准的共用預設。
-- [0019 — Operation facets](retired/0019-operation-facets-and-execution-strategy.md)：facets 與 execution 分界由 0066 承接，局部策略見 session／app README。
+- [0022 — Worktree coordination](retired/0022-agent-coordination-worktree.md)：舊協作 protocol；通用流程改由外部 skill 管理，本地 live resource 限制見 CLAUDE.md。
 - [0023 — Cooperative interrupt feedback](retired/0023-cooperative-interrupt-feedback-wakeup.md)：舊 FeedbackInbox 由 0066 的有序 channel 取代。
+- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：外部 agent 啟動邊界由 0068 接替；operation feedback 見 0066。
 - [0025 — Cross-thread interaction channel](retired/0025-cross-thread-interaction-channel.md)：互動分界由 0066 承接；局部事件契約見 session／app README。
 - [0026 — OperationRunner and ports](retired/0026-operation-abstraction-runner-scope-ports.md)：runner 分界由 0066 承接；局部 port 與 scope 見 session／app README。
-- [0058 — Registry-owned disconnect](retired/0058-registry-owned-visa-session-disconnect.md)：跨 owner teardown 由 0066 承接，registry 局部契約見 device README。
-- [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
-- [0024 — Agent launch UI retirement](retired/0024-embedded-agent-session-architecture.md)：外部 agent 啟動邊界由 0068 接替；operation feedback 見 0066。
-- [0015 — GUI memento caretaker](retired/0015-persistence-caretaker-memento-single-file.md)：app 與 shared caretaker 的責任由 0063 接替。
 - [0027 — Experiment data persistence](retired/0027-experiment-data-persistence-native-labber-axes-list.md)：資料責任由 0063 接替，細節在 datafile 與 experiment owner 文件。
-- [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。
-- [0033 — Waveform reference lifecycle](retired/0033-arbitrary-waveform-delete-no-reference-scan.md)：不級聯更新由 0063 接替。
-- [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：共用 ResultTree 與執行骨架見 `lib/zcu_tools/experiment/v2/runtime/README.md`；autofluxdep executor 與 flux tracker 契約見 `zcu_lab/v2/experiment-authoring.md`，workflow collection 邊界見 0062。
-- [0039 — QubitParams JSON owner](retired/0039-qubit-params-json-owner.md)：typed handoff 由 0063 接替。
-- [0040 — Autofluxdep run artifact](retired/0040-autofluxdep-run-result-artifact.md)：保存邊界由 0063 接替，workflow lifecycle 見 0062。
-- [0057 — RecordTable v2](retired/0057-flat-sampletable-v2-coordinate-contract.md)：座標保存契約由 0063 接替，schema 細節由 record_table owner 維護。
-- [0041 — Autofluxdep feedback framework](retired/0041-autofluxdep-feedback-framework.md)：feedback 跨模組邊界接入 0062，slot 細節移至 app README。
-- [0042 — Autofluxdep feedback confidence reversion](retired/0042-autofluxdep-feedback-confidence-reversion.md)：freshness 邊界接入 0062，公式移至 app README。
-- [0043 — Autofluxdep runtime cfg override plan](retired/0043-autofluxdep-runtime-cfg-override-plan.md)：cfg 邊界接入 0062，snapshot／decoration 細節移至 app README。
-
-以下舊篇已分流至模組 owner 文件；退役正文僅供追溯。
-
-- [0054 — Resonance multiplicative amplitude background](retired/0054-resonance-multiplicative-amplitude-background.md)：real log-amplitude slope 乘完整 resonator response，`edelay` 維持唯一 global phase slope。
-- [0055 — Route-scoped resonator electrical delay](retired/0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 與 generator/readout route 以單一 compound calibration 持久化為後續 branch seed。
-- [0056 — Resonance phase curvature and rational initializer](retired/0056-resonance-phase-curvature-rational-initializer.md)：optional resonance-centered quadratic phase background 與 internal degree-1 rational initializer 不接管 route-scoped delay branch。
 - [0028 — Fluxdep analysis kernel](retired/0028-fluxdep-analysis-kernel.md)：flux-dependence analysis kernel 位於 GUI / notebook adapter 之外。
 - [0029 — Fluxonium prediction engine](retired/0029-fluxonium-prediction-engine.md)：Fluxonium prediction policy 位於 `simulate.fluxonium`。
 - [0030 — Arbitrary waveform optional recipe](retired/0030-arbitrary-waveform-asset-optional-recipe.md)：arbitrary waveform asset 是 qubit-scoped `.npz`，可內嵌 formula recipe。
 - [0031 — Formula recipe segments](retired/0031-formula-recipe-complex-segments.md)：formula recipe 使用 ordered segments 與 complex expression。
+- [0032 — Waveform reference time axis](retired/0032-arbitrary-waveform-reference-time-axis.md)：時間權威由 0063 接替。
+- [0033 — Waveform reference lifecycle](retired/0033-arbitrary-waveform-delete-no-reference-scan.md)：不級聯更新由 0063 接替。
 - [0034 — ArbWaveformDatabase repository](retired/0034-arb-waveform-database-shared-asset-repository.md)：資產操作現由 `resources.ArbWaveformDatabase` 擁有。
 - [0035 — MCP failures use tool errors](retired/0035-arb-waveform-mcp-failures-use-tool-errors.md)：arb waveform error 由 main app 投影到 remote 契約。
-- [0016 — notebook liveplot auto close](retired/0016-notebook-liveplot-auto-close-default.md)：notebook liveplot 預設 auto-close，不依賴 ipympl 私有協議。
-- [0022 — Worktree coordination](retired/0022-agent-coordination-worktree.md)：舊協作 protocol；通用流程改由外部 skill 管理，本地 live resource 限制見 CLAUDE.md。
+- [0036 — Adapter capability contract](retired/0036-adapter-capability-contract-validated-at-import.md)：跨 owner 規則由 0067 接替，精確 hook 見 experiment adapter README。
+- [0038 — Executor ResultTree](retired/0038-executor-result-tree.md)：共用 ResultTree 與執行骨架見 `lib/zcu_tools/experiment/v2/runtime/README.md`，workflow collection 邊界見 0062。
+- [0039 — QubitParams JSON owner](retired/0039-qubit-params-json-owner.md)：typed handoff 由 0063 接替。
+- [0040 — Autofluxdep run artifact](retired/0040-autofluxdep-run-result-artifact.md)：保存邊界由 0063 接替，workflow lifecycle 見 0062。
+- [0041 — Autofluxdep feedback framework](retired/0041-autofluxdep-feedback-framework.md)：feedback 跨模組邊界接入 0062，slot 細節移至 app README。
+- [0042 — Autofluxdep feedback confidence reversion](retired/0042-autofluxdep-feedback-confidence-reversion.md)：freshness 邊界接入 0062，公式移至 app README。
+- [0043 — Autofluxdep runtime cfg override plan](retired/0043-autofluxdep-runtime-cfg-override-plan.md)：cfg 邊界接入 0062，snapshot／decoration 細節移至 app README。
+- [0044 — GUI process runtime](retired/0044-gui-process-runtime.md)：跨模組啟動邊界由 0064 接替，局部契約見 gui README。
+- [0045 — Shared GUI cfg core](retired/0045-shared-gui-cfg-core-ownership.md)：已被 [[0065]]、[[0073]] 的 Form owner 分工取代。
+- [0046 — Shared cfg lowering ports](retired/0046-shared-cfg-lowering-ports.md)：已被 [[0065]]、[[0073]] 的 Form 轉換與持久 Spec 提交取代。
+- [0047 — Expected errors](retired/0047-typed-expected-error-taxonomy.md)：跨模組邊界由 [[0068]] 接替。
+- [0048 — Domain event facts and View reactions](retired/0048-domain-event-facts-and-view-reactions.md)：事件與反應由 0067 接替，pane matrix 見 measure README。
+- [0049 — Lazy push](retired/0049-subscriber-aware-lazy-push.md)：跨模組邊界由 [[0068]] 接替。
+- [0050 — Canonical cfg binding paths](retired/0050-canonical-cfg-binding-paths.md)：已被 [[0065]] 的 Form model-field paths 與 batch 契約取代。
+- [0051 — Program cfg shape catalog](retired/0051-canonical-program-cfg-shape-catalog.md)：已被 [[0065]]、[[0073]] 的持久 Spec 與生成器取代。
+- [0052 — Event attribution](retired/0052-event-meta-and-frontend-attribution.md)：跨模組邊界由 [[0068]] 接替。
+- [0054 — Resonance multiplicative amplitude background](retired/0054-resonance-multiplicative-amplitude-background.md)：real log-amplitude slope 乘完整 resonator response，`edelay` 維持唯一 global phase slope。
+- [0055 — Route-scoped resonator electrical delay](retired/0055-route-scoped-resonator-electrical-delay.md)：boundary search 可 bounded adaptive expansion；成功 delay 與 generator/readout route 以單一 compound calibration 持久化為後續 branch seed。
+- [0056 — Resonance phase curvature and rational initializer](retired/0056-resonance-phase-curvature-rational-initializer.md)：optional resonance-centered quadratic phase background 與 internal degree-1 rational initializer 不接管 route-scoped delay branch。
+- [0057 — RecordTable v2](retired/0057-flat-sampletable-v2-coordinate-contract.md)：座標保存契約由 0063 接替，schema 細節由 record_table owner 維護。
+- [0058 — Registry-owned disconnect](retired/0058-registry-owned-visa-session-disconnect.md)：跨 owner teardown 由 0066 承接，registry 局部契約見 device README。
+- [0059 — MCP RPC catalog](retired/0059-measure-mcp-rpc-channel.md)：跨模組邊界由 [[0068]] 接替。
+- [0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 [[0068]] 接替。
+- [0061 — Measure interactive plugin session](retired/0061-measure-interactive-plugin-session.md)：session ownership 由 0067 接替，互動細節見 measure README。
+- [0077 — Numerical candidates、plan ownership 與 checked replay](retired/0077-numerical-plans-and-replay.md)：Numerical planner 與 checked replay 已移除，現行分工見 [[0078]]。
+- [Pydantic 表單、輸入與宿主提交](retired/pydantic-form-tool.md)：superseded，穩定邊界併入 0065／0062，持久 Spec 與推導由 0008／0073 承接；原稿留存歷史。
+- [量測成果 Artifact、設定快照與讀回](retired/artifact-persistence.md)：superseded，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
+- [Cfg 編輯接縫與使用邊界](retired/cfg-editing-boundaries.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。
+- [Cfg 資源公開契約與同步發布](retired/cfg-resource-contract.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。
+- [具名 workflows 與可丟棄的步驟執行](retired/workflows-engine.md)：retired，保留期 0 候選草稿，workflow 執行契約由 0062 接替。
+- [Autofluxdep 逐項宣告依賴與 predictor 載入](retired/autofluxdep-explicit-dependencies.md)：autofluxdep 已移除，不再提供 orchestrator 與 predictor 載入流程。

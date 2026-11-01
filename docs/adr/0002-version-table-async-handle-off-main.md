@@ -2,9 +2,9 @@
 status: accepted
 ---
 
-# 並發感知：資源版本表與 off-main blocking handler（handle 模型沿革）
+# 0002 — 並發感知：資源版本表與 off-main blocking handler（handle 模型沿革）
 
-**狀態：** accepted（資源版本表 guard 與 RPC off-main handler 仍有效；下文的舊 handle 模型已由 [[0066]] 接替）。
+資源版本表 guard 與 RPC off-main handler 仍有效；下文的舊 handle 模型已由 [[0066]] 接替。
 **關聯：** Permit／Lease 見 [[0001]]；handle、lease、取消與關閉的現行分界見 [[0066]]；shared transport 見 [[0068]]，external-refresh Reaction 見 [[0067]]。
 
 ## 脈絡

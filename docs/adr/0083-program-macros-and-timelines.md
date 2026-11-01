@@ -1,7 +1,12 @@
+---
+status: accepted
+date: 2026-10-29
+---
+
 # 0083 — Program macro 與具名 timeline
 
-日期：2026-10-29。Builder 契約更新：2026-10-30。Timeline、Repeat、收尾證明與全面遷移裁定更新：2026-11-01。
-狀態：Accepted。全部實驗使用 TimelineBuilder／TimelineProgramV2，legacy program 與 control module 已移除。
+Builder 契約更新：2026-10-30。Timeline、Repeat、收尾證明與全面遷移裁定更新：2026-11-01。
+全部實驗使用 TimelineBuilder／TimelineProgramV2，legacy program 與 control module 已移除。
 相關：[[0072]]、[[0074]]、[[0078]]
 
 ## 脈絡

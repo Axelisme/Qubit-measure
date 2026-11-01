@@ -212,7 +212,7 @@ Mux 實驗每個參與 tone 各有一張 `measurement_i`，
 不把多 tone 疊在同一 axis。每張圖保留自己的 actual x，delay 類使用共用
 requested-delay 軸。GE 使用 IQ scatter，以藍／紅區分 probe off/on 兩個 preparation。
 單 qubit 與 mux GE 各自用 matplotlib 畫 IQ scatter，live 更新先複製 IQ，
-再經公開 `Plots.draw` 在 host owner 繪圖。Worker 不持有 active artists，
+再經公開的 `@plots.on_plot_thread` 在 host owner 繪圖。Worker 不持有 active artists，
 partial NaN 不補零。Mux GE 逐 tone 直接呼叫數值工具，不委派單 qubit 實驗的分析。
 
 七個 mux qubit cfg 使用完整固定 `tones` 與獨立 `participants: list[int]`。

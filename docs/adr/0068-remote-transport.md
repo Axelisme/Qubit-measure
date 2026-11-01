@@ -2,9 +2,7 @@
 status: accepted
 ---
 
-# ADR-0068 — 遠端前端、傳輸與 agent 介面
-
-**狀態：** accepted。
+# 0068 — 遠端前端、傳輸與 agent 介面
 
 **Last updated:** 2026-11-01，移除 Pause／Resume、Ask waiting 與 GUI Run terminal
 

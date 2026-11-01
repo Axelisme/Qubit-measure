@@ -4,7 +4,7 @@ status: superseded
 
 # 0051 — Canonical program cfg shape catalog
 
-**狀態：** superseded。舊 cfg_editing catalog／materializer 已移除，持久 Spec 與 Form 生成器見 [[0065]]、[[0073]]。以下正文保留歷史設計，不是現行契約。
+舊 cfg_editing catalog／materializer 已移除，持久 Spec 與 Form 生成器見 [[0065]]、[[0073]]。以下正文保留歷史設計，不是現行契約。
 
 **關聯：** [[0067]]、[[0045]]、[[0046]]、[[0050]]。
 

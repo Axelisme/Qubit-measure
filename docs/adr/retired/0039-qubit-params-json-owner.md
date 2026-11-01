@@ -2,9 +2,9 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [QubitParams](../../../lib/zcu_tools/resources/qubit_params.md)。以下保留歷史正文。
+> 2026-09-27。跨模組決策由 [ADR-0063](../0063-persistence-ownership.md) 接替；局部契約見 [QubitParams](../../../lib/zcu_tools/resources/qubit_params.md)。以下保留歷史正文。
 
-# ADR-0039 — QubitParams owns params.json typed handoff
+# 0039 — QubitParams owns params.json typed handoff
 
 關聯 [[0029]]（prediction engine 擁有 simulation policy）、[[0037]]（value lookup 不取代 explicit typed dependencies）。
 

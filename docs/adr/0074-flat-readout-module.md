@@ -2,9 +2,7 @@
 status: accepted
 ---
 
-# ADR-0074 — 獨立的平鋪 Readout module
-
-**讀者：** lab-author、framework-dev、agent。查閱 readout 配置、classifier 所有權與 module 引用的跨模組契約。
+# 0074 — 獨立的平鋪 Readout module
 
 ## 背景
 

@@ -6,62 +6,60 @@
 
 ## Agent 介面
 
-- 2026-10-12 [QCA 作為前端的可行性評估](2026-10-12-qca-frontend-evaluation.md)：QCA 的儀器層較弱，不取代 measure-gui MCP；只借鏡規劃時約定判準與校準 VLM 判圖。
-- 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入；決策見 [ADR-0075 Agent 介面分層](../adr/0075-agent-interface-layers.md)。
-- 2026-10-12 [fluxdep MCP 的定位與介面重設計](2026-10-12-fluxdep-mcp-design.md)：MCP 依 agent 的六個決策點與能力清單組裝 RPC，每張譜各自保有 context，證據圖只在決策點回；並歸納出十條適用於全部 MCP 的設計範式。
-- 2026-10-16 [Recipe 與 workflow 的協作模型：generator、阻塞函式或 async](2026-10-16-recipe-workflow-yield-vs-async.md)：保留 generator 由 driver 掌控進度，recipe 改用有型別的 `yield from` helper；主動訊息只支援控制命令與邊界生效的 tunables，不做 async。
-- 2026-10-21 [Recipe 接口重設計](2026-10-21-recipe-interface-redesign.md)：兩層執行（驅動引擎只懂 Wait／Ask／return，便利層包 GUI RPC）；輸入是作者定義的 FormModel、原生型別、兩態 None 保留；`@recipe` 取代 DEFINITION；回覆為作者 report 的包裝。
-- 2026-10-21 [三角色協定：Wait／Ask／Signal](2026-10-21-three-role-protocol.md)：agent、腳本、runtime 三角色；recipe 與 workflow Engine 底層同一份協定，effect 與 env 方法都是糖；Signal 第一版只有內建 kind 由 host 處理。
-- 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：recipe 操作 GUI tab 可多實驗，workflow 跑 Engine；workflow 由 measure-gui 承載；維持 helper，helper 搬到實驗目錄並列 core，共用零件不共用流程。
-- 2026-10-22 [Workflow 改為單一 generator：取消、Signal、step 模型與回退](2026-10-22-workflow-single-generator.md)：recipe 取消統一 return；協定移除 Signal；workflow 由 step 函式改為單一 generator 並刪 Effect，Pause 立即打斷並於 Resume 重跑 operation；回退走新 run 組合，engine 不提供整點重做。
-- 2026-10-22 [中斷 scope 成為顯式的 core 契約](2026-10-22-explicit-scope-contract.md)：協作式與錯誤式中斷依「我等的事」或「我」被中斷分流；Scope 由 experiment 層定義、core 與 workflow 共用，`with`／`for` 保證邊界，路徑 `kind:name#seq`，目錄鏡射 scope；決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-10-12 [QCA 作為前端的可行性評估](2026-10-12-qca-frontend-evaluation.md)：QCA 不取代 measure-gui MCP，只借鏡規劃判準與校準 VLM 判圖。
+- 2026-10-12 [Agent 介面分層的推導](2026-10-12-agent-interface-layers.md)：自動化往下推，agent 只在宣告的判斷交接處介入，決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-10-12 [fluxdep MCP 的定位與介面重設計](2026-10-12-fluxdep-mcp-design.md)：依 agent 決策點組裝 RPC 與證據圖，介面原則見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-10-16 [Recipe 與 workflow 的協作模型：generator、阻塞函式或 async](2026-10-16-recipe-workflow-yield-vs-async.md)：Generator 的歷史選項已由 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md) 的 async 契約取代。
+- 2026-10-21 [Recipe 接口重設計](2026-10-21-recipe-interface-redesign.md)：記錄 Wait／Ask 引擎與有型別 recipe 入口的歷史設計，現行作者介面見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-10-21 [三角色協定：Wait／Ask／Signal](2026-10-21-three-role-protocol.md)：Wait／Ask／Signal 的 generator 協定已由 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md) 取代。
+- 2026-10-21 [Workflow 定位、承載與執行基底](2026-10-21-workflow-positioning-and-hosting.md)：Recipe 操作 GUI tab，workflow 跑實驗核心並由 measure-gui 承載，現行分工見 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md)。
+- 2026-10-22 [Workflow 改為單一 generator：取消、Signal、step 模型與回退](2026-10-22-workflow-single-generator.md)：單一 generator 與 Pause／Resume 的歷史設計已由 [ADR-0062](../adr/0062-experiment-workflow.md) 與 [ADR-0075](../adr/0075-agent-interface-layers.md) 取代。
+- 2026-10-22 [中斷 scope 成為顯式的 core 契約](2026-10-22-explicit-scope-contract.md)：中斷由顯式 Scope 區分目標並保證作用域，決策見 [ADR-0075](../adr/0075-agent-interface-layers.md)。
 
 ## 模擬量測環境
 
-- 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：延後解析的時間層經原型逐位重現現行 ASM；`Module.init()` 搬不進 macro，不立即全面遷移；模擬 frontend 改讀語意 macro 或底層 macro 兩案待第二個原型比較，2026-10-14 裁決暫不改。後記二：目標改為底層原生 QICK 寫法加我們的 macro、上層 builder 由作者自選，模擬器支援 macro 型別子集。後記三：兩層寫法經第三個原型逐位重現；時間模型改採具名 timeline（M1 精神、以 QICK 參考時間實現）。後記四：具名 timeline 經第四個原型以公開 API 驗證；移除 block、主流程用預設 timeline、提供 sync，推進長度取實際結束時間，遷移分兩步。後記五：program 層接近原生，builder 改為先記錄、離開時產生 program 的 with 範圍。後記六：module 是宣告物件、每次發射一個 macro；驗收改為預期行為，新舊差異改成一次性報告；timeline 不綁定參考時間、只存結尾，原生方法維持 QICK 行為，以 `delay_timeline` 與 `sync` 操作 timeline；模擬器支援原生 macro 子集，現有實驗都能模擬。
-- 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：未認證，僅界限。M8/M16 的共同 DC K8 population L1 差為 0.359636；M16 只是最大成功尺寸，M24 首點與 M32 reference 的 quadrature 失敗，不能認證大幅 excursion 或 reset fidelity。
-
-- 2026-10-21 [CKP reduced closure 研究：精度過但成本 42 倍](2026-10-21-ckp-reduced-closure-study.md)：flip 非真空腔激發必須保留；displaced-Fock N2 精度過但成本 41.9 倍，Gaussian 否決；半古典先 partial land，下一步走 joint Fock 性能研究。
-- 2026-10-21 [Joint Fock CKP 性能研究：保守 RK4 加 N+1 cutoff 外推 129 s](2026-10-21-joint-fock-performance-study.md)：兩能階候選通過局部精度並外推 129 s，快版餘裕薄不採；16 能階原型數十小時不可行，改動態 [0,2] 加四階診斷；下一步保守版 prototype 與全圖驗證。
-- 2026-10-18 [Dyson 的解析分類、輸入共用與 sparse scan](2026-10-18-dyson-input-reuse.md)：解析 B2 與 post-check 分工，共用前綴收縮輸入，sparse scan 只省 12.6% 因而未採用。
+- 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：保留環境與 preset 的早期選項，後續方向見[模擬環境草稿](../adr/draft/simulation-environments.md)。
+- 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：離線建庫的早期方案已由 [FTF 模擬加速討論](2026-10-16-ftf-simulation-speedup.md) 的 runtime 路線取代。
+- 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：每點演化一次後做 shot 統計抽樣，以 runtime 分派和快取取代離線 U 表與 density record。
+- 2026-10-17 [FTF 分段引擎：Dyson 門檻、分類成本與事後檢查](2026-10-17-ftf-dyson-guard-and-classification.md)：分類只做輕量判斷，Dyson 的 apply 後偏差只報告不重算，同一段不演化兩次。
+- 2026-10-18 [Dyson 的解析分類、輸入共用與 sparse scan](2026-10-18-dyson-input-reuse.md)：解析 B2 與 post-check 分工並共用前綴輸入，sparse scan 僅省 12.6% 因而未採用。
 - 2026-10-18 [Constant-tone period builders 的演進](2026-10-18-constant-period-builders.md)：比較 CF4、Padé7、Sambe 與 gain anchors，保留 carrier continuation 零命中及 RSS 超標的否決紀錄。
 - 2026-10-18 [Shaped periods、gate preparation 與 carrier reuse](2026-10-18-shaped-period-and-gates.md)：採 build-once handoff、phase-adaptive gates 與 narrow carrier interpolation，wide scan 保留 exact bypass。
-- 2026-10-18 [Two-tone Floquet 的 frame、sidebands 與成本交叉](2026-10-18-two-tone-floquet.md)：保留 divisor 修正、P residual 失敗與四項未認證假設，短段 throughput 最後改走 direct。
+- 2026-10-18 [Two-tone Floquet 的 frame、sidebands 與成本交叉](2026-10-18-two-tone-floquet.md)：保留 divisor 修正、P residual 失敗與未認證假設，短段 throughput 改走 direct。
 - 2026-10-18 [Direct integration 的 RHS、step controls 與 interaction picture](2026-10-18-direct-integration.md)：採 Hermitian RHS、sample-spacing ceiling 與 row-independent IP，撤掉依賴 partition 的 gain grouping。
-- 2026-10-18 [Readout 的 guarded discrete sums](2026-10-18-readout-discrete-sums.md)：flat integrated readout 直接求 ADC 樣本和，unsupported contents 保留 field fallback，正式比較另補 clean pairs。
-- 2026-10-18 [Planner 的 evidence admission 與固定成本](2026-10-18-planner-evidence-and-overhead.md)：accuracy 通過仍未取得 performance admission，144 組比較有 100 組較慢，stage estimates 不代替完整 acquire。
-
-- 2026-10-17 [FTF 分段引擎：Dyson 門檻、分類成本與事後檢查](2026-10-17-ftf-dyson-guard-and-classification.md)：分類只做輕量判斷，同一段不演化兩次；Dyson 的 |Δp| 改為 apply 後只報告不重算，治本靠分類時的解析指標；門檻由每段預算推出，係數由掃描校準；不用 Rust。
-- 2026-10-16 [FTF 模擬加速：快速路徑、shot 統計、分段快取與分派決策圖](2026-10-16-ftf-simulation-speedup.md)：主要瓶頸是 acquire 重複 reps × rounds 次。改為每點只算一次並用統計抽樣，各段依決策圖分派到 Dyson、週期、靜態、gate 快取、Floquet 或 numba DOP853，使用者規模從約 8 天降到 13 分鐘至 2 小時；只用 numba，刪除離線 U 表與 density record。
-- 2026-10-15 [離線GPU建庫、分段演化與插值重用](2026-10-15-offline-propagator-library.md)：固定模型採離線建庫存檔、模擬載入插值；CPU可行性已有證據，GPU建表與檔案載入仍待驗證，四階精度以量測用途評估。已被 2026-10-16 的 FTF 模擬加速取代：FTF 一定有耗散，離線 U 表會刪除，改用 runtime lazy 快取。
-- 2026-10-13 [模擬量測環境、低能投影與 FTF preset 的討論](2026-10-13-simulation-environment-ftf-preset.md)：早期選項與 prototype 的歷史快照；後續決策以[模擬環境 ADR](../adr/draft/simulation-environments.md)為準，文末後記說明已定案與仍待完成的範圍。
+- 2026-10-18 [Readout 的 guarded discrete sums](2026-10-18-readout-discrete-sums.md)：Flat integrated readout 直接求 ADC 樣本和，unsupported contents 保留 field fallback。
+- 2026-10-18 [Planner 的 evidence admission 與固定成本](2026-10-18-planner-evidence-and-overhead.md)：Accuracy 通過但 144 組比較有 100 組較慢，未取得 performance admission。
+- 2026-10-21 [CKP reduced closure 研究：精度過但成本 42 倍](2026-10-21-ckp-reduced-closure-study.md)：Displaced-Fock N2 精度過但成本為半古典的 41.9 倍，否決 Gaussian 並轉向 joint Fock 性能研究。
+- 2026-10-21 [Joint Fock CKP 性能研究：保守 RK4 加 N+1 cutoff 外推 129 s](2026-10-21-joint-fock-performance-study.md)：兩能階保守版外推 129 s，16 能階成本不可行，改評估動態 [0,2] 與四階診斷。
+- 2026-10-28 [FTF 固定 DC flux ramp 的截斷與成本界限](2026-10-28-ftf-fixed-dc-flux-benchmark.md)：M16 僅為最大成功尺寸，M24／M32 reference 失敗，不能認證大幅 excursion 或 reset fidelity。
+- 2026-10-29 [Module 改 QICK Macro 與模擬 frontend 改讀 macro](2026-10-29-module-to-macro.md)：記錄 Module 改 macro 與具名 timeline 的原型比較及六次後記，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
 
 ## Program 與 timeline 編譯
 
-- 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：宣告回到 QICK 原生；變數是「軸 → 分量」、計算靠軸比對，跨軸 max／min 是保留 8 支加殘差包絡的極值節點；所有合流走同一個 join，runtime max 4 條指令；runtime 時間寫進 s14，ref 只由名字含 delay 的方法推進；Repeat 拿掉 `advance_ref` 改用結構定點規則；tProc v2 讀不到也回撥不了 ref。後記：跨軸 max／min 改用 Abs 表示（線性部分加 Σc|x|），儲存不展開，求範圍時依共用軸分塊、分支定界並快取，取代保留 8 支的極值節點。
+- 2026-10-31 [Timeline 編譯：變數模型、通用 join 與 s14 事件時間](2026-10-31-timeline-variable-model.md)：Timeline 合流採共用 join，範圍證明改用 Abs 表示，現行決策見 [ADR-0083](../adr/0083-program-macros-and-timelines.md)。
 
 ## Cfg 與表單
 
-- 2026-10-29 [Singleshot 分類參數放進 readout cfg](2026-10-29-readout-classifier.md)：g/e 中心、radius、confusion matrix 改為 readout cfg 的可選 `classifier`，由 library readout module 擁有、GE 寫回 module；acquire 的分類參數由 readout module 工具算出、作者明確傳入；讀出設定改變後的失效機制暫不做。
-- 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：缺值給公允值、無效值留空、故障報錯，「可預測與一致比正確重要」，初值開 Form 時算成數字；sweep 模式存於共用 Form 輸入，recipe 一次設定並重設為 range + expts。
-- 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導、說明放 core、起始值寫在 form.py 樹，角色表退化成範本目錄，`dev` 改具名欄位；決策見 [ADR-0073 Measure 表單推導](../adr/0073-measure-form-derivation.md)。
-- 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：選項清單由生成器產生、核心通用、widget 只照清單畫；換分支不繼承舊值；ref 轉 inline 用選項指令；key-or-inline 統一成有 tag 的形狀；歷史草稿為 Pydantic 表單 ADR，現行決策見 [ADR-0065](../adr/0065-cfg-editing.md) 與 [ADR-0073](../adr/0073-measure-form-derivation.md)。
+- 2026-10-13 [Measure 表單重設計：從 builder 重抄到 core cfg 推導](2026-10-13-measure-form-redesign.md)：表單形狀從 core cfg 推導，說明與初值各有 owner，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)。
+- 2026-10-13 [表單選項的分層：生成器給選項，widget 照清單畫](2026-10-13-form-options-layering.md)：生成器給選項而 widget 只呈現，現行分工見 [ADR-0065](../adr/0065-cfg-editing.md) 與 [ADR-0073](../adr/0073-measure-form-derivation.md)。
+- 2026-10-17 [Measure Form 的校準初值與 sweep 模式切換](2026-10-17-measure-form-initial-values-and-sweep-mode.md)：校準初值在開 Form 時算成數字，缺值、無效值與故障分流，決策見 [ADR-0073](../adr/0073-measure-form-derivation.md)。
+- 2026-10-29 [Singleshot 分類參數放進 readout cfg](2026-10-29-readout-classifier.md)：Classifier 隨 readout cfg 保存，作者明確傳入 acquisition，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。
 
 ## 模組邊界
 
-- 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：具體 alias、儀器與模型的認知放 zcu_lab；模板綁定只由呼叫端明填，alias 是 setup／point 各自的檔案；predictor 讀自己的格式檔；框架內建支援能力用內聚子模組而非注入；session 清掉 chip／qubit 假設，分析工具改 entry＋component。
+- 2026-10-20 [框架去具體化：alias、模板、predictor 與一晶片一 qubit 假設](2026-10-20-framework-decoupling.md)：領域 alias、模板與模型認知留在 zcu_lab，框架的 owner 邊界見 [ADR-0072](../adr/0072-module-boundaries.md)。
 
 ## 測試與驗證
 
-- 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：行為由 agent 用只經使用者可碰元件操作、只讀使用者可見狀態的情境驗證，使用者走查只判品味；框架情境進 `tests/`，實驗走查腳本留 task scratch。
+- 2026-10-16 [Agent 自行做 UI e2e：元件驅動情境](2026-10-16-agent-ui-e2e.md)：Agent 經使用者可操作的元件驗證可見行為，使用者走查判品味。
 
 ## 存檔與資料格式
 
-- 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以 ledger 增量讀與內容 hash 快照減少重複驗證；批次為原形、工作量測試與 owner handler 延遲 warning 分別保護交易邊界、工作量與現場診斷。
-- 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 `data.h5`，Notebook 與 GUI 都讀它；Artifact 以項目種類擴充、格式由框架決定，讀回採資料優先、設定可缺；決策見 [ADR-0063](../adr/0063-persistence-ownership.md)／[0069](../adr/0069-experiment-core-and-frontends.md)／[0067](../adr/0067-gui-application.md)。
+- 2026-10-14 [量測成果 Artifact、設定快照與讀回的推導](2026-10-14-artifact-persistence.md)：設定快照正本只在 data.h5，保存與讀回決策見 [ADR-0063](../adr/0063-persistence-ownership.md)、[ADR-0069](../adr/0069-experiment-core-and-frontends.md) 與 [ADR-0067](../adr/0067-gui-application.md)。
+- 2026-10-23 [Store 讀取效率與寫入慣例](2026-10-23-store-read-efficiency.md)：保留分組提交，以增量讀和內容 hash 快照減少重複驗證。
 
 ## 量測策略
 
-- 2026-10-30 [Readout 優化指標：用兩次讀出的一、二次矩算 SNR 與 QND](2026-10-30-readout-optimization-metrics.md)：不需分類參數，由兩種製備下 R1 的平均差與變異數得到 Δ² = m₁² + 4v，算出 SNR、熱布居；R2 對比與 R1 之比給 QND；中間 π 在理想模型下沒有新資訊，用來看量測造成的 leakage 與量測後 π 失準；參考分支總是打開，優化先畫 Pareto 前緣由人選。
-- 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：QICK 的平均本來就在 host 用整個 round 的逐發資料計算，所以在取數層依 herald 篩選再平均不需存逐發資料；FPGA 回饋因延遲未知、ALU 無乘法與模擬器限制否決；上層新增 `heralding/*`，先做單 qubit。
-- 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點沒有增益；唯一有效的是每條曲線的穩健 delay 取樣（σ 約 0.73 倍）；不需新 workflow，建議在 `coherence_fluxdep` 加 delay 模式。
+- 2026-10-27 [T1/T2 over flux 量測策略：哪些機制有效](2026-10-27-coherence-strategy-levers.md)：自適應 flux 選點無增益，穩健 delay 取樣讓每條曲線的 σ 約為原來 0.73 倍。
+- 2026-10-29 [Heralding：取數層 post-selection，不做 FPGA active reset](2026-10-29-heralding-post-selection.md)：在 host 取數層依 herald 篩選再平均，不做 FPGA active reset，決策見 [ADR-0074](../adr/0074-flat-readout-module.md)。
+- 2026-10-30 [Readout 優化指標：用兩次讀出的一、二次矩算 SNR 與 QND](2026-10-30-readout-optimization-metrics.md)：兩次讀出的一、二次矩估 SNR 與 QND，先畫 Pareto 前緣由人選。

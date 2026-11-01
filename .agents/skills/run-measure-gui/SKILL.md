@@ -15,7 +15,7 @@ description: GUI 操作。透過 measure-gui MCP 連線或啟動 GUI、執行量
 
 只有當次授權涵蓋啟動 GUI 時，才用 `launch="if_missing"` 或 `launch="new"`。連線本身不連硬體，但 startup script 可能連硬體，啟動前審閱選用腳本與授權。需要換 script 或 project_root 時先關舊 GUI，再 launch new；attach 不重跑 startup，也拒絕顯式 script／project_root。選擇預設、可信 `startup(ctx)` 或 clean，以及隔離資料目錄前，讀 [Startup scripts](../../../lib/zcu_tools/mcp/measure/README.md#startup-scripts)。離線 FTF 使用 `zcu_lab/simulation_envs/FTF/startup.py`，先依該環境 README 準備 YAML。Token 視為秘密；認證或 wire 不相容時先解決連線，不送動作。
 
-讀寫目前 point 的參數、library 或 aliases 時，先用 `status()` 或 `rpc_call(method="entry.info")` 取得頂層 `files`，再依各筆絕對 path 直接讀檔。Revision 是已安裝版本，磁碟可能仍有未驗證候選，不能只靠 status 推斷檔案內容。完整流程見 [Point 檔案讀寫](../../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫)。
+讀寫目前 point 的參數、library 或 aliases 前，先讀 [Point 檔案讀寫](../../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫)，依該契約取得檔案與已安裝版本。
 
 硬體：有硬體副作用前，確認相關接線、裝置模式、適用限制及當次授權。沿用仍有效的已確認資訊；關鍵條件缺失時先問使用者，只推進不依賴該缺口的操作。
 
@@ -31,7 +31,7 @@ Tab：新建或重用工作頁、再次呼叫同 adapter 的 recipe、保存不�
 
 Guard：依操作讀相關完整觀察。Tab 用 `tab.snapshot`，SoC 用 `soc.info(include_cfg=true)`，裝置用 `device.snapshot`。Cfg 寫入與 Run 前另讀 `tab.get_cfg` 的目前 input、values 與 errors。Guard 以這些完整觀察為依據。
 
-Point 檔案編輯使用 `files` 的 path 與已安裝 revision，不以 `context.snapshot` 代替讀檔。修改前確認自己是 holder，保留已安裝 revision，直接編輯後呼叫 `rpc_call(method="context.reload", params={"path": path, "expected_revision": revision})`。`expected_revision` 必須明填，預期 library 或 aliases 缺檔時可用 null。檔案系統不檢查 holder，不能因為可以寫檔就省略控制權確認。依上述 Point 檔案讀寫契約執行，不另用特化讀寫工具。
+Point 檔案編輯前確認自己是 holder，再依 [Point 檔案讀寫](../../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫) 讀取、編輯與 reload。檔案系統不檢查 GUI 控制權，不能因為可以寫檔就省略確認。
 
 沿用值：來源記錄含 `cloned_from`、準備用於量測或校準時，依 [沿用值驗證](references/tab-strategy.md#沿用值驗證) 核對來源與適用性。
 
@@ -43,7 +43,7 @@ Point 檔案編輯使用 `files` 的 path 與已安裝 revision，不以 `contex
 
 保存或 writeback 前核對目標，回覆後逐項核對實際產物與寫入結果。依 Tab 生命週期處理保存缺口。把 execution、op、run_id、結果與 artifact 位置交回 Measure task 的當前 round，供後續裁定使用。保留已知 execution ID；全域 status 只列活躍項目與最近 10 筆終態 recipe，不是完整歷史。用 `status(execution, detail="full")` 看捕捉的 native 證據；等待完整接續用 `wait(execution)`，不是只等 GUI operation 的 `wait(op)`。Save 要看各 output 的 status／error，run_id 或預留路徑不證明已存檔。重分析會替換同 pane 的圖，需要比較時先保存舊圖。
 
-直接編輯 point 檔案後，核對 reload 回覆的 `document`、`path` 與 `revision`，或確認 watcher 已安裝同一候選。單有檔案寫入不代表 owner 已驗證、安裝或發布。將檔案路徑與已安裝 revision 證據交回當前 round。此流程不改既有 recipe／writeback 保存方式，也不改既有 Tab／Run 的固定 capture。Refresh／Reset 的效果見 Point 檔案讀寫契約。
+直接編輯 point 檔案後，依 [Point 檔案讀寫](../../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫) 確認候選已安裝，將檔案路徑與已安裝 revision 證據交回當前 round。
 
 完成條件：本次操作有可追溯的結果與實際保存位置；直接編輯的 point 候選已確認安裝，或已記錄失敗／未知、保存缺口及待確認事項。
 
@@ -55,7 +55,7 @@ Post `result_read` 失敗時，先讀 `tab.snapshot`，比對 `post_analysis_sta
 
 寫回回覆為 unknown 時，先查回覆中 `recovery` 的 `tab.writeback_receipt`，核對 submission_id、已確認項目與固定目的地。逾時不等於寫入失敗，不據此重送。取消只代表已請求停止，用 wait/status 確認 cleanup 終局。結束 MCP session 只會斷線，不關閉 GUI，也不保證硬體停止。
 
-Reload 驗證失敗時，owner 保留已安裝記憶體，磁碟仍是外部候選，先依回覆的路徑與原因修正。Revision mismatch 時先重讀 `files` 與檔案內容，watcher 可能已先安裝合法候選，核對是否為同一版本後再決定。非 holder 不重送。不要用舊 revision 自動覆寫或反覆 reload。
+Reload 驗證失敗、revision mismatch 或 watcher 先安裝候選時，依 [Point 檔案讀寫](../../../lib/zcu_tools/mcp/measure/README.md#point-檔案讀寫) 判斷下一步；非 holder 不重送。
 
 只有確認尚未執行或已失敗，且重試仍在授權內時，才決定是否重送。執行狀態未知時，記錄已核對的範圍與不確定性並求助，保持相關操作暫停。
 

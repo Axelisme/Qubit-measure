@@ -2,9 +2,9 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-26）。跨模組決策由 [ADR-0062](../0062-experiment-workflow.md) 接替；autofluxdep 已移除，原設計見 [退役 ADR-0018](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)。以下保留歷史正文。
+> 2026-09-26。跨模組決策由 [ADR-0062](../0062-experiment-workflow.md) 接替；autofluxdep 已移除，原設計見 [退役 ADR-0018](0018-autofluxdep-orchestrator-requirement-resolver-builder-currying.md)。以下保留歷史正文。
 
-# ADR-0041 — autofluxdep feedback framework
+# 0041 — autofluxdep feedback framework
 
 關聯 [[0018]]（autofluxdep resolver-builder boundary）、[[0029]]（Fluxonium prediction engine）、[[0042]]（feedback confidence reversion）。
 

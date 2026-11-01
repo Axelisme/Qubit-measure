@@ -4,8 +4,6 @@ status: accepted
 
 # 0072 — 模組定位與依賴邊界
 
-**狀態：** accepted。
-
 ## 脈絡
 
 `zcu_tools` 有 15 個頂層 package，過去只有 7 條 import-linter contract，其餘邊界靠「責任明確」這類原則維持。agent 會把既有耦合當成先例，也不會主動寫 contract。
@@ -182,7 +180,7 @@ Fluxdep 所需非均勻背景由自己的私有 renderer 擁有，不依賴 lab 
 
 使用者於 2026-10-16 改定驗收方式：「算了，我認為不用真的測試ZCU_LAB移開後會不會出現錯誤。這中東西直接看有沒有import就好，偷偷做的在review也會被抓到，感覺是浪費時間測試」。Tests 不依賴 `zcu_lab` 的原則不變，由 review 檢查 import，必要時以 grep 輔助。不再暫移 `zcu_lab/` 跑 pytest，也不新增 `ZCU_LAB` 環境變數或 import hook。
 
-實驗定義（`zcu_lab`）的改動，包含畫面改動，使用 `experiment` 層的共用離線 probe 驗收。`experiment.probe` 提供三個獨立階段 `run_stage`、`save_stage`、`analysis_stage`，各回具名結果與 PNG bytes，不寫磁碟、無 CLI；run 與 analysis 分開驗收，不組 e2e。合成輸入用 `synthesize`（任何回 ArrayLike 的模型）或 `sample_iq_shots`（raw IQ）。Agent 看圖並記錄判讀，probe 腳本與結果留在 task scratch，不 commit 成 durable 測試。框架 UI 改動仍使用 ComponentDriver 情境。操作與完成條件由 [UI 驗證](../../tests/README.md#ui-驗證) 擁有。
+實驗定義（`zcu_lab`）的改動，包含畫面改動，使用 `experiment` 層的共用離線 probe 驗收。`experiment.probe` 提供三個獨立階段 `run_stage`、`save_stage`、`analysis_stage`，各回具名結果。run 與 analysis 回 PNG bytes，不寫磁碟。`save_stage` 寫 native `data.h5` 並 restore。三階段無 CLI。run 與 analysis 分開驗收，不組 e2e。合成輸入用 `synthesize`（任何回 ArrayLike 的模型）或 `sample_iq_shots`（raw IQ）。Agent 看圖並記錄判讀，probe 腳本與結果留在 task scratch，不 commit 成 durable 測試。框架 UI 改動仍使用 ComponentDriver 情境。操作與完成條件由 [UI 驗證](../../tests/README.md#ui-驗證) 擁有。
 
 2026-10-30 使用者提出：「關於測試實驗定義的方式，用ui跑e2e有點太重量級了，我認為可以修改規則，透過建立context的方式測試run與analysis」。當時比較 A（只改驗收規則）、B（改規則並提供共用 probe）、C（再加 `zcu_lab` 自有的 durable 測試）。使用者回答：「B」。採用共用 probe，讓各實驗只需提供實驗與 cfg，不再各自組裝離線驗收流程；durable lab 測試不在此決定範圍。
 

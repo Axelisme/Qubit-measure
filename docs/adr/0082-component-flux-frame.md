@@ -1,7 +1,11 @@
+---
+status: accepted
+date: 2026-10-27
+---
+
 # 0082 — Component flux frame 與明確升級
 
-日期：2026-10-27
-狀態：Accepted；既有名稱與 membership 接線的 advisor 細節仍為 Review: pending。
+既有名稱與 membership 接線的 advisor 細節仍為 Review: pending。
 相關：[[0063]]、[[0069]]、[[0072]]、[[0081]]
 
 ## 脈絡

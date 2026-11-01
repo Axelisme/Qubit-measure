@@ -2,9 +2,9 @@
 status: accepted
 ---
 
-# ADR-0075 — Agent 介面分層
+# 0075 — Agent 介面分層
 
-**狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
+使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 
 **Last updated:** 2026-11-02，workflow 自有取數與 lib run_core 轉接
 

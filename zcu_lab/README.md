@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-11-01，Python 階段驗收
+**Last updated:** 2026-11-01，作者入口與驗收命令分層
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -56,17 +56,14 @@ Import 不執行註冊，重複 bootstrap 按接收 registry 的規則報錯。
 
 Scalar alias `mux=MG12` 讓 mux adapter 從固定 capture 的 `$mux.module.readout` 取得 Readout 初值。完整 tones[i] 綁定 resonators[i]。participants 以 list[int] 選擇量測的原始序號並指定順序，不改綁定或保存的 resonators。Module owner 是 group，不是第一個 resonator；重排不會改 owner。Framework 不知道 group schema。定位與 writeback capture 邊界見 [ADR-0072](../docs/adr/0072-module-boundaries.md#mux-group-是實驗室的-component-定義)。
 
-## Component 欄位單位
+<a id="component-欄位單位"></a>
+
+## Component 與實驗作者入口
 
 元件型別別名在既有 Field 附靜態 `json_schema_extra` 單位資料。Frequency 用 MHz，Duration 用 us，Energy 用 GHz，PumpPower 用 dBm。Qubit 的 `flux.offset` 使用 Φ0，`flux.period.<device>` 使用各儀器原生單位／Φ0，方向保留。Global flux 原值仍可存於 `general.ext.flux_value`。Qubit 不再保存 `flux_unit`，JPA 的 `J1.flux_unit` 維持原契約。Flux 不標固定單位。未宣告單位不代表無因次。Resources 以公開路徑查詢提供固定欄位的靜態 unit。GUI 的 WB 列只用查詢結果加標籤，不換算。Ext 與 flux 類欄位不顯示單位；run context 不消費這些標記。
 
-`recipes.RECIPES` 明列 `@recipe(name, description)` 產生的宣告。
-作者寫 `async def (session, inputs: RecipeInputs) -> Report`，在 RecipeInputs 子類加入實驗欄位，在 RecipeReport 子類加入報告欄位。
-框架由 inputs model 產生 MCP JSON schema，不渲染 GUI Form。Measure MCP server 從 lab 描述取得清單，import 不執行量測或註冊。
-RecipeSession.open_tab 以 target mapping 與 reuse 開啟或 Reset tab。
-作者依序明寫 select／command／set，最後逐筆 set overrides，再 check_ready。
-Target 省略／KEEP／null 沿用 Reset 的全域 aliases。
-GUI adapters 的 cfg 與 Run 使用該 tab 的固定 capture，後續全域 alias 變動不追改既有 Run。
+Recipe 的宣告、Inputs／Report、tab 操作、來源與 overrides、Analyze／取消及 Save 契約見
+[recipes README](recipes/README.md)。Mux 的逐元素操作見 [mux recipe guide](recipes/mux-guide.md)。
 
 Measure 的 `form.py` 提供 `make_form(ctx)`，在 Open／Reset 依固定來源選初值與形狀。
 `gui.py` 宣告 Adapter／Analysis／Interactive／PostAnalysis 值，不繼承 adapter class。
@@ -81,22 +78,13 @@ JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 取得 driver，不認得 alias。Analyze／WB／Save 使用 Run 的固定來源，不重讀目前表。
 具名欄位與範本契約見 [ADR-0073](../docs/adr/0073-measure-form-derivation.md)。
 
-Framework 的 `RecipeTab` 提供 Form read／set／select／command／check_ready，以及 Run／Analyze／問答／同步 Save。Read、寫入與 overrides 都用 dotted string。`tab.read_parameter` 讀 tab 固定捕捉的參數，`session.device_unit` 只讀裝置快取。
-可省略的實驗欄位用 KEEP 保留表單值，明填 null 原樣交 owner 清空／關閉。Analysis updates 也只濾 KEEP。掃描端點與 flux 範圍直接在 recipe 主體計算，不另選校準 fallback。Center／span 成對提供或成對省略，缺一個就回 needs_parameters，不從 Form endpoints 或校準補齊。明填 module scalar 前直接 command to_inline，保留既有 waveform family。已 inline 時不改值。完整作者契約見 [recipes README](recipes/README.md)。
-
-Recipe 直接引用分析 owner 的具名 summary，不另宣告 FitQuality、QualityIssue 或 summary 鏡像。Recipe 的 Report 由作者選欄位並繼承 RecipeReport，不另宣告 SummaryElements 或 estimates 路徑。框架回 `RecipeOutcome(status, report, runs)`；runs 保留各次 Run 與 Save 收據，full query 另保留 Run 前條件、owner-native analysis summary／invalid 與明確捕捉的寫回提案。元素位置與名稱由 owner 提供，不從 participants row 推測。操作與來源界線見 [mux recipe guide](recipes/mux-guide.md)。
-
-所有 lab async def 的 await 只允許 env／tab／session 呼叫或靜態解析到 lab 定義的 async helper，helper 可以再呼叫 helper。Quality gate 全掃本文，不分 recipe、workflow 或 helper。明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接呼叫不論有無 await 都拒絕，其他 async with／async for 不另禁。這是 AST guardrail，不追蹤 assignment aliases、動態分派或包裝，不是完整 type checker。作者仍須遵守序列執行契約，詳見 [recipes](recipes/README.md)。
-
-Run 子層取消回 partial，作者可繼續。根取消使下一個 Run／Analyze／Ask await raise 普通 ScriptCancelled，不是 CancelledError。進行中的 Run 先 drain 並保留 run_id 與 partial facts，再 raise；partial 留在 tab 交 agent 決定是否保存。既有 Run 在 try 外，該 await 被根取消時不進後續 Save finalizer。已進入 try 的流程仍在 finally 同步 Save，不新增取消分支或 Save finalizer。取消終態回 cancelled、report=null 與 runs。
-
-Analyze 的例外交給作者，包含 fitting 的 AnalysisFailed；框架不辨識原因，也不把例外轉成失敗值。作者決定是否捕捉，未捕捉就使 recipe failed。子層分析取消且無結果時仍可回 AnalysisResult(result=None, status="failed", reason=...)，與 fitting 例外分開。Recipe 在解參照前檢查 result，取消而無結果時回報 reason，不 Ask、不接受 writeback、不跑相依 Post。完整契約見 [recipes README](recipes/README.md)。
+Lab async 的 await 與序列執行限制見 [POLICY](POLICY.md#2-在-recipe-寫出操作流程)。
 
 [`v2`](v2/README.md) 是實驗的使用者 namespace。每個實驗的 core 與可選 GUI、notebook 附件放在同一資料夾。Core 不依賴 GUI。
 
 有擬合的分析在 summary 附 `fit_quality`，建議使用 `zcu_tools.analysis.fitting.compute_fit_quality`。實驗定義者負責選擇各 fit 的資料、參數及 covariance；GE 的 joint、ground、excited 可分開回報。這是實驗定義者的約定，框架不檢查、不特別解讀品質，也不修改 optimizer 或 writeback 政策。
 
-本套件的實驗定義不寫個別測試。Framework owner 用最小合成 workflow／adapter 驗證 runtime、NotebookAdapter、GUI、MCP 與共用工具，不 import 本套件。刪掉 `zcu_lab/` 後，整套 pytest 仍須通過，包含 slow。Import-linter C16 禁止 `zcu_tools` 反向依賴本套件。
+個別實驗的測試邊界見 [程式碼品質](../docs/code-quality.md#測試驗證可觀察契約)。離線驗收依下節入口執行。
 
 Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室 component 轉換輸入。
 
@@ -114,79 +102,36 @@ Predictor 使用 entry 的 `predictors/*.json` 或手動參數，不從實驗室
 
 ### 準備 Python 檔
 
-在 task scratch 寫 `probe.py`。直接 import 受影響實驗的 class 與 Cfg／Result 型別，
-以 Python constructor 填完整 cfg 與分析 options。
-例如測 `FreqExp` 就用它的 Cfg，不用 GUI Form 自動產生 cfg，也不把未解析的 library 引用交給 run。
-所有必填欄位、單位與通道都依實驗的型別與 docstring 填寫，先讓 Pyright 與 Ruff 檢查腳本。
+在 task scratch 寫 `probe.py`，按 [驗收規則](../tests/README.md#實驗定義)
+選階段與輸入。Cfg、Result、options 與 RunMetadata 使用其 owner 的型別。
+Stage API、生成器、PNG 格式與環境清理責任見
+[experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
 
-依本次改動選擇要呼叫的階段。下列片段假設腳本已建立型別化的 `experiment`、`cfg`、
-`record`、`options` 與 `output_dir: Path`，按需要採用，不是要一起執行的固定流程。
-API 與具名回傳型別見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
+下列片段各自獨立，假設 caller 已填好具名物件。按改動選用，不串成固定流程：
 
-驗證 run 時，先從 caller 的獨立板子 YAML 讀取 mapping，交給 `zcu_tools.program.build_soccfg` 建立 `soccfg`。
-板子 YAML 的欄位與範例見 [program](../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
-再呼叫 `white_noise(soccfg, std_adc=..., seed=..., routes=...)`，或依
-[single_fluxonium](../lib/zcu_tools/experiment/single_fluxonium/README.md) 建立物理模擬環境並明傳 `soccfg`。
-White noise 的 `std_adc`、`seed` 與 `routes` 全部必填。
-`routes` 可列出 `(generator, ADC)` 配對，或用 `"all"` 連接每個 generator 與每個 ADC。
-Generator／ADC 數目與型別由 YAML 指定，不從接線推導，也不照抄其他實驗的設定。
-Caller 在成功與失敗路徑都要清理自己建立的環境：
+Run 的 caller-owned YAML、`white_noise` 參數與環境清理見
+[simulation environment](../lib/zcu_tools/experiment/README.md#explicit-simulation-environments)。
 
 ```python
-from zcu_tools.experiment.probe import run_stage
+from zcu_tools.experiment.probe import analysis_stage, run_stage, save_stage
 
-try:
-    acquired = run_stage(experiment, cfg, environment)
-    print(acquired.elapsed_seconds)
-    print(acquired.record.result)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for name, png in acquired.pngs.items():
-        (output_dir / name).write_bytes(png)
-finally:
-    try:
-        if environment.close_backend is not None:
-            environment.close_backend()
-    finally:
-        environment.devices.close_all_devices()
-```
+# Run input includes an explicitly wired environment owned by this script.
+acquired = run_stage(experiment, cfg, environment)
 
-驗證存檔時，用實驗的 Result 型別與 Cfg 組成 `RunRecord`，metadata 依
-[RunMetadata 契約](../lib/zcu_tools/experiment/README.md#實驗介面與資料) 填寫，experiment tag 須符合 spec。
-也可選擇用 run 階段回傳的 record。Save 不需要環境：
-
-```python
-from zcu_tools.experiment.probe import save_stage
-
+# Save can use a directly constructed RunRecord without acquisition.
 saved = save_stage(record, experiment.AXES_SPEC, output_dir)
-print(saved.native_path)  # output_dir/data.h5
-print(saved.roundtrip_equal, saved.cfg_issue)
-print(saved.record.result)
+
+# Analysis can use a directly constructed Result without run or save.
+analyzed = analysis_stage(experiment, record, options)
 ```
 
-驗證分析時，以實驗自己的 Result 組 RunRecord，明填 analyze 所需的 options。
-需要模型資料時，從 `zcu_tools.experiment.probe.generators` import `synthesize`，
-並直接 import fitting 的公開模型，例如 `zcu_tools.analysis.fitting.expfunc`。
-按模型原始簽名填 params，明填 noise_std 與 seed，輸出 shape 由模型決定。
-需要 raw IQ 時，使用同模組的 `sample_iq_shots`，明填 g／e 複數中心、每個 quadrature
-的 width、每列 shots 與 seed。GE 傳 `[0,1]`，對稱錯置傳 `[p,1-p]`，掃描傳 population 曲線。
-兩個機制不替 caller 定義實驗 Result。Caller 按實驗的欄位與 shape 包裝陣列，
-再組 RunRecord。Raw IQ 不先轉 histogram。
-分析不需要先 run 或 save：
+Run／analysis 的圖片由腳本保存，例如：
 
 ```python
-from zcu_tools.experiment.probe import analysis_stage
-
-analyzed = analysis_stage(experiment, record, options)
-print(analyzed.analysis)
 output_dir.mkdir(parents=True, exist_ok=True)
 for name, png in analyzed.pngs.items():
     (output_dir / name).write_bytes(png)
 ```
-
-Run 與 analysis 的 `pngs` 是 `dict[str, bytes]`，key 含 `live-`／`analysis-`、
-URL-escaped 圖名與 `.png`。圖片使用 figure 目前尺寸與 100 dpi。
-階段只回 bytes，不寫圖片；腳本決定保存位置，agent 再逐張開啟並記錄判讀。
-不同案例用不同目錄，同名輸出會被覆寫。
 
 ### 檢查與執行
 
@@ -214,9 +159,5 @@ status=$?
 printf '%s\n' "$status" > "$scratch/exit-status.txt"
 ```
 
-保存腳本、實際命令、靜態檢查、階段結果與 traceback。
-各階段直接傳出原始例外，腳本沒有捕捉的錯誤會使 Python 回非零 exit status。
-Run 成功後核對 record shape／dtype；save 成功後確認 `roundtrip_equal is True` 並判讀 `cfg_issue`；
-analysis 成功後判讀實際回傳物件。
-Exit 0、native 檔存在或 PNG 存在都不能代替這些檢查與逐張看圖。
+腳本、命令、回傳結果與逐張看圖的完成條件依 [tests 驗收規則](../tests/README.md#實驗定義) 記錄。
 離線驗收不代表實機校準或物理模型已獲驗證。

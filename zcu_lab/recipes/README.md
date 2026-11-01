@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找 recipe 宣告、操作順序與作者契約。
 
-**Last updated:** 2026-10-31，Analyze 例外與子層取消
+**Last updated:** 2026-11-01，作者 await 與測試邊界改連 owner
 
 Recipe 是操作 GUI tab 的 async 函式。Core 擁有 cfg、量測與分析計算，Adapter 接上表單、RunRecord 與分析來源。
 Recipe 選來源、設參數，再決定 Run、Analyze 與 writeback 問答的順序。
@@ -83,16 +83,7 @@ Analysis updates 直接傳 dict，例如 `updates={"dual_exp": inputs.dual_exp, 
 `tab.analyze` 送 owner 前略過 KEEP 項，明填 null 原樣交分析 owner。
 全 KEEP 與不帶 updates 相同，保留 owner 的分析參數。
 
-所有 lab async def 統一只 await `env.*`／`tab.*`／`session.*` 呼叫，
-或靜態解析到 `zcu_lab` 內定義的 helper，定義可用 def 或 async def。
-Recipe 通常用 `tab.*`，寫回問答用 `tab.ask_writeback()`。
-Workflow 可寫 `await helper(env, cfg)`，helper 可再呼叫 helper，自己的 async def 本文也同樣受檢查。
-不要 await 外部 coroutine。在 async def 內，`asyncio.*`、`create_task`、`gather`、
-`wait_for`、`TaskGroup` 的直接呼叫即使不 await 也拒絕，包含 async with TaskGroup()。
-其他 async with／async for 不另禁。Runtime 擁有 worker loop 與 operation 生命週期。
-Quality gate 的 `tools/check_script_awaits.py` 全掃 async def，不識別 decorator，
-不分 entry／helper，也不做可達性分析。
-這不是 type checker；assignment aliases、動態分派與包裝可繞過規則，作者仍須遵守契約。
+Lab async 函式的 await 與序列執行限制遵循 [ADR-0075](../../docs/adr/0075-agent-interface-layers.md#async-協作與控制命令)，檢查命令見 [await guardrail](../../tools/README.md#lab-script-await-guardrail)。
 通常的順序如下：
 
 ```python
@@ -197,5 +188,4 @@ Framework 的執行、問答與取消契約見
 新增 adapter 與流程的入口見 [實驗教學](../tutorial/03-experiment.md)
 與 [recipe 教學](../tutorial/04-recipe.md)。
 
-Lab 定義以直接 schema、guide、adapter forms-open 與離線 smoke 審閱。
-Framework pytest 使用合成 recipe，不 import `zcu_lab`，也不固定這裡的實驗預設值。
+Lab 定義的測試邊界與驗收方式遵循 [ADR-0072](../../docs/adr/0072-module-boundaries.md#分層)。

@@ -225,11 +225,4 @@ Data root 的 point `record.json` 與 metadata root 的 run 摘要是不同檔�
 
 ## Async await guardrail
 
-作者可寫 `await iteration.call(...)`、`await run_core(iteration, acquire, cfg)` 或 `await helper(scope, cfg)`。
-Helper 必須解析到 zcu_lab 內的函式定義，可用 def 或 async def。Lib 唯一例外是 `zcu_tools.experiment.run_core.run_core`，直接 import alias 也以完整路徑核對。
-所有 lab async def 統一只 await env／scope／iteration／tab／session 的呼叫、lib run_core 或 lab 內定義的 helper，helper 可再呼叫 helper。
-Quality gate 全掃 async def 本文，不依 decorator 或可達性選集。
-在 async def 內，明列 asyncio.*、create_task、gather、wait_for、TaskGroup 的直接 Call 即使不 await 也拒絕，包含 async with TaskGroup()。
-其他 async with／async for 不另禁。
-AST 檢查不追蹤 assignment aliases、動態分派與包裝，不是 type checker。
-共用 host 與控制命令的邊界見 [ADR-0075](../../docs/adr/0075-agent-interface-layers.md#async-協作與控制命令)。
+Lab async 函式的 await 與序列執行限制遵循 [ADR-0075](../../docs/adr/0075-agent-interface-layers.md#async-協作與控制命令)。

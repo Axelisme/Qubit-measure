@@ -2,7 +2,7 @@
 
 **Readers:** operator, agent. Bath-reset pi/2 phase sweep: holds the tested bath reset at its calibrated cavity freq/gain and length and sweeps the tomography pi/2 pulse phase, fitting the cosine response to find the phases that reset to ground (max) and to excited (min). Runs on real hardware. Run last, to fix the pi/2 phase of the reset module.
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-01
 
 ## Parameter sources
 
@@ -17,6 +17,8 @@ Tested reset starts as an editable copy of the bath_reset template. Optional ini
 ## Typical writeback
 
 Proposes phases to `$qubit.ext.reset_bath_max_phase` and `$qubit.ext.reset_bath_min_phase`. With acquired run settings and captured calibration, proposes `$qubit.reset.reset_bath` and `$qubit.reset.reset_bath_e` from the tested reset, replacing only pi/2 phase with max/ground and min/excited respectively. Tested cavity frequency, gain and all other fields remain. An optional `$qubit.module.reset` row selects ground by default; it can be edited to excited.
+
+The proposal uses only this Run's tested reset and captured parameters, not current aliases, ext values or an older library module. Missing saved cfg or parameter capture leaves only the scalar proposals. Source and Apply errors still propagate. Applying the library rows without the optional reset-slot row leaves the selected reset unchanged.
 
 ## Recommended
 

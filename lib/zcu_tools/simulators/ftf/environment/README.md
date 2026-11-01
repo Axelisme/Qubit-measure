@@ -1,8 +1,8 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-01，caller-owned board examples
+**Last updated:** 2026-11-01，startup／YAML 與 runtime 契約分層
 
-**讀者：** lab-author、framework-dev、agent。FTF 環境的組裝、數值接線與 acquisition 設定。
+**讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
 `ftf(configuration, *, soccfg, acquisition=None, workers=1, warmup=False, time_scale=None)`
 builds the same `SimulationEnvironment` for GUI startup and Notebook callers. It creates fixed-unit V/A `FakeDevice` sources in one
@@ -12,12 +12,10 @@ applies initial values at environment construction and binds the caller's requir
 The builder does not infer channel counts from wiring. `FTFSource` and
 `plan_template` require the same acquisition profile for numeric PFB carrier selection. The returned manager owns cleanup. A
 builder failure closes its resources and preserves both startup and close errors.
-The GUI example is `zcu_lab/simulation_envs/FTF/startup.py`, which calls `ftf(...)`
-with adjacent `ftf.yaml`, a working copy of the tracked `default.yaml`, and
-`profile.yaml` for the board.
-The Notebook walkthrough is `notebook_md/single_qubit.md`; it calls the same public
-builder with an explicit YAML path. Neither caller uses an environment wrapper.
-欄位用途、單位與 entry 接線請讀 [FTF YAML v2 欄位指南](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md)。
+Startup, Notebook calls and caller-owned YAML setup belong to
+[simulation environments](../../../../../zcu_lab/simulation_envs/README.md#ftf-startup-與-yaml-設定).
+Field units and entry wiring belong to the [FTF field guide](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md);
+schema and validation belong to [FTF config](../config/README.md).
 
 ## Contents
 
@@ -50,28 +48,8 @@ decimated acquisition keeps the completed trace and stops before the next round.
 Startup preparation, program construction and round hooks are outside this
 budget. No GUI field is added; final plot-buffer flushing is unchanged.
 
-For profiling or benchmarking, build the board from the caller-owned YAML and
-pass it explicitly. From the repository root, after preparing `ftf.yaml`:
-
-```python
-from pathlib import Path
-
-import yaml
-from zcu_tools.program import build_soccfg
-from zcu_tools.simulators.ftf.environment import ftf
-
-configuration = Path("zcu_lab/simulation_envs/FTF/ftf.yaml")
-board_yaml = configuration.with_name("profile.yaml")
-soccfg = build_soccfg(yaml.safe_load(board_yaml.read_text(encoding="utf-8")))
-env = ftf(configuration, soccfg=soccfg, time_scale=0)
-```
-
-The caller must close `env.devices` with `close_all_devices()` after use.
-This public override disables waiting without changing numeric
-settings, RNG streams, density, readout or routes. Alternatively set
-`numerics.time_scale: 0` in the caller-owned YAML. With the default
-`time_scale=None`, the builder uses the YAML value. Wait for startup
-preparation with `env.wait_ready()` before starting a benchmark timer too.
+Profiling overrides and the caller's board-loading example belong to
+[environment setup](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
 
 ## Routing telemetry
 
@@ -82,16 +60,8 @@ one JSON line, including all software rounds and partial work after a failure.
 UTC. Relative explicit directories resolve at environment startup. The GUI and
 experiment acquisition calls need no changes.
 
-To also disable telemetry, load `settings` with
-`from zcu_tools.simulators.ftf.config import load_ftf` and
-`settings = load_ftf(configuration)`. Use the same `soccfg` built above in
-`ftf(settings.with_telemetry(enabled=False), soccfg=soccfg, time_scale=0)`.
-The public settings method returns a copy, disabling
-routing timers and all telemetry I/O without changing the original settings.
-No directory is created. `settings.with_telemetry(enabled=True, directory=Path(...))`
-selects another directory; omitted directory preserves the current setting.
-The YAML form is `numerics: {telemetry: {enabled: false}}`. Routing and
-density/readout results are unchanged bitwise.
+YAML switches and `settings.with_telemetry(...)` setup belong to
+[environment configuration](../../../../../zcu_lab/simulation_envs/README.md#關閉補等與-telemetry).
 
 Each line contains `timestamp`, `points` (request grid, excluding shots),
 `rounds` (captured attempts), `wall_s` (admitted acquire time including pacing,
@@ -188,10 +158,9 @@ One source owns one `Engine` with a 4 MiB routing-facts allowance.
 Numerical preparations live within one evolve. The source's complete preparation
 LRU remains separate from Engine and does not retain noisy outputs.
 The keyword `workers` selects the engine's sole parallel width; direct callers
-use one worker by default. GUI startup explicitly uses `workers=1`.
-The Notebook example selects `max(1, (os.cpu_count() or 1) - 2)` workers,
-reserving two host CPUs. Unknown CPU counts use one worker.
-An eight-core host uses six Notebook workers. Evolution limits
+use one worker by default. GUI and Notebook policy belongs to
+[FTF startup](../../../../../zcu_lab/simulation_envs/FTF/README.md#演化與重播).
+Evolution limits
 native BLAS to one thread for the entire call. Overlapping evolves share a
 process-level reference count: the first sets the limit and the last restores
 it. Do not independently change threadpoolctl limits while an evolve is active.
@@ -216,12 +185,11 @@ complete preparations. No projected operators or rates cross flux points.
 
 ## Startup preparation
 
-The Notebook example opts into `warmup=True`. Building that environment
-immediately starts one process-wide background numeric worker. All opted-in
-environments in the same process share its future and terminal result.
-GUI startup explicitly uses `warmup=False`, so it starts no numeric preparation.
-Direct `ftf()` callers also default to `warmup=False` and `workers=1` to avoid
-unexpected CPU work. Authors choose the policy at each call.
+`ftf(..., warmup=False)` starts no numeric preparation by default. Callers choose
+workers and warmup explicitly; GUI and Notebook policy belongs to
+[environment setup](../../../../../zcu_lab/simulation_envs/README.md#workers-與-startup-preparation).
+Opting in starts one process-wide background numeric worker. All opted-in
+environments in the process share its future and terminal result.
 Preparation uses small disposable numeric models, one evolution worker and no
 sampling. It never reads or changes the live environment's devices, binding seed,
 acquire sequence or resident engine cache. Compilation still consumes CPU and
@@ -356,8 +324,8 @@ not accepted.
 
 Optional `flux_lines.f1`, `flux_lines.coupler` and `flux_lines.f2` each bind one
 generator to one loop. A pulse on that generator contributes signed gain times
-`flux_phi0_per_gain` in Phi0. The public `ftf` builder includes these channels in
-the mock QICK profile. Line display names may repeat across loops. Pulses on
+`flux_phi0_per_gain` in Phi0. The caller's board profile must include those
+generator channels. Line display names may repeat across loops. Pulses on
 unbound generators still fail. With no flux lines, the existing fixed-DC batch
 and microwave controls remain unchanged.
 
@@ -572,9 +540,9 @@ use a receiver and generator from that path. `FTFSource.open_acquire` rejects
 pulse and mux generators anywhere in one request's templates and names both
 indices. Standalone `plan_template` rejects mixing within its template too.
 Separate acquires can select different paths in the same environment.
-The runtime sizes generator and ADC arrays from their maximum configured indices
-plus one, including both readout paths and all drive lines. It uses the mux mock
-profile only when mux is configured and includes both paths in the routes.
+The caller supplies the board profile independently of model wiring. Runtime
+uses that profile without inferring channel counts or selecting a mock profile;
+the environment routes include both configured readout paths and all drive lines.
 `plan_template` and `FTFSource` accept an explicit `readout=` override; private replay rejects an
 override that cannot be reconstructed from captured settings. Plans expose
 `readouts`, an ordered tuple of `FTFReadoutPlan(channel, batch)`, not a singleton.

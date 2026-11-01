@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-01，獨立階段的實驗驗收、caller 自備板子 profile 與 simulators 測試 owner
+**Last updated:** 2026-11-02，program 測試慣例與 IR 行為 owner 分層
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -12,7 +12,7 @@
    有不同且穩定的責任時，可以拆成另一個 `test_*.py`，不按 ticket、phase 或 part 切檔。
    `T1` 等名稱也可能是真實物理量，依情境判讀，不靠字面判為 ticket 名。
 2. 目錄依 owning module，沿用 [AGENTS.md](../AGENTS.md) 的路徑對應：`tests/scripts/`、
-   `tests/tools/`、`tests/apps/`、`tests/mcp_servers/`、`tests/migrations/` 和 `tests/zcu_lab/` 對應 repo root 同名目錄，其餘框架測試對應 `lib/zcu_tools/` 下的模組。
+   `tests/tools/`、`tests/apps/`、`tests/mcp_servers/` 與 `tests/migrations/` 對應 repo root 同名目錄，其餘框架測試對應 `lib/zcu_tools/` 下的模組。
    `contract`、`parity` 是既有保留段，該段以下豁免，但前綴仍須對應；不因新案例建立新的豁免目錄。
    跨模組契約放在擁有整合行為的模組目錄，不按每個參與模組複製案例。
    Notebook 專用且已抽離的 helper 仍在其模組路徑驗證介面，不必提升為通用工具。
@@ -75,20 +75,9 @@ Agent 在 review-done 前須跑完情境並親自看過每步截圖，留下精�
 命令與腳本片段見 [zcu_lab 驗收說明](../zcu_lab/README.md#實驗定義的離線驗收)，
 API 契約見 [experiment probe](../lib/zcu_tools/experiment/README.md#offline-experiment-probe)。
 
-依本次改動分別呼叫公開階段，不要求每次串成完整流程：
-
-- `run_stage(experiment, cfg, environment)` 接 caller 明確接線的 `SimulationEnvironment`。
-  它驗證 Result 的 shape／dtype 符合 `AXES_SPEC` 並更新 live 圖，回傳 record、秒數與 PNG bytes，不存檔或分析。
-- `save_stage(record, spec, directory)` 接執行結果或用實驗 Result 型別直接構造的 `RunRecord`。
-  它寫入 `directory/data.h5`、讀回並逐欄比較，回傳還原的 record、路徑、`roundtrip_equal` 與 `cfg_issue`。
-- `analysis_stage(experiment, record, options)` 接明確來源，不需要先 run 或 save。
-  可用 `probe.generators.synthesize` 配 fitting 公開模型，或用 `sample_iq_shots` 抽 raw IQ。
-  Caller 將陣列填入實驗自己的 Result，再組成 RunRecord。
-  它回傳 analyze 的實際結果與 PNG bytes，不轉成文字摘要。
-
-Run 與 analysis 的 `pngs` 都是 `dict[str, bytes]`。
-Key 是 `live-` 或 `analysis-` 加 URL-escaped 圖名與 `.png`。
-階段不寫圖片，caller 自己保存 bytes 並看圖。
+依改動選擇階段，不要求串成完整流程。Run 改動選 `run_stage`，保存映射改動選
+`save_stage`，分析改動選 `analysis_stage`。同時影響多個階段時分別驗收。
+API 的輸入、輸出、生成器與比較規則由上述 experiment probe 文件擁有。
 
 Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不新增個別實驗的 durable tests：
 
@@ -101,8 +90,7 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
    核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
    只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
 
-Caller 擁有環境生命週期，須在 `finally` 清理 backend 與 devices，失敗時也一樣。
-階段不重設 caller 的 seed、不改接線，也不建立硬體連線。
+環境建構與清理由 [probe API 契約](../lib/zcu_tools/experiment/README.md#offline-experiment-probe) 規範，腳本須覆蓋失敗路徑。
 離線驗收不代表實機校準或物理模型已獲驗證。
 框架的 stage 測試用最小合成實驗，兩個生成機制用合成模型與 population 測試。
 測試不 import `zcu_lab`，不逐家族驗證 fitting 回復真值。
@@ -162,10 +150,7 @@ uv run --directory <worktree> --no-sync -- \
 經 `.agent_state/tools/run-heavy.sh` 執行。該 runner 預設 4 workers，使用 headless GUI
 與數值函式庫 threads=1；不要為了量測另開未授權的 full 暖機。
 
-4 workers 的建議來自同機 8 核心的單次矩陣。非模擬在 2／4／6／8 workers 的 receipt wall
-為 458／306／321／322 s，模擬為 219／166／165／181 s。
-6 workers 沒有明確優於 4，4 也留下核心給其他 lane。
-背景負載與 cache 順序沒有完全控制，這不是穩定加速率或其他機器的最佳值。
+4 workers 的建議依據見 [worker 數比較](../docs/reference/test-speed-comparisons.md#worker-數比較)。
 保留 `worksteal`，不改 pytest 的預設 marker。
 
 全樹驗證的時點依 task 適用流程安排，並先取得 heavy slot。依變更範圍選擇 marker expression，兩種都包含 slow：
@@ -211,61 +196,10 @@ Store 效率以工作量測試保護，不斷言實測秒數。使用 synthetic 
 避免 worker 與 BLAS 執行緒超額競爭。Serial 跑法不設這些變數，適合 debug。
 Qt GUI 子套件可選 `tests/gui tests/gui/app/fluxdep tests/gui/app/dispersive`。
 
-### 速度結果，2026-10-22
+### 歷史速度比較
 
-兩組互不重疊的局部選集已量得約 8.705 s 的 worker elapsed 節省：
-
-- Fluxdep 兩個 busy-poll 案例以外部 `sleep` 的本地 binding 替身去掉真實等待，
-  保留正式每秒 poll 策略、兩次 poll 與結果／context 斷言。
-  三組 old/new 比較中，先算每案例各自 old/new call median 的差，再相加，得到 4.001 s。
-- 純 snapshot 消費 fixture 改為每案例建立獨立的 typed model，省去不必要的真 storage；
-  真 storage／reload 案例保持原樣。完整 126 案例的 setup/call/teardown 加總，
-  三組 paired old 減 new 差值的 median 為 4.704 s，包含 50 個未改案例的量測波動。
-
-合計是 `4.000834279 + 4.704295066 = 8.705129345 s`，不是 CPU time 或整套 wall time。
-兩項的 median 算法不同，合計也不是整套的 median；不再加各 module median 或 process／import 節省。
-不能除以 worker 數推算整套 wall 改善。
-
-配置只試一輪，沒有採用變更。Default 的 `worksteal` 改 `load` 單 pair wall 為
-264.306 → 260.697 s，1.366% 的小差與背景負載變化不足以支持更改排程。
-`-p no:cacheprovider` 的 collection wall 為 25.044 → 25.623 s，沒有收益。
-完整 import self time 前十沒有能保留公開 import／decorator 契約的安全 lazy 候選。
-預設配置不變，執行指南繼續使用 `--dist=worksteal`。
-
-下表是相同 production 與 dependency tree 的單次參考比較。Old 只還原
-`tests/mcp/fluxdep/test_align.py`、`tests/gui/session/test_parameter_context.py` 與
-`tests/resources/entry/test_roles.py` 的等待／fixture 變更，其餘檔案與依賴保持相同。
-每個選集各跑 old/new 一次，四筆均為 `-n 2 --dist=worksteal`。
-
-| 選集 | Old wall s | New wall s | Old 減 new s | 差值占 old |
-| --- | ---: | ---: | ---: | ---: |
-| Default，兩筆各 11849 passed | 256.538714 | 246.988530 | 9.550184 | 3.723% |
-| Full，兩筆各 11852 passed | 267.610523 | 262.417422 | 5.193101 | 1.941% |
-
-Default 沿用 `pyproject.toml` 的 `not slow and not sim`，full 使用 `not sim`，包含 slow。
-兩個 pair 各自的完整有序選集相同，沒有 skip 或 xfail。對應的 pytest 命令如下，
-執行時仍須按上方規則經共用重工作佇列：
-
-```bash
-uv run --directory <worktree> --no-sync -- python -B -m pytest \
-  -n 2 --dist=worksteal -q --durations=50
-uv run --directory <worktree> --no-sync -- python -B -m pytest \
-  -n 2 --dist=worksteal -q --durations=50 -m "not sim"
-```
-
-四筆在同一 high/P-core slot、CPU 2、3 執行，GUI offscreen，數值函式庫 threads 為 1。
-Wall 包含 uv／Python／pytest 啟動與退出；兩邊的 instrumentation、JUnit／duration 輸出與
-每次重建的使用者 cache 隔離一致，這些觀測成本沒有扣除。
-每個 pair 都是 old 先、new 後，且有共享負載與 OS page cache 影響。
-因此只作單次參考，不宣稱穩定加速，不外推到其他選集或環境，也不拿跨時段基線宣稱改善。
-
-以下三項仍須裁定，未批准就不改：
-
-- MCP initial grace 需要新的公開 clock/deadline 契約，不 fake wait、不 patch `Condition`、不改 grace 值。
-- Editor GC policy 涉及真實顯式 `collect` 的 lifecycle 驗證，不能自行減少收集次數。
-- 數值 fit 資料量變更須保留真擬合與驗證精度，不能降級驗證來換速度。
-
-既有成本診斷只用來找候選，不是加速證據；整個案例的秒數也不是可省時間的上界估計。
+2026-10-22 的等待／fixture 調整數據、量測方法與限制見
+[參考紀錄](../docs/reference/test-speed-comparisons.md)。不要用當日選集數量或單次 wall time 推算目前效能。
 
 ### Numba cache 重用與冷跑
 
@@ -416,7 +350,13 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 
 ## 兩層 Fixture 策略
 
-### Level 1 — caller-owned YAML compile profiles
+測試的 mock 或抽象基底型別過寬時，用 runtime assertion 收窄，例如
+`assert isinstance(item, RegWriteInst)`，不要用 `cast()` 隱藏不相容介面。
+替身使用型別相容的 fake 或既有 typed seam，不新增 suppression。
+故意回傳錯誤型別的負向案例，使用窄 helper／protocol 或在邊界做明確 runtime assertion，
+不為消除診斷把簽名放寬為 `Any`。
+
+### QICK 編譯 fixture
 
 `tests/program/_profiles.py` 讀取 `tests/program/profiles/` 的獨立 YAML，交給
 公開 `program.build_soccfg`。`load_soccfg` 和 `load_mux_soccfg` 只覆寫 caller
@@ -428,10 +368,15 @@ Debounce 測試控制外部 QTimer 排程或虛擬時鐘，不用 `QTest.qWait`�
 `TimelineBuilder.build()` 與手寫 `TimelineProgramV2` 都跑真實 QICK ASM。
 板子的輸入欄位與時脈推導見 [program README](../lib/zcu_tools/program/README.md#yaml-compile-profiles)。
 
-### Level 2 — `MagicMock` (`tests/program/v2/modules/conftest.py`)
+### Module declaration fixture
 
-用於 `modules/` 下的**純單元測試**，只測試 cfg parsing、constructor overrides 與 declaration calls，
-不觸發真實 QICK 編譯。`mock_prog.soccfg` 是一個最小 dict，不需完整硬體欄位。
+`tests/program/v2/modules/conftest.py` 提供 typed `ProgramTrace` recording adapter，供 module 的 cfg parsing、
+constructor overrides、declaration calls 與 emission 意圖驗證，不觸發真實 QICK 編譯。
+它記錄 readout 宣告、trigger、pulse、loop、delay、register write 與 jump，不實作第二套 compiler 或 IR parser。
+驗證 program emission 時不用鬆散 `MagicMock` program。`MagicMock` 留給非 program 協作者、
+child-module spy hook 或刻意注入錯誤的案例。
+需要編譯行為的案例使用前一節的 QICK fixture；需要真實 acquire 行為時使用
+[offline acquisition transport](#offline-acquisition-transports)，`ProgramTrace` 不取代這項覆蓋。
 
 ### IR 結構測試（`tests/program/v2/ir/`）
 
@@ -641,6 +586,8 @@ Parallel body 用 fork／emit／join，經公開 compiled timing 檢查共同 or
 
 `auto_compress` 只在 `len(values) >= 30` 時啟動。  
 測試中用 64 個元素驗證壓縮路徑，3 個元素驗證非壓縮路徑。
+Lookup 回歸須涵蓋 [tProc shift-count 限制](../lib/zcu_tools/program/v2/README.md#打包的-data-memory-lookup)
+下的 register／data-memory 指令效果，僅看物理模擬事件不足以驗證擷取。
 
 ### IR pass 測試
 
@@ -658,31 +605,16 @@ Parallel body 用 fork／emit／join，經公開 compiled timing 檢查共同 or
 `BasicBlockNode.__post_init__` 拒絕在 `.insts` 中放 `JumpInst`。新增 pass 測試用有效的 block
 經 pipeline 檢查可觀察結果；不為 unreachable 的非法 block 繞過建構器測私有方法。
 
-### UnrollLoopPass — jump table 觸發條件
+### Dispatch 與最佳化 guard 驗收
 
-Register-driven loop（`n=Register`）+ `available_regs` 非空 + `k_final >= 2` + `body_size > 0` 才觸發 jump table。測試中：body 用 NopInst（size=1），`pmem_budget=1024`（k_budget=1024），`cost_default=1, cost_jump_flush=40`，body_cost=1，scheduled_ticks=0，slack=-1 < 0 → k_timing=max_unroll_factor=32；k_final=min(32,1024)=32 → 觸發。
-
-### SimplifyDispatchPass — 回傳 BlockNode 而非 BasicBlockNode
-
-`SimplifyDispatchPass` 對 `IRDispatch(k==2)` 回傳 `BlockNode([cond_bb, fallthrough_bb])`，兩個分支均顯式 jump，不依賴 fall-through：
-
-- `cond_bb`：`JUMP target_labels[1] -if(NZ) -op(value_reg - #0)`（小 PMEM）；big-PMEM 用 `REG_WR s15 label + JUMP [s15]`
-- `fallthrough_bb`：`JUMP target_labels[0]`（小 PMEM，`BranchEliminationPass` 可消除）；big-PMEM 永遠保留
-
-經 pipeline 驗證時檢查兩個 branch 的目標，而不是依賴舊的 `BasicBlockNode` 回傳型別。
-
-### DmemDispatchPass — 小/大 pmem 路徑
-
-`DmemDispatchPass` 的 guard block 依 `needs_big_jump(pmem_capacity)` 分叉：
-- `pmem_capacity <= 2048`：guard 是 label-mode `JumpInst`（`label=LabelRef(last)`, `addr=None`）
-- `pmem_capacity > 2048`：guard 是 `RegWriteInst(dst=s15, src=LABEL)` + `JumpInst(addr=s15)`
-
-驗證小 pmem 路徑時提供 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))`，經 IR pipeline 觀察生成結果。
-
-### DeadWriteEliminationPass / ZeroDelayDCEPass — disable_opt guard
-
-`block.disable_opt=True` 應保留未優化的行為。以有效 `BasicBlockNode(..., disable_opt=True)`
-作 pipeline 輸入，比較產生的 IR，而非直接斷言 `_process_block` 的呼叫或回傳。
+Pass 行為由 [IR pass reference](../docs/reference/ir-pass-behavior.md) 擁有。
+Register-driven unroll 案例要提供非空 body、可用 register 與足夠的時間／PMEM 預算。
+例如 `NopInst` body、`pmem_budget=1024`、`cost_default=1`、`cost_jump_flush=40`、
+`max_unroll_factor=32` 可覆蓋 jump-table 路徑。
+經 pipeline 驗證 dispatch 時檢查 branch 目標，不依賴舊的 `BasicBlockNode` 回傳型別。
+小 PMEM 案例明確傳 `PipeLineContext(config=PipeLineConfig(pmem_capacity=512))`。
+`disable_opt` 案例以有效 `BasicBlockNode(..., disable_opt=True)` 作 pipeline 輸入，
+比較產生的 IR，不直接斷言 `_process_block` 的呼叫或回傳。
 
 ---
 

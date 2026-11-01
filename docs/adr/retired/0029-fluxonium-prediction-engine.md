@@ -2,9 +2,9 @@
 status: retired
 ---
 
-> 狀態：retired（2026-09-27）。現行局部契約見 [`simulate/fluxonium/README.md`](../../../lib/zcu_tools/simulate/fluxonium/README.md)；以下保留歷史正文。
+> 2026-09-27。現行局部契約見 [`simulate/fluxonium/README.md`](../../../lib/zcu_tools/simulate/fluxonium/README.md)；以下保留歷史正文。
 
-# Fluxonium Prediction engine owns simulation policy outside GUI adapters
+# 0029 — Fluxonium Prediction engine owns simulation policy outside GUI adapters
 
 Fluxonium Prediction lives in `zcu_tools.simulate.fluxonium` as a production
 simulation-facing engine, not inside GUI services. GUI dispersive tuning,

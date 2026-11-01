@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0062 — 實驗執行與 workflow 編排
+# 0062 — 實驗執行與 workflow 編排
 
 **Last updated:** 2026-11-02，workflow 自有取數與 run_core 轉接
 

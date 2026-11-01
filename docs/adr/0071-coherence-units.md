@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# ADR-0071 — Coherence 的頻率、時間與 loss parameter 單位
+# 0071 — Coherence 的頻率、時間與 loss parameter 單位
 
 ## 決策與落實狀態
 
