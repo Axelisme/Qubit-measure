@@ -40,6 +40,7 @@ from ._timeline_macros import (
 )
 from ._timeline_outputs import (
     TimelineObservedPulse,
+    TimelineObservedTrigger,
     TimelinePlacedConfig,
     TimelinePlacedPulse,
     TimelinePlacedTrigger,
@@ -1035,13 +1036,15 @@ class TimelineProgramV2(MyProgramV2, ProgramResourcesMixin):
         """
         timeline = timeline if timeline is not None else self._timeline_default
         super().trigger(*args, **kwargs)
+        source = self._pop_native(Trigger)
         if timeline is not None:
-            source = self._pop_native(Trigger)
             if source.t is None:
                 raise ValueError("timeline trigger does not support t=None")
             self.append_macro(
                 TimelinePlacedTrigger(self._timeline_book, timeline, source)
             )
+        else:
+            self.append_macro(TimelineObservedTrigger(self._timeline_book, source))
 
     def pulse(
         self, ch: int, name: str, *args, timeline: str | None = None, **kwargs

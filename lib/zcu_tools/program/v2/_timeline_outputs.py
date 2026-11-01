@@ -266,6 +266,35 @@ class TimelinePlacedConfig(ConfigReadout):
         return self.source.list_time_params()
 
 
+class TimelineObservedTrigger(Trigger):
+    """Retain native Trigger outputs, observing its quantized ADC tail evidence."""
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}()"
+
+    def __init__(self, book: TimelineBook, source: Trigger):
+        super().__init__(
+            ros=source.ros,
+            tts=source.tts,
+            pins=source.pins,
+            t=source.t,
+            width=source.width,
+            ddr4=source.ddr4,
+            mr=source.mr,
+            tag=source.tag,
+        )
+        self.book = book
+
+    def preprocess(self, prog) -> None:
+        super().preprocess(prog)
+        if self.t_regs["t"] is None:
+            return
+        actual_t = self.get_time_param("t")
+        for ch in self.ros:
+            length = prog.ro_chs[ch]["length"] / prog.soccfg["readouts"][ch]["f_output"]
+            self.book.record_native(prog, ch, actual_t + length, generator=False)
+
+
 class TimelinePlacedTrigger(Trigger):
     def __repr__(self) -> str:
         # QICK eagerly formats macros even when debug logging is disabled.
