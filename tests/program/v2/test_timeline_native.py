@@ -113,7 +113,7 @@ def test_timeline_pulse_auto_chooses_later_channel_or_end(delay, expected):
     assert [e.cycle for e in shot.events if e.kind == "wave"] == [0, expected]
 
 
-def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
+def test_timeline_trigger_advances_only_width_and_retains_adc_wait():
     def body(prog):
         prog.timeline_inc(10 / 430.08)
         prog.trigger([0], timeline="default")
@@ -122,15 +122,16 @@ def test_timeline_trigger_advances_through_adc_window_and_retains_native_wait():
 
     prog = _program(body)
     # Native ADC window is123/307.2 us =172.2 tProc cycles.
-    # Timeline closure ceilings 10+172.2 to183; native wait rounds to182.
+    # The named end is20 (trigger width only); native ADC wait still rounds to182.
     assert prog.get_time_param("wait", "t") * 430.08 == pytest.approx(182)
     shot = _shot(prog)
     assert [(e.cycle, e.value) for e in shot.events if e.kind == "data"] == [
         (10, 1),
         (20, 0),
     ]
-    assert [e.cycle for e in shot.events if e.kind == "wave"] == [183]
-    assert shot.body_end_cycle == 226
+    assert [e.cycle for e in shot.events if e.kind == "wave"] == [20]
+    assert shot.body_end_cycle == 63
+    assert shot.end_cycle == 182
 
 
 def test_fractional_event_start_and_trigger_width_ceil_once():
