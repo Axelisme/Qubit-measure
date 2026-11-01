@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc
+from zcu_tools.analysis.fitting import cosfunc, decaycos, expfunc, lorfunc
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,20 @@ class OscillationParameters:
     frequency: float
     phase_degrees: float
     decay_time: float | None
+
+
+@dataclass(frozen=True)
+class LorentzianParameters:
+    """Lorentzian truth: offset/amplitude in signal units, slope in signal/x.
+
+    center and positive half_width use x units; offset is the baseline at center.
+    """
+
+    offset: float
+    slope: float
+    amplitude: float
+    center: float
+    half_width: float
 
 
 def _coordinates(xs: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -112,4 +126,22 @@ def generate_rabi(
     _coordinates(xs)
     return cosfunc(
         xs, truth.offset, truth.amplitude, truth.frequency, truth.phase_degrees
+    ) + _noise(xs.shape, noise_std, seed)
+
+
+def generate_lorentzian(
+    xs: NDArray[np.float64], truth: LorentzianParameters, noise_std: float, seed: int
+) -> NDArray[np.float64]:
+    """Return fitting.lorfunc samples on finite 1D xs, without changing inputs.
+
+    truth supplies a peak (positive amplitude) or dip (negative amplitude) with
+    linear background and positive half_width in xs units. noise_std is the
+    independent additive Gaussian signal noise; seed initializes a local RNG.
+    Invalid coordinates, width or noise raise ValueError.
+    """
+    _coordinates(xs)
+    if not np.isfinite(truth.half_width) or truth.half_width <= 0:
+        raise ValueError("half_width must be finite and positive")
+    return lorfunc(
+        xs, truth.offset, truth.slope, truth.amplitude, truth.center, truth.half_width
     ) + _noise(xs.shape, noise_std, seed)
