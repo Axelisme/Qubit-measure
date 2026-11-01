@@ -67,7 +67,7 @@ class SelectionProvenance:
 
     def matches(self, expected: TableSelection) -> bool:
         """Return whether every reaching definition has the expected mapping."""
-        pending = [self]
+        pending: list[SelectionProvenance] = [self]
         seen: set[SelectionProvenance] = set()
         while pending:
             current = pending.pop()
