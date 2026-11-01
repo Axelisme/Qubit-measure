@@ -33,6 +33,7 @@ def test_averaged_collection_preserves_read_axes_tones_and_nan_after_module_reus
 @pytest.mark.parametrize("emitted", [False, True])
 def test_collection_requires_identity_emitted_in_nested_control(emitted, monkeypatch):
     module = native_mux().build("mux")
+
     class Program(TimelineProgramV2):
         def _initialize(self, cfg):
             self.add_loop("choice", 2)
