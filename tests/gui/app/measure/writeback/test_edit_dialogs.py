@@ -360,7 +360,7 @@ def test_module_install_refusal_keeps_original_draft(
         )
     else:
         def reject_input(*args):
-            raise FormInputRejected("Input rejected")
+            raise FormInputRejected((), "Input rejected")
 
         monkeypatch.setattr(form.state, "install_input", reject_input)
     driver.click("Save")
