@@ -6,7 +6,7 @@ status: accepted
 
 **狀態：** accepted。使用者於 2026-10-16 以「都採用建議」確認歸檔。本篇記錄入口分層、recipe 與 workflow 的共用 async host、Ask 及取消契約。不新增工具、不改 method policy，也不授權硬體操作。
 
-**Last updated:** 2026-11-01，Scope.call、lib core helper 與前端停止事實
+**Last updated:** 2026-11-02，workflow 自有取數與 lib run_core 轉接
 
 **關聯：** [[0068]] 的 remote 與 measure 固定工具、[[0062]] 的 workflow run、[[0063]] 的保存權威、[[0069]] 的核心與前端；控制權見 [[0070]]，workflow engine 見 [[0062]]。
 
@@ -44,7 +44,7 @@ L1 與 L2 的差別在於誰決定介入點。L1 由 agent 決定，它可以在
 
 Recipe 作者以 `await tab.run()` 與 `await tab.analyze(stage, result=T)` 等待工作結果，不表示每一步都要 agent 回答。互動分析以 `interactive=True` 明確交接 GUI tab。`await tab.ask_writeback()` 是 recipe 等待 agent 或使用者回答的提問。回答本身不寫入資料，作者接受寫回時另呼叫同步 `tab.accept_writeback(items)`。取消不回傳 cancelled 分支給作者，作者以 `finally` 保存已有的 Run，終態與 runs 由 runtime 回報。
 
-L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。`await scope.call(fn)` 等待一般工作，`await run_core(scope, core.run, cfg)` 透過 lib helper 執行 core，`await env.ask(question)` 才是交給 agent 的提問。
+L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次實驗，交接可出現在實驗之間或之內。`await scope.call(fn)` 等待一般工作。Workflow 自己實作同步取數函式 `acquire(cfg, *, context)`，以 `await run_core(scope, acquire, cfg)` 透過 lib helper 執行。`await env.ask(question)` 才是交給 agent 的提問。
 
 2026-10-21 使用者修正 L2 與 L3 的定位與協作模型。以下保留當時的協定術語，現行 async 契約見下節。推導見 [Recipe 接口重設計](../discussions/2026-10-21-recipe-interface-redesign.md)、[三角色協定](../discussions/2026-10-21-three-role-protocol.md)、[Workflow 定位與承載](../discussions/2026-10-21-workflow-positioning-and-hosting.md)。
 
@@ -80,7 +80,7 @@ L3 workflow 由作者決定在哪裡交還控制權。一次執行跨越多次�
 
 根 kind 限 workflow／recipe／run。Workflow 與 recipe 根的 name 由 host 使用 catalog 實名顯式注入，不做 fallback。非 None 的 name 必須非空，不含 #、/、:。框架用 `branch(kind, name=...)` 建 iteration／operation／schedule／acquire；作者用 `child(label)` 建自訂 scope，label 不得含分隔符或使用保留 kind。With 或顯式 release 管理壽命，release 後不得再建 child。
 
-作者的 env 就是 workflow 根。每個 child 提供相同的 call／setup_device／wait_until／dir／commit 能力。Core 轉接由獨立的 `run_core(scope, core.run, cfg, name=...)` 提供，不在 Scope 上提供 run。作者用 `with env.scope(label) as scope` 與 `for item, iteration in zip(items, env.iterations())` 明填 parent，沒有隱式 current scope。
+作者的 env 就是 workflow 根。每個 child 提供相同的 call／setup_device／wait_until／dir／commit 能力。同步取數函式的轉接由獨立的 `run_core(scope, acquire, cfg, name=...)` 提供。Workflow 自己實作 acquire，Scope 不提供 run。作者用 `with env.scope(label) as scope` 與 `for item, iteration in zip(items, env.iterations())` 明填 parent，沒有隱式 current scope。
 
 Workflow 根取消且 expected=None 時，Stop owner lock 先寫 StopRequested／manifest 並 latch，再由 host.cancel 原子設 root。持久化不進 control callback。此分支的 cancelled=True 表示 owner 已接受並記錄 Stop；host 若仍活則同時設 token，不保證 drain。Host 已退出但 owner 尚未 finalization 時，接受 Stop 仍可使終態為 cancelled，不以 host.cancel 的 refusal 推翻 owner 的接受。其他 selector 直接由 host.cancel 核對，不寫 Stop 意圖。Terminal workflow 對合法請求回 typed scope-not-active refusal，錯誤語法仍 fail fast。持久化失敗保留 failed 與原始 cause，不偽裝成 accepted。
 
