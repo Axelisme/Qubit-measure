@@ -197,7 +197,10 @@ def test_ge_analysis_without_decay_tail_reports_only_fixed_length_ratio(
 
 
 @pytest.mark.parametrize("align_t1", [False, True])
-def test_visible_decay_tail_identifies_joint_length_ratio(align_t1):
+@pytest.mark.parametrize("max_relative_error", [1.0, 1e-12])
+def test_visible_decay_tail_identifies_joint_length_ratio(
+    align_t1, max_relative_error
+):
     xs = np.linspace(-3.0, 3.0, 10001)
     quantiles = (np.arange(2000) + 0.5) / 2000
     ground_pdf = calc_population_pdf(xs, -1.0, 1.0, 0.25, 1.0, 0.0, 0.5, 0.4)
@@ -217,19 +220,26 @@ def test_visible_decay_tail_identifies_joint_length_ratio(align_t1):
                 init_p0_e=0.0,
                 avg_p=0.5,
                 align_t1=align_t1,
+                length_ratio_max_relative_error=max_relative_error,
             ),
             plots=plots,
         )
 
-        assert result["length_ratio"] == pytest.approx(0.4, abs=0.05)
+        if max_relative_error == 1e-12:
+            assert result["length_ratio"] is None
+        else:
+            assert result["length_ratio"] == pytest.approx(0.4, abs=0.05)
         assert 0.7 < fidelity <= 1.0
         np.testing.assert_allclose(populations, [[1.0, 0.0], [0.0, 1.0]], atol=0.03)
         assert result["g_center"].real == pytest.approx(-1.0, abs=0.03)
         assert result["e_center"].real == pytest.approx(1.0, abs=0.03)
         assert result["s"] == pytest.approx(0.25, abs=0.03)
         title = " ".join(text.get_text() for text in plots["fit"].texts)
-        assert "Readout length =" in title
-        assert (" / " in title) == (not align_t1)
+        if result["length_ratio"] is None:
+            assert "Readout length: not identifiable" in title
+        else:
+            assert "Readout length =" in title
+            assert (" / " in title) == (not align_t1)
     finally:
         plots.finish(present=False)
         plots.release()
