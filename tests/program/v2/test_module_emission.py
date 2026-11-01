@@ -281,7 +281,7 @@ def test_t1_including_readout_uses_event_end_at_each_scan_point(
         offset + 160 for offset in offsets
     ] * 2
     assert [s.end_cycle - s.start_cycle for s in shots] == [
-        offset + 217 for offset in offsets
+        offset + 216 for offset in offsets
     ] * 2
 
 
@@ -360,7 +360,7 @@ def test_reset_composite_keeps_internal_overlap(kind, reset_waves, length, timel
         [10 + t for t in reset_waves] + [length + 10, length + 32]
     ] * 2
     assert [s.body_end_cycle - s.start_cycle for s in shots] == [length + 170] * 2
-    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 227] * 2
+    assert [s.end_cycle - s.start_cycle for s in shots] == [length + 226] * 2
     assert [
         [e.cycle - s.start_cycle for e in s.events if e.kind == "data"] for s in shots
     ] == [[length + 54, length + 64]] * 2

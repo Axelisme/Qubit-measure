@@ -798,7 +798,7 @@ def test_builder_repeat_rebases_external_end_and_expires_local_names(
     mock_soccfg, count
 ):
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.fork("default", into=["external", "parent"])
     builder.timeline_inc(2.0, timeline="external")
     builder.timeline_inc(0.1, timeline="parent")
@@ -843,7 +843,7 @@ def test_builder_register_repeat_forwards_bounds_and_preserves_remaining_end(
     builder = v2.TimelineBuilder(mock_soccfg, initial_delay=0, relax_delay=0)
     builder.add_loop("scan", 2)
     loader = v2.LoadValue("count", [2, 3], idx_reg="scan", val_reg="n")
-    readout = _readout()
+    readout = _readout(post_delay=0.1)
     builder.emit(loader)
     builder.fork("default", into="external")
     builder.timeline_inc(2.0, timeline="external")

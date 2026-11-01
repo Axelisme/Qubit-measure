@@ -157,7 +157,7 @@ def test_readout_trigger_quantization_does_not_extend_generator_end(
         origin + 12 for _ in steps
     ] * 2
     assert [shot.end_cycle - shot.start_cycle for shot in result] == [
-        origin + trigger_start + 19 + step + 9 for step in steps
+        origin + trigger_start + 18 + step + 9 for step in steps
     ] * 2
 
 

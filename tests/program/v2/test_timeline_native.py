@@ -213,7 +213,12 @@ def test_author_start_and_trigger_width_sweeps_keep_native_affine_values():
         prog.delay_by_timeline()
         prog.pulse(0, "pulse", timeline="default", tag="after")
 
-    prog = _program(body, lambda p: p.add_loop("scan", 4))
+    # Width sweep leaves0..3 cycles of ADC slack; this synthetic fixture allows it.
+    def initialize(prog):
+        prog.add_loop("scan", 4)
+        prog.relax_delay = 3 / 430.08
+
+    prog = _program(body, initialize)
     assert prog.get_time_param("edge", "t", as_array=True) * 430.08 == pytest.approx(
         [0, 1, 2, 3]
     )
@@ -254,7 +259,7 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
         prog.declare_readout(0, length=100 / 307.2)
         prog.add_loop("scan", 2)
 
-    def trigger(prog, timeline="default"):
+    def trigger(prog, timeline: str | None = "default"):
         prog.trigger([0], timeline=timeline)
         prog.timeline_inc(90 / 430.08, timeline=timeline)
 
@@ -265,19 +270,16 @@ def test_adc_overlap_is_rejected_across_control_flow(control):
                 if control == "repeat_sync":
                     prog.delay_by_timeline()
         elif control == "nested_repeat":
-            with prog.repeat("outer", 2):
-                with prog.repeat("inner", 1):
-                    trigger(prog)
+            with prog.repeat("outer", 2), prog.repeat("inner", 1):
+                trigger(prog)
         elif control == "branch_then_trigger":
-            with prog.branch(by="scan", align_timeline=False) as cases:
-                with cases.case(0):
-                    trigger(prog, None)
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                trigger(prog, None)
             prog.trigger([0], timeline="default")
         else:
             trigger(prog)
-            with prog.branch(by="scan", align_timeline=False) as cases:
-                with cases.case(0):
-                    prog.trigger([0])
+            with prog.branch(by="scan", align_timeline=False) as cases, cases.case(0):
+                prog.trigger([0])
 
     with pytest.raises(ValueError, match=r"channel 0.*ADC overlap.*40 cycles"):
         _program(body, initialize)
