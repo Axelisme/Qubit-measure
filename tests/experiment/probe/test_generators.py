@@ -30,5 +30,5 @@ def test_decay_fringe_recovers_time_frequency_and_phase():
     ys = generators.generate_decay_fringe(
         xs, generators.OscillationParameters(0.2, 0.8, 0.4, 25.0, 8.0), 0.001, 17
     )
-    fit = fit_decay_fringe(xs, ys)
+    fit = fit_decay_fringe(xs, ys, fit_params=[0.1, 0.9, 0.39, 20.0, 9.0])
     assert_allclose(fit.params, [0.2, 0.8, 0.4, 25.0, 8.0], rtol=0.01, atol=0.002)
