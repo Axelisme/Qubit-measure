@@ -89,7 +89,7 @@ LogPoints 與 Range 使用相同的樹上初值邊界，依 advisor 2026-10-19 �
 
 Module 節點分為兩種。
 
-- `Slot(path, copy=False, set={}, fallback=None)` 使用捕捉的 library 槽位。Copy 產生 inline input。來源不可解析時可採用 fallback Template。
+- `Slot(path, copy=False, set={})` 使用捕捉的 library 槽位。Copy 產生 inline input。Slot 不選擇替代來源。
 - `Template(id, set={}, seed_metadata={})` 從注入的持久範本建 fresh inline input。Seed metadata 以 root-relative canonical paths 指向來源說明與校準狀態。
 
 Slot／Template 不提供 lock 參數，也不提供 `Locked` 節點。List 各位置可有不同的唯讀初值。
@@ -117,20 +117,23 @@ Bath reset phase 仍可編輯。這個入口不擴充 nested readonly，不複�
 路徑不一致時明確報錯。共享的只有隱藏路徑，各位置的值與來源獨立，不新增作者 API。
 普通位置 tree 直接放 Hidden 仍受 [[0079]] 的共同元素宣告限制。
 
-`Slot(path, fallback=Template(...))` 在固定 capture 可解析時使用原 Slot；來源缺席、懸空或 alias 未綁定時才採用 Template。
-來源可解析但 family 不相容時仍報錯，不回退。沒有 fallback 時，optional 欄位停用且有效，required 欄位留空且 Invalid。
-Template 的 seed metadata 只在實際採用該 Template 時合併，使用與 `Form.with_seed_metadata` 相同的 root-relative canonical paths。
+來源選擇由 lab 的單一 factory helper `source(ctx, path, template) -> Slot | Template` 負責。
+固定 capture 可解析該 path 時回傳 `Slot(path)`；來源缺席、懸空或 alias 未綁定時回傳傳入的 Template，路徑只寫一次。
+框架不提供 Slot fallback 或依 capture 選擇分支的機制。來源可解析但 family 不相容時仍報錯，不回退。
+未選用 Template 且 Slot 缺來源時，required 欄位留空且 Invalid，nullable 且預設 None 的欄位停用並維持有效。
+Seed metadata 寫在 Template 上，只在實際採用該 Template 時合併，使用與 `Form.with_seed_metadata` 相同的 root-relative canonical paths。
 同一路徑的顯式 `Form.with_seed_metadata` 值優先。顯式 if／else 寫法仍可使用，不提供另一個 init 模式。
 
 使用者於 2026-10-30 選擇「9A」，採用 Slot fallback 與 Template 自有 metadata，以免重複來源路徑並將 seed 說明留在範本旁。
 同日針對本段先前禁止 fallback 的規則，使用者確認「Q9A」，維持新寫法並修訂本段。
+上述 Slot fallback 選源規則由 2026-11-01 使用者改裁「B，如果要省下重複名字，那就一個factory helper就好」取代，來源選擇改由 lab 的單一 factory helper 完成。
 
 ```python
 def make_form(ctx: FormContext) -> Form[FreqCfg]:
     return Form(FreqCfg, {
         "modules": {
-            "readout": Slot(
-                "$resonator.module.readout", fallback=Template("readout")
+            "readout": source(
+                ctx, "$resonator.module.readout", Template("readout")
             ),
         },
         "sweep": {"freq": Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301)},
@@ -170,7 +173,9 @@ Make_form 回 `Form(Cfg, tree)`，不把 ctx 傳進 Form。
 `TabFormResource` 在 Open 與 Reset 捕捉來源，呼叫 make_form，然後綁定並驗證
 Registry 的範本目錄。Register 不執行 factory，也不預檢範本。
 Edit、preview、result 與 Run 使用同一捕捉，不重建 Form 或刷新來源。
-Reset 可以同時換形狀和初值；失敗保留原 Form。Memento 保存 selection／branch 與 Form input，
+Refresh 轉交既有 seed metadata 快照並保留 Form input，不重算初值。
+Reset 重新捕捉來源，重算初值與 seed metadata。它可以同時換形狀和初值，失敗保留原 Form。
+Memento 保存 selection／branch 與 Form input，
 由可信宣告重建，還原不執行 converter。唯讀欄位保留存檔值，不從宣告重算。型別或來源 identity 不匹配明確報錯，不靜默丟葉，
 不加舊版雙讀或 native cfg 反向回填，見 [[0079]]。
 Load 只載分析／writeback 所需結果，不覆蓋表單。

@@ -31,7 +31,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Pulse 與 mux Readout 擁有 generator／ADC、waveform 與 classifier 配置；分類與 correction 只取 run cfg，三態 reference Apply 到 readout library；單一 processor 同時接收所有 ADC，Classify／IQ 軸的逐 shot 外積求總和，框架只累加 round，Result 保存總和；emit tag 識別讀出，未標記時使用 module 名稱；herald 條件平均與通過比例由總和衍生，舊格式明確拒絕；原生 QICK projection 由 caller 明確選用，caller 準備參數並負責校準適用性。
 
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：make_form、adapter input 與實驗 record 分離、固定捕捉、歷史 tab 的無 Form 狀態與 Reset 恢復、adapter 黑箱、lab 單一 source factory 與 Template 自有 metadata、Refresh 保留 seed 快照／Reset 重算、共用初值政策的 domain helper 邊界、Hidden 合法供值與顯式路徑、持久範本、具名裝置欄位、sweep 四種座標／採樣表示與 opt-in Log／List 整數清單政策。
 - [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、sweep 座標／採樣指令與有效端點、持久 Spec、Library／Inspect／writeback 的提交邊界、有序 alias 清單編輯與固定讀回、固定來源、Refresh 保留 input／Reset 重算初值、腳本的 opaque TabInput 與共用 Inspect Aliases 頁。
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 的宿主所有權、opaque writeback draft、中立完整 ModuleSpec proposal builder 的精確欄位比對與 child key 保留，以及 Apply 當下選作用中文件組、nullable destination 與 selected Apply 的成功前綴。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、內部 ValueRef／resolve_value_ref、Form expression 與固定 capture；舊 token／tagged wire 已退休。
