@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-10-30
+**Last updated:** 2026-11-01
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -24,6 +24,21 @@ FWHM 使用半 prominence 的插值寬度，至少為谷兩側頻率步進的平
 `failure.AnalysisFailed` 表示數值 owner 已辨識的無法產出分析結果，與任意程式錯誤分開。
 Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交付 failed 值。
 分類範圍由各數值 owner 文件列明，不以 ValueError／RuntimeError 的文字猜測。
+
+## Readout QND 指標
+
+`readout_metrics.readout_metrics(sums)` 分析單一 gain 點的
+`(8, 3, 3, 3, 3)` shot sums，回傳 frozen `ReadoutMetrics`。
+四個 moment 軸依序是 R1、R1、R2、R2 的 `(1, I, Q)`。
+Branch index 是 `prepare_pi*4 + r1_on*2 + middle_pi`。
+
+SNR、Gaussian 分離保真度與熱布居共用 R1 開、中間 I 的兩製備校準。
+保持率、QND、向上／向下翻轉率與中間 π 未作用比例各有 `_on`、`_off` scalar 欄位。
+`retention_from_covariance` 用同一校準兩分支的 R1–R2 covariance 檢查保持率。
+所有欄位都無單位，不裁切到物理範圍。
+缺少 shots 或退化分母使依賴該資料的指標為 NaN，shape 錯誤拋出 ValueError。
+模型假設與各欄位的 NaN 條件見函式及結果型別的 docstring。
+本模組不分類、不修正 leakage，也不選 gain。
 
 ## 多 device flux 座標
 
