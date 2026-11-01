@@ -7,8 +7,13 @@ from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay, fit_dual_decay
-from zcu_tools.analysis.fitting import expfunc
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    expfunc,
+    fit_decay,
+    fit_dual_decay,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,

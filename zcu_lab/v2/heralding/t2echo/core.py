@@ -8,7 +8,12 @@ from typing import Annotated, ClassVar
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fit_decay, fit_decay_fringe
+from zcu_tools.analysis.fitting import (
+    FitQuality,
+    compute_fit_quality,
+    fit_decay,
+    fit_decay_fringe,
+)
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
