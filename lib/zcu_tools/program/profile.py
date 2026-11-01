@@ -189,7 +189,7 @@ def _readouts(
             fdds_div=channel.fs_div * channel.decimation,
         )
         readouts.append(cfg)
-        adc = {
+        adc: dict[str, object] = {
             "fs": fs,
             "fs_mult": channel.fs_mult,
             "fs_div": channel.fs_div,
