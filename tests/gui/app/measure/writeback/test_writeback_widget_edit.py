@@ -344,6 +344,13 @@ def _input(dialog: QDialog, path: str) -> QLineEdit:
 
 @pytest.fixture
 def module_ui(module_widget, tmp_path, request):
+    """Start with a matching library entry so changed leaves alter Proposed text."""
+    ctrl, _, tab_id, pane = module_widget
+    form = ctrl.writeback_control.get_writeback_item_form_for_pane(tab_id, pane, "ml-1")
+    context = ctrl.context_control
+    context.set_module(
+        require_target(context.read_context()), MODULE_PROPOSAL_TARGET, form.spec()
+    )
     _, widget, _, _ = _populate_module(module_widget)
     driver = ComponentDriver(widget)
     driver.resize_window(900, 400)
@@ -377,7 +384,9 @@ def test_module_cancel_then_save_updates_only_saved_ledger(module_ui):
     editor.click("Save")
     driver.screenshot(evidence / "07-saved.png")
     assert not driver.dialogs()
-    assert "5100.125" in driver.observe(object_name="writebackProposed").tooltip
+    proposed = driver.observe(object_name="writebackProposed")
+    assert proposed.text != original.text
+    assert "5100.125" in proposed.tooltip
 
 
 def test_module_save_keeps_captured_expression_and_waveform_key(
