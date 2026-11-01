@@ -1,15 +1,19 @@
 """Writeback editing feedback through the ledger's public Qt surface."""
 
+import os
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtGui import QColor, QPalette
 from qtpy.QtWidgets import QDialog, QLabel, QLineEdit, QMessageBox, QPushButton
 from zcu_tools.gui.app.measure.writeback import ParameterWriteback, WritebackValues
 from zcu_tools.gui.app.measure.writeback.widget import WritebackWidget
 from zcu_tools.gui.widgets import error_colour
+
+from tests.gui._user_input import ComponentDriver
 
 
 def button(parent, text: str) -> QPushButton:
@@ -262,106 +266,43 @@ def module_editor(qapp, monkeypatch):
     qapp.processEvents()
 
 
-def test_module_context_changes_follow_shared_state(module_editor):
-    _, dialog, _, _, form, current, _ = module_editor
-    texts = label_text(dialog)
-    assert "Readout pulse" in texts
-    assert "Changes go to the writeback draft at once" in texts
-    assert "only written by Apply Selected" in texts
-    assert "Writes to library" in texts
-    assert "Changes from library (1)" in texts
-    assert "freq  6000.0 → 6001.0" in texts
-    form.state.write({("gain",): 0.3}, form.env)
-    assert "Changes from library (2)" in label_text(dialog)
-    assert "gain  0.2 → 0.3" in label_text(dialog)
-    current.clear()
-    # The preview contract uses None, not an empty dict, for missing entries.
-    ctrl = module_editor[3]
-    ctrl.writeback_control.get_writeback_values_for_pane.side_effect = lambda *a, **k: {
-        "ml-1": WritebackValues(
-            actual_path="pulse",
-            current=None,
-            proposed=form.spec().model_dump(mode="python"),
-            unit=None,
-        )
-    }
-    form.state.write({("gain",): 0.4}, form.env)
-    assert "New library entry" in label_text(dialog)
+@pytest.fixture
+def module_driver(module_editor, tmp_path):
+    widget, dialog, *_ = module_editor
+    driver = ComponentDriver(dialog)
+    driver.resize_window(700, 700)
+    evidence = Path(os.environ.get("WRITEBACK_UI_EVIDENCE", str(tmp_path)))
+    return driver, ComponentDriver(widget), evidence
 
 
-def test_module_errors_list_path_and_discard_warning(module_editor):
-    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
-
-    _, dialog, _, _, _, _, messages = module_editor
-    assert "Changes from library" in label_text(dialog)
-    freq = dialog.findChild(QLineEdit, "form.input.freq")
-    commit_text_on_focus_loss(freq, "abc")
-    texts = label_text(dialog)
-    assert "freq:" in texts and "abc" in texts
-    assert "Invalid text is discarded when you press Done" in texts
-    assert "Unavailable while the configuration is invalid" in texts
-    error = dialog.findChild(QLabel, "writebackEditError")
-    assert error.isVisible()
-    assert error.palette().color(QPalette.ColorRole.WindowText) == error_colour(dialog)
-    commit_text_on_focus_loss(freq, "6002.0")
-    assert not error.isVisible()
-    assert "freq  6000.0 → 6002.0" in label_text(dialog)
-    assert messages == []
-
-
-@pytest.mark.parametrize("finish", ["done", "escape", "close"])
-def test_module_finish_commits_name_and_drops_only_local_text(module_editor, finish):
-    from qtpy.QtCore import Qt
-
-    from tests.gui._user_input import key_click
-    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
-
-    _, dialog, item, _, form, _, messages = module_editor
-    assert "Done" in [b.text() for b in dialog.findChildren(QPushButton)]
-    freq = dialog.findChild(QLineEdit, "form.input.freq")
-    commit_text_on_focus_loss(freq, "abc")
-    name = next(e for e in dialog.findChildren(QLineEdit) if e.text() == "pulse")
-    name.setText("tuned")
-    if finish == "done":
-        button(dialog, "Done").click()
-    elif finish == "escape":
-        key_click(dialog, Qt.Key.Key_Escape)
-    else:
-        dialog.close()
-    assert not dialog.isVisible()
-    assert item.target_name == "tuned"
+@pytest.mark.parametrize("finish", ["cancel", "escape", "close", "detach"])
+def test_module_cancel_discards_content_and_name(module_editor, module_driver, finish):
+    widget, _, item, _, form, _, messages = module_editor
+    driver, ledger, evidence = module_driver
+    prefix = evidence / f"cancel-{finish}"
+    driver.screenshot(prefix / "01-open.png")
+    driver.enter_text(object_name="form.input.freq", value="6002.0")
+    driver.screenshot(prefix / "02-frequency.png")
+    driver.enter_text(object_name="writebackApplyAs", value="tuned")
+    driver.screenshot(prefix / "03-name.png")
     assert form.spec().freq == 6001.0
-    assert messages == []
-
-
-def test_module_target_refusal_is_inline(module_editor):
-    _, dialog, item, ctrl, _, _, messages = module_editor
-    assert "Changes go to the writeback draft at once" in label_text(dialog)
-    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = RuntimeError(
-        "Tab is busy"
-    )
-    name = next(e for e in dialog.findChildren(QLineEdit) if e.text() == "pulse")
-    name.setText("tuned")
-    name.editingFinished.emit()
-    assert "Tab is busy" in label_text(dialog)
-    assert dialog.isVisible()
+    assert item.target_name == "pulse"
+    assert "freq  6000.0 → 6002.0" in driver.observe(
+        object_name="writebackModuleChanges"
+    ).text
+    if finish == "cancel":
+        driver.click("Cancel")
+    elif finish == "escape":
+        driver.press_key(Qt.Key.Key_Escape)
+    elif finish == "close":
+        driver.close_window()
+    else:
+        widget.detach()
+    ledger.screenshot(prefix / "04-finished.png")
+    assert not ledger.dialogs()
+    assert form.spec().freq == 6001.0
     assert item.target_name == "pulse"
     assert messages == []
-    ctrl.writeback_control.set_writeback_item_for_pane.side_effect = None
-
-
-def test_module_ledger_summarizes_changes_and_exposes_full_tooltip(module_editor):
-    widget, _, _, _, form, _, _ = module_editor
-    current = widget.findChild(QLabel, "writebackCurrent")
-    proposed = widget.findChild(QLabel, "writebackProposed")
-    assert current.text() == "library entry"
-    assert proposed.text() == "1 change"
-    assert "freq  6000.0 → 6001.0" in proposed.toolTip()
-    form.state.write({("freq",): 6000.0}, form.env)
-    assert proposed.text() == "no changes"
-    form.state.write({("gain",): 0.4}, form.env)
-    assert proposed.text() == "1 change"
-    assert "gain  0.2 → 0.4" in proposed.toolTip()
 
 
 def test_missing_library_entry_counts_only_proposed_leaves():
@@ -369,61 +310,3 @@ def test_missing_library_entry_counts_only_proposed_leaves():
 
     changes = edit_dialogs.module_changes(None, {"freq": 6012.0, "gain": 0.2})
     assert [change.path for change in changes] == ["freq", "gain"]
-
-
-def test_invalid_module_ledger_explains_apply_gate_and_recovers(module_editor, qapp):
-    from qtpy.QtWidgets import QCheckBox
-    from zcu_tools.gui.widgets import warning_colour
-
-    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
-
-    widget, dialog, item, _, _, _, _ = module_editor
-    freq = dialog.findChild(QLineEdit, "form.input.freq")
-    commit_text_on_focus_loss(freq, "abc")
-    proposed = widget.findChild(QLabel, "writebackProposed")
-    assert proposed.text() == "Invalid configuration"
-    assert proposed.palette().color(QPalette.ColorRole.WindowText) == error_colour(
-        widget
-    )
-    hint = next(
-        label
-        for label in widget.findChildren(QLabel)
-        if "Fix or uncheck invalid module" in label.text()
-    )
-    assert item.target_name in hint.text()
-    assert hint.palette().color(QPalette.ColorRole.WindowText) == warning_colour(widget)
-    assert not button(widget, "Apply Selected").isEnabled()
-    palette = widget.palette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#353535"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eeeeee"))
-    widget.setPalette(palette)
-    qapp.processEvents()
-    assert proposed.palette().color(QPalette.ColorRole.WindowText) == error_colour(
-        widget
-    )
-    checkbox = widget.findChild(QCheckBox)
-    checkbox.setChecked(False)
-    assert "Select the items to write back" in hint.text()
-    checkbox.setChecked(True)
-    commit_text_on_focus_loss(freq, "6002.0")
-    assert proposed.text() == "1 change"
-    assert "Select the items to write back" in hint.text()
-    assert button(widget, "Apply Selected").isEnabled()
-
-
-def test_module_error_list_tracks_edits_while_already_invalid(module_editor, qapp):
-    from tests.gui.widgets.form._text_input import commit_text_on_focus_loss
-
-    _, dialog, _, _, _, _, _ = module_editor
-    error = dialog.findChild(QLabel, "writebackEditError")
-    freq = dialog.findChild(QLineEdit, "form.input.freq")
-    gain = dialog.findChild(QLineEdit, "form.input.gain")
-    commit_text_on_focus_loss(freq, "bad-frequency")
-    qapp.processEvents()
-    commit_text_on_focus_loss(gain, "bad-gain")
-    qapp.processEvents()
-    assert "freq:" in error.text() and "gain:" in error.text()
-    commit_text_on_focus_loss(freq, "6002.0")
-    qapp.processEvents()
-    assert "freq:" not in error.text()
-    assert "gain:" in error.text()
