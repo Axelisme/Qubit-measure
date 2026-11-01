@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from zcu_tools.analysis.fitting import fit_decay, fit_decay_fringe, fit_qubit_freq, fit_rabi, fitlor
+from zcu_tools.analysis.fitting.anticross import fit_anticross
 from zcu_tools.analysis.fitting.resonance import HangerModel, TransmissionModel
 from zcu_tools.analysis.fitting.singleshot import fit_singleshot
 from zcu_tools.analysis.fitting.singleshot_rabi import RabiPhysicalParams, fit_rabi_joint
@@ -135,3 +136,14 @@ def test_singleshot_rabi_raw_iq_recovers_population_dynamics():
     assert fit.sigma == pytest.approx(0.18, abs=0.02)
     assert fit.p_avg == pytest.approx(0.2, abs=0.08)
     assert fit.length_ratio == pytest.approx(0.3, abs=0.06)
+
+
+def test_anticrossing_recovers_identifiable_center_and_coupling():
+    xs = np.linspace(-1.7, 2.3, 81)
+    branches = generators.generate_anticrossing(
+        xs, generators.ConicParameters(-1.0, 0.6, 1.0, -3.0, 0.0, 2.0), 0.0001, 17
+    )
+    assert branches.shape == (2, 81)
+    center_x, center_y, coupling, m1, m2, *_ = fit_anticross(xs, *branches)
+    assert_allclose([center_x, center_y, coupling], [0.3, 1.5, 0.4], atol=0.001)
+    assert_allclose(sorted([m1, m2]), [-1.0, 1.0], atol=0.001)
